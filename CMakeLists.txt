@@ -1,22 +1,25 @@
-﻿# CMakeList.txt: CMake-Projekt für "Engine". Schließen Sie die Quelle ein, und definieren Sie
-# projektspezifische Logik hier.
-#
-cmake_minimum_required (VERSION 3.10)
+﻿cmake_minimum_required (VERSION 3.12)
 
-# Aktivieren Sie Hot Reload für MSVC-Compiler, sofern unterstützt.
-if (POLICY CMP0141)
-  cmake_policy(SET CMP0141 NEW)
-  set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
-endif()
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-project ("Engine")
+project ("Engine" LANGUAGES C CXX)
 
-# Fügen Sie der ausführbaren Datei dieses Projekts eine Quelle hinzu.
-add_executable (Engine "src/main.cpp" )
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
-add_subdirectory(SDL)
-target_link_libraries(Engine PRIVATE SDL3::SDL3)
+add_subdirectory(external/glad/cmake)
+glad_add_library(glad_gl_core SHARED API gl:core=4.6)
 
-if (CMAKE_VERSION VERSION_GREATER 3.12)
-  set_property(TARGET Engine PROPERTY CXX_STANDARD 20)
-endif()
+add_subdirectory(external/SDL3 EXCLUDE_FROM_ALL)
+
+add_executable(Engine
+    src/main.cpp
+)
+
+target_link_libraries(Engine
+    PRIVATE
+        SDL3::SDL3
+        glad_gl_core
+)
