@@ -90,8 +90,11 @@
       <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <ExceptionHandling>Sync</ExceptionHandling>
+      <FloatingPointModel></FloatingPointModel>
       <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
       <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
       <LanguageStandard>stdcpp20</LanguageStandard>
@@ -129,7 +132,7 @@ cd C:\Users\conno\source\repos\Engine\build\src\Renderer
 if %errorlevel% neq 0 goto :cmEnd
 C:
 if %errorlevel% neq 0 goto :cmEnd
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E __create_def C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/Debug/exports.def C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/Debug//objects.txt
+"C:\Program Files\CMake\bin\cmake.exe" -E __create_def C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/Debug/exports.def C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/Debug//objects.txt
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -162,7 +165,10 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
       <ExceptionHandling>Sync</ExceptionHandling>
+      <FloatingPointModel></FloatingPointModel>
       <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <LanguageStandard>stdcpp20</LanguageStandard>
@@ -202,7 +208,7 @@ cd C:\Users\conno\source\repos\Engine\build\src\Renderer
 if %errorlevel% neq 0 goto :cmEnd
 C:
 if %errorlevel% neq 0 goto :cmEnd
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E __create_def C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/Release/exports.def C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/Release//objects.txt
+"C:\Program Files\CMake\bin\cmake.exe" -E __create_def C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/Release/exports.def C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/Release//objects.txt
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -235,7 +241,10 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
       <ExceptionHandling>Sync</ExceptionHandling>
+      <FloatingPointModel></FloatingPointModel>
       <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
       <LanguageStandard>stdcpp20</LanguageStandard>
@@ -275,7 +284,7 @@ cd C:\Users\conno\source\repos\Engine\build\src\Renderer
 if %errorlevel% neq 0 goto :cmEnd
 C:
 if %errorlevel% neq 0 goto :cmEnd
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E __create_def C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/MinSizeRel/exports.def C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/MinSizeRel//objects.txt
+"C:\Program Files\CMake\bin\cmake.exe" -E __create_def C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/MinSizeRel/exports.def C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/MinSizeRel//objects.txt
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -308,8 +317,11 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck></BufferSecurityCheck>
+      <CallingConvention></CallingConvention>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <ExceptionHandling>Sync</ExceptionHandling>
+      <FloatingPointModel></FloatingPointModel>
       <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
       <LanguageStandard>stdcpp20</LanguageStandard>
@@ -347,7 +359,7 @@ cd C:\Users\conno\source\repos\Engine\build\src\Renderer
 if %errorlevel% neq 0 goto :cmEnd
 C:
 if %errorlevel% neq 0 goto :cmEnd
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E __create_def C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/RelWithDebInfo/exports.def C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/RelWithDebInfo//objects.txt
+"C:\Program Files\CMake\bin\cmake.exe" -E __create_def C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/RelWithDebInfo/exports.def C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/RelWithDebInfo//objects.txt
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -380,7 +392,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <UseUtf8Encoding>Always</UseUtf8Encoding>
       <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building Custom Rule C:/Users/conno/source/repos/Engine/src/Renderer/CMakeLists.txt</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/conno/source/repos/Engine -BC:/Users/conno/source/repos/Engine/build --check-stamp-file C:/Users/conno/source/repos/Engine/build/src/Renderer/CMakeFiles/generate.stamp
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/conno/source/repos/Engine -BC:/Users/conno/source/repos/Engine/build --check-stamp-file C:/Users/conno/source/repos/Engine/build/src/Renderer/CMakeFiles/generate.stamp
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -393,7 +405,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
       <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Building Custom Rule C:/Users/conno/source/repos/Engine/src/Renderer/CMakeLists.txt</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/conno/source/repos/Engine -BC:/Users/conno/source/repos/Engine/build --check-stamp-file C:/Users/conno/source/repos/Engine/build/src/Renderer/CMakeFiles/generate.stamp
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/conno/source/repos/Engine -BC:/Users/conno/source/repos/Engine/build --check-stamp-file C:/Users/conno/source/repos/Engine/build/src/Renderer/CMakeFiles/generate.stamp
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -406,7 +418,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
       <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Building Custom Rule C:/Users/conno/source/repos/Engine/src/Renderer/CMakeLists.txt</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/conno/source/repos/Engine -BC:/Users/conno/source/repos/Engine/build --check-stamp-file C:/Users/conno/source/repos/Engine/build/src/Renderer/CMakeFiles/generate.stamp
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/conno/source/repos/Engine -BC:/Users/conno/source/repos/Engine/build --check-stamp-file C:/Users/conno/source/repos/Engine/build/src/Renderer/CMakeFiles/generate.stamp
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -419,7 +431,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
       <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Building Custom Rule C:/Users/conno/source/repos/Engine/src/Renderer/CMakeLists.txt</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
-"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/conno/source/repos/Engine -BC:/Users/conno/source/repos/Engine/build --check-stamp-file C:/Users/conno/source/repos/Engine/build/src/Renderer/CMakeFiles/generate.stamp
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/conno/source/repos/Engine -BC:/Users/conno/source/repos/Engine/build --check-stamp-file C:/Users/conno/source/repos/Engine/build/src/Renderer/CMakeFiles/generate.stamp
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
