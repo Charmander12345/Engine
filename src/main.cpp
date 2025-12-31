@@ -28,7 +28,7 @@ int main()
 
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 
     SDL_Window* window = SDL_CreateWindow("Engine Project", 800, 600, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL | SDL_WINDOW_MINIMIZED);
@@ -80,6 +80,7 @@ int main()
     logger.log("Setup complete. Entering main loop.", Logger::LogLevel::INFO);
 
     bool running = true;
+    bool consoleOpen = false;
     SDL_ShowWindow(window);
     SDL_RestoreWindow(window);
     
@@ -90,7 +91,8 @@ int main()
                 running = false;
             }
             if (event.type == SDL_EVENT_KEY_UP) {
-                if (event.key.key == SDLK_ESCAPE) {
+                if (event.key.key == SDLK_ESCAPE) 
+                {
                     running = false;
                 }
             }

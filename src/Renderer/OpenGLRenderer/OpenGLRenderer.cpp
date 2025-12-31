@@ -7,6 +7,32 @@
 
 namespace
 {
+    void LogShaderInfo(GLuint shader, const std::string& stage)
+    {
+        auto& logger = Logger::Instance();
+        GLint logLen = 0;
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &logLen);
+        if (logLen > 1)
+        {
+            std::vector<char> log(logLen);
+            glGetShaderInfoLog(shader, logLen, nullptr, log.data());
+            logger.log(stage + " info log: " + std::string(log.data()), Logger::LogLevel::ERROR);
+        }
+    }
+
+    void LogProgramInfo(GLuint program)
+    {
+        auto& logger = Logger::Instance();
+        GLint logLen = 0;
+        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &logLen);
+        if (logLen > 1)
+        {
+            std::vector<char> log(logLen);
+            glGetProgramInfoLog(program, logLen, nullptr, log.data());
+            logger.log(std::string("Program info log: ") + log.data(), Logger::LogLevel::ERROR);
+        }
+    }
+
     GLuint CompileShader(GLenum type, const char* source)
     {
         GLuint shader = glCreateShader(type);
@@ -17,6 +43,7 @@ namespace
         glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
         if (!success)
         {
+            LogShaderInfo(shader, type == GL_VERTEX_SHADER ? "Vertex shader" : "Fragment shader");
             glDeleteShader(shader);
             return 0;
         }
@@ -44,6 +71,7 @@ namespace
 
         GLint linked = 0;
         glGetProgramiv(program, GL_LINK_STATUS, &linked);
+        LogProgramInfo(program);
         glDeleteShader(vs);
         glDeleteShader(fs);
         if (!linked)
@@ -97,7 +125,7 @@ bool OpenGLRenderer::initialize(SDL_Window* appwindow)
     m_window = appwindow;
 
     const char* vertexSrc = R"GLSL(
-        #version 150 core
+        #version 330 core
         layout(location = 0) in vec3 aPos;
         layout(location = 1) in vec3 aColor;
         out vec3 vColor;
@@ -109,7 +137,7 @@ bool OpenGLRenderer::initialize(SDL_Window* appwindow)
     )GLSL";
 
     const char* fragmentSrc = R"GLSL(
-        #version 150 core
+        #version 330 core
         in vec3 vColor;
         out vec4 FragColor;
         void main()
