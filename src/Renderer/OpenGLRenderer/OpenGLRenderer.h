@@ -19,4 +19,7 @@ private:
     bool m_initialized;
     std::string m_name;
     SDL_Window* m_window;
+    GLuint m_vao;
+    GLuint m_vbo;
+    GLuint m_program;
 };

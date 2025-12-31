@@ -20,6 +20,7 @@ target_include_directories(Renderer
 target_link_libraries(Renderer
     PUBLIC
         SDL3::SDL3
+        Logger
 )
 
 if (WIN32)

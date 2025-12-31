@@ -13,7 +13,9 @@ using namespace std;
 
 int main()
 {
-    Logger logger("engine_log.txt");
+    auto& logger = Logger::Instance();
+    logger.initialize("engine_log.txt");
+
     //SDL Initialisierung
     logger.log("Initialisiere SDL...", Logger::LogLevel::INFO);
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -43,6 +45,14 @@ int main()
     SDL_GLContext glContext = SDL_GL_CreateContext(window);
     if (!glContext) {
         logger.log(std::string("OpenGL Kontext konnte nicht erstellt werden: ") + SDL_GetError(), Logger::LogLevel::ERROR);
+        SDL_DestroyWindow(window);
+        SDL_Quit();
+        return -1;
+    }
+
+    if (!SDL_GL_MakeCurrent(window, glContext)) {
+        logger.log(std::string("Kontext konnte nicht aktuell gesetzt werden: ") + SDL_GetError(), Logger::LogLevel::ERROR);
+        SDL_GL_DestroyContext(glContext);
         SDL_DestroyWindow(window);
         SDL_Quit();
         return -1;
@@ -86,11 +96,14 @@ int main()
             }
         }
         renderer->clear();
+        renderer->render();
         renderer->present();
         
         SDL_Delay(16.6);
     }
 
+    delete renderer;
+    SDL_GL_DestroyContext(glContext);
     SDL_DestroyWindow(window);
     SDL_Quit();
     return 0;

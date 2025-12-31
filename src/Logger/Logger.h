@@ -13,16 +13,23 @@
 
 class Logger
 {
-	public:
-	enum class LogLevel {
-		INFO,
-		WARNING,
-		ERROR
-	};
-	Logger(const std::string& filename);
-	~Logger();
-	void log(const std::string& message, LogLevel level = LogLevel::INFO);
+public:
+    enum class LogLevel {
+        INFO,
+        WARNING,
+        ERROR
+    };
+
+    static Logger& Instance();
+    void initialize(const std::string& filename);
+    void log(const std::string& message, LogLevel level = LogLevel::INFO);
 
 private:
-	std::ofstream logFile;
+    Logger() = default;
+    ~Logger();
+    Logger(const Logger&) = delete;
+    Logger& operator=(const Logger&) = delete;
+
+    std::ofstream logFile;
+    bool initialized{false};
 };
