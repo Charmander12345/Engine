@@ -34,8 +34,8 @@ endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for each subdirectory.
-  include("C:/Users/conno/source/repos/Engine/build/external/glad/cmake/cmake_install.cmake")
-  include("C:/Users/conno/source/repos/Engine/build/external/SDL3/cmake_install.cmake")
+  include("C:/Users/conno/source/repos/Engine/build/src/Renderer/cmake_install.cmake")
+  include("C:/Users/conno/source/repos/Engine/build/src/Logger/cmake_install.cmake")
 
 endif()
 

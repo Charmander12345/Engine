@@ -1,9 +1,9 @@
-C:/Users/conno/source/repos/Engine/build/CMakeFiles/glad_gl_core.dir
 C:/Users/conno/source/repos/Engine/build/CMakeFiles/Engine.dir
 C:/Users/conno/source/repos/Engine/build/CMakeFiles/ALL_BUILD.dir
 C:/Users/conno/source/repos/Engine/build/CMakeFiles/ZERO_CHECK.dir
-C:/Users/conno/source/repos/Engine/build/external/glad/cmake/CMakeFiles/ALL_BUILD.dir
 C:/Users/conno/source/repos/Engine/build/external/SDL3/CMakeFiles/SDL3-shared.dir
 C:/Users/conno/source/repos/Engine/build/external/SDL3/CMakeFiles/SDL3_test.dir
 C:/Users/conno/source/repos/Engine/build/external/SDL3/CMakeFiles/SDL_uclibc.dir
 C:/Users/conno/source/repos/Engine/build/external/SDL3/CMakeFiles/ALL_BUILD.dir
+C:/Users/conno/source/repos/Engine/build/src/Renderer/CMakeFiles/Renderer.dir
+C:/Users/conno/source/repos/Engine/build/src/Logger/CMakeFiles/Logger.dir

@@ -7,7 +7,7 @@ if(CMAKE_VERSION VERSION_LESS "2.8.3")
    message(FATAL_ERROR "CMake >= 2.8.3 required")
 endif()
 cmake_policy(PUSH)
-cmake_policy(VERSION 2.8.3...4.0)
+cmake_policy(VERSION 2.8.3...3.31)
 #----------------------------------------------------------------
 # Generated CMake target import file.
 #----------------------------------------------------------------
@@ -62,28 +62,28 @@ set_target_properties(SDL3::SDL3-shared PROPERTIES
 set_property(TARGET SDL3::SDL3-shared APPEND PROPERTY IMPORTED_CONFIGURATIONS DEBUG)
 set_target_properties(SDL3::SDL3-shared PROPERTIES
   IMPORTED_IMPLIB_DEBUG "C:/Users/conno/source/repos/Engine/build/external/SDL3/Debug/SDL3.lib"
-  IMPORTED_LOCATION_DEBUG "C:/Users/conno/source/repos/Engine/build/external/SDL3/Debug/SDL3.dll"
+  IMPORTED_LOCATION_DEBUG "C:/Users/conno/source/repos/Engine/build/Debug/SDL3.dll"
   )
 
 # Import target "SDL3::SDL3-shared" for configuration "Release"
 set_property(TARGET SDL3::SDL3-shared APPEND PROPERTY IMPORTED_CONFIGURATIONS RELEASE)
 set_target_properties(SDL3::SDL3-shared PROPERTIES
   IMPORTED_IMPLIB_RELEASE "C:/Users/conno/source/repos/Engine/build/external/SDL3/Release/SDL3.lib"
-  IMPORTED_LOCATION_RELEASE "C:/Users/conno/source/repos/Engine/build/external/SDL3/Release/SDL3.dll"
+  IMPORTED_LOCATION_RELEASE "C:/Users/conno/source/repos/Engine/build/Release/SDL3.dll"
   )
 
 # Import target "SDL3::SDL3-shared" for configuration "MinSizeRel"
 set_property(TARGET SDL3::SDL3-shared APPEND PROPERTY IMPORTED_CONFIGURATIONS MINSIZEREL)
 set_target_properties(SDL3::SDL3-shared PROPERTIES
   IMPORTED_IMPLIB_MINSIZEREL "C:/Users/conno/source/repos/Engine/build/external/SDL3/MinSizeRel/SDL3.lib"
-  IMPORTED_LOCATION_MINSIZEREL "C:/Users/conno/source/repos/Engine/build/external/SDL3/MinSizeRel/SDL3.dll"
+  IMPORTED_LOCATION_MINSIZEREL "C:/Users/conno/source/repos/Engine/build/MinSizeRel/SDL3.dll"
   )
 
 # Import target "SDL3::SDL3-shared" for configuration "RelWithDebInfo"
 set_property(TARGET SDL3::SDL3-shared APPEND PROPERTY IMPORTED_CONFIGURATIONS RELWITHDEBINFO)
 set_target_properties(SDL3::SDL3-shared PROPERTIES
   IMPORTED_IMPLIB_RELWITHDEBINFO "C:/Users/conno/source/repos/Engine/build/external/SDL3/RelWithDebInfo/SDL3.lib"
-  IMPORTED_LOCATION_RELWITHDEBINFO "C:/Users/conno/source/repos/Engine/build/external/SDL3/RelWithDebInfo/SDL3.dll"
+  IMPORTED_LOCATION_RELWITHDEBINFO "C:/Users/conno/source/repos/Engine/build/RelWithDebInfo/SDL3.dll"
   )
 
 # Make sure the targets which have been exported in some other

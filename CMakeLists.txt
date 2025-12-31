@@ -9,10 +9,9 @@ project ("Engine" LANGUAGES C CXX)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
-add_subdirectory(external/glad/cmake)
-glad_add_library(glad_gl_core SHARED API gl:core=4.6)
-
 add_subdirectory(external/SDL3 EXCLUDE_FROM_ALL)
+add_subdirectory(src/Renderer)
+add_subdirectory(src/Logger)
 
 add_executable(Engine
     src/main.cpp
@@ -21,5 +20,6 @@ add_executable(Engine
 target_link_libraries(Engine
     PRIVATE
         SDL3::SDL3
-        glad_gl_core
+        Renderer
+        Logger
 )

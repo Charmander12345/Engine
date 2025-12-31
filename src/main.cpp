@@ -1,27 +1,28 @@
 ﻿#include <iostream>
-#include <chrono>
-#include <thread>
-#include "Renderer/Renderer.h"
 #include <SDL3/SDL.h>
-#include <glad/gl.h>
 
 #if defined(_WIN32)
 #include <Windows.h>
 #endif
 
+#include "Renderer/Renderer.h"
+#include "Renderer/OpenGLRenderer/OpenGLRenderer.h"
+#include "Logger/Logger.h"
+
 using namespace std;
 
 int main()
 {
+    Logger logger("engine_log.txt");
     //SDL Initialisierung
-	cout << "Initialisiere SDL..." << endl;
+    logger.log("Initialisiere SDL...", Logger::LogLevel::INFO);
     if (!SDL_Init(SDL_INIT_VIDEO)) {
-        std::cerr << "SDL konnte nicht initialisiert werden: " << SDL_GetError() << std::endl;
+        logger.log(std::string("SDL konnte nicht initialisiert werden: ") + SDL_GetError(), Logger::LogLevel::ERROR);
         return -1;
     }
 
-	cout << "SDL erfolgreich initialisiert." << endl;
-	cout << "Initialisiere Fenster..." << endl;
+    logger.log("SDL erfolgreich initialisiert.", Logger::LogLevel::INFO);
+    logger.log("Initialisiere Fenster...", Logger::LogLevel::INFO);
 
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -30,46 +31,47 @@ int main()
 
     SDL_Window* window = SDL_CreateWindow("Engine Project", 800, 600, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL | SDL_WINDOW_MINIMIZED);
     if (!window) {
-        std::cerr << "Fenster konnte nicht erstellt werden: " << SDL_GetError() << std::endl;
+        logger.log(std::string("Fenster konnte nicht erstellt werden: ") + SDL_GetError(), Logger::LogLevel::ERROR);
         SDL_Quit();
         return -1;
     }
 
-	cout << "Fenster erfolgreich erstellt." << endl;
+    logger.log("Fenster erfolgreich erstellt.", Logger::LogLevel::INFO);
 
-	cout << "Erstelle OpenGL Context..." << endl;
+    logger.log("Erstelle OpenGL Context...", Logger::LogLevel::INFO);
 
-	SDL_GLContext glContext = SDL_GL_CreateContext(window);
+    SDL_GLContext glContext = SDL_GL_CreateContext(window);
     if (!glContext) {
-        std::cerr << "OpenGL Kontext konnte nicht erstellt werden: " << SDL_GetError() << std::endl;
+        logger.log(std::string("OpenGL Kontext konnte nicht erstellt werden: ") + SDL_GetError(), Logger::LogLevel::ERROR);
         SDL_DestroyWindow(window);
         SDL_Quit();
         return -1;
-	}
+    }
 
-	cout << "OpenGL Context erfolgreich erstellt." << endl;
+    logger.log("OpenGL Context erfolgreich erstellt.", Logger::LogLevel::INFO);
 
-	cout << "Initialisiere GLAD..." << endl;
+    logger.log("Initialisiere Renderer...", Logger::LogLevel::INFO);
+    Renderer* renderer = new OpenGLRenderer();
 
-	if (!gladLoadGL((GLADloadfunc)SDL_GL_GetProcAddress)) 
+    if (!renderer->initialize(window))
     {
-        std::cerr << "GLAD konnte nicht initialisiert werden." << std::endl;
+        logger.log("GLAD konnte nicht initialisiert werden.", Logger::LogLevel::ERROR);
         SDL_GL_DestroyContext(glContext);
         SDL_DestroyWindow(window);
         SDL_Quit();
         return -1;
-	}
+    }
 
-	cout << "GLAD erfolgreich initialisiert." << endl;
+    logger.log("GLAD erfolgreich initialisiert.", Logger::LogLevel::INFO);
 #if defined(_WIN32)
     FreeConsole();
-	//DestroyWindow(GetConsoleWindow());
+    //DestroyWindow(GetConsoleWindow());
 #endif
-	cout << "Setuup complete. Entering main loop." << endl;
+    logger.log("Setup complete. Entering main loop.", Logger::LogLevel::INFO);
 
     bool running = true;
-	SDL_ShowWindow(window);
-	SDL_RestoreWindow(window);
+    SDL_ShowWindow(window);
+    SDL_RestoreWindow(window);
     
     while (running) {
         SDL_Event event;
@@ -81,12 +83,11 @@ int main()
                 if (event.key.key == SDLK_ESCAPE) {
                     running = false;
                 }
-			}
+            }
         }
-        glClearColor(0.5f, 0.5f, 0.5f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        SDL_GL_SwapWindow(window);
+        renderer->clear();
+        renderer->present();
+        
         SDL_Delay(16.6);
     }
 

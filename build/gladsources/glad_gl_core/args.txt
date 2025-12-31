@@ -1,1 +1,0 @@
---out-path C:/Users/conno/source/repos/Engine/build/gladsources/glad_gl_core --api gl:core=4.6 c 

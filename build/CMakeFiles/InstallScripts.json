@@ -2,8 +2,9 @@
 	"InstallScripts" : 
 	[
 		"C:/Users/conno/source/repos/Engine/build/cmake_install.cmake",
-		"C:/Users/conno/source/repos/Engine/build/external/glad/cmake/cmake_install.cmake",
-		"C:/Users/conno/source/repos/Engine/build/external/SDL3/cmake_install.cmake"
+		"C:/Users/conno/source/repos/Engine/build/external/SDL3/cmake_install.cmake",
+		"C:/Users/conno/source/repos/Engine/build/src/Renderer/cmake_install.cmake",
+		"C:/Users/conno/source/repos/Engine/build/src/Logger/cmake_install.cmake"
 	],
 	"Parallel" : false
 }

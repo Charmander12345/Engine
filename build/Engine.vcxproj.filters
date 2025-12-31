@@ -4,11 +4,22 @@
     <ClCompile Include="C:\Users\conno\source\repos\Engine\src\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\Users\conno\source\repos\Engine\src\Logger\Logger.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="C:\Users\conno\source\repos\Engine\src\Logger\Logger.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="C:\Users\conno\source\repos\Engine\CMakeLists.txt" />
   </ItemGroup>
   <ItemGroup>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{272190C5-3B4E-3FBA-B02F-2D68C214E74D}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source Files">
       <UniqueIdentifier>{5EEDC05C-3780-3D36-A48D-AF4309ED56B8}</UniqueIdentifier>
     </Filter>
