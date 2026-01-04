@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <glm/glm.hpp>
 #include "glad/include/gl.h"
+#include <memory>
 #include "OpenGLShader.h"
 
 class OpenGLShaderProgram

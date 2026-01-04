@@ -10,10 +10,11 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 add_subdirectory(external/SDL3 EXCLUDE_FROM_ALL)
-add_subdirectory(src/Renderer)
-add_subdirectory(src/Logger)
 add_subdirectory(src/AssetManager)
 add_subdirectory(src/Diagnostics)
+add_subdirectory(src/Basics)
+add_subdirectory(src/Renderer)
+add_subdirectory(src/Logger)
 
 add_executable(Engine
     src/main.cpp
@@ -27,10 +28,19 @@ target_link_libraries(Engine
         Logger
         AssetManager
         Diagnostics
+        Basics
 )
 
+set(ENGINE_DEPLOY_DIR "C:/Users/conno/source/repos/EngineBuild")
+
 add_custom_command(TARGET Engine POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/OpenGLRenderer/shaders
-            $<TARGET_FILE_DIR:Engine>/shaders
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:Engine> "${ENGINE_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:Renderer> "${ENGINE_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:Logger> "${ENGINE_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:AssetManager> "${ENGINE_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:Diagnostics> "${ENGINE_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_FILE_DIR:Engine>/shaders" "${ENGINE_DEPLOY_DIR}/shaders"
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:Engine> "${ENGINE_DEPLOY_DIR}/"
+    COMMAND_EXPAND_LISTS
 )

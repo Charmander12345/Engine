@@ -1,4 +1,9 @@
 #include "Logger.h"
+#include <filesystem>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 
 Logger& Logger::Instance()
 {
@@ -6,16 +11,37 @@ Logger& Logger::Instance()
     return instance;
 }
 
-void Logger::initialize(const std::string& filename)
+void Logger::initialize()
 {
     if (initialized)
     {
         return;
     }
+
+    std::filesystem::path logDir = std::filesystem::current_path() / "Logs";
+    std::error_code ec;
+    std::filesystem::create_directories(logDir, ec);
+
+    auto now = std::chrono::system_clock::now();
+    std::time_t t = std::chrono::system_clock::to_time_t(now);
+    std::tm tm{};
+#if defined(_WIN32)
+    localtime_s(&tm, &t);
+#else
+    tm = *std::localtime(&t);
+#endif
+
+    std::ostringstream oss;
+    oss << "log_" << std::put_time(&tm, "%Y-%m-%d_%H-%M-%S") << ".log";
+    filename = (logDir / oss.str()).string();
+
     logFile.open(filename, std::ios::out | std::ios::trunc);
-    if (!logFile.is_open()) {
+    if (!logFile.is_open())
+    {
         std::cerr << "Fehler beim Öffnen der Log-Datei: " << filename << std::endl;
-    } else {
+    }
+    else
+    {
         initialized = true;
     }
 }

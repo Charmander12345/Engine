@@ -9,18 +9,15 @@
 class DiagnosticsManager
 {
 public:
-    enum  class RHIType
+    enum class RHIType
     {
         Unknown,
         OpenGL,
-        Vulkan,
         DirectX11,
         DirectX12
-	};
+    };
 
     static DiagnosticsManager& Instance();
-
-
 
     // Set or update a state entry
     void setState(const std::string& key, const std::string& value);
@@ -30,6 +27,11 @@ public:
 
     // Clear all stored states
     void clear();
+
+    // RHI selection
+    void setRHIType(RHIType type);
+    RHIType getRHIType() const;
+    static std::string rhiTypeToString(RHIType type);
 
     // Persist/load simple key=value pairs to/from config/config.ini in the engine directory
     bool saveConfig() const;
@@ -45,4 +47,5 @@ private:
 
     mutable std::mutex m_mutex;
     std::unordered_map<std::string, std::string> m_states;
+    RHIType m_rhiType{RHIType::Unknown};
 };

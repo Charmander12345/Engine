@@ -15,11 +15,12 @@ OpenGLShaderProgram::~OpenGLShaderProgram()
     }
 }
 
-bool OpenGLShaderProgram::attach(const OpenGLShader& shader)
+bool OpenGLShaderProgram::attach(const std::shared_ptr<Shader>& shader)
 {
-    if (!shader.isCompiled() || shader.id() == 0)
+    auto glShader = std::dynamic_pointer_cast<OpenGLShader>(shader);
+    if (!glShader || glShader->id() == 0)
     {
-        Logger::Instance().log("Attach fehlgeschlagen: Shader nicht kompiliert", Logger::LogLevel::ERROR);
+        Logger::Instance().log("Attach fehlgeschlagen: Shader nicht kompiliert oder falscher Typ", Logger::LogLevel::ERROR);
         return false;
     }
 
@@ -28,7 +29,7 @@ bool OpenGLShaderProgram::attach(const OpenGLShader& shader)
         m_program = glCreateProgram();
     }
 
-    glAttachShader(m_program, shader.id());
+    glAttachShader(m_program, glShader->id());
     m_linked = false;
     return true;
 }

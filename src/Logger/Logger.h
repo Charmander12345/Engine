@@ -21,7 +21,7 @@ public:
     };
 
     static Logger& Instance();
-    void initialize(const std::string& filename);
+    void initialize();
     void log(const std::string& message, LogLevel level = LogLevel::INFO);
 
 private:
@@ -32,4 +32,5 @@ private:
 
     std::ofstream logFile;
     bool initialized{false};
+    std::string filename;
 };

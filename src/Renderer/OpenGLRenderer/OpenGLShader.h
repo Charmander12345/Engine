@@ -1,38 +1,30 @@
 #pragma once
 
 #include <string>
+#include <cstdint>
 #include <glm/glm.hpp>
 #include "glad/include/gl.h"
+#include "../Shader.h"
 
-class OpenGLShader
+class OpenGLShader : public Shader
 {
 public:
-    enum class ShaderType : GLenum
-    {
-        Vertex   = GL_VERTEX_SHADER,
-        Fragment = GL_FRAGMENT_SHADER
-    };
-
     OpenGLShader();
-    ~OpenGLShader();
+    ~OpenGLShader() override;
 
-    // Load shader source from string or file and compile
-    bool loadFromSource(ShaderType type, const std::string& source);
-    bool loadFromFile(ShaderType type, const std::string& filePath);
+    bool loadFromSource(Shader::Type type, const std::string& source) override;
+    bool loadFromFile(Shader::Type type, const std::string& filePath) override;
+    bool compile() override;
 
-    // Compile current source; called internally by load helpers
-    bool compile();
+    Type type() const override { return static_cast<Type>(m_type); }
+    const std::string& source() const override { return m_source; }
+    const std::string& compileLog() const override { return m_compileLog; }
 
-    // Introspection
-    ShaderType type() const { return m_type; }
-    bool isCompiled() const { return m_compiled; }
-    const std::string& source() const { return m_source; }
-    const std::string& compileLog() const { return m_compileLog; }
     GLuint id() const { return m_shader; }
 
 private:
     GLuint m_shader{0};
-    ShaderType m_type{ShaderType::Vertex};
+    Shader::Type m_type{Shader::Type::Vertex};
     std::string m_source;
     std::string m_compileLog;
     bool m_compiled{false};

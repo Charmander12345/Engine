@@ -1,12 +1,14 @@
 add_library(Renderer SHARED
 
     Renderer.h
+    Shader.h
+    Material.h
     OpenGLRenderer/OpenGLRenderer.cpp
     OpenGLRenderer/OpenGLRenderer.h
     OpenGLRenderer/OpenGLShader.cpp
     OpenGLRenderer/OpenGLShader.h
-    OpenGLRenderer/OpenGLShaderProgram.cpp
-    OpenGLRenderer/OpenGLShaderProgram.h
+    OpenGLRenderer/OpenGLMaterial.cpp
+    OpenGLRenderer/OpenGLMaterial.h
     OpenGLRenderer/glad/src/gl.c
 )
 
@@ -20,12 +22,14 @@ target_include_directories(Renderer
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/OpenGLRenderer
         ${CMAKE_CURRENT_SOURCE_DIR}/OpenGLRenderer/glad/include
+        ${CMAKE_SOURCE_DIR}/src/Basics
 )
 
 target_link_libraries(Renderer
     PUBLIC
         SDL3::SDL3
         Logger
+        Basics
 )
 
 if (WIN32)

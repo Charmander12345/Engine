@@ -8,7 +8,7 @@ class Renderer
 public:
     virtual ~Renderer() = default;
 
-    virtual bool initialize(SDL_Window* appwindow) = 0;
+    virtual bool initialize() = 0;
     virtual void clear() = 0;
     virtual void render() = 0;
     virtual void present() = 0;

@@ -6,6 +6,7 @@
 #include <iostream>
 #include "Logger.h"
 #include "OpenGLShader.h"
+#include "../../Basics/Object3D.h"
 
 namespace
 {
@@ -28,26 +29,53 @@ OpenGLRenderer::OpenGLRenderer()
     m_initialized = false;
     m_name = "OpenGL Renderer";
     m_window = nullptr;
-    m_vao = 0;
-    m_vbo = 0;
+    m_glContext = nullptr;
 }
 
 OpenGLRenderer::~OpenGLRenderer()
 {
-    if (m_vbo)
-    {
-        glDeleteBuffers(1, &m_vbo);
-    }
-    if (m_vao)
-    {
-        glDeleteVertexArrays(1, &m_vao);
-    }
+    SDL_GL_DestroyContext(m_glContext);
+    SDL_DestroyWindow(m_window);
 }
 
-bool OpenGLRenderer::initialize(SDL_Window* appwindow)
+bool OpenGLRenderer::initialize()
 {
     auto& logger = Logger::Instance();
-    logger.log("OpenGLRenderer initialize gestartet", Logger::LogLevel::INFO);
+    logger.log("OpenGLRenderer initialize started", Logger::LogLevel::INFO);
+
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 6);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+
+    logger.log("Creating Window...", Logger::LogLevel::INFO);
+
+    m_window = SDL_CreateWindow("Engine Project", 800, 600, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL | SDL_WINDOW_MINIMIZED);
+    if (!m_window) {
+        logger.log(std::string("Failed to create window: ") + SDL_GetError(), Logger::LogLevel::ERROR);
+        SDL_Quit();
+        return false;
+    }
+    logger.log("Window created successfully.", Logger::LogLevel::INFO);
+    logger.log("Creating OpenGL context...", Logger::LogLevel::INFO);
+
+    m_glContext = SDL_GL_CreateContext(m_window);
+    if (!m_glContext) {
+        logger.log(std::string("Failed to create OpenGL context: ") + SDL_GetError(), Logger::LogLevel::ERROR);
+        SDL_DestroyWindow(m_window);
+        SDL_Quit();
+        return false;
+    }
+
+    if (!SDL_GL_MakeCurrent(m_window, m_glContext)) {
+        logger.log(std::string("Failed to make created context current: ") + SDL_GetError(), Logger::LogLevel::ERROR);
+        SDL_GL_DestroyContext(m_glContext);
+        SDL_DestroyWindow(m_window);
+        SDL_Quit();
+        return false;
+    }
+
+    logger.log("OpenGL context created successfully.", Logger::LogLevel::INFO);
 
     if (!gladLoadGL((GLADloadfunc)SDL_GL_GetProcAddress))
     {
@@ -55,73 +83,74 @@ bool OpenGLRenderer::initialize(SDL_Window* appwindow)
         return false;
     }
 
-    logger.log("GLAD initialisiert", Logger::LogLevel::INFO);
+    logger.log("GLAD initialised.", Logger::LogLevel::INFO);
 
     int nrAttributes;
     glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &nrAttributes);
-    logger.log("Maximale Anzahl an Vertex-Attributen: " + std::to_string(nrAttributes), Logger::LogLevel::INFO);
-
-    m_window = appwindow;
+    logger.log("Max number of vertex attributes: " + std::to_string(nrAttributes), Logger::LogLevel::INFO);
 
     std::string vertexPath = ResolveShaderPath("vertex.glsl");
     std::string fragmentPath = ResolveShaderPath("fragment.glsl");
 
     if (vertexPath.empty() || fragmentPath.empty())
     {
-        logger.log("Shader-Dateien vertex.glsl oder fragment.glsl wurden nicht gefunden", Logger::LogLevel::ERROR);
+        logger.log("Couldn't locate vertex.glsl and/or fragment.glsl.", Logger::LogLevel::ERROR);
         return false;
     }
 
-    OpenGLShader vertexShader;
-    OpenGLShader fragmentShader;
+    auto vertexShader = std::make_shared<OpenGLShader>();
+    auto fragmentShader = std::make_shared<OpenGLShader>();
 
-    if (!vertexShader.loadFromFile(OpenGLShader::ShaderType::Vertex, vertexPath))
+    if (!vertexShader->loadFromFile(Shader::Type::Vertex, vertexPath))
     {
-        logger.log("Vertex-Shader konnte nicht geladen/kompiliert werden", Logger::LogLevel::ERROR);
+        logger.log("Failed to load/compile vertex.glsl.", Logger::LogLevel::ERROR);
         return false;
     }
 
-    if (!fragmentShader.loadFromFile(OpenGLShader::ShaderType::Fragment, fragmentPath))
+    if (!fragmentShader->loadFromFile(Shader::Type::Fragment, fragmentPath))
     {
-        logger.log("Fragment-Shader konnte nicht geladen/kompiliert werden", Logger::LogLevel::ERROR);
+        logger.log("Failed to load/compile fragment.glsl.", Logger::LogLevel::ERROR);
         return false;
     }
 
-    if (!m_program.attach(vertexShader) || !m_program.attach(fragmentShader) || !m_program.link())
-    {
-        logger.log("Shader-Programm konnte nicht erstellt werden: " + m_program.linkLog(), Logger::LogLevel::ERROR);
-        return false;
-    }
+    m_material = std::make_shared<OpenGLMaterial>();
+    m_material->addShader(vertexShader);
+    m_material->addShader(fragmentShader);
 
-    logger.log("Shader-Programm erstellt", Logger::LogLevel::INFO);
+    // Build a static 3D object with vertex data and layout
+    auto object3D = std::make_shared<Object3D>();
+    object3D->setMaterial(m_material);
 
-    const float vertices[] = {
+    const std::vector<float> vertices = {
         // positions        // colors
          0.0f,  0.5f, 0.0f,  1.0f, 0.0f, 0.0f,
         -0.5f, -0.5f, 0.0f,  0.0f, 1.0f, 0.0f,
          0.5f, -0.5f, 0.0f,  0.0f, 0.0f, 1.0f
     };
+    object3D->setVertices(vertices);
 
-    glGenVertexArrays(1, &m_vao);
-    glGenBuffers(1, &m_vbo);
+    m_material->setVertexData(vertices);
 
-    glBindVertexArray(m_vao);
+    std::vector<OpenGLMaterial::LayoutElement> layout = {
+        {0, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(6 * sizeof(float)), 0},
+        {1, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(6 * sizeof(float)), static_cast<size_t>(3 * sizeof(float))}
+    };
+    m_material->setLayout(layout);
 
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    if (!m_material->build())
+    {
+        logger.log("Failed to build OpenGL material (program link).", Logger::LogLevel::ERROR);
+        return false;
+    }
 
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
-
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(3 * sizeof(float)));
-
-    glBindVertexArray(0);
+    logger.log("Shader program created successfully.", Logger::LogLevel::INFO);
 
     glEnable(GL_DEPTH_TEST);
 
     m_initialized = true;
-    logger.log("OpenGLRenderer initialize erfolgreich", Logger::LogLevel::INFO);
+    logger.log("Initialisation of the OpenGL renderer complete.", Logger::LogLevel::INFO);
+    SDL_ShowWindow(m_window);
+    SDL_RestoreWindow(m_window);
     return true;
 }
 
@@ -151,12 +180,12 @@ void OpenGLRenderer::render()
     SDL_GetWindowSizeInPixels(m_window, &width, &height);
     glViewport(0, 0, width, height);
 
-    m_program.bind();
-    glBindVertexArray(m_vao);
-    //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
-    glBindVertexArray(0);
-    m_program.unbind();
+    if (m_material)
+    {
+        m_material->bind();
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        m_material->unbind();
+    }
 }
 
 const std::string& OpenGLRenderer::name() const

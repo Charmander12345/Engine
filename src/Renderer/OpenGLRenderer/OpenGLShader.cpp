@@ -17,14 +17,14 @@ OpenGLShader::~OpenGLShader()
     }
 }
 
-bool OpenGLShader::loadFromSource(ShaderType type, const std::string& source)
+bool OpenGLShader::loadFromSource(Shader::Type type, const std::string& source)
 {
     m_type = type;
     m_source = source;
     return compile();
 }
 
-bool OpenGLShader::loadFromFile(ShaderType type, const std::string& filePath)
+bool OpenGLShader::loadFromFile(Shader::Type type, const std::string& filePath)
 {
     std::ifstream file(filePath, std::ios::in | std::ios::binary);
     if (!file)
@@ -40,9 +40,20 @@ bool OpenGLShader::loadFromFile(ShaderType type, const std::string& filePath)
     return compile();
 }
 
+static GLenum ToGLType(Shader::Type type)
+{
+    switch (type)
+    {
+    case Shader::Type::Vertex: return GL_VERTEX_SHADER;
+    case Shader::Type::Fragment: return GL_FRAGMENT_SHADER;
+    case Shader::Type::Geometry: return GL_GEOMETRY_SHADER;
+    case Shader::Type::Compute: return GL_COMPUTE_SHADER;
+    default: return 0;
+    }
+}
+
 bool OpenGLShader::compile()
 {
-    // Clean previous
     if (m_shader)
     {
         glDeleteShader(m_shader);
@@ -51,7 +62,14 @@ bool OpenGLShader::compile()
     m_compileLog.clear();
     m_compiled = false;
 
-    GLuint shader = glCreateShader(static_cast<GLenum>(m_type));
+    GLenum glType = ToGLType(m_type);
+    if (glType == 0)
+    {
+        Logger::Instance().log("Unsupported shader type for OpenGL", Logger::LogLevel::ERROR);
+        return false;
+    }
+
+    GLuint shader = glCreateShader(glType);
     const char* src = m_source.c_str();
     glShaderSource(shader, 1, &src, nullptr);
     glCompileShader(shader);
