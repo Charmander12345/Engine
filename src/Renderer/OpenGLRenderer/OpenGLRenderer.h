@@ -2,6 +2,7 @@
 
 #include "../Renderer.h"
 #include "glad/include/gl.h"
+#include "OpenGLShaderProgram.h"
 
 class OpenGLRenderer : public Renderer
 {
@@ -21,5 +22,5 @@ private:
     SDL_Window* m_window;
     GLuint m_vao;
     GLuint m_vbo;
-    GLuint m_program;
+    OpenGLShaderProgram m_program;
 };

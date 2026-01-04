@@ -80,17 +80,20 @@ int main()
     logger.log("Setup complete. Entering main loop.", Logger::LogLevel::INFO);
 
     bool running = true;
-    bool consoleOpen = false;
     SDL_ShowWindow(window);
     SDL_RestoreWindow(window);
     
-    while (running) {
+    while (running) 
+    {
         SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_EVENT_QUIT) {
+        while (SDL_PollEvent(&event)) 
+        {
+            if (event.type == SDL_EVENT_QUIT) 
+            {
                 running = false;
             }
-            if (event.type == SDL_EVENT_KEY_UP) {
+            if (event.type == SDL_EVENT_KEY_UP) 
+            {
                 if (event.key.key == SDLK_ESCAPE) 
                 {
                     running = false;

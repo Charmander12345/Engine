@@ -1,85 +1,25 @@
 #include "OpenGLRenderer.h"
 #include <vector>
 #include <string>
+#include <filesystem>
 #include <SDL3/SDL.h>
 #include <iostream>
 #include "Logger.h"
+#include "OpenGLShader.h"
 
 namespace
 {
-    void LogShaderInfo(GLuint shader, const std::string& stage)
+    std::string ResolveShaderPath(const std::string& filename)
     {
-        auto& logger = Logger::Instance();
-        GLint logLen = 0;
-        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &logLen);
-        if (logLen > 1)
-        {
-            std::vector<char> log(logLen);
-            glGetShaderInfoLog(shader, logLen, nullptr, log.data());
-            logger.log(stage + " info log: " + std::string(log.data()), Logger::LogLevel::ERROR);
-        }
-    }
+        std::filesystem::path base = std::filesystem::current_path();
 
-    void LogProgramInfo(GLuint program)
-    {
-        auto& logger = Logger::Instance();
-        GLint logLen = 0;
-        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &logLen);
-        if (logLen > 1)
-        {
-            std::vector<char> log(logLen);
-            glGetProgramInfoLog(program, logLen, nullptr, log.data());
-            logger.log(std::string("Program info log: ") + log.data(), Logger::LogLevel::ERROR);
-        }
-    }
+        std::filesystem::path shadersfolder = base / "shaders" / filename;
 
-    GLuint CompileShader(GLenum type, const char* source)
-    {
-        GLuint shader = glCreateShader(type);
-        glShaderSource(shader, 1, &source, nullptr);
-        glCompileShader(shader);
-
-        GLint success = 0;
-        glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-        if (!success)
+        if (std::filesystem::exists(shadersfolder))
         {
-            LogShaderInfo(shader, type == GL_VERTEX_SHADER ? "Vertex shader" : "Fragment shader");
-            glDeleteShader(shader);
-            return 0;
+            return shadersfolder.string();
         }
-        return shader;
-    }
-
-    GLuint CreateProgram(const char* vsSource, const char* fsSource)
-    {
-        GLuint vs = CompileShader(GL_VERTEX_SHADER, vsSource);
-        if (!vs)
-        {
-            return 0;
-        }
-        GLuint fs = CompileShader(GL_FRAGMENT_SHADER, fsSource);
-        if (!fs)
-        {
-            glDeleteShader(vs);
-            return 0;
-        }
-
-        GLuint program = glCreateProgram();
-        glAttachShader(program, vs);
-        glAttachShader(program, fs);
-        glLinkProgram(program);
-
-        GLint linked = 0;
-        glGetProgramiv(program, GL_LINK_STATUS, &linked);
-        LogProgramInfo(program);
-        glDeleteShader(vs);
-        glDeleteShader(fs);
-        if (!linked)
-        {
-            glDeleteProgram(program);
-            return 0;
-        }
-        return program;
+        return {};
     }
 }
 
@@ -90,15 +30,10 @@ OpenGLRenderer::OpenGLRenderer()
     m_window = nullptr;
     m_vao = 0;
     m_vbo = 0;
-    m_program = 0;
 }
 
 OpenGLRenderer::~OpenGLRenderer()
 {
-    if (m_program)
-    {
-        glDeleteProgram(m_program);
-    }
     if (m_vbo)
     {
         glDeleteBuffers(1, &m_vbo);
@@ -122,34 +57,39 @@ bool OpenGLRenderer::initialize(SDL_Window* appwindow)
 
     logger.log("GLAD initialisiert", Logger::LogLevel::INFO);
 
+    int nrAttributes;
+    glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &nrAttributes);
+    logger.log("Maximale Anzahl an Vertex-Attributen: " + std::to_string(nrAttributes), Logger::LogLevel::INFO);
+
     m_window = appwindow;
 
-    const char* vertexSrc = R"GLSL(
-        #version 330 core
-        layout(location = 0) in vec3 aPos;
-        layout(location = 1) in vec3 aColor;
-        out vec3 vColor;
-        void main()
-        {
-            vColor = aColor;
-            gl_Position = vec4(aPos, 1.0);
-        }
-    )GLSL";
+    std::string vertexPath = ResolveShaderPath("vertex.glsl");
+    std::string fragmentPath = ResolveShaderPath("fragment.glsl");
 
-    const char* fragmentSrc = R"GLSL(
-        #version 330 core
-        in vec3 vColor;
-        out vec4 FragColor;
-        void main()
-        {
-            FragColor = vec4(vColor, 1.0);
-        }
-    )GLSL";
-
-    m_program = CreateProgram(vertexSrc, fragmentSrc);
-    if (!m_program)
+    if (vertexPath.empty() || fragmentPath.empty())
     {
-        logger.log("Shader-Programm konnte nicht erstellt werden", Logger::LogLevel::ERROR);
+        logger.log("Shader-Dateien vertex.glsl oder fragment.glsl wurden nicht gefunden", Logger::LogLevel::ERROR);
+        return false;
+    }
+
+    OpenGLShader vertexShader;
+    OpenGLShader fragmentShader;
+
+    if (!vertexShader.loadFromFile(OpenGLShader::ShaderType::Vertex, vertexPath))
+    {
+        logger.log("Vertex-Shader konnte nicht geladen/kompiliert werden", Logger::LogLevel::ERROR);
+        return false;
+    }
+
+    if (!fragmentShader.loadFromFile(OpenGLShader::ShaderType::Fragment, fragmentPath))
+    {
+        logger.log("Fragment-Shader konnte nicht geladen/kompiliert werden", Logger::LogLevel::ERROR);
+        return false;
+    }
+
+    if (!m_program.attach(vertexShader) || !m_program.attach(fragmentShader) || !m_program.link())
+    {
+        logger.log("Shader-Programm konnte nicht erstellt werden: " + m_program.linkLog(), Logger::LogLevel::ERROR);
         return false;
     }
 
@@ -211,10 +151,12 @@ void OpenGLRenderer::render()
     SDL_GetWindowSizeInPixels(m_window, &width, &height);
     glViewport(0, 0, width, height);
 
-    glUseProgram(m_program);
+    m_program.bind();
     glBindVertexArray(m_vao);
+    //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glBindVertexArray(0);
+    m_program.unbind();
 }
 
 const std::string& OpenGLRenderer::name() const

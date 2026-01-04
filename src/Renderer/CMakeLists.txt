@@ -1,7 +1,12 @@
 add_library(Renderer SHARED
+
     Renderer.h
     OpenGLRenderer/OpenGLRenderer.cpp
     OpenGLRenderer/OpenGLRenderer.h
+    OpenGLRenderer/OpenGLShader.cpp
+    OpenGLRenderer/OpenGLShader.h
+    OpenGLRenderer/OpenGLShaderProgram.cpp
+    OpenGLRenderer/OpenGLShaderProgram.h
     OpenGLRenderer/glad/src/gl.c
 )
 
