@@ -10,26 +10,23 @@
 #include "Renderer/OpenGLRenderer/OpenGLRenderer.h"
 #include "Logger/Logger.h"
 #include "Diagnostics/DiagnosticsManager.h"
+#include "AssetManager/AssetManager.h"
 
 using namespace std;
-
-Renderer* renderer = nullptr;
 
 int main()
 {
     auto& logger = Logger::Instance();
+    auto& assetManager = AssetManager::Instance();
     logger.initialize();
 
     std::string cwd = std::filesystem::current_path().string();
     logger.log("Startup path: " + cwd, Logger::LogLevel::INFO);
 
-    // Log the current working directory
-    logger.log("Current working directory: " + std::filesystem::current_path().string(), Logger::LogLevel::INFO);
-
     // SDL Initialisierung
     logger.log("Initialising SDL...", Logger::LogLevel::INFO);
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
-        logger.log(std::string("Failed to initialise SDL: ") + SDL_GetError(), Logger::LogLevel::ERROR);
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
+        logger.log(std::string("Failed to initialise SDL: ") + SDL_GetError(), Logger::LogLevel::FATAL);
         return -1;
     }
     auto& diagnostics = DiagnosticsManager::Instance();
@@ -43,7 +40,9 @@ int main()
 
     if (!renderer->initialize())
     {
-        logger.log("Failed to initialise renderer.", Logger::LogLevel::ERROR);
+        logger.log("Failed to initialise renderer.", Logger::LogLevel::FATAL);
+        delete renderer;
+        SDL_Quit();
         return -1;
     }
 
@@ -51,10 +50,15 @@ int main()
 #if defined(_WIN32)
     FreeConsole();
 #endif
-    logger.log("Setup complete. Entering main loop.", Logger::LogLevel::INFO);
+    logger.log("Setup complete.", Logger::LogLevel::INFO);
+
+    if (!assetManager.loadProject("C:/Users/conno/Downloads/SampleProject"))
+    {
+		assetManager.createProject(cwd, "SampleProject", { "SampleProject", "1.0", "1.0", DiagnosticsManager::RHIType::OpenGL });
+    }
 
     bool running = true;
-    
+    logger.log("Entering main loop.", Logger::LogLevel::INFO);
     while (running) 
     {
         SDL_Event event;
@@ -80,7 +84,7 @@ int main()
     }
 
     delete renderer;
-	diagnostics.saveConfig();
+    diagnostics.saveConfig();
     SDL_Quit();
     return 0;
 }

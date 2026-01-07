@@ -31,6 +31,7 @@ public:
 
     void bind() override;
     void unbind() override;
+    void render() override;
 
 private:
     std::vector<std::shared_ptr<OpenGLShader>> m_shaders;
@@ -39,4 +40,5 @@ private:
     GLuint m_program{0};
     GLuint m_vao{0};
     GLuint m_vbo{0};
+    GLsizei m_vertexCount{0};
 };

@@ -1,6 +1,9 @@
 add_library(AssetManager SHARED
     AssetManager.cpp
     AssetManager.h
+    GarbageCollector.cpp
+    GarbageCollector.h
+    AssetTypes.h
 )
 
 set_target_properties(AssetManager PROPERTIES
@@ -11,6 +14,16 @@ set_target_properties(AssetManager PROPERTIES
 target_include_directories(AssetManager
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/src/Diagnostics
+        ${CMAKE_SOURCE_DIR}/src/Logger
+        ${CMAKE_SOURCE_DIR}/src/Basics
+)
+
+target_link_libraries(AssetManager
+    PUBLIC
+        Diagnostics
+        Logger
+        Basics
 )
 
 if (WIN32)

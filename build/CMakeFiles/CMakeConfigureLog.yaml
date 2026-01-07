@@ -64,7 +64,6 @@ events:
         - "C:\\Users\\conno\\AppData\\Local\\Microsoft\\WindowsApps"
         - "C:\\Users\\conno\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
         - "C:\\Users\\conno\\.dotnet\\tools"
-        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\PrivateAssemblies\\runtimes\\win-x64\\native"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\VC\\Linux\\bin\\ConnectionManagerExe"
@@ -95,7 +94,7 @@ events:
       The output was:
       0
       MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-      Der Buildvorgang wurde am 31.12.2025 02:06:01 gestartet.
+      Der Buildvorgang wurde am 06.01.2026 18:18:25 gestartet.
       
       Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\4.2.1\\CompilerIdC\\CompilerIdC.vcxproj" auf Knoten "1" (Standardziele).
       PrepareForBuild:
@@ -124,7 +123,7 @@ events:
           0 Warnung(en)
           0 Fehler
       
-      Verstrichene Zeit 00:00:04.17
+      Verstrichene Zeit 00:00:02.10
       
       
       Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "CompilerIdC.exe"
@@ -186,7 +185,6 @@ events:
       - "C:/Users/conno/AppData/Local/Microsoft/WindowsApps/"
       - "C:/Users/conno/AppData/Local/Programs/Microsoft VS Code/bin/"
       - "C:/Users/conno/.dotnet/tools/"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/VC/Linux/bin/ConnectionManagerExe/"
@@ -225,7 +223,6 @@ events:
         - "C:\\Users\\conno\\AppData\\Local\\Microsoft\\WindowsApps"
         - "C:\\Users\\conno\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
         - "C:\\Users\\conno\\.dotnet\\tools"
-        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\PrivateAssemblies\\runtimes\\win-x64\\native"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\VC\\Linux\\bin\\ConnectionManagerExe"
@@ -282,7 +279,6 @@ events:
       - "C:/Users/conno/AppData/Local/Microsoft/WindowsApps/"
       - "C:/Users/conno/AppData/Local/Programs/Microsoft VS Code/bin/"
       - "C:/Users/conno/.dotnet/tools/"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/VC/Linux/bin/ConnectionManagerExe/"
@@ -378,9 +374,6 @@ events:
       - "C:/Users/conno/.dotnet/tools/lld-link.com"
       - "C:/Users/conno/.dotnet/tools/lld-link.exe"
       - "C:/Users/conno/.dotnet/tools/lld-link"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/lld-link.com"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/lld-link.exe"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/lld-link"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/lld-link.com"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/lld-link.exe"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/lld-link"
@@ -425,7 +418,6 @@ events:
         - "C:\\Users\\conno\\AppData\\Local\\Microsoft\\WindowsApps"
         - "C:\\Users\\conno\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
         - "C:\\Users\\conno\\.dotnet\\tools"
-        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\PrivateAssemblies\\runtimes\\win-x64\\native"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\VC\\Linux\\bin\\ConnectionManagerExe"
@@ -480,7 +472,6 @@ events:
       - "C:/Users/conno/AppData/Local/Microsoft/WindowsApps/"
       - "C:/Users/conno/AppData/Local/Programs/Microsoft VS Code/bin/"
       - "C:/Users/conno/.dotnet/tools/"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/VC/Linux/bin/ConnectionManagerExe/"
@@ -519,7 +510,6 @@ events:
         - "C:\\Users\\conno\\AppData\\Local\\Microsoft\\WindowsApps"
         - "C:\\Users\\conno\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
         - "C:\\Users\\conno\\.dotnet\\tools"
-        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\PrivateAssemblies\\runtimes\\win-x64\\native"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\VC\\Linux\\bin\\ConnectionManagerExe"
@@ -574,7 +564,6 @@ events:
       - "C:/Users/conno/AppData/Local/Microsoft/WindowsApps/"
       - "C:/Users/conno/AppData/Local/Programs/Microsoft VS Code/bin/"
       - "C:/Users/conno/.dotnet/tools/"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/VC/Linux/bin/ConnectionManagerExe/"
@@ -643,7 +632,6 @@ events:
         - "C:\\Users\\conno\\AppData\\Local\\Microsoft\\WindowsApps"
         - "C:\\Users\\conno\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
         - "C:\\Users\\conno\\.dotnet\\tools"
-        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\PrivateAssemblies\\runtimes\\win-x64\\native"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\VC\\Linux\\bin\\ConnectionManagerExe"
@@ -698,7 +686,6 @@ events:
       - "C:/Users/conno/AppData/Local/Microsoft/WindowsApps/"
       - "C:/Users/conno/AppData/Local/Programs/Microsoft VS Code/bin/"
       - "C:/Users/conno/.dotnet/tools/"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/VC/Linux/bin/ConnectionManagerExe/"
@@ -737,7 +724,6 @@ events:
         - "C:\\Users\\conno\\AppData\\Local\\Microsoft\\WindowsApps"
         - "C:\\Users\\conno\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
         - "C:\\Users\\conno\\.dotnet\\tools"
-        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\PrivateAssemblies\\runtimes\\win-x64\\native"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\VC\\Linux\\bin\\ConnectionManagerExe"
@@ -798,7 +784,6 @@ events:
         - "C:\\Users\\conno\\AppData\\Local\\Microsoft\\WindowsApps"
         - "C:\\Users\\conno\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
         - "C:\\Users\\conno\\.dotnet\\tools"
-        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\PrivateAssemblies\\runtimes\\win-x64\\native"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\VC\\Linux\\bin\\ConnectionManagerExe"
@@ -829,7 +814,7 @@ events:
       The output was:
       0
       MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-      Der Buildvorgang wurde am 31.12.2025 02:06:07 gestartet.
+      Der Buildvorgang wurde am 06.01.2026 18:18:28 gestartet.
       
       Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\4.2.1\\CompilerIdCXX\\CompilerIdCXX.vcxproj" auf Knoten "1" (Standardziele).
       PrepareForBuild:
@@ -858,7 +843,7 @@ events:
           0 Warnung(en)
           0 Fehler
       
-      Verstrichene Zeit 00:00:03.70
+      Verstrichene Zeit 00:00:02.34
       
       
       Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CompilerIdCXX.exe"
@@ -920,7 +905,6 @@ events:
       - "C:/Users/conno/AppData/Local/Microsoft/WindowsApps/"
       - "C:/Users/conno/AppData/Local/Programs/Microsoft VS Code/bin/"
       - "C:/Users/conno/.dotnet/tools/"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/VC/Linux/bin/ConnectionManagerExe/"
@@ -1016,9 +1000,6 @@ events:
       - "C:/Users/conno/.dotnet/tools/lld-link.com"
       - "C:/Users/conno/.dotnet/tools/lld-link.exe"
       - "C:/Users/conno/.dotnet/tools/lld-link"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/lld-link.com"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/lld-link.exe"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/lld-link"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/lld-link.com"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/lld-link.exe"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/lld-link"
@@ -1063,7 +1044,6 @@ events:
         - "C:\\Users\\conno\\AppData\\Local\\Microsoft\\WindowsApps"
         - "C:\\Users\\conno\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
         - "C:\\Users\\conno\\.dotnet\\tools"
-        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\PrivateAssemblies\\runtimes\\win-x64\\native"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\VC\\Linux\\bin\\ConnectionManagerExe"
@@ -1120,7 +1100,6 @@ events:
       - "C:/Users/conno/AppData/Local/Microsoft/WindowsApps/"
       - "C:/Users/conno/AppData/Local/Programs/Microsoft VS Code/bin/"
       - "C:/Users/conno/.dotnet/tools/"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/VC/Linux/bin/ConnectionManagerExe/"
@@ -1198,7 +1177,6 @@ events:
         - "C:\\Users\\conno\\AppData\\Local\\Microsoft\\WindowsApps"
         - "C:\\Users\\conno\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
         - "C:\\Users\\conno\\.dotnet\\tools"
-        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\PrivateAssemblies\\runtimes\\win-x64\\native"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\VC\\Linux\\bin\\ConnectionManagerExe"
@@ -1218,8 +1196,8 @@ events:
     checks:
       - "Detecting C compiler ABI info"
     directories:
-      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-fp6421"
-      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-fp6421"
+      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-2gdhvv"
+      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-2gdhvv"
     cmakeVariables:
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS /W3"
       CMAKE_C_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
@@ -1228,39 +1206,39 @@ events:
       variable: "CMAKE_C_ABI_COMPILED"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-fp6421'
+        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-2gdhvv'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_860e5.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_536db.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:06:13 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:18:32 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-fp6421\\cmTC_860e5.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-2gdhvv\\cmTC_536db.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-fp6421\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_860e5.dir\\Debug\\cmTC_860e5.tlog\\" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-2gdhvv\\Debug\\" wird erstellt.
+          Das Verzeichnis "cmTC_536db.dir\\Debug\\cmTC_536db.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_860e5.dir\\Debug\\cmTC_860e5.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_860e5.dir\\Debug\\cmTC_860e5.tlog\\unsuccessfulbuild".
+          "cmTC_536db.dir\\Debug\\cmTC_536db.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_536db.dir\\Debug\\cmTC_536db.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_860e5.dir\\Debug\\\\" /Fd"cmTC_860e5.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.2\\Modules\\CMakeCCompilerABI.c"
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_536db.dir\\Debug\\\\" /Fd"cmTC_536db.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.2\\Modules\\CMakeCCompilerABI.c"
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_860e5.dir\\Debug\\\\" /Fd"cmTC_860e5.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.2\\Modules\\CMakeCCompilerABI.c"
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_536db.dir\\Debug\\\\" /Fd"cmTC_536db.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.2\\Modules\\CMakeCCompilerABI.c"
           CMakeCCompilerABI.c
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-fp6421\\Debug\\cmTC_860e5.exe" /INCREMENTAL /ILK:"cmTC_860e5.dir\\Debug\\cmTC_860e5.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-fp6421/Debug/cmTC_860e5.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-fp6421/Debug/cmTC_860e5.lib" /MACHINE:X64  /machine:x64 cmTC_860e5.dir\\Debug\\CMakeCCompilerABI.obj
-          cmTC_860e5.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-fp6421\\Debug\\cmTC_860e5.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-2gdhvv\\Debug\\cmTC_536db.exe" /INCREMENTAL /ILK:"cmTC_536db.dir\\Debug\\cmTC_536db.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-2gdhvv/Debug/cmTC_536db.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-2gdhvv/Debug/cmTC_536db.lib" /MACHINE:X64  /machine:x64 cmTC_536db.dir\\Debug\\CMakeCCompilerABI.obj
+          cmTC_536db.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-2gdhvv\\Debug\\cmTC_536db.exe
         FinalizeBuildStatus:
-          Die Datei "cmTC_860e5.dir\\Debug\\cmTC_860e5.tlog\\unsuccessfulbuild" wird gel├Âscht.
-          Aktualisieren des Timestamps von "cmTC_860e5.dir\\Debug\\cmTC_860e5.tlog\\cmTC_860e5.lastbuildstate".
-        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-fp6421\\cmTC_860e5.vcxproj" ist abgeschlossen (Standardziele).
+          Die Datei "cmTC_536db.dir\\Debug\\cmTC_536db.tlog\\unsuccessfulbuild" wird gel├Âscht.
+          Aktualisieren des Timestamps von "cmTC_536db.dir\\Debug\\cmTC_536db.tlog\\cmTC_536db.lastbuildstate".
+        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-2gdhvv\\cmTC_536db.vcxproj" ist abgeschlossen (Standardziele).
         
         Der Buildvorgang wurde erfolgreich ausgef├╝hrt.
             0 Warnung(en)
             0 Fehler
         
-        Verstrichene Zeit 00:00:03.67
+        Verstrichene Zeit 00:00:02.33
         
       exitCode: 0
   -
@@ -1300,8 +1278,8 @@ events:
     checks:
       - "Detecting CXX compiler ABI info"
     directories:
-      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-xi20cm"
-      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-xi20cm"
+      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-d9ns2f"
+      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-d9ns2f"
     cmakeVariables:
       CMAKE_CXX_FLAGS: "/DWIN32 /D_WINDOWS /W3 /GR /EHsc"
       CMAKE_CXX_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
@@ -1311,47 +1289,47 @@ events:
       variable: "CMAKE_CXX_ABI_COMPILED"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-xi20cm'
+        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-d9ns2f'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_bdeff.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_51ed1.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:06:19 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:18:35 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-xi20cm\\cmTC_bdeff.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-d9ns2f\\cmTC_51ed1.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-xi20cm\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_bdeff.dir\\Debug\\cmTC_bdeff.tlog\\" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-d9ns2f\\Debug\\" wird erstellt.
+          Das Verzeichnis "cmTC_51ed1.dir\\Debug\\cmTC_51ed1.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_bdeff.dir\\Debug\\cmTC_bdeff.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_bdeff.dir\\Debug\\cmTC_bdeff.tlog\\unsuccessfulbuild".
+          "cmTC_51ed1.dir\\Debug\\cmTC_51ed1.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_51ed1.dir\\Debug\\cmTC_51ed1.tlog\\unsuccessfulbuild".
         ComputeStdModulesCompileInputs:
           Reading library manifest file 'C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\modules\\modules.json' which provides data for library 'microsoft/STL'.
           Adding module source 'C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\modules\\std.ixx' from library 'microsoft/STL' to be built with this project.
           Adding module source 'C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\modules\\std.compat.ixx' from library 'microsoft/STL' to be built with this project.
         MakeDirsForCl:
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-xi20cm\\cmTC_bdeff.dir\\Debug\\microsoft\\STL" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-d9ns2f\\cmTC_51ed1.dir\\Debug\\microsoft\\STL" wird erstellt.
         SetModuleDependencies:
-          Das Verzeichnis "cmTC_bdeff.dir\\Debug\\cmTC_bdeff_MD.tlog\\" wird erstellt.
+          Das Verzeichnis "cmTC_51ed1.dir\\Debug\\cmTC_51ed1_MD.tlog\\" wird erstellt.
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /GR /std:c++20 /Fo"cmTC_bdeff.dir\\Debug\\\\" /Fd"cmTC_bdeff.dir\\Debug\\vc145.pdb" /external:W3 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.2\\Modules\\CMakeCXXCompilerABI.cpp"
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /GR /std:c++20 /Fo"cmTC_51ed1.dir\\Debug\\\\" /Fd"cmTC_51ed1.dir\\Debug\\vc145.pdb" /external:W3 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.2\\Modules\\CMakeCXXCompilerABI.cpp"
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /GR /std:c++20 /Fo"cmTC_bdeff.dir\\Debug\\\\" /Fd"cmTC_bdeff.dir\\Debug\\vc145.pdb" /external:W3 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.2\\Modules\\CMakeCXXCompilerABI.cpp"
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /GR /std:c++20 /Fo"cmTC_51ed1.dir\\Debug\\\\" /Fd"cmTC_51ed1.dir\\Debug\\vc145.pdb" /external:W3 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.2\\Modules\\CMakeCXXCompilerABI.cpp"
           CMakeCXXCompilerABI.cpp
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-xi20cm\\Debug\\cmTC_bdeff.exe" /INCREMENTAL /ILK:"cmTC_bdeff.dir\\Debug\\cmTC_bdeff.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-xi20cm/Debug/cmTC_bdeff.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-xi20cm/Debug/cmTC_bdeff.lib" /MACHINE:X64  /machine:x64 cmTC_bdeff.dir\\Debug\\CMakeCXXCompilerABI.obj
-          cmTC_bdeff.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-xi20cm\\Debug\\cmTC_bdeff.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-d9ns2f\\Debug\\cmTC_51ed1.exe" /INCREMENTAL /ILK:"cmTC_51ed1.dir\\Debug\\cmTC_51ed1.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-d9ns2f/Debug/cmTC_51ed1.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-d9ns2f/Debug/cmTC_51ed1.lib" /MACHINE:X64  /machine:x64 cmTC_51ed1.dir\\Debug\\CMakeCXXCompilerABI.obj
+          cmTC_51ed1.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-d9ns2f\\Debug\\cmTC_51ed1.exe
         FinalizeBuildStatus:
-          Die Datei "cmTC_bdeff.dir\\Debug\\cmTC_bdeff.tlog\\unsuccessfulbuild" wird gel├Âscht.
-          Aktualisieren des Timestamps von "cmTC_bdeff.dir\\Debug\\cmTC_bdeff.tlog\\cmTC_bdeff.lastbuildstate".
-        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-xi20cm\\cmTC_bdeff.vcxproj" ist abgeschlossen (Standardziele).
+          Die Datei "cmTC_51ed1.dir\\Debug\\cmTC_51ed1.tlog\\unsuccessfulbuild" wird gel├Âscht.
+          Aktualisieren des Timestamps von "cmTC_51ed1.dir\\Debug\\cmTC_51ed1.tlog\\cmTC_51ed1.lastbuildstate".
+        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-d9ns2f\\cmTC_51ed1.vcxproj" ist abgeschlossen (Standardziele).
         
         Der Buildvorgang wurde erfolgreich ausgef├╝hrt.
             0 Warnung(en)
             0 Fehler
         
-        Verstrichene Zeit 00:00:04.38
+        Verstrichene Zeit 00:00:01.88
         
       exitCode: 0
   -
@@ -1432,7 +1410,6 @@ events:
       - "C:/Users/conno/AppData/Local/Microsoft/WindowsApps/"
       - "C:/Users/conno/AppData/Local/Programs/Microsoft VS Code/bin/"
       - "C:/Users/conno/.dotnet/tools/"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/VC/Linux/bin/ConnectionManagerExe/"
@@ -1711,15 +1688,6 @@ events:
       - "C:/Users/conno/.dotnet/tools/pkgconf.com"
       - "C:/Users/conno/.dotnet/tools/pkgconf.exe"
       - "C:/Users/conno/.dotnet/tools/pkgconf"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/pkg-config.bat.com"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/pkg-config.bat.exe"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/pkg-config.bat"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/pkg-config.com"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/pkg-config.exe"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/pkg-config"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/pkgconf.com"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/pkgconf.exe"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/pkgconf"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/pkg-config.bat.com"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/pkg-config.bat.exe"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/pkg-config.bat"
@@ -1896,7 +1864,6 @@ events:
         - "C:\\Users\\conno\\AppData\\Local\\Microsoft\\WindowsApps"
         - "C:\\Users\\conno\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
         - "C:\\Users\\conno\\.dotnet\\tools"
-        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\PrivateAssemblies\\runtimes\\win-x64\\native"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\VC\\Linux\\bin\\ConnectionManagerExe"
@@ -1926,37 +1893,37 @@ events:
       stdout: |
         Change Dir: 'C:/Users/conno/source/repos/Engine/build/external/SDL3/CMakeFiles/CMakeTmp/SDL_detect_arch/CMakeFiles/CMakeTmp'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_b203e.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_1bdae.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:06:26 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:18:38 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\external\\SDL3\\CMakeFiles\\CMakeTmp\\SDL_detect_arch\\CMakeFiles\\CMakeTmp\\cmTC_b203e.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\external\\SDL3\\CMakeFiles\\CMakeTmp\\SDL_detect_arch\\CMakeFiles\\CMakeTmp\\cmTC_1bdae.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
           Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\external\\SDL3\\CMakeFiles\\CMakeTmp\\SDL_detect_arch\\CMakeFiles\\CMakeTmp\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_b203e.dir\\Debug\\cmTC_b203e.tlog\\" wird erstellt.
+          Das Verzeichnis "cmTC_1bdae.dir\\Debug\\cmTC_1bdae.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_b203e.dir\\Debug\\cmTC_b203e.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_b203e.dir\\Debug\\cmTC_b203e.tlog\\unsuccessfulbuild".
+          "cmTC_1bdae.dir\\Debug\\cmTC_1bdae.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_1bdae.dir\\Debug\\cmTC_1bdae.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_b203e.dir\\Debug\\\\" /Fd"C:\\Users\\conno\\source\\repos\\Engine\\build\\external\\SDL3\\CMakeFiles\\CMakeTmp\\SDL_detect_arch\\CMakeFiles\\CMakeTmp\\Debug\\cmTC_b203e.pdb" /external:W3 /TC /errorReport:queue C:\\Users\\conno\\source\\repos\\Engine\\build\\external\\SDL3\\CMakeFiles\\CMakeTmp\\SDL_detect_arch.c
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_1bdae.dir\\Debug\\\\" /Fd"C:\\Users\\conno\\source\\repos\\Engine\\build\\external\\SDL3\\CMakeFiles\\CMakeTmp\\SDL_detect_arch\\CMakeFiles\\CMakeTmp\\Debug\\cmTC_1bdae.pdb" /external:W3 /TC /errorReport:queue C:\\Users\\conno\\source\\repos\\Engine\\build\\external\\SDL3\\CMakeFiles\\CMakeTmp\\SDL_detect_arch.c
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_b203e.dir\\Debug\\\\" /Fd"C:\\Users\\conno\\source\\repos\\Engine\\build\\external\\SDL3\\CMakeFiles\\CMakeTmp\\SDL_detect_arch\\CMakeFiles\\CMakeTmp\\Debug\\cmTC_b203e.pdb" /external:W3 /TC /errorReport:queue C:\\Users\\conno\\source\\repos\\Engine\\build\\external\\SDL3\\CMakeFiles\\CMakeTmp\\SDL_detect_arch.c
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_1bdae.dir\\Debug\\\\" /Fd"C:\\Users\\conno\\source\\repos\\Engine\\build\\external\\SDL3\\CMakeFiles\\CMakeTmp\\SDL_detect_arch\\CMakeFiles\\CMakeTmp\\Debug\\cmTC_1bdae.pdb" /external:W3 /TC /errorReport:queue C:\\Users\\conno\\source\\repos\\Engine\\build\\external\\SDL3\\CMakeFiles\\CMakeTmp\\SDL_detect_arch.c
           SDL_detect_arch.c
         Lib:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\Lib.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\external\\SDL3\\CMakeFiles\\CMakeTmp\\SDL_detect_arch\\CMakeFiles\\CMakeTmp\\Debug\\cmTC_b203e.lib" /NOLOGO /MACHINE:X64  /machine:x64 cmTC_b203e.dir\\Debug\\SDL_detect_arch.obj
-          cmTC_b203e.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\external\\SDL3\\CMakeFiles\\CMakeTmp\\SDL_detect_arch\\CMakeFiles\\CMakeTmp\\Debug\\cmTC_b203e.lib
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\Lib.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\external\\SDL3\\CMakeFiles\\CMakeTmp\\SDL_detect_arch\\CMakeFiles\\CMakeTmp\\Debug\\cmTC_1bdae.lib" /NOLOGO /MACHINE:X64  /machine:x64 cmTC_1bdae.dir\\Debug\\SDL_detect_arch.obj
+          cmTC_1bdae.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\external\\SDL3\\CMakeFiles\\CMakeTmp\\SDL_detect_arch\\CMakeFiles\\CMakeTmp\\Debug\\cmTC_1bdae.lib
         FinalizeBuildStatus:
-          Die Datei "cmTC_b203e.dir\\Debug\\cmTC_b203e.tlog\\unsuccessfulbuild" wird gel├Âscht.
-          Aktualisieren des Timestamps von "cmTC_b203e.dir\\Debug\\cmTC_b203e.tlog\\cmTC_b203e.lastbuildstate".
-        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\external\\SDL3\\CMakeFiles\\CMakeTmp\\SDL_detect_arch\\CMakeFiles\\CMakeTmp\\cmTC_b203e.vcxproj" ist abgeschlossen (Standardziele).
+          Die Datei "cmTC_1bdae.dir\\Debug\\cmTC_1bdae.tlog\\unsuccessfulbuild" wird gel├Âscht.
+          Aktualisieren des Timestamps von "cmTC_1bdae.dir\\Debug\\cmTC_1bdae.tlog\\cmTC_1bdae.lastbuildstate".
+        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\external\\SDL3\\CMakeFiles\\CMakeTmp\\SDL_detect_arch\\CMakeFiles\\CMakeTmp\\cmTC_1bdae.vcxproj" ist abgeschlossen (Standardziele).
         
         Der Buildvorgang wurde erfolgreich ausgef├╝hrt.
             0 Warnung(en)
             0 Fehler
         
-        Verstrichene Zeit 00:00:03.78
+        Verstrichene Zeit 00:00:01.70
         
       exitCode: 0
   -
@@ -1969,8 +1936,8 @@ events:
     checks:
       - "Performing Test CAN_PRESEED"
     directories:
-      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-pt3vvb"
-      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-pt3vvb"
+      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-qwf7vw"
+      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-qwf7vw"
     cmakeVariables:
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS /W3"
       CMAKE_C_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
@@ -1980,39 +1947,39 @@ events:
       variable: "CAN_PRESEED"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-pt3vvb'
+        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-qwf7vw'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_721fd.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_08729.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:06:31 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:18:41 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-pt3vvb\\cmTC_721fd.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-qwf7vw\\cmTC_08729.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-pt3vvb\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_721fd.dir\\Debug\\cmTC_721fd.tlog\\" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-qwf7vw\\Debug\\" wird erstellt.
+          Das Verzeichnis "cmTC_08729.dir\\Debug\\cmTC_08729.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_721fd.dir\\Debug\\cmTC_721fd.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_721fd.dir\\Debug\\cmTC_721fd.tlog\\unsuccessfulbuild".
+          "cmTC_08729.dir\\Debug\\cmTC_08729.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_08729.dir\\Debug\\cmTC_08729.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D CAN_PRESEED /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_721fd.dir\\Debug\\\\" /Fd"cmTC_721fd.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-pt3vvb\\src.c"
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D CAN_PRESEED /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_08729.dir\\Debug\\\\" /Fd"cmTC_08729.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-qwf7vw\\src.c"
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D CAN_PRESEED /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_721fd.dir\\Debug\\\\" /Fd"cmTC_721fd.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-pt3vvb\\src.c"
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D CAN_PRESEED /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_08729.dir\\Debug\\\\" /Fd"cmTC_08729.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-qwf7vw\\src.c"
           src.c
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-pt3vvb\\Debug\\cmTC_721fd.exe" /INCREMENTAL /ILK:"cmTC_721fd.dir\\Debug\\cmTC_721fd.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-pt3vvb/Debug/cmTC_721fd.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-pt3vvb/Debug/cmTC_721fd.lib" /MACHINE:X64  /machine:x64 cmTC_721fd.dir\\Debug\\src.obj
-          cmTC_721fd.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-pt3vvb\\Debug\\cmTC_721fd.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-qwf7vw\\Debug\\cmTC_08729.exe" /INCREMENTAL /ILK:"cmTC_08729.dir\\Debug\\cmTC_08729.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-qwf7vw/Debug/cmTC_08729.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-qwf7vw/Debug/cmTC_08729.lib" /MACHINE:X64  /machine:x64 cmTC_08729.dir\\Debug\\src.obj
+          cmTC_08729.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-qwf7vw\\Debug\\cmTC_08729.exe
         FinalizeBuildStatus:
-          Die Datei "cmTC_721fd.dir\\Debug\\cmTC_721fd.tlog\\unsuccessfulbuild" wird gel├Âscht.
-          Aktualisieren des Timestamps von "cmTC_721fd.dir\\Debug\\cmTC_721fd.tlog\\cmTC_721fd.lastbuildstate".
-        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-pt3vvb\\cmTC_721fd.vcxproj" ist abgeschlossen (Standardziele).
+          Die Datei "cmTC_08729.dir\\Debug\\cmTC_08729.tlog\\unsuccessfulbuild" wird gel├Âscht.
+          Aktualisieren des Timestamps von "cmTC_08729.dir\\Debug\\cmTC_08729.tlog\\cmTC_08729.lastbuildstate".
+        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-qwf7vw\\cmTC_08729.vcxproj" ist abgeschlossen (Standardziele).
         
         Der Buildvorgang wurde erfolgreich ausgef├╝hrt.
             0 Warnung(en)
             0 Fehler
         
-        Verstrichene Zeit 00:00:04.12
+        Verstrichene Zeit 00:00:02.12
         
       exitCode: 0
   -
@@ -2025,8 +1992,8 @@ events:
     checks:
       - "Performing Test COMPILER_SUPPORTS_MMX"
     directories:
-      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-5dp4qq"
-      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-5dp4qq"
+      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-egcczn"
+      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-egcczn"
     cmakeVariables:
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS /W3"
       CMAKE_C_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
@@ -2036,45 +2003,45 @@ events:
       variable: "COMPILER_SUPPORTS_MMX"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-5dp4qq'
+        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-egcczn'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_1a7ce.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_76561.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:06:37 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:18:45 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5dp4qq\\cmTC_1a7ce.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-egcczn\\cmTC_76561.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5dp4qq\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_1a7ce.dir\\Debug\\cmTC_1a7ce.tlog\\" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-egcczn\\Debug\\" wird erstellt.
+          Das Verzeichnis "cmTC_76561.dir\\Debug\\cmTC_76561.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_1a7ce.dir\\Debug\\cmTC_1a7ce.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_1a7ce.dir\\Debug\\cmTC_1a7ce.tlog\\unsuccessfulbuild".
+          "cmTC_76561.dir\\Debug\\cmTC_76561.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_76561.dir\\Debug\\cmTC_76561.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_MMX /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_1a7ce.dir\\Debug\\\\" /Fd"cmTC_1a7ce.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5dp4qq\\src.c"
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_MMX /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_76561.dir\\Debug\\\\" /Fd"cmTC_76561.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-egcczn\\src.c"
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_MMX /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_1a7ce.dir\\Debug\\\\" /Fd"cmTC_1a7ce.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5dp4qq\\src.c"
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_MMX /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_76561.dir\\Debug\\\\" /Fd"cmTC_76561.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-egcczn\\src.c"
           src.c
-        C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5dp4qq\\src.c(15,27): warning C4013: "_mm_add_pi32" undefiniert; Annahme: extern mit R├╝ckgabetyp int [C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5dp4qq\\cmTC_1a7ce.vcxproj]
-        C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5dp4qq\\src.c(15,25): error C2440: "=": "int" kann nicht in "__m64" konvertiert werden [C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5dp4qq\\cmTC_1a7ce.vcxproj]
-        Die Erstellung des Projekts "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5dp4qq\\cmTC_1a7ce.vcxproj" ist abgeschlossen (Standardziele) -- FEHLER.
+        C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-egcczn\\src.c(15,27): warning C4013: "_mm_add_pi32" undefiniert; Annahme: extern mit R├╝ckgabetyp int [C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-egcczn\\cmTC_76561.vcxproj]
+        C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-egcczn\\src.c(15,25): error C2440: "=": "int" kann nicht in "__m64" konvertiert werden [C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-egcczn\\cmTC_76561.vcxproj]
+        Die Erstellung des Projekts "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-egcczn\\cmTC_76561.vcxproj" ist abgeschlossen (Standardziele) -- FEHLER.
         
         Fehler beim Buildvorgang.
         
-        "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5dp4qq\\cmTC_1a7ce.vcxproj" (Standardziel) (1) ->
+        "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-egcczn\\cmTC_76561.vcxproj" (Standardziel) (1) ->
         (ClCompile Ziel) -> 
-          C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5dp4qq\\src.c(15,27): warning C4013: "_mm_add_pi32" undefiniert; Annahme: extern mit R├╝ckgabetyp int [C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5dp4qq\\cmTC_1a7ce.vcxproj]
+          C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-egcczn\\src.c(15,27): warning C4013: "_mm_add_pi32" undefiniert; Annahme: extern mit R├╝ckgabetyp int [C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-egcczn\\cmTC_76561.vcxproj]
         
         
-        "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5dp4qq\\cmTC_1a7ce.vcxproj" (Standardziel) (1) ->
+        "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-egcczn\\cmTC_76561.vcxproj" (Standardziel) (1) ->
         (ClCompile Ziel) -> 
-          C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5dp4qq\\src.c(15,25): error C2440: "=": "int" kann nicht in "__m64" konvertiert werden [C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5dp4qq\\cmTC_1a7ce.vcxproj]
+          C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-egcczn\\src.c(15,25): error C2440: "=": "int" kann nicht in "__m64" konvertiert werden [C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-egcczn\\cmTC_76561.vcxproj]
         
             1 Warnung(en)
             1 Fehler
         
-        Verstrichene Zeit 00:00:03.77
+        Verstrichene Zeit 00:00:01.90
         
       exitCode: 1
   -
@@ -2087,8 +2054,8 @@ events:
     checks:
       - "Performing Test COMPILER_SUPPORTS_SSE"
     directories:
-      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-eegjl4"
-      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-eegjl4"
+      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-29a9he"
+      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-29a9he"
     cmakeVariables:
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS /W3"
       CMAKE_C_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
@@ -2098,39 +2065,39 @@ events:
       variable: "COMPILER_SUPPORTS_SSE"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-eegjl4'
+        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-29a9he'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_fd3d6.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_a2cb7.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:06:42 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:18:47 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-eegjl4\\cmTC_fd3d6.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-29a9he\\cmTC_a2cb7.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-eegjl4\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_fd3d6.dir\\Debug\\cmTC_fd3d6.tlog\\" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-29a9he\\Debug\\" wird erstellt.
+          Das Verzeichnis "cmTC_a2cb7.dir\\Debug\\cmTC_a2cb7.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_fd3d6.dir\\Debug\\cmTC_fd3d6.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_fd3d6.dir\\Debug\\cmTC_fd3d6.tlog\\unsuccessfulbuild".
+          "cmTC_a2cb7.dir\\Debug\\cmTC_a2cb7.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_a2cb7.dir\\Debug\\cmTC_a2cb7.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_fd3d6.dir\\Debug\\\\" /Fd"cmTC_fd3d6.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-eegjl4\\src.c"
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_a2cb7.dir\\Debug\\\\" /Fd"cmTC_a2cb7.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-29a9he\\src.c"
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_fd3d6.dir\\Debug\\\\" /Fd"cmTC_fd3d6.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-eegjl4\\src.c"
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_a2cb7.dir\\Debug\\\\" /Fd"cmTC_a2cb7.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-29a9he\\src.c"
           src.c
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-eegjl4\\Debug\\cmTC_fd3d6.exe" /INCREMENTAL /ILK:"cmTC_fd3d6.dir\\Debug\\cmTC_fd3d6.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-eegjl4/Debug/cmTC_fd3d6.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-eegjl4/Debug/cmTC_fd3d6.lib" /MACHINE:X64  /machine:x64 cmTC_fd3d6.dir\\Debug\\src.obj
-          cmTC_fd3d6.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-eegjl4\\Debug\\cmTC_fd3d6.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-29a9he\\Debug\\cmTC_a2cb7.exe" /INCREMENTAL /ILK:"cmTC_a2cb7.dir\\Debug\\cmTC_a2cb7.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-29a9he/Debug/cmTC_a2cb7.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-29a9he/Debug/cmTC_a2cb7.lib" /MACHINE:X64  /machine:x64 cmTC_a2cb7.dir\\Debug\\src.obj
+          cmTC_a2cb7.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-29a9he\\Debug\\cmTC_a2cb7.exe
         FinalizeBuildStatus:
-          Die Datei "cmTC_fd3d6.dir\\Debug\\cmTC_fd3d6.tlog\\unsuccessfulbuild" wird gel├Âscht.
-          Aktualisieren des Timestamps von "cmTC_fd3d6.dir\\Debug\\cmTC_fd3d6.tlog\\cmTC_fd3d6.lastbuildstate".
-        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-eegjl4\\cmTC_fd3d6.vcxproj" ist abgeschlossen (Standardziele).
+          Die Datei "cmTC_a2cb7.dir\\Debug\\cmTC_a2cb7.tlog\\unsuccessfulbuild" wird gel├Âscht.
+          Aktualisieren des Timestamps von "cmTC_a2cb7.dir\\Debug\\cmTC_a2cb7.tlog\\cmTC_a2cb7.lastbuildstate".
+        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-29a9he\\cmTC_a2cb7.vcxproj" ist abgeschlossen (Standardziele).
         
         Der Buildvorgang wurde erfolgreich ausgef├╝hrt.
             0 Warnung(en)
             0 Fehler
         
-        Verstrichene Zeit 00:00:04.03
+        Verstrichene Zeit 00:00:01.82
         
       exitCode: 0
   -
@@ -2143,8 +2110,8 @@ events:
     checks:
       - "Performing Test COMPILER_SUPPORTS_SSE2"
     directories:
-      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-elkf3l"
-      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-elkf3l"
+      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-d6agi2"
+      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-d6agi2"
     cmakeVariables:
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS /W3"
       CMAKE_C_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
@@ -2154,39 +2121,39 @@ events:
       variable: "COMPILER_SUPPORTS_SSE2"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-elkf3l'
+        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-d6agi2'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_28895.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_12fe1.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:06:48 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:18:50 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-elkf3l\\cmTC_28895.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-d6agi2\\cmTC_12fe1.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-elkf3l\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_28895.dir\\Debug\\cmTC_28895.tlog\\" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-d6agi2\\Debug\\" wird erstellt.
+          Das Verzeichnis "cmTC_12fe1.dir\\Debug\\cmTC_12fe1.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_28895.dir\\Debug\\cmTC_28895.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_28895.dir\\Debug\\cmTC_28895.tlog\\unsuccessfulbuild".
+          "cmTC_12fe1.dir\\Debug\\cmTC_12fe1.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_12fe1.dir\\Debug\\cmTC_12fe1.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE2 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_28895.dir\\Debug\\\\" /Fd"cmTC_28895.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-elkf3l\\src.c"
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE2 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_12fe1.dir\\Debug\\\\" /Fd"cmTC_12fe1.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-d6agi2\\src.c"
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE2 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_28895.dir\\Debug\\\\" /Fd"cmTC_28895.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-elkf3l\\src.c"
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE2 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_12fe1.dir\\Debug\\\\" /Fd"cmTC_12fe1.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-d6agi2\\src.c"
           src.c
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-elkf3l\\Debug\\cmTC_28895.exe" /INCREMENTAL /ILK:"cmTC_28895.dir\\Debug\\cmTC_28895.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-elkf3l/Debug/cmTC_28895.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-elkf3l/Debug/cmTC_28895.lib" /MACHINE:X64  /machine:x64 cmTC_28895.dir\\Debug\\src.obj
-          cmTC_28895.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-elkf3l\\Debug\\cmTC_28895.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-d6agi2\\Debug\\cmTC_12fe1.exe" /INCREMENTAL /ILK:"cmTC_12fe1.dir\\Debug\\cmTC_12fe1.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-d6agi2/Debug/cmTC_12fe1.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-d6agi2/Debug/cmTC_12fe1.lib" /MACHINE:X64  /machine:x64 cmTC_12fe1.dir\\Debug\\src.obj
+          cmTC_12fe1.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-d6agi2\\Debug\\cmTC_12fe1.exe
         FinalizeBuildStatus:
-          Die Datei "cmTC_28895.dir\\Debug\\cmTC_28895.tlog\\unsuccessfulbuild" wird gel├Âscht.
-          Aktualisieren des Timestamps von "cmTC_28895.dir\\Debug\\cmTC_28895.tlog\\cmTC_28895.lastbuildstate".
-        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-elkf3l\\cmTC_28895.vcxproj" ist abgeschlossen (Standardziele).
+          Die Datei "cmTC_12fe1.dir\\Debug\\cmTC_12fe1.tlog\\unsuccessfulbuild" wird gel├Âscht.
+          Aktualisieren des Timestamps von "cmTC_12fe1.dir\\Debug\\cmTC_12fe1.tlog\\cmTC_12fe1.lastbuildstate".
+        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-d6agi2\\cmTC_12fe1.vcxproj" ist abgeschlossen (Standardziele).
         
         Der Buildvorgang wurde erfolgreich ausgef├╝hrt.
             0 Warnung(en)
             0 Fehler
         
-        Verstrichene Zeit 00:00:03.93
+        Verstrichene Zeit 00:00:01.82
         
       exitCode: 0
   -
@@ -2199,8 +2166,8 @@ events:
     checks:
       - "Performing Test COMPILER_SUPPORTS_SSE3"
     directories:
-      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-40eqjz"
-      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-40eqjz"
+      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-s5duad"
+      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-s5duad"
     cmakeVariables:
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS /W3"
       CMAKE_C_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
@@ -2210,39 +2177,39 @@ events:
       variable: "COMPILER_SUPPORTS_SSE3"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-40eqjz'
+        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-s5duad'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_d77af.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_dfc64.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:06:53 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:18:53 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-40eqjz\\cmTC_d77af.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-s5duad\\cmTC_dfc64.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-40eqjz\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_d77af.dir\\Debug\\cmTC_d77af.tlog\\" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-s5duad\\Debug\\" wird erstellt.
+          Das Verzeichnis "cmTC_dfc64.dir\\Debug\\cmTC_dfc64.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_d77af.dir\\Debug\\cmTC_d77af.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_d77af.dir\\Debug\\cmTC_d77af.tlog\\unsuccessfulbuild".
+          "cmTC_dfc64.dir\\Debug\\cmTC_dfc64.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_dfc64.dir\\Debug\\cmTC_dfc64.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE3 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_d77af.dir\\Debug\\\\" /Fd"cmTC_d77af.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-40eqjz\\src.c"
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE3 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_dfc64.dir\\Debug\\\\" /Fd"cmTC_dfc64.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-s5duad\\src.c"
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE3 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_d77af.dir\\Debug\\\\" /Fd"cmTC_d77af.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-40eqjz\\src.c"
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE3 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_dfc64.dir\\Debug\\\\" /Fd"cmTC_dfc64.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-s5duad\\src.c"
           src.c
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-40eqjz\\Debug\\cmTC_d77af.exe" /INCREMENTAL /ILK:"cmTC_d77af.dir\\Debug\\cmTC_d77af.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-40eqjz/Debug/cmTC_d77af.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-40eqjz/Debug/cmTC_d77af.lib" /MACHINE:X64  /machine:x64 cmTC_d77af.dir\\Debug\\src.obj
-          cmTC_d77af.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-40eqjz\\Debug\\cmTC_d77af.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-s5duad\\Debug\\cmTC_dfc64.exe" /INCREMENTAL /ILK:"cmTC_dfc64.dir\\Debug\\cmTC_dfc64.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-s5duad/Debug/cmTC_dfc64.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-s5duad/Debug/cmTC_dfc64.lib" /MACHINE:X64  /machine:x64 cmTC_dfc64.dir\\Debug\\src.obj
+          cmTC_dfc64.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-s5duad\\Debug\\cmTC_dfc64.exe
         FinalizeBuildStatus:
-          Die Datei "cmTC_d77af.dir\\Debug\\cmTC_d77af.tlog\\unsuccessfulbuild" wird gel├Âscht.
-          Aktualisieren des Timestamps von "cmTC_d77af.dir\\Debug\\cmTC_d77af.tlog\\cmTC_d77af.lastbuildstate".
-        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-40eqjz\\cmTC_d77af.vcxproj" ist abgeschlossen (Standardziele).
+          Die Datei "cmTC_dfc64.dir\\Debug\\cmTC_dfc64.tlog\\unsuccessfulbuild" wird gel├Âscht.
+          Aktualisieren des Timestamps von "cmTC_dfc64.dir\\Debug\\cmTC_dfc64.tlog\\cmTC_dfc64.lastbuildstate".
+        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-s5duad\\cmTC_dfc64.vcxproj" ist abgeschlossen (Standardziele).
         
         Der Buildvorgang wurde erfolgreich ausgef├╝hrt.
             0 Warnung(en)
             0 Fehler
         
-        Verstrichene Zeit 00:00:04.12
+        Verstrichene Zeit 00:00:01.87
         
       exitCode: 0
   -
@@ -2255,8 +2222,8 @@ events:
     checks:
       - "Performing Test COMPILER_SUPPORTS_SSE4_1"
     directories:
-      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-8mqbap"
-      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-8mqbap"
+      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-5jvzi3"
+      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-5jvzi3"
     cmakeVariables:
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS /W3"
       CMAKE_C_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
@@ -2266,39 +2233,39 @@ events:
       variable: "COMPILER_SUPPORTS_SSE4_1"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-8mqbap'
+        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-5jvzi3'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_62d6b.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_d0cfb.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:06:59 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:18:55 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-8mqbap\\cmTC_62d6b.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5jvzi3\\cmTC_d0cfb.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-8mqbap\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_62d6b.dir\\Debug\\cmTC_62d6b.tlog\\" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5jvzi3\\Debug\\" wird erstellt.
+          Das Verzeichnis "cmTC_d0cfb.dir\\Debug\\cmTC_d0cfb.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_62d6b.dir\\Debug\\cmTC_62d6b.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_62d6b.dir\\Debug\\cmTC_62d6b.tlog\\unsuccessfulbuild".
+          "cmTC_d0cfb.dir\\Debug\\cmTC_d0cfb.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_d0cfb.dir\\Debug\\cmTC_d0cfb.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE4_1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_62d6b.dir\\Debug\\\\" /Fd"cmTC_62d6b.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-8mqbap\\src.c"
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE4_1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_d0cfb.dir\\Debug\\\\" /Fd"cmTC_d0cfb.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5jvzi3\\src.c"
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE4_1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_62d6b.dir\\Debug\\\\" /Fd"cmTC_62d6b.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-8mqbap\\src.c"
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE4_1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_d0cfb.dir\\Debug\\\\" /Fd"cmTC_d0cfb.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5jvzi3\\src.c"
           src.c
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-8mqbap\\Debug\\cmTC_62d6b.exe" /INCREMENTAL /ILK:"cmTC_62d6b.dir\\Debug\\cmTC_62d6b.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-8mqbap/Debug/cmTC_62d6b.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-8mqbap/Debug/cmTC_62d6b.lib" /MACHINE:X64  /machine:x64 cmTC_62d6b.dir\\Debug\\src.obj
-          cmTC_62d6b.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-8mqbap\\Debug\\cmTC_62d6b.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5jvzi3\\Debug\\cmTC_d0cfb.exe" /INCREMENTAL /ILK:"cmTC_d0cfb.dir\\Debug\\cmTC_d0cfb.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-5jvzi3/Debug/cmTC_d0cfb.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-5jvzi3/Debug/cmTC_d0cfb.lib" /MACHINE:X64  /machine:x64 cmTC_d0cfb.dir\\Debug\\src.obj
+          cmTC_d0cfb.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5jvzi3\\Debug\\cmTC_d0cfb.exe
         FinalizeBuildStatus:
-          Die Datei "cmTC_62d6b.dir\\Debug\\cmTC_62d6b.tlog\\unsuccessfulbuild" wird gel├Âscht.
-          Aktualisieren des Timestamps von "cmTC_62d6b.dir\\Debug\\cmTC_62d6b.tlog\\cmTC_62d6b.lastbuildstate".
-        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-8mqbap\\cmTC_62d6b.vcxproj" ist abgeschlossen (Standardziele).
+          Die Datei "cmTC_d0cfb.dir\\Debug\\cmTC_d0cfb.tlog\\unsuccessfulbuild" wird gel├Âscht.
+          Aktualisieren des Timestamps von "cmTC_d0cfb.dir\\Debug\\cmTC_d0cfb.tlog\\cmTC_d0cfb.lastbuildstate".
+        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-5jvzi3\\cmTC_d0cfb.vcxproj" ist abgeschlossen (Standardziele).
         
         Der Buildvorgang wurde erfolgreich ausgef├╝hrt.
             0 Warnung(en)
             0 Fehler
         
-        Verstrichene Zeit 00:00:04.13
+        Verstrichene Zeit 00:00:01.80
         
       exitCode: 0
   -
@@ -2311,8 +2278,8 @@ events:
     checks:
       - "Performing Test COMPILER_SUPPORTS_SSE4_2"
     directories:
-      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-scbopo"
-      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-scbopo"
+      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-vwzp78"
+      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-vwzp78"
     cmakeVariables:
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS /W3"
       CMAKE_C_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
@@ -2322,39 +2289,39 @@ events:
       variable: "COMPILER_SUPPORTS_SSE4_2"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-scbopo'
+        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-vwzp78'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_21e22.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_27391.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:07:05 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:18:58 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-scbopo\\cmTC_21e22.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-vwzp78\\cmTC_27391.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-scbopo\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_21e22.dir\\Debug\\cmTC_21e22.tlog\\" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-vwzp78\\Debug\\" wird erstellt.
+          Das Verzeichnis "cmTC_27391.dir\\Debug\\cmTC_27391.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_21e22.dir\\Debug\\cmTC_21e22.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_21e22.dir\\Debug\\cmTC_21e22.tlog\\unsuccessfulbuild".
+          "cmTC_27391.dir\\Debug\\cmTC_27391.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_27391.dir\\Debug\\cmTC_27391.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE4_2 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_21e22.dir\\Debug\\\\" /Fd"cmTC_21e22.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-scbopo\\src.c"
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE4_2 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_27391.dir\\Debug\\\\" /Fd"cmTC_27391.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-vwzp78\\src.c"
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE4_2 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_21e22.dir\\Debug\\\\" /Fd"cmTC_21e22.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-scbopo\\src.c"
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_SSE4_2 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_27391.dir\\Debug\\\\" /Fd"cmTC_27391.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-vwzp78\\src.c"
           src.c
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-scbopo\\Debug\\cmTC_21e22.exe" /INCREMENTAL /ILK:"cmTC_21e22.dir\\Debug\\cmTC_21e22.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-scbopo/Debug/cmTC_21e22.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-scbopo/Debug/cmTC_21e22.lib" /MACHINE:X64  /machine:x64 cmTC_21e22.dir\\Debug\\src.obj
-          cmTC_21e22.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-scbopo\\Debug\\cmTC_21e22.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-vwzp78\\Debug\\cmTC_27391.exe" /INCREMENTAL /ILK:"cmTC_27391.dir\\Debug\\cmTC_27391.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-vwzp78/Debug/cmTC_27391.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-vwzp78/Debug/cmTC_27391.lib" /MACHINE:X64  /machine:x64 cmTC_27391.dir\\Debug\\src.obj
+          cmTC_27391.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-vwzp78\\Debug\\cmTC_27391.exe
         FinalizeBuildStatus:
-          Die Datei "cmTC_21e22.dir\\Debug\\cmTC_21e22.tlog\\unsuccessfulbuild" wird gel├Âscht.
-          Aktualisieren des Timestamps von "cmTC_21e22.dir\\Debug\\cmTC_21e22.tlog\\cmTC_21e22.lastbuildstate".
-        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-scbopo\\cmTC_21e22.vcxproj" ist abgeschlossen (Standardziele).
+          Die Datei "cmTC_27391.dir\\Debug\\cmTC_27391.tlog\\unsuccessfulbuild" wird gel├Âscht.
+          Aktualisieren des Timestamps von "cmTC_27391.dir\\Debug\\cmTC_27391.tlog\\cmTC_27391.lastbuildstate".
+        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-vwzp78\\cmTC_27391.vcxproj" ist abgeschlossen (Standardziele).
         
         Der Buildvorgang wurde erfolgreich ausgef├╝hrt.
             0 Warnung(en)
             0 Fehler
         
-        Verstrichene Zeit 00:00:04.04
+        Verstrichene Zeit 00:00:01.78
         
       exitCode: 0
   -
@@ -2367,8 +2334,8 @@ events:
     checks:
       - "Performing Test COMPILER_SUPPORTS_AVX"
     directories:
-      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-dr71s5"
-      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-dr71s5"
+      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-7gjap4"
+      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-7gjap4"
     cmakeVariables:
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS /W3"
       CMAKE_C_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
@@ -2378,39 +2345,39 @@ events:
       variable: "COMPILER_SUPPORTS_AVX"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-dr71s5'
+        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-7gjap4'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_41347.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_e086d.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:07:11 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:19:01 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-dr71s5\\cmTC_41347.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-7gjap4\\cmTC_e086d.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-dr71s5\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_41347.dir\\Debug\\cmTC_41347.tlog\\" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-7gjap4\\Debug\\" wird erstellt.
+          Das Verzeichnis "cmTC_e086d.dir\\Debug\\cmTC_e086d.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_41347.dir\\Debug\\cmTC_41347.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_41347.dir\\Debug\\cmTC_41347.tlog\\unsuccessfulbuild".
+          "cmTC_e086d.dir\\Debug\\cmTC_e086d.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_e086d.dir\\Debug\\cmTC_e086d.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_AVX /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_41347.dir\\Debug\\\\" /Fd"cmTC_41347.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-dr71s5\\src.c"
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_AVX /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_e086d.dir\\Debug\\\\" /Fd"cmTC_e086d.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-7gjap4\\src.c"
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_AVX /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_41347.dir\\Debug\\\\" /Fd"cmTC_41347.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-dr71s5\\src.c"
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_AVX /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_e086d.dir\\Debug\\\\" /Fd"cmTC_e086d.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-7gjap4\\src.c"
           src.c
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-dr71s5\\Debug\\cmTC_41347.exe" /INCREMENTAL /ILK:"cmTC_41347.dir\\Debug\\cmTC_41347.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-dr71s5/Debug/cmTC_41347.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-dr71s5/Debug/cmTC_41347.lib" /MACHINE:X64  /machine:x64 cmTC_41347.dir\\Debug\\src.obj
-          cmTC_41347.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-dr71s5\\Debug\\cmTC_41347.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-7gjap4\\Debug\\cmTC_e086d.exe" /INCREMENTAL /ILK:"cmTC_e086d.dir\\Debug\\cmTC_e086d.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-7gjap4/Debug/cmTC_e086d.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-7gjap4/Debug/cmTC_e086d.lib" /MACHINE:X64  /machine:x64 cmTC_e086d.dir\\Debug\\src.obj
+          cmTC_e086d.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-7gjap4\\Debug\\cmTC_e086d.exe
         FinalizeBuildStatus:
-          Die Datei "cmTC_41347.dir\\Debug\\cmTC_41347.tlog\\unsuccessfulbuild" wird gel├Âscht.
-          Aktualisieren des Timestamps von "cmTC_41347.dir\\Debug\\cmTC_41347.tlog\\cmTC_41347.lastbuildstate".
-        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-dr71s5\\cmTC_41347.vcxproj" ist abgeschlossen (Standardziele).
+          Die Datei "cmTC_e086d.dir\\Debug\\cmTC_e086d.tlog\\unsuccessfulbuild" wird gel├Âscht.
+          Aktualisieren des Timestamps von "cmTC_e086d.dir\\Debug\\cmTC_e086d.tlog\\cmTC_e086d.lastbuildstate".
+        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-7gjap4\\cmTC_e086d.vcxproj" ist abgeschlossen (Standardziele).
         
         Der Buildvorgang wurde erfolgreich ausgef├╝hrt.
             0 Warnung(en)
             0 Fehler
         
-        Verstrichene Zeit 00:00:03.96
+        Verstrichene Zeit 00:00:01.97
         
       exitCode: 0
   -
@@ -2423,8 +2390,8 @@ events:
     checks:
       - "Performing Test COMPILER_SUPPORTS_AVX2"
     directories:
-      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-kpevjv"
-      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-kpevjv"
+      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-wve58j"
+      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-wve58j"
     cmakeVariables:
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS /W3"
       CMAKE_C_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
@@ -2434,39 +2401,39 @@ events:
       variable: "COMPILER_SUPPORTS_AVX2"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-kpevjv'
+        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-wve58j'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_d1844.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_90601.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:07:16 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:19:04 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-kpevjv\\cmTC_d1844.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-wve58j\\cmTC_90601.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-kpevjv\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_d1844.dir\\Debug\\cmTC_d1844.tlog\\" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-wve58j\\Debug\\" wird erstellt.
+          Das Verzeichnis "cmTC_90601.dir\\Debug\\cmTC_90601.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_d1844.dir\\Debug\\cmTC_d1844.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_d1844.dir\\Debug\\cmTC_d1844.tlog\\unsuccessfulbuild".
+          "cmTC_90601.dir\\Debug\\cmTC_90601.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_90601.dir\\Debug\\cmTC_90601.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_AVX2 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_d1844.dir\\Debug\\\\" /Fd"cmTC_d1844.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-kpevjv\\src.c"
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_AVX2 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_90601.dir\\Debug\\\\" /Fd"cmTC_90601.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-wve58j\\src.c"
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_AVX2 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_d1844.dir\\Debug\\\\" /Fd"cmTC_d1844.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-kpevjv\\src.c"
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_AVX2 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_90601.dir\\Debug\\\\" /Fd"cmTC_90601.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-wve58j\\src.c"
           src.c
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-kpevjv\\Debug\\cmTC_d1844.exe" /INCREMENTAL /ILK:"cmTC_d1844.dir\\Debug\\cmTC_d1844.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-kpevjv/Debug/cmTC_d1844.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-kpevjv/Debug/cmTC_d1844.lib" /MACHINE:X64  /machine:x64 cmTC_d1844.dir\\Debug\\src.obj
-          cmTC_d1844.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-kpevjv\\Debug\\cmTC_d1844.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-wve58j\\Debug\\cmTC_90601.exe" /INCREMENTAL /ILK:"cmTC_90601.dir\\Debug\\cmTC_90601.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-wve58j/Debug/cmTC_90601.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-wve58j/Debug/cmTC_90601.lib" /MACHINE:X64  /machine:x64 cmTC_90601.dir\\Debug\\src.obj
+          cmTC_90601.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-wve58j\\Debug\\cmTC_90601.exe
         FinalizeBuildStatus:
-          Die Datei "cmTC_d1844.dir\\Debug\\cmTC_d1844.tlog\\unsuccessfulbuild" wird gel├Âscht.
-          Aktualisieren des Timestamps von "cmTC_d1844.dir\\Debug\\cmTC_d1844.tlog\\cmTC_d1844.lastbuildstate".
-        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-kpevjv\\cmTC_d1844.vcxproj" ist abgeschlossen (Standardziele).
+          Die Datei "cmTC_90601.dir\\Debug\\cmTC_90601.tlog\\unsuccessfulbuild" wird gel├Âscht.
+          Aktualisieren des Timestamps von "cmTC_90601.dir\\Debug\\cmTC_90601.tlog\\cmTC_90601.lastbuildstate".
+        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-wve58j\\cmTC_90601.vcxproj" ist abgeschlossen (Standardziele).
         
         Der Buildvorgang wurde erfolgreich ausgef├╝hrt.
             0 Warnung(en)
             0 Fehler
         
-        Verstrichene Zeit 00:00:04.09
+        Verstrichene Zeit 00:00:01.92
         
       exitCode: 0
   -
@@ -2479,8 +2446,8 @@ events:
     checks:
       - "Performing Test COMPILER_SUPPORTS_AVX512F"
     directories:
-      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-ae6bhp"
-      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-ae6bhp"
+      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-bm8lou"
+      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-bm8lou"
     cmakeVariables:
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS /W3"
       CMAKE_C_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
@@ -2490,39 +2457,39 @@ events:
       variable: "COMPILER_SUPPORTS_AVX512F"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-ae6bhp'
+        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-bm8lou'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_2858e.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_0699d.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:07:22 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:19:06 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-ae6bhp\\cmTC_2858e.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-bm8lou\\cmTC_0699d.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-ae6bhp\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_2858e.dir\\Debug\\cmTC_2858e.tlog\\" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-bm8lou\\Debug\\" wird erstellt.
+          Das Verzeichnis "cmTC_0699d.dir\\Debug\\cmTC_0699d.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_2858e.dir\\Debug\\cmTC_2858e.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_2858e.dir\\Debug\\cmTC_2858e.tlog\\unsuccessfulbuild".
+          "cmTC_0699d.dir\\Debug\\cmTC_0699d.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_0699d.dir\\Debug\\cmTC_0699d.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_AVX512F /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_2858e.dir\\Debug\\\\" /Fd"cmTC_2858e.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-ae6bhp\\src.c"
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_AVX512F /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_0699d.dir\\Debug\\\\" /Fd"cmTC_0699d.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-bm8lou\\src.c"
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_AVX512F /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_2858e.dir\\Debug\\\\" /Fd"cmTC_2858e.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-ae6bhp\\src.c"
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D COMPILER_SUPPORTS_AVX512F /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_0699d.dir\\Debug\\\\" /Fd"cmTC_0699d.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-bm8lou\\src.c"
           src.c
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-ae6bhp\\Debug\\cmTC_2858e.exe" /INCREMENTAL /ILK:"cmTC_2858e.dir\\Debug\\cmTC_2858e.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-ae6bhp/Debug/cmTC_2858e.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-ae6bhp/Debug/cmTC_2858e.lib" /MACHINE:X64  /machine:x64 cmTC_2858e.dir\\Debug\\src.obj
-          cmTC_2858e.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-ae6bhp\\Debug\\cmTC_2858e.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-bm8lou\\Debug\\cmTC_0699d.exe" /INCREMENTAL /ILK:"cmTC_0699d.dir\\Debug\\cmTC_0699d.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-bm8lou/Debug/cmTC_0699d.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-bm8lou/Debug/cmTC_0699d.lib" /MACHINE:X64  /machine:x64 cmTC_0699d.dir\\Debug\\src.obj
+          cmTC_0699d.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-bm8lou\\Debug\\cmTC_0699d.exe
         FinalizeBuildStatus:
-          Die Datei "cmTC_2858e.dir\\Debug\\cmTC_2858e.tlog\\unsuccessfulbuild" wird gel├Âscht.
-          Aktualisieren des Timestamps von "cmTC_2858e.dir\\Debug\\cmTC_2858e.tlog\\cmTC_2858e.lastbuildstate".
-        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-ae6bhp\\cmTC_2858e.vcxproj" ist abgeschlossen (Standardziele).
+          Die Datei "cmTC_0699d.dir\\Debug\\cmTC_0699d.tlog\\unsuccessfulbuild" wird gel├Âscht.
+          Aktualisieren des Timestamps von "cmTC_0699d.dir\\Debug\\cmTC_0699d.tlog\\cmTC_0699d.lastbuildstate".
+        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-bm8lou\\cmTC_0699d.vcxproj" ist abgeschlossen (Standardziele).
         
         Der Buildvorgang wurde erfolgreich ausgef├╝hrt.
             0 Warnung(en)
             0 Fehler
         
-        Verstrichene Zeit 00:00:04.28
+        Verstrichene Zeit 00:00:02.32
         
       exitCode: 0
   -
@@ -2534,8 +2501,8 @@ events:
     checks:
       - "Looking for _copysign"
     directories:
-      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-mzbc6r"
-      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-mzbc6r"
+      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-v13whz"
+      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-v13whz"
     cmakeVariables:
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS /W3"
       CMAKE_C_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
@@ -2545,39 +2512,39 @@ events:
       variable: "LIBC_HAS__COPYSIGN"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-mzbc6r'
+        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-v13whz'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_a15c6.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_5a386.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:07:28 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:19:10 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-mzbc6r\\cmTC_a15c6.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-v13whz\\cmTC_5a386.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-mzbc6r\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_a15c6.dir\\Debug\\cmTC_a15c6.tlog\\" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-v13whz\\Debug\\" wird erstellt.
+          Das Verzeichnis "cmTC_5a386.dir\\Debug\\cmTC_5a386.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_a15c6.dir\\Debug\\cmTC_a15c6.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_a15c6.dir\\Debug\\cmTC_a15c6.tlog\\unsuccessfulbuild".
+          "cmTC_5a386.dir\\Debug\\cmTC_5a386.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_5a386.dir\\Debug\\cmTC_5a386.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_a15c6.dir\\Debug\\\\" /Fd"cmTC_a15c6.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-mzbc6r\\CheckSymbolExists.c"
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_5a386.dir\\Debug\\\\" /Fd"cmTC_5a386.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-v13whz\\CheckSymbolExists.c"
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_a15c6.dir\\Debug\\\\" /Fd"cmTC_a15c6.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-mzbc6r\\CheckSymbolExists.c"
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_5a386.dir\\Debug\\\\" /Fd"cmTC_5a386.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-v13whz\\CheckSymbolExists.c"
           CheckSymbolExists.c
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-mzbc6r\\Debug\\cmTC_a15c6.exe" /INCREMENTAL /ILK:"cmTC_a15c6.dir\\Debug\\cmTC_a15c6.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-mzbc6r/Debug/cmTC_a15c6.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-mzbc6r/Debug/cmTC_a15c6.lib" /MACHINE:X64  /machine:x64 cmTC_a15c6.dir\\Debug\\CheckSymbolExists.obj
-          cmTC_a15c6.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-mzbc6r\\Debug\\cmTC_a15c6.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-v13whz\\Debug\\cmTC_5a386.exe" /INCREMENTAL /ILK:"cmTC_5a386.dir\\Debug\\cmTC_5a386.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-v13whz/Debug/cmTC_5a386.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-v13whz/Debug/cmTC_5a386.lib" /MACHINE:X64  /machine:x64 cmTC_5a386.dir\\Debug\\CheckSymbolExists.obj
+          cmTC_5a386.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-v13whz\\Debug\\cmTC_5a386.exe
         FinalizeBuildStatus:
-          Die Datei "cmTC_a15c6.dir\\Debug\\cmTC_a15c6.tlog\\unsuccessfulbuild" wird gel├Âscht.
-          Aktualisieren des Timestamps von "cmTC_a15c6.dir\\Debug\\cmTC_a15c6.tlog\\cmTC_a15c6.lastbuildstate".
-        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-mzbc6r\\cmTC_a15c6.vcxproj" ist abgeschlossen (Standardziele).
+          Die Datei "cmTC_5a386.dir\\Debug\\cmTC_5a386.tlog\\unsuccessfulbuild" wird gel├Âscht.
+          Aktualisieren des Timestamps von "cmTC_5a386.dir\\Debug\\cmTC_5a386.tlog\\cmTC_5a386.lastbuildstate".
+        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-v13whz\\cmTC_5a386.vcxproj" ist abgeschlossen (Standardziele).
         
         Der Buildvorgang wurde erfolgreich ausgef├╝hrt.
             0 Warnung(en)
             0 Fehler
         
-        Verstrichene Zeit 00:00:04.01
+        Verstrichene Zeit 00:00:02.39
         
       exitCode: 0
   -
@@ -2589,8 +2556,8 @@ events:
     checks:
       - "Looking for _fseeki64"
     directories:
-      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-0991fk"
-      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-0991fk"
+      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-wk0kpa"
+      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-wk0kpa"
     cmakeVariables:
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS /W3"
       CMAKE_C_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
@@ -2600,39 +2567,39 @@ events:
       variable: "LIBC_HAS__FSEEKI64"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-0991fk'
+        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-wk0kpa'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_65f85.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_11aa8.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:07:34 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:19:14 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-0991fk\\cmTC_65f85.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-wk0kpa\\cmTC_11aa8.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-0991fk\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_65f85.dir\\Debug\\cmTC_65f85.tlog\\" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-wk0kpa\\Debug\\" wird erstellt.
+          Das Verzeichnis "cmTC_11aa8.dir\\Debug\\cmTC_11aa8.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_65f85.dir\\Debug\\cmTC_65f85.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_65f85.dir\\Debug\\cmTC_65f85.tlog\\unsuccessfulbuild".
+          "cmTC_11aa8.dir\\Debug\\cmTC_11aa8.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_11aa8.dir\\Debug\\cmTC_11aa8.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_65f85.dir\\Debug\\\\" /Fd"cmTC_65f85.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-0991fk\\CheckSymbolExists.c"
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_11aa8.dir\\Debug\\\\" /Fd"cmTC_11aa8.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-wk0kpa\\CheckSymbolExists.c"
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_65f85.dir\\Debug\\\\" /Fd"cmTC_65f85.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-0991fk\\CheckSymbolExists.c"
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_11aa8.dir\\Debug\\\\" /Fd"cmTC_11aa8.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-wk0kpa\\CheckSymbolExists.c"
           CheckSymbolExists.c
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-0991fk\\Debug\\cmTC_65f85.exe" /INCREMENTAL /ILK:"cmTC_65f85.dir\\Debug\\cmTC_65f85.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-0991fk/Debug/cmTC_65f85.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-0991fk/Debug/cmTC_65f85.lib" /MACHINE:X64  /machine:x64 cmTC_65f85.dir\\Debug\\CheckSymbolExists.obj
-          cmTC_65f85.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-0991fk\\Debug\\cmTC_65f85.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-wk0kpa\\Debug\\cmTC_11aa8.exe" /INCREMENTAL /ILK:"cmTC_11aa8.dir\\Debug\\cmTC_11aa8.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-wk0kpa/Debug/cmTC_11aa8.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-wk0kpa/Debug/cmTC_11aa8.lib" /MACHINE:X64  /machine:x64 cmTC_11aa8.dir\\Debug\\CheckSymbolExists.obj
+          cmTC_11aa8.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-wk0kpa\\Debug\\cmTC_11aa8.exe
         FinalizeBuildStatus:
-          Die Datei "cmTC_65f85.dir\\Debug\\cmTC_65f85.tlog\\unsuccessfulbuild" wird gel├Âscht.
-          Aktualisieren des Timestamps von "cmTC_65f85.dir\\Debug\\cmTC_65f85.tlog\\cmTC_65f85.lastbuildstate".
-        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-0991fk\\cmTC_65f85.vcxproj" ist abgeschlossen (Standardziele).
+          Die Datei "cmTC_11aa8.dir\\Debug\\cmTC_11aa8.tlog\\unsuccessfulbuild" wird gel├Âscht.
+          Aktualisieren des Timestamps von "cmTC_11aa8.dir\\Debug\\cmTC_11aa8.tlog\\cmTC_11aa8.lastbuildstate".
+        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-wk0kpa\\cmTC_11aa8.vcxproj" ist abgeschlossen (Standardziele).
         
         Der Buildvorgang wurde erfolgreich ausgef├╝hrt.
             0 Warnung(en)
             0 Fehler
         
-        Verstrichene Zeit 00:00:04.03
+        Verstrichene Zeit 00:00:02.39
         
       exitCode: 0
   -
@@ -2644,8 +2611,8 @@ events:
     checks:
       - "Performing Test HAVE_GAMEINPUT_H"
     directories:
-      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-98guan"
-      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-98guan"
+      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-x6oxlt"
+      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-x6oxlt"
     cmakeVariables:
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS /W3"
       CMAKE_C_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
@@ -2655,39 +2622,39 @@ events:
       variable: "HAVE_GAMEINPUT_H"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-98guan'
+        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-x6oxlt'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_7469b.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_738ec.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:07:40 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:19:18 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-98guan\\cmTC_7469b.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-x6oxlt\\cmTC_738ec.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-98guan\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_7469b.dir\\Debug\\cmTC_7469b.tlog\\" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-x6oxlt\\Debug\\" wird erstellt.
+          Das Verzeichnis "cmTC_738ec.dir\\Debug\\cmTC_738ec.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_7469b.dir\\Debug\\cmTC_7469b.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_7469b.dir\\Debug\\cmTC_7469b.tlog\\unsuccessfulbuild".
+          "cmTC_738ec.dir\\Debug\\cmTC_738ec.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_738ec.dir\\Debug\\cmTC_738ec.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D HAVE_GAMEINPUT_H /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_7469b.dir\\Debug\\\\" /Fd"cmTC_7469b.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-98guan\\src.c"
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D HAVE_GAMEINPUT_H /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_738ec.dir\\Debug\\\\" /Fd"cmTC_738ec.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-x6oxlt\\src.c"
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D HAVE_GAMEINPUT_H /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_7469b.dir\\Debug\\\\" /Fd"cmTC_7469b.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-98guan\\src.c"
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D HAVE_GAMEINPUT_H /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_738ec.dir\\Debug\\\\" /Fd"cmTC_738ec.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-x6oxlt\\src.c"
           src.c
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-98guan\\Debug\\cmTC_7469b.exe" /INCREMENTAL /ILK:"cmTC_7469b.dir\\Debug\\cmTC_7469b.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-98guan/Debug/cmTC_7469b.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-98guan/Debug/cmTC_7469b.lib" /MACHINE:X64  /machine:x64 cmTC_7469b.dir\\Debug\\src.obj
-          cmTC_7469b.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-98guan\\Debug\\cmTC_7469b.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-x6oxlt\\Debug\\cmTC_738ec.exe" /INCREMENTAL /ILK:"cmTC_738ec.dir\\Debug\\cmTC_738ec.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-x6oxlt/Debug/cmTC_738ec.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-x6oxlt/Debug/cmTC_738ec.lib" /MACHINE:X64  /machine:x64 cmTC_738ec.dir\\Debug\\src.obj
+          cmTC_738ec.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-x6oxlt\\Debug\\cmTC_738ec.exe
         FinalizeBuildStatus:
-          Die Datei "cmTC_7469b.dir\\Debug\\cmTC_7469b.tlog\\unsuccessfulbuild" wird gel├Âscht.
-          Aktualisieren des Timestamps von "cmTC_7469b.dir\\Debug\\cmTC_7469b.tlog\\cmTC_7469b.lastbuildstate".
-        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-98guan\\cmTC_7469b.vcxproj" ist abgeschlossen (Standardziele).
+          Die Datei "cmTC_738ec.dir\\Debug\\cmTC_738ec.tlog\\unsuccessfulbuild" wird gel├Âscht.
+          Aktualisieren des Timestamps von "cmTC_738ec.dir\\Debug\\cmTC_738ec.tlog\\cmTC_738ec.lastbuildstate".
+        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-x6oxlt\\cmTC_738ec.vcxproj" ist abgeschlossen (Standardziele).
         
         Der Buildvorgang wurde erfolgreich ausgef├╝hrt.
             0 Warnung(en)
             0 Fehler
         
-        Verstrichene Zeit 00:00:04.51
+        Verstrichene Zeit 00:00:02.45
         
       exitCode: 0
   -
@@ -2698,8 +2665,8 @@ events:
     checks:
       - "Looking for dxgi1_5.h"
     directories:
-      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-oa5zv8"
-      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-oa5zv8"
+      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-yli5pn"
+      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-yli5pn"
     cmakeVariables:
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS /W3"
       CMAKE_C_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
@@ -2709,39 +2676,39 @@ events:
       variable: "HAVE_DXGI1_5_H"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-oa5zv8'
+        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-yli5pn'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_b55d1.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_4d3d2.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:07:46 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:19:22 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-oa5zv8\\cmTC_b55d1.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yli5pn\\cmTC_4d3d2.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-oa5zv8\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_b55d1.dir\\Debug\\cmTC_b55d1.tlog\\" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yli5pn\\Debug\\" wird erstellt.
+          Das Verzeichnis "cmTC_4d3d2.dir\\Debug\\cmTC_4d3d2.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_b55d1.dir\\Debug\\cmTC_b55d1.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_b55d1.dir\\Debug\\cmTC_b55d1.tlog\\unsuccessfulbuild".
+          "cmTC_4d3d2.dir\\Debug\\cmTC_4d3d2.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_4d3d2.dir\\Debug\\cmTC_4d3d2.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_b55d1.dir\\Debug\\\\" /Fd"cmTC_b55d1.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-oa5zv8\\CheckIncludeFile.c"
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_4d3d2.dir\\Debug\\\\" /Fd"cmTC_4d3d2.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yli5pn\\CheckIncludeFile.c"
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_b55d1.dir\\Debug\\\\" /Fd"cmTC_b55d1.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-oa5zv8\\CheckIncludeFile.c"
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_4d3d2.dir\\Debug\\\\" /Fd"cmTC_4d3d2.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yli5pn\\CheckIncludeFile.c"
           CheckIncludeFile.c
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-oa5zv8\\Debug\\cmTC_b55d1.exe" /INCREMENTAL /ILK:"cmTC_b55d1.dir\\Debug\\cmTC_b55d1.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-oa5zv8/Debug/cmTC_b55d1.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-oa5zv8/Debug/cmTC_b55d1.lib" /MACHINE:X64  /machine:x64 cmTC_b55d1.dir\\Debug\\CheckIncludeFile.obj
-          cmTC_b55d1.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-oa5zv8\\Debug\\cmTC_b55d1.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yli5pn\\Debug\\cmTC_4d3d2.exe" /INCREMENTAL /ILK:"cmTC_4d3d2.dir\\Debug\\cmTC_4d3d2.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-yli5pn/Debug/cmTC_4d3d2.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-yli5pn/Debug/cmTC_4d3d2.lib" /MACHINE:X64  /machine:x64 cmTC_4d3d2.dir\\Debug\\CheckIncludeFile.obj
+          cmTC_4d3d2.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yli5pn\\Debug\\cmTC_4d3d2.exe
         FinalizeBuildStatus:
-          Die Datei "cmTC_b55d1.dir\\Debug\\cmTC_b55d1.tlog\\unsuccessfulbuild" wird gel├Âscht.
-          Aktualisieren des Timestamps von "cmTC_b55d1.dir\\Debug\\cmTC_b55d1.tlog\\cmTC_b55d1.lastbuildstate".
-        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-oa5zv8\\cmTC_b55d1.vcxproj" ist abgeschlossen (Standardziele).
+          Die Datei "cmTC_4d3d2.dir\\Debug\\cmTC_4d3d2.tlog\\unsuccessfulbuild" wird gel├Âscht.
+          Aktualisieren des Timestamps von "cmTC_4d3d2.dir\\Debug\\cmTC_4d3d2.tlog\\cmTC_4d3d2.lastbuildstate".
+        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yli5pn\\cmTC_4d3d2.vcxproj" ist abgeschlossen (Standardziele).
         
         Der Buildvorgang wurde erfolgreich ausgef├╝hrt.
             0 Warnung(en)
             0 Fehler
         
-        Verstrichene Zeit 00:00:04.58
+        Verstrichene Zeit 00:00:02.61
         
       exitCode: 0
   -
@@ -2752,8 +2719,8 @@ events:
     checks:
       - "Looking for dxgi1_6.h"
     directories:
-      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-u89q23"
-      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-u89q23"
+      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-ed8sne"
+      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-ed8sne"
     cmakeVariables:
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS /W3"
       CMAKE_C_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
@@ -2763,39 +2730,39 @@ events:
       variable: "HAVE_DXGI1_6_H"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-u89q23'
+        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-ed8sne'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_5fd7f.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_5797e.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:07:52 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:19:25 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-u89q23\\cmTC_5fd7f.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-ed8sne\\cmTC_5797e.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-u89q23\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_5fd7f.dir\\Debug\\cmTC_5fd7f.tlog\\" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-ed8sne\\Debug\\" wird erstellt.
+          Das Verzeichnis "cmTC_5797e.dir\\Debug\\cmTC_5797e.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_5fd7f.dir\\Debug\\cmTC_5fd7f.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_5fd7f.dir\\Debug\\cmTC_5fd7f.tlog\\unsuccessfulbuild".
+          "cmTC_5797e.dir\\Debug\\cmTC_5797e.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_5797e.dir\\Debug\\cmTC_5797e.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_5fd7f.dir\\Debug\\\\" /Fd"cmTC_5fd7f.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-u89q23\\CheckIncludeFile.c"
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_5797e.dir\\Debug\\\\" /Fd"cmTC_5797e.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-ed8sne\\CheckIncludeFile.c"
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_5fd7f.dir\\Debug\\\\" /Fd"cmTC_5fd7f.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-u89q23\\CheckIncludeFile.c"
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_5797e.dir\\Debug\\\\" /Fd"cmTC_5797e.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-ed8sne\\CheckIncludeFile.c"
           CheckIncludeFile.c
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-u89q23\\Debug\\cmTC_5fd7f.exe" /INCREMENTAL /ILK:"cmTC_5fd7f.dir\\Debug\\cmTC_5fd7f.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-u89q23/Debug/cmTC_5fd7f.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-u89q23/Debug/cmTC_5fd7f.lib" /MACHINE:X64  /machine:x64 cmTC_5fd7f.dir\\Debug\\CheckIncludeFile.obj
-          cmTC_5fd7f.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-u89q23\\Debug\\cmTC_5fd7f.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-ed8sne\\Debug\\cmTC_5797e.exe" /INCREMENTAL /ILK:"cmTC_5797e.dir\\Debug\\cmTC_5797e.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-ed8sne/Debug/cmTC_5797e.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-ed8sne/Debug/cmTC_5797e.lib" /MACHINE:X64  /machine:x64 cmTC_5797e.dir\\Debug\\CheckIncludeFile.obj
+          cmTC_5797e.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-ed8sne\\Debug\\cmTC_5797e.exe
         FinalizeBuildStatus:
-          Die Datei "cmTC_5fd7f.dir\\Debug\\cmTC_5fd7f.tlog\\unsuccessfulbuild" wird gel├Âscht.
-          Aktualisieren des Timestamps von "cmTC_5fd7f.dir\\Debug\\cmTC_5fd7f.tlog\\cmTC_5fd7f.lastbuildstate".
-        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-u89q23\\cmTC_5fd7f.vcxproj" ist abgeschlossen (Standardziele).
+          Die Datei "cmTC_5797e.dir\\Debug\\cmTC_5797e.tlog\\unsuccessfulbuild" wird gel├Âscht.
+          Aktualisieren des Timestamps von "cmTC_5797e.dir\\Debug\\cmTC_5797e.tlog\\cmTC_5797e.lastbuildstate".
+        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-ed8sne\\cmTC_5797e.vcxproj" ist abgeschlossen (Standardziele).
         
         Der Buildvorgang wurde erfolgreich ausgef├╝hrt.
             0 Warnung(en)
             0 Fehler
         
-        Verstrichene Zeit 00:00:04.51
+        Verstrichene Zeit 00:00:02.00
         
       exitCode: 0
   -
@@ -2807,8 +2774,8 @@ events:
     checks:
       - "Performing Test HAVE_MFAPI_H"
     directories:
-      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-trf6jo"
-      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-trf6jo"
+      source: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-t3vxhe"
+      binary: "C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-t3vxhe"
     cmakeVariables:
       CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS /W3"
       CMAKE_C_FLAGS_DEBUG: "/MDd /Zi /Ob0 /Od /RTC1"
@@ -2818,39 +2785,39 @@ events:
       variable: "HAVE_MFAPI_H"
       cached: true
       stdout: |
-        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-trf6jo'
+        Change Dir: 'C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-t3vxhe'
         
-        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_eeb7c.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
+        Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_f0953.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=18.0 /v:n
         MSBuild-Version 18.0.5+e22287bf1 f├╝r .NET Framework
-        Der Buildvorgang wurde am 31.12.2025 02:07:59 gestartet.
+        Der Buildvorgang wurde am 06.01.2026 18:19:29 gestartet.
         
-        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-trf6jo\\cmTC_eeb7c.vcxproj" auf Knoten "1" (Standardziele).
+        Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-t3vxhe\\cmTC_f0953.vcxproj" auf Knoten "1" (Standardziele).
         PrepareForBuild:
           Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
-          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-trf6jo\\Debug\\" wird erstellt.
-          Das Verzeichnis "cmTC_eeb7c.dir\\Debug\\cmTC_eeb7c.tlog\\" wird erstellt.
+          Das Verzeichnis "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-t3vxhe\\Debug\\" wird erstellt.
+          Das Verzeichnis "cmTC_f0953.dir\\Debug\\cmTC_f0953.tlog\\" wird erstellt.
         InitializeBuildStatus:
-          "cmTC_eeb7c.dir\\Debug\\cmTC_eeb7c.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
-          Aktualisieren des Timestamps von "cmTC_eeb7c.dir\\Debug\\cmTC_eeb7c.tlog\\unsuccessfulbuild".
+          "cmTC_f0953.dir\\Debug\\cmTC_f0953.tlog\\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+          Aktualisieren des Timestamps von "cmTC_f0953.dir\\Debug\\cmTC_f0953.tlog\\unsuccessfulbuild".
         ClCompile:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D HAVE_MFAPI_H /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_eeb7c.dir\\Debug\\\\" /Fd"cmTC_eeb7c.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-trf6jo\\src.c"
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\CL.exe /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D HAVE_MFAPI_H /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_f0953.dir\\Debug\\\\" /Fd"cmTC_f0953.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-t3vxhe\\src.c"
           Microsoft (R) C/C++-Optimierungscompiler Version 19.50.35721 f├╝r x64
           Copyright (C) Microsoft Corporation. Alle Rechte vorbehalten.
-          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D HAVE_MFAPI_H /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_eeb7c.dir\\Debug\\\\" /Fd"cmTC_eeb7c.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-trf6jo\\src.c"
+          cl /c /Zi /W3 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _GNU_SOURCE=1 /D HAVE_MFAPI_H /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_f0953.dir\\Debug\\\\" /Fd"cmTC_f0953.dir\\Debug\\vc145.pdb" /external:W3 /TC /errorReport:queue "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-t3vxhe\\src.c"
           src.c
         Link:
-          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-trf6jo\\Debug\\cmTC_eeb7c.exe" /INCREMENTAL /ILK:"cmTC_eeb7c.dir\\Debug\\cmTC_eeb7c.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-trf6jo/Debug/cmTC_eeb7c.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-trf6jo/Debug/cmTC_eeb7c.lib" /MACHINE:X64  /machine:x64 cmTC_eeb7c.dir\\Debug\\src.obj
-          cmTC_eeb7c.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-trf6jo\\Debug\\cmTC_eeb7c.exe
+          C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.50.35717\\bin\\HostX64\\x64\\link.exe /OUT:"C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-t3vxhe\\Debug\\cmTC_f0953.exe" /INCREMENTAL /ILK:"cmTC_f0953.dir\\Debug\\cmTC_f0953.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-t3vxhe/Debug/cmTC_f0953.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"C:/Users/conno/source/repos/Engine/build/CMakeFiles/CMakeScratch/TryCompile-t3vxhe/Debug/cmTC_f0953.lib" /MACHINE:X64  /machine:x64 cmTC_f0953.dir\\Debug\\src.obj
+          cmTC_f0953.vcxproj -> C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-t3vxhe\\Debug\\cmTC_f0953.exe
         FinalizeBuildStatus:
-          Die Datei "cmTC_eeb7c.dir\\Debug\\cmTC_eeb7c.tlog\\unsuccessfulbuild" wird gel├Âscht.
-          Aktualisieren des Timestamps von "cmTC_eeb7c.dir\\Debug\\cmTC_eeb7c.tlog\\cmTC_eeb7c.lastbuildstate".
-        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-trf6jo\\cmTC_eeb7c.vcxproj" ist abgeschlossen (Standardziele).
+          Die Datei "cmTC_f0953.dir\\Debug\\cmTC_f0953.tlog\\unsuccessfulbuild" wird gel├Âscht.
+          Aktualisieren des Timestamps von "cmTC_f0953.dir\\Debug\\cmTC_f0953.tlog\\cmTC_f0953.lastbuildstate".
+        Die Erstellung von Projekt "C:\\Users\\conno\\source\\repos\\Engine\\build\\CMakeFiles\\CMakeScratch\\TryCompile-t3vxhe\\cmTC_f0953.vcxproj" ist abgeschlossen (Standardziele).
         
         Der Buildvorgang wurde erfolgreich ausgef├╝hrt.
             0 Warnung(en)
             0 Fehler
         
-        Verstrichene Zeit 00:00:04.62
+        Verstrichene Zeit 00:00:02.29
         
       exitCode: 0
   -
@@ -2909,7 +2876,6 @@ events:
       - "C:/Users/conno/AppData/Local/Microsoft/WindowsApps/"
       - "C:/Users/conno/AppData/Local/Programs/Microsoft VS Code/bin/"
       - "C:/Users/conno/.dotnet/tools/"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/VC/Linux/bin/ConnectionManagerExe/"
@@ -2959,7 +2925,6 @@ events:
       - "C:/Users/conno/AppData/Local/Microsoft/WindowsApps/"
       - "C:/Users/conno/AppData/Local/Programs/Microsoft VS Code/bin/"
       - "C:/Users/conno/.dotnet/tools/"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/VC/Linux/bin/ConnectionManagerExe/"
@@ -3008,7 +2973,6 @@ events:
       - "C:/Users/conno/AppData/Local/Microsoft/WindowsApps/"
       - "C:/Users/conno/AppData/Local/Programs/Microsoft VS Code/bin/"
       - "C:/Users/conno/.dotnet/tools/"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/VC/Linux/bin/ConnectionManagerExe/"
@@ -3057,7 +3021,6 @@ events:
       - "C:/Users/conno/AppData/Local/Microsoft/WindowsApps/"
       - "C:/Users/conno/AppData/Local/Programs/Microsoft VS Code/bin/"
       - "C:/Users/conno/.dotnet/tools/"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/VC/Linux/bin/ConnectionManagerExe/"
@@ -3104,7 +3067,6 @@ events:
         - "C:\\Users\\conno\\AppData\\Local\\Microsoft\\WindowsApps"
         - "C:\\Users\\conno\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
         - "C:\\Users\\conno\\.dotnet\\tools"
-        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\PrivateAssemblies\\runtimes\\win-x64\\native"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\VC\\Linux\\bin\\ConnectionManagerExe"
@@ -3221,8 +3183,6 @@ events:
       - "C:/Users/conno/AppData/Local/Programs/Microsoft VS Code/bin/"
       - "C:/Users/conno/.dotnet/tools/libusb-1.0/"
       - "C:/Users/conno/.dotnet/tools/"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/libusb-1.0/"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/libusb-1.0/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/libusb-1.0/"
@@ -3324,8 +3284,6 @@ events:
       - "C:/Users/conno/AppData/Local/Programs/Microsoft VS Code/bin/libusb.h"
       - "C:/Users/conno/.dotnet/tools/libusb-1.0/libusb.h"
       - "C:/Users/conno/.dotnet/tools/libusb.h"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/libusb-1.0/libusb.h"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/libusb.h"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/libusb-1.0/libusb.h"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/libusb.h"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/libusb-1.0/libusb.h"
@@ -3382,7 +3340,6 @@ events:
         - "C:\\Users\\conno\\AppData\\Local\\Microsoft\\WindowsApps"
         - "C:\\Users\\conno\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
         - "C:\\Users\\conno\\.dotnet\\tools"
-        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\PrivateAssemblies\\runtimes\\win-x64\\native"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\VC\\Linux\\bin\\ConnectionManagerExe"
@@ -3453,7 +3410,6 @@ events:
       - "C:/Users/conno/AppData/Local/Microsoft/WindowsApps/"
       - "C:/Users/conno/AppData/Local/Programs/Microsoft VS Code/bin/"
       - "C:/Users/conno/.dotnet/tools/"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/VC/Linux/bin/ConnectionManagerExe/"
@@ -3559,9 +3515,6 @@ events:
       - "C:/Users/conno/.dotnet/tools/git.cmd.com"
       - "C:/Users/conno/.dotnet/tools/git.cmd.exe"
       - "C:/Users/conno/.dotnet/tools/git.cmd"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/git.cmd.com"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/git.cmd.exe"
-      - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/PrivateAssemblies/runtimes/win-x64/native/git.cmd"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/git.cmd.com"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/git.cmd.exe"
       - "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/git.cmd"
@@ -3712,7 +3665,6 @@ events:
         - "C:\\Users\\conno\\AppData\\Local\\Microsoft\\WindowsApps"
         - "C:\\Users\\conno\\AppData\\Local\\Programs\\Microsoft VS Code\\bin"
         - "C:\\Users\\conno\\.dotnet\\tools"
-        - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\PrivateAssemblies\\runtimes\\win-x64\\native"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\Ninja"
         - "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\Common7\\IDE\\VC\\Linux\\bin\\ConnectionManagerExe"

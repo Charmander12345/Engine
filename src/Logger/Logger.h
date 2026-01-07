@@ -17,7 +17,8 @@ public:
     enum class LogLevel {
         INFO,
         WARNING,
-        ERROR
+        ERROR,
+        FATAL
     };
 
     static Logger& Instance();

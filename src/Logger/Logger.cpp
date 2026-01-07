@@ -66,6 +66,9 @@ void Logger::log(const std::string& message, LogLevel level)
         case LogLevel::ERROR:
             levelStr = "ERROR";
             break;
+        case LogLevel::FATAL:
+            levelStr = "FATAL";
+            break;
     }
 
     if (logFile.is_open()) {

@@ -1,0 +1,2 @@
+C:/Users/conno/source/repos/Engine/build/src/AssetManager/AssetManager.dir/MinSizeRel/AssetManager.obj
+C:/Users/conno/source/repos/Engine/build/src/AssetManager/AssetManager.dir/MinSizeRel/GarbageCollector.obj

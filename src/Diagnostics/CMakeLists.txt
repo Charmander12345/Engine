@@ -9,7 +9,7 @@ set_target_properties(Diagnostics PROPERTIES
 )
 
 target_include_directories(Diagnostics
-    PUBLIC
+    PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 

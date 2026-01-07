@@ -13,8 +13,9 @@ set_target_properties(Basics PROPERTIES
 )
 
 target_include_directories(Basics
-    PUBLIC
+    PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/src/AssetManager
 )
 
 if (WIN32)

@@ -1,2 +1,4 @@
 C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/RelWithDebInfo/OpenGLRenderer.obj
+C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/RelWithDebInfo/OpenGLShader.obj
+C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/RelWithDebInfo/OpenGLMaterial.obj
 C:/Users/conno/source/repos/Engine/build/src/Renderer/Renderer.dir/RelWithDebInfo/gl.obj

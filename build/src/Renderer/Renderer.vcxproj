@@ -87,7 +87,7 @@
   <PropertyGroup />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\src\Basics;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\AssetManager;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <BufferSecurityCheck></BufferSecurityCheck>
@@ -114,10 +114,10 @@
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;CMAKE_INTDIR=\"Debug\";Renderer_EXPORTS</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\src\Basics;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\AssetManager;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\src\Basics;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\AssetManager;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -142,7 +142,7 @@ exit /b %1
 if %errorlevel% neq 0 goto :VCEnd</Command>
     </PreLinkEvent>
     <Link>
-      <AdditionalDependencies>..\..\external\SDL3\Debug\SDL3.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>..\..\external\SDL3\Debug\SDL3.lib;..\Logger\Debug\Logger.lib;..\Basics\Debug\Basics.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>
@@ -162,7 +162,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\src\Basics;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\AssetManager;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
       <BufferSecurityCheck></BufferSecurityCheck>
@@ -190,10 +190,10 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR=\"Release\";Renderer_EXPORTS</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\src\Basics;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\AssetManager;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\src\Basics;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\AssetManager;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -218,7 +218,7 @@ exit /b %1
 if %errorlevel% neq 0 goto :VCEnd</Command>
     </PreLinkEvent>
     <Link>
-      <AdditionalDependencies>..\..\external\SDL3\Release\SDL3.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>..\..\external\SDL3\Release\SDL3.lib;..\Logger\Release\Logger.lib;..\Basics\Release\Basics.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>
@@ -238,7 +238,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\src\Basics;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\AssetManager;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
       <BufferSecurityCheck></BufferSecurityCheck>
@@ -266,10 +266,10 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR=\"MinSizeRel\";Renderer_EXPORTS</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\src\Basics;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\AssetManager;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\src\Basics;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\AssetManager;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -294,7 +294,7 @@ exit /b %1
 if %errorlevel% neq 0 goto :VCEnd</Command>
     </PreLinkEvent>
     <Link>
-      <AdditionalDependencies>..\..\external\SDL3\MinSizeRel\SDL3.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>..\..\external\SDL3\MinSizeRel\SDL3.lib;..\Logger\MinSizeRel\Logger.lib;..\Basics\MinSizeRel\Basics.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>
@@ -314,7 +314,7 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\src\Basics;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\AssetManager;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
       <BufferSecurityCheck></BufferSecurityCheck>
@@ -341,10 +341,10 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR=\"RelWithDebInfo\";Renderer_EXPORTS</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\src\Basics;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\AssetManager;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\Renderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer;C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\include;C:\Users\conno\source\repos\Engine\src\Basics;C:\Users\conno\source\repos\Engine\build\external\SDL3\include-revision;C:\Users\conno\source\repos\Engine\external\SDL3\include;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\AssetManager;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -369,7 +369,7 @@ exit /b %1
 if %errorlevel% neq 0 goto :VCEnd</Command>
     </PreLinkEvent>
     <Link>
-      <AdditionalDependencies>..\..\external\SDL3\RelWithDebInfo\SDL3.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>..\..\external\SDL3\RelWithDebInfo\SDL3.lib;..\Logger\RelWithDebInfo\Logger.lib;..\Basics\RelWithDebInfo\Basics.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>
@@ -446,8 +446,14 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="C:\Users\conno\source\repos\Engine\src\Renderer\Renderer.h" />
+    <ClInclude Include="C:\Users\conno\source\repos\Engine\src\Renderer\Shader.h" />
+    <ClInclude Include="C:\Users\conno\source\repos\Engine\src\Renderer\Material.h" />
     <ClCompile Include="C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\OpenGLRenderer.cpp" />
     <ClInclude Include="C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\OpenGLRenderer.h" />
+    <ClCompile Include="C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\OpenGLShader.cpp" />
+    <ClInclude Include="C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\OpenGLShader.h" />
+    <ClCompile Include="C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\OpenGLMaterial.cpp" />
+    <ClInclude Include="C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\OpenGLMaterial.h" />
     <ClCompile Include="C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\src\gl.c" />
   </ItemGroup>
   <ItemGroup />
@@ -457,6 +463,14 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <Name>ZERO_CHECK</Name>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\conno\source\repos\Engine\build\src\Basics\Basics.vcxproj">
+      <Project>{89642C4B-2791-3AB7-AF67-6FE0805640D0}</Project>
+      <Name>Basics</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\conno\source\repos\Engine\build\src\Logger\Logger.vcxproj">
+      <Project>{06780637-DA1A-305D-BA73-5BC99E8A1CC7}</Project>
+      <Name>Logger</Name>
     </ProjectReference>
     <ProjectReference Include="C:\Users\conno\source\repos\Engine\build\external\SDL3\SDL3-shared.vcxproj">
       <Project>{3491A02A-73D2-36D8-BD26-7F4731AE50B1}</Project>

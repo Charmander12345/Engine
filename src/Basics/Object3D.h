@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <vector>
 #include "EngineObject.h"
 
@@ -18,7 +19,12 @@ public:
     void setVertices(const std::vector<float>& vertices) { m_vertices = vertices; }
     const std::vector<float>& getVertices() const { return m_vertices; }
 
+    void setMaterialAssetPath(const std::string& path) { m_materialAssetPath = path; }
+    const std::string& getMaterialAssetPath() const { return m_materialAssetPath; }
+
+    void render();
 private:
     std::shared_ptr<Material> m_material;
     std::vector<float> m_vertices;
+    std::string m_materialAssetPath;
 };

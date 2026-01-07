@@ -120,3 +120,59 @@ bool DiagnosticsManager::loadConfig()
     }
     return true;
 }
+
+bool DiagnosticsManager::isProjectLoaded() const
+{
+    return projectLoaded;
+}
+
+const DiagnosticsManager::ProjectInfo& DiagnosticsManager::getProjectInfo() const
+{
+	return m_projectInfo;
+}
+
+void DiagnosticsManager::setProjectInfo(const ProjectInfo& info)
+{
+    m_projectInfo = info;
+	projectLoaded = true;
+}
+
+void DiagnosticsManager::clearProjectInfo()
+{
+    m_projectInfo = { "", "", "", RHIType::Unknown };
+	projectLoaded = false;
+}
+
+bool DiagnosticsManager::isActionInProgress() const
+{
+    return isLoadingAsset || isLoadingProject || isSavingAsset || isSavingProject || isBuildingProject;
+}
+
+void DiagnosticsManager::setActionInProgress(ActionType action, bool inProgress)
+{
+    switch (action)
+    {
+    case ActionType::LoadingAsset:
+        isLoadingAsset = inProgress;
+        break;
+    case ActionType::SavingAsset:
+        isSavingAsset = inProgress;
+        break;
+    case ActionType::BuildingProject:
+        isBuildingProject = inProgress;
+        break;
+    case ActionType::LoadingProject:
+        isLoadingProject = inProgress;
+        break;
+    case ActionType::SavingProject:
+        isSavingProject = inProgress;
+        break;
+    default:
+        break;
+	}
+}
+
+DiagnosticsManager::DiagnosticsManager()
+{
+	m_projectInfo = { "", "", "", RHIType::Unknown };
+}

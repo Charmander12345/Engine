@@ -18,7 +18,16 @@ add_subdirectory(src/Logger)
 
 add_executable(Engine
     src/main.cpp
-    src/AssetManager/AssetManager.h
+)
+
+target_include_directories(Engine
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/src/Renderer
+        ${CMAKE_SOURCE_DIR}/src/Logger
+        ${CMAKE_SOURCE_DIR}/src/AssetManager
+        ${CMAKE_SOURCE_DIR}/src/Diagnostics
+        ${CMAKE_SOURCE_DIR}/src/Basics
 )
 
 target_link_libraries(Engine

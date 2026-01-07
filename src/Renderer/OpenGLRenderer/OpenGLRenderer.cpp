@@ -118,8 +118,8 @@ bool OpenGLRenderer::initialize()
     m_material->addShader(fragmentShader);
 
     // Build a static 3D object with vertex data and layout
-    auto object3D = std::make_shared<Object3D>();
-    object3D->setMaterial(m_material);
+    m_object3D = std::make_shared<Object3D>();
+    m_object3D->setMaterial(m_material);
 
     const std::vector<float> vertices = {
         // positions        // colors
@@ -127,7 +127,7 @@ bool OpenGLRenderer::initialize()
         -0.5f, -0.5f, 0.0f,  0.0f, 1.0f, 0.0f,
          0.5f, -0.5f, 0.0f,  0.0f, 0.0f, 1.0f
     };
-    object3D->setVertices(vertices);
+    m_object3D->setVertices(vertices);
 
     m_material->setVertexData(vertices);
 
@@ -180,11 +180,9 @@ void OpenGLRenderer::render()
     SDL_GetWindowSizeInPixels(m_window, &width, &height);
     glViewport(0, 0, width, height);
 
-    if (m_material)
+    if (m_object3D)
     {
-        m_material->bind();
-        glDrawArrays(GL_TRIANGLES, 0, 3);
-        m_material->unbind();
+        m_object3D->render();
     }
 }
 

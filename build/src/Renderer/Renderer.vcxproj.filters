@@ -4,6 +4,12 @@
     <ClCompile Include="C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\OpenGLRenderer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\OpenGLShader.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\OpenGLMaterial.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\glad\src\gl.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -12,7 +18,19 @@
     <ClInclude Include="C:\Users\conno\source\repos\Engine\src\Renderer\Renderer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="C:\Users\conno\source\repos\Engine\src\Renderer\Shader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\conno\source\repos\Engine\src\Renderer\Material.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\OpenGLRenderer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\OpenGLShader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\conno\source\repos\Engine\src\Renderer\OpenGLRenderer\OpenGLMaterial.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

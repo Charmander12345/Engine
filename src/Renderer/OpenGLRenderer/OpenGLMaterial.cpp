@@ -100,15 +100,33 @@ bool OpenGLMaterial::build()
     glBindVertexArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
+    // compute vertex count from stride and data size
+    GLsizei stride = m_layout[0].stride;
+    if (stride == 0)
+    {
+        Logger::Instance().log("OpenGLMaterial: Layout stride ist 0", Logger::LogLevel::ERROR);
+        return false;
+    }
+    m_vertexCount = static_cast<GLsizei>((m_vertexData.size() * sizeof(float)) / stride);
+
     return true;
 }
 
 void OpenGLMaterial::bind()
 {
     glUseProgram(m_program);
+    glBindVertexArray(m_vao);
 }
 
 void OpenGLMaterial::unbind()
 {
+    glBindVertexArray(0);
     glUseProgram(0);
+}
+
+void OpenGLMaterial::render()
+{
+    bind();
+    glDrawArrays(GL_TRIANGLES, 0, m_vertexCount);
+    unbind();
 }
