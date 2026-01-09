@@ -28,6 +28,93 @@ AssetManager& AssetManager::Instance()
     return instance;
 }
 
+bool AssetManager::initialize()
+{
+	m_garbageCollector = GarbageCollector();
+
+    // Create a default 2D triangle asset that is tracked and can be saved via saveAllAssets.
+    // It starts as unsaved and will be written on demand.
+    {
+        auto& logger = Logger::Instance();
+
+        fs::path contentRoot = fs::current_path() / "Content";
+        fs::path assetPath = contentRoot / "default_triangle2d.asset";
+
+        auto tri = std::make_shared<Object2D>();
+        tri->setName("DefaultTriangle2D");
+        tri->setPath(assetPath.string());
+        tri->setAssetType(AssetType::Model2D);
+        tri->setIsSaved(false);
+
+        // positions (x,y) + color (r,g,b)
+        tri->setVertices({
+            0.0f,  0.5f,  1.0f, 0.0f, 0.0f,
+           -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
+            0.5f, -0.5f,  0.0f, 0.0f, 1.0f
+        });
+
+        m_defaultTriangle2D = tri;
+        m_garbageCollector.registerResource(m_defaultTriangle2D);
+        logger.log("Registered default 2D triangle asset.", Logger::LogLevel::INFO);
+    }
+
+    return true;
+}
+
+bool AssetManager::saveAllAssets()
+{
+    auto& diagnostics = DiagnosticsManager::Instance();
+    auto& logger = Logger::Instance();
+
+    diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingAsset, true);
+
+    // ensure we don't keep stale entries
+    m_garbageCollector.collect();
+
+    const auto& tracked = m_garbageCollector.getTrackedResourcesRef();
+
+    size_t toSaveCount = 0;
+    for (const auto& res : tracked)
+    {
+        if (res && !res->getIsSaved())
+        {
+            ++toSaveCount;
+        }
+    }
+
+    logger.log("Saving assets... Pending: " + std::to_string(toSaveCount), Logger::LogLevel::INFO);
+
+    size_t savedCount = 0;
+    for (const auto& res : tracked)
+    {
+        if (!res)
+        {
+            continue;
+        }
+
+        if (res->getIsSaved())
+        {
+            continue;
+        }
+
+        if (!saveAsset(res))
+        {
+            logger.log("Failed to auto-save asset: " + res->getName(), Logger::LogLevel::ERROR);
+            diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingAsset, false);
+            return false;
+        }
+
+        ++savedCount;
+    }
+
+    logger.log(
+        "All unsaved assets have been saved. Saved: " + std::to_string(savedCount) + "/" + std::to_string(toSaveCount),
+        Logger::LogLevel::INFO);
+
+    diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingAsset, false);
+    return true;
+}
+
 bool AssetManager::loadAsset(const std::string& path)
 {
     auto& logger = Logger::Instance();
@@ -72,6 +159,9 @@ bool AssetManager::loadAsset(const std::string& path)
     std::shared_ptr<EngineObject> obj;
     switch (type)
     {
+    case AssetType::Model2D:
+        obj = std::make_shared<Object2D>();
+        break;
     case AssetType::Model3D:
         obj = std::make_shared<Object3D>();
         break;
@@ -86,6 +176,22 @@ bool AssetManager::loadAsset(const std::string& path)
     obj->setName(name);
     obj->setPath(absAssetPath.string());
     obj->setAssetType(type);
+    obj->setIsSaved(true);
+
+    if (type == AssetType::Model2D)
+    {
+        auto obj2d = std::static_pointer_cast<Object2D>(obj);
+        obj2d->setMaterialAssetPath(materialAssetPath);
+
+        uint32_t vertCount = 0;
+        if (!in.read(reinterpret_cast<char*>(&vertCount), sizeof(vertCount))) return false;
+        std::vector<float> verts(vertCount);
+        if (vertCount > 0)
+        {
+            if (!in.read(reinterpret_cast<char*>(verts.data()), vertCount * sizeof(float))) return false;
+        }
+        obj2d->setVertices(verts);
+    }
 
     if (type == AssetType::Model3D)
     {
@@ -101,6 +207,8 @@ bool AssetManager::loadAsset(const std::string& path)
         }
         obj3d->setVertices(verts);
     }
+
+    m_garbageCollector.registerResource(obj);
 
     logger.log("Asset loaded: " + name + " (" + relPath + ")", Logger::LogLevel::INFO);
     return true;
@@ -147,7 +255,15 @@ bool AssetManager::saveAsset(const std::shared_ptr<EngineObject>& object)
     writeString(out, relPath.string());
 
     std::string materialAssetPath;
-    if (object->getAssetType() == AssetType::Model3D)
+    if (object->getAssetType() == AssetType::Model2D)
+    {
+        auto obj2d = std::dynamic_pointer_cast<Object2D>(object);
+        if (obj2d)
+        {
+            materialAssetPath = obj2d->getMaterialAssetPath();
+        }
+    }
+    else if (object->getAssetType() == AssetType::Model3D)
     {
         auto obj3d = std::dynamic_pointer_cast<Object3D>(object);
         if (obj3d)
@@ -156,6 +272,26 @@ bool AssetManager::saveAsset(const std::shared_ptr<EngineObject>& object)
         }
     }
     writeString(out, materialAssetPath);
+
+    if (object->getAssetType() == AssetType::Model2D)
+    {
+        auto obj2d = std::dynamic_pointer_cast<Object2D>(object);
+        if (obj2d)
+        {
+            const auto& verts = obj2d->getVertices();
+            uint32_t vertCount = static_cast<uint32_t>(verts.size());
+            out.write(reinterpret_cast<const char*>(&vertCount), sizeof(vertCount));
+            if (vertCount > 0)
+            {
+                out.write(reinterpret_cast<const char*>(verts.data()), vertCount * sizeof(float));
+            }
+        }
+        else
+        {
+            uint32_t zero = 0;
+            out.write(reinterpret_cast<const char*>(&zero), sizeof(zero));
+        }
+    }
 
     if (object->getAssetType() == AssetType::Model3D)
     {
@@ -183,6 +319,7 @@ bool AssetManager::saveAsset(const std::shared_ptr<EngineObject>& object)
         return false;
     }
 
+    object->setIsSaved(true);
     return true;
 }
 
@@ -194,6 +331,9 @@ std::shared_ptr<EngineObject> AssetManager::createAsset(AssetType type, const st
     std::shared_ptr<EngineObject> obj;
     switch (type)
     {
+    case AssetType::Model2D:
+        obj = std::make_shared<Object2D>();
+        break;
     case AssetType::Model3D:
         obj = std::make_shared<Object3D>();
         break;
@@ -210,6 +350,7 @@ std::shared_ptr<EngineObject> AssetManager::createAsset(AssetType type, const st
     obj->setPath(path);
     obj->setName(name);
     obj->setAssetType(type);
+    obj->setIsSaved(false);
     return obj;
 }
 

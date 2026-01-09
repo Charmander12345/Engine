@@ -18,6 +18,7 @@ int main()
 {
     auto& logger = Logger::Instance();
     auto& assetManager = AssetManager::Instance();
+    assetManager.initialize();
     logger.initialize();
 
     std::string cwd = std::filesystem::current_path().string();
@@ -74,13 +75,17 @@ int main()
                 {
                     running = false;
                 }
+                if (event.key.key == SDLK_F1)
+                {
+					assetManager.saveAllAssets();
+				}
             }
         }
         renderer->clear();
         renderer->render();
         renderer->present();
         
-        SDL_Delay(16.6);
+        SDL_Delay(16);
     }
 
     delete renderer;

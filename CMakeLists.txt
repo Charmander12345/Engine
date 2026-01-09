@@ -41,6 +41,7 @@ target_link_libraries(Engine
 )
 
 set(ENGINE_DEPLOY_DIR "C:/Users/conno/source/repos/EngineBuild")
+set(SHADERS_SOURCE_DIR "${CMAKE_SOURCE_DIR}/src/Renderer/shaders")
 
 add_custom_command(TARGET Engine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}"
@@ -49,7 +50,11 @@ add_custom_command(TARGET Engine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:Logger> "${ENGINE_DEPLOY_DIR}/"
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:AssetManager> "${ENGINE_DEPLOY_DIR}/"
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:Diagnostics> "${ENGINE_DEPLOY_DIR}/"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "$<TARGET_FILE_DIR:Engine>/shaders" "${ENGINE_DEPLOY_DIR}/shaders"
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:Basics> "${ENGINE_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:SDL3::SDL3> "$<TARGET_FILE_DIR:Engine>/"
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:SDL3::SDL3> "${ENGINE_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${SHADERS_SOURCE_DIR}" "$<TARGET_FILE_DIR:Engine>/shaders"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${SHADERS_SOURCE_DIR}" "${ENGINE_DEPLOY_DIR}/shaders"
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:Engine> "${ENGINE_DEPLOY_DIR}/"
     COMMAND_EXPAND_LISTS
 )
