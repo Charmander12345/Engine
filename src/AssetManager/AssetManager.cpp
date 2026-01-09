@@ -37,12 +37,13 @@ bool AssetManager::initialize()
     {
         auto& logger = Logger::Instance();
 
-        fs::path contentRoot = fs::current_path() / "Content";
+        fs::path contentRoot = "Content";
         fs::path assetPath = contentRoot / "default_triangle2d.asset";
 
         auto tri = std::make_shared<Object2D>();
         tri->setName("DefaultTriangle2D");
-        tri->setPath(assetPath.string());
+        // store only the relative path inside Content
+        tri->setPath("default_triangle2d.asset");
         tri->setAssetType(AssetType::Model2D);
         tri->setIsSaved(false);
 
@@ -120,11 +121,28 @@ bool AssetManager::loadAsset(const std::string& path)
     auto& logger = Logger::Instance();
     logger.log("Loading asset: " + path, Logger::LogLevel::INFO);
 
-    bool loaded = DiagnosticsManager::Instance().isProjectLoaded();
-    fs::path absolutePath = fs::absolute(path);
-    if (!fs::exists(absolutePath) || !loaded)
+    auto& diagnostics = DiagnosticsManager::Instance();
+    bool loaded = diagnostics.isProjectLoaded();
+    if (!loaded || diagnostics.getProjectInfo().projectPath.empty())
     {
-        logger.log("Asset load failed (missing file or no project loaded): " + absolutePath.string(), Logger::LogLevel::ERROR);
+        logger.log("Asset load failed (no project loaded)", Logger::LogLevel::ERROR);
+        return false;
+    }
+
+    fs::path contentRoot = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+
+    // 'path' is expected to be the relative path inside Content.
+    fs::path relPath = fs::path(path);
+    if (relPath.is_absolute())
+    {
+        logger.log("Asset load failed (path must be relative to Content): " + relPath.string(), Logger::LogLevel::ERROR);
+        return false;
+    }
+
+    fs::path absolutePath = contentRoot / relPath;
+    if (!fs::exists(absolutePath))
+    {
+        logger.log("Asset load failed (missing file): " + absolutePath.string(), Logger::LogLevel::ERROR);
         return false;
     }
 
@@ -150,10 +168,10 @@ bool AssetManager::loadAsset(const std::string& path)
     AssetType type = static_cast<AssetType>(typeInt);
 
     std::string name;
-    std::string relPath;
+    std::string storedRelPath;
     std::string materialAssetPath;
     if (!readString(in, name)) return false;
-    if (!readString(in, relPath)) return false;
+    if (!readString(in, storedRelPath)) return false;
     if (!readString(in, materialAssetPath)) return false;
 
     std::shared_ptr<EngineObject> obj;
@@ -170,11 +188,9 @@ bool AssetManager::loadAsset(const std::string& path)
         break;
     }
 
-    fs::path contentRoot = fs::current_path() / "content";
-    fs::path absAssetPath = contentRoot / relPath;
-
     obj->setName(name);
-    obj->setPath(absAssetPath.string());
+    // store only relative path inside Content
+    obj->setPath(storedRelPath.empty() ? relPath.generic_string() : storedRelPath);
     obj->setAssetType(type);
     obj->setIsSaved(true);
 
@@ -210,7 +226,7 @@ bool AssetManager::loadAsset(const std::string& path)
 
     m_garbageCollector.registerResource(obj);
 
-    logger.log("Asset loaded: " + name + " (" + relPath + ")", Logger::LogLevel::INFO);
+    logger.log("Asset loaded: " + name + " (" + obj->getPath() + ")", Logger::LogLevel::INFO);
     return true;
 }
 
@@ -223,23 +239,35 @@ bool AssetManager::saveAsset(const std::shared_ptr<EngineObject>& object)
         return false;
     }
 
-    fs::path contentRoot = fs::current_path() / "Content";
+    const auto& diagnostics = DiagnosticsManager::Instance();
+    const auto& projInfo = diagnostics.getProjectInfo();
+    if (projInfo.projectPath.empty())
+    {
+        logger.log("saveAsset failed: no project loaded (projectPath is empty)", Logger::LogLevel::ERROR);
+        return false;
+    }
+
+    // The object stores only a relative path inside the Content folder.
+    fs::path relAssetPath = fs::path(object->getPath());
+    if (relAssetPath.is_absolute())
+    {
+        logger.log("saveAsset failed: object path must be relative to Content: " + relAssetPath.string(), Logger::LogLevel::ERROR);
+        return false;
+    }
+
+    fs::path contentRoot = fs::path(projInfo.projectPath) / "Content";
     std::error_code ec;
     fs::create_directories(contentRoot, ec);
 
-    fs::path assetPath = fs::path(object->getPath());
-    fs::path relPath = fs::relative(assetPath, contentRoot, ec);
-    if (ec)
-    {
-        relPath = assetPath;
-    }
+    fs::path finalAssetPath = contentRoot / relAssetPath;
+    fs::create_directories(finalAssetPath.parent_path(), ec);
 
-    logger.log("Saving asset: " + object->getName() + " at " + assetPath.string(), Logger::LogLevel::INFO);
+    logger.log("Saving asset: " + object->getName() + " at " + finalAssetPath.string(), Logger::LogLevel::INFO);
 
-    std::ofstream out(assetPath, std::ios::binary | std::ios::trunc);
+    std::ofstream out(finalAssetPath, std::ios::binary | std::ios::trunc);
     if (!out.is_open())
     {
-        logger.log("Failed to open asset file for writing: " + assetPath.string(), Logger::LogLevel::FATAL);
+        logger.log("Failed to open asset file for writing: " + finalAssetPath.string(), Logger::LogLevel::FATAL);
         return false;
     }
 
@@ -252,7 +280,8 @@ bool AssetManager::saveAsset(const std::shared_ptr<EngineObject>& object)
     out.write(reinterpret_cast<const char*>(&typeInt), sizeof(typeInt));
 
     writeString(out, object->getName());
-    writeString(out, relPath.string());
+    // persist relative path inside Content
+    writeString(out, relAssetPath.generic_string());
 
     std::string materialAssetPath;
     if (object->getAssetType() == AssetType::Model2D)
@@ -315,7 +344,7 @@ bool AssetManager::saveAsset(const std::shared_ptr<EngineObject>& object)
 
     if (!out.good())
     {
-        logger.log("Error writing asset file: " + assetPath.string(), Logger::LogLevel::ERROR);
+        logger.log("Error writing asset file: " + finalAssetPath.string(), Logger::LogLevel::ERROR);
         return false;
     }
 
@@ -347,7 +376,15 @@ std::shared_ptr<EngineObject> AssetManager::createAsset(AssetType type, const st
         break;
     }
 
-    obj->setPath(path);
+    // Store ONLY the relative path within the Content folder.
+    // Caller can pass e.g. "Meshes/cube.asset".
+    fs::path rel = fs::path(path);
+    if (rel.is_absolute())
+    {
+        rel = rel.filename();
+    }
+
+    obj->setPath(rel.generic_string());
     obj->setName(name);
     obj->setAssetType(type);
     obj->setIsSaved(false);
@@ -400,6 +437,7 @@ bool AssetManager::loadProject(const std::string& projectPath)
     info.projectName = projectFile.stem().string();
     info.projectVersion = "";
     info.engineVersion = "";
+    info.projectPath = root.string();
     info.selectedRHI = DiagnosticsManager::RHIType::Unknown;
 
     std::ifstream in(projectFile);
@@ -423,6 +461,7 @@ bool AssetManager::loadProject(const std::string& projectPath)
         if (key == "Name") info.projectName = value;
         else if (key == "Version") info.projectVersion = value;
         else if (key == "EngineVersion") info.engineVersion = value;
+        else if (key == "Path") info.projectPath = value;
         else if (key == "RHI")
         {
             if (value == "OpenGL") info.selectedRHI = DiagnosticsManager::RHIType::OpenGL;
@@ -432,7 +471,19 @@ bool AssetManager::loadProject(const std::string& projectPath)
         }
     }
 
+    // Ensure path is always set even if missing from file
+    if (info.projectPath.empty())
+    {
+        info.projectPath = root.string();
+    }
+
     diagnostics.setProjectInfo(info);
+
+    if (!diagnostics.loadProjectConfig())
+    {
+        logger.log("Failed to load project config.", Logger::LogLevel::ERROR);
+    }
+
     diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingProject, false);
     logger.log("Project loaded: " + info.projectName, Logger::LogLevel::INFO);
     return true;
@@ -465,7 +516,18 @@ bool AssetManager::saveProject(const std::string& projectPath)
         return false;
     }
 
-    const auto& info = diagnostics.getProjectInfo();
+    auto info = diagnostics.getProjectInfo();
+    if (info.projectPath.empty())
+    {
+        info.projectPath = root.string();
+        diagnostics.setProjectInfo(info);
+    }
+
+    if (!diagnostics.saveProjectConfig())
+    {
+        logger.log("Failed to save project config.", Logger::LogLevel::ERROR);
+    }
+
     fs::path projectFile = root / (info.projectName + ".project");
     std::ofstream out(projectFile, std::ios::out | std::ios::trunc);
     if (!out.is_open())
@@ -478,6 +540,7 @@ bool AssetManager::saveProject(const std::string& projectPath)
     out << "Name=" << info.projectName << "\n";
     out << "Version=" << info.projectVersion << "\n";
     out << "EngineVersion=" << info.engineVersion << "\n";
+    out << "Path=" << info.projectPath << "\n";
     out << "RHI=" << DiagnosticsManager::rhiTypeToString(info.selectedRHI) << "\n";
 
     diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingProject, false);
@@ -504,7 +567,18 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
         return false;
     }
 
-    diagnostics.setProjectInfo(info);
+    auto infoWithPath = info;
+    infoWithPath.projectPath = fs::absolute(root, ec).string();
+    if (ec)
+    {
+        infoWithPath.projectPath = root.string();
+    }
+
+    diagnostics.setProjectInfo(infoWithPath);
+
+    // ensure defaults.ini exists for the new project
+    diagnostics.loadProjectConfig();
+
     bool saved = saveProject(root.string());
     diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingProject, false);
     if (saved)

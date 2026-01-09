@@ -23,6 +23,7 @@ public:
         std::string projectName;
         std::string projectVersion;
         std::string engineVersion;
+        std::string projectPath;
 		RHIType selectedRHI;
 	};
 
@@ -37,11 +38,14 @@ public:
 
     static DiagnosticsManager& Instance();
 
-    // Set or update a state entry
+    // Engine-wide states
     void setState(const std::string& key, const std::string& value);
-
-    // Retrieve a state entry; returns std::nullopt if missing
     std::optional<std::string> getState(const std::string& key) const;
+
+    // Project-specific states (stored in <project>/Config/defaults.ini)
+    void setProjectState(const std::string& key, const std::string& value);
+    std::optional<std::string> getProjectState(const std::string& key) const;
+    void clearProjectStates();
 
     // Clear all stored states
     void clear();
@@ -54,6 +58,10 @@ public:
     // Persist/load simple key=value pairs to/from config/config.ini in the engine directory
     bool saveConfig() const;
     bool loadConfig();
+
+    // Project config (defaults.ini)
+    bool saveProjectConfig() const;
+    bool loadProjectConfig();
 
 	// Project info
 	bool isProjectLoaded() const;
@@ -72,9 +80,14 @@ private:
     DiagnosticsManager& operator=(const DiagnosticsManager&) = delete;
 
     std::filesystem::path getConfigPath() const;
+    std::filesystem::path getProjectConfigPath() const;
+
+    static bool readKeyValueFile(const std::filesystem::path& filePath, std::unordered_map<std::string, std::string>& out);
+    static bool writeKeyValueFile(const std::filesystem::path& filePath, const std::unordered_map<std::string, std::string>& data);
 
     mutable std::mutex m_mutex;
     std::unordered_map<std::string, std::string> m_states;
+    std::unordered_map<std::string, std::string> m_projectStates;
     RHIType m_rhiType{RHIType::Unknown};
 
 	bool projectLoaded{ false };

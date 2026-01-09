@@ -55,7 +55,7 @@ int main()
 
     if (!assetManager.loadProject("C:/Users/conno/Downloads/SampleProject"))
     {
-		assetManager.createProject(cwd, "SampleProject", { "SampleProject", "1.0", "1.0", DiagnosticsManager::RHIType::OpenGL });
+		assetManager.createProject(cwd, "SampleProject", { "SampleProject", "1.0", "1.0", "", DiagnosticsManager::RHIType::OpenGL });
     }
 
     bool running = true;
@@ -89,6 +89,7 @@ int main()
     }
 
     delete renderer;
+    diagnostics.saveProjectConfig();
     diagnostics.saveConfig();
     SDL_Quit();
     return 0;
