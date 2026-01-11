@@ -5,7 +5,8 @@ add_library(Basics SHARED
     Object2D.h
     Object3D.cpp
     Object3D.h
-)
+    "EngineLevel.h"
+    "EngineLevel.cpp")
 
 set_target_properties(Basics PROPERTIES
     CXX_STANDARD 20

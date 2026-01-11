@@ -244,8 +244,9 @@ void DiagnosticsManager::setProjectInfo(const ProjectInfo& info)
 void DiagnosticsManager::clearProjectInfo()
 {
     m_projectInfo = { "", "", "", "", RHIType::Unknown };
-	projectLoaded = false;
+    projectLoaded = false;
     m_projectStates.clear();
+    m_activeLevel.reset();
 }
 
 bool DiagnosticsManager::isActionInProgress() const
@@ -275,6 +276,16 @@ void DiagnosticsManager::setActionInProgress(ActionType action, bool inProgress)
     default:
         break;
 	}
+}
+
+void DiagnosticsManager::setActiveLevel(std::unique_ptr<EngineLevel> level)
+{
+    m_activeLevel = std::move(level);
+}
+
+EngineLevel* DiagnosticsManager::getActiveLevel()
+{
+    return m_activeLevel.get();
 }
 
 DiagnosticsManager::DiagnosticsManager()

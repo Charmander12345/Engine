@@ -83,7 +83,7 @@ bool AssetManager::saveAllAssets()
         }
     }
 
-    logger.log("Saving assets... Pending: " + std::to_string(toSaveCount), Logger::LogLevel::INFO);
+    logger.log("Saving assets... Pending: " + std::to_string(toSaveCount) + ", Tracked: " + std::to_string(tracked.size()), Logger::LogLevel::INFO);
 
     size_t savedCount = 0;
     for (const auto& res : tracked)
@@ -107,6 +107,18 @@ bool AssetManager::saveAllAssets()
 
         ++savedCount;
     }
+
+	auto level = diagnostics.getActiveLevel();
+	if (level)
+	{
+		logger.log("Saving active level...", Logger::LogLevel::INFO);
+		if (!saveAsset(std::shared_ptr<EngineObject>(level, [](EngineObject*) {})))
+		{
+			logger.log("Failed to save active level: " + level->getName(), Logger::LogLevel::ERROR);
+			diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingAsset, false);
+			return false;
+		}
+	}
 
     logger.log(
         "All unsaved assets have been saved. Saved: " + std::to_string(savedCount) + "/" + std::to_string(toSaveCount),
@@ -183,6 +195,9 @@ bool AssetManager::loadAsset(const std::string& path)
     case AssetType::Model3D:
         obj = std::make_shared<Object3D>();
         break;
+    case AssetType::Level:
+        obj = std::make_shared<EngineLevel>();
+        break;
     default:
         obj = std::make_shared<EngineObject>();
         break;
@@ -222,6 +237,30 @@ bool AssetManager::loadAsset(const std::string& path)
             if (!in.read(reinterpret_cast<char*>(verts.data()), vertCount * sizeof(float))) return false;
         }
         obj3d->setVertices(verts);
+    }
+
+    if (type == AssetType::Level)
+    {
+        auto level = std::static_pointer_cast<EngineLevel>(obj);
+
+        uint32_t depCount = 0;
+        if (!in.read(reinterpret_cast<char*>(&depCount), sizeof(depCount))) return false;
+        for (uint32_t i = 0; i < depCount; ++i)
+        {
+            std::string objPath;
+            if (!readString(in, objPath)) return false;
+
+            fs::path p(objPath);
+            if (p.is_absolute())
+            {
+                logger.log("Invalid asset path (should be relative to Content): " + objPath, Logger::LogLevel::ERROR);
+                return false;
+            }
+
+            EngineObject dep;
+            dep.setPath(p.generic_string());
+            level->getWorldObjects().push_back(dep);
+        }
     }
 
     m_garbageCollector.registerResource(obj);
@@ -284,27 +323,17 @@ bool AssetManager::saveAsset(const std::shared_ptr<EngineObject>& object)
     writeString(out, relAssetPath.generic_string());
 
     std::string materialAssetPath;
-    if (object->getAssetType() == AssetType::Model2D)
+    switch (object->getAssetType())
+    {
+    case AssetType::Model2D:
     {
         auto obj2d = std::dynamic_pointer_cast<Object2D>(object);
         if (obj2d)
         {
             materialAssetPath = obj2d->getMaterialAssetPath();
         }
-    }
-    else if (object->getAssetType() == AssetType::Model3D)
-    {
-        auto obj3d = std::dynamic_pointer_cast<Object3D>(object);
-        if (obj3d)
-        {
-            materialAssetPath = obj3d->getMaterialAssetPath();
-        }
-    }
-    writeString(out, materialAssetPath);
+        writeString(out, materialAssetPath);
 
-    if (object->getAssetType() == AssetType::Model2D)
-    {
-        auto obj2d = std::dynamic_pointer_cast<Object2D>(object);
         if (obj2d)
         {
             const auto& verts = obj2d->getVertices();
@@ -320,11 +349,17 @@ bool AssetManager::saveAsset(const std::shared_ptr<EngineObject>& object)
             uint32_t zero = 0;
             out.write(reinterpret_cast<const char*>(&zero), sizeof(zero));
         }
+        break;
     }
-
-    if (object->getAssetType() == AssetType::Model3D)
+    case AssetType::Model3D:
     {
         auto obj3d = std::dynamic_pointer_cast<Object3D>(object);
+        if (obj3d)
+        {
+            materialAssetPath = obj3d->getMaterialAssetPath();
+        }
+        writeString(out, materialAssetPath);
+
         if (obj3d)
         {
             const auto& verts = obj3d->getVertices();
@@ -340,6 +375,37 @@ bool AssetManager::saveAsset(const std::shared_ptr<EngineObject>& object)
             uint32_t zero = 0;
             out.write(reinterpret_cast<const char*>(&zero), sizeof(zero));
         }
+        break;
+    }
+    case AssetType::Level:
+    {
+        auto level = std::dynamic_pointer_cast<EngineLevel>(object);
+        // keep string slot for format compatibility
+        writeString(out, materialAssetPath);
+
+        uint32_t depCount = 0;
+        if (level)
+        {
+            auto& deps = level->getWorldObjects();
+            depCount = static_cast<uint32_t>(deps.size());
+        }
+
+        out.write(reinterpret_cast<const char*>(&depCount), sizeof(depCount));
+
+        if (level)
+        {
+            auto& deps = level->getWorldObjects();
+            for (uint32_t i = 0; i < depCount; ++i)
+            {
+                // only store the object path (relative to Content)
+                writeString(out, deps[i].getPath());
+            }
+        }
+        break;
+    }
+    default:
+        writeString(out, materialAssetPath);
+        break;
     }
 
     if (!out.good())
@@ -448,6 +514,7 @@ bool AssetManager::loadProject(const std::string& projectPath)
         return false;
     }
 
+    std::string LevelPath;
     std::string line;
     while (std::getline(in, line))
     {
@@ -469,6 +536,10 @@ bool AssetManager::loadProject(const std::string& projectPath)
             else if (value == "DirectX12") info.selectedRHI = DiagnosticsManager::RHIType::DirectX12;
             else info.selectedRHI = DiagnosticsManager::RHIType::Unknown;
         }
+        else if (key == "Level")
+        {
+            LevelPath = value;
+		}
     }
 
     // Ensure path is always set even if missing from file
@@ -478,6 +549,19 @@ bool AssetManager::loadProject(const std::string& projectPath)
     }
 
     diagnostics.setProjectInfo(info);
+
+    if (!LevelPath.empty())
+    {
+        auto level = std::make_unique<EngineLevel>();
+        level->setPath(LevelPath);
+        level->setName(fs::path(LevelPath).stem().string());
+        diagnostics.setActiveLevel(std::move(level));
+    }
+    else
+    {
+        diagnostics.setActiveLevel(nullptr);
+        logger.log("No active level set for project.", Logger::LogLevel::WARNING);
+    }
 
     if (!diagnostics.loadProjectConfig())
     {
@@ -508,6 +592,7 @@ bool AssetManager::saveProject(const std::string& projectPath)
     fs::create_directories(root / "Shaders", ec);
     fs::create_directories(root / "Config", ec);
     fs::create_directories(root / "Content", ec);
+    fs::create_directories(root / "Content" / "Levels");
 
     if (ec)
     {
@@ -542,6 +627,7 @@ bool AssetManager::saveProject(const std::string& projectPath)
     out << "EngineVersion=" << info.engineVersion << "\n";
     out << "Path=" << info.projectPath << "\n";
     out << "RHI=" << DiagnosticsManager::rhiTypeToString(info.selectedRHI) << "\n";
+	out << "Level=" << (diagnostics.getActiveLevel() ? diagnostics.getActiveLevel()->getPath() : "") << "\n";
 
     diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingProject, false);
     logger.log("Project saved: " + projectFile.string(), Logger::LogLevel::INFO);
@@ -559,6 +645,7 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
     fs::create_directories(root / "Shaders", ec);
     fs::create_directories(root / "Config", ec);
     fs::create_directories(root / "Content", ec);
+    fs::create_directories(root / "Content" / "Levels");
 
     if (ec)
     {
@@ -575,6 +662,11 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
     }
 
     diagnostics.setProjectInfo(infoWithPath);
+
+    auto defaultlevel = std::make_unique<EngineLevel>();
+    defaultlevel->setName("Default");
+    defaultlevel->setPath("Levels\\DefaultLevel.map");
+    diagnostics.setActiveLevel(std::move(defaultlevel));
 
     // ensure defaults.ini exists for the new project
     diagnostics.loadProjectConfig();

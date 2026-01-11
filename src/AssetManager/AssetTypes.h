@@ -8,5 +8,6 @@ enum class AssetType
     Model3D,
     Audio,
     Script,
-    Shader
+    Shader,
+    Level
 };

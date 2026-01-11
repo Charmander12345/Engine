@@ -6,6 +6,8 @@
 #include <mutex>
 #include <filesystem>
 #include <vector>
+#include <memory>
+#include "../Basics/EngineLevel.h"
 
 class DiagnosticsManager
 {
@@ -73,6 +75,9 @@ public:
     bool isActionInProgress() const;
 	void setActionInProgress(ActionType action, bool inProgress);
 
+    void setActiveLevel(std::unique_ptr<EngineLevel> level);
+    EngineLevel* getActiveLevel();
+
 private:
     DiagnosticsManager();
     ~DiagnosticsManager() = default;
@@ -92,6 +97,7 @@ private:
 
 	bool projectLoaded{ false };
 	ProjectInfo m_projectInfo;
+    std::unique_ptr<EngineLevel> m_activeLevel;
 
 	bool isLoadingAsset{ false };
     bool isSavingAsset{ false };

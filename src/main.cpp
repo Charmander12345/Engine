@@ -53,7 +53,7 @@ int main()
 #endif
     logger.log("Setup complete.", Logger::LogLevel::INFO);
 
-    if (!assetManager.loadProject("C:/Users/conno/Downloads/SampleProject"))
+    if (!assetManager.loadProject("SampleProject"))
     {
 		assetManager.createProject(cwd, "SampleProject", { "SampleProject", "1.0", "1.0", "", DiagnosticsManager::RHIType::OpenGL });
     }

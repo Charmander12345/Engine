@@ -8,6 +8,7 @@
 #include "../Basics/EngineObject.h"
 #include "../Basics/Object2D.h"
 #include "../Basics/Object3D.h"
+#include "../Basics/EngineLevel.h"
 #include "../Logger/Logger.h"
 #include "GarbageCollector.h"
 
