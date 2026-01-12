@@ -2,6 +2,7 @@
 
 #include <string>
 #include "../AssetManager/AssetTypes.h"
+#include "MathTypes.h"
 
 class EngineObject
 {
@@ -23,10 +24,15 @@ public:
     void setAssetType(AssetType type) { m_type = type; }
     AssetType getAssetType() const { return m_type; }
 
+    void setTransform(const Transform& t) { m_transform = t; }
+    const Transform& getTransform() const { return m_transform; }
+
 private:
 
     std::string m_path;
     std::string m_name;
     AssetType m_type{AssetType::Unknown};
 	bool isSaved{ false };
+
+    Transform m_transform{};
 };

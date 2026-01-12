@@ -5,10 +5,68 @@
 #include <iomanip>
 #include <sstream>
 
+namespace
+{
+    static std::tm localTime(std::time_t t)
+    {
+        std::tm tm{};
+#if defined(_WIN32)
+        localtime_s(&tm, &t);
+#else
+        tm = *std::localtime(&t);
+#endif
+        return tm;
+    }
+
+    static std::string nowTimestamp()
+    {
+        auto now = std::chrono::system_clock::now();
+        std::time_t t = std::chrono::system_clock::to_time_t(now);
+        const std::tm tm = localTime(t);
+
+        std::ostringstream oss;
+        oss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
+        return oss.str();
+    }
+}
+
 Logger& Logger::Instance()
 {
     static Logger instance;
     return instance;
+}
+
+void Logger::setMinimumLogLevel(LogLevel level)
+{
+    minimumLevel = level;
+}
+
+const char* Logger::toString(LogLevel level)
+{
+    switch (level)
+    {
+    case LogLevel::INFO: return "INFO";
+    case LogLevel::WARNING: return "WARNING";
+    case LogLevel::ERROR: return "ERROR";
+    case LogLevel::FATAL: return "FATAL";
+    default: return "INFO";
+    }
+}
+
+const char* Logger::toString(Category category)
+{
+    switch (category)
+    {
+    case Category::General: return "General";
+    case Category::Engine: return "Engine";
+    case Category::AssetManagement: return "AssetManagement";
+    case Category::Diagnostics: return "Diagnostics";
+    case Category::Rendering: return "Rendering";
+    case Category::Input: return "Input";
+    case Category::Project: return "Project";
+    case Category::IO: return "IO";
+    default: return "General";
+    }
 }
 
 void Logger::initialize()
@@ -24,12 +82,7 @@ void Logger::initialize()
 
     auto now = std::chrono::system_clock::now();
     std::time_t t = std::chrono::system_clock::to_time_t(now);
-    std::tm tm{};
-#if defined(_WIN32)
-    localtime_s(&tm, &t);
-#else
-    tm = *std::localtime(&t);
-#endif
+    const std::tm tm = localTime(t);
 
     std::ostringstream oss;
     oss << "log_" << std::put_time(&tm, "%Y-%m-%d_%H-%M-%S") << ".log";
@@ -38,41 +91,44 @@ void Logger::initialize()
     logFile.open(filename, std::ios::out | std::ios::trunc);
     if (!logFile.is_open())
     {
-        std::cerr << "Fehler beim Öffnen der Log-Datei: " << filename << std::endl;
+        std::cerr << "Failed to open log file: " << filename << std::endl;
     }
     else
     {
         initialized = true;
     }
+
+    log(Category::Engine, std::string("Logger initialised. Output file: ") + filename, LogLevel::INFO);
 }
 
 Logger::~Logger()
 {
-    if (logFile.is_open()) {
+    if (logFile.is_open())
+    {
         logFile.close();
     }
 }
 
 void Logger::log(const std::string& message, LogLevel level)
 {
-    std::string levelStr;
-    switch (level) {
-        case LogLevel::INFO:
-            levelStr = "INFO";
-            break;
-        case LogLevel::WARNING:
-            levelStr = "WARNING";
-            break;
-        case LogLevel::ERROR:
-            levelStr = "ERROR";
-            break;
-        case LogLevel::FATAL:
-            levelStr = "FATAL";
-            break;
+    log(Category::General, message, level);
+}
+
+void Logger::log(Category category, const std::string& message, LogLevel level)
+{
+    if (static_cast<int>(level) < static_cast<int>(minimumLevel))
+    {
+        return;
     }
 
-    if (logFile.is_open()) {
-        logFile << "[" << levelStr << "] " << message << std::endl;
+    const std::string ts = nowTimestamp();
+    const char* levelStr = toString(level);
+    const char* catStr = toString(category);
+
+    if (logFile.is_open())
+    {
+        logFile << "[" << ts << "][" << catStr << "][" << levelStr << "] " << message << std::endl;
     }
-    std::cout << "[" << levelStr << "] " << message << std::endl;
+
+    std::cout << "[" << ts << "][" << catStr << "][" << levelStr << "] " << message << std::endl;
 }

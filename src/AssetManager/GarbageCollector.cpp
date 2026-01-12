@@ -3,10 +3,10 @@
 
 void GarbageCollector::collect()
 {
-    // remove invalid entries (should be rare with shared_ptr storage)
+    // remove expired entries
     m_trackedResources.erase(
         std::remove_if(m_trackedResources.begin(), m_trackedResources.end(),
-            [](const std::shared_ptr<EngineObject>& p) { return p == nullptr; }),
+            [](const std::weak_ptr<EngineObject>& p) { return p.expired(); }),
         m_trackedResources.end());
 }
 
@@ -18,14 +18,14 @@ bool GarbageCollector::registerResource(const std::shared_ptr<EngineObject>& res
     }
 
     auto it = std::find_if(m_trackedResources.begin(), m_trackedResources.end(),
-        [&](const std::shared_ptr<EngineObject>& p)
+        [&](const std::weak_ptr<EngineObject>& p)
         {
-            return p && p.get() == resource.get();
+            auto sp = p.lock();
+            return sp && sp.get() == resource.get();
         });
 
     if (it != m_trackedResources.end())
     {
-        // already tracked
         return false;
     }
 
@@ -33,12 +33,23 @@ bool GarbageCollector::registerResource(const std::shared_ptr<EngineObject>& res
     return true;
 }
 
-const std::vector<std::shared_ptr<EngineObject>>& GarbageCollector::getTrackedResourcesRef() const
+std::vector<std::shared_ptr<EngineObject>> GarbageCollector::getAliveResources() const
 {
-    return m_trackedResources;
+    std::vector<std::shared_ptr<EngineObject>> out;
+    out.reserve(m_trackedResources.size());
+
+    for (const auto& w : m_trackedResources)
+    {
+        if (auto sp = w.lock())
+        {
+            out.push_back(std::move(sp));
+        }
+    }
+
+    return out;
 }
 
-bool GarbageCollector::isRelevant(const std::shared_ptr<EngineObject>& resource) const
+const std::vector<std::weak_ptr<EngineObject>>& GarbageCollector::getTrackedResourcesRef() const
 {
-    return resource != nullptr;
+    return m_trackedResources;
 }

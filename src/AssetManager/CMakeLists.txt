@@ -4,6 +4,7 @@ add_library(AssetManager SHARED
     GarbageCollector.cpp
     GarbageCollector.h
     AssetTypes.h
+    stb_image.h
 )
 
 set_target_properties(AssetManager PROPERTIES

@@ -1,4 +1,4 @@
-# Install script for directory: C:/Users/conno/source/repos/Engine/src/Renderer
+# Install script for directory: C:/Users/conno/source/repos/Charmander12345/Engine/src/Renderer
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -35,6 +35,6 @@ endif()
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
 if(CMAKE_INSTALL_LOCAL_ONLY)
-  file(WRITE "C:/Users/conno/source/repos/Engine/build/src/Renderer/install_local_manifest.txt"
+  file(WRITE "C:/Users/conno/source/repos/Charmander12345/Engine/build/src/Renderer/install_local_manifest.txt"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()

@@ -22,7 +22,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{C9B0498D-63C5-3675-8C9D-7260A478E1B2}</ProjectGuid>
+    <ProjectGuid>{6EE14D06-C29B-3ACC-A243-21C2F805D84A}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
     <Platform>x64</Platform>
@@ -59,25 +59,25 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
     <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Users\conno\source\repos\Engine\build\Debug\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Users\conno\source\repos\Charmander12345\Engine\build\Debug\</OutDir>
     <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">AssetManager.dir\Debug\</IntDir>
     <TargetName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">AssetManager</TargetName>
     <TargetExt Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">.dll</TargetExt>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</LinkIncremental>
     <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</GenerateManifest>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\conno\source\repos\Engine\build\Release\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\conno\source\repos\Charmander12345\Engine\build\Release\</OutDir>
     <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AssetManager.dir\Release\</IntDir>
     <TargetName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AssetManager</TargetName>
     <TargetExt Condition="'$(Configuration)|$(Platform)'=='Release|x64'">.dll</TargetExt>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkIncremental>
     <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</GenerateManifest>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Users\conno\source\repos\Engine\build\MinSizeRel\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Users\conno\source\repos\Charmander12345\Engine\build\MinSizeRel\</OutDir>
     <IntDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">AssetManager.dir\MinSizeRel\</IntDir>
     <TargetName Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">AssetManager</TargetName>
     <TargetExt Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">.dll</TargetExt>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkIncremental>
     <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">true</GenerateManifest>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Users\conno\source\repos\Engine\build\RelWithDebInfo\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Users\conno\source\repos\Charmander12345\Engine\build\RelWithDebInfo\</OutDir>
     <IntDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">AssetManager.dir\RelWithDebInfo\</IntDir>
     <TargetName Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">AssetManager</TargetName>
     <TargetExt Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">.dll</TargetExt>
@@ -87,14 +87,11 @@
   <PropertyGroup />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\AssetManager;C:\Users\conno\source\repos\Engine\src\Diagnostics;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager;C:\Users\conno\source\repos\Charmander12345\Engine\src\Diagnostics;C:\Users\conno\source\repos\Charmander12345\Engine\src\Logger;C:\Users\conno\source\repos\Charmander12345\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
-      <BufferSecurityCheck></BufferSecurityCheck>
-      <CallingConvention></CallingConvention>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <ExceptionHandling>Sync</ExceptionHandling>
-      <FloatingPointModel></FloatingPointModel>
       <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
       <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
       <LanguageStandard>stdcpp20</LanguageStandard>
@@ -114,10 +111,10 @@
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;CMAKE_INTDIR=\"Debug\";AssetManager_EXPORTS</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\AssetManager;C:\Users\conno\source\repos\Engine\src\Diagnostics;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager;C:\Users\conno\source\repos\Charmander12345\Engine\src\Diagnostics;C:\Users\conno\source\repos\Charmander12345\Engine\src\Logger;C:\Users\conno\source\repos\Charmander12345\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\AssetManager;C:\Users\conno\source\repos\Engine\src\Diagnostics;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager;C:\Users\conno\source\repos\Charmander12345\Engine\src\Diagnostics;C:\Users\conno\source\repos\Charmander12345\Engine\src\Logger;C:\Users\conno\source\repos\Charmander12345\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -128,11 +125,11 @@
       <UseUtf8Encoding>Always</UseUtf8Encoding>
       <Message>Auto build dll exports</Message>
       <Command>setlocal
-cd C:\Users\conno\source\repos\Engine\build\src\AssetManager
+cd C:\Users\conno\source\repos\Charmander12345\Engine\build\src\AssetManager
 if %errorlevel% neq 0 goto :cmEnd
 C:
 if %errorlevel% neq 0 goto :cmEnd
-"C:\Program Files\CMake\bin\cmake.exe" -E __create_def C:/Users/conno/source/repos/Engine/build/src/AssetManager/AssetManager.dir/Debug/exports.def C:/Users/conno/source/repos/Engine/build/src/AssetManager/AssetManager.dir/Debug//objects.txt
+"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E __create_def C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/AssetManager.dir/Debug/exports.def C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/AssetManager.dir/Debug//objects.txt
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -142,17 +139,17 @@ exit /b %1
 if %errorlevel% neq 0 goto :VCEnd</Command>
     </PreLinkEvent>
     <Link>
-      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>..\Diagnostics\Debug\Diagnostics.lib;..\Logger\Debug\Logger.lib;..\Basics\Debug\Basics.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
       <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
-      <ImportLibrary>C:/Users/conno/source/repos/Engine/build/src/AssetManager/Debug/AssetManager.lib</ImportLibrary>
+      <ImportLibrary>C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/Debug/AssetManager.lib</ImportLibrary>
       <LinkErrorReporting></LinkErrorReporting>
-      <ModuleDefinitionFile>C:/Users/conno/source/repos/Engine/build/src/AssetManager/AssetManager.dir/Debug/exports.def</ModuleDefinitionFile>
-      <ProgramDataBaseFile>C:/Users/conno/source/repos/Engine/build/Debug/AssetManager.pdb</ProgramDataBaseFile>
+      <ModuleDefinitionFile>C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/AssetManager.dir/Debug/exports.def</ModuleDefinitionFile>
+      <ProgramDataBaseFile>C:/Users/conno/source/repos/Charmander12345/Engine/build/Debug/AssetManager.pdb</ProgramDataBaseFile>
       <RandomizedBaseAddress></RandomizedBaseAddress>
       <SubSystem></SubSystem>
     </Link>
@@ -162,13 +159,10 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\AssetManager;C:\Users\conno\source\repos\Engine\src\Diagnostics;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager;C:\Users\conno\source\repos\Charmander12345\Engine\src\Diagnostics;C:\Users\conno\source\repos\Charmander12345\Engine\src\Logger;C:\Users\conno\source\repos\Charmander12345\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
-      <BufferSecurityCheck></BufferSecurityCheck>
-      <CallingConvention></CallingConvention>
       <ExceptionHandling>Sync</ExceptionHandling>
-      <FloatingPointModel></FloatingPointModel>
       <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <LanguageStandard>stdcpp20</LanguageStandard>
@@ -190,10 +184,10 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR=\"Release\";AssetManager_EXPORTS</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\AssetManager;C:\Users\conno\source\repos\Engine\src\Diagnostics;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager;C:\Users\conno\source\repos\Charmander12345\Engine\src\Diagnostics;C:\Users\conno\source\repos\Charmander12345\Engine\src\Logger;C:\Users\conno\source\repos\Charmander12345\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\AssetManager;C:\Users\conno\source\repos\Engine\src\Diagnostics;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager;C:\Users\conno\source\repos\Charmander12345\Engine\src\Diagnostics;C:\Users\conno\source\repos\Charmander12345\Engine\src\Logger;C:\Users\conno\source\repos\Charmander12345\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -204,11 +198,11 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <UseUtf8Encoding>Always</UseUtf8Encoding>
       <Message>Auto build dll exports</Message>
       <Command>setlocal
-cd C:\Users\conno\source\repos\Engine\build\src\AssetManager
+cd C:\Users\conno\source\repos\Charmander12345\Engine\build\src\AssetManager
 if %errorlevel% neq 0 goto :cmEnd
 C:
 if %errorlevel% neq 0 goto :cmEnd
-"C:\Program Files\CMake\bin\cmake.exe" -E __create_def C:/Users/conno/source/repos/Engine/build/src/AssetManager/AssetManager.dir/Release/exports.def C:/Users/conno/source/repos/Engine/build/src/AssetManager/AssetManager.dir/Release//objects.txt
+"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E __create_def C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/AssetManager.dir/Release/exports.def C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/AssetManager.dir/Release//objects.txt
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -218,17 +212,17 @@ exit /b %1
 if %errorlevel% neq 0 goto :VCEnd</Command>
     </PreLinkEvent>
     <Link>
-      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>..\Diagnostics\Release\Diagnostics.lib;..\Logger\Release\Logger.lib;..\Basics\Release\Basics.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
       <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
-      <ImportLibrary>C:/Users/conno/source/repos/Engine/build/src/AssetManager/Release/AssetManager.lib</ImportLibrary>
+      <ImportLibrary>C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/Release/AssetManager.lib</ImportLibrary>
       <LinkErrorReporting></LinkErrorReporting>
-      <ModuleDefinitionFile>C:/Users/conno/source/repos/Engine/build/src/AssetManager/AssetManager.dir/Release/exports.def</ModuleDefinitionFile>
-      <ProgramDataBaseFile>C:/Users/conno/source/repos/Engine/build/Release/AssetManager.pdb</ProgramDataBaseFile>
+      <ModuleDefinitionFile>C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/AssetManager.dir/Release/exports.def</ModuleDefinitionFile>
+      <ProgramDataBaseFile>C:/Users/conno/source/repos/Charmander12345/Engine/build/Release/AssetManager.pdb</ProgramDataBaseFile>
       <RandomizedBaseAddress></RandomizedBaseAddress>
       <SubSystem></SubSystem>
     </Link>
@@ -238,13 +232,10 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\AssetManager;C:\Users\conno\source\repos\Engine\src\Diagnostics;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager;C:\Users\conno\source\repos\Charmander12345\Engine\src\Diagnostics;C:\Users\conno\source\repos\Charmander12345\Engine\src\Logger;C:\Users\conno\source\repos\Charmander12345\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
-      <BufferSecurityCheck></BufferSecurityCheck>
-      <CallingConvention></CallingConvention>
       <ExceptionHandling>Sync</ExceptionHandling>
-      <FloatingPointModel></FloatingPointModel>
       <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
       <LanguageStandard>stdcpp20</LanguageStandard>
@@ -266,10 +257,10 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR=\"MinSizeRel\";AssetManager_EXPORTS</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\AssetManager;C:\Users\conno\source\repos\Engine\src\Diagnostics;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager;C:\Users\conno\source\repos\Charmander12345\Engine\src\Diagnostics;C:\Users\conno\source\repos\Charmander12345\Engine\src\Logger;C:\Users\conno\source\repos\Charmander12345\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\AssetManager;C:\Users\conno\source\repos\Engine\src\Diagnostics;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager;C:\Users\conno\source\repos\Charmander12345\Engine\src\Diagnostics;C:\Users\conno\source\repos\Charmander12345\Engine\src\Logger;C:\Users\conno\source\repos\Charmander12345\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -280,11 +271,11 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <UseUtf8Encoding>Always</UseUtf8Encoding>
       <Message>Auto build dll exports</Message>
       <Command>setlocal
-cd C:\Users\conno\source\repos\Engine\build\src\AssetManager
+cd C:\Users\conno\source\repos\Charmander12345\Engine\build\src\AssetManager
 if %errorlevel% neq 0 goto :cmEnd
 C:
 if %errorlevel% neq 0 goto :cmEnd
-"C:\Program Files\CMake\bin\cmake.exe" -E __create_def C:/Users/conno/source/repos/Engine/build/src/AssetManager/AssetManager.dir/MinSizeRel/exports.def C:/Users/conno/source/repos/Engine/build/src/AssetManager/AssetManager.dir/MinSizeRel//objects.txt
+"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E __create_def C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/AssetManager.dir/MinSizeRel/exports.def C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/AssetManager.dir/MinSizeRel//objects.txt
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -294,17 +285,17 @@ exit /b %1
 if %errorlevel% neq 0 goto :VCEnd</Command>
     </PreLinkEvent>
     <Link>
-      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>..\Diagnostics\MinSizeRel\Diagnostics.lib;..\Logger\MinSizeRel\Logger.lib;..\Basics\MinSizeRel\Basics.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
       <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
-      <ImportLibrary>C:/Users/conno/source/repos/Engine/build/src/AssetManager/MinSizeRel/AssetManager.lib</ImportLibrary>
+      <ImportLibrary>C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/MinSizeRel/AssetManager.lib</ImportLibrary>
       <LinkErrorReporting></LinkErrorReporting>
-      <ModuleDefinitionFile>C:/Users/conno/source/repos/Engine/build/src/AssetManager/AssetManager.dir/MinSizeRel/exports.def</ModuleDefinitionFile>
-      <ProgramDataBaseFile>C:/Users/conno/source/repos/Engine/build/MinSizeRel/AssetManager.pdb</ProgramDataBaseFile>
+      <ModuleDefinitionFile>C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/AssetManager.dir/MinSizeRel/exports.def</ModuleDefinitionFile>
+      <ProgramDataBaseFile>C:/Users/conno/source/repos/Charmander12345/Engine/build/MinSizeRel/AssetManager.pdb</ProgramDataBaseFile>
       <RandomizedBaseAddress></RandomizedBaseAddress>
       <SubSystem></SubSystem>
     </Link>
@@ -314,14 +305,11 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\AssetManager;C:\Users\conno\source\repos\Engine\src\Diagnostics;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager;C:\Users\conno\source\repos\Charmander12345\Engine\src\Diagnostics;C:\Users\conno\source\repos\Charmander12345\Engine\src\Logger;C:\Users\conno\source\repos\Charmander12345\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
-      <BufferSecurityCheck></BufferSecurityCheck>
-      <CallingConvention></CallingConvention>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <ExceptionHandling>Sync</ExceptionHandling>
-      <FloatingPointModel></FloatingPointModel>
       <ForceConformanceInForLoopScope></ForceConformanceInForLoopScope>
       <InlineFunctionExpansion>OnlyExplicitInline</InlineFunctionExpansion>
       <LanguageStandard>stdcpp20</LanguageStandard>
@@ -341,10 +329,10 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;CMAKE_INTDIR=\"RelWithDebInfo\";AssetManager_EXPORTS</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\AssetManager;C:\Users\conno\source\repos\Engine\src\Diagnostics;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager;C:\Users\conno\source\repos\Charmander12345\Engine\src\Diagnostics;C:\Users\conno\source\repos\Charmander12345\Engine\src\Logger;C:\Users\conno\source\repos\Charmander12345\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Engine\src\AssetManager;C:\Users\conno\source\repos\Engine\src\Diagnostics;C:\Users\conno\source\repos\Engine\src\Logger;C:\Users\conno\source\repos\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager;C:\Users\conno\source\repos\Charmander12345\Engine\src\Diagnostics;C:\Users\conno\source\repos\Charmander12345\Engine\src\Logger;C:\Users\conno\source\repos\Charmander12345\Engine\src\Basics;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -355,11 +343,11 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
       <UseUtf8Encoding>Always</UseUtf8Encoding>
       <Message>Auto build dll exports</Message>
       <Command>setlocal
-cd C:\Users\conno\source\repos\Engine\build\src\AssetManager
+cd C:\Users\conno\source\repos\Charmander12345\Engine\build\src\AssetManager
 if %errorlevel% neq 0 goto :cmEnd
 C:
 if %errorlevel% neq 0 goto :cmEnd
-"C:\Program Files\CMake\bin\cmake.exe" -E __create_def C:/Users/conno/source/repos/Engine/build/src/AssetManager/AssetManager.dir/RelWithDebInfo/exports.def C:/Users/conno/source/repos/Engine/build/src/AssetManager/AssetManager.dir/RelWithDebInfo//objects.txt
+"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -E __create_def C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/AssetManager.dir/RelWithDebInfo/exports.def C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/AssetManager.dir/RelWithDebInfo//objects.txt
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -369,17 +357,17 @@ exit /b %1
 if %errorlevel% neq 0 goto :VCEnd</Command>
     </PreLinkEvent>
     <Link>
-      <AdditionalDependencies>kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>..\Diagnostics\RelWithDebInfo\Diagnostics.lib;..\Logger\RelWithDebInfo\Logger.lib;..\Basics\RelWithDebInfo\Basics.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
       <ImageHasSafeExceptionHandlers></ImageHasSafeExceptionHandlers>
-      <ImportLibrary>C:/Users/conno/source/repos/Engine/build/src/AssetManager/RelWithDebInfo/AssetManager.lib</ImportLibrary>
+      <ImportLibrary>C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/RelWithDebInfo/AssetManager.lib</ImportLibrary>
       <LinkErrorReporting></LinkErrorReporting>
-      <ModuleDefinitionFile>C:/Users/conno/source/repos/Engine/build/src/AssetManager/AssetManager.dir/RelWithDebInfo/exports.def</ModuleDefinitionFile>
-      <ProgramDataBaseFile>C:/Users/conno/source/repos/Engine/build/RelWithDebInfo/AssetManager.pdb</ProgramDataBaseFile>
+      <ModuleDefinitionFile>C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/AssetManager.dir/RelWithDebInfo/exports.def</ModuleDefinitionFile>
+      <ProgramDataBaseFile>C:/Users/conno/source/repos/Charmander12345/Engine/build/RelWithDebInfo/AssetManager.pdb</ProgramDataBaseFile>
       <RandomizedBaseAddress></RandomizedBaseAddress>
       <SubSystem></SubSystem>
     </Link>
@@ -388,11 +376,11 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
     </ProjectReference>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <CustomBuild Include="C:\Users\conno\source\repos\Engine\src\AssetManager\CMakeLists.txt">
+    <CustomBuild Include="C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager\CMakeLists.txt">
       <UseUtf8Encoding>Always</UseUtf8Encoding>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building Custom Rule C:/Users/conno/source/repos/Engine/src/AssetManager/CMakeLists.txt</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building Custom Rule C:/Users/conno/source/repos/Charmander12345/Engine/src/AssetManager/CMakeLists.txt</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
-"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/conno/source/repos/Engine -BC:/Users/conno/source/repos/Engine/build --check-stamp-file C:/Users/conno/source/repos/Engine/build/src/AssetManager/CMakeFiles/generate.stamp
+"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/conno/source/repos/Charmander12345/Engine -BC:/Users/conno/source/repos/Charmander12345/Engine/build --check-stamp-file C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/CMakeFiles/generate.stamp
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -400,12 +388,12 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Users\conno\source\repos\Engine\build\CMakeFiles\cmake.verify_globs;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Users\conno\source\repos\Engine\build\src\AssetManager\CMakeFiles\generate.stamp</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Users\conno\source\repos\Charmander12345\Engine\build\CMakeFiles\cmake.verify_globs;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Users\conno\source\repos\Charmander12345\Engine\build\src\AssetManager\CMakeFiles\generate.stamp</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Building Custom Rule C:/Users/conno/source/repos/Engine/src/AssetManager/CMakeLists.txt</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Building Custom Rule C:/Users/conno/source/repos/Charmander12345/Engine/src/AssetManager/CMakeLists.txt</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
-"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/conno/source/repos/Engine -BC:/Users/conno/source/repos/Engine/build --check-stamp-file C:/Users/conno/source/repos/Engine/build/src/AssetManager/CMakeFiles/generate.stamp
+"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/conno/source/repos/Charmander12345/Engine -BC:/Users/conno/source/repos/Charmander12345/Engine/build --check-stamp-file C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/CMakeFiles/generate.stamp
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -413,12 +401,12 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\conno\source\repos\Engine\build\CMakeFiles\cmake.verify_globs;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\conno\source\repos\Engine\build\src\AssetManager\CMakeFiles\generate.stamp</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\conno\source\repos\Charmander12345\Engine\build\CMakeFiles\cmake.verify_globs;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Users\conno\source\repos\Charmander12345\Engine\build\src\AssetManager\CMakeFiles\generate.stamp</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Building Custom Rule C:/Users/conno/source/repos/Engine/src/AssetManager/CMakeLists.txt</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Building Custom Rule C:/Users/conno/source/repos/Charmander12345/Engine/src/AssetManager/CMakeLists.txt</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
-"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/conno/source/repos/Engine -BC:/Users/conno/source/repos/Engine/build --check-stamp-file C:/Users/conno/source/repos/Engine/build/src/AssetManager/CMakeFiles/generate.stamp
+"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/conno/source/repos/Charmander12345/Engine -BC:/Users/conno/source/repos/Charmander12345/Engine/build --check-stamp-file C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/CMakeFiles/generate.stamp
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -426,12 +414,12 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Users\conno\source\repos\Engine\build\CMakeFiles\cmake.verify_globs;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Users\conno\source\repos\Engine\build\src\AssetManager\CMakeFiles\generate.stamp</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Users\conno\source\repos\Charmander12345\Engine\build\CMakeFiles\cmake.verify_globs;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">C:\Users\conno\source\repos\Charmander12345\Engine\build\src\AssetManager\CMakeFiles\generate.stamp</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
-      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Building Custom Rule C:/Users/conno/source/repos/Engine/src/AssetManager/CMakeLists.txt</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Building Custom Rule C:/Users/conno/source/repos/Charmander12345/Engine/src/AssetManager/CMakeLists.txt</Message>
       <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
-"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/conno/source/repos/Engine -BC:/Users/conno/source/repos/Engine/build --check-stamp-file C:/Users/conno/source/repos/Engine/build/src/AssetManager/CMakeFiles/generate.stamp
+"C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe" -SC:/Users/conno/source/repos/Charmander12345/Engine -BC:/Users/conno/source/repos/Charmander12345/Engine/build --check-stamp-file C:/Users/conno/source/repos/Charmander12345/Engine/build/src/AssetManager/CMakeFiles/generate.stamp
 if %errorlevel% neq 0 goto :cmEnd
 :cmEnd
 endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
@@ -439,25 +427,38 @@ endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
 exit /b %1
 :cmDone
 if %errorlevel% neq 0 goto :VCEnd</Command>
-      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Users\conno\source\repos\Engine\build\CMakeFiles\cmake.verify_globs;%(AdditionalInputs)</AdditionalInputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Users\conno\source\repos\Engine\build\src\AssetManager\CMakeFiles\generate.stamp</Outputs>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Users\conno\source\repos\Charmander12345\Engine\build\CMakeFiles\cmake.verify_globs;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">C:\Users\conno\source\repos\Charmander12345\Engine\build\src\AssetManager\CMakeFiles\generate.stamp</Outputs>
       <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="C:\Users\conno\source\repos\Engine\src\AssetManager\AssetManager.cpp" />
-    <ClInclude Include="C:\Users\conno\source\repos\Engine\src\AssetManager\AssetManager.h" />
-    <ClCompile Include="C:\Users\conno\source\repos\Engine\src\AssetManager\GarbageCollector.cpp" />
-    <ClInclude Include="C:\Users\conno\source\repos\Engine\src\AssetManager\GarbageCollector.h" />
-    <ClInclude Include="C:\Users\conno\source\repos\Engine\src\AssetManager\AssetTypes.h" />
+    <ClCompile Include="C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager\AssetManager.cpp" />
+    <ClInclude Include="C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager\AssetManager.h" />
+    <ClCompile Include="C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager\GarbageCollector.cpp" />
+    <ClInclude Include="C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager\GarbageCollector.h" />
+    <ClInclude Include="C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager\AssetTypes.h" />
+    <ClInclude Include="C:\Users\conno\source\repos\Charmander12345\Engine\src\AssetManager\stb_image.h" />
   </ItemGroup>
   <ItemGroup />
   <ItemGroup>
-    <ProjectReference Include="C:\Users\conno\source\repos\Engine\build\ZERO_CHECK.vcxproj">
-      <Project>{33913149-380A-3D02-825A-7E518959D320}</Project>
+    <ProjectReference Include="C:\Users\conno\source\repos\Charmander12345\Engine\build\ZERO_CHECK.vcxproj">
+      <Project>{03A8988F-F48F-3C51-9E73-661E94070F23}</Project>
       <Name>ZERO_CHECK</Name>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\conno\source\repos\Charmander12345\Engine\build\src\Basics\Basics.vcxproj">
+      <Project>{77402B00-6829-31C4-841D-6237E41ADF79}</Project>
+      <Name>Basics</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\conno\source\repos\Charmander12345\Engine\build\src\Diagnostics\Diagnostics.vcxproj">
+      <Project>{0F08F4B8-C9D7-3A23-A7CA-7CD46DEC061C}</Project>
+      <Name>Diagnostics</Name>
+    </ProjectReference>
+    <ProjectReference Include="C:\Users\conno\source\repos\Charmander12345\Engine\build\src\Logger\Logger.vcxproj">
+      <Project>{247F7A90-4D39-3BAB-B9A9-8673C115CFC9}</Project>
+      <Name>Logger</Name>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

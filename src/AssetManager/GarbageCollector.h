@@ -12,10 +12,9 @@ public:
     void collect();
     bool registerResource(const std::shared_ptr<EngineObject>& resource);
 
-    const std::vector<std::shared_ptr<EngineObject>>& getTrackedResourcesRef() const;
+    std::vector<std::shared_ptr<EngineObject>> getAliveResources() const;
+    const std::vector<std::weak_ptr<EngineObject>>& getTrackedResourcesRef() const;
 
 private:
-    bool isRelevant(const std::shared_ptr<EngineObject>& resource) const;
-
-    std::vector<std::shared_ptr<EngineObject>> m_trackedResources;
+    std::vector<std::weak_ptr<EngineObject>> m_trackedResources;
 };

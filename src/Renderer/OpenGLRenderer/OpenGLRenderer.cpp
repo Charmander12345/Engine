@@ -4,8 +4,13 @@
 #include <filesystem>
 #include <SDL3/SDL.h>
 #include <iostream>
+
 #include "Logger.h"
 #include "OpenGLShader.h"
+
+#include "Texture.h"
+#include "../AssetManager/AssetManager.h"
+
 #include "../../Basics/Object3D.h"
 
 namespace
@@ -41,60 +46,60 @@ OpenGLRenderer::~OpenGLRenderer()
 bool OpenGLRenderer::initialize()
 {
     auto& logger = Logger::Instance();
-    logger.log("OpenGLRenderer initialize started", Logger::LogLevel::INFO);
+    logger.log(Logger::Category::Rendering, "OpenGLRenderer initialize started", Logger::LogLevel::INFO);
 
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 6);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 
-    logger.log("Creating Window...", Logger::LogLevel::INFO);
+    logger.log(Logger::Category::Rendering, "Creating Window...", Logger::LogLevel::INFO);
 
     m_window = SDL_CreateWindow("Engine Project", 800, 600, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL | SDL_WINDOW_MINIMIZED);
     if (!m_window) {
-        logger.log(std::string("Failed to create window: ") + SDL_GetError(), Logger::LogLevel::ERROR);
+        logger.log(Logger::Category::Rendering, std::string("Failed to create window: ") + SDL_GetError(), Logger::LogLevel::ERROR);
         SDL_Quit();
         return false;
     }
-    logger.log("Window created successfully.", Logger::LogLevel::INFO);
-    logger.log("Creating OpenGL context...", Logger::LogLevel::INFO);
+    logger.log(Logger::Category::Rendering, "Window created successfully.", Logger::LogLevel::INFO);
+    logger.log(Logger::Category::Rendering, "Creating OpenGL context...", Logger::LogLevel::INFO);
 
     m_glContext = SDL_GL_CreateContext(m_window);
     if (!m_glContext) {
-        logger.log(std::string("Failed to create OpenGL context: ") + SDL_GetError(), Logger::LogLevel::ERROR);
+        logger.log(Logger::Category::Rendering, std::string("Failed to create OpenGL context: ") + SDL_GetError(), Logger::LogLevel::ERROR);
         SDL_DestroyWindow(m_window);
         SDL_Quit();
         return false;
     }
 
     if (!SDL_GL_MakeCurrent(m_window, m_glContext)) {
-        logger.log(std::string("Failed to make created context current: ") + SDL_GetError(), Logger::LogLevel::ERROR);
+        logger.log(Logger::Category::Rendering, std::string("Failed to make created context current: ") + SDL_GetError(), Logger::LogLevel::ERROR);
         SDL_GL_DestroyContext(m_glContext);
         SDL_DestroyWindow(m_window);
         SDL_Quit();
         return false;
     }
 
-    logger.log("OpenGL context created successfully.", Logger::LogLevel::INFO);
+    logger.log(Logger::Category::Rendering, "OpenGL context created successfully.", Logger::LogLevel::INFO);
 
     if (!gladLoadGL((GLADloadfunc)SDL_GL_GetProcAddress))
     {
-        logger.log("Failed to initialize GLAD", Logger::LogLevel::ERROR);
+        logger.log(Logger::Category::Rendering, "Failed to initialize GLAD", Logger::LogLevel::ERROR);
         return false;
     }
 
-    logger.log("GLAD initialised.", Logger::LogLevel::INFO);
+    logger.log(Logger::Category::Rendering, "GLAD initialised.", Logger::LogLevel::INFO);
 
     int nrAttributes;
     glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &nrAttributes);
-    logger.log("Max number of vertex attributes: " + std::to_string(nrAttributes), Logger::LogLevel::INFO);
+    logger.log(Logger::Category::Rendering, "Max number of vertex attributes: " + std::to_string(nrAttributes), Logger::LogLevel::INFO);
 
     std::string vertexPath = ResolveShaderPath("vertex.glsl");
     std::string fragmentPath = ResolveShaderPath("fragment.glsl");
 
     if (vertexPath.empty() || fragmentPath.empty())
     {
-        logger.log("Couldn't locate vertex.glsl and/or fragment.glsl.", Logger::LogLevel::ERROR);
+        logger.log(Logger::Category::Rendering, "Couldn't locate vertex.glsl and/or fragment.glsl.", Logger::LogLevel::ERROR);
         return false;
     }
 
@@ -103,13 +108,13 @@ bool OpenGLRenderer::initialize()
 
     if (!vertexShader->loadFromFile(Shader::Type::Vertex, vertexPath))
     {
-        logger.log("Failed to load/compile vertex.glsl.", Logger::LogLevel::ERROR);
+        logger.log(Logger::Category::Rendering, "Failed to load/compile vertex.glsl.", Logger::LogLevel::ERROR);
         return false;
     }
 
     if (!fragmentShader->loadFromFile(Shader::Type::Fragment, fragmentPath))
     {
-        logger.log("Failed to load/compile fragment.glsl.", Logger::LogLevel::ERROR);
+        logger.log(Logger::Category::Rendering, "Failed to load/compile fragment.glsl.", Logger::LogLevel::ERROR);
         return false;
     }
 
@@ -122,33 +127,103 @@ bool OpenGLRenderer::initialize()
     m_object3D->setMaterial(m_material);
 
     const std::vector<float> vertices = {
-        // positions        // colors
-         0.0f,  0.5f, 0.0f,  1.0f, 0.0f, 0.0f,
-        -0.5f, -0.5f, 0.0f,  0.0f, 1.0f, 0.0f,
-         0.5f, -0.5f, 0.0f,  0.0f, 0.0f, 1.0f
+        // positions             // colors            // texcoords
+        -0.5f,  0.5f, 0.0f,      1.0f, 0.0f, 0.0f,     0.0f, 1.0f, // top-left
+         0.5f,  0.5f, 0.0f,      0.0f, 1.0f, 0.0f,     1.0f, 1.0f, // top-right
+         0.5f, -0.5f, 0.0f,      0.0f, 0.0f, 1.0f,     1.0f, 0.0f, // bottom-right
+        -0.5f, -0.5f, 0.0f,      1.0f, 1.0f, 0.0f,     0.0f, 0.0f  // bottom-left
     };
     m_object3D->setVertices(vertices);
 
-    m_material->setVertexData(vertices);
+    // Indexed draw: 4 unique vertices, 2 triangles (quad)
+    const std::vector<uint32_t> indices = { 0, 1, 2, 2, 3, 0 };
+    m_object3D->setIndices(indices);
 
+    m_material->setVertexData(vertices);
+    m_material->setIndexData(indices);
+
+    // IMPORTANT: interleaved vertex format is 8 floats per vertex
+    const GLsizei stride = static_cast<GLsizei>(8 * sizeof(float));
     std::vector<OpenGLMaterial::LayoutElement> layout = {
-        {0, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(6 * sizeof(float)), 0},
-        {1, 3, GL_FLOAT, GL_FALSE, static_cast<GLsizei>(6 * sizeof(float)), static_cast<size_t>(3 * sizeof(float))}
+        {0, 3, GL_FLOAT, GL_FALSE, stride, 0},
+        {1, 3, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(3 * sizeof(float))},
+        {2, 2, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(6 * sizeof(float))}
     };
     m_material->setLayout(layout);
 
+    // Load / import wall.jpg into a texture asset, create a material asset referencing it, and bind it.
+    {
+        auto& assetManager = AssetManager::Instance();
+
+        // We want "Content/Textures/wall.jpg" relative to the currently loaded project.
+        const std::string srcAbs = assetManager.getAbsoluteContentPath("Textures/wall.jpg");
+
+        if (!srcAbs.empty() && std::filesystem::exists(srcAbs))
+        {
+            logger.log(Logger::Category::AssetManagement, std::string("Importing texture: ") + srcAbs, Logger::LogLevel::INFO);
+
+            // Asset paths are relative to Content
+            const std::string texAssetRelPath = "Textures/wall.asset";
+            const std::string texAssetName = "wall";
+
+            auto createdTex = assetManager.createAsset(AssetType::Texture, texAssetRelPath, texAssetName, srcAbs);
+            auto tex = std::dynamic_pointer_cast<Texture>(createdTex);
+
+            if (tex)
+            {
+                logger.log(Logger::Category::AssetManagement, "Texture imported and saved as asset: " + texAssetRelPath, Logger::LogLevel::INFO);
+
+                // Create material asset that references the texture asset
+                const std::string matAssetRelPath = "Materials/wall_material.asset";
+                const std::string matAssetName = "wall_material";
+
+                auto createdMat = assetManager.createAsset(AssetType::Material, matAssetRelPath, matAssetName, texAssetRelPath);
+                if (createdMat)
+                {
+                    m_object3D->setMaterialAssetPath(matAssetRelPath);
+                }
+
+                // Bind texture for rendering (runtime)
+                m_material->setTextures({ tex });
+            }
+            else
+            {
+                logger.log(Logger::Category::AssetManagement, "Texture import failed; using debug texture.", Logger::LogLevel::WARNING);
+            }
+        }
+        else
+        {
+            logger.log(Logger::Category::AssetManagement, "wall.jpg not found under project Content/Textures (using debug texture).", Logger::LogLevel::WARNING);
+        }
+
+        // Fallback texture if we couldn't import wall.jpg
+        if (m_material->getTextures().empty())
+        {
+            auto tex = std::make_shared<Texture>();
+            tex->setName("DebugTexture");
+            tex->setWidth(2);
+            tex->setHeight(2);
+            tex->setChannels(4);
+            tex->setData({
+                255,   0,   0, 255,   0, 255,   0, 255,
+                  0,   0, 255, 255, 255, 255,   0, 255
+            });
+            m_material->setTextures({ tex });
+        }
+    }
+
     if (!m_material->build())
     {
-        logger.log("Failed to build OpenGL material (program link).", Logger::LogLevel::ERROR);
+        logger.log(Logger::Category::Rendering, "Failed to build OpenGL material (program link).", Logger::LogLevel::ERROR);
         return false;
     }
 
-    logger.log("Shader program created successfully.", Logger::LogLevel::INFO);
+    logger.log(Logger::Category::Rendering, "Shader program created successfully.", Logger::LogLevel::INFO);
 
     glEnable(GL_DEPTH_TEST);
 
     m_initialized = true;
-    logger.log("Initialisation of the OpenGL renderer complete.", Logger::LogLevel::INFO);
+    logger.log(Logger::Category::Rendering, "Initialisation of the OpenGL renderer complete.", Logger::LogLevel::INFO);
     SDL_ShowWindow(m_window);
     SDL_RestoreWindow(m_window);
     return true;

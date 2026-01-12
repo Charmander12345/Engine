@@ -31,9 +31,9 @@
 /* #undef SDL_VENDOR_INFO */
 
 #ifdef SDL_VENDOR_INFO
-#define SDL_REVISION "SDL-3.3.7-prerelease-3.3.6-51-g95ac0ff4d (" SDL_VENDOR_INFO ")"
+#define SDL_REVISION "SDL-3.3.7-GIT-NOTFOUND (" SDL_VENDOR_INFO ")"
 #else
-#define SDL_REVISION "SDL-3.3.7-prerelease-3.3.6-51-g95ac0ff4d"
+#define SDL_REVISION "SDL-3.3.7-GIT-NOTFOUND"
 #endif
 
 #endif /* SDL_revision_h_ */

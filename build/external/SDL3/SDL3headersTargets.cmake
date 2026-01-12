@@ -7,7 +7,7 @@ if(CMAKE_VERSION VERSION_LESS "3.0.0")
    message(FATAL_ERROR "CMake >= 3.0.0 required")
 endif()
 cmake_policy(PUSH)
-cmake_policy(VERSION 3.0.0...4.0)
+cmake_policy(VERSION 3.0.0...3.31)
 #----------------------------------------------------------------
 # Generated CMake target import file.
 #----------------------------------------------------------------
@@ -50,7 +50,7 @@ unset(_cmake_expected_targets)
 add_library(SDL3::Headers INTERFACE IMPORTED)
 
 set_target_properties(SDL3::Headers PROPERTIES
-  INTERFACE_INCLUDE_DIRECTORIES "C:/Users/conno/source/repos/Engine/build/external/SDL3/include-revision;C:/Users/conno/source/repos/Engine/external/SDL3/include"
+  INTERFACE_INCLUDE_DIRECTORIES "C:/Users/conno/source/repos/Charmander12345/Engine/build/external/SDL3/include-revision;C:/Users/conno/source/repos/Charmander12345/Engine/external/SDL3/include"
 )
 
 # This file does not depend on other imported targets which have

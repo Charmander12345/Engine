@@ -2,12 +2,30 @@
 #include "Logger.h"
 #include <vector>
 
+#include "OpenGLTexture.h"
+#include "Texture.h"
+
 OpenGLMaterial::~OpenGLMaterial()
 {
     if (m_program)
     {
         glDeleteProgram(m_program);
         m_program = 0;
+    }
+    if (m_ebo)
+    {
+        glDeleteBuffers(1, &m_ebo);
+        m_ebo = 0;
+    }
+    if (m_vbo)
+    {
+        glDeleteBuffers(1, &m_vbo);
+        m_vbo = 0;
+    }
+    if (m_vao)
+    {
+        glDeleteVertexArrays(1, &m_vao);
+        m_vao = 0;
     }
 }
 
@@ -33,6 +51,11 @@ bool OpenGLMaterial::build()
     {
         glDeleteProgram(m_program);
         m_program = 0;
+    }
+    if (m_ebo)
+    {
+        glDeleteBuffers(1, &m_ebo);
+        m_ebo = 0;
     }
     if (m_vbo)
     {
@@ -88,6 +111,7 @@ bool OpenGLMaterial::build()
     glGenBuffers(1, &m_vbo);
 
     glBindVertexArray(m_vao);
+
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
     glBufferData(GL_ARRAY_BUFFER, m_vertexData.size() * sizeof(float), m_vertexData.data(), GL_STATIC_DRAW);
 
@@ -97,6 +121,17 @@ bool OpenGLMaterial::build()
         glVertexAttribPointer(elem.index, elem.size, elem.type, elem.normalized, elem.stride, reinterpret_cast<void*>(elem.offset));
     }
 
+    // Optional indexed drawing
+    m_indexCount = 0;
+    if (!m_indexData.empty())
+    {
+        glGenBuffers(1, &m_ebo);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, m_indexData.size() * sizeof(uint32_t), m_indexData.data(), GL_STATIC_DRAW);
+        m_indexCount = static_cast<GLsizei>(m_indexData.size());
+    }
+
+    // Note: do not unbind GL_ELEMENT_ARRAY_BUFFER while VAO is bound.
     glBindVertexArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
@@ -112,14 +147,77 @@ bool OpenGLMaterial::build()
     return true;
 }
 
+void OpenGLMaterial::bindTextures()
+{
+    if (m_textures.empty())
+    {
+        return;
+    }
+
+    // Must have the program bound before calling glUniform*
+    glUseProgram(m_program);
+
+    uint32_t unit = 0;
+    for (const auto& texCpu : m_textures)
+    {
+        if (!texCpu)
+        {
+            ++unit;
+            continue;
+        }
+
+        const Texture* key = texCpu.get();
+        auto it = m_textureCache.find(key);
+        if (it == m_textureCache.end())
+        {
+            auto glTex = std::make_shared<OpenGLTexture>();
+            if (!glTex->initialize(*texCpu))
+            {
+                Logger::Instance().log("OpenGLMaterial: Failed to initialize OpenGL texture from Texture asset.", Logger::LogLevel::ERROR);
+                ++unit;
+                continue;
+            }
+            it = m_textureCache.emplace(key, std::move(glTex)).first;
+        }
+
+        // Bind texture to unit first
+        it->second->bind(unit);
+
+        const std::string uniformName = "texture" + std::to_string(unit);
+        GLint loc = glGetUniformLocation(m_program, uniformName.c_str());
+        if (loc >= 0)
+        {
+            glUniform1i(loc, static_cast<GLint>(unit));
+        }
+
+        ++unit;
+    }
+
+    // Ensure we return to texture unit 0
+    glActiveTexture(GL_TEXTURE0);
+}
+
 void OpenGLMaterial::bind()
 {
     glUseProgram(m_program);
     glBindVertexArray(m_vao);
+
+    bindTextures();
 }
 
 void OpenGLMaterial::unbind()
 {
+    // Unbind textures (by unit)
+    uint32_t unit = 0;
+    for (const auto& texCpu : m_textures)
+    {
+        (void)texCpu;
+        glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + unit));
+        glBindTexture(GL_TEXTURE_2D, 0);
+        ++unit;
+    }
+    glActiveTexture(GL_TEXTURE0);
+
     glBindVertexArray(0);
     glUseProgram(0);
 }
@@ -127,6 +225,13 @@ void OpenGLMaterial::unbind()
 void OpenGLMaterial::render()
 {
     bind();
-    glDrawArrays(GL_TRIANGLES, 0, m_vertexCount);
+    if (m_indexCount > 0)
+    {
+        glDrawElements(GL_TRIANGLES, m_indexCount, GL_UNSIGNED_INT, nullptr);
+    }
+    else
+    {
+        glDrawArrays(GL_TRIANGLES, 0, m_vertexCount);
+    }
     unbind();
 }

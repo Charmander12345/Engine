@@ -6,6 +6,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 project ("Engine" LANGUAGES C CXX)
 
+# Ensure consistent MSVC runtime across all targets (prevents CRT/linker unresolved externals)
+if (MSVC)
+    # Use the DLL runtime (/MD, /MDd)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+
+    # Prefer 64-bit tools/libraries when generating with Ninja inside Visual Studio.
+    # This avoids accidental linkage against x86 Windows SDK libs.
+    set(CMAKE_VS_PLATFORM_NAME "x64" CACHE STRING "" FORCE)
+endif()
+
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
@@ -19,6 +29,9 @@ add_subdirectory(src/Logger)
 add_executable(Engine
     src/main.cpp
 )
+
+# Engine is a console executable
+set_target_properties(Engine PROPERTIES WIN32_EXECUTABLE OFF)
 
 target_include_directories(Engine
     PRIVATE
@@ -41,7 +54,10 @@ target_link_libraries(Engine
 )
 
 set(ENGINE_DEPLOY_DIR "C:/Users/conno/source/repos/EngineBuild")
-set(SHADERS_SOURCE_DIR "${CMAKE_SOURCE_DIR}/src/Renderer/shaders")
+
+# Always copy from the source tree to avoid stale files in the build directory.
+# NOTE: There are two shader directories in the repo; use Renderer/OpenGLRenderer/shaders as the authoritative one.
+set(SHADERS_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/OpenGLRenderer/shaders")
 
 add_custom_command(TARGET Engine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}"
@@ -53,8 +69,14 @@ add_custom_command(TARGET Engine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:Basics> "${ENGINE_DEPLOY_DIR}/"
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:SDL3::SDL3> "$<TARGET_FILE_DIR:Engine>/"
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:SDL3::SDL3> "${ENGINE_DEPLOY_DIR}/"
+
+    # Clean shader output dirs first so removed/renamed shaders don't stay around
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:Engine>/shaders"
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${ENGINE_DEPLOY_DIR}/shaders"
+
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${SHADERS_SOURCE_DIR}" "$<TARGET_FILE_DIR:Engine>/shaders"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${SHADERS_SOURCE_DIR}" "${ENGINE_DEPLOY_DIR}/shaders"
+
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:Engine> "${ENGINE_DEPLOY_DIR}/"
     COMMAND_EXPAND_LISTS
 )

@@ -21,9 +21,24 @@ public:
         FATAL
     };
 
+    enum class Category {
+        General,
+        Engine,
+        AssetManagement,
+        Diagnostics,
+        Rendering,
+        Input,
+        Project,
+        IO
+    };
+
     static Logger& Instance();
     void initialize();
+
+    void setMinimumLogLevel(LogLevel level);
+
     void log(const std::string& message, LogLevel level = LogLevel::INFO);
+    void log(Category category, const std::string& message, LogLevel level = LogLevel::INFO);
 
 private:
     Logger() = default;
@@ -31,7 +46,12 @@ private:
     Logger(const Logger&) = delete;
     Logger& operator=(const Logger&) = delete;
 
+    static const char* toString(LogLevel level);
+    static const char* toString(Category category);
+
     std::ofstream logFile;
     bool initialized{false};
     std::string filename;
+
+    LogLevel minimumLevel{ LogLevel::INFO };
 };

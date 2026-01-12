@@ -1,53 +1,49 @@
 # CMake generation dependency list for this directory.
-C:/Program Files/CMake/share/cmake-4.2/Modules/BasicConfigVersion-AnyNewerVersion.cmake.in
-C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeCheckCompilerFlagCommonPatterns.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeDependentOption.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/CMakePackageConfigHelpers.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/CMakeParseArguments.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/CMakePushCheckState.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCCompilerFlag.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceCompiles.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCSourceRuns.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCXXCompilerFlag.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/CheckCXXSourceCompiles.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/CheckIncludeFile.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/CheckLanguage.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/CheckLibraryExists.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/CheckLinkerFlag.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/CheckSourceCompiles.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/CheckStructHasMember.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/CheckSymbolExists.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/FindGit.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/FindPackageHandleStandardArgs.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/FindPackageMessage.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/FindPkgConfig.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/GNUInstallDirs.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckCompilerFlag.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckFlagCommonConfig.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckLinkerFlag.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceCompiles.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/Internal/CheckSourceRuns.cmake
-C:/Program Files/CMake/share/cmake-4.2/Modules/WriteBasicConfigVersionFile.cmake
-C:/Users/conno/source/repos/Engine/.git/modules/external/SDL3/HEAD
-C:/Users/conno/source/repos/Engine/.git/modules/external/SDL3/refs/heads/main
-C:/Users/conno/source/repos/Engine/build/CMakeFiles/cmake.verify_globs
-C:/Users/conno/source/repos/Engine/build/external/SDL3/CMakeFiles/SDL_build_config.h.intermediate
-C:/Users/conno/source/repos/Engine/build/external/SDL3/CMakeFiles/git-data/grabRef.cmake
-C:/Users/conno/source/repos/Engine/external/SDL3/CMakeLists.txt
-C:/Users/conno/source/repos/Engine/external/SDL3/cmake/3rdparty.cmake
-C:/Users/conno/source/repos/Engine/external/SDL3/cmake/FindLibUSB.cmake
-C:/Users/conno/source/repos/Engine/external/SDL3/cmake/GetGitRevisionDescription.cmake
-C:/Users/conno/source/repos/Engine/external/SDL3/cmake/GetGitRevisionDescription.cmake.in
-C:/Users/conno/source/repos/Engine/external/SDL3/cmake/PreseedEmscriptenCache.cmake
-C:/Users/conno/source/repos/Engine/external/SDL3/cmake/PreseedMSVCCache.cmake
-C:/Users/conno/source/repos/Engine/external/SDL3/cmake/PreseedNokiaNGageCache.cmake
-C:/Users/conno/source/repos/Engine/external/SDL3/cmake/SDL3Config.cmake.in
-C:/Users/conno/source/repos/Engine/external/SDL3/cmake/macros.cmake
-C:/Users/conno/source/repos/Engine/external/SDL3/cmake/sdlchecks.cmake
-C:/Users/conno/source/repos/Engine/external/SDL3/cmake/sdlcommands.cmake
-C:/Users/conno/source/repos/Engine/external/SDL3/cmake/sdlcompilers.cmake
-C:/Users/conno/source/repos/Engine/external/SDL3/cmake/sdlcpu.cmake
-C:/Users/conno/source/repos/Engine/external/SDL3/cmake/sdlmanpages.cmake
-C:/Users/conno/source/repos/Engine/external/SDL3/cmake/sdlplatform.cmake
-C:/Users/conno/source/repos/Engine/external/SDL3/include/build_config/SDL_build_config.h.cmake
-C:/Users/conno/source/repos/Engine/external/SDL3/include/build_config/SDL_revision.h.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/BasicConfigVersion-AnyNewerVersion.cmake.in
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/CMakeCheckCompilerFlagCommonPatterns.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/CMakeDependentOption.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/CMakePackageConfigHelpers.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/CMakeParseArguments.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/CMakePushCheckState.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/CheckCCompilerFlag.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/CheckCSourceCompiles.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/CheckCSourceRuns.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/CheckCXXCompilerFlag.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/CheckCXXSourceCompiles.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/CheckIncludeFile.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/CheckLanguage.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/CheckLibraryExists.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/CheckLinkerFlag.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/CheckSourceCompiles.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/CheckStructHasMember.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/CheckSymbolExists.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/FindGit.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/FindPackageHandleStandardArgs.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/FindPackageMessage.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/FindPkgConfig.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/GNUInstallDirs.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/Internal/CheckCompilerFlag.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/Internal/CheckFlagCommonConfig.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/Internal/CheckLinkerFlag.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/Internal/CheckSourceCompiles.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/Internal/CheckSourceRuns.cmake
+C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/share/cmake-4.1/Modules/WriteBasicConfigVersionFile.cmake
+C:/Users/conno/source/repos/Charmander12345/Engine/build/CMakeFiles/cmake.verify_globs
+C:/Users/conno/source/repos/Charmander12345/Engine/build/external/SDL3/CMakeFiles/SDL_build_config.h.intermediate
+C:/Users/conno/source/repos/Charmander12345/Engine/external/SDL3/CMakeLists.txt
+C:/Users/conno/source/repos/Charmander12345/Engine/external/SDL3/cmake/3rdparty.cmake
+C:/Users/conno/source/repos/Charmander12345/Engine/external/SDL3/cmake/FindLibUSB.cmake
+C:/Users/conno/source/repos/Charmander12345/Engine/external/SDL3/cmake/GetGitRevisionDescription.cmake
+C:/Users/conno/source/repos/Charmander12345/Engine/external/SDL3/cmake/PreseedEmscriptenCache.cmake
+C:/Users/conno/source/repos/Charmander12345/Engine/external/SDL3/cmake/PreseedMSVCCache.cmake
+C:/Users/conno/source/repos/Charmander12345/Engine/external/SDL3/cmake/PreseedNokiaNGageCache.cmake
+C:/Users/conno/source/repos/Charmander12345/Engine/external/SDL3/cmake/SDL3Config.cmake.in
+C:/Users/conno/source/repos/Charmander12345/Engine/external/SDL3/cmake/macros.cmake
+C:/Users/conno/source/repos/Charmander12345/Engine/external/SDL3/cmake/sdlchecks.cmake
+C:/Users/conno/source/repos/Charmander12345/Engine/external/SDL3/cmake/sdlcommands.cmake
+C:/Users/conno/source/repos/Charmander12345/Engine/external/SDL3/cmake/sdlcompilers.cmake
+C:/Users/conno/source/repos/Charmander12345/Engine/external/SDL3/cmake/sdlcpu.cmake
+C:/Users/conno/source/repos/Charmander12345/Engine/external/SDL3/cmake/sdlmanpages.cmake
+C:/Users/conno/source/repos/Charmander12345/Engine/external/SDL3/cmake/sdlplatform.cmake
+C:/Users/conno/source/repos/Charmander12345/Engine/external/SDL3/include/build_config/SDL_build_config.h.cmake
+C:/Users/conno/source/repos/Charmander12345/Engine/external/SDL3/include/build_config/SDL_revision.h.cmake
