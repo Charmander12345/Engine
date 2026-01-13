@@ -3,6 +3,8 @@
 
 void GarbageCollector::collect()
 {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
     // remove expired entries
     m_trackedResources.erase(
         std::remove_if(m_trackedResources.begin(), m_trackedResources.end(),
@@ -16,6 +18,8 @@ bool GarbageCollector::registerResource(const std::shared_ptr<EngineObject>& res
     {
         return false;
     }
+
+    std::lock_guard<std::mutex> lock(m_mutex);
 
     auto it = std::find_if(m_trackedResources.begin(), m_trackedResources.end(),
         [&](const std::weak_ptr<EngineObject>& p)
@@ -35,6 +39,8 @@ bool GarbageCollector::registerResource(const std::shared_ptr<EngineObject>& res
 
 std::vector<std::shared_ptr<EngineObject>> GarbageCollector::getAliveResources() const
 {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
     std::vector<std::shared_ptr<EngineObject>> out;
     out.reserve(m_trackedResources.size());
 

@@ -1,5 +1,0 @@
-C:/Users/conno/source/repos/Charmander12345/Engine/build/src/Basics/Basics.dir/MinSizeRel/EngineObject.obj
-C:/Users/conno/source/repos/Charmander12345/Engine/build/src/Basics/Basics.dir/MinSizeRel/Object2D.obj
-C:/Users/conno/source/repos/Charmander12345/Engine/build/src/Basics/Basics.dir/MinSizeRel/Object3D.obj
-C:/Users/conno/source/repos/Charmander12345/Engine/build/src/Basics/Basics.dir/MinSizeRel/EngineLevel.obj
-C:/Users/conno/source/repos/Charmander12345/Engine/build/src/Basics/Basics.dir/MinSizeRel/Texture.obj

@@ -25,6 +25,7 @@ target_link_libraries(AssetManager
         Diagnostics
         Logger
         Basics
+        SDL3::SDL3
 )
 
 if (WIN32)

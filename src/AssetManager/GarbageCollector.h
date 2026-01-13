@@ -1,6 +1,7 @@
 #pragma once
 #include <vector>
 #include <memory>
+#include <mutex>
 #include "../Basics/EngineObject.h"
 
 class GarbageCollector
@@ -16,5 +17,6 @@ public:
     const std::vector<std::weak_ptr<EngineObject>>& getTrackedResourcesRef() const;
 
 private:
+    mutable std::mutex m_mutex;
     std::vector<std::weak_ptr<EngineObject>> m_trackedResources;
 };

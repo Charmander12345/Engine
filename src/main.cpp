@@ -96,11 +96,18 @@ int main()
                 }
                 if (event.key.key == SDLK_F1)
                 {
-                    logger.log(Logger::Category::Input, "F1 pressed - saving all assets.", Logger::LogLevel::INFO);
-                    assetManager.saveAllAssets();
+                    logger.log(Logger::Category::Input, "F1 pressed - saving all assets (async).", Logger::LogLevel::INFO);
+                    assetManager.saveAllAssetsAsync();
+                }
+                if (event.key.key == SDLK_F2)
+                {
+                    logger.log(Logger::Category::Input, "F2 pressed - opening import dialog.", Logger::LogLevel::INFO);
+                    assetManager.importAssetWithDialog(nullptr, AssetType::Unknown);
                 }
             }
         }
+
+        assetManager.pump();
 
         renderer->clear();
         renderer->render();
@@ -115,6 +122,12 @@ int main()
     }
 
     logger.log(Logger::Category::Engine, "Shutting down...", Logger::LogLevel::INFO);
+
+	while (diagnostics.isActionInProgress())
+    {
+        logger.log(Logger::Category::Engine, "Waiting for ongoing actions to complete...", Logger::LogLevel::INFO);
+        SDL_Delay(100);
+    }
 
     delete renderer;
 

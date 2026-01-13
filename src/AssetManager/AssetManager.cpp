@@ -8,9 +8,83 @@
 #include <cstdint>
 #include "AssetTypes.h"
 
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_dialog.h>
+
 #include "MaterialAsset.h"
 
 namespace fs = std::filesystem;
+
+namespace
+{
+    struct ImportDialogContext
+    {
+        AssetType preferredType{ AssetType::Texture };
+    };
+
+    // Map file extension -> asset type (extensible)
+    static AssetType DetectAssetTypeFromPath(const fs::path& p)
+    {
+        std::string ext = p.extension().string();
+        for (auto& c : ext)
+        {
+            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        }
+
+        // Textures
+        if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga")
+            return AssetType::Texture;
+
+        // Future: models/audio/shaders/scripts...
+        // if (ext == ".obj" || ext == ".fbx" ... ) return AssetType::Model3D;
+        // if (ext == ".wav" || ext == ".ogg" ... ) return AssetType::Audio;
+        // if (ext == ".glsl" || ext == ".vert" || ext == ".frag") return AssetType::Shader;
+
+        return AssetType::Unknown;
+    }
+
+    static void SDLCALL OnImportDialogClosed(void* userdata, const char* const* filelist, int /*filter_index*/)
+    {
+		Logger::Instance().log(Logger::Category::AssetManagement, "Import dialog closed callback invoked.", Logger::LogLevel::INFO);
+        auto* ctx = static_cast<ImportDialogContext*>(userdata);
+        if (!ctx)
+        {
+            Logger::Instance().log(Logger::Category::AssetManagement, "Import dialog context is null!", Logger::LogLevel::ERROR);
+            return;
+        }
+
+        if (!filelist || !filelist[0])
+        {
+            Logger::Instance().log(Logger::Category::AssetManagement, "Import dialog cancelled or no file selected.", Logger::LogLevel::INFO);
+            delete ctx;
+            return;
+        }
+
+        const std::string selectedPath = filelist[0];
+        Logger::Instance().log(Logger::Category::AssetManagement, "Queueing import job for file: " + selectedPath, Logger::LogLevel::INFO);
+        AssetManager::Instance().importAssetFromFileAsync(ctx->preferredType, selectedPath);
+        delete ctx;
+    }
+
+    static std::string sanitizeName(const std::string& name)
+    {
+        std::string out;
+        out.reserve(name.size());
+        for (char c : name)
+        {
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-')
+            {
+                out.push_back(c);
+            }
+            else
+            {
+                out.push_back('_');
+            }
+        }
+        if (out.empty()) out = "Imported";
+        return out;
+    }
+}
 
 static void writeString(std::ofstream& out, const std::string& s)
 {
@@ -235,7 +309,7 @@ const std::vector<AssetRegistryEntry>& AssetManager::getAssetRegistry() const
 
 bool AssetManager::initialize()
 {
-	m_garbageCollector = GarbageCollector();
+    startWorker();
 
     // Create a default 2D triangle asset that is tracked and can be saved via saveAllAssets.
     // It starts as unsaved and will be written on demand.
@@ -269,8 +343,119 @@ bool AssetManager::initialize()
     return true;
 }
 
+void AssetManager::startWorker()
+{
+    if (m_workerRunning)
+        return;
+
+    m_workerStopRequested = false;
+    m_workerRunning = true;
+
+    m_worker = std::thread([this]()
+    {
+        auto& logger = Logger::Instance();
+        logger.log(Logger::Category::AssetManagement, "Asset worker thread started.", Logger::LogLevel::INFO);
+
+        for (;;)
+        {
+            std::function<void()> job;
+            {
+                std::unique_lock<std::mutex> lock(m_jobMutex);
+                m_jobCv.wait(lock, [this]() { return m_workerStopRequested || !m_jobs.empty(); });
+
+                if (m_workerStopRequested && m_jobs.empty())
+                    break;
+
+                job = std::move(m_jobs.front());
+                m_jobs.pop();
+            }
+
+            if (job)
+            {
+                job();
+            }
+        }
+
+        logger.log(Logger::Category::AssetManagement, "Asset worker thread exiting.", Logger::LogLevel::INFO);
+    });
+}
+
+void AssetManager::stopWorker()
+{
+    if (!m_workerRunning)
+        return;
+
+    {
+        std::lock_guard<std::mutex> lock(m_jobMutex);
+        m_workerStopRequested = true;
+    }
+    m_jobCv.notify_all();
+
+    if (m_worker.joinable())
+    {
+        m_worker.join();
+    }
+
+    m_workerRunning = false;
+}
+
+void AssetManager::enqueueJob(std::function<void()> job)
+{
+    {
+        std::lock_guard<std::mutex> lock(m_jobMutex);
+        m_jobs.push(std::move(job));
+    }
+    m_jobCv.notify_one();
+}
+
+void AssetManager::pump()
+{
+    // currently no main-thread-only work is required.
+}
+
+void AssetManager::importAssetFromFileAsync(AssetType type, std::string sourceFilePath)
+{
+    auto& diagnostics = DiagnosticsManager::Instance();
+    diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingAsset, true);
+
+    enqueueJob([this, type, source = std::move(sourceFilePath)]()
+    {
+        {
+            std::lock_guard<std::mutex> lock(m_stateMutex);
+            importAssetFromFile(type, source);
+        }
+
+        auto& diagnosticsLocal = DiagnosticsManager::Instance();
+        diagnosticsLocal.setActionInProgress(DiagnosticsManager::ActionType::LoadingAsset, false);
+    });
+}
+
+void AssetManager::saveAllAssetsAsync()
+{
+    auto& diagnostics = DiagnosticsManager::Instance();
+    diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingAsset, true);
+
+    enqueueJob([this]()
+    {
+        {
+            std::lock_guard<std::mutex> lock(m_stateMutex);
+            saveAllAssets();
+        }
+
+        auto& diagnosticsLocal = DiagnosticsManager::Instance();
+        diagnosticsLocal.setActionInProgress(DiagnosticsManager::ActionType::SavingAsset, false);
+    });
+}
+
+AssetManager::~AssetManager()
+{
+    stopWorker();
+}
+
 bool AssetManager::saveAllAssets()
 {
+    std::lock_guard<std::mutex> lock(m_stateMutex);
+
     auto& diagnostics = DiagnosticsManager::Instance();
     auto& logger = Logger::Instance();
 
@@ -353,12 +538,25 @@ std::string AssetManager::getAbsoluteContentPath(const std::string& relativeToCo
 
 std::shared_ptr<EngineObject> AssetManager::loadAssetObject(const std::string& path)
 {
+    // Fast path: already loaded
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        for (const auto& alive : m_garbageCollector.getAliveResources())
+        {
+            if (alive && alive->getPath() == path)
+            {
+                return alive;
+            }
+        }
+    }
+
     if (!loadAsset(path))
     {
         return nullptr;
     }
 
-    // Find the loaded asset among currently alive tracked assets.
+    // Fetch again after load
+    std::lock_guard<std::mutex> lock(m_stateMutex);
     for (const auto& alive : m_garbageCollector.getAliveResources())
     {
         if (alive && alive->getPath() == path)
@@ -366,7 +564,6 @@ std::shared_ptr<EngineObject> AssetManager::loadAssetObject(const std::string& p
             return alive;
         }
     }
-
     return nullptr;
 }
 
@@ -402,18 +599,24 @@ std::vector<std::shared_ptr<Texture>> AssetManager::loadTexturesForMaterial(cons
 
 bool AssetManager::loadAsset(const std::string& path)
 {
-    auto& logger = Logger::Instance();
-    logger.log(Logger::Category::AssetManagement, "Loading asset: " + path, Logger::LogLevel::INFO);
+     auto& logger = Logger::Instance();
+     logger.log(Logger::Category::AssetManagement, "Loading asset: " + path, Logger::LogLevel::INFO);
 
-    auto& diagnostics = DiagnosticsManager::Instance();
-    bool loaded = diagnostics.isProjectLoaded();
-    if (!loaded || diagnostics.getProjectInfo().projectPath.empty())
-    {
-        logger.log(Logger::Category::AssetManagement, "Asset load failed (no project loaded)", Logger::LogLevel::ERROR);
-        return false;
-    }
+     auto logReadFail = [&](const char* what)
+     {
+         logger.log(Logger::Category::AssetManagement, std::string("Asset load failed while reading ") + what + " (asset: " + path + ")", Logger::LogLevel::ERROR);
+     };
+
+     auto& diagnostics = DiagnosticsManager::Instance();
+     bool loaded = diagnostics.isProjectLoaded();
+     if (!loaded || diagnostics.getProjectInfo().projectPath.empty())
+     {
+         logger.log(Logger::Category::AssetManagement, "Asset load failed (no project loaded)", Logger::LogLevel::ERROR);
+         return false;
+     }
 
     fs::path contentRoot = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+    logger.log(Logger::Category::AssetManagement, "Content root: " + contentRoot.lexically_normal().string(), Logger::LogLevel::INFO);
 
     // 'path' is expected to be the relative path inside Content.
     fs::path relPath = fs::path(path);
@@ -422,8 +625,10 @@ bool AssetManager::loadAsset(const std::string& path)
         logger.log(Logger::Category::AssetManagement, "Asset load failed (path must be relative to Content): " + relPath.string(), Logger::LogLevel::ERROR);
         return false;
     }
+    logger.log(Logger::Category::AssetManagement, "Relative asset path: " + relPath.generic_string(), Logger::LogLevel::INFO);
 
     fs::path absolutePath = contentRoot / relPath;
+    logger.log(Logger::Category::AssetManagement, "Absolute asset path: " + absolutePath.lexically_normal().string(), Logger::LogLevel::INFO);
     if (!fs::exists(absolutePath))
     {
         logger.log(Logger::Category::AssetManagement, "Asset load failed (missing file): " + absolutePath.string(), Logger::LogLevel::ERROR);
@@ -437,26 +642,45 @@ bool AssetManager::loadAsset(const std::string& path)
         return false;
     }
 
+    // Avoid re-loading the same asset while we parse (reduces recursive loops)
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        for (const auto& alive : m_garbageCollector.getAliveResources())
+        {
+            if (alive && alive->getPath() == relPath.generic_string())
+            {
+                logger.log(Logger::Category::AssetManagement, "Asset already loaded: " + relPath.generic_string(), Logger::LogLevel::INFO);
+                return true;
+            }
+        }
+    }
+
     uint32_t magic = 0;
     uint32_t version = 0;
-    if (!in.read(reinterpret_cast<char*>(&magic), sizeof(magic))) return false;
-    if (!in.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
+    if (!in.read(reinterpret_cast<char*>(&magic), sizeof(magic))) { logReadFail("magic"); return false; }
+    if (!in.read(reinterpret_cast<char*>(&version), sizeof(version))) { logReadFail("version"); return false; }
+    logger.log(Logger::Category::AssetManagement, "Asset header: magic=0x" + std::to_string(magic) + ", version=" + std::to_string(version), Logger::LogLevel::INFO);
     if (magic != 0x41535453 || version != 2) // 'ASTS'
     {
-        logger.log(Logger::Category::AssetManagement, "Invalid asset file format", Logger::LogLevel::ERROR);
+        logger.log(Logger::Category::AssetManagement, "Invalid asset file format (expected magic=0x41535453, version=2)", Logger::LogLevel::ERROR);
         return false;
     }
 
     int32_t typeInt = 0;
-    if (!in.read(reinterpret_cast<char*>(&typeInt), sizeof(typeInt))) return false;
+    if (!in.read(reinterpret_cast<char*>(&typeInt), sizeof(typeInt))) { logReadFail("type"); return false; }
     AssetType type = static_cast<AssetType>(typeInt);
+    logger.log(Logger::Category::AssetManagement, "Asset type int: " + std::to_string(typeInt), Logger::LogLevel::INFO);
 
     std::string name;
     std::string storedRelPath;
     std::string materialAssetPath;
-    if (!readString(in, name)) return false;
-    if (!readString(in, storedRelPath)) return false;
-    if (!readString(in, materialAssetPath)) return false;
+    if (!readString(in, name)) { logReadFail("name"); return false; }
+    if (!readString(in, storedRelPath)) { logReadFail("storedRelPath"); return false; }
+    if (!readString(in, materialAssetPath)) { logReadFail("materialAssetPath"); return false; }
+
+    logger.log(Logger::Category::AssetManagement,
+        "Asset meta: name='" + name + "', storedRelPath='" + storedRelPath + "', materialAssetPath='" + materialAssetPath + "'",
+        Logger::LogLevel::INFO);
 
     std::shared_ptr<EngineObject> obj;
     switch (type)
@@ -487,21 +711,27 @@ bool AssetManager::loadAsset(const std::string& path)
     obj->setAssetType(type);
     obj->setIsSaved(true);
 
+    std::vector<std::string> levelDepPaths;
+
     if (type == AssetType::Texture)
     {
         auto tex = std::static_pointer_cast<Texture>(obj);
         int32_t w = 0, h = 0, c = 0;
         uint32_t dataSize = 0;
-        if (!in.read(reinterpret_cast<char*>(&w), sizeof(w))) return false;
-        if (!in.read(reinterpret_cast<char*>(&h), sizeof(h))) return false;
-        if (!in.read(reinterpret_cast<char*>(&c), sizeof(c))) return false;
-        if (!in.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize))) return false;
+        if (!in.read(reinterpret_cast<char*>(&w), sizeof(w))) { logReadFail("texture width"); return false; }
+        if (!in.read(reinterpret_cast<char*>(&h), sizeof(h))) { logReadFail("texture height"); return false; }
+        if (!in.read(reinterpret_cast<char*>(&c), sizeof(c))) { logReadFail("texture channels"); return false; }
+        if (!in.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize))) { logReadFail("texture dataSize"); return false; }
+
+        logger.log(Logger::Category::AssetManagement,
+            "Texture payload: w=" + std::to_string(w) + ", h=" + std::to_string(h) + ", c=" + std::to_string(c) + ", dataSize=" + std::to_string(dataSize),
+            Logger::LogLevel::INFO);
 
         std::vector<unsigned char> data;
         data.resize(dataSize);
         if (dataSize > 0)
         {
-            if (!in.read(reinterpret_cast<char*>(data.data()), dataSize)) return false;
+            if (!in.read(reinterpret_cast<char*>(data.data()), dataSize)) { logReadFail("texture data blob"); return false; }
         }
 
         tex->setWidth(w);
@@ -516,31 +746,39 @@ bool AssetManager::loadAsset(const std::string& path)
         obj2d->setMaterialAssetPath(materialAssetPath);
 
         uint32_t vertCount = 0;
-        if (!in.read(reinterpret_cast<char*>(&vertCount), sizeof(vertCount))) return false;
+        if (!in.read(reinterpret_cast<char*>(&vertCount), sizeof(vertCount))) { logReadFail("model2d vertCount"); return false; }
+        logger.log(Logger::Category::AssetManagement, "Model2D payload: vertCount=" + std::to_string(vertCount), Logger::LogLevel::INFO);
         std::vector<float> verts(vertCount);
         if (vertCount > 0)
         {
-            if (!in.read(reinterpret_cast<char*>(verts.data()), vertCount * sizeof(float))) return false;
+            if (!in.read(reinterpret_cast<char*>(verts.data()), vertCount * sizeof(float))) { logReadFail("model2d verts"); return false; }
         }
         obj2d->setVertices(verts);
 
         uint32_t indexCount = 0;
-        if (!in.read(reinterpret_cast<char*>(&indexCount), sizeof(indexCount))) return false;
+        if (!in.read(reinterpret_cast<char*>(&indexCount), sizeof(indexCount))) { logReadFail("model2d indexCount"); return false; }
+        logger.log(Logger::Category::AssetManagement, "Model2D payload: indexCount=" + std::to_string(indexCount), Logger::LogLevel::INFO);
         std::vector<uint32_t> indices(indexCount);
         if (indexCount > 0)
         {
-            if (!in.read(reinterpret_cast<char*>(indices.data()), indexCount * sizeof(uint32_t))) return false;
+            if (!in.read(reinterpret_cast<char*>(indices.data()), indexCount * sizeof(uint32_t))) { logReadFail("model2d indices"); return false; }
         }
         obj2d->setIndices(indices);
 
         // Auto-load material + textures via AssetManager
         if (!materialAssetPath.empty())
         {
+            logger.log(Logger::Category::AssetManagement, "Model2D: loading material asset '" + materialAssetPath + "'", Logger::LogLevel::INFO);
             if (auto matAsset = loadMaterialAsset(materialAssetPath))
             {
+                logger.log(Logger::Category::AssetManagement, "Model2D: material loaded, loading textures...", Logger::LogLevel::INFO);
                 auto textures = loadTexturesForMaterial(*matAsset);
                 obj2d->setLoadedMaterialAsset(matAsset);
                 obj2d->setLoadedTextures(textures);
+            }
+            else
+            {
+                logger.log(Logger::Category::AssetManagement, "Model2D: failed to load material asset '" + materialAssetPath + "'", Logger::LogLevel::WARNING);
             }
         }
     }
@@ -551,31 +789,39 @@ bool AssetManager::loadAsset(const std::string& path)
         obj3d->setMaterialAssetPath(materialAssetPath);
 
         uint32_t vertCount = 0;
-        if (!in.read(reinterpret_cast<char*>(&vertCount), sizeof(vertCount))) return false;
+        if (!in.read(reinterpret_cast<char*>(&vertCount), sizeof(vertCount))) { logReadFail("model3d vertCount"); return false; }
+        logger.log(Logger::Category::AssetManagement, "Model3D payload: vertCount=" + std::to_string(vertCount), Logger::LogLevel::INFO);
         std::vector<float> verts(vertCount);
         if (vertCount > 0)
         {
-            if (!in.read(reinterpret_cast<char*>(verts.data()), vertCount * sizeof(float))) return false;
+            if (!in.read(reinterpret_cast<char*>(verts.data()), vertCount * sizeof(float))) { logReadFail("model3d verts"); return false; }
         }
         obj3d->setVertices(verts);
 
         uint32_t indexCount = 0;
-        if (!in.read(reinterpret_cast<char*>(&indexCount), sizeof(indexCount))) return false;
+        if (!in.read(reinterpret_cast<char*>(&indexCount), sizeof(indexCount))) { logReadFail("model3d indexCount"); return false; }
+        logger.log(Logger::Category::AssetManagement, "Model3D payload: indexCount=" + std::to_string(indexCount), Logger::LogLevel::INFO);
         std::vector<uint32_t> indices(indexCount);
         if (indexCount > 0)
         {
-            if (!in.read(reinterpret_cast<char*>(indices.data()), indexCount * sizeof(uint32_t))) return false;
+            if (!in.read(reinterpret_cast<char*>(indices.data()), indexCount * sizeof(uint32_t))) { logReadFail("model3d indices"); return false; }
         }
         obj3d->setIndices(indices);
 
         // Auto-load material + textures via AssetManager
         if (!materialAssetPath.empty())
         {
+            logger.log(Logger::Category::AssetManagement, "Model3D: loading material asset '" + materialAssetPath + "'", Logger::LogLevel::INFO);
             if (auto matAsset = loadMaterialAsset(materialAssetPath))
             {
+                logger.log(Logger::Category::AssetManagement, "Model3D: material loaded, loading textures...", Logger::LogLevel::INFO);
                 auto textures = loadTexturesForMaterial(*matAsset);
                 obj3d->setLoadedMaterialAsset(matAsset);
                 obj3d->setLoadedTextures(textures);
+            }
+            else
+            {
+                logger.log(Logger::Category::AssetManagement, "Model3D: failed to load material asset '" + materialAssetPath + "'", Logger::LogLevel::WARNING);
             }
         }
     }
@@ -586,11 +832,14 @@ bool AssetManager::loadAsset(const std::string& path)
         level->clearLoadedDependencies();
 
         uint32_t depCount = 0;
-        if (!in.read(reinterpret_cast<char*>(&depCount), sizeof(depCount))) return false;
+        if (!in.read(reinterpret_cast<char*>(&depCount), sizeof(depCount))) { logReadFail("level depCount"); return false; }
+        logger.log(Logger::Category::AssetManagement, "Level payload: depCount=" + std::to_string(depCount), Logger::LogLevel::INFO);
         for (uint32_t i = 0; i < depCount; ++i)
         {
             std::string objPath;
-            if (!readString(in, objPath)) return false;
+            if (!readString(in, objPath)) { logReadFail("level object path"); return false; }
+
+            logger.log(Logger::Category::AssetManagement, "Level dep[" + std::to_string(i) + "]: path='" + objPath + "'", Logger::LogLevel::INFO);
 
             fs::path p(objPath);
             if (p.is_absolute())
@@ -600,9 +849,9 @@ bool AssetManager::loadAsset(const std::string& path)
             }
 
             Vec3 pos{}, rot{}, scl{};
-            if (!in.read(reinterpret_cast<char*>(&pos), sizeof(pos))) return false;
-            if (!in.read(reinterpret_cast<char*>(&rot), sizeof(rot))) return false;
-            if (!in.read(reinterpret_cast<char*>(&scl), sizeof(scl))) return false;
+            if (!in.read(reinterpret_cast<char*>(&pos), sizeof(pos))) { logReadFail("level object position"); return false; }
+            if (!in.read(reinterpret_cast<char*>(&rot), sizeof(rot))) { logReadFail("level object rotation"); return false; }
+            if (!in.read(reinterpret_cast<char*>(&scl), sizeof(scl))) { logReadFail("level object scale"); return false; }
 
             Transform t;
             t.setPosition(pos);
@@ -614,31 +863,9 @@ bool AssetManager::loadAsset(const std::string& path)
             if (!p.empty())
             {
                 const std::string depRelPath = p.generic_string();
-                loadAsset(depRelPath);
-
-                // Find the loaded asset among currently alive tracked assets.
-                std::shared_ptr<EngineObject> depAsset;
-                for (const auto& alive : m_garbageCollector.getAliveResources())
-                {
-                    if (alive && alive->getPath() == depRelPath)
-                    {
-                        depAsset = alive;
-                        break;
-                    }
-                }
-
-                if (depAsset)
-                {
-                    level->setLoadedDependency(depRelPath, depAsset);
-                }
-            }
-
-            EngineObject dep;
-            dep.setPath(p.generic_string());
-            dep.setTransform(t);
-
-            level->registerObject(dep);
-            level->setObjectTransform(dep, t);
+                logger.log(Logger::Category::AssetManagement, "Level: recorded dependency asset '" + depRelPath + "'", Logger::LogLevel::INFO);
+                levelDepPaths.push_back(depRelPath);
+             }
         }
     }
 
@@ -647,7 +874,8 @@ bool AssetManager::loadAsset(const std::string& path)
         auto mat = std::static_pointer_cast<MaterialAsset>(obj);
 
         uint32_t texRefCount = 0;
-        if (!in.read(reinterpret_cast<char*>(&texRefCount), sizeof(texRefCount))) return false;
+        if (!in.read(reinterpret_cast<char*>(&texRefCount), sizeof(texRefCount))) { logReadFail("material texRefCount"); return false; }
+        logger.log(Logger::Category::AssetManagement, "Material payload: texRefCount=" + std::to_string(texRefCount), Logger::LogLevel::INFO);
 
         std::vector<std::string> refs;
         refs.reserve(texRefCount);
@@ -655,14 +883,38 @@ bool AssetManager::loadAsset(const std::string& path)
         for (uint32_t i = 0; i < texRefCount; ++i)
         {
             std::string ref;
-            if (!readString(in, ref)) return false;
+            if (!readString(in, ref)) { logReadFail("material texture ref"); return false; }
+            logger.log(Logger::Category::AssetManagement, "Material texRef[" + std::to_string(i) + "]: '" + ref + "'", Logger::LogLevel::INFO);
             refs.push_back(std::move(ref));
         }
 
         mat->setTextureAssetPaths(std::move(refs));
     }
 
-    m_garbageCollector.registerResource(obj);
+    // Register main object in GC before resolving dependencies
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        m_garbageCollector.registerResource(obj);
+    }
+
+    // Resolve dependencies synchronously and attach them to the owning asset.
+    if (type == AssetType::Level)
+    {
+        auto level = std::static_pointer_cast<EngineLevel>(obj);
+        for (const auto& depRelPath : levelDepPaths)
+        {
+            auto depObj = loadAssetObject(depRelPath);
+            if (depObj)
+            {
+                level->setLoadedDependency(depRelPath, depObj);
+                logger.log(Logger::Category::AssetManagement, "Level: dependency attached '" + depRelPath + "'", Logger::LogLevel::INFO);
+            }
+            else
+            {
+                logger.log(Logger::Category::AssetManagement, "Level: dependency failed to load '" + depRelPath + "'", Logger::LogLevel::WARNING);
+            }
+        }
+    }
 
     logger.log(Logger::Category::AssetManagement, "Asset loaded: " + name + " (" + obj->getPath() + ")", Logger::LogLevel::INFO);
     return true;
@@ -670,6 +922,8 @@ bool AssetManager::loadAsset(const std::string& path)
 
 bool AssetManager::saveAsset(const std::shared_ptr<EngineObject>& object)
 {
+    std::lock_guard<std::mutex> lock(m_stateMutex);
+
     auto& logger = Logger::Instance();
     if (!object)
     {
@@ -939,95 +1193,152 @@ static std::string normalizeAssetRelPath(AssetType type, std::string relPath)
     return p.generic_string();
 }
 
+void AssetManager::ensureDefaultTriangleAssetSaved()
+{
+    auto& logger = Logger::Instance();
+    std::shared_ptr<EngineObject> tri;
+    bool needsSave = false;
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        tri = m_defaultTriangle2D;
+        needsSave = (tri != nullptr) && !tri->getIsSaved();
+    }
+
+    if (!tri)
+    {
+        logger.log(Logger::Category::AssetManagement, "Default triangle asset missing; cannot initialize level content.", Logger::LogLevel::WARNING);
+        return;
+    }
+
+    if (needsSave)
+    {
+        if (!saveAsset(tri))
+        {
+            logger.log(Logger::Category::AssetManagement, "Failed to persist default triangle asset.", Logger::LogLevel::ERROR);
+        }
+    }
+}
+
+std::unique_ptr<EngineLevel> AssetManager::createLevelWithDefaultTriangle(const std::string& levelPath, const std::string& levelName)
+{
+    auto level = std::make_unique<EngineLevel>();
+    level->setName(levelName);
+    level->setPath(fs::path(levelPath).generic_string());
+
+    ensureDefaultTriangleAssetSaved();
+
+    if (m_defaultTriangle2D)
+    {
+        EngineObject dep;
+        dep.setPath(m_defaultTriangle2D->getPath());
+        dep.setName(m_defaultTriangle2D->getName());
+        dep.setAssetType(m_defaultTriangle2D->getAssetType());
+        Transform t{};
+        dep.setTransform(t);
+
+        level->registerObject(dep);
+        level->setObjectTransform(dep, t);
+        level->setLoadedDependency(dep.getPath(), m_defaultTriangle2D);
+    }
+
+    level->setIsSaved(false);
+    return level;
+}
+
 std::shared_ptr<EngineObject> AssetManager::createAsset(AssetType type, const std::string& path, const std::string& name, const std::string& sourcePath)
 {
     auto& logger = Logger::Instance();
     logger.log(Logger::Category::AssetManagement, "Creating asset with name: " + name + " at " + path, Logger::LogLevel::INFO);
 
     std::shared_ptr<EngineObject> obj;
-    switch (type)
+    std::string normalizedRel;
     {
-    case AssetType::Model2D:
-        obj = std::make_shared<Object2D>();
-        break;
-    case AssetType::Model3D:
-        obj = std::make_shared<Object3D>();
-        break;
-    case AssetType::Texture:
-        obj = std::make_shared<Texture>();
-        break;
-    case AssetType::Material:
-        obj = std::make_shared<MaterialAsset>();
-        break;
-    case AssetType::Audio:
-    case AssetType::Script:
-    case AssetType::Shader:
-    case AssetType::Unknown:
-    default:
-        obj = std::make_shared<EngineObject>();
-        break;
-    }
+        std::lock_guard<std::mutex> lock(m_stateMutex);
 
-    fs::path rel = fs::path(path);
-    if (rel.is_absolute())
-    {
-        rel = rel.filename();
-    }
-
-    const std::string normalizedRel = normalizeAssetRelPath(type, rel.generic_string());
-
-    obj->setPath(normalizedRel);
-    obj->setName(name);
-    obj->setAssetType(type);
-    obj->setIsSaved(false);
-
-    if (type == AssetType::Texture)
-    {
-        auto tex = std::dynamic_pointer_cast<Texture>(obj);
-        if (tex)
+        switch (type)
         {
-            if (sourcePath.empty())
-            {
-                logger.log("Texture asset creation requires a sourcePath to import image data.", Logger::LogLevel::ERROR);
-                return nullptr;
-            }
-
-            int w = 0, h = 0, c = 0;
-            unsigned char* data = stbi_load(sourcePath.c_str(), &w, &h, &c, 0);
-            if (!data)
-            {
-                logger.log("Failed to load texture source image: " + sourcePath, Logger::LogLevel::ERROR);
-                return nullptr;
-            }
-
-            const size_t total = static_cast<size_t>(w) * static_cast<size_t>(h) * static_cast<size_t>(c);
-            std::vector<unsigned char> bytes;
-            bytes.assign(data, data + total);
-            stbi_image_free(data);
-
-            tex->setWidth(w);
-            tex->setHeight(h);
-            tex->setChannels(c);
-            tex->setData(std::move(bytes));
+        case AssetType::Model2D:
+            obj = std::make_shared<Object2D>();
+            break;
+        case AssetType::Model3D:
+            obj = std::make_shared<Object3D>();
+            break;
+        case AssetType::Texture:
+            obj = std::make_shared<Texture>();
+            break;
+        case AssetType::Material:
+            obj = std::make_shared<MaterialAsset>();
+            break;
+        case AssetType::Audio:
+        case AssetType::Script:
+        case AssetType::Shader:
+        case AssetType::Unknown:
+        default:
+            obj = std::make_shared<EngineObject>();
+            break;
         }
-    }
 
-    if (type == AssetType::Material)
-    {
-        auto mat = std::dynamic_pointer_cast<MaterialAsset>(obj);
-        if (mat)
+        fs::path rel = fs::path(path);
+        if (rel.is_absolute())
         {
-            std::vector<std::string> refs;
-            if (!sourcePath.empty())
-            {
-                refs.push_back(sourcePath);
-            }
-            mat->setTextureAssetPaths(std::move(refs));
+            rel = rel.filename();
         }
-    }
 
-    // ALWAYS register in GC when created
-    m_garbageCollector.registerResource(obj);
+        normalizedRel = normalizeAssetRelPath(type, rel.generic_string());
+
+        obj->setPath(normalizedRel);
+        obj->setName(name);
+        obj->setAssetType(type);
+        obj->setIsSaved(false);
+
+        if (type == AssetType::Texture)
+        {
+            auto tex = std::dynamic_pointer_cast<Texture>(obj);
+            if (tex)
+            {
+                if (sourcePath.empty())
+                {
+                    logger.log("Texture asset creation requires a sourcePath to import image data.", Logger::LogLevel::ERROR);
+                    return nullptr;
+                }
+
+                int w = 0, h = 0, c = 0;
+                unsigned char* data = stbi_load(sourcePath.c_str(), &w, &h, &c, 0);
+                if (!data)
+                {
+                    logger.log("Failed to load texture source image: " + sourcePath, Logger::LogLevel::ERROR);
+                    return nullptr;
+                }
+
+                const size_t total = static_cast<size_t>(w) * static_cast<size_t>(h) * static_cast<size_t>(c);
+                std::vector<unsigned char> bytes;
+                bytes.assign(data, data + total);
+                stbi_image_free(data);
+
+                tex->setWidth(w);
+                tex->setHeight(h);
+                tex->setChannels(c);
+                tex->setData(std::move(bytes));
+            }
+        }
+
+        if (type == AssetType::Material)
+        {
+            auto mat = std::dynamic_pointer_cast<MaterialAsset>(obj);
+            if (mat)
+            {
+                std::vector<std::string> refs;
+                if (!sourcePath.empty())
+                {
+                    refs.push_back(sourcePath);
+                }
+                mat->setTextureAssetPaths(std::move(refs));
+            }
+        }
+
+        // ALWAYS register in GC when created
+        m_garbageCollector.registerResource(obj);
+    }
 
     if (!saveAsset(obj))
     {
@@ -1174,17 +1485,38 @@ bool AssetManager::loadProject(const std::string& projectPath)
     }
 	logger.log(Logger::Category::AssetManagement, "Asset registry ready. Total assets: " + std::to_string(m_registry.size()), Logger::LogLevel::INFO);
 
+    auto createDefaultLevel = [&]()
+    {
+        const std::string fallbackPath = (fs::path("Levels") / "DefaultLevel.map").generic_string();
+        auto level = createLevelWithDefaultTriangle(fallbackPath, fs::path(fallbackPath).stem().string());
+        diagnostics.setActiveLevel(std::move(level));
+
+        if (auto* lvl = diagnostics.getActiveLevel())
+        {
+            saveAsset(std::shared_ptr<EngineObject>(lvl, [](EngineObject*) {}));
+            discoverAssetsAndBuildRegistry(info.projectPath);
+            saveAssetRegistry(info.projectPath);
+        }
+    };
+
     if (!LevelPath.empty())
     {
-        auto level = std::make_unique<EngineLevel>();
-        level->setPath(LevelPath);
-        level->setName(fs::path(LevelPath).stem().string());
-        diagnostics.setActiveLevel(std::move(level));
+        const std::string relLevelPath = fs::path(LevelPath).generic_string();
+        auto loadedObj = loadAssetObject(relLevelPath);
+        if (auto loadedLevel = std::dynamic_pointer_cast<EngineLevel>(loadedObj))
+        {
+            diagnostics.setActiveLevel(std::make_unique<EngineLevel>(*loadedLevel));
+        }
+        else
+        {
+            logger.log(Logger::Category::AssetManagement, "Failed to load level asset; creating default level.", Logger::LogLevel::WARNING);
+            createDefaultLevel();
+        }
     }
     else
     {
-        diagnostics.setActiveLevel(nullptr);
-        logger.log("No active level set for project.", Logger::LogLevel::WARNING);
+        logger.log("No active level set for project. Creating default level.", Logger::LogLevel::WARNING);
+        createDefaultLevel();
     }
 
     if (!diagnostics.loadProjectConfig())
@@ -1248,12 +1580,18 @@ bool AssetManager::saveProject(const std::string& projectPath)
         return false;
     }
 
+    std::string levelPathToSave;
+    if (diagnostics.getActiveLevel())
+    {
+        levelPathToSave = fs::path(diagnostics.getActiveLevel()->getPath()).generic_string();
+    }
+
     out << "Name=" << info.projectName << "\n";
     out << "Version=" << info.projectVersion << "\n";
     out << "EngineVersion=" << info.engineVersion << "\n";
     out << "Path=" << info.projectPath << "\n";
     out << "RHI=" << DiagnosticsManager::rhiTypeToString(info.selectedRHI) << "\n";
-	out << "Level=" << (diagnostics.getActiveLevel() ? diagnostics.getActiveLevel()->getPath() : "") << "\n";
+    out << "Level=" << levelPathToSave << "\n";
 
     diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingProject, false);
     logger.log(Logger::Category::Project, "Project saved: " + projectFile.string(), Logger::LogLevel::INFO);
@@ -1291,13 +1629,17 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
 
     diagnostics.setProjectInfo(infoWithPath);
 
-    auto defaultlevel = std::make_unique<EngineLevel>();
-    defaultlevel->setName("Default");
-    defaultlevel->setPath("Levels\\DefaultLevel.map");
+    const std::string defaultLevelPath = (fs::path("Levels") / "DefaultLevel.map").generic_string();
+    auto defaultlevel = createLevelWithDefaultTriangle(defaultLevelPath, "Default");
     diagnostics.setActiveLevel(std::move(defaultlevel));
 
     // ensure defaults.ini exists for the new project
     diagnostics.loadProjectConfig();
+
+    if (auto* level = diagnostics.getActiveLevel())
+    {
+        saveAsset(std::shared_ptr<EngineObject>(level, [](EngineObject*) {}));
+    }
 
     bool saved = saveProject(root.string());
     diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingProject, false);
@@ -1312,4 +1654,99 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
         return false;
 	}
     return saved;
+}
+
+void AssetManager::importAssetWithDialog(SDL_Window* parentWindow, AssetType preferredType)
+{
+    auto& logger = Logger::Instance();
+
+    const auto& diagnostics = DiagnosticsManager::Instance();
+    if (!diagnostics.isProjectLoaded() || diagnostics.getProjectInfo().projectPath.empty())
+    {
+        logger.log(Logger::Category::AssetManagement, "Import failed: no project loaded.", Logger::LogLevel::ERROR);
+        return;
+    }
+
+    auto* ctx = new ImportDialogContext();
+    ctx->preferredType = preferredType;
+
+    SDL_DialogFileFilter filters[] = {
+        { "Images", "png;jpg;jpeg;bmp;tga" },
+        { "All files", "*" }
+    };
+
+    SDL_ShowOpenFileDialog(
+        OnImportDialogClosed,
+        ctx,
+        parentWindow,
+        filters,
+        SDL_arraysize(filters),
+        nullptr,
+        false);
+
+    logger.log(Logger::Category::AssetManagement, "Import dialog opened.", Logger::LogLevel::INFO);
+}
+
+// NOTE: File dialogs should be handled by the SDL/UI layer and then call importAssetFromFile(...).
+
+std::shared_ptr<EngineObject> AssetManager::importAssetFromFile(AssetType type, const std::string& sourceFilePath)
+{
+    auto& logger = Logger::Instance();
+
+    const auto& diagnostics = DiagnosticsManager::Instance();
+    if (!diagnostics.isProjectLoaded() || diagnostics.getProjectInfo().projectPath.empty())
+    {
+        logger.log(Logger::Category::AssetManagement, "Import failed: no project loaded.", Logger::LogLevel::ERROR);
+        return nullptr;
+    }
+
+    fs::path src(sourceFilePath);
+    if (sourceFilePath.empty() || !fs::exists(src))
+    {
+        logger.log(Logger::Category::AssetManagement, "Import failed: source file missing: " + sourceFilePath, Logger::LogLevel::ERROR);
+        return nullptr;
+    }
+
+    if (type == AssetType::Unknown)
+    {
+        type = DetectAssetTypeFromPath(src);
+        if (type == AssetType::Unknown)
+        {
+            logger.log(Logger::Category::AssetManagement,
+                "Import failed: couldn't detect asset type from extension: " + src.extension().string() + " (file: " + src.string() + ")",
+                Logger::LogLevel::ERROR);
+            return nullptr;
+        }
+    }
+
+    // Dispatch by asset type (extensible)
+    switch (type)
+    {
+    case AssetType::Texture:
+    {
+        // Destination: Content/Textures/<stem>.asset
+        const std::string baseName = sanitizeName(src.stem().string());
+        const std::string relAssetPath = (fs::path("Textures") / (baseName + ".asset")).generic_string();
+
+        // If already exists, add a suffix.
+        std::string finalRelAssetPath = relAssetPath;
+        int suffix = 1;
+        while (doesAssetExist(finalRelAssetPath))
+        {
+            finalRelAssetPath = (fs::path("Textures") / (baseName + "_" + std::to_string(suffix) + ".asset")).generic_string();
+            ++suffix;
+        }
+
+        logger.log(Logger::Category::AssetManagement, "Importing texture from: " + src.string(), Logger::LogLevel::INFO);
+        auto created = createAsset(AssetType::Texture, finalRelAssetPath, baseName, src.string());
+        if (created)
+        {
+            logger.log(Logger::Category::AssetManagement, "Imported texture asset: " + finalRelAssetPath, Logger::LogLevel::INFO);
+        }
+        return created;
+    }
+    default:
+        logger.log(Logger::Category::AssetManagement, "Import not implemented for this asset type yet.", Logger::LogLevel::WARNING);
+        return nullptr;
+    }
 }

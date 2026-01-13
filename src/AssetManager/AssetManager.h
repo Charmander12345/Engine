@@ -5,6 +5,11 @@
 #include <memory>
 #include <vector>
 #include <unordered_map>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <queue>
+#include <functional>
 #include "AssetTypes.h"
 #include "../Diagnostics/DiagnosticsManager.h"
 #include "../Basics/EngineObject.h"
@@ -15,6 +20,8 @@
 #include "../Basics/MaterialAsset.h"
 #include "../Logger/Logger.h"
 #include "GarbageCollector.h"
+
+struct SDL_Window;
 
 struct AssetRegistryEntry
 {
@@ -43,6 +50,20 @@ public:
 
     std::shared_ptr<EngineObject> createAsset(AssetType type, const std::string& path, const std::string& name, const std::string& sourcePath = "");
 
+    void importAssetWithDialog(SDL_Window* parentWindow, AssetType preferredType = AssetType::Unknown);
+
+    // Sync import (kept for existing callers)
+    std::shared_ptr<EngineObject> importAssetFromFile(AssetType type, const std::string& sourceFilePath);
+
+    // Async import: runs the heavy work on the asset worker thread.
+    void importAssetFromFileAsync(AssetType type, std::string sourceFilePath);
+
+    // Async save of all currently tracked assets
+    void saveAllAssetsAsync();
+
+    // Optional: process any main-thread follow-ups (currently lightweight)
+    void pump();
+
     // Resolve <project>/Content/<relative> if a project is loaded.
     // Returns empty string if no project loaded.
     std::string getAbsoluteContentPath(const std::string& relativeToContent) const;
@@ -62,13 +83,21 @@ public:
     bool createProject(const std::string& parentDir, const std::string& projectName, const DiagnosticsManager::ProjectInfo& info);
 
 private:
+    // Worker lifecycle
+    void startWorker();
+    void stopWorker();
+    void enqueueJob(std::function<void()> job);
+
     bool loadAssetRegistry(const std::string& projectRoot);
     bool saveAssetRegistry(const std::string& projectRoot) const;
     bool discoverAssetsAndBuildRegistry(const std::string& projectRoot);
     void registerAssetInRegistry(const AssetRegistryEntry& entry);
 
+    void ensureDefaultTriangleAssetSaved();
+    std::unique_ptr<EngineLevel> createLevelWithDefaultTriangle(const std::string& levelPath, const std::string& levelName);
+
     AssetManager() = default;
-    ~AssetManager() = default;
+    ~AssetManager();
     AssetManager(const AssetManager&) = delete;
     AssetManager& operator=(const AssetManager&) = delete;
 	GarbageCollector m_garbageCollector;
@@ -79,4 +108,15 @@ private:
     std::vector<AssetRegistryEntry> m_registry;
     std::unordered_map<std::string, size_t> m_registryByPath;
     std::unordered_map<std::string, size_t> m_registryByName;
+
+    // Registry + GC / internal state protection
+    mutable std::mutex m_stateMutex;
+
+    // Async job queue
+    std::thread m_worker;
+    std::mutex m_jobMutex;
+    std::condition_variable m_jobCv;
+    std::queue<std::function<void()>> m_jobs;
+    bool m_workerRunning{ false };
+    bool m_workerStopRequested{ false };
 };
