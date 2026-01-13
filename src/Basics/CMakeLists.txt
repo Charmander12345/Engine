@@ -23,6 +23,9 @@ target_include_directories(Basics
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/src/AssetManager
+        ${CMAKE_SOURCE_DIR}/src/Renderer/OpenGLRenderer
+        ${CMAKE_SOURCE_DIR}/src/Renderer/OpenGLRenderer/glad/include
+        ${CMAKE_SOURCE_DIR}/src/Renderer
 )
 
 if (WIN32)

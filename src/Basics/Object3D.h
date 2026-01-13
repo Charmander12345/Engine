@@ -37,6 +37,7 @@ public:
     const std::vector<std::shared_ptr<Texture>>& getLoadedTextures() const { return m_loadedTextures; }
 
     void render();
+    void render(const class Transform* worldTransform, const void* viewMatrix, const void* projectionMatrix);
 private:
     std::shared_ptr<Material> m_material;
 

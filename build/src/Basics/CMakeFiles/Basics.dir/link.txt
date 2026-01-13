@@ -1,0 +1,1 @@
+/usr/bin/c++ -fPIC -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/Basics.dir/link.d -shared -Wl,-soname,libBasics.so -o ../../libBasics.so CMakeFiles/Basics.dir/EngineObject.cpp.o CMakeFiles/Basics.dir/EngineLevel.cpp.o CMakeFiles/Basics.dir/Object3D.cpp.o CMakeFiles/Basics.dir/Object2D.cpp.o CMakeFiles/Basics.dir/Texture.cpp.o CMakeFiles/Basics.dir/MaterialAsset.cpp.o

@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <SDL3/SDL.h>
 #include <iostream>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include "Logger.h"
 #include "OpenGLShader.h"
@@ -35,6 +36,21 @@ OpenGLRenderer::OpenGLRenderer()
     m_name = "OpenGL Renderer";
     m_window = nullptr;
     m_glContext = nullptr;
+
+    // Initialize view matrix (camera at origin looking down -Z)
+    m_viewMatrix = glm::lookAt(
+        glm::vec3(0.0f, 0.0f, 3.0f),  // Camera position
+        glm::vec3(0.0f, 0.0f, 0.0f),  // Look at point
+        glm::vec3(0.0f, 1.0f, 0.0f)   // Up vector
+    );
+
+    // Initialize projection matrix (will be updated with proper aspect ratio)
+    m_projectionMatrix = glm::perspective(
+        glm::radians(45.0f),  // FOV
+        800.0f / 600.0f,      // Aspect ratio (will be updated)
+        0.1f,                 // Near plane
+        100.0f                // Far plane
+    );
 }
 
 OpenGLRenderer::~OpenGLRenderer()
@@ -255,9 +271,23 @@ void OpenGLRenderer::render()
     SDL_GetWindowSizeInPixels(m_window, &width, &height);
     glViewport(0, 0, width, height);
 
+    // Update projection matrix with current aspect ratio
+    if (height > 0)
+    {
+        float aspectRatio = static_cast<float>(width) / static_cast<float>(height);
+        m_projectionMatrix = glm::perspective(
+            glm::radians(45.0f),
+            aspectRatio,
+            0.1f,
+            100.0f
+        );
+    }
+
     if (m_object3D)
     {
-        m_object3D->render();
+        // Use the object's own transform for rendering
+        const Transform& objTransform = m_object3D->getTransform();
+        m_object3D->render(&objTransform, &m_viewMatrix, &m_projectionMatrix);
     }
 }
 

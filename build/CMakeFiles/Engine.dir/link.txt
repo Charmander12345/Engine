@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/Engine.dir/link.d CMakeFiles/Engine.dir/src/main.cpp.o -o Engine  -Wl,-rpath,/home/runner/work/Engine/Engine/build libRenderer.so libAssetManager.so libDiagnostics.so libBasics.so libSDL3.so.0.3.7 libLogger.so

@@ -1,0 +1,1 @@
+/usr/bin/c++ -fPIC -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/Diagnostics.dir/link.d -shared -Wl,-soname,libDiagnostics.so -o ../../libDiagnostics.so CMakeFiles/Diagnostics.dir/DiagnosticsManager.cpp.o
