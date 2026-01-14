@@ -5,14 +5,17 @@
 #include <SDL3/SDL.h>
 #include <iostream>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 #include "Logger.h"
 #include "OpenGLShader.h"
+#include "OpenGLMaterial.h"
 
 #include "Texture.h"
 #include "../AssetManager/AssetManager.h"
 
 #include "../../Basics/Object3D.h"
+#include "../../Basics/MathTypes.h"
 
 namespace
 {
@@ -285,9 +288,23 @@ void OpenGLRenderer::render()
 
     if (m_object3D)
     {
-        // Use the object's own transform for rendering
-        const Transform& objTransform = m_object3D->getTransform();
-        m_object3D->render(&objTransform, &m_viewMatrix, &m_projectionMatrix);
+        // Get the material and set transformation matrices if it's OpenGL-based
+        auto material = m_object3D->getMaterial();
+        auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
+        
+        if (glMaterial)
+        {
+            // Set model matrix from object's transform
+            const Transform& objTransform = m_object3D->getTransform();
+            Mat4 engineMat = objTransform.getMatrix4ColumnMajor();
+            glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
+            
+            glMaterial->setModelMatrix(modelMatrix);
+            glMaterial->setViewMatrix(m_viewMatrix);
+            glMaterial->setProjectionMatrix(m_projectionMatrix);
+        }
+        
+        m_object3D->render();
     }
 }
 
