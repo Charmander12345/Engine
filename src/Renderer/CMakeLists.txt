@@ -12,8 +12,10 @@ add_library(Renderer SHARED
     OpenGLRenderer/OpenGLTexture.cpp
     OpenGLRenderer/OpenGLTexture.h
     OpenGLRenderer/glad/src/gl.c
+    RenderResourceManager.cpp
+    OpenGLRenderer/OpenGLObject2D.cpp
+    OpenGLRenderer/OpenGLObject2D.h
 )
-
 set_target_properties(Renderer PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON

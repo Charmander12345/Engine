@@ -94,6 +94,7 @@ private:
     void registerAssetInRegistry(const AssetRegistryEntry& entry);
 
     void ensureDefaultTriangleAssetSaved();
+    void ensureDefaultAssetsCreated();
     std::unique_ptr<EngineLevel> createLevelWithDefaultTriangle(const std::string& levelPath, const std::string& levelName);
 
     AssetManager() = default;

@@ -60,14 +60,20 @@ set(ENGINE_DEPLOY_DIR "C:/Users/conno/source/repos/EngineBuild")
 set(SHADERS_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/OpenGLRenderer/shaders")
 
 add_custom_command(TARGET Engine POST_BUILD
-    # Copy SDL3 library to build directory
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:SDL3::SDL3> "$<TARGET_FILE_DIR:Engine>/"
+    # Ensure deploy directory exists
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}"
 
-    # Clean shader output dir first so removed/renamed shaders don't stay around
-    COMMAND ${CMAKE_COMMAND} -E rm -rf "$<TARGET_FILE_DIR:Engine>/shaders"
+    # Copy Engine exe to deploy directory
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:Engine>" "${ENGINE_DEPLOY_DIR}/"
 
-    # Copy shaders to build directory
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${SHADERS_SOURCE_DIR}" "$<TARGET_FILE_DIR:Engine>/shaders"
+    # Copy SDL3 (and other runtime) dlls next to exe into deploy directory
+    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:Engine> "${ENGINE_DEPLOY_DIR}/"
+
+    # Clean shaders output dir first so removed/renamed shaders don't stay around
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${ENGINE_DEPLOY_DIR}/shaders"
+
+    # Copy shaders to deploy directory
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${SHADERS_SOURCE_DIR}" "${ENGINE_DEPLOY_DIR}/shaders"
 
     COMMAND_EXPAND_LISTS
 )

@@ -1,37 +1,19 @@
 #include "OpenGLRenderer.h"
-#include <vector>
-#include <string>
-#include <filesystem>
 #include <SDL3/SDL.h>
-#include <iostream>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
 #include "Logger.h"
-#include "OpenGLShader.h"
 #include "OpenGLMaterial.h"
 
-#include "Texture.h"
-#include "../AssetManager/AssetManager.h"
+#include "../../Diagnostics/DiagnosticsManager.h"
+#include "../../Basics/EngineLevel.h"
+
+#include "../RenderResourceManager.h"
 
 #include "../../Basics/Object3D.h"
+#include "../../Basics/Object2D.h"
 #include "../../Basics/MathTypes.h"
-
-namespace
-{
-    std::string ResolveShaderPath(const std::string& filename)
-    {
-        std::filesystem::path base = std::filesystem::current_path();
-
-        std::filesystem::path shadersfolder = base / "shaders" / filename;
-
-        if (std::filesystem::exists(shadersfolder))
-        {
-            return shadersfolder.string();
-        }
-        return {};
-    }
-}
 
 OpenGLRenderer::OpenGLRenderer()
 {
@@ -113,132 +95,6 @@ bool OpenGLRenderer::initialize()
     glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &nrAttributes);
     logger.log(Logger::Category::Rendering, "Max number of vertex attributes: " + std::to_string(nrAttributes), Logger::LogLevel::INFO);
 
-    std::string vertexPath = ResolveShaderPath("vertex.glsl");
-    std::string fragmentPath = ResolveShaderPath("fragment.glsl");
-
-    if (vertexPath.empty() || fragmentPath.empty())
-    {
-        logger.log(Logger::Category::Rendering, "Couldn't locate vertex.glsl and/or fragment.glsl.", Logger::LogLevel::ERROR);
-        return false;
-    }
-
-    auto vertexShader = std::make_shared<OpenGLShader>();
-    auto fragmentShader = std::make_shared<OpenGLShader>();
-
-    if (!vertexShader->loadFromFile(Shader::Type::Vertex, vertexPath))
-    {
-        logger.log(Logger::Category::Rendering, "Failed to load/compile vertex.glsl.", Logger::LogLevel::ERROR);
-        return false;
-    }
-
-    if (!fragmentShader->loadFromFile(Shader::Type::Fragment, fragmentPath))
-    {
-        logger.log(Logger::Category::Rendering, "Failed to load/compile fragment.glsl.", Logger::LogLevel::ERROR);
-        return false;
-    }
-
-    m_material = std::make_shared<OpenGLMaterial>();
-    m_material->addShader(vertexShader);
-    m_material->addShader(fragmentShader);
-
-    // Build a static 3D object with vertex data and layout
-    m_object3D = std::make_shared<Object3D>();
-    m_object3D->setMaterial(m_material);
-
-    const std::vector<float> vertices = {
-        // positions             // colors            // texcoords
-        -0.5f,  0.5f, 0.0f,      1.0f, 0.0f, 0.0f,     0.0f, 1.0f, // top-left
-         0.5f,  0.5f, 0.0f,      0.0f, 1.0f, 0.0f,     1.0f, 1.0f, // top-right
-         0.5f, -0.5f, 0.0f,      0.0f, 0.0f, 1.0f,     1.0f, 0.0f, // bottom-right
-        -0.5f, -0.5f, 0.0f,      1.0f, 1.0f, 0.0f,     0.0f, 0.0f  // bottom-left
-    };
-    m_object3D->setVertices(vertices);
-
-    // Indexed draw: 4 unique vertices, 2 triangles (quad)
-    const std::vector<uint32_t> indices = { 0, 1, 2, 2, 3, 0 };
-    m_object3D->setIndices(indices);
-
-    m_material->setVertexData(vertices);
-    m_material->setIndexData(indices);
-
-    // IMPORTANT: interleaved vertex format is 8 floats per vertex
-    const GLsizei stride = static_cast<GLsizei>(8 * sizeof(float));
-    std::vector<OpenGLMaterial::LayoutElement> layout = {
-        {0, 3, GL_FLOAT, GL_FALSE, stride, 0},
-        {1, 3, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(3 * sizeof(float))},
-        {2, 2, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(6 * sizeof(float))}
-    };
-    m_material->setLayout(layout);
-
-    // Load / import wall.jpg into a texture asset, create a material asset referencing it, and bind it.
-    {
-        auto& assetManager = AssetManager::Instance();
-
-        // We want "Content/Textures/wall.jpg" relative to the currently loaded project.
-        const std::string srcAbs = assetManager.getAbsoluteContentPath("Textures/wall.jpg");
-
-        if (!srcAbs.empty() && std::filesystem::exists(srcAbs))
-        {
-            logger.log(Logger::Category::AssetManagement, std::string("Importing texture: ") + srcAbs, Logger::LogLevel::INFO);
-
-            // Asset paths are relative to Content
-            const std::string texAssetRelPath = "Textures/wall.asset";
-            const std::string texAssetName = "wall";
-
-            auto createdTex = assetManager.createAsset(AssetType::Texture, texAssetRelPath, texAssetName, srcAbs);
-            auto tex = std::dynamic_pointer_cast<Texture>(createdTex);
-
-            if (tex)
-            {
-                logger.log(Logger::Category::AssetManagement, "Texture imported and saved as asset: " + texAssetRelPath, Logger::LogLevel::INFO);
-
-                // Create material asset that references the texture asset
-                const std::string matAssetRelPath = "Materials/wall_material.asset";
-                const std::string matAssetName = "wall_material";
-
-                auto createdMat = assetManager.createAsset(AssetType::Material, matAssetRelPath, matAssetName, texAssetRelPath);
-                if (createdMat)
-                {
-                    m_object3D->setMaterialAssetPath(matAssetRelPath);
-                }
-
-                // Bind texture for rendering (runtime)
-                m_material->setTextures({ tex });
-            }
-            else
-            {
-                logger.log(Logger::Category::AssetManagement, "Texture import failed; using debug texture.", Logger::LogLevel::WARNING);
-            }
-        }
-        else
-        {
-            logger.log(Logger::Category::AssetManagement, "wall.jpg not found under project Content/Textures (using debug texture).", Logger::LogLevel::WARNING);
-        }
-
-        // Fallback texture if we couldn't import wall.jpg
-        if (m_material->getTextures().empty())
-        {
-            auto tex = std::make_shared<Texture>();
-            tex->setName("DebugTexture");
-            tex->setWidth(2);
-            tex->setHeight(2);
-            tex->setChannels(4);
-            tex->setData({
-                255,   0,   0, 255,   0, 255,   0, 255,
-                  0,   0, 255, 255, 255, 255,   0, 255
-            });
-            m_material->setTextures({ tex });
-        }
-    }
-
-    if (!m_material->build())
-    {
-        logger.log(Logger::Category::Rendering, "Failed to build OpenGL material (program link).", Logger::LogLevel::ERROR);
-        return false;
-    }
-
-    logger.log(Logger::Category::Rendering, "Shader program created successfully.", Logger::LogLevel::INFO);
-
     glEnable(GL_DEPTH_TEST);
 
     m_initialized = true;
@@ -286,25 +142,66 @@ void OpenGLRenderer::render()
         );
     }
 
-    if (m_object3D)
+    auto& diagnostics = DiagnosticsManager::Instance();
+    EngineLevel* level = diagnostics.getActiveLevel();
+    if (!level)
+	{
+		Logger::Instance().log(Logger::Category::Rendering, "No active level to render.", Logger::LogLevel::WARNING);
+        return;
+	}
+
+    if (!diagnostics.isScenePrepared())
     {
-        // Get the material and set transformation matrices if it's OpenGL-based
-        auto material = m_object3D->getMaterial();
-        auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
-        
-        if (glMaterial)
+        RenderResourceManager rrm;
+        if (rrm.prepareActiveLevel())
         {
-            // Set model matrix from object's transform
-            const Transform& objTransform = m_object3D->getTransform();
-            Mat4 engineMat = objTransform.getMatrix4ColumnMajor();
-            glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-            
-            glMaterial->setModelMatrix(modelMatrix);
-            glMaterial->setViewMatrix(m_viewMatrix);
-            glMaterial->setProjectionMatrix(m_projectionMatrix);
+            diagnostics.setScenePrepared(true);
         }
-        
-        m_object3D->render();
+    }
+
+    const auto& objs = level->getWorldObjects();
+    const auto& transforms = level->getWorldObjectTransforms();
+
+    for (const auto& entry : objs)
+    {
+        if (!entry || entry->getPath().empty())
+            continue;
+
+        const Transform* t = nullptr;
+        auto trIt = transforms.find(entry->getPath());
+        if (trIt != transforms.end())
+            t = &trIt->second;
+
+        if (auto obj3d = std::dynamic_pointer_cast<Object3D>(entry))
+        {
+            auto material = obj3d->getMaterial();
+            auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
+            if (glMaterial && t)
+            {
+                Mat4 engineMat = t->getMatrix4ColumnMajor();
+                glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
+
+                glMaterial->setModelMatrix(modelMatrix);
+                glMaterial->setViewMatrix(m_viewMatrix);
+                glMaterial->setProjectionMatrix(m_projectionMatrix);
+            }
+            obj3d->render();
+        }
+        else if (auto obj2d = std::dynamic_pointer_cast<Object2D>(entry))
+        {
+            auto material = obj2d->getMaterial();
+            auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
+            if (glMaterial && t)
+            {
+                Mat4 engineMat = t->getMatrix4ColumnMajor();
+                glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
+
+                glMaterial->setModelMatrix(modelMatrix);
+                glMaterial->setViewMatrix(m_viewMatrix);
+                glMaterial->setProjectionMatrix(m_projectionMatrix);
+            }
+            obj2d->render();
+        }
     }
 }
 

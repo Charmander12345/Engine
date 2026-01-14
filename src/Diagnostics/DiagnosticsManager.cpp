@@ -247,6 +247,7 @@ void DiagnosticsManager::clearProjectInfo()
     projectLoaded = false;
     m_projectStates.clear();
     m_activeLevel.reset();
+    m_scenePrepared = false;
 }
 
 bool DiagnosticsManager::isActionInProgress() const
@@ -286,6 +287,18 @@ void DiagnosticsManager::setActiveLevel(std::unique_ptr<EngineLevel> level)
 EngineLevel* DiagnosticsManager::getActiveLevel()
 {
     return m_activeLevel.get();
+}
+
+void DiagnosticsManager::setScenePrepared(bool prepared)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_scenePrepared = prepared;
+}
+
+bool DiagnosticsManager::isScenePrepared() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_scenePrepared;
 }
 
 DiagnosticsManager::DiagnosticsManager()

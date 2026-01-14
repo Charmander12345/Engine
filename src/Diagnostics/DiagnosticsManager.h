@@ -78,6 +78,9 @@ public:
     void setActiveLevel(std::unique_ptr<EngineLevel> level);
     EngineLevel* getActiveLevel();
 
+    void setScenePrepared(bool prepared);
+    bool isScenePrepared() const;
+
 private:
     DiagnosticsManager();
     ~DiagnosticsManager() = default;
@@ -98,6 +101,8 @@ private:
 	bool projectLoaded{ false };
 	ProjectInfo m_projectInfo;
     std::unique_ptr<EngineLevel> m_activeLevel;
+
+    bool m_scenePrepared{ false };
 
 	bool isLoadingAsset{ false };
     bool isSavingAsset{ false };

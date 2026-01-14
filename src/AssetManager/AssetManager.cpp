@@ -311,36 +311,202 @@ bool AssetManager::initialize()
 {
     startWorker();
 
-    // Create a default 2D triangle asset that is tracked and can be saved via saveAllAssets.
-    // It starts as unsaved and will be written on demand.
+    // Create in-memory default assets immediately. Persisting them (and optionally importing wall.jpg)
+    // is handled later when a project is loaded.
     {
-        auto& logger = Logger::Instance();
-        logger.log(Logger::Category::AssetManagement, "Registering built-in default assets...", Logger::LogLevel::INFO);
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        if (!m_defaultTriangle2D)
+        {
+            auto tex = std::make_shared<Texture>();
+            tex->setName("DefaultDebugTexture");
+            tex->setPath((fs::path("Textures") / "default_debug.asset").generic_string());
+            tex->setAssetType(AssetType::Texture);
+            tex->setIsSaved(false);
+            tex->setWidth(2);
+            tex->setHeight(2);
+            tex->setChannels(4);
+            tex->setData({
+                255,   0,   0, 255,   0, 255,   0, 255,
+                  0,   0, 255, 255, 255, 255,   0, 255
+            });
+            m_garbageCollector.registerResource(tex);
 
-        fs::path contentRoot = "Content";
-        fs::path assetPath = contentRoot / "default_triangle2d.asset";
+            auto mat = std::make_shared<MaterialAsset>();
+            mat->setName("DefaultDebugMaterial");
+            mat->setPath((fs::path("Materials") / "default_debug.asset").generic_string());
+            mat->setAssetType(AssetType::Material);
+            mat->setIsSaved(false);
+            mat->setTextureAssetPaths({ tex->getPath() });
+            m_garbageCollector.registerResource(mat);
 
-        auto tri = std::make_shared<Object2D>();
-        tri->setName("DefaultTriangle2D");
-        // store only the relative path inside Content
-        tri->setPath("default_triangle2d.asset");
-        tri->setAssetType(AssetType::Model2D);
-        tri->setIsSaved(false);
+            auto quad = std::make_shared<Object2D>();
+            quad->setName("DefaultQuad2D");
+            quad->setPath("default_quad2d.asset");
+            quad->setAssetType(AssetType::Model2D);
+            quad->setIsSaved(false);
+            quad->setMaterialAssetPath(mat->getPath());
+            quad->setLoadedMaterialAsset(mat);
+            quad->setVertices({
+                // positions             // colors            // texcoords
+                -0.5f,  0.5f, 0.0f,      1.0f, 0.0f, 0.0f,     0.0f, 1.0f,
+                 0.5f,  0.5f, 0.0f,      0.0f, 1.0f, 0.0f,     1.0f, 1.0f,
+                 0.5f, -0.5f, 0.0f,      0.0f, 0.0f, 1.0f,     1.0f, 0.0f,
+                -0.5f, -0.5f, 0.0f,      1.0f, 1.0f, 0.0f,     0.0f, 0.0f
+            });
+            quad->setIndices({ 0, 1, 2, 2, 3, 0 });
+            m_garbageCollector.registerResource(quad);
 
-        // positions (x,y) + color (r,g,b)
-        tri->setVertices({
-            0.0f,  0.5f,  1.0f, 0.0f, 0.0f,
-           -0.5f, -0.5f,  0.0f, 1.0f, 0.0f,
-            0.5f, -0.5f,  0.0f, 0.0f, 1.0f
-        });
-        tri->setIndices({ 0, 1, 2 });
-
-        m_defaultTriangle2D = tri;
-        m_garbageCollector.registerResource(m_defaultTriangle2D);
-        logger.log(Logger::Category::AssetManagement, "Registered default 2D triangle asset.", Logger::LogLevel::INFO);
+            m_defaultTriangle2D = quad;
+        }
     }
 
     return true;
+}
+
+void AssetManager::ensureDefaultAssetsCreated()
+{
+    auto& diagnostics = DiagnosticsManager::Instance();
+    if (!diagnostics.isProjectLoaded() || diagnostics.getProjectInfo().projectPath.empty())
+    {
+        // No project context => can't create/save project assets.
+        return;
+    }
+
+    auto& logger = Logger::Instance();
+    logger.log(Logger::Category::AssetManagement, "Ensuring default assets exist for project...", Logger::LogLevel::INFO);
+
+    // If the quad already exists on disk, use it as the model, but still ensure the material/texture it
+    // references exist.
+    std::shared_ptr<Object2D> diskQuad;
+    if (auto loaded = loadAssetObject("default_quad2d.asset"))
+    {
+        diskQuad = std::dynamic_pointer_cast<Object2D>(loaded);
+        if (diskQuad)
+        {
+            {
+                std::lock_guard<std::mutex> lock(m_stateMutex);
+                m_defaultTriangle2D = diskQuad;
+            }
+            logger.log(Logger::Category::AssetManagement, "Default assets: using existing default_quad2d.asset", Logger::LogLevel::INFO);
+        }
+    }
+
+    // 1) Texture asset: prefer wall.jpg, else create debug texture asset.
+    std::shared_ptr<Texture> tex;
+    {
+        const std::string wallAssetRel = (fs::path("Textures") / "wall.asset").generic_string();
+        if (auto existing = loadAssetObject(wallAssetRel))
+        {
+            tex = std::dynamic_pointer_cast<Texture>(existing);
+        }
+
+        if (!tex)
+        {
+            std::string wallAbs = getAbsoluteContentPath((fs::path("Textures") / "wall.jpg").generic_string());
+            if (wallAbs.empty() || !fs::exists(fs::path(wallAbs)))
+            {
+                // Some projects use .jp (typo/legacy) as mentioned; support that too.
+                wallAbs = getAbsoluteContentPath((fs::path("Textures") / "wall.jp").generic_string());
+            }
+
+            if (!wallAbs.empty() && fs::exists(fs::path(wallAbs)))
+            {
+                logger.log(Logger::Category::AssetManagement, "Default assets: importing wall.jpg -> " + wallAssetRel, Logger::LogLevel::INFO);
+                auto created = createAsset(AssetType::Texture, wallAssetRel, "wall", wallAbs);
+                tex = std::dynamic_pointer_cast<Texture>(created);
+            }
+            else
+            {
+                logger.log(Logger::Category::AssetManagement, "Default assets: wall texture source missing (expected Content/Textures/wall.jpg or wall.jp)", Logger::LogLevel::WARNING);
+            }
+        }
+    }
+
+    if (!tex)
+    {
+        if (auto existing = loadAssetObject((fs::path("Textures") / "default_debug.asset").generic_string()))
+        {
+            tex = std::dynamic_pointer_cast<Texture>(existing);
+        }
+    }
+
+    if (!tex)
+    {
+        tex = std::make_shared<Texture>();
+        tex->setName("DefaultDebugTexture");
+        tex->setPath((fs::path("Textures") / "default_debug.asset").generic_string());
+        tex->setAssetType(AssetType::Texture);
+        tex->setIsSaved(false);
+        tex->setWidth(2);
+        tex->setHeight(2);
+        tex->setChannels(4);
+        tex->setData({
+            255,   0,   0, 255,   0, 255,   0, 255,
+              0,   0, 255, 255, 255, 255,   0, 255
+        });
+
+        {
+            std::lock_guard<std::mutex> lock(m_stateMutex);
+            m_garbageCollector.registerResource(tex);
+        }
+    }
+
+	logger.log(Logger::Category::AssetManagement, "Default assets: using texture asset at path: " + tex->getPath(), Logger::LogLevel::INFO);
+
+    // 2) Material asset referencing that texture.
+    const std::string matPath = (fs::path("Materials") / "default_debug.asset").generic_string();
+    std::shared_ptr<MaterialAsset> mat;
+    if (auto existing = loadAssetObject(matPath))
+    {
+        mat = std::dynamic_pointer_cast<MaterialAsset>(existing);
+    }
+    if (!mat)
+    {
+        mat = std::make_shared<MaterialAsset>();
+        mat->setName("DefaultDebugMaterial");
+        mat->setPath(matPath);
+        mat->setAssetType(AssetType::Material);
+        mat->setIsSaved(false);
+        mat->setTextureAssetPaths({ tex->getPath() });
+
+        {
+            std::lock_guard<std::mutex> lock(m_stateMutex);
+            m_garbageCollector.registerResource(mat);
+        }
+    }
+
+	logger.log(Logger::Category::AssetManagement, "Default assets: using material asset at path: " + mat->getPath(), Logger::LogLevel::INFO);
+
+    // 3) Quad model referencing the material (create only if missing on disk).
+    std::shared_ptr<Object2D> quad = diskQuad;
+    if (!quad)
+    {
+        quad = std::make_shared<Object2D>();
+        quad->setName("DefaultQuad2D");
+        quad->setPath("default_quad2d.asset");
+        quad->setAssetType(AssetType::Model2D);
+        quad->setIsSaved(false);
+    }
+
+    quad->setMaterialAssetPath(mat->getPath());
+    quad->setLoadedMaterialAsset(mat);
+
+    quad->setVertices({
+        // positions             // colors            // texcoords
+        -0.5f,  0.5f, 0.0f,      1.0f, 0.0f, 0.0f,     0.0f, 1.0f,
+         0.5f,  0.5f, 0.0f,      0.0f, 1.0f, 0.0f,     1.0f, 1.0f,
+         0.5f, -0.5f, 0.0f,      0.0f, 0.0f, 1.0f,     1.0f, 0.0f,
+        -0.5f, -0.5f, 0.0f,      1.0f, 1.0f, 0.0f,     0.0f, 0.0f
+    });
+    quad->setIndices({ 0, 1, 2, 2, 3, 0 });
+
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        m_defaultTriangle2D = quad;
+        m_garbageCollector.registerResource(m_defaultTriangle2D);
+    }
+
+	logger.log(Logger::Category::AssetManagement, "Default assets ensured.", Logger::LogLevel::INFO);
 }
 
 void AssetManager::startWorker()
@@ -543,7 +709,7 @@ std::shared_ptr<EngineObject> AssetManager::loadAssetObject(const std::string& p
         std::lock_guard<std::mutex> lock(m_stateMutex);
         for (const auto& alive : m_garbageCollector.getAliveResources())
         {
-            if (alive && alive->getPath() == path)
+            if (alive && fs::path(alive->getPath()).generic_string() == fs::path(path).generic_string())
             {
                 return alive;
             }
@@ -559,7 +725,7 @@ std::shared_ptr<EngineObject> AssetManager::loadAssetObject(const std::string& p
     std::lock_guard<std::mutex> lock(m_stateMutex);
     for (const auto& alive : m_garbageCollector.getAliveResources())
     {
-        if (alive && alive->getPath() == path)
+        if (alive && fs::path(alive->getPath()).generic_string() == fs::path(path).generic_string())
         {
             return alive;
         }
@@ -643,13 +809,14 @@ bool AssetManager::loadAsset(const std::string& path)
     }
 
     // Avoid re-loading the same asset while we parse (reduces recursive loops)
+    const std::string requestedKey = relPath.generic_string();
     {
         std::lock_guard<std::mutex> lock(m_stateMutex);
         for (const auto& alive : m_garbageCollector.getAliveResources())
         {
-            if (alive && alive->getPath() == relPath.generic_string())
+            if (alive && fs::path(alive->getPath()).generic_string() == requestedKey)
             {
-                logger.log(Logger::Category::AssetManagement, "Asset already loaded: " + relPath.generic_string(), Logger::LogLevel::INFO);
+                logger.log(Logger::Category::AssetManagement, "Asset already loaded: " + requestedKey, Logger::LogLevel::INFO);
                 return true;
             }
         }
@@ -706,8 +873,9 @@ bool AssetManager::loadAsset(const std::string& path)
     }
 
     obj->setName(name);
-    // store only relative path inside Content
-    obj->setPath(storedRelPath.empty() ? relPath.generic_string() : storedRelPath);
+    // Use storedRelPath as canonical key if it exists; otherwise use requested path.
+    const std::string canonicalKey = fs::path(storedRelPath.empty() ? requestedKey : storedRelPath).generic_string();
+    obj->setPath(canonicalKey);
     obj->setAssetType(type);
     obj->setIsSaved(true);
 
@@ -858,14 +1026,26 @@ bool AssetManager::loadAsset(const std::string& path)
             t.setRotation(rot);
             t.setScale(scl);
 
-            // Load dependency asset into memory (if it exists).
-            // We keep a strong reference in the level so the GC won't unload it while the level is active.
             if (!p.empty())
             {
                 const std::string depRelPath = p.generic_string();
-                logger.log(Logger::Category::AssetManagement, "Level: recorded dependency asset '" + depRelPath + "'", Logger::LogLevel::INFO);
-                levelDepPaths.push_back(depRelPath);
-             }
+                logger.log(Logger::Category::AssetManagement, "Level: loading object asset '" + depRelPath + "'", Logger::LogLevel::INFO);
+
+                auto depObj = loadAssetObject(depRelPath);
+                if (depObj)
+                {
+                    level->registerObject(depObj);
+                    level->setObjectTransform(depRelPath, t);
+                    level->setLoadedDependency(depRelPath, depObj);
+                    logger.log(Logger::Category::AssetManagement, "Level: object attached '" + depRelPath + "'", Logger::LogLevel::INFO);
+                }
+                else
+                {
+                    logger.log(Logger::Category::AssetManagement, "Level: object failed to load '" + depRelPath + "'", Logger::LogLevel::WARNING);
+                    // still keep transform so it survives if asset appears later
+                    level->setObjectTransform(depRelPath, t);
+                }
+            }
         }
     }
 
@@ -897,24 +1077,7 @@ bool AssetManager::loadAsset(const std::string& path)
         m_garbageCollector.registerResource(obj);
     }
 
-    // Resolve dependencies synchronously and attach them to the owning asset.
-    if (type == AssetType::Level)
-    {
-        auto level = std::static_pointer_cast<EngineLevel>(obj);
-        for (const auto& depRelPath : levelDepPaths)
-        {
-            auto depObj = loadAssetObject(depRelPath);
-            if (depObj)
-            {
-                level->setLoadedDependency(depRelPath, depObj);
-                logger.log(Logger::Category::AssetManagement, "Level: dependency attached '" + depRelPath + "'", Logger::LogLevel::INFO);
-            }
-            else
-            {
-                logger.log(Logger::Category::AssetManagement, "Level: dependency failed to load '" + depRelPath + "'", Logger::LogLevel::WARNING);
-            }
-        }
-    }
+    // Level dependencies are resolved inline during parsing.
 
     logger.log(Logger::Category::AssetManagement, "Asset loaded: " + name + " (" + obj->getPath() + ")", Logger::LogLevel::INFO);
     return true;
@@ -1109,7 +1272,7 @@ bool AssetManager::saveAsset(const std::shared_ptr<EngineObject>& object)
         uint32_t depCount = 0;
         if (level)
         {
-            auto& deps = level->getWorldObjects();
+			const auto& deps = level->getWorldObjects();
             depCount = static_cast<uint32_t>(deps.size());
         }
 
@@ -1117,16 +1280,16 @@ bool AssetManager::saveAsset(const std::shared_ptr<EngineObject>& object)
 
         if (level)
         {
-            auto& deps = level->getWorldObjects();
+			const auto& deps = level->getWorldObjects();
             const auto& transforms = level->getWorldObjectTransforms();
 
             for (uint32_t i = 0; i < depCount; ++i)
             {
                 const auto& dep = deps[i];
-                const std::string& path = dep.getPath();
+                const std::string path = (dep ? dep->getPath() : std::string{});
                 writeString(out, path);
 
-                Transform t = dep.getTransform();
+                Transform t{};
                 if (!path.empty())
                 {
                     auto it = transforms.find(path);
@@ -1196,6 +1359,10 @@ static std::string normalizeAssetRelPath(AssetType type, std::string relPath)
 void AssetManager::ensureDefaultTriangleAssetSaved()
 {
     auto& logger = Logger::Instance();
+
+    // Lazily create defaults (requires a project to be loaded for importing/saving).
+    ensureDefaultAssetsCreated();
+
     std::shared_ptr<EngineObject> tri;
     bool needsSave = false;
     {
@@ -1208,6 +1375,36 @@ void AssetManager::ensureDefaultTriangleAssetSaved()
     {
         logger.log(Logger::Category::AssetManagement, "Default triangle asset missing; cannot initialize level content.", Logger::LogLevel::WARNING);
         return;
+    }
+
+    // Also persist dependencies of the default model (material + textures).
+    // The object itself should not hold texture pointers; resolve textures via the material asset.
+    if (auto obj2d = std::dynamic_pointer_cast<Object2D>(tri))
+    {
+        const std::string matPath = obj2d->getMaterialAssetPath();
+        if (!matPath.empty())
+        {
+            auto matObj = loadAssetObject(matPath);
+            if (auto mat = std::dynamic_pointer_cast<MaterialAsset>(matObj))
+            {
+                obj2d->setLoadedMaterialAsset(mat);
+                if (!mat->getIsSaved())
+                {
+                    logger.log(Logger::Category::AssetManagement, "Persisting default material asset: " + mat->getPath(), Logger::LogLevel::INFO);
+                    saveAsset(mat);
+                }
+
+                auto textures = loadTexturesForMaterial(*mat);
+                for (const auto& tex : textures)
+                {
+                    if (tex && !tex->getIsSaved())
+                    {
+                        logger.log(Logger::Category::AssetManagement, "Persisting default texture asset: " + tex->getPath(), Logger::LogLevel::INFO);
+                        saveAsset(tex);
+                    }
+                }
+            }
+        }
     }
 
     if (needsSave)
@@ -1229,16 +1426,10 @@ std::unique_ptr<EngineLevel> AssetManager::createLevelWithDefaultTriangle(const 
 
     if (m_defaultTriangle2D)
     {
-        EngineObject dep;
-        dep.setPath(m_defaultTriangle2D->getPath());
-        dep.setName(m_defaultTriangle2D->getName());
-        dep.setAssetType(m_defaultTriangle2D->getAssetType());
-        Transform t{};
-        dep.setTransform(t);
-
-        level->registerObject(dep);
-        level->setObjectTransform(dep, t);
-        level->setLoadedDependency(dep.getPath(), m_defaultTriangle2D);
+		Transform t{};
+		level->registerObject(m_defaultTriangle2D);
+		level->setObjectTransform(m_defaultTriangle2D->getPath(), t);
+		level->setLoadedDependency(m_defaultTriangle2D->getPath(), m_defaultTriangle2D);
     }
 
     level->setIsSaved(false);
@@ -1463,6 +1654,9 @@ bool AssetManager::loadProject(const std::string& projectPath)
 
     diagnostics.setProjectInfo(info);
 
+    // New project/level context: force re-prepare of renderer resources.
+    diagnostics.setScenePrepared(false);
+
     // Registry handling: ONLY here.
     // Always rebuild via discovery to ensure it's up-to-date.
 	logger.log(Logger::Category::Project, "Building asset registry for project: " + info.projectName, Logger::LogLevel::INFO);
@@ -1505,7 +1699,21 @@ bool AssetManager::loadProject(const std::string& projectPath)
         auto loadedObj = loadAssetObject(relLevelPath);
         if (auto loadedLevel = std::dynamic_pointer_cast<EngineLevel>(loadedObj))
         {
-            diagnostics.setActiveLevel(std::make_unique<EngineLevel>(*loadedLevel));
+			// Create a runtime level instance but keep resolved world object references.
+			auto runtimeLevel = std::make_unique<EngineLevel>();
+			runtimeLevel->setName(loadedLevel->getName());
+			runtimeLevel->setPath(loadedLevel->getPath());
+			runtimeLevel->setAssetType(loadedLevel->getAssetType());
+			runtimeLevel->setIsSaved(true);
+
+			// Copy resolved world objects (shared_ptr) and transforms.
+			runtimeLevel->getWorldObjects() = loadedLevel->getWorldObjects();
+			for (const auto& kv : loadedLevel->getWorldObjectTransforms())
+			{
+				runtimeLevel->setObjectTransform(kv.first, kv.second);
+			}
+
+			diagnostics.setActiveLevel(std::move(runtimeLevel));
         }
         else
         {
