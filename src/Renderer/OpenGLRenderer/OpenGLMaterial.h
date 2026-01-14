@@ -7,6 +7,7 @@
 #include "../Material.h"
 #include "OpenGLShader.h"
 #include "glad/include/gl.h"
+#include <glm/glm.hpp>
 
 class Texture;
 class OpenGLTexture;
@@ -41,6 +42,11 @@ public:
     void unbind() override;
     void render() override;
 
+    // Matrix uniform setters
+    void setModelMatrix(const glm::mat4& matrix) { m_modelMatrix = matrix; }
+    void setViewMatrix(const glm::mat4& matrix) { m_viewMatrix = matrix; }
+    void setProjectionMatrix(const glm::mat4& matrix) { m_projectionMatrix = matrix; }
+
 private:
     void bindTextures();
 
@@ -57,4 +63,9 @@ private:
 
     // Cache GPU textures per CPU-Texture pointer
     std::unordered_map<const Texture*, std::shared_ptr<OpenGLTexture>> m_textureCache;
+
+    // Transformation matrices
+    glm::mat4 m_modelMatrix{1.0f};
+    glm::mat4 m_viewMatrix{1.0f};
+    glm::mat4 m_projectionMatrix{1.0f};
 };

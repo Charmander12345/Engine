@@ -1,6 +1,7 @@
 #include "OpenGLMaterial.h"
 #include "Logger.h"
 #include <vector>
+#include <glm/gtc/type_ptr.hpp>
 
 #include "OpenGLTexture.h"
 #include "Texture.h"
@@ -201,6 +202,25 @@ void OpenGLMaterial::bind()
 {
     glUseProgram(m_program);
     glBindVertexArray(m_vao);
+
+    // Set matrix uniforms
+    GLint modelLoc = glGetUniformLocation(m_program, "uModel");
+    if (modelLoc >= 0)
+    {
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(m_modelMatrix));
+    }
+
+    GLint viewLoc = glGetUniformLocation(m_program, "uView");
+    if (viewLoc >= 0)
+    {
+        glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(m_viewMatrix));
+    }
+
+    GLint projectionLoc = glGetUniformLocation(m_program, "uProjection");
+    if (projectionLoc >= 0)
+    {
+        glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(m_projectionMatrix));
+    }
 
     bindTextures();
 }

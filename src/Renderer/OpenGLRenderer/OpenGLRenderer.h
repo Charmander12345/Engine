@@ -5,6 +5,7 @@
 #include "OpenGLMaterial.h"
 #include "../../Basics/Object3D.h"
 #include <memory>
+#include <glm/glm.hpp>
 
 class OpenGLRenderer : public Renderer
 {
@@ -25,4 +26,7 @@ private:
     SDL_GLContext m_glContext;
     std::shared_ptr<OpenGLMaterial> m_material;
     std::shared_ptr<Object3D> m_object3D;
+
+    glm::mat4 m_viewMatrix;
+    glm::mat4 m_projectionMatrix;
 };
