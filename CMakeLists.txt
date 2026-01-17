@@ -55,6 +55,11 @@ target_link_libraries(Engine
 
 set(ENGINE_DEPLOY_DIR "C:/Users/conno/source/repos/EngineBuild")
 
+# Build outputs (exe + DLLs) should go directly to the deploy directory.
+# This is more reliable than post-build copying, especially with Ninja.
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}")
+
 # Always copy from the source tree to avoid stale files in the build directory.
 # NOTE: There are two shader directories in the repo; use Renderer/OpenGLRenderer/shaders as the authoritative one.
 set(SHADERS_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/OpenGLRenderer/shaders")
@@ -64,10 +69,10 @@ add_custom_command(TARGET Engine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}"
 
     # Copy Engine exe to deploy directory
-    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:Engine>" "${ENGINE_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:Engine>" "${ENGINE_DEPLOY_DIR}/$<TARGET_FILE_NAME:Engine>"
 
-    # Copy SDL3 (and other runtime) dlls next to exe into deploy directory
-    COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:Engine> "${ENGINE_DEPLOY_DIR}/"
+    # Copy all runtime DLLs needed by Engine to deploy directory
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:Engine> "${ENGINE_DEPLOY_DIR}"
 
     # Clean shaders output dir first so removed/renamed shaders don't stay around
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${ENGINE_DEPLOY_DIR}/shaders"

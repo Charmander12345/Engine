@@ -366,77 +366,59 @@ bool AssetManager::initialize()
 void AssetManager::ensureDefaultAssetsCreated()
 {
     auto& diagnostics = DiagnosticsManager::Instance();
+    auto& logger = Logger::Instance();
     if (!diagnostics.isProjectLoaded() || diagnostics.getProjectInfo().projectPath.empty())
     {
         // No project context => can't create/save project assets.
+		logger.log(Logger::Category::AssetManagement, "Cannot ensure default assets: no project loaded.", Logger::LogLevel::ERROR);
         return;
     }
 
-    auto& logger = Logger::Instance();
+    
     logger.log(Logger::Category::AssetManagement, "Ensuring default assets exist for project...", Logger::LogLevel::INFO);
 
-    // If the quad already exists on disk, use it as the model, but still ensure the material/texture it
-    // references exist.
-    std::shared_ptr<Object2D> diskQuad;
-    if (auto loaded = loadAssetObject("default_quad2d.asset"))
-    {
-        diskQuad = std::dynamic_pointer_cast<Object2D>(loaded);
-        if (diskQuad)
-        {
-            {
-                std::lock_guard<std::mutex> lock(m_stateMutex);
-                m_defaultTriangle2D = diskQuad;
-            }
-            logger.log(Logger::Category::AssetManagement, "Default assets: using existing default_quad2d.asset", Logger::LogLevel::INFO);
-        }
-    }
+    const fs::path contentRoot = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
 
-    // 1) Texture asset: prefer wall.jpg, else create debug texture asset.
-    std::shared_ptr<Texture> tex;
+    const auto ensureOnDisk = [&](const std::string& relPath, AssetType expectedType, const std::shared_ptr<EngineObject>& obj) -> bool
     {
-        const std::string wallAssetRel = (fs::path("Textures") / "wall.asset").generic_string();
-        if (auto existing = loadAssetObject(wallAssetRel))
+        const fs::path abs = contentRoot / fs::path(relPath);
+
+        bool existsAndOk = false;
+        if (fs::exists(abs))
         {
-            tex = std::dynamic_pointer_cast<Texture>(existing);
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == expectedType;
         }
 
-        if (!tex)
+        if (existsAndOk)
         {
-            std::string wallAbs = getAbsoluteContentPath((fs::path("Textures") / "wall.jpg").generic_string());
-            if (wallAbs.empty() || !fs::exists(fs::path(wallAbs)))
-            {
-                // Some projects use .jp (typo/legacy) as mentioned; support that too.
-                wallAbs = getAbsoluteContentPath((fs::path("Textures") / "wall.jp").generic_string());
-            }
-
-            if (!wallAbs.empty() && fs::exists(fs::path(wallAbs)))
-            {
-                logger.log(Logger::Category::AssetManagement, "Default assets: importing wall.jpg -> " + wallAssetRel, Logger::LogLevel::INFO);
-                auto created = createAsset(AssetType::Texture, wallAssetRel, "wall", wallAbs);
-                tex = std::dynamic_pointer_cast<Texture>(created);
-            }
-            else
-            {
-                logger.log(Logger::Category::AssetManagement, "Default assets: wall texture source missing (expected Content/Textures/wall.jpg or wall.jp)", Logger::LogLevel::WARNING);
-            }
+            logger.log(Logger::Category::AssetManagement, "Default asset OK: " + relPath, Logger::LogLevel::INFO);
+            return true;
         }
-    }
 
-    if (!tex)
-    {
-        if (auto existing = loadAssetObject((fs::path("Textures") / "default_debug.asset").generic_string()))
+        if (!obj)
         {
-            tex = std::dynamic_pointer_cast<Texture>(existing);
+            logger.log(Logger::Category::AssetManagement, "Default asset missing/invalid and cannot be created: " + relPath, Logger::LogLevel::ERROR);
+            return false;
         }
-    }
 
-    if (!tex)
+        logger.log(
+            Logger::Category::AssetManagement,
+            std::string("Default asset ") + (fs::exists(abs) ? "invalid (type mismatch), overwriting: " : "missing, creating: ") + relPath,
+            Logger::LogLevel::WARNING);
+
+        obj->setPath(relPath);
+        obj->setAssetType(expectedType);
+        obj->setIsSaved(false);
+        return saveAsset(obj);
+    };
+
+    // 1) wall texture
+    const std::string wallTexRel = (fs::path("Textures") / "wall.asset").generic_string();
     {
-        tex = std::make_shared<Texture>();
-        tex->setName("DefaultDebugTexture");
-        tex->setPath((fs::path("Textures") / "default_debug.asset").generic_string());
-        tex->setAssetType(AssetType::Texture);
-        tex->setIsSaved(false);
+        auto tex = std::make_shared<Texture>();
+        tex->setName("wall");
+        // Default debug texture (2x2 RGBA)
         tex->setWidth(2);
         tex->setHeight(2);
         tex->setChannels(4);
@@ -444,67 +426,88 @@ void AssetManager::ensureDefaultAssetsCreated()
             255,   0,   0, 255,   0, 255,   0, 255,
               0,   0, 255, 255, 255, 255,   0, 255
         });
-
-        {
-            std::lock_guard<std::mutex> lock(m_stateMutex);
-            m_garbageCollector.registerResource(tex);
-        }
+        ensureOnDisk(wallTexRel, AssetType::Texture, tex);
     }
 
-	logger.log(Logger::Category::AssetManagement, "Default assets: using texture asset at path: " + tex->getPath(), Logger::LogLevel::INFO);
-
-    // 2) Material asset referencing that texture.
-    const std::string matPath = (fs::path("Materials") / "default_debug.asset").generic_string();
-    std::shared_ptr<MaterialAsset> mat;
-    if (auto existing = loadAssetObject(matPath))
+    // 2) wall material
+    const std::string wallMatRel = (fs::path("Materials") / "wall.asset").generic_string();
     {
-        mat = std::dynamic_pointer_cast<MaterialAsset>(existing);
-    }
-    if (!mat)
-    {
-        mat = std::make_shared<MaterialAsset>();
+        auto mat = std::make_shared<MaterialAsset>();
         mat->setName("DefaultDebugMaterial");
-        mat->setPath(matPath);
-        mat->setAssetType(AssetType::Material);
-        mat->setIsSaved(false);
-        mat->setTextureAssetPaths({ tex->getPath() });
+        mat->setTextureAssetPaths({ wallTexRel });
+        ensureOnDisk(wallMatRel, AssetType::Material, mat);
+    }
 
+    // 3) default 3D quad model
+    const std::string quad3dRel = "default_quad3d.asset";
+    {
+        const fs::path abs = contentRoot / fs::path(quad3dRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
         {
-            std::lock_guard<std::mutex> lock(m_stateMutex);
-            m_garbageCollector.registerResource(mat);
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Model3D;
+        }
+
+        if (existsAndOk)
+        {
+            logger.log(Logger::Category::AssetManagement, "Default asset OK: " + quad3dRel, Logger::LogLevel::INFO);
+        }
+        else
+        {
+            auto quad = std::make_shared<Object3D>();
+            quad->setName("DefaultQuad3D");
+            quad->setMaterialAssetPath(wallMatRel);
+            quad->setVertices({
+    -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,
+     0.5f, -0.5f, -0.5f,  1.0f, 0.0f,
+     0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+     0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+    -0.5f,  0.5f, -0.5f,  0.0f, 1.0f,
+    -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,
+
+    -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+     0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
+     0.5f,  0.5f,  0.5f,  1.0f, 1.0f,
+     0.5f,  0.5f,  0.5f,  1.0f, 1.0f,
+    -0.5f,  0.5f,  0.5f,  0.0f, 1.0f,
+    -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+
+    -0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+    -0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+    -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+    -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+    -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+    -0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+
+     0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+     0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+     0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+     0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+     0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+     0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+
+    -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+     0.5f, -0.5f, -0.5f,  1.0f, 1.0f,
+     0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
+     0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
+    -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+    -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+
+    -0.5f,  0.5f, -0.5f,  0.0f, 1.0f,
+     0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+     0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+     0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+    -0.5f,  0.5f,  0.5f,  0.0f, 0.0f,
+    -0.5f,  0.5f, -0.5f,  0.0f, 1.0f
+            });
+            quad->setIndices({});
+
+            ensureOnDisk(quad3dRel, AssetType::Model3D, quad);
         }
     }
 
-	logger.log(Logger::Category::AssetManagement, "Default assets: using material asset at path: " + mat->getPath(), Logger::LogLevel::INFO);
-
-    // 3) Quad model referencing the material (create only if missing on disk).
-    std::shared_ptr<Object2D> quad = diskQuad;
-    if (!quad)
-    {
-        quad = std::make_shared<Object2D>();
-        quad->setName("DefaultQuad2D");
-        quad->setPath("default_quad2d.asset");
-        quad->setAssetType(AssetType::Model2D);
-        quad->setIsSaved(false);
-    }
-
-    quad->setMaterialAssetPath(mat->getPath());
-    quad->setLoadedMaterialAsset(mat);
-
-    quad->setVertices({
-        // positions             // colors            // texcoords
-        -0.5f,  0.5f, 0.0f,      1.0f, 0.0f, 0.0f,     0.0f, 1.0f,
-         0.5f,  0.5f, 0.0f,      0.0f, 1.0f, 0.0f,     1.0f, 1.0f,
-         0.5f, -0.5f, 0.0f,      0.0f, 0.0f, 1.0f,     1.0f, 0.0f,
-        -0.5f, -0.5f, 0.0f,      1.0f, 1.0f, 0.0f,     0.0f, 0.0f
-    });
-    quad->setIndices({ 0, 1, 2, 2, 3, 0 });
-
-    {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        m_defaultTriangle2D = quad;
-        m_garbageCollector.registerResource(m_defaultTriangle2D);
-    }
+    // NOTE: Levels are ensured/loaded by loadProject(). This function only creates/saves default asset files.
 
 	logger.log(Logger::Category::AssetManagement, "Default assets ensured.", Logger::LogLevel::INFO);
 }
@@ -706,6 +709,7 @@ std::shared_ptr<EngineObject> AssetManager::loadAssetObject(const std::string& p
 {
     // Fast path: already loaded
     {
+		Logger::Instance().log(Logger::Category::AssetManagement, "loadAssetObject(): checking for already loaded asset: " + path, Logger::LogLevel::INFO);
         std::lock_guard<std::mutex> lock(m_stateMutex);
         for (const auto& alive : m_garbageCollector.getAliveResources())
         {
@@ -715,22 +719,14 @@ std::shared_ptr<EngineObject> AssetManager::loadAssetObject(const std::string& p
             }
         }
     }
-
-    if (!loadAsset(path))
+	Logger::Instance().log(Logger::Category::AssetManagement, "loadAssetObject(): asset not already loaded, proceeding to load: " + path, Logger::LogLevel::INFO);
+	auto object = loadAsset(path);
+    if (!object)
     {
+		Logger::Instance().log(Logger::Category::AssetManagement, "loadAssetObject(): loadAsset() failed for path: " + path, Logger::LogLevel::ERROR);
         return nullptr;
     }
-
-    // Fetch again after load
-    std::lock_guard<std::mutex> lock(m_stateMutex);
-    for (const auto& alive : m_garbageCollector.getAliveResources())
-    {
-        if (alive && fs::path(alive->getPath()).generic_string() == fs::path(path).generic_string())
-        {
-            return alive;
-        }
-    }
-    return nullptr;
+    return object;
 }
 
 std::shared_ptr<MaterialAsset> AssetManager::loadMaterialAsset(const std::string& materialAssetPath)
@@ -763,7 +759,7 @@ std::vector<std::shared_ptr<Texture>> AssetManager::loadTexturesForMaterial(cons
     return out;
 }
 
-bool AssetManager::loadAsset(const std::string& path)
+std::shared_ptr<EngineObject> AssetManager::loadAsset(const std::string& path)
 {
      auto& logger = Logger::Instance();
      logger.log(Logger::Category::AssetManagement, "Loading asset: " + path, Logger::LogLevel::INFO);
@@ -778,7 +774,7 @@ bool AssetManager::loadAsset(const std::string& path)
      if (!loaded || diagnostics.getProjectInfo().projectPath.empty())
      {
          logger.log(Logger::Category::AssetManagement, "Asset load failed (no project loaded)", Logger::LogLevel::ERROR);
-         return false;
+         return nullptr;
      }
 
     fs::path contentRoot = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
@@ -789,7 +785,7 @@ bool AssetManager::loadAsset(const std::string& path)
     if (relPath.is_absolute())
     {
         logger.log(Logger::Category::AssetManagement, "Asset load failed (path must be relative to Content): " + relPath.string(), Logger::LogLevel::ERROR);
-        return false;
+        return nullptr;
     }
     logger.log(Logger::Category::AssetManagement, "Relative asset path: " + relPath.generic_string(), Logger::LogLevel::INFO);
 
@@ -798,14 +794,14 @@ bool AssetManager::loadAsset(const std::string& path)
     if (!fs::exists(absolutePath))
     {
         logger.log(Logger::Category::AssetManagement, "Asset load failed (missing file): " + absolutePath.string(), Logger::LogLevel::ERROR);
-        return false;
+        return nullptr;
     }
 
     std::ifstream in(absolutePath, std::ios::binary);
     if (!in.is_open())
     {
         logger.log(Logger::Category::AssetManagement, "Failed to open asset file: " + absolutePath.string(), Logger::LogLevel::ERROR);
-        return false;
+        return nullptr;
     }
 
     // Avoid re-loading the same asset while we parse (reduces recursive loops)
@@ -817,33 +813,33 @@ bool AssetManager::loadAsset(const std::string& path)
             if (alive && fs::path(alive->getPath()).generic_string() == requestedKey)
             {
                 logger.log(Logger::Category::AssetManagement, "Asset already loaded: " + requestedKey, Logger::LogLevel::INFO);
-                return true;
+                return alive;
             }
         }
     }
 
     uint32_t magic = 0;
     uint32_t version = 0;
-    if (!in.read(reinterpret_cast<char*>(&magic), sizeof(magic))) { logReadFail("magic"); return false; }
-    if (!in.read(reinterpret_cast<char*>(&version), sizeof(version))) { logReadFail("version"); return false; }
+    if (!in.read(reinterpret_cast<char*>(&magic), sizeof(magic))) { logReadFail("magic"); return nullptr; }
+    if (!in.read(reinterpret_cast<char*>(&version), sizeof(version))) { logReadFail("version"); return nullptr; }
     logger.log(Logger::Category::AssetManagement, "Asset header: magic=0x" + std::to_string(magic) + ", version=" + std::to_string(version), Logger::LogLevel::INFO);
     if (magic != 0x41535453 || version != 2) // 'ASTS'
     {
         logger.log(Logger::Category::AssetManagement, "Invalid asset file format (expected magic=0x41535453, version=2)", Logger::LogLevel::ERROR);
-        return false;
+        return nullptr;
     }
 
     int32_t typeInt = 0;
-    if (!in.read(reinterpret_cast<char*>(&typeInt), sizeof(typeInt))) { logReadFail("type"); return false; }
+    if (!in.read(reinterpret_cast<char*>(&typeInt), sizeof(typeInt))) { logReadFail("type"); return nullptr; }
     AssetType type = static_cast<AssetType>(typeInt);
     logger.log(Logger::Category::AssetManagement, "Asset type int: " + std::to_string(typeInt), Logger::LogLevel::INFO);
 
     std::string name;
     std::string storedRelPath;
     std::string materialAssetPath;
-    if (!readString(in, name)) { logReadFail("name"); return false; }
-    if (!readString(in, storedRelPath)) { logReadFail("storedRelPath"); return false; }
-    if (!readString(in, materialAssetPath)) { logReadFail("materialAssetPath"); return false; }
+    if (!readString(in, name)) { logReadFail("name"); return nullptr; }
+    if (!readString(in, storedRelPath)) { logReadFail("storedRelPath"); return nullptr; }
+    if (!readString(in, materialAssetPath)) { logReadFail("materialAssetPath"); return nullptr; }
 
     logger.log(Logger::Category::AssetManagement,
         "Asset meta: name='" + name + "', storedRelPath='" + storedRelPath + "', materialAssetPath='" + materialAssetPath + "'",
@@ -886,10 +882,10 @@ bool AssetManager::loadAsset(const std::string& path)
         auto tex = std::static_pointer_cast<Texture>(obj);
         int32_t w = 0, h = 0, c = 0;
         uint32_t dataSize = 0;
-        if (!in.read(reinterpret_cast<char*>(&w), sizeof(w))) { logReadFail("texture width"); return false; }
-        if (!in.read(reinterpret_cast<char*>(&h), sizeof(h))) { logReadFail("texture height"); return false; }
-        if (!in.read(reinterpret_cast<char*>(&c), sizeof(c))) { logReadFail("texture channels"); return false; }
-        if (!in.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize))) { logReadFail("texture dataSize"); return false; }
+        if (!in.read(reinterpret_cast<char*>(&w), sizeof(w))) { logReadFail("texture width"); return nullptr; }
+        if (!in.read(reinterpret_cast<char*>(&h), sizeof(h))) { logReadFail("texture height"); return nullptr; }
+        if (!in.read(reinterpret_cast<char*>(&c), sizeof(c))) { logReadFail("texture channels"); return nullptr; }
+        if (!in.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize))) { logReadFail("texture dataSize"); return nullptr; }
 
         logger.log(Logger::Category::AssetManagement,
             "Texture payload: w=" + std::to_string(w) + ", h=" + std::to_string(h) + ", c=" + std::to_string(c) + ", dataSize=" + std::to_string(dataSize),
@@ -899,7 +895,7 @@ bool AssetManager::loadAsset(const std::string& path)
         data.resize(dataSize);
         if (dataSize > 0)
         {
-            if (!in.read(reinterpret_cast<char*>(data.data()), dataSize)) { logReadFail("texture data blob"); return false; }
+            if (!in.read(reinterpret_cast<char*>(data.data()), dataSize)) { logReadFail("texture data blob"); return nullptr; }
         }
 
         tex->setWidth(w);
@@ -914,22 +910,22 @@ bool AssetManager::loadAsset(const std::string& path)
         obj2d->setMaterialAssetPath(materialAssetPath);
 
         uint32_t vertCount = 0;
-        if (!in.read(reinterpret_cast<char*>(&vertCount), sizeof(vertCount))) { logReadFail("model2d vertCount"); return false; }
+        if (!in.read(reinterpret_cast<char*>(&vertCount), sizeof(vertCount))) { logReadFail("model2d vertCount"); return nullptr; }
         logger.log(Logger::Category::AssetManagement, "Model2D payload: vertCount=" + std::to_string(vertCount), Logger::LogLevel::INFO);
         std::vector<float> verts(vertCount);
         if (vertCount > 0)
         {
-            if (!in.read(reinterpret_cast<char*>(verts.data()), vertCount * sizeof(float))) { logReadFail("model2d verts"); return false; }
+            if (!in.read(reinterpret_cast<char*>(verts.data()), vertCount * sizeof(float))) { logReadFail("model2d verts"); return nullptr; }
         }
         obj2d->setVertices(verts);
 
         uint32_t indexCount = 0;
-        if (!in.read(reinterpret_cast<char*>(&indexCount), sizeof(indexCount))) { logReadFail("model2d indexCount"); return false; }
+        if (!in.read(reinterpret_cast<char*>(&indexCount), sizeof(indexCount))) { logReadFail("model2d indexCount"); return nullptr; }
         logger.log(Logger::Category::AssetManagement, "Model2D payload: indexCount=" + std::to_string(indexCount), Logger::LogLevel::INFO);
         std::vector<uint32_t> indices(indexCount);
         if (indexCount > 0)
         {
-            if (!in.read(reinterpret_cast<char*>(indices.data()), indexCount * sizeof(uint32_t))) { logReadFail("model2d indices"); return false; }
+            if (!in.read(reinterpret_cast<char*>(indices.data()), indexCount * sizeof(uint32_t))) { logReadFail("model2d indices"); return nullptr; }
         }
         obj2d->setIndices(indices);
 
@@ -957,22 +953,22 @@ bool AssetManager::loadAsset(const std::string& path)
         obj3d->setMaterialAssetPath(materialAssetPath);
 
         uint32_t vertCount = 0;
-        if (!in.read(reinterpret_cast<char*>(&vertCount), sizeof(vertCount))) { logReadFail("model3d vertCount"); return false; }
+        if (!in.read(reinterpret_cast<char*>(&vertCount), sizeof(vertCount))) { logReadFail("model3d vertCount"); return nullptr; }
         logger.log(Logger::Category::AssetManagement, "Model3D payload: vertCount=" + std::to_string(vertCount), Logger::LogLevel::INFO);
         std::vector<float> verts(vertCount);
         if (vertCount > 0)
         {
-            if (!in.read(reinterpret_cast<char*>(verts.data()), vertCount * sizeof(float))) { logReadFail("model3d verts"); return false; }
+            if (!in.read(reinterpret_cast<char*>(verts.data()), vertCount * sizeof(float))) { logReadFail("model3d verts"); return nullptr; }
         }
         obj3d->setVertices(verts);
 
         uint32_t indexCount = 0;
-        if (!in.read(reinterpret_cast<char*>(&indexCount), sizeof(indexCount))) { logReadFail("model3d indexCount"); return false; }
+        if (!in.read(reinterpret_cast<char*>(&indexCount), sizeof(indexCount))) { logReadFail("model3d indexCount"); return nullptr; }
         logger.log(Logger::Category::AssetManagement, "Model3D payload: indexCount=" + std::to_string(indexCount), Logger::LogLevel::INFO);
         std::vector<uint32_t> indices(indexCount);
         if (indexCount > 0)
         {
-            if (!in.read(reinterpret_cast<char*>(indices.data()), indexCount * sizeof(uint32_t))) { logReadFail("model3d indices"); return false; }
+            if (!in.read(reinterpret_cast<char*>(indices.data()), indexCount * sizeof(uint32_t))) { logReadFail("model3d indices"); return nullptr; }
         }
         obj3d->setIndices(indices);
 
@@ -1000,12 +996,12 @@ bool AssetManager::loadAsset(const std::string& path)
         level->clearLoadedDependencies();
 
         uint32_t depCount = 0;
-        if (!in.read(reinterpret_cast<char*>(&depCount), sizeof(depCount))) { logReadFail("level depCount"); return false; }
+        if (!in.read(reinterpret_cast<char*>(&depCount), sizeof(depCount))) { logReadFail("level depCount"); return nullptr; }
         logger.log(Logger::Category::AssetManagement, "Level payload: depCount=" + std::to_string(depCount), Logger::LogLevel::INFO);
         for (uint32_t i = 0; i < depCount; ++i)
         {
             std::string objPath;
-            if (!readString(in, objPath)) { logReadFail("level object path"); return false; }
+            if (!readString(in, objPath)) { logReadFail("level object path"); return nullptr; }
 
             logger.log(Logger::Category::AssetManagement, "Level dep[" + std::to_string(i) + "]: path='" + objPath + "'", Logger::LogLevel::INFO);
 
@@ -1013,13 +1009,13 @@ bool AssetManager::loadAsset(const std::string& path)
             if (p.is_absolute())
             {
                 logger.log("Invalid asset path (should be relative to Content): " + objPath, Logger::LogLevel::ERROR);
-                return false;
+                return nullptr;
             }
 
             Vec3 pos{}, rot{}, scl{};
-            if (!in.read(reinterpret_cast<char*>(&pos), sizeof(pos))) { logReadFail("level object position"); return false; }
-            if (!in.read(reinterpret_cast<char*>(&rot), sizeof(rot))) { logReadFail("level object rotation"); return false; }
-            if (!in.read(reinterpret_cast<char*>(&scl), sizeof(scl))) { logReadFail("level object scale"); return false; }
+            if (!in.read(reinterpret_cast<char*>(&pos), sizeof(pos))) { logReadFail("level object position"); return nullptr; }
+            if (!in.read(reinterpret_cast<char*>(&rot), sizeof(rot))) { logReadFail("level object rotation"); return nullptr; }
+            if (!in.read(reinterpret_cast<char*>(&scl), sizeof(scl))) { logReadFail("level object scale"); return nullptr; }
 
             Transform t;
             t.setPosition(pos);
@@ -1054,7 +1050,7 @@ bool AssetManager::loadAsset(const std::string& path)
         auto mat = std::static_pointer_cast<MaterialAsset>(obj);
 
         uint32_t texRefCount = 0;
-        if (!in.read(reinterpret_cast<char*>(&texRefCount), sizeof(texRefCount))) { logReadFail("material texRefCount"); return false; }
+        if (!in.read(reinterpret_cast<char*>(&texRefCount), sizeof(texRefCount))) { logReadFail("material texRefCount"); return nullptr; }
         logger.log(Logger::Category::AssetManagement, "Material payload: texRefCount=" + std::to_string(texRefCount), Logger::LogLevel::INFO);
 
         std::vector<std::string> refs;
@@ -1063,7 +1059,7 @@ bool AssetManager::loadAsset(const std::string& path)
         for (uint32_t i = 0; i < texRefCount; ++i)
         {
             std::string ref;
-            if (!readString(in, ref)) { logReadFail("material texture ref"); return false; }
+            if (!readString(in, ref)) { logReadFail("material texture ref"); return nullptr; }
             logger.log(Logger::Category::AssetManagement, "Material texRef[" + std::to_string(i) + "]: '" + ref + "'", Logger::LogLevel::INFO);
             refs.push_back(std::move(ref));
         }
@@ -1080,7 +1076,7 @@ bool AssetManager::loadAsset(const std::string& path)
     // Level dependencies are resolved inline during parsing.
 
     logger.log(Logger::Category::AssetManagement, "Asset loaded: " + name + " (" + obj->getPath() + ")", Logger::LogLevel::INFO);
-    return true;
+    return obj;
 }
 
 bool AssetManager::saveAsset(const std::shared_ptr<EngineObject>& object)
@@ -1418,21 +1414,51 @@ void AssetManager::ensureDefaultTriangleAssetSaved()
 
 std::unique_ptr<EngineLevel> AssetManager::createLevelWithDefaultTriangle(const std::string& levelPath, const std::string& levelName)
 {
+    auto& logger = Logger::Instance();
+    auto& diagnostics = DiagnosticsManager::Instance();
+
+    if (!diagnostics.isProjectLoaded() || diagnostics.getProjectInfo().projectPath.empty())
+    {
+        logger.log(Logger::Category::AssetManagement, "createLevelWithDefaultTriangle: no project loaded.", Logger::LogLevel::ERROR);
+        return nullptr;
+    }
+
+    // Ensure default assets exist on disk.
+    ensureDefaultAssetsCreated();
+
+    // Load default model so level can reference it.
+    auto quadObj = loadAssetObject("default_quad3d.asset");
+    auto quad = std::dynamic_pointer_cast<Object3D>(quadObj);
+    if (!quad)
+    {
+        logger.log(Logger::Category::AssetManagement, "createLevelWithDefaultTriangle: failed to load default_quad3d.asset", Logger::LogLevel::ERROR);
+        return nullptr;
+    }
+
     auto level = std::make_unique<EngineLevel>();
     level->setName(levelName);
     level->setPath(fs::path(levelPath).generic_string());
+    level->setAssetType(AssetType::Level);
+    level->setIsSaved(false);
 
-    ensureDefaultTriangleAssetSaved();
+    level->registerObject(quad);
+    level->setLoadedDependency(quad->getPath(), quad);
 
-    if (m_defaultTriangle2D)
+    Transform t{};
+    t.setPosition(Vec3{ 0.25f, 0.0f, 0.0f });
+    t.setRotation(Vec3{ 20.0f, 50.0f, 70.0f });
+    t.setScale(Vec3{ 1.0f, 1.0f, 1.0f });
+    level->setObjectTransform(quad->getPath(), t);
+
+    // Save via aliasing shared_ptr (non-owning).
+    std::shared_ptr<EngineObject> base;
+    std::shared_ptr<EngineObject> alias(base, static_cast<EngineObject*>(level.get()));
+    if (!saveAsset(alias))
     {
-		Transform t{};
-		level->registerObject(m_defaultTriangle2D);
-		level->setObjectTransform(m_defaultTriangle2D->getPath(), t);
-		level->setLoadedDependency(m_defaultTriangle2D->getPath(), m_defaultTriangle2D);
+        logger.log(Logger::Category::AssetManagement, "createLevelWithDefaultTriangle: failed to save level asset: " + level->getPath(), Logger::LogLevel::ERROR);
+        return nullptr;
     }
 
-    level->setIsSaved(false);
     return level;
 }
 
@@ -1652,13 +1678,70 @@ bool AssetManager::loadProject(const std::string& projectPath)
         info.projectPath = root.string();
     }
 
+    // Project file fully parsed - apply it.
     diagnostics.setProjectInfo(info);
 
     // New project/level context: force re-prepare of renderer resources.
     diagnostics.setScenePrepared(false);
 
-    // Registry handling: ONLY here.
-    // Always rebuild via discovery to ensure it's up-to-date.
+    // Ensure default assets exist, but do not create/override the active level here.
+    ensureDefaultAssetsCreated();
+
+    auto createAndSetFallbackLevel = [&]()
+    {
+        const std::string fallbackPath = (fs::path("Levels") / "DefaultLevel.map").generic_string();
+        logger.log(Logger::Category::Project, "Creating fallback level: " + fallbackPath, Logger::LogLevel::WARNING);
+
+        auto level = createLevelWithDefaultTriangle(fallbackPath, fs::path(fallbackPath).stem().string());
+        if (level)
+        {
+            diagnostics.setActiveLevel(std::move(level));
+            diagnostics.setScenePrepared(false);
+            saveProject(info.projectPath);
+        }
+        else
+        {
+            logger.log(Logger::Category::Project, "Failed to create fallback level.", Logger::LogLevel::ERROR);
+        }
+    };
+
+    if (!LevelPath.empty())
+    {
+		logger.log(Logger::Category::Project, "Loading active level from project file: " + LevelPath, Logger::LogLevel::INFO);
+        const std::string relLevelPath = fs::path(LevelPath).generic_string();
+        auto loadedObj = loadAssetObject(relLevelPath);
+        if (auto loadedLevel = std::dynamic_pointer_cast<EngineLevel>(loadedObj))
+        {
+			logger.log(Logger::Category::Project, "Active level loaded: " + loadedLevel->getName(), Logger::LogLevel::INFO);
+			// Create a runtime level instance but keep resolved world object references.
+			auto runtimeLevel = std::make_unique<EngineLevel>();
+			runtimeLevel->setName(loadedLevel->getName());
+			runtimeLevel->setPath(loadedLevel->getPath());
+			runtimeLevel->setAssetType(loadedLevel->getAssetType());
+			runtimeLevel->setIsSaved(true);
+
+			// Copy resolved world objects (shared_ptr) and transforms.
+			runtimeLevel->getWorldObjects() = loadedLevel->getWorldObjects();
+			for (const auto& kv : loadedLevel->getWorldObjectTransforms())
+			{
+				runtimeLevel->setObjectTransform(kv.first, kv.second);
+			}
+			logger.log(Logger::Category::Project, "Active level initialized: " + runtimeLevel->getName(), Logger::LogLevel::INFO);
+			diagnostics.setActiveLevel(std::move(runtimeLevel));
+        }
+        else
+        {
+            logger.log(Logger::Category::AssetManagement, "Failed to load configured level asset: " + relLevelPath, Logger::LogLevel::WARNING);
+            createAndSetFallbackLevel();
+        }
+    }
+    else
+    {
+		logger.log(Logger::Category::Project, "No active level set in project file.", Logger::LogLevel::WARNING);
+		createAndSetFallbackLevel();
+    }
+
+    // Registry handling: build at the very end, so it includes any ensured default assets.
 	logger.log(Logger::Category::Project, "Building asset registry for project: " + info.projectName, Logger::LogLevel::INFO);
     {
         const bool registryLoaded = loadAssetRegistry(info.projectPath);
@@ -1678,54 +1761,6 @@ bool AssetManager::loadProject(const std::string& projectPath)
         }
     }
 	logger.log(Logger::Category::AssetManagement, "Asset registry ready. Total assets: " + std::to_string(m_registry.size()), Logger::LogLevel::INFO);
-
-    auto createDefaultLevel = [&]()
-    {
-        const std::string fallbackPath = (fs::path("Levels") / "DefaultLevel.map").generic_string();
-        auto level = createLevelWithDefaultTriangle(fallbackPath, fs::path(fallbackPath).stem().string());
-        diagnostics.setActiveLevel(std::move(level));
-
-        if (auto* lvl = diagnostics.getActiveLevel())
-        {
-            saveAsset(std::shared_ptr<EngineObject>(lvl, [](EngineObject*) {}));
-            discoverAssetsAndBuildRegistry(info.projectPath);
-            saveAssetRegistry(info.projectPath);
-        }
-    };
-
-    if (!LevelPath.empty())
-    {
-        const std::string relLevelPath = fs::path(LevelPath).generic_string();
-        auto loadedObj = loadAssetObject(relLevelPath);
-        if (auto loadedLevel = std::dynamic_pointer_cast<EngineLevel>(loadedObj))
-        {
-			// Create a runtime level instance but keep resolved world object references.
-			auto runtimeLevel = std::make_unique<EngineLevel>();
-			runtimeLevel->setName(loadedLevel->getName());
-			runtimeLevel->setPath(loadedLevel->getPath());
-			runtimeLevel->setAssetType(loadedLevel->getAssetType());
-			runtimeLevel->setIsSaved(true);
-
-			// Copy resolved world objects (shared_ptr) and transforms.
-			runtimeLevel->getWorldObjects() = loadedLevel->getWorldObjects();
-			for (const auto& kv : loadedLevel->getWorldObjectTransforms())
-			{
-				runtimeLevel->setObjectTransform(kv.first, kv.second);
-			}
-
-			diagnostics.setActiveLevel(std::move(runtimeLevel));
-        }
-        else
-        {
-            logger.log(Logger::Category::AssetManagement, "Failed to load level asset; creating default level.", Logger::LogLevel::WARNING);
-            createDefaultLevel();
-        }
-    }
-    else
-    {
-        logger.log("No active level set for project. Creating default level.", Logger::LogLevel::WARNING);
-        createDefaultLevel();
-    }
 
     if (!diagnostics.loadProjectConfig())
     {
@@ -1838,7 +1873,7 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
     diagnostics.setProjectInfo(infoWithPath);
 
     const std::string defaultLevelPath = (fs::path("Levels") / "DefaultLevel.map").generic_string();
-    auto defaultlevel = createLevelWithDefaultTriangle(defaultLevelPath, "Default");
+    auto defaultlevel = std::make_unique<EngineLevel>();
     diagnostics.setActiveLevel(std::move(defaultlevel));
 
     // ensure defaults.ini exists for the new project
@@ -1861,7 +1896,7 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
         logger.log("Failed to load newly created project: " + root.string(), Logger::LogLevel::ERROR);
         return false;
 	}
-    return saved;
+    return loaded;
 }
 
 void AssetManager::importAssetWithDialog(SDL_Window* parentWindow, AssetType preferredType)

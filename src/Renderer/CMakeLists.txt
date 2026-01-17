@@ -15,6 +15,10 @@ add_library(Renderer SHARED
     RenderResourceManager.cpp
     OpenGLRenderer/OpenGLObject2D.cpp
     OpenGLRenderer/OpenGLObject2D.h
+    OpenGLRenderer/OpenGLObject3D.cpp
+    OpenGLRenderer/OpenGLObject3D.h
+    OpenGLRenderer/OpenGLCamera.cpp
+    OpenGLRenderer/OpenGLCamera.h
 )
 set_target_properties(Renderer PROPERTIES
     CXX_STANDARD 20

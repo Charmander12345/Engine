@@ -75,9 +75,31 @@ int main()
     uint64_t frame = 0;
     logger.log(Logger::Category::Engine, "Entering main loop.", Logger::LogLevel::INFO);
 
+    bool mouseLookEnabled = true;
+
+    uint64_t lastCounter = SDL_GetPerformanceCounter();
+    const double freq = static_cast<double>(SDL_GetPerformanceFrequency());
+
     while (running)
     {
         ++frame;
+
+        const uint64_t now = SDL_GetPerformanceCounter();
+        const double dt = (freq > 0.0) ? (static_cast<double>(now - lastCounter) / freq) : 0.016;
+        lastCounter = now;
+
+        // Basic movement (world-space for now)
+        const float moveSpeed = static_cast<float>(3.0 * dt); // units/sec
+        const bool* keys = SDL_GetKeyboardState(nullptr);
+        if (keys)
+        {
+            if (keys[SDL_SCANCODE_W]) renderer->moveCamera(0.0f, 0.0f, -moveSpeed);
+            if (keys[SDL_SCANCODE_S]) renderer->moveCamera(0.0f, 0.0f, +moveSpeed);
+            if (keys[SDL_SCANCODE_A]) renderer->moveCamera(-moveSpeed, 0.0f, 0.0f);
+            if (keys[SDL_SCANCODE_D]) renderer->moveCamera(+moveSpeed, 0.0f, 0.0f);
+            if (keys[SDL_SCANCODE_Q]) renderer->moveCamera(0.0f, -moveSpeed, 0.0f);
+            if (keys[SDL_SCANCODE_E]) renderer->moveCamera(0.0f, +moveSpeed, 0.0f);
+        }
 
         SDL_Event event;
         while (SDL_PollEvent(&event))
@@ -87,6 +109,12 @@ int main()
                 logger.log(Logger::Category::Input, "SDL_EVENT_QUIT received.", Logger::LogLevel::INFO);
                 running = false;
             }
+
+                if (event.key.key == SDLK_TAB)
+                {
+                    mouseLookEnabled = !mouseLookEnabled;
+                    logger.log(Logger::Category::Input, std::string("Mouse look: ") + (mouseLookEnabled ? "enabled" : "disabled"), Logger::LogLevel::INFO);
+                }
             if (event.type == SDL_EVENT_KEY_UP)
             {
                 if (event.key.key == SDLK_ESCAPE)
@@ -104,6 +132,12 @@ int main()
                     logger.log(Logger::Category::Input, "F2 pressed - opening import dialog.", Logger::LogLevel::INFO);
                     assetManager.importAssetWithDialog(nullptr, AssetType::Unknown);
                 }
+
+            if (event.type == SDL_EVENT_MOUSE_MOTION && mouseLookEnabled)
+            {
+                const float sensitivity = static_cast<float>(12.0 * dt); // deg/sec per pixel
+                renderer->rotateCamera(event.motion.xrel * sensitivity, -event.motion.yrel * sensitivity);
+            }
             }
         }
 

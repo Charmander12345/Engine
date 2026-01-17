@@ -7,8 +7,10 @@
 
 #include "../Basics/EngineLevel.h"
 #include "../Basics/Object2D.h"
+#include "../Basics/Object3D.h"
 
 #include "OpenGLRenderer/OpenGLObject2D.h"
+#include "OpenGLRenderer/OpenGLObject3D.h"
 #include "OpenGLRenderer/OpenGLMaterial.h"
 
 bool RenderResourceManager::prepareActiveLevel()
@@ -48,9 +50,13 @@ bool RenderResourceManager::prepareOpenGL(EngineLevel& level)
         if (!obj)
             continue;
 
-        // For now: support 2D objects (default triangle)
+        // 2D objects
         if (auto obj2d = std::dynamic_pointer_cast<Object2D>(obj))
         {
+            logger.log(Logger::Category::Rendering,
+                "RenderResourceManager: Object2D geometry: vertexFloats=" + std::to_string(obj2d->getVertices().size()) +
+                ", indexCount=" + std::to_string(obj2d->getIndices().size()),
+                Logger::LogLevel::INFO);
             logger.log(Logger::Category::Rendering, "RenderResourceManager: preparing Object2D '" + obj2d->getPath() + "'", Logger::LogLevel::INFO);
             if (!prepareOpenGLObject2D(obj2d))
             {
@@ -62,6 +68,25 @@ bool RenderResourceManager::prepareOpenGL(EngineLevel& level)
                 logger.log(Logger::Category::Rendering, "RenderResourceManager: prepared Object2D '" + obj2d->getPath() + "'", Logger::LogLevel::INFO);
             }
         }
+
+        // 3D objects
+        if (auto obj3d = std::dynamic_pointer_cast<Object3D>(obj))
+        {
+            logger.log(Logger::Category::Rendering,
+                "RenderResourceManager: Object3D geometry: vertexFloats=" + std::to_string(obj3d->getVertices().size()) +
+                ", indexCount=" + std::to_string(obj3d->getIndices().size()),
+                Logger::LogLevel::INFO);
+            logger.log(Logger::Category::Rendering, "RenderResourceManager: preparing Object3D '" + obj3d->getPath() + "'", Logger::LogLevel::INFO);
+            if (!prepareOpenGLObject3D(obj3d))
+            {
+                logger.log(Logger::Category::Rendering, "RenderResourceManager: failed to prepare OpenGL resources for Object3D: " + obj3d->getPath(), Logger::LogLevel::ERROR);
+                ok = false;
+            }
+            else
+            {
+                logger.log(Logger::Category::Rendering, "RenderResourceManager: prepared Object3D '" + obj3d->getPath() + "'", Logger::LogLevel::INFO);
+            }
+        }
     }
 
     logger.log(Logger::Category::Rendering,
@@ -69,6 +94,24 @@ bool RenderResourceManager::prepareOpenGL(EngineLevel& level)
         ok ? Logger::LogLevel::INFO : Logger::LogLevel::WARNING);
 
     return ok;
+}
+
+bool RenderResourceManager::prepareOpenGLObject3D(const std::shared_ptr<Object3D>& obj3d)
+{
+    if (!obj3d)
+        return false;
+
+    // Only treat as prepared if the material is already backend-specific.
+    {
+        auto existing = obj3d->getMaterial();
+        if (std::dynamic_pointer_cast<OpenGLMaterial>(existing))
+        {
+            return true;
+        }
+    }
+
+    OpenGLObject3D glObj(obj3d);
+    return glObj.prepare();
 }
 
 bool RenderResourceManager::prepareOpenGLObject2D(const std::shared_ptr<Object2D>& obj2d)

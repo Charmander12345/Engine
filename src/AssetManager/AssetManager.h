@@ -41,10 +41,12 @@ public:
 
 	bool saveAllAssets();
 
-    bool loadAsset(const std::string& path);
+	// Load and return the asset object if successful (also registers with GC)
+	// Returns nullptr on failure.
+	std::shared_ptr<EngineObject> loadAsset(const std::string& path);
 
-    // Load and return the asset object if successful (also registers with GC)
-    std::shared_ptr<EngineObject> loadAssetObject(const std::string& path);
+	// Convenience wrapper (kept for readability/compatibility): returns an object pointer.
+	std::shared_ptr<EngineObject> loadAssetObject(const std::string& path);
 
     bool saveAsset(const std::shared_ptr<EngineObject>& object);
 

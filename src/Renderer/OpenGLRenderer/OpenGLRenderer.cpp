@@ -5,6 +5,7 @@
 
 #include "Logger.h"
 #include "OpenGLMaterial.h"
+#include "OpenGLCamera.h"
 
 #include "../../Diagnostics/DiagnosticsManager.h"
 #include "../../Basics/EngineLevel.h"
@@ -22,12 +23,7 @@ OpenGLRenderer::OpenGLRenderer()
     m_window = nullptr;
     m_glContext = nullptr;
 
-    // Initialize view matrix (camera at origin looking down -Z)
-    m_viewMatrix = glm::lookAt(
-        glm::vec3(0.0f, 0.0f, 3.0f),  // Camera position
-        glm::vec3(0.0f, 0.0f, 0.0f),  // Look at point
-        glm::vec3(0.0f, 1.0f, 0.0f)   // Up vector
-    );
+    m_camera = std::make_unique<OpenGLCamera>();
 
     // Initialize projection matrix (will be updated with proper aspect ratio)
     m_projectionMatrix = glm::perspective(
@@ -36,6 +32,8 @@ OpenGLRenderer::OpenGLRenderer()
         0.1f,                 // Near plane
         100.0f                // Far plane
     );
+
+    // Note: any initial camera offset should be expressed as initial camera position.
 }
 
 OpenGLRenderer::~OpenGLRenderer()
@@ -99,6 +97,16 @@ bool OpenGLRenderer::initialize()
 
     m_initialized = true;
     logger.log(Logger::Category::Rendering, "Initialisation of the OpenGL renderer complete.", Logger::LogLevel::INFO);
+
+    // Prime render resources as soon as the renderer is ready.
+    {
+        RenderResourceManager rrm;
+        if (rrm.prepareActiveLevel())
+        {
+            DiagnosticsManager::Instance().setScenePrepared(true);
+        }
+    }
+
     SDL_ShowWindow(m_window);
     SDL_RestoreWindow(m_window);
     return true;
@@ -159,6 +167,13 @@ void OpenGLRenderer::render()
         }
     }
 
+    glm::mat4 view(1.0f);
+    if (m_camera)
+    {
+        Mat4 engineView = m_camera->getViewMatrixColumnMajor();
+        view = glm::make_mat4(engineView.m);
+    }
+
     const auto& objs = level->getWorldObjects();
     const auto& transforms = level->getWorldObjectTransforms();
 
@@ -181,8 +196,10 @@ void OpenGLRenderer::render()
                 Mat4 engineMat = t->getMatrix4ColumnMajor();
                 glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
 
+                modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+
                 glMaterial->setModelMatrix(modelMatrix);
-                glMaterial->setViewMatrix(m_viewMatrix);
+                glMaterial->setViewMatrix(view);
                 glMaterial->setProjectionMatrix(m_projectionMatrix);
             }
             obj3d->render();
@@ -196,13 +213,30 @@ void OpenGLRenderer::render()
                 Mat4 engineMat = t->getMatrix4ColumnMajor();
                 glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
 
+				modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 0.0f, 1.0f));
+                
+
                 glMaterial->setModelMatrix(modelMatrix);
-                glMaterial->setViewMatrix(m_viewMatrix);
+                glMaterial->setViewMatrix(view);
                 glMaterial->setProjectionMatrix(m_projectionMatrix);
             }
             obj2d->render();
         }
     }
+}
+
+void OpenGLRenderer::moveCamera(float dx, float dy, float dz)
+{
+    if (!m_camera)
+        return;
+    m_camera->move(Vec3{ dx, dy, dz });
+}
+
+void OpenGLRenderer::rotateCamera(float yawDeltaDegrees, float pitchDeltaDegrees)
+{
+    if (!m_camera)
+        return;
+    m_camera->rotate(yawDeltaDegrees, pitchDeltaDegrees);
 }
 
 const std::string& OpenGLRenderer::name() const
