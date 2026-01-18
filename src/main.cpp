@@ -76,6 +76,7 @@ int main()
     logger.log(Logger::Category::Engine, "Entering main loop.", Logger::LogLevel::INFO);
 
     bool mouseLookEnabled = true;
+    bool rightMouseDown = false;
 
     uint64_t lastCounter = SDL_GetPerformanceCounter();
     const double freq = static_cast<double>(SDL_GetPerformanceFrequency());
@@ -110,6 +111,15 @@ int main()
                 running = false;
             }
 
+            if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_RIGHT)
+            {
+                rightMouseDown = true;
+            }
+            else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_RIGHT)
+            {
+                rightMouseDown = false;
+            }
+
                 if (event.key.key == SDLK_TAB)
                 {
                     mouseLookEnabled = !mouseLookEnabled;
@@ -133,7 +143,7 @@ int main()
                     assetManager.importAssetWithDialog(nullptr, AssetType::Unknown);
                 }
 
-            if (event.type == SDL_EVENT_MOUSE_MOTION && mouseLookEnabled)
+            if (event.type == SDL_EVENT_MOUSE_MOTION && mouseLookEnabled && rightMouseDown)
             {
                 const float sensitivity = static_cast<float>(12.0 * dt); // deg/sec per pixel
                 renderer->rotateCamera(event.motion.xrel * sensitivity, -event.motion.yrel * sensitivity);
