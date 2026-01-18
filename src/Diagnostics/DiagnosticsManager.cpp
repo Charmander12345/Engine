@@ -305,3 +305,61 @@ DiagnosticsManager::DiagnosticsManager()
 {
 	m_projectInfo = { "", "", "", "", RHIType::Unknown };
 }
+
+void DiagnosticsManager::registerKeyDownHandler(int key, KeyCallback callback)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_keyDownHandlers[key].push_back(std::move(callback));
+}
+
+void DiagnosticsManager::registerKeyUpHandler(int key, KeyCallback callback)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_keyUpHandlers[key].push_back(std::move(callback));
+}
+
+bool DiagnosticsManager::dispatchKeyDown(int key)
+{
+    std::vector<KeyCallback> handlers;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_keyDownHandlers.find(key);
+        if (it != m_keyDownHandlers.end())
+        {
+            handlers = it->second;
+        }
+    }
+
+    for (auto& h : handlers)
+    {
+        if (h && h())
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool DiagnosticsManager::dispatchKeyUp(int key)
+{
+    std::vector<KeyCallback> handlers;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_keyUpHandlers.find(key);
+        if (it != m_keyUpHandlers.end())
+        {
+            handlers = it->second;
+        }
+    }
+
+    for (auto& h : handlers)
+    {
+        if (h && h())
+        {
+            return true;
+        }
+    }
+
+    return false;
+}

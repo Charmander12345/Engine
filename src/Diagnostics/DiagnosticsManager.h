@@ -7,11 +7,14 @@
 #include <filesystem>
 #include <vector>
 #include <memory>
+#include <functional>
 #include "../Basics/EngineLevel.h"
 
 class DiagnosticsManager
 {
 public:
+    using KeyCallback = std::function<bool()>;
+
     enum class RHIType
     {
         Unknown,
@@ -75,6 +78,13 @@ public:
     bool isActionInProgress() const;
 	void setActionInProgress(ActionType action, bool inProgress);
 
+    // Input event dispatch (minimal)
+    void registerKeyDownHandler(int key, KeyCallback callback);
+    void registerKeyUpHandler(int key, KeyCallback callback);
+
+    bool dispatchKeyDown(int key);
+    bool dispatchKeyUp(int key);
+
     void setActiveLevel(std::unique_ptr<EngineLevel> level);
     EngineLevel* getActiveLevel();
 
@@ -109,4 +119,7 @@ private:
     bool isBuildingProject{ false };
     bool isLoadingProject{ false };
     bool isSavingProject{ false };
+
+    std::unordered_map<int, std::vector<KeyCallback>> m_keyDownHandlers;
+    std::unordered_map<int, std::vector<KeyCallback>> m_keyUpHandlers;
 };

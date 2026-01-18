@@ -75,7 +75,24 @@ int main()
     uint64_t frame = 0;
     logger.log(Logger::Category::Engine, "Entering main loop.", Logger::LogLevel::INFO);
 
-    bool mouseLookEnabled = true;
+    diagnostics.registerKeyUpHandler(SDLK_ESCAPE, [&]() {
+        logger.log(Logger::Category::Input, "Escape pressed - exiting.", Logger::LogLevel::INFO);
+        running = false;
+        return true;
+        });
+
+    diagnostics.registerKeyUpHandler(SDLK_F1, [&]() {
+        logger.log(Logger::Category::Input, "F1 pressed - saving all assets (async).", Logger::LogLevel::INFO);
+        assetManager.saveAllAssetsAsync();
+        return true;
+        });
+
+    diagnostics.registerKeyUpHandler(SDLK_F2, [&]() {
+        logger.log(Logger::Category::Input, "F2 pressed - opening import dialog.", Logger::LogLevel::INFO);
+        assetManager.importAssetWithDialog(nullptr, AssetType::Unknown);
+        return true;
+        });
+
     bool rightMouseDown = false;
 
     uint64_t lastCounter = SDL_GetPerformanceCounter();
@@ -120,34 +137,20 @@ int main()
                 rightMouseDown = false;
             }
 
-                if (event.key.key == SDLK_TAB)
-                {
-                    mouseLookEnabled = !mouseLookEnabled;
-                    logger.log(Logger::Category::Input, std::string("Mouse look: ") + (mouseLookEnabled ? "enabled" : "disabled"), Logger::LogLevel::INFO);
-                }
-            if (event.type == SDL_EVENT_KEY_UP)
-            {
-                if (event.key.key == SDLK_ESCAPE)
-                {
-                    logger.log(Logger::Category::Input, "Escape pressed - exiting.", Logger::LogLevel::INFO);
-                    running = false;
-                }
-                if (event.key.key == SDLK_F1)
-                {
-                    logger.log(Logger::Category::Input, "F1 pressed - saving all assets (async).", Logger::LogLevel::INFO);
-                    assetManager.saveAllAssetsAsync();
-                }
-                if (event.key.key == SDLK_F2)
-                {
-                    logger.log(Logger::Category::Input, "F2 pressed - opening import dialog.", Logger::LogLevel::INFO);
-                    assetManager.importAssetWithDialog(nullptr, AssetType::Unknown);
-                }
-
-            if (event.type == SDL_EVENT_MOUSE_MOTION && mouseLookEnabled && rightMouseDown)
+            if (event.type == SDL_EVENT_MOUSE_MOTION && rightMouseDown)
             {
                 const float sensitivity = static_cast<float>(12.0 * dt); // deg/sec per pixel
-                renderer->rotateCamera(event.motion.xrel * sensitivity, -event.motion.yrel * sensitivity);
+                renderer->rotateCamera(static_cast<float>(event.motion.xrel) * sensitivity,
+                    -static_cast<float>(event.motion.yrel) * sensitivity);
             }
+
+            if (event.type == SDL_EVENT_KEY_UP)
+            {
+                diagnostics.dispatchKeyUp(event.key.key);
+            }
+            else if (event.type == SDL_EVENT_KEY_DOWN)
+            {
+                diagnostics.dispatchKeyDown(event.key.key);
             }
         }
 
