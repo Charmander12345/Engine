@@ -10,6 +10,7 @@ public:
     OpenGLCamera();
 
     void move(const Vec3& delta) override;
+    void moveRelative(float forward, float right, float up) override;
     void rotate(float yawDeltaDegrees, float pitchDeltaDegrees) override;
 
     Mat4 getViewMatrixColumnMajor() const override;

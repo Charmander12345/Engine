@@ -13,12 +13,15 @@ public:
     ~OpenGLRenderer() override;
 
     bool initialize() override;
+    void shutdown() override;
     void clear() override;
     void render() override;
     void present() override;
     const std::string& name() const override;
 
-    void moveCamera(float dx, float dy, float dz) override;
+    SDL_Window* window() const override;
+
+    void moveCamera(float forward, float right, float up) override;
     void rotateCamera(float yawDeltaDegrees, float pitchDeltaDegrees) override;
 
 private:

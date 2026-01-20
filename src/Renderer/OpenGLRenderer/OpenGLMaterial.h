@@ -4,7 +4,7 @@
 #include <memory>
 #include <unordered_map>
 #include <cstdint>
-#include "../Material.h"
+#include "../../Basics/Material.h"
 #include "OpenGLShader.h"
 #include "glad/include/gl.h"
 #include <glm/glm.hpp>
