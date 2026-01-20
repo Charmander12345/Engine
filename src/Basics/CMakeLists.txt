@@ -9,8 +9,7 @@ add_library(Basics SHARED
     Object2D.h
     "Texture.cpp"
     "Texture.h"
-    "MaterialAsset.cpp"
-    "MaterialAsset.h"
+    "Material.h"
     "MathTypes.h"
 )
 

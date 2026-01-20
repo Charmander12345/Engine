@@ -7,7 +7,14 @@ class Camera
 public:
     virtual ~Camera() = default;
 
+    // World-space delta (rarely used for player-like controls)
     virtual void move(const Vec3& delta) = 0;
+
+    // Local-space movement relative to camera orientation.
+    // forward: +forward (look direction)
+    // right: +right
+    // up: +up
+    virtual void moveRelative(float forward, float right, float up) = 0;
 
     // yaw: rotation around world up (Y), pitch: rotation around local right (X)
     virtual void rotate(float yawDeltaDegrees, float pitchDeltaDegrees) = 0;

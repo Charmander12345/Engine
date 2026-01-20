@@ -27,6 +27,19 @@ void OpenGLCamera::move(const Vec3& delta)
     m_position.z += delta.z;
 }
 
+void OpenGLCamera::moveRelative(float forward, float right, float up)
+{
+    const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+    const glm::vec3 camRight = glm::normalize(glm::cross(m_front, worldUp));
+    const glm::vec3 camUp = glm::normalize(glm::cross(camRight, m_front));
+
+    const glm::vec3 delta = (m_front * forward) + (camRight * right) + (camUp * up);
+
+    m_position.x += delta.x;
+    m_position.y += delta.y;
+    m_position.z += delta.z;
+}
+
 void OpenGLCamera::rotate(float yawDeltaDegrees, float pitchDeltaDegrees)
 {
     m_yawDeg += yawDeltaDegrees;
