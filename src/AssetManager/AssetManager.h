@@ -35,6 +35,13 @@ class Material;
 class AssetManager
 {
 public:
+
+    enum SyncState
+    {
+        Async,
+		Sync
+    };
+
     static AssetManager& Instance();
 
 	bool initialize();
