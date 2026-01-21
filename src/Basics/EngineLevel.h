@@ -5,54 +5,35 @@
 #include <string>
 #include <memory>
 #include "EngineObject.h"
-#include "Object3D.h"
-#include "Object2D.h"
 #include "MathTypes.h"
 #include "../AssetManager/AssetTypes.h"
 
 class EngineLevel : public EngineObject
 {
 public:
-
-	struct ObjectInstance
-	{
-		std::shared_ptr<EngineObject> object;
-		Transform transform;
-		std::string groupID;
-	};
-
-	struct group
-	{
-		std::string id;
-		std::vector<std::shared_ptr<EngineObject>> objects;
-		std::vector<Transform> transforms;
-		bool isInstanced{ false };
-	};
-
 	EngineLevel();
 	~EngineLevel();
 
-	bool enableInstancing(const std::string& groupID);
-	void disableInstancing(const std::string& groupID);
+	std::vector<std::shared_ptr<EngineObject>>& getWorldObjects();
+	const std::vector<std::shared_ptr<EngineObject>>& getWorldObjects() const;
 
-	bool createGroup(const std::string& groupID, bool instanced = false);
-	void deleteGroup(const std::string& groupID);
+	// store instance transforms (by object path)
+	const std::unordered_map<std::string, Transform>& getWorldObjectTransforms() const;
 
-	bool addObjectToGroup(const std::string& groupID, const std::shared_ptr<EngineObject>& object, const Transform& transform);
-	bool removeObjectFromGroup(const std::string& groupID, const std::shared_ptr<EngineObject>& object);
-
-	std::vector<std::shared_ptr<ObjectInstance>>& getWorldObjects();
-	std::vector<group>& getGroups();
-
+	// Legacy: kept for compatibility with older code paths, but world objects are authoritative.
+	const std::unordered_map<std::string, std::shared_ptr<EngineObject>>& getLoadedDependencies() const;
 	void clearLoadedDependencies();
+	void setLoadedDependency(const std::string& path, const std::shared_ptr<EngineObject>& obj);
 
-	bool registerObject(const std::shared_ptr<EngineObject>& object, Transform transform, const std::string& groupID);
+	bool registerObject(const std::shared_ptr<EngineObject>& object);
 	bool unregisterObject(const std::shared_ptr<EngineObject>& object);
 	bool setObjectTransform(const std::string& objectPath, const Transform& transform);
 
 
 private:
 
-	std::vector<std::shared_ptr<ObjectInstance>> Objects;
-	std::vector<group> m_groups;
+	std::vector<std::shared_ptr<EngineObject>> Objects;
+	std::unordered_map<std::string, Transform> m_objectTransforms;
+	std::unordered_map<std::string, std::shared_ptr<EngineObject>> m_loadedDependencies;
+
 };

@@ -17,7 +17,7 @@
 #include "../Basics/Object3D.h"
 #include "../Basics/EngineLevel.h"
 #include "../Basics/Texture.h"
-#include "../Basics/Material.h"
+#include "../Basics/MaterialAsset.h"
 #include "../Logger/Logger.h"
 #include "GarbageCollector.h"
 
@@ -66,17 +66,14 @@ public:
     // Optional: process any main-thread follow-ups (currently lightweight)
     void pump();
 
-	// Synchronous: tidies up expired weak_ptr tracked resources.
-	void collectGarbage();
-
     // Resolve <project>/Content/<relative> if a project is loaded.
     // Returns empty string if no project loaded.
     std::string getAbsoluteContentPath(const std::string& relativeToContent) const;
 
     // Convenience for runtime: resolve an Object2D/3D material + textures based on stored asset paths.
     // Creates a renderer Material instance (OpenGLMaterial etc. is responsibility of renderer; this only loads CPU assets).
-	std::shared_ptr<Material> loadMaterialAsset(const std::string& materialAssetPath);
-	std::vector<std::shared_ptr<Texture>> loadTexturesForMaterial(const Material& material);
+    std::shared_ptr<MaterialAsset> loadMaterialAsset(const std::string& materialAssetPath);
+    std::vector<std::shared_ptr<Texture>> loadTexturesForMaterial(const MaterialAsset& material);
 
 
     // Asset Registry

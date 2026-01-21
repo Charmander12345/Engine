@@ -8,6 +8,7 @@
 #include "Logger.h"
 
 #include "../../Basics/Object3D.h"
+#include "../../Basics/MaterialAsset.h"
 #include "../../AssetManager/AssetManager.h"
 
 namespace
@@ -98,10 +99,11 @@ bool OpenGLObject3D::prepare()
     layout.push_back(OpenGLMaterial::LayoutElement{ 2, 2, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(3 * sizeof(float)) });
     mat->setLayout(layout);
 
-    // Propagate textures from the runtime material (loaded by AssetManager) into the OpenGL material.
-    if (auto cpuMat = m_obj->getMaterial())
+    // Attach CPU-side textures via the material asset.
+    if (auto matAsset = m_obj->getLoadedMaterialAsset())
     {
-        mat->setTextures(cpuMat->getTextures());
+        auto textures = AssetManager::Instance().loadTexturesForMaterial(*matAsset);
+        mat->setTextures(textures);
     }
 
     if (!mat->build())

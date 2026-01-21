@@ -98,10 +98,6 @@ int main()
     uint64_t lastCounter = SDL_GetPerformanceCounter();
     const double freq = static_cast<double>(SDL_GetPerformanceFrequency());
 
-    uint64_t lastGcCounter = lastCounter;
-    constexpr double kGcIntervalSec = 60.0;
-    uint64_t gcRuns = 0;
-
     while (running)
     {
         ++frame;
@@ -110,29 +106,17 @@ int main()
         const double dt = (freq > 0.0) ? (static_cast<double>(now - lastCounter) / freq) : 0.016;
         lastCounter = now;
 
-        if (freq > 0.0 && (static_cast<double>(now - lastGcCounter) / freq) >= kGcIntervalSec)
-        {
-            assetManager.collectGarbage();
-            lastGcCounter = now;
-
-            ++gcRuns;
-            if ((gcRuns % 12) == 0)
-            {
-                logger.log(Logger::Category::AssetManagement, "Periodic GC runs=" + std::to_string(gcRuns), Logger::LogLevel::INFO);
-            }
-        }
-
-        // Basic movement (camera-relative)
+        // Basic movement (world-space for now)
         const float moveSpeed = static_cast<float>(3.0 * dt); // units/sec
         const bool* keys = SDL_GetKeyboardState(nullptr);
         if (keys)
         {
-            if (keys[SDL_SCANCODE_W]) renderer->moveCamera(+moveSpeed, 0.0f, 0.0f);
-            if (keys[SDL_SCANCODE_S]) renderer->moveCamera(-moveSpeed, 0.0f, 0.0f);
-            if (keys[SDL_SCANCODE_A]) renderer->moveCamera(0.0f, -moveSpeed, 0.0f);
-            if (keys[SDL_SCANCODE_D]) renderer->moveCamera(0.0f, +moveSpeed, 0.0f);
-            if (keys[SDL_SCANCODE_Q]) renderer->moveCamera(0.0f, 0.0f, -moveSpeed);
-            if (keys[SDL_SCANCODE_E]) renderer->moveCamera(0.0f, 0.0f, +moveSpeed);
+            if (keys[SDL_SCANCODE_W]) renderer->moveCamera(0.0f, 0.0f, -moveSpeed);
+            if (keys[SDL_SCANCODE_S]) renderer->moveCamera(0.0f, 0.0f, +moveSpeed);
+            if (keys[SDL_SCANCODE_A]) renderer->moveCamera(-moveSpeed, 0.0f, 0.0f);
+            if (keys[SDL_SCANCODE_D]) renderer->moveCamera(+moveSpeed, 0.0f, 0.0f);
+            if (keys[SDL_SCANCODE_Q]) renderer->moveCamera(0.0f, -moveSpeed, 0.0f);
+            if (keys[SDL_SCANCODE_E]) renderer->moveCamera(0.0f, +moveSpeed, 0.0f);
         }
 
         SDL_Event event;
@@ -147,27 +131,15 @@ int main()
             if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_RIGHT)
             {
                 rightMouseDown = true;
-                if (auto* w = renderer->window())
-                {
-                    SDL_SetWindowRelativeMouseMode(w, true);
-                }
-                SDL_HideCursor();
             }
             else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_RIGHT)
             {
                 rightMouseDown = false;
-                if (auto* w = renderer->window())
-                {
-                    SDL_SetWindowRelativeMouseMode(w, false);
-                }
-                SDL_ShowCursor();
             }
 
             if (event.type == SDL_EVENT_MOUSE_MOTION && rightMouseDown)
             {
-                // Use a frame-rate independent sensitivity (degrees per pixel).
-                // Relative mouse motion already represents physical movement, not a per-frame quantity.
-                const float sensitivity = 0.12f; // deg per pixel
+                const float sensitivity = static_cast<float>(12.0 * dt); // deg/sec per pixel
                 renderer->rotateCamera(static_cast<float>(event.motion.xrel) * sensitivity,
                     -static_cast<float>(event.motion.yrel) * sensitivity);
             }
@@ -203,8 +175,6 @@ int main()
         logger.log(Logger::Category::Engine, "Waiting for ongoing actions to complete...", Logger::LogLevel::INFO);
         SDL_Delay(100);
     }
-
-    renderer->shutdown();
 
     delete renderer;
 

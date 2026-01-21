@@ -36,50 +36,6 @@ OpenGLRenderer::OpenGLRenderer()
     // Note: any initial camera offset should be expressed as initial camera position.
 }
 
-void OpenGLRenderer::shutdown()
-{
-    auto& logger = Logger::Instance();
-    logger.log(Logger::Category::Rendering, "OpenGLRenderer shutdown: releasing GPU resources...", Logger::LogLevel::INFO);
-
-    // Ensure GL context is current so destructors can safely delete GL objects.
-    if (m_window && m_glContext)
-    {
-        SDL_GL_MakeCurrent(m_window, m_glContext);
-    }
-
-    auto& diagnostics = DiagnosticsManager::Instance();
-    if (EngineLevel* level = diagnostics.getActiveLevel())
-    {
-        auto& objs = level->getWorldObjects();
-        size_t cleared = 0;
-        for (auto& entry : objs)
-        {
-            if (!entry)
-                continue;
-
-            if (auto obj2d = (entry->object ? std::dynamic_pointer_cast<Object2D>(entry->object) : nullptr))
-            {
-                obj2d->setMaterial(nullptr);
-                ++cleared;
-            }
-            else if (auto obj3d = (entry->object ? std::dynamic_pointer_cast<Object3D>(entry->object) : nullptr))
-            {
-                obj3d->setMaterial(nullptr);
-                ++cleared;
-            }
-        }
-
-        logger.log(Logger::Category::Rendering,
-            "OpenGLRenderer shutdown: cleared materials on " + std::to_string(cleared) + " world objects.",
-            Logger::LogLevel::INFO);
-    }
-
-    // Any additional renderer-owned GPU resources can be released here.
-    m_camera.reset();
-
-    logger.log(Logger::Category::Rendering, "OpenGLRenderer shutdown: done.", Logger::LogLevel::INFO);
-}
-
 OpenGLRenderer::~OpenGLRenderer()
 {
     SDL_GL_DestroyContext(m_glContext);
@@ -219,103 +175,61 @@ void OpenGLRenderer::render()
     }
 
     const auto& objs = level->getWorldObjects();
-	const auto& groups = level->getGroups();
+    const auto& transforms = level->getWorldObjectTransforms();
 
-    if (!objs.empty())
+    for (const auto& entry : objs)
     {
-        for (const auto& entry : objs)
+        if (!entry || entry->getPath().empty())
+            continue;
+
+        const Transform* t = nullptr;
+        auto trIt = transforms.find(entry->getPath());
+        if (trIt != transforms.end())
+            t = &trIt->second;
+
+        if (auto obj3d = std::dynamic_pointer_cast<Object3D>(entry))
         {
-            if (!entry || entry->object->getPath().empty())
-                continue;
-
-            Transform* t = &entry->transform;
-
-            if (auto obj3d = std::dynamic_pointer_cast<Object3D>(entry->object))
+            auto material = obj3d->getMaterial();
+            auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
+            if (glMaterial && t)
             {
-                auto material = obj3d->getMaterial();
-                auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
-                if (glMaterial && t)
-                {
-                    Mat4 engineMat = t->getMatrix4ColumnMajor();
-                    glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
+                Mat4 engineMat = t->getMatrix4ColumnMajor();
+                glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
 
-                    modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+                modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 1.0f, 0.0f));
 
-                    glMaterial->setModelMatrix(modelMatrix);
-                    glMaterial->setViewMatrix(view);
-                    glMaterial->setProjectionMatrix(m_projectionMatrix);
-                }
-                obj3d->render();
+                glMaterial->setModelMatrix(modelMatrix);
+                glMaterial->setViewMatrix(view);
+                glMaterial->setProjectionMatrix(m_projectionMatrix);
             }
-            else if (auto obj2d = std::dynamic_pointer_cast<Object2D>(entry->object))
-            {
-                auto material = obj2d->getMaterial();
-                auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
-                if (glMaterial && t)
-                {
-                    Mat4 engineMat = t->getMatrix4ColumnMajor();
-                    glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-
-                    modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 0.0f, 1.0f));
-
-
-                    glMaterial->setModelMatrix(modelMatrix);
-                    glMaterial->setViewMatrix(view);
-                    glMaterial->setProjectionMatrix(m_projectionMatrix);
-                }
-                obj2d->render();
-            }
+            obj3d->render();
         }
-    }
-	if (!groups.empty())
-    {
-        for (const auto& groupEntry : groups)
+        else if (auto obj2d = std::dynamic_pointer_cast<Object2D>(entry))
         {
-            const auto& groupObjects = groupEntry.objects;
-            for (size_t i = 0; i < groupObjects.size(); ++i)
+            auto material = obj2d->getMaterial();
+            auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
+            if (glMaterial && t)
             {
-                const auto& entry = groupObjects[i];
-                if (!entry || entry->getPath().empty())
-                    continue;
-				Transform* t = (i < groupEntry.transforms.size()) ? const_cast<Transform*>(&groupEntry.transforms[i]) : nullptr;
-                if (auto obj3d = std::dynamic_pointer_cast<Object3D>(entry))
-                {
-                    auto material = obj3d->getMaterial();
-                    auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
-                    if (glMaterial && t)
-                    {
-                        Mat4 engineMat = t->getMatrix4ColumnMajor();
-                        glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-                        glMaterial->setModelMatrix(modelMatrix);
-                        glMaterial->setViewMatrix(view);
-                        glMaterial->setProjectionMatrix(m_projectionMatrix);
-                    }
-                    obj3d->render();
-                }
-                else if (auto obj2d = std::dynamic_pointer_cast<Object2D>(entry))
-                {
-                    auto material = obj2d->getMaterial();
-                    auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
-                    if (glMaterial && t)
-                    {
-                        Mat4 engineMat = t->getMatrix4ColumnMajor();
-                        glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-                        glMaterial->setModelMatrix(modelMatrix);
-                        glMaterial->setViewMatrix(view);
-                        glMaterial->setProjectionMatrix(m_projectionMatrix);
-                    }
-                    obj2d->render();
-                }
+                Mat4 engineMat = t->getMatrix4ColumnMajor();
+                glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
+
+				modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 0.0f, 1.0f));
+                
+
+                glMaterial->setModelMatrix(modelMatrix);
+                glMaterial->setViewMatrix(view);
+                glMaterial->setProjectionMatrix(m_projectionMatrix);
             }
+            obj2d->render();
         }
     }
 }
 
-void OpenGLRenderer::moveCamera(float forward, float right, float up)
+void OpenGLRenderer::moveCamera(float dx, float dy, float dz)
 {
     if (!m_camera)
         return;
-    m_camera->moveRelative(forward, right, up);
+    m_camera->move(Vec3{ dx, dy, dz });
 }
 
 void OpenGLRenderer::rotateCamera(float yawDeltaDegrees, float pitchDeltaDegrees)
@@ -328,9 +242,4 @@ void OpenGLRenderer::rotateCamera(float yawDeltaDegrees, float pitchDeltaDegrees
 const std::string& OpenGLRenderer::name() const
 {
     return m_name;
-}
-
-SDL_Window* OpenGLRenderer::window() const
-{
-    return m_window;
 }

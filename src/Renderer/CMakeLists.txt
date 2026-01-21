@@ -2,7 +2,7 @@ add_library(Renderer SHARED
 
     Renderer.h
     Shader.h
-    
+    Material.h
     OpenGLRenderer/OpenGLRenderer.cpp
     OpenGLRenderer/OpenGLRenderer.h
     OpenGLRenderer/OpenGLShader.cpp

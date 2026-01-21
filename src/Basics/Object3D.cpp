@@ -1,6 +1,6 @@
 
 #include "Object3D.h"
-#include "Material.h"
+#include "../Renderer/Material.h"
 
 void Object3D::render()
 {

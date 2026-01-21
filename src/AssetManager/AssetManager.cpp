@@ -11,7 +11,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_dialog.h>
 
-#include "../Basics/Material.h"
+#include "MaterialAsset.h"
 
 namespace fs = std::filesystem;
 
@@ -331,12 +331,12 @@ bool AssetManager::initialize()
             });
             m_garbageCollector.registerResource(tex);
 
-			auto mat = std::make_shared<Material>();
-			mat->setName("DefaultDebugMaterial");
-			mat->setPath((fs::path("Materials") / "default_debug.asset").generic_string());
-			mat->setAssetType(AssetType::Material);
-			mat->setIsSaved(false);
-			mat->setTextureAssetPaths({ tex->getPath() });
+            auto mat = std::make_shared<MaterialAsset>();
+            mat->setName("DefaultDebugMaterial");
+            mat->setPath((fs::path("Materials") / "default_debug.asset").generic_string());
+            mat->setAssetType(AssetType::Material);
+            mat->setIsSaved(false);
+            mat->setTextureAssetPaths({ tex->getPath() });
             m_garbageCollector.registerResource(mat);
 
             auto quad = std::make_shared<Object2D>();
@@ -344,7 +344,8 @@ bool AssetManager::initialize()
             quad->setPath("default_quad2d.asset");
             quad->setAssetType(AssetType::Model2D);
             quad->setIsSaved(false);
-			// Material assets/textures are handled by Material; Object2D only stores a runtime Material instance.
+            quad->setMaterialAssetPath(mat->getPath());
+            quad->setLoadedMaterialAsset(mat);
             quad->setVertices({
                 // positions             // colors            // texcoords
                 -0.5f,  0.5f, 0.0f,      1.0f, 0.0f, 0.0f,     0.0f, 1.0f,
@@ -431,7 +432,7 @@ void AssetManager::ensureDefaultAssetsCreated()
     // 2) wall material
     const std::string wallMatRel = (fs::path("Materials") / "wall.asset").generic_string();
     {
-		auto mat = std::make_shared<Material>();
+        auto mat = std::make_shared<MaterialAsset>();
         mat->setName("DefaultDebugMaterial");
         mat->setTextureAssetPaths({ wallTexRel });
         ensureOnDisk(wallMatRel, AssetType::Material, mat);
@@ -456,7 +457,7 @@ void AssetManager::ensureDefaultAssetsCreated()
         {
             auto quad = std::make_shared<Object3D>();
             quad->setName("DefaultQuad3D");
-				// Material assets/textures are handled by Material; Object3D only stores a runtime Material instance.
+            quad->setMaterialAssetPath(wallMatRel);
             quad->setVertices({
     -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,
      0.5f, -0.5f, -0.5f,  1.0f, 0.0f,
@@ -579,12 +580,6 @@ void AssetManager::enqueueJob(std::function<void()> job)
 void AssetManager::pump()
 {
     // currently no main-thread-only work is required.
-}
-
-void AssetManager::collectGarbage()
-{
-    std::lock_guard<std::mutex> lock(m_stateMutex);
-    m_garbageCollector.collect();
 }
 
 void AssetManager::importAssetFromFileAsync(AssetType type, std::string sourceFilePath)
@@ -734,7 +729,7 @@ std::shared_ptr<EngineObject> AssetManager::loadAssetObject(const std::string& p
     return object;
 }
 
-std::shared_ptr<Material> AssetManager::loadMaterialAsset(const std::string& materialAssetPath)
+std::shared_ptr<MaterialAsset> AssetManager::loadMaterialAsset(const std::string& materialAssetPath)
 {
     if (materialAssetPath.empty())
     {
@@ -742,10 +737,10 @@ std::shared_ptr<Material> AssetManager::loadMaterialAsset(const std::string& mat
     }
 
     auto obj = loadAssetObject(materialAssetPath);
-    return std::dynamic_pointer_cast<Material>(obj);
+    return std::dynamic_pointer_cast<MaterialAsset>(obj);
 }
 
-std::vector<std::shared_ptr<Texture>> AssetManager::loadTexturesForMaterial(const Material& material)
+std::vector<std::shared_ptr<Texture>> AssetManager::loadTexturesForMaterial(const MaterialAsset& material)
 {
     std::vector<std::shared_ptr<Texture>> out;
 
@@ -863,7 +858,7 @@ std::shared_ptr<EngineObject> AssetManager::loadAsset(const std::string& path)
         obj = std::make_shared<Texture>();
         break;
     case AssetType::Material:
-        obj = std::make_shared<Material>();
+        obj = std::make_shared<MaterialAsset>();
         break;
     case AssetType::Level:
         obj = std::make_shared<EngineLevel>();
@@ -912,27 +907,7 @@ std::shared_ptr<EngineObject> AssetManager::loadAsset(const std::string& path)
     if (type == AssetType::Model2D)
     {
         auto obj2d = std::static_pointer_cast<Object2D>(obj);
-        // Create a runtime Material instance and populate it from the referenced material asset.
-        // Object2D should only reference Material, not MaterialAsset.
-        {
-            auto runtimeMat = std::make_shared<Material>();
-            runtimeMat->setPath(materialAssetPath);
-            runtimeMat->setAssetType(AssetType::Material);
-            runtimeMat->setIsSaved(true);
-
-            if (!materialAssetPath.empty())
-            {
-                logger.log(Logger::Category::AssetManagement, "Model2D: loading material asset '" + materialAssetPath + "'", Logger::LogLevel::INFO);
-                if (auto matAsset = loadMaterialAsset(materialAssetPath))
-                {
-                    runtimeMat->setTextureAssetPaths(std::vector<std::string>(matAsset->getTextureAssetPaths()));
-                    auto textures = loadTexturesForMaterial(*matAsset);
-                    runtimeMat->setTextures(textures);
-                }
-            }
-
-            obj2d->setMaterial(runtimeMat);
-        }
+        obj2d->setMaterialAssetPath(materialAssetPath);
 
         uint32_t vertCount = 0;
         if (!in.read(reinterpret_cast<char*>(&vertCount), sizeof(vertCount))) { logReadFail("model2d vertCount"); return nullptr; }
@@ -954,34 +929,28 @@ std::shared_ptr<EngineObject> AssetManager::loadAsset(const std::string& path)
         }
         obj2d->setIndices(indices);
 
-        // Material handling is done by runtime Material instances; asset paths are not stored on Object2D.
+        // Auto-load material + textures via AssetManager
+        if (!materialAssetPath.empty())
+        {
+            logger.log(Logger::Category::AssetManagement, "Model2D: loading material asset '" + materialAssetPath + "'", Logger::LogLevel::INFO);
+            if (auto matAsset = loadMaterialAsset(materialAssetPath))
+            {
+                logger.log(Logger::Category::AssetManagement, "Model2D: material loaded, loading textures...", Logger::LogLevel::INFO);
+                auto textures = loadTexturesForMaterial(*matAsset);
+                obj2d->setLoadedMaterialAsset(matAsset);
+                obj2d->setLoadedTextures(textures);
+            }
+            else
+            {
+                logger.log(Logger::Category::AssetManagement, "Model2D: failed to load material asset '" + materialAssetPath + "'", Logger::LogLevel::WARNING);
+            }
+        }
     }
 
     if (type == AssetType::Model3D)
     {
         auto obj3d = std::static_pointer_cast<Object3D>(obj);
-
-        // Create a runtime Material instance and populate it from the referenced material asset.
-        // Object3D should only reference Material, not MaterialAsset.
-        {
-            auto runtimeMat = std::make_shared<Material>();
-            runtimeMat->setPath(materialAssetPath);
-            runtimeMat->setAssetType(AssetType::Material);
-            runtimeMat->setIsSaved(true);
-
-            if (!materialAssetPath.empty())
-            {
-                logger.log(Logger::Category::AssetManagement, "Model3D: loading material asset '" + materialAssetPath + "'", Logger::LogLevel::INFO);
-                if (auto matAsset = loadMaterialAsset(materialAssetPath))
-                {
-                    runtimeMat->setTextureAssetPaths(std::vector<std::string>(matAsset->getTextureAssetPaths()));
-                    auto textures = loadTexturesForMaterial(*matAsset);
-                    runtimeMat->setTextures(textures);
-                }
-            }
-
-            obj3d->setMaterial(runtimeMat);
-        }
+        obj3d->setMaterialAssetPath(materialAssetPath);
 
         uint32_t vertCount = 0;
         if (!in.read(reinterpret_cast<char*>(&vertCount), sizeof(vertCount))) { logReadFail("model3d vertCount"); return nullptr; }
@@ -1003,7 +972,22 @@ std::shared_ptr<EngineObject> AssetManager::loadAsset(const std::string& path)
         }
         obj3d->setIndices(indices);
 
-        // Material handling is done by runtime Material instances; asset paths are not stored on Object3D.
+        // Auto-load material + textures via AssetManager
+        if (!materialAssetPath.empty())
+        {
+            logger.log(Logger::Category::AssetManagement, "Model3D: loading material asset '" + materialAssetPath + "'", Logger::LogLevel::INFO);
+            if (auto matAsset = loadMaterialAsset(materialAssetPath))
+            {
+                logger.log(Logger::Category::AssetManagement, "Model3D: material loaded, loading textures...", Logger::LogLevel::INFO);
+                auto textures = loadTexturesForMaterial(*matAsset);
+                obj3d->setLoadedMaterialAsset(matAsset);
+                obj3d->setLoadedTextures(textures);
+            }
+            else
+            {
+                logger.log(Logger::Category::AssetManagement, "Model3D: failed to load material asset '" + materialAssetPath + "'", Logger::LogLevel::WARNING);
+            }
+        }
     }
 
     if (type == AssetType::Level)
@@ -1038,9 +1022,6 @@ std::shared_ptr<EngineObject> AssetManager::loadAsset(const std::string& path)
             t.setRotation(rot);
             t.setScale(scl);
 
-			std::string groupID;
-			if (!readString(in, groupID)) { logReadFail("level object groupID"); return nullptr; }
-
             if (!p.empty())
             {
                 const std::string depRelPath = p.generic_string();
@@ -1049,13 +1030,16 @@ std::shared_ptr<EngineObject> AssetManager::loadAsset(const std::string& path)
                 auto depObj = loadAssetObject(depRelPath);
                 if (depObj)
                 {
-					level->registerObject(depObj, t, groupID);
+                    level->registerObject(depObj);
+                    level->setObjectTransform(depRelPath, t);
+                    level->setLoadedDependency(depRelPath, depObj);
                     logger.log(Logger::Category::AssetManagement, "Level: object attached '" + depRelPath + "'", Logger::LogLevel::INFO);
                 }
                 else
                 {
                     logger.log(Logger::Category::AssetManagement, "Level: object failed to load '" + depRelPath + "'", Logger::LogLevel::WARNING);
-					// transform cannot be stored without an object instance
+                    // still keep transform so it survives if asset appears later
+                    level->setObjectTransform(depRelPath, t);
                 }
             }
         }
@@ -1063,7 +1047,7 @@ std::shared_ptr<EngineObject> AssetManager::loadAsset(const std::string& path)
 
     if (type == AssetType::Material)
     {
-        auto mat = std::static_pointer_cast<Material>(obj);
+        auto mat = std::static_pointer_cast<MaterialAsset>(obj);
 
         uint32_t texRefCount = 0;
         if (!in.read(reinterpret_cast<char*>(&texRefCount), sizeof(texRefCount))) { logReadFail("material texRefCount"); return nullptr; }
@@ -1188,7 +1172,7 @@ bool AssetManager::saveAsset(const std::shared_ptr<EngineObject>& object)
         // keep string slot for format compatibility
         writeString(out, materialAssetPath);
 
-        auto mat = std::dynamic_pointer_cast<Material>(object);
+        auto mat = std::dynamic_pointer_cast<MaterialAsset>(object);
         uint32_t texRefCount = 0;
         if (mat)
         {
@@ -1208,9 +1192,11 @@ bool AssetManager::saveAsset(const std::shared_ptr<EngineObject>& object)
     case AssetType::Model2D:
     {
         auto obj2d = std::dynamic_pointer_cast<Object2D>(object);
-
-        // Keep string slot for format compatibility; Object2D no longer stores material asset paths.
-        writeString(out, std::string{});
+        if (obj2d)
+        {
+            materialAssetPath = obj2d->getMaterialAssetPath();
+        }
+        writeString(out, materialAssetPath);
 
         if (obj2d)
         {
@@ -1241,8 +1227,11 @@ bool AssetManager::saveAsset(const std::shared_ptr<EngineObject>& object)
     case AssetType::Model3D:
     {
         auto obj3d = std::dynamic_pointer_cast<Object3D>(object);
-        // Keep string slot for format compatibility; Object3D no longer stores material asset paths.
-        writeString(out, std::string{});
+        if (obj3d)
+        {
+            materialAssetPath = obj3d->getMaterialAssetPath();
+        }
+        writeString(out, materialAssetPath);
 
         if (obj3d)
         {
@@ -1285,71 +1274,34 @@ bool AssetManager::saveAsset(const std::shared_ptr<EngineObject>& object)
 
         out.write(reinterpret_cast<const char*>(&depCount), sizeof(depCount));
 
-		if (level)
-		{
+        if (level)
+        {
 			const auto& deps = level->getWorldObjects();
-			for (uint32_t i = 0; i < depCount; ++i)
-			{
-				const auto& inst = deps[i];
-				const std::string path = (inst && inst->object ? inst->object->getPath() : std::string{});
-				writeString(out, path);
+            const auto& transforms = level->getWorldObjectTransforms();
 
-				Vec3 p{}, r{}, s{};
-				if (inst)
-				{
-					p = inst->transform.getPosition();
-					r = inst->transform.getRotation();
-					s = inst->transform.getScale();
-				}
-
-				out.write(reinterpret_cast<const char*>(&p), sizeof(p));
-				out.write(reinterpret_cast<const char*>(&r), sizeof(r));
-				out.write(reinterpret_cast<const char*>(&s), sizeof(s));
-
-				// Persist group membership for non-instanced world objects.
-				const std::string gid = (inst ? inst->groupID : std::string{});
-				writeString(out, gid);
-			}
-		}
-
-        // --- Groups (appended for backward compatibility) ---
-        uint32_t groupCount = 0;
-        if (level)
-        {
-            groupCount = static_cast<uint32_t>(level->getGroups().size());
-        }
-
-        out.write(reinterpret_cast<const char*>(&groupCount), sizeof(groupCount));
-
-        if (level)
-        {
-            const auto& groups = level->getGroups();
-            for (uint32_t gi = 0; gi < groupCount; ++gi)
+            for (uint32_t i = 0; i < depCount; ++i)
             {
-                const auto& g = groups[gi];
+                const auto& dep = deps[i];
+                const std::string path = (dep ? dep->getPath() : std::string{});
+                writeString(out, path);
 
-                writeString(out, g.id);
-                const uint8_t instanced = g.isInstanced ? 1u : 0u;
-                out.write(reinterpret_cast<const char*>(&instanced), sizeof(instanced));
-
-                const uint32_t instCount = static_cast<uint32_t>(std::min(g.objects.size(), g.transforms.size()));
-                out.write(reinterpret_cast<const char*>(&instCount), sizeof(instCount));
-
-                for (uint32_t ii = 0; ii < instCount; ++ii)
+                Transform t{};
+                if (!path.empty())
                 {
-                    const auto& entryObj = g.objects[ii];
-                    const std::string path = (entryObj ? entryObj->getPath() : std::string{});
-                    writeString(out, path);
-
-                    const Transform& t = g.transforms[ii];
-                    Vec3 p = t.getPosition();
-                    Vec3 r = t.getRotation();
-                    Vec3 s = t.getScale();
-
-                    out.write(reinterpret_cast<const char*>(&p), sizeof(p));
-                    out.write(reinterpret_cast<const char*>(&r), sizeof(r));
-                    out.write(reinterpret_cast<const char*>(&s), sizeof(s));
+                    auto it = transforms.find(path);
+                    if (it != transforms.end())
+                    {
+                        t = it->second;
+                    }
                 }
+
+                Vec3 p = t.getPosition();
+                Vec3 r = t.getRotation();
+                Vec3 s = t.getScale();
+
+                out.write(reinterpret_cast<const char*>(&p), sizeof(p));
+                out.write(reinterpret_cast<const char*>(&r), sizeof(r));
+                out.write(reinterpret_cast<const char*>(&s), sizeof(s));
             }
         }
         break;
@@ -1421,7 +1373,35 @@ void AssetManager::ensureDefaultTriangleAssetSaved()
         return;
     }
 
-    // Object2D no longer owns/persists material asset references; runtime Material handles that.
+    // Also persist dependencies of the default model (material + textures).
+    // The object itself should not hold texture pointers; resolve textures via the material asset.
+    if (auto obj2d = std::dynamic_pointer_cast<Object2D>(tri))
+    {
+        const std::string matPath = obj2d->getMaterialAssetPath();
+        if (!matPath.empty())
+        {
+            auto matObj = loadAssetObject(matPath);
+            if (auto mat = std::dynamic_pointer_cast<MaterialAsset>(matObj))
+            {
+                obj2d->setLoadedMaterialAsset(mat);
+                if (!mat->getIsSaved())
+                {
+                    logger.log(Logger::Category::AssetManagement, "Persisting default material asset: " + mat->getPath(), Logger::LogLevel::INFO);
+                    saveAsset(mat);
+                }
+
+                auto textures = loadTexturesForMaterial(*mat);
+                for (const auto& tex : textures)
+                {
+                    if (tex && !tex->getIsSaved())
+                    {
+                        logger.log(Logger::Category::AssetManagement, "Persisting default texture asset: " + tex->getPath(), Logger::LogLevel::INFO);
+                        saveAsset(tex);
+                    }
+                }
+            }
+        }
+    }
 
     if (needsSave)
     {
@@ -1461,11 +1441,14 @@ std::unique_ptr<EngineLevel> AssetManager::createLevelWithDefaultTriangle(const 
     level->setAssetType(AssetType::Level);
     level->setIsSaved(false);
 
-	Transform t{};
-	t.setPosition(Vec3{ 0.25f, 0.0f, 0.0f });
-	t.setRotation(Vec3{ 20.0f, 50.0f, 70.0f });
-	t.setScale(Vec3{ 1.0f, 1.0f, 1.0f });
-	level->registerObject(quad, t, std::string{});
+    level->registerObject(quad);
+    level->setLoadedDependency(quad->getPath(), quad);
+
+    Transform t{};
+    t.setPosition(Vec3{ 0.25f, 0.0f, 0.0f });
+    t.setRotation(Vec3{ 20.0f, 50.0f, 70.0f });
+    t.setScale(Vec3{ 1.0f, 1.0f, 1.0f });
+    level->setObjectTransform(quad->getPath(), t);
 
     // Save via aliasing shared_ptr (non-owning).
     std::shared_ptr<EngineObject> base;
@@ -1501,7 +1484,7 @@ std::shared_ptr<EngineObject> AssetManager::createAsset(AssetType type, const st
             obj = std::make_shared<Texture>();
             break;
         case AssetType::Material:
-            obj = std::make_shared<Material>();
+            obj = std::make_shared<MaterialAsset>();
             break;
         case AssetType::Audio:
         case AssetType::Script:
@@ -1558,7 +1541,7 @@ std::shared_ptr<EngineObject> AssetManager::createAsset(AssetType type, const st
 
         if (type == AssetType::Material)
         {
-            auto mat = std::dynamic_pointer_cast<Material>(obj);
+            auto mat = std::dynamic_pointer_cast<MaterialAsset>(obj);
             if (mat)
             {
                 std::vector<std::string> refs;
@@ -1739,7 +1722,10 @@ bool AssetManager::loadProject(const std::string& projectPath)
 
 			// Copy resolved world objects (shared_ptr) and transforms.
 			runtimeLevel->getWorldObjects() = loadedLevel->getWorldObjects();
-			runtimeLevel->getGroups() = loadedLevel->getGroups();
+			for (const auto& kv : loadedLevel->getWorldObjectTransforms())
+			{
+				runtimeLevel->setObjectTransform(kv.first, kv.second);
+			}
 			logger.log(Logger::Category::Project, "Active level initialized: " + runtimeLevel->getName(), Logger::LogLevel::INFO);
 			diagnostics.setActiveLevel(std::move(runtimeLevel));
         }

@@ -50,12 +50,8 @@ bool RenderResourceManager::prepareOpenGL(EngineLevel& level)
         if (!obj)
             continue;
 
-		auto engineObj = obj->object;
-		if (!engineObj)
-			continue;
-
         // 2D objects
-		if (auto obj2d = std::dynamic_pointer_cast<Object2D>(engineObj))
+        if (auto obj2d = std::dynamic_pointer_cast<Object2D>(obj))
         {
             logger.log(Logger::Category::Rendering,
                 "RenderResourceManager: Object2D geometry: vertexFloats=" + std::to_string(obj2d->getVertices().size()) +
@@ -74,7 +70,7 @@ bool RenderResourceManager::prepareOpenGL(EngineLevel& level)
         }
 
         // 3D objects
-		if (auto obj3d = std::dynamic_pointer_cast<Object3D>(engineObj))
+        if (auto obj3d = std::dynamic_pointer_cast<Object3D>(obj))
         {
             logger.log(Logger::Category::Rendering,
                 "RenderResourceManager: Object3D geometry: vertexFloats=" + std::to_string(obj3d->getVertices().size()) +
