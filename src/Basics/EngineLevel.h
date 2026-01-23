@@ -14,6 +14,33 @@ class EngineLevel : public EngineObject
 {
 public:
 
+	void to_json(json& j, const EngineLevel& level) const
+	{
+		std::vector<std::string> objectPaths;
+		for (const auto& objInstance : level.Objects)
+		{
+			objectPaths.push_back(objInstance->object->getPath());
+		}
+
+		std::vector<json> groupsJson;
+		for (const auto& grp : level.m_groups)
+		{
+			json g;
+			g["id"] = grp.id;
+			std::vector<std::string> groupObjectPaths;
+			for (const auto& obj : grp.objects)
+			{
+				groupObjectPaths.push_back(obj->getPath());
+			}
+			g["objects"] = groupObjectPaths;
+			//g["transforms"] = grp.transforms;
+			g["isInstanced"] = grp.isInstanced;
+			groupsJson.push_back(g);
+		}
+
+		j = json{ {"Objects", objectPaths}, {"Groups", groupsJson} };
+	}
+
 	struct ObjectInstance
 	{
 		std::shared_ptr<EngineObject> object;
@@ -23,6 +50,7 @@ public:
 
 	struct group
 	{
+#define NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(group, id, objects, transforms, isInstanced)
 		std::string id;
 		std::vector<std::shared_ptr<EngineObject>> objects;
 		std::vector<Transform> transforms;

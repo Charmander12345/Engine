@@ -11,6 +11,8 @@ add_library(Basics SHARED
     "Texture.h"
     "Material.h"
     "MathTypes.h"
+    "ECS/DataStructs/SparseSet.h"
+    "ECS/ECS.h"
 )
 
 set_target_properties(Basics PROPERTIES
@@ -23,6 +25,7 @@ target_include_directories(Basics
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/src/AssetManager
         ${CMAKE_SOURCE_DIR}/src/Renderer
+        ${CMAKE_SOURCE_DIR}/external
 )
 
 if (WIN32)

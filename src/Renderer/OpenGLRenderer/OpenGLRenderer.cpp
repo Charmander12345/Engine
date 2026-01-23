@@ -48,7 +48,7 @@ void OpenGLRenderer::shutdown()
     }
 
     auto& diagnostics = DiagnosticsManager::Instance();
-    if (EngineLevel* level = diagnostics.getActiveLevel())
+    if (EngineLevel* level = diagnostics.getActiveLevelSoft())
     {
         auto& objs = level->getWorldObjects();
         size_t cleared = 0;
@@ -195,7 +195,7 @@ void OpenGLRenderer::render()
     }
 
     auto& diagnostics = DiagnosticsManager::Instance();
-    EngineLevel* level = diagnostics.getActiveLevel();
+    EngineLevel* level = diagnostics.getActiveLevelSoft();
     if (!level)
 	{
 		Logger::Instance().log(Logger::Category::Rendering, "No active level to render.", Logger::LogLevel::WARNING);

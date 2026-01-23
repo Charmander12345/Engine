@@ -5,16 +5,18 @@
 #include <vector>
 #include <cstdint>
 #include "EngineObject.h"
+#include "Material.h"
 
 class Material;
 
 class Object3D : public EngineObject
 {
+#define NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Object3D, materialAssetPath, m_vertices, m_indices)
 public:
     Object3D() = default;
     ~Object3D() override = default;
 
-    void setMaterial(const std::shared_ptr<Material>& mat) { m_material = mat; }
+    void setMaterial(const std::shared_ptr<Material>& mat) { m_material = mat; materialAssetPath = mat->getPath(); }
     std::shared_ptr<Material> getMaterial() const { return m_material; }
 
     // Geometry (indexed)
@@ -27,6 +29,7 @@ public:
     void render();
 private:
     std::shared_ptr<Material> m_material;
+	std::string materialAssetPath;
 
     // unique/interleaved vertices (layout-dependent) + indices
     std::vector<float> m_vertices;

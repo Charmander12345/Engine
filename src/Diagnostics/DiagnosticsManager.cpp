@@ -284,10 +284,30 @@ void DiagnosticsManager::setActiveLevel(std::unique_ptr<EngineLevel> level)
     m_activeLevel = std::move(level);
 }
 
-EngineLevel* DiagnosticsManager::getActiveLevel()
+std::unique_ptr<EngineLevel> DiagnosticsManager::getActiveLevel()
+{
+    // Rückgabe einer Kopie des Zeigers ist nicht möglich, da unique_ptr nicht kopierbar ist.
+    // Stattdessen: Rückgabe eines Raw-Pointers oder einer Referenz, oder Übergabe des Besitzes (move).
+    // Hier: Rückgabe eines Raw-Pointers (Aufrufer besitzt das Objekt nicht!).
+    return m_activeLevel ? std::make_unique<EngineLevel>(*m_activeLevel) : nullptr;
+}
+
+EngineLevel* DiagnosticsManager::getActiveLevelSoft()
 {
     return m_activeLevel.get();
 }
+
+// Alternativ, wenn Sie den Besitz übertragen wollen (Achtung: m_activeLevel ist danach nullptr!):
+// std::unique_ptr<EngineLevel> DiagnosticsManager::getActiveLevel()
+// {
+//     return std::move(m_activeLevel);
+// }
+
+// Oder, wenn Sie nur einen Zeiger zurückgeben wollen (kein Besitzübergang!):
+// EngineLevel* DiagnosticsManager::getActiveLevel()
+// {
+//     return m_activeLevel.get();
+// }
 
 void DiagnosticsManager::setScenePrepared(bool prepared)
 {
@@ -362,4 +382,35 @@ bool DiagnosticsManager::dispatchKeyUp(int key)
     }
 
     return false;
+}
+
+bool DiagnosticsManager::isActionFinished(unsigned int actionID) const
+{
+	auto result = m_actions.find(actionID);
+    return result != m_actions.end() && !result->second.inProgress;
+}
+
+DiagnosticsManager::Action& DiagnosticsManager::registerAction(ActionType type)
+{
+    static unsigned int nextID = 1;
+    unsigned int actionID = nextID++;
+
+    m_actions[actionID] = { type, true };
+    return m_actions[actionID];
+}
+
+bool DiagnosticsManager::updateActionProgress(unsigned int actionID, bool inProgress)
+{
+    auto result = m_actions.find(actionID);
+    if (result == m_actions.end())
+    {
+        return false;
+    }
+    result->second.inProgress = inProgress;
+    if (!inProgress)
+    {
+        // Optionally remove finished actions from the map
+        m_actions.erase(result);
+	}
+    return true;
 }

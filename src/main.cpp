@@ -83,13 +83,13 @@ int main()
 
     diagnostics.registerKeyUpHandler(SDLK_F1, [&]() {
         logger.log(Logger::Category::Input, "F1 pressed - saving all assets (async).", Logger::LogLevel::INFO);
-        assetManager.saveAllAssetsAsync();
+        //assetManager.saveAllAssetsAsync();
         return true;
         });
 
     diagnostics.registerKeyUpHandler(SDLK_F2, [&]() {
         logger.log(Logger::Category::Input, "F2 pressed - opening import dialog.", Logger::LogLevel::INFO);
-        assetManager.importAssetWithDialog(nullptr, AssetType::Unknown);
+        //assetManager.importAssetWithDialog(nullptr, AssetType::Unknown);
         return true;
         });
 
@@ -181,8 +181,6 @@ int main()
                 diagnostics.dispatchKeyDown(event.key.key);
             }
         }
-
-        assetManager.pump();
 
         renderer->clear();
         renderer->render();

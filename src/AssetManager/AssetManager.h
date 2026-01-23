@@ -20,6 +20,9 @@
 #include "../Basics/Material.h"
 #include "../Logger/Logger.h"
 #include "GarbageCollector.h"
+#include "json.hpp"
+
+using json = nlohmann::json;
 
 struct SDL_Window;
 
@@ -28,6 +31,12 @@ struct AssetRegistryEntry
     std::string name;
     std::string path; // relative to Content
     AssetType type{ AssetType::Unknown };
+};
+
+struct Asset
+{
+	AssetType type{ AssetType::Unknown };
+	unsigned int ID{ 0 };
 };
 
 class Material;
@@ -46,53 +55,30 @@ public:
 
 	bool initialize();
 
-	bool saveAllAssets();
+	// Load and return the asset object if successful (also registers with GC) - Returns nullptr on failure.
+	int loadAsset(const std::string& path, AssetType type, SyncState syncState = Sync);
+    bool saveAsset(const Asset& asset, SyncState syncState = Async, DiagnosticsManager::Action action = DiagnosticsManager::Action{});
+    bool saveAllAssets(SyncState syncState = Async);
+    int createAsset(AssetType type, const std::string& path, const std::string& name, const std::string& sourcePath = "", SyncState syncState = Async);
 
-	// Load and return the asset object if successful (also registers with GC)
-	// Returns nullptr on failure.
-	std::shared_ptr<EngineObject> loadAsset(const std::string& path);
-
-	// Convenience wrapper (kept for readability/compatibility): returns an object pointer.
-	std::shared_ptr<EngineObject> loadAssetObject(const std::string& path);
-
-    bool saveAsset(const std::shared_ptr<EngineObject>& object);
-
-    std::shared_ptr<EngineObject> createAsset(AssetType type, const std::string& path, const std::string& name, const std::string& sourcePath = "");
-
-    void importAssetWithDialog(SDL_Window* parentWindow, AssetType preferredType = AssetType::Unknown);
-
-    // Sync import (kept for existing callers)
-    std::shared_ptr<EngineObject> importAssetFromFile(AssetType type, const std::string& sourceFilePath);
-
-    // Async import: runs the heavy work on the asset worker thread.
-    void importAssetFromFileAsync(AssetType type, std::string sourceFilePath);
-
-    // Async save of all currently tracked assets
-    void saveAllAssetsAsync();
-
-    // Optional: process any main-thread follow-ups (currently lightweight)
-    void pump();
+    //import asset
+	bool OpenImportDialog(SDL_Window* parentWindow, AssetType forcedType = AssetType::Unknown, SyncState syncState = Async);
+    //Worker function for importing an asset from a selected file path
+    void importAssetFromPath(std::string path, AssetType preferredType, unsigned int ActionID);
 
 	// Synchronous: tidies up expired weak_ptr tracked resources.
 	void collectGarbage();
 
-    // Resolve <project>/Content/<relative> if a project is loaded.
-    // Returns empty string if no project loaded.
+	// Resolve <project>/Content/<relative> if a project is loaded. Returns empty string if no project is loaded.
     std::string getAbsoluteContentPath(const std::string& relativeToContent) const;
-
-    // Convenience for runtime: resolve an Object2D/3D material + textures based on stored asset paths.
-    // Creates a renderer Material instance (OpenGLMaterial etc. is responsibility of renderer; this only loads CPU assets).
-	std::shared_ptr<Material> loadMaterialAsset(const std::string& materialAssetPath);
-	std::vector<std::shared_ptr<Texture>> loadTexturesForMaterial(const Material& material);
-
 
     // Asset Registry
     bool doesAssetExist(const std::string& pathOrName) const;
-    const std::vector<AssetRegistryEntry>& getAssetRegistry() const;
 
-    bool loadProject(const std::string& projectPath);
-    bool saveProject(const std::string& projectPath);
-    bool createProject(const std::string& parentDir, const std::string& projectName, const DiagnosticsManager::ProjectInfo& info);
+	//Project management
+    bool loadProject(const std::string& projectPath, SyncState syncState = Sync);
+    bool saveProject(const std::string& projectPath, SyncState syncState = Sync);
+    bool createProject(const std::string& parentDir, const std::string& projectName, const DiagnosticsManager::ProjectInfo& info, SyncState syncState = Sync);
 
 private:
     // Worker lifecycle
@@ -104,19 +90,61 @@ private:
     bool saveAssetRegistry(const std::string& projectRoot) const;
     bool discoverAssetsAndBuildRegistry(const std::string& projectRoot);
     void registerAssetInRegistry(const AssetRegistryEntry& entry);
+    const std::vector<AssetRegistryEntry>& getAssetRegistry() const;
 
-    void ensureDefaultTriangleAssetSaved();
+	// Default assets
     void ensureDefaultAssetsCreated();
-    std::unique_ptr<EngineLevel> createLevelWithDefaultTriangle(const std::string& levelPath, const std::string& levelName);
+
+    //Saving specific assettypes
+    struct SaveResult
+    {
+        bool success{ false };
+		std::string errorMessage;
+    };
+
+	SaveResult saveTextureAsset(const std::shared_ptr<Texture>& texture);
+	SaveResult saveMaterialAsset(const std::shared_ptr<Material>& material);
+	SaveResult saveObject2DAsset(const std::shared_ptr<Object2D>& object2D);
+	SaveResult saveObject3DAsset(const std::shared_ptr<Object3D>& object3D);
+	SaveResult saveLevelAsset(const std::unique_ptr<EngineLevel>& level);
+
+	//Loading specific assettypes
+    struct LoadResult
+    {
+		json j;
+		std::string errorMessage;
+		bool success{ false };
+    };
+
+	LoadResult ReadAssetHeader(const std::string& path, AssetType& outType);
+	LoadResult loadTextureAsset(const std::string& path);
+	LoadResult loadMaterialAsset(const std::string& path);
+	LoadResult loadObject2DAsset(const std::string& path);
+	LoadResult loadObject3DAsset(const std::string& path);
+	LoadResult loadLevelAsset(const std::string& path);
+
+	// Creating specific assettypes
+    struct CreateResult
+	{
+		std::shared_ptr<EngineObject> object{ nullptr };
+		std::string errorMessage;
+		bool success{ false };
+	};
+
+	CreateResult createTextureAsset(const std::string& path, const std::string& name, const std::string& sourcePath);
+	CreateResult createMaterialAsset(const std::string& path, const std::string& name, const std::string& sourcePath);
+	CreateResult createObject2DAsset(const std::string& path, const std::string& name, const std::string& sourcePath);
+	CreateResult createObject3DAsset(const std::string& path, const std::string& name, const std::string& sourcePath);
+	CreateResult createLevelAsset(const std::string& path, const std::string& name, const std::string& sourcePath);
+
+	unsigned int registerLoadedAsset(const std::shared_ptr<EngineObject>& object);
+	std::shared_ptr<EngineObject> getLoadedAssetByID(unsigned int id) const;
 
     AssetManager() = default;
     ~AssetManager();
     AssetManager(const AssetManager&) = delete;
     AssetManager& operator=(const AssetManager&) = delete;
 	GarbageCollector m_garbageCollector;
-
-    // Keeps built-in assets alive (GarbageCollector only stores weak_ptr).
-    std::shared_ptr<EngineObject> m_defaultTriangle2D;
 
     std::vector<AssetRegistryEntry> m_registry;
     std::unordered_map<std::string, size_t> m_registryByPath;
@@ -132,4 +160,7 @@ private:
     std::queue<std::function<void()>> m_jobs;
     bool m_workerRunning{ false };
     bool m_workerStopRequested{ false };
+
+    std::unordered_map<unsigned int, std::shared_ptr<EngineObject>> m_loadedAssets;
+    static int s_nextAssetID;
 };

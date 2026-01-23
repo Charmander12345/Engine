@@ -23,6 +23,7 @@ public:
         DirectX12
     };
 
+    
     struct ProjectInfo
     {
         std::string projectName;
@@ -38,8 +39,17 @@ public:
         SavingAsset,
         BuildingProject,
         LoadingProject,
-        SavingProject
+        SavingProject,
+		ImportingAsset,
+        NONE
 	};
+
+    struct Action
+    {
+        ActionType type { ActionType::NONE };
+        bool inProgress{ true };
+		unsigned int ID{ 0 };
+    };
 
     static DiagnosticsManager& Instance();
 
@@ -86,10 +96,16 @@ public:
     bool dispatchKeyUp(int key);
 
     void setActiveLevel(std::unique_ptr<EngineLevel> level);
-    EngineLevel* getActiveLevel();
+    std::unique_ptr<EngineLevel> getActiveLevel();
+    EngineLevel* getActiveLevelSoft();
 
     void setScenePrepared(bool prepared);
     bool isScenePrepared() const;
+
+	// Action tracking (only intended for async actions)
+	bool isActionFinished(unsigned int actionID) const;
+	Action& registerAction(ActionType type);
+	bool updateActionProgress(unsigned int actionID, bool inProgress);
 
 private:
     DiagnosticsManager();
@@ -122,4 +138,6 @@ private:
 
     std::unordered_map<int, std::vector<KeyCallback>> m_keyDownHandlers;
     std::unordered_map<int, std::vector<KeyCallback>> m_keyUpHandlers;
+
+	std::unordered_map<unsigned int, Action> m_actions;
 };

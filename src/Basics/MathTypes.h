@@ -1,9 +1,12 @@
 #pragma once
 
 #include <cmath>
+#include "../AssetManager/json.hpp"
+using json = nlohmann::json;
 
 struct Vec3
 {
+#define NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Vec3, x, y, z) 
     float x{0.0f};
     float y{0.0f};
     float z{0.0f};
@@ -11,6 +14,7 @@ struct Vec3
 
 struct Mat3
 {
+#define NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Mat3, m)
     float m[9]{
         1.0f, 0.0f, 0.0f,
         0.0f, 1.0f, 0.0f,
@@ -20,6 +24,7 @@ struct Mat3
 
 struct Mat4
 {
+#define NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Mat4, m)
     float m[16]{
         1.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 1.0f, 0.0f, 0.0f,
@@ -55,6 +60,7 @@ struct Mat4
 
 class Transform
 {
+#define NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Transform, m_position, m_rotation, m_scale)
 public:
     Transform() = default;
     Transform(Vec3 position, Vec3 rotation = {}, Vec3 scale = {1.0f, 1.0f, 1.0f})

@@ -9,6 +9,7 @@ class Material;
 
 class Object2D : public EngineObject
 {
+#define NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Object2D, m_vertices, m_indices, materialAssetPath)
 public:
     Object2D() = default;
     ~Object2D() override = default;
@@ -27,6 +28,7 @@ public:
 
 private:
     std::shared_ptr<Material> m_material;
+	std::string materialAssetPath;
 
     // unique/interleaved vertices (layout-dependent) + indices
     std::vector<float> m_vertices;

@@ -2,10 +2,14 @@
 
 #include <string>
 #include "../AssetManager/AssetTypes.h"
+#include "../AssetManager/json.hpp"
 #include "MathTypes.h"
+
+using json = nlohmann::json;
 
 class EngineObject
 {
+#define NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(EngineObject, m_path, m_name, m_type, isSaved, m_transform)
 public:
     EngineObject() = default;
     virtual ~EngineObject() = default;
