@@ -11,6 +11,7 @@
 #include "Logger/Logger.h"
 #include "Diagnostics/DiagnosticsManager.h"
 #include "AssetManager/AssetManager.h"
+#include "Basics/ECS/ECS.h"
 
 using namespace std;
 
@@ -71,6 +72,9 @@ int main()
     FreeConsole();
 #endif
 
+    auto& ecs = ECS::ECSManager::Instance();
+    ecs.createEntity();
+
     bool running = true;
     uint64_t frame = 0;
     logger.log(Logger::Category::Engine, "Entering main loop.", Logger::LogLevel::INFO);
@@ -115,6 +119,8 @@ int main()
             assetManager.collectGarbage();
             lastGcCounter = now;
 
+
+			logger.log(Logger::Category::Rendering, "Delta time (dt): " + std::to_string(dt) + " seconds.", Logger::LogLevel::INFO);
             ++gcRuns;
             if ((gcRuns % 12) == 0)
             {

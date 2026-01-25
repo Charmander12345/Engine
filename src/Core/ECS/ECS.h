@@ -19,12 +19,12 @@ namespace ECS
 
 		Entity createEntity();
 
+
 	private:
 		ECSManager() = default;
 		~ECSManager() = default;
 		ECSManager(const ECSManager&) = delete;
 		ECSManager& operator=(const ECSManager&) = delete;
-		Entity m_nextEntity{ 0 };
-
-	}
+		Entity m_nextEntity{ 1 };
+	};
 }

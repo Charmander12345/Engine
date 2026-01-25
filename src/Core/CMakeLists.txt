@@ -1,4 +1,4 @@
-add_library(Basics SHARED
+add_library(Core SHARED
     EngineObject.cpp
     EngineObject.h
     "EngineLevel.cpp"
@@ -13,7 +13,8 @@ add_library(Basics SHARED
     "MathTypes.h"
     "ECS/DataStructs/SparseSet.h"
     "ECS/ECS.h"
-)
+    "ECS/Components.h"
+    "ECS/ECS.cpp")
 
 set_target_properties(Basics PROPERTIES
     CXX_STANDARD 20
@@ -26,6 +27,7 @@ target_include_directories(Basics
         ${CMAKE_SOURCE_DIR}/src/AssetManager
         ${CMAKE_SOURCE_DIR}/src/Renderer
         ${CMAKE_SOURCE_DIR}/external
+        ${CMAKE_SOURCE_DIR}/ECS
 )
 
 if (WIN32)

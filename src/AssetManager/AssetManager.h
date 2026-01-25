@@ -57,8 +57,11 @@ public:
 
 	// Load and return the asset object if successful (also registers with GC) - Returns nullptr on failure.
 	int loadAsset(const std::string& path, AssetType type, SyncState syncState = Sync);
+    //Saves the specified asset to a file. returns whether saving was successful. Note: when saving async function returns whether the job was queued successfully.
     bool saveAsset(const Asset& asset, SyncState syncState = Async, DiagnosticsManager::Action action = DiagnosticsManager::Action{});
+	//Saves all currently loaded and altered assets. returns whether all saves were successful. Note: when saving async function returns whether the job was queued successfully.
     bool saveAllAssets(SyncState syncState = Async);
+	//Create a new asset of the specified type at the specified path with the specified name. returns the asset ID if successful, 0 on failure.
     int createAsset(AssetType type, const std::string& path, const std::string& name, const std::string& sourcePath = "", SyncState syncState = Async);
 
     //import asset
@@ -112,7 +115,7 @@ private:
     struct LoadResult
     {
 		json j;
-		std::string errorMessage;
+		std::string errorMessage; 
 		bool success{ false };
     };
 
