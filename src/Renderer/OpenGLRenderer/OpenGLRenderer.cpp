@@ -8,13 +8,13 @@
 #include "OpenGLCamera.h"
 
 #include "../../Diagnostics/DiagnosticsManager.h"
-#include "../../Basics/EngineLevel.h"
+#include "../../Core/EngineLevel.h"
 
 #include "../RenderResourceManager.h"
 
-#include "../../Basics/Object3D.h"
-#include "../../Basics/Object2D.h"
-#include "../../Basics/MathTypes.h"
+#include "../../Core/Object3D.h"
+#include "../../Core/Object2D.h"
+#include "../../Core/MathTypes.h"
 
 OpenGLRenderer::OpenGLRenderer()
 {

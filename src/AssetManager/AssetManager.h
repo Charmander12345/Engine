@@ -10,17 +10,11 @@
 #include <condition_variable>
 #include <queue>
 #include <functional>
-#include "AssetTypes.h"
 #include "../Diagnostics/DiagnosticsManager.h"
-#include "../Basics/EngineObject.h"
-#include "../Basics/Object2D.h"
-#include "../Basics/Object3D.h"
-#include "../Basics/EngineLevel.h"
-#include "../Basics/Texture.h"
-#include "../Basics/Material.h"
 #include "../Logger/Logger.h"
 #include "GarbageCollector.h"
 #include "json.hpp"
+#include "Core.h"
 
 using json = nlohmann::json;
 

@@ -8,7 +8,7 @@
 #include <vector>
 #include <memory>
 #include <functional>
-#include "../Basics/EngineLevel.h"
+#include "../Core/EngineLevel.h"
 
 class DiagnosticsManager
 {

@@ -11,7 +11,7 @@
 #include "Logger/Logger.h"
 #include "Diagnostics/DiagnosticsManager.h"
 #include "AssetManager/AssetManager.h"
-#include "Basics/ECS/ECS.h"
+#include "Core/ECS/ECS.h"
 
 using namespace std;
 

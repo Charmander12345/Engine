@@ -7,7 +7,7 @@
 #include "OpenGLShader.h"
 #include "Logger.h"
 
-#include "../../Basics/Object3D.h"
+#include "../../Core/Object3D.h"
 #include "../../AssetManager/AssetManager.h"
 
 namespace

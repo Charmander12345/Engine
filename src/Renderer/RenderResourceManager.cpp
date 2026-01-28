@@ -5,9 +5,9 @@
 #include "../Diagnostics/DiagnosticsManager.h"
 #include "../Logger/Logger.h"
 
-#include "../Basics/EngineLevel.h"
-#include "../Basics/Object2D.h"
-#include "../Basics/Object3D.h"
+#include "../Core/EngineLevel.h"
+#include "../Core/Object2D.h"
+#include "../Core/Object3D.h"
 
 #include "OpenGLRenderer/OpenGLObject2D.h"
 #include "OpenGLRenderer/OpenGLObject3D.h"
@@ -16,7 +16,7 @@
 bool RenderResourceManager::prepareActiveLevel()
 {
     auto& diagnostics = DiagnosticsManager::Instance();
-    EngineLevel* level = diagnostics.getActiveLevel();
+    EngineLevel* level = diagnostics.getActiveLevelSoft();
     if (!level)
         return false;
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../Basics/MathTypes.h"
+#include "../Core/MathTypes.h"
 
 class Camera
 {

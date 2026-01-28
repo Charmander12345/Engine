@@ -37,7 +37,9 @@ public:
 
     void setMinimumLogLevel(LogLevel level);
 
+	// Log with default category (General)
     void log(const std::string& message, LogLevel level = LogLevel::INFO);
+	// Log with specified category
     void log(Category category, const std::string& message, LogLevel level = LogLevel::INFO);
 
 private:

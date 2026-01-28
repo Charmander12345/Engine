@@ -3,25 +3,26 @@ add_library(Core SHARED
     EngineObject.h
     "EngineLevel.cpp"
     "EngineLevel.h"
-    Object3D.cpp
-    Object3D.h
-    Object2D.cpp
-    Object2D.h
-    "Texture.cpp"
-    "Texture.h"
-    "Material.h"
+    
+    
+    
+    
+    "../Renderer/Texture.cpp"
+    "../Renderer/Texture.h"
+    "../Renderer/Material.h"
     "MathTypes.h"
     "ECS/DataStructs/SparseSet.h"
     "ECS/ECS.h"
     "ECS/Components.h"
-    "ECS/ECS.cpp")
+    "ECS/ECS.cpp" "Asset.cpp"
+    "Asset.h" "Core.h")
 
-set_target_properties(Basics PROPERTIES
+set_target_properties(Core PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
 )
 
-target_include_directories(Basics
+target_include_directories(Core
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/src/AssetManager
@@ -31,5 +32,5 @@ target_include_directories(Basics
 )
 
 if (WIN32)
-    set_target_properties(Basics PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    set_target_properties(Core PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()

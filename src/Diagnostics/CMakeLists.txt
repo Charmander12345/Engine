@@ -11,6 +11,12 @@ set_target_properties(Diagnostics PROPERTIES
 target_include_directories(Diagnostics
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/src/Core
+)
+
+target_link_libraries(Diagnostics
+    PRIVATE
+        Core
 )
 
 if (WIN32)

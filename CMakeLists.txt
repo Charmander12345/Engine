@@ -22,13 +22,13 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 add_subdirectory(external/SDL3 EXCLUDE_FROM_ALL)
 add_subdirectory(src/AssetManager)
 add_subdirectory(src/Diagnostics)
-add_subdirectory(src/Basics)
+add_subdirectory(src/Core)
 add_subdirectory(src/Renderer)
 add_subdirectory(src/Logger)
 
 add_executable(Engine
     src/main.cpp
-)
+ "src/Core/Asset.h")
 
 # Engine is a console executable
 set_target_properties(Engine PROPERTIES WIN32_EXECUTABLE OFF)
@@ -40,7 +40,7 @@ target_include_directories(Engine
         ${CMAKE_SOURCE_DIR}/src/Logger
         ${CMAKE_SOURCE_DIR}/src/AssetManager
         ${CMAKE_SOURCE_DIR}/src/Diagnostics
-        ${CMAKE_SOURCE_DIR}/src/Basics
+        ${CMAKE_SOURCE_DIR}/src/Core
 )
 
 target_link_libraries(Engine
@@ -50,7 +50,7 @@ target_link_libraries(Engine
         Logger
         AssetManager
         Diagnostics
-        Basics
+        Core
 )
 
 set(ENGINE_DEPLOY_DIR "C:/Users/conno/source/repos/EngineBuild")

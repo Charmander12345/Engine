@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "../Core/Texture.h"
+
 class Texture;
 
 class OpenGLTexture

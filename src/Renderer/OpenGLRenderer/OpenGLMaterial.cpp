@@ -4,7 +4,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "OpenGLTexture.h"
-#include "Texture.h"
+#include "../Core/Texture.h"
 
 OpenGLMaterial::~OpenGLMaterial()
 {

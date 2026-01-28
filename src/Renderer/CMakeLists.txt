@@ -32,7 +32,7 @@ target_include_directories(Renderer
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/OpenGLRenderer
         ${CMAKE_CURRENT_SOURCE_DIR}/OpenGLRenderer/glad/include
-        ${CMAKE_SOURCE_DIR}/src/Basics
+        ${CMAKE_SOURCE_DIR}/src/Core
         ${CMAKE_SOURCE_DIR}/src/AssetManager
 )
 
@@ -40,7 +40,7 @@ target_link_libraries(Renderer
     PUBLIC
         SDL3::SDL3
         Logger
-        Basics
+        Core
         AssetManager
 )
 
