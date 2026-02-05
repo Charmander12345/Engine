@@ -1,6 +1,7 @@
 #include "OpenGLRenderer.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <filesystem>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -9,6 +10,8 @@
 #include "OpenGLCamera.h"
 #include "OpenGLObject2D.h"
 #include "OpenGLObject3D.h"
+#include "OpenGLTextRenderer.h"
+#include "OpenGLShader.h"
 
 #include "../../Diagnostics/DiagnosticsManager.h"
 #include "../../Core/EngineLevel.h"
@@ -53,6 +56,22 @@ void OpenGLRenderer::shutdown()
 
     OpenGLObject2D::ClearCache();
     OpenGLObject3D::ClearCache();
+
+    if (m_uiQuadVbo)
+    {
+        glDeleteBuffers(1, &m_uiQuadVbo);
+        m_uiQuadVbo = 0;
+    }
+    if (m_uiQuadVao)
+    {
+        glDeleteVertexArrays(1, &m_uiQuadVao);
+        m_uiQuadVao = 0;
+    }
+    if (m_uiQuadProgram)
+    {
+        glDeleteProgram(m_uiQuadProgram);
+        m_uiQuadProgram = 0;
+    }
 
     // Any additional renderer-owned GPU resources can be released here.
     m_camera.reset();
@@ -176,14 +195,26 @@ void OpenGLRenderer::render()
         return;
     }
 
+    renderWorld();
+    renderUI();
+}
+
+void OpenGLRenderer::renderWorld()
+{
+    if (!m_initialized)
+    {
+        return;
+    }
+
     m_renderEntries.erase(
         std::remove_if(m_renderEntries.begin(), m_renderEntries.end(),
             [this](const RenderEntry& entry) { return !isRenderEntryRelevant(entry); }),
         m_renderEntries.end());
 
-    int width = 0;
-    int height = 0;
-    SDL_GetWindowSizeInPixels(m_window, &width, &height);
+    const Vec2 viewportSize = getViewportSize();
+    m_uiManager.setAvailableViewportSize(viewportSize);
+    const int width = static_cast<int>(viewportSize.x);
+    const int height = static_cast<int>(viewportSize.y);
     glViewport(0, 0, width, height);
 
     // Update projection matrix with current aspect ratio
@@ -212,6 +243,7 @@ void OpenGLRenderer::render()
         m_renderEntries.clear();
         diagnostics.setScenePrepared(false);
         m_cachedLevel = level;
+        m_textRenderer.reset();
     }
 
     if (!diagnostics.isScenePrepared())
@@ -529,11 +561,224 @@ void OpenGLRenderer::render()
     }
 }
 
+void OpenGLRenderer::renderUI()
+{
+    const GLboolean depthEnabled = glIsEnabled(GL_DEPTH_TEST);
+    if (depthEnabled)
+    {
+        glDisable(GL_DEPTH_TEST);
+    }
+
+    if (!m_textRenderer)
+    {
+        m_textRenderer = m_resourceManager.prepareTextRenderer();
+    }
+
+    if (!m_textRenderer)
+    {
+        m_textQueue.clear();
+        return;
+    }
+
+    int width = 0;
+    int height = 0;
+    SDL_GetWindowSizeInPixels(m_window, &width, &height);
+    m_textRenderer->setScreenSize(width, height);
+
+    const auto& widgets = m_uiManager.getRegisteredWidgets();
+    if (!widgets.empty() && ensureUIQuadRenderer())
+    {
+        std::vector<const UIManager::WidgetEntry*> ordered;
+        ordered.reserve(widgets.size());
+        for (const auto& entry : widgets)
+        {
+            ordered.push_back(&entry);
+        }
+
+        std::sort(ordered.begin(), ordered.end(), [](const UIManager::WidgetEntry* a, const UIManager::WidgetEntry* b)
+        {
+            const int za = (a && a->widget) ? a->widget->getZOrder() : 0;
+            const int zb = (b && b->widget) ? b->widget->getZOrder() : 0;
+            return za < zb;
+        });
+
+        const glm::mat4 uiProjection = glm::ortho(0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f);
+
+        for (const auto* entry : ordered)
+        {
+            if (!entry || !entry->widget)
+            {
+                continue;
+            }
+
+            const auto& widget = entry->widget;
+            Vec2 widgetSize = widget->getSizePixels();
+            if (widgetSize.x <= 0.0f)
+            {
+                widgetSize.x = static_cast<float>(width);
+            }
+            if (widgetSize.y <= 0.0f)
+            {
+                widgetSize.y = static_cast<float>(height);
+            }
+
+            for (const auto& element : widget->getElements())
+            {
+                const float x0 = element.from.x * widgetSize.x;
+                const float y0 = element.from.y * widgetSize.y;
+                const float x1 = element.to.x * widgetSize.x;
+                const float y1 = element.to.y * widgetSize.y;
+
+                if (element.type == WidgetElementType::Panel)
+                {
+                    drawUIPanel(x0, y0, x1, y1, element.color, uiProjection);
+                }
+                else if (element.type == WidgetElementType::Text)
+                {
+                    const float heightPx = std::max(0.0f, y1 - y0);
+                    const float scale = (heightPx > 0.0f) ? (heightPx / 48.0f) : 1.0f;
+                    m_textRenderer->drawText(element.text, Vec2{ x0, y0 }, scale, element.color);
+                }
+            }
+        }
+    }
+
+    for (const auto& command : m_textQueue)
+    {
+        Vec2 pixelPos{
+            command.screenPos.x * static_cast<float>(width),
+            command.screenPos.y * static_cast<float>(height)
+        };
+        m_textRenderer->drawText(command.text, pixelPos, command.scale, command.color);
+    }
+
+    m_textQueue.clear();
+
+    if (depthEnabled)
+    {
+        glEnable(GL_DEPTH_TEST);
+    }
+}
+
 void OpenGLRenderer::moveCamera(float forward, float right, float up)
 {
     if (!m_camera)
         return;
     m_camera->moveRelative(forward, right, up);
+}
+
+void OpenGLRenderer::queueText(const std::string& text, const Vec2& screenPos, float scale, const Vec4& color)
+{
+    TextCommand command;
+    command.text = text;
+    command.screenPos = screenPos;
+    command.scale = scale;
+    command.color = color;
+    m_textQueue.push_back(std::move(command));
+}
+
+bool OpenGLRenderer::ensureUIQuadRenderer()
+{
+    if (m_uiQuadProgram != 0)
+    {
+        return true;
+    }
+
+    const std::filesystem::path vertexPath = std::filesystem::current_path() / "shaders" / "ui_vertex.glsl";
+    const std::filesystem::path fragmentPath = std::filesystem::current_path() / "shaders" / "ui_fragment.glsl";
+
+    auto vertex = std::make_shared<OpenGLShader>();
+    auto fragment = std::make_shared<OpenGLShader>();
+
+    if (!vertex->loadFromFile(Shader::Type::Vertex, vertexPath.string()) ||
+        !fragment->loadFromFile(Shader::Type::Fragment, fragmentPath.string()))
+    {
+        return false;
+    }
+
+    m_uiQuadProgram = glCreateProgram();
+    glAttachShader(m_uiQuadProgram, vertex->id());
+    glAttachShader(m_uiQuadProgram, fragment->id());
+    glLinkProgram(m_uiQuadProgram);
+
+    GLint linked = 0;
+    glGetProgramiv(m_uiQuadProgram, GL_LINK_STATUS, &linked);
+    if (!linked)
+    {
+        Logger::Instance().log("OpenGLRenderer: Failed to link UI quad shader", Logger::LogLevel::ERROR);
+        glDeleteProgram(m_uiQuadProgram);
+        m_uiQuadProgram = 0;
+        return false;
+    }
+
+    glGenVertexArrays(1, &m_uiQuadVao);
+    glGenBuffers(1, &m_uiQuadVbo);
+    glBindVertexArray(m_uiQuadVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_uiQuadVbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 6 * 2, nullptr, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), reinterpret_cast<void*>(0));
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    return true;
+}
+
+void OpenGLRenderer::drawUIPanel(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection)
+{
+    if (m_uiQuadProgram == 0 || m_uiQuadVao == 0)
+    {
+        return;
+    }
+
+    const glm::vec4 glColor{ color.x, color.y, color.z, color.w };
+
+    float vertices[6][2] = {
+        { x0, y1 },
+        { x0, y0 },
+        { x1, y0 },
+        { x0, y1 },
+        { x1, y0 },
+        { x1, y1 }
+    };
+
+    glUseProgram(m_uiQuadProgram);
+    glUniformMatrix4fv(glGetUniformLocation(m_uiQuadProgram, "uProjection"), 1, GL_FALSE, &projection[0][0]);
+    glUniform4fv(glGetUniformLocation(m_uiQuadProgram, "uColor"), 1, &glColor[0]);
+
+    glBindVertexArray(m_uiQuadVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_uiQuadVbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindVertexArray(0);
+}
+
+Vec2 OpenGLRenderer::getViewportSize() const
+{
+    int width = 0;
+    int height = 0;
+    if (m_window)
+    {
+        SDL_GetWindowSizeInPixels(m_window, &width, &height);
+    }
+
+    return Vec2{ static_cast<float>(width), static_cast<float>(height) };
+}
+
+UIManager& OpenGLRenderer::getUIManager()
+{
+    return m_uiManager;
+}
+
+const UIManager& OpenGLRenderer::getUIManager() const
+{
+    return m_uiManager;
+}
+
+std::shared_ptr<Widget> OpenGLRenderer::createWidgetFromAsset(const std::shared_ptr<AssetData>& asset)
+{
+    return m_resourceManager.buildWidgetAsset(asset);
 }
 
 bool OpenGLRenderer::isRenderEntryRelevant(const RenderEntry& entry) const

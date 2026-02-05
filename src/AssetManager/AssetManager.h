@@ -109,6 +109,7 @@ private:
 	SaveResult saveObject2DAsset(const std::shared_ptr<AssetData>& object2D);
 	SaveResult saveObject3DAsset(const std::shared_ptr<AssetData>& object3D);
 	SaveResult saveLevelAsset(const std::unique_ptr<EngineLevel>& level);
+	SaveResult saveWidgetAsset(const std::shared_ptr<AssetData>& widget);
 
 	//Loading specific assettypes
     struct LoadResult
@@ -124,6 +125,7 @@ private:
 	LoadResult loadObject2DAsset(const std::string& path);
 	LoadResult loadObject3DAsset(const std::string& path);
 	LoadResult loadLevelAsset(const std::string& path);
+	LoadResult loadWidgetAsset(const std::string& path);
 
 	// Creating specific assettypes
     struct CreateResult

@@ -20,6 +20,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 add_subdirectory(external/SDL3 EXCLUDE_FROM_ALL)
+add_subdirectory(external/freetype)
 add_subdirectory(src/AssetManager)
 add_subdirectory(src/Diagnostics)
 add_subdirectory(src/Core)

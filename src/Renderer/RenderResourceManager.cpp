@@ -14,6 +14,8 @@
 #include "OpenGLRenderer/OpenGLObject2D.h"
 #include "OpenGLRenderer/OpenGLObject3D.h"
 #include "OpenGLRenderer/OpenGLMaterial.h"
+#include "OpenGLRenderer/OpenGLTextRenderer.h"
+#include "UIWidget.h"
 
 bool RenderResourceManager::prepareActiveLevel()
 {
@@ -28,6 +30,7 @@ bool RenderResourceManager::prepareActiveLevel()
 		logger.log(Logger::Category::Rendering, "RenderResourceManager: failed to prepare ECS for level", Logger::LogLevel::ERROR);
 		return false;
 	}
+
     logger.log(Logger::Category::Rendering, "RenderResourceManager: prepareActiveLevel() start", Logger::LogLevel::INFO);
 
     switch (diagnostics.getRHIType())
@@ -98,6 +101,59 @@ bool RenderResourceManager::prepareOpenGL(EngineLevel& level)
         ok ? Logger::LogLevel::INFO : Logger::LogLevel::WARNING);
 
     return ok;
+}
+
+void RenderResourceManager::prepareAssets(const std::vector<AssetPrepKind>& kinds)
+{
+    for (const auto kind : kinds)
+    {
+        switch (kind)
+        {
+        case AssetPrepKind::Text:
+            prepareTextRenderer();
+            break;
+        case AssetPrepKind::Widget:
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+std::shared_ptr<Widget> RenderResourceManager::buildWidgetAsset(const std::shared_ptr<AssetData>& asset)
+{
+    if (!asset || asset->getAssetType() != AssetType::Widget)
+    {
+        return nullptr;
+    }
+
+    const unsigned int assetId = asset->getId();
+    if (assetId != 0)
+    {
+        auto cached = m_widgetCache.find(assetId);
+        if (cached != m_widgetCache.end())
+        {
+            if (auto widget = cached->second.lock())
+            {
+                return widget;
+            }
+            m_widgetCache.erase(cached);
+        }
+    }
+
+    auto widget = std::make_shared<Widget>();
+    widget->setName(asset->getName());
+    widget->setPath(asset->getPath());
+    widget->setAssetType(AssetType::Widget);
+    widget->loadFromJson(asset->getData());
+
+    if (assetId != 0)
+    {
+        m_widgetCache[assetId] = widget;
+    }
+
+    AssetManager::Instance().registerRuntimeResource(widget);
+    return widget;
 }
 
 std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::buildRenderablesForSchema(const ECS::Schema& schema)
@@ -309,6 +365,30 @@ void RenderResourceManager::clearCaches()
     m_object2DCache.clear();
     m_object3DCache.clear();
     m_textureCache.clear();
+    m_textRenderer.reset();
+}
+
+std::shared_ptr<OpenGLTextRenderer> RenderResourceManager::prepareTextRenderer()
+{
+    if (auto existing = m_textRenderer.lock())
+    {
+        return existing;
+    }
+
+    const std::filesystem::path fontPath = std::filesystem::current_path() / "Content" / "Fonts" / "default.ttf";
+    const std::filesystem::path vertexPath = std::filesystem::current_path() / "shaders" / "text_vertex.glsl";
+    const std::filesystem::path fragmentPath = std::filesystem::current_path() / "shaders" / "text_fragment.glsl";
+
+    auto renderer = std::make_shared<OpenGLTextRenderer>();
+    if (!renderer->initialize(fontPath.string(), vertexPath.string(), fragmentPath.string()))
+    {
+        Logger::Instance().log(Logger::Category::Rendering, "RenderResourceManager: failed to initialize text renderer", Logger::LogLevel::ERROR);
+        return nullptr;
+    }
+
+    m_textRenderer = renderer;
+    AssetManager::Instance().registerRuntimeResource(renderer);
+    return renderer;
 }
 
 bool RenderResourceManager::prepareOpenGLObject3D(const std::shared_ptr<AssetData>& asset, const std::vector<std::shared_ptr<Texture>>& textures)

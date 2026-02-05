@@ -19,6 +19,14 @@ add_library(Renderer SHARED
     OpenGLRenderer/OpenGLObject3D.h
     OpenGLRenderer/OpenGLCamera.cpp
     OpenGLRenderer/OpenGLCamera.h
+    OpenGLRenderer/OpenGLTextRenderer.cpp
+    OpenGLRenderer/OpenGLTextRenderer.h
+    UIManager.cpp
+    UIManager.h
+    UIWidget.cpp
+    UIWidget.h
+    UIWidgets/TextWidget.cpp
+    UIWidgets/TextWidget.h
 )
 set_target_properties(Renderer PROPERTIES
     CXX_STANDARD 20
@@ -39,6 +47,7 @@ target_include_directories(Renderer
 target_link_libraries(Renderer
     PUBLIC
         SDL3::SDL3
+        freetype
         Logger
         Core
         AssetManager

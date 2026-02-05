@@ -12,7 +12,9 @@
 #include "Logger/Logger.h"
 #include "Diagnostics/DiagnosticsManager.h"
 #include "AssetManager/AssetManager.h"
+#include "AssetManager/AssetTypes.h"
 #include "Core/ECS/ECS.h"
+#include "Core/MathTypes.h"
 
 using namespace std;
 
@@ -95,6 +97,25 @@ int main()
     ecs.initialize({});
     ecs.createEntity();
 
+    if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
+    {
+        const std::string widgetPath = assetManager.getAbsoluteContentPath("Widgets/TitleBar.asset");
+        if (!widgetPath.empty())
+        {
+            const int widgetId = assetManager.loadAsset(widgetPath, AssetType::Widget, AssetManager::Sync);
+            if (widgetId != 0)
+            {
+                if (auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(widgetId)))
+                {
+                    if (auto widget = glRenderer->createWidgetFromAsset(asset))
+                    {
+                        glRenderer->getUIManager().registerWidget("TitleBar", widget);
+                    }
+                }
+            }
+        }
+    }
+
     bool running = true;
     uint64_t frame = 0;
     logger.log(Logger::Category::Engine, "Entering main loop.", Logger::LogLevel::INFO);
@@ -122,9 +143,15 @@ int main()
     uint64_t lastCounter = SDL_GetPerformanceCounter();
     const double freq = static_cast<double>(SDL_GetPerformanceFrequency());
 
+    double fpsTimer = 0.0;
+    uint32_t fpsFrames = 0;
+    double fpsValue = 0.0;
+
     uint64_t lastGcCounter = lastCounter;
     constexpr double kGcIntervalSec = 60.0;
     uint64_t gcRuns = 0;
+
+    bool fpscap = true;
 
     while (running)
     {
@@ -133,6 +160,15 @@ int main()
         const uint64_t now = SDL_GetPerformanceCounter();
         const double dt = (freq > 0.0) ? (static_cast<double>(now - lastCounter) / freq) : 0.016;
         lastCounter = now;
+
+        fpsTimer += dt;
+        ++fpsFrames;
+        if (fpsTimer >= 1.0)
+        {
+            fpsValue = static_cast<double>(fpsFrames) / fpsTimer;
+            fpsFrames = 0;
+            fpsTimer = 0.0;
+        }
 
         if (freq > 0.0 && (static_cast<double>(now - lastGcCounter) / freq) >= kGcIntervalSec)
         {
@@ -201,6 +237,10 @@ int main()
             if (event.type == SDL_EVENT_KEY_UP)
             {
                 diagnostics.dispatchKeyUp(event.key.key);
+                if (event.key.key == SDLK_F12)
+                {
+					fpscap = !fpscap;
+                }
             }
             else if (event.type == SDL_EVENT_KEY_DOWN)
             {
@@ -208,11 +248,22 @@ int main()
             }
         }
 
+        if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
+        {
+            glRenderer->queueText("FPS: " + std::to_string(static_cast<int>(fpsValue + 0.5)),
+                Vec2{ 0.02f, 0.05f },
+                0.6f,
+                Vec4{ 1.0f, 1.0f, 1.0f, 1.0f });
+        }
+
         renderer->clear();
         renderer->render();
         renderer->present();
 
-        SDL_Delay(16);
+        if (fpscap)
+        {
+            SDL_Delay(16);
+        }
 
         if ((frame % 600) == 0)
         {

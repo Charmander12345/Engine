@@ -3,6 +3,9 @@
 #include "../Renderer.h"
 #include "../Camera.h"
 #include "../RenderResourceManager.h"
+#include "../UIManager.h"
+
+#include "../../Core/MathTypes.h"
 #include "glad/include/gl.h"
 #include <memory>
 #include <vector>
@@ -31,7 +34,18 @@ public:
     void moveCamera(float forward, float right, float up) override;
     void rotateCamera(float yawDeltaDegrees, float pitchDeltaDegrees) override;
 
+    void queueText(const std::string& text, const Vec2& screenPos, float scale, const Vec4& color);
+    Vec2 getViewportSize() const;
+    UIManager& getUIManager();
+    const UIManager& getUIManager() const;
+    std::shared_ptr<Widget> createWidgetFromAsset(const std::shared_ptr<AssetData>& asset);
+
 private:
+    void renderWorld();
+    void renderUI();
+    bool ensureUIQuadRenderer();
+    void drawUIPanel(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection);
+
     struct RenderEntry
     {
         ECS::TransformComponent transform{};
@@ -40,6 +54,14 @@ private:
     };
 
     bool isRenderEntryRelevant(const RenderEntry& entry) const;
+
+    struct TextCommand
+    {
+        std::string text;
+        Vec2 screenPos;
+        float scale{1.0f};
+        Vec4 color{1.0f, 1.0f, 1.0f, 1.0f};
+    };
 
     bool m_initialized;
     std::string m_name;
@@ -51,4 +73,13 @@ private:
     std::vector<RenderEntry> m_renderEntries;
     RenderResourceManager m_resourceManager;
     EngineLevel* m_cachedLevel{ nullptr };
+
+    UIManager m_uiManager;
+
+    std::shared_ptr<OpenGLTextRenderer> m_textRenderer;
+    std::vector<TextCommand> m_textQueue;
+
+    GLuint m_uiQuadProgram{0};
+    GLuint m_uiQuadVao{0};
+    GLuint m_uiQuadVbo{0};
 };

@@ -12,6 +12,22 @@ struct Vec3
     float z{0.0f};
 };
 
+struct Vec2
+{
+#define NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Vec2, x, y)
+    float x{0.0f};
+    float y{0.0f};
+};
+
+struct Vec4
+{
+#define NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Vec4, x, y, z, w)
+    float x{0.0f};
+    float y{0.0f};
+    float z{0.0f};
+    float w{0.0f};
+};
+
 struct Mat3
 {
 #define NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Mat3, m)

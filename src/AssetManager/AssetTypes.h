@@ -13,5 +13,6 @@ enum class AssetType
     Audio,
     Script,
     Shader,
-    Level
+    Level,
+    Widget
 };

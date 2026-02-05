@@ -12,10 +12,17 @@ class AssetData;
 class Texture;
 class OpenGLObject2D;
 class OpenGLObject3D;
+class OpenGLTextRenderer;
+class Widget;
 
 class RenderResourceManager
 {
 public:
+    enum class AssetPrepKind
+    {
+        Text,
+        Widget
+    };
     RenderResourceManager() = default;
 
     bool prepareActiveLevel();
@@ -32,6 +39,9 @@ public:
 
     std::vector<RenderableAsset> buildRenderablesForSchema(const ECS::Schema& schema);
     void clearCaches();
+    std::shared_ptr<OpenGLTextRenderer> prepareTextRenderer();
+    void prepareAssets(const std::vector<AssetPrepKind>& kinds);
+    std::shared_ptr<Widget> buildWidgetAsset(const std::shared_ptr<AssetData>& asset);
 
 private:
     bool prepareOpenGL(EngineLevel& level);
@@ -41,4 +51,6 @@ private:
     std::unordered_map<unsigned int, std::weak_ptr<OpenGLObject2D>> m_object2DCache;
     std::unordered_map<unsigned int, std::weak_ptr<OpenGLObject3D>> m_object3DCache;
     std::unordered_map<std::string, std::vector<std::shared_ptr<Texture>>> m_textureCache;
+    std::weak_ptr<OpenGLTextRenderer> m_textRenderer;
+    std::unordered_map<unsigned int, std::weak_ptr<Widget>> m_widgetCache;
 };

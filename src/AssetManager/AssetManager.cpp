@@ -633,6 +633,48 @@ void AssetManager::ensureDefaultAssetsCreated()
         entity2["components"] = components2;
         entities.push_back(entity2);
 
+        json entity3 = json::object();
+        entity3["id"] = 3;
+
+        json components3 = json::object();
+        components3["Transform"] = json{
+            {"position", json::array({ -2.0f, 0.0f, 0.0f })},
+            {"rotation", json::array({ 0.0f, -30.0f, 0.0f })},
+            {"scale", json::array({ 1.0f, 1.0f, 1.0f })}
+        };
+        components3["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
+        components3["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        entity3["components"] = components3;
+        entities.push_back(entity3);
+
+        json entity4 = json::object();
+        entity4["id"] = 4;
+
+        json components4 = json::object();
+        components4["Transform"] = json{
+            {"position", json::array({ 0.0f, 0.0f, 2.5f })},
+            {"rotation", json::array({ 0.0f, 90.0f, 0.0f })},
+            {"scale", json::array({ 1.0f, 1.0f, 1.0f })}
+        };
+        components4["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
+        components4["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        entity4["components"] = components4;
+        entities.push_back(entity4);
+
+        json entity5 = json::object();
+        entity5["id"] = 5;
+
+        json components5 = json::object();
+        components5["Transform"] = json{
+            {"position", json::array({ 0.0f, 0.0f, -2.5f })},
+            {"rotation", json::array({ 0.0f, 0.0f, 0.0f })},
+            {"scale", json::array({ 1.0f, 1.0f, 1.0f })}
+        };
+        components5["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
+        components5["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        entity5["components"] = components5;
+        entities.push_back(entity5);
+
         levelJson["Entities"] = entities;
 
         auto defaultLevel = std::make_unique<EngineLevel>();
@@ -664,6 +706,37 @@ void AssetManager::ensureDefaultAssetsCreated()
 
         diagnostics.setActiveLevel(std::move(defaultLevel));
         diagnostics.setScenePrepared(false);
+    }
+
+    const std::string defaultWidgetRel = (fs::path("Widgets") / "TitleBar.asset").generic_string();
+    {
+        json widgetJson = json::object();
+        widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 50.0f} };
+        widgetJson["m_zOrder"] = 0;
+
+        json elements = json::array();
+        json panel = json::object();
+        panel["type"] = "Panel";
+        panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        panel["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 1.0f} };
+        elements.push_back(panel);
+
+        json label = json::object();
+        label["type"] = "Text";
+        label["from"] = json{ {"x", 0.02f}, {"y", 0.2f} };
+        label["to"] = json{ {"x", 0.5f}, {"y", 0.8f} };
+        label["color"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        label["text"] = "Engine";
+        label["font"] = "default.ttf";
+        elements.push_back(label);
+
+        widgetJson["m_elements"] = elements;
+
+        auto widget = std::make_shared<AssetData>();
+        widget->setName("TitleBar");
+        widget->setData(std::move(widgetJson));
+        ensureOnDisk(defaultWidgetRel, AssetType::Widget, widget);
     }
 
 	logger.log(Logger::Category::AssetManagement, "Default assets ensured.", Logger::LogLevel::INFO);
@@ -924,6 +997,9 @@ int AssetManager::loadAsset(const std::string& path, AssetType type, SyncState s
 	case AssetType::Level:
 		result = loadLevelAsset(path);
 		break;
+	case AssetType::Widget:
+		result = loadWidgetAsset(path);
+		break;
 	default:
 		return 0;
 	}
@@ -1005,6 +1081,9 @@ bool AssetManager::saveAsset(const Asset& asset, SyncState syncState, Diagnostic
         case AssetType::Material:
 			result = saveMaterialAsset(assetData);
             break;
+	case AssetType::Widget:
+		result = saveWidgetAsset(assetData);
+		break;
         case AssetType::Audio:
         case AssetType::Script:
         case AssetType::Shader:
@@ -1464,6 +1543,64 @@ AssetManager::LoadResult AssetManager::loadTextureAsset(const std::string& path)
 		texture->setId(id);
 	}
 	m_garbageCollector.registerResource(texture);
+
+	result.success = true;
+	return result;
+}
+
+AssetManager::LoadResult AssetManager::loadWidgetAsset(const std::string& path)
+{
+	LoadResult result;
+	std::ifstream in(path, std::ios::binary);
+	if (!in.is_open())
+	{
+		result.errorMessage = "Failed to open widget asset file.";
+		return result;
+	}
+
+    AssetType headerType{ AssetType::Unknown };
+    std::string name;
+    bool isJson = false;
+    if (!readAssetHeader(in, headerType, name, isJson))
+	{
+		result.errorMessage = "Invalid widget asset header.";
+		return result;
+	}
+
+	if (headerType != AssetType::Widget)
+	{
+		result.errorMessage = "Asset type mismatch for widget.";
+		return result;
+	}
+
+    if (!readAssetJson(in, result.j, result.errorMessage, isJson))
+	{
+		return result;
+	}
+
+	auto widget = std::make_shared<AssetData>();
+	if (result.j.is_object())
+	{
+		widget->setData(result.j);
+	}
+
+	if (name.empty())
+	{
+		name = fs::path(path).stem().string();
+	}
+
+	widget->setName(name);
+	widget->setPath(path);
+	widget->setAssetType(headerType);
+	widget->setType(headerType);
+	widget->setIsSaved(true);
+
+	auto id = registerLoadedAsset(widget);
+	if (id != 0)
+	{
+		widget->setId(id);
+	}
+	m_garbageCollector.registerResource(widget);
 
 	result.success = true;
 	return result;
@@ -2077,4 +2214,78 @@ AssetManager::SaveResult AssetManager::saveLevelAsset(const std::unique_ptr<Engi
 	level->setIsSaved(true);
 	result.success = true;
 	return result;
+}
+
+AssetManager::SaveResult AssetManager::saveWidgetAsset(const std::shared_ptr<AssetData>& widget)
+{
+    SaveResult result;
+    if (!widget)
+    {
+        result.errorMessage = "Widget asset is null.";
+        return result;
+    }
+
+    auto& diagnostics = DiagnosticsManager::Instance();
+    if (!diagnostics.isProjectLoaded())
+    {
+        result.errorMessage = "No project loaded for widget save.";
+        return result;
+    }
+
+    std::string name = widget->getName();
+    if (name.empty())
+    {
+        name = "Widget";
+        widget->setName(name);
+    }
+
+    std::string relPath = widget->getPath();
+    if (relPath.empty())
+    {
+        relPath = name + ".asset";
+        widget->setPath(relPath);
+    }
+
+    fs::path rel = fs::path(relPath);
+    if (rel.extension().empty())
+    {
+        rel.replace_extension(".asset");
+        relPath = rel.generic_string();
+        widget->setPath(relPath);
+    }
+
+    const fs::path absPath = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relPath);
+    std::error_code ec;
+    fs::create_directories(absPath.parent_path(), ec);
+
+    std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+    if (!out.is_open())
+    {
+        result.errorMessage = "Failed to open widget asset file for writing.";
+        return result;
+    }
+
+    json data = widget->getData();
+    if (data.is_null())
+    {
+        data = json::object();
+    }
+
+    json fileJson = json::object();
+    fileJson["magic"] = 0x41535453;
+    fileJson["version"] = 2;
+    fileJson["type"] = static_cast<int>(AssetType::Widget);
+    fileJson["name"] = name;
+    fileJson["data"] = data;
+
+    out << fileJson.dump(4);
+    if (!out.good())
+    {
+        result.errorMessage = "Failed to write widget asset data.";
+        return result;
+    }
+
+    widget->setIsSaved(true);
+    result.success = true;
+    return result;
 }
