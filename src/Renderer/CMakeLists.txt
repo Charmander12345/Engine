@@ -25,6 +25,10 @@ add_library(Renderer SHARED
     UIManager.h
     UIWidget.cpp
     UIWidget.h
+    UIWidgets/ButtonWidget.cpp
+    UIWidgets/ButtonWidget.h
+    UIWidgets/StackPanelWidget.cpp
+    UIWidgets/StackPanelWidget.h
     UIWidgets/TextWidget.cpp
     UIWidgets/TextWidget.h
 )

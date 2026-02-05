@@ -719,7 +719,10 @@ void AssetManager::ensureDefaultAssetsCreated()
         panel["type"] = "Panel";
         panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
         panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        panel["fillX"] = true;
         panel["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 1.0f} };
+        panel["shaderVertex"] = "panel_vertex.glsl";
+        panel["shaderFragment"] = "panel_fragment.glsl";
         elements.push_back(panel);
 
         json label = json::object();
@@ -729,7 +732,70 @@ void AssetManager::ensureDefaultAssetsCreated()
         label["color"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
         label["text"] = "Engine";
         label["font"] = "default.ttf";
+        label["fontSize"] = 20.0f;
+        label["sizeToContent"] = true;
+        label["shaderVertex"] = "text_vertex.glsl";
+        label["shaderFragment"] = "text_fragment.glsl";
         elements.push_back(label);
+
+        json buttonStack = json::object();
+        buttonStack["type"] = "StackPanel";
+        buttonStack["from"] = json{ {"x", 0.85f}, {"y", 0.1f} };
+        buttonStack["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        buttonStack["orientation"] = "Horizontal";
+        buttonStack["padding"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        buttonStack["sizeToContent"] = true;
+
+        json btnMin = json::object();
+        btnMin["type"] = "Button";
+        btnMin["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        btnMin["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        btnMin["color"] = json{ {"x", 0.2f}, {"y", 0.2f}, {"z", 0.2f}, {"w", 1.0f} };
+        btnMin["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        btnMin["text"] = "_";
+        btnMin["font"] = "default.ttf";
+        btnMin["fontSize"] = 16.0f;
+        btnMin["textAlignH"] = "Center";
+        btnMin["textAlignV"] = "Center";
+        btnMin["minSize"] = json{ {"x", 40.0f}, {"y", 0.0f} };
+        btnMin["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
+        btnMin["shaderVertex"] = "button_vertex.glsl";
+        btnMin["shaderFragment"] = "button_fragment.glsl";
+
+        json btnMax = json::object();
+        btnMax["type"] = "Button";
+        btnMax["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        btnMax["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        btnMax["color"] = json{ {"x", 0.26f}, {"y", 0.26f}, {"z", 0.26f}, {"w", 1.0f} };
+        btnMax["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        btnMax["text"] = "[ ]";
+        btnMax["font"] = "default.ttf";
+        btnMax["fontSize"] = 16.0f;
+        btnMax["textAlignH"] = "Center";
+        btnMax["textAlignV"] = "Center";
+        btnMax["minSize"] = json{ {"x", 40.0f}, {"y", 0.0f} };
+        btnMax["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
+        btnMax["shaderVertex"] = "button_vertex.glsl";
+        btnMax["shaderFragment"] = "button_fragment.glsl";
+
+        json btnClose = json::object();
+        btnClose["type"] = "Button";
+        btnClose["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        btnClose["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        btnClose["color"] = json{ {"x", 0.3f}, {"y", 0.08f}, {"z", 0.08f}, {"w", 1.0f} };
+        btnClose["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        btnClose["text"] = "X";
+        btnClose["font"] = "default.ttf";
+        btnClose["fontSize"] = 16.0f;
+        btnClose["textAlignH"] = "Center";
+        btnClose["textAlignV"] = "Center";
+        btnClose["minSize"] = json{ {"x", 40.0f}, {"y", 0.0f} };
+        btnClose["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
+        btnClose["shaderVertex"] = "button_vertex.glsl";
+        btnClose["shaderFragment"] = "button_fragment.glsl";
+
+        buttonStack["children"] = json::array({ btnMin, btnMax, btnClose });
+        elements.push_back(buttonStack);
 
         widgetJson["m_elements"] = elements;
 

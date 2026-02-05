@@ -138,6 +138,17 @@ int main()
         return true;
         });
 
+    if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
+    {
+        diagnostics.registerKeyUpHandler(SDLK_F11, [glRenderer]() {
+            glRenderer->toggleUIDebug();
+            Logger::Instance().log(Logger::Category::Input,
+                std::string("UI debug bounds: ") + (glRenderer->isUIDebugEnabled() ? "ON" : "OFF"),
+                Logger::LogLevel::INFO);
+            return true;
+            });
+    }
+
     bool rightMouseDown = false;
 
     uint64_t lastCounter = SDL_GetPerformanceCounter();

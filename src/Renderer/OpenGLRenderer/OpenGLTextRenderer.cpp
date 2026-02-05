@@ -27,19 +27,26 @@ OpenGLTextRenderer::~OpenGLTextRenderer()
         glDeleteTextures(1, &m_atlasTexture);
         m_atlasTexture = 0;
     }
-    if (m_program)
+    for (auto& entry : m_programCache)
     {
-        glDeleteProgram(m_program);
-        m_program = 0;
+        if (entry.second)
+        {
+            glDeleteProgram(entry.second);
+        }
     }
+    m_programCache.clear();
+    m_program = 0;
 }
 
 bool OpenGLTextRenderer::initialize(const std::string& fontPath, const std::string& vertexShaderPath, const std::string& fragmentShaderPath)
 {
-    if (!buildShaderProgram(vertexShaderPath, fragmentShaderPath))
+    if (!buildShaderProgram(vertexShaderPath, fragmentShaderPath, m_program))
     {
         return false;
     }
+
+    const std::string key = vertexShaderPath + "|" + fragmentShaderPath;
+    m_programCache[key] = m_program;
 
     if (!buildGlyphAtlas(fontPath))
     {
@@ -71,16 +78,88 @@ void OpenGLTextRenderer::setScreenSize(int width, int height)
 
 void OpenGLTextRenderer::drawText(const std::string& text, const Vec2& screenPos, float scale, const Vec4& color)
 {
-    if (!m_program || !m_atlasTexture)
+    drawTextWithProgram(text, screenPos, scale, color, m_program);
+}
+
+void OpenGLTextRenderer::drawTextWithShader(const std::string& text, const Vec2& screenPos, float scale, const Vec4& color,
+    const std::string& vertexShaderPath, const std::string& fragmentShaderPath)
+{
+    const GLuint program = getProgramForShaders(vertexShaderPath, fragmentShaderPath);
+    if (program == 0)
+    {
+        return;
+    }
+
+    drawTextWithProgram(text, screenPos, scale, color, program);
+}
+
+bool OpenGLTextRenderer::buildShaderProgram(const std::string& vertexShaderPath, const std::string& fragmentShaderPath, GLuint& outProgram)
+{
+    auto vertex = std::make_shared<OpenGLShader>();
+    auto fragment = std::make_shared<OpenGLShader>();
+
+    if (!vertex->loadFromFile(Shader::Type::Vertex, vertexShaderPath) || !fragment->loadFromFile(Shader::Type::Fragment, fragmentShaderPath))
+    {
+        return false;
+    }
+
+    outProgram = glCreateProgram();
+    glAttachShader(outProgram, vertex->id());
+    glAttachShader(outProgram, fragment->id());
+    glLinkProgram(outProgram);
+
+    GLint linked = 0;
+    glGetProgramiv(outProgram, GL_LINK_STATUS, &linked);
+    if (!linked)
+    {
+        Logger::Instance().log("OpenGLTextRenderer: Failed to link text shader program", Logger::LogLevel::ERROR);
+        glDeleteProgram(outProgram);
+        outProgram = 0;
+        return false;
+    }
+
+    return true;
+}
+
+GLuint OpenGLTextRenderer::getProgramForShaders(const std::string& vertexShaderPath, const std::string& fragmentShaderPath)
+{
+    if (vertexShaderPath.empty() || fragmentShaderPath.empty())
+    {
+        return m_program;
+    }
+
+    const std::string key = vertexShaderPath + "|" + fragmentShaderPath;
+    auto it = m_programCache.find(key);
+    if (it != m_programCache.end())
+    {
+        return it->second;
+    }
+
+    GLuint program = 0;
+    if (!buildShaderProgram(vertexShaderPath, fragmentShaderPath, program))
+    {
+        return 0;
+    }
+
+    glUseProgram(program);
+    glUniform1i(glGetUniformLocation(program, "uTextAtlas"), 0);
+
+    m_programCache[key] = program;
+    return program;
+}
+
+void OpenGLTextRenderer::drawTextWithProgram(const std::string& text, const Vec2& screenPos, float scale, const Vec4& color, GLuint program)
+{
+    if (!program || !m_atlasTexture)
     {
         return;
     }
 
     const glm::vec4 glColor{ color.x, color.y, color.z, color.w };
 
-    glUseProgram(m_program);
-    glUniformMatrix4fv(glGetUniformLocation(m_program, "uProjection"), 1, GL_FALSE, &m_projection[0][0]);
-    glUniform4fv(glGetUniformLocation(m_program, "uTextColor"), 1, &glColor[0]);
+    glUseProgram(program);
+    glUniformMatrix4fv(glGetUniformLocation(program, "uProjection"), 1, GL_FALSE, &m_projection[0][0]);
+    glUniform4fv(glGetUniformLocation(program, "uTextColor"), 1, &glColor[0]);
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_atlasTexture);
@@ -88,7 +167,11 @@ void OpenGLTextRenderer::drawText(const std::string& text, const Vec2& screenPos
     glBindVertexArray(m_vao);
 
     float xpos = screenPos.x;
-    float ypos = screenPos.y;
+    float baseline = screenPos.y;
+    if (m_fontAscent > 0.0f)
+    {
+        baseline += m_fontAscent * scale;
+    }
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -104,7 +187,7 @@ void OpenGLTextRenderer::drawText(const std::string& text, const Vec2& screenPos
         const Glyph& glyph = it->second;
 
         float gx = xpos + static_cast<float>(glyph.bearing.x) * scale;
-        float gy = ypos + (static_cast<float>(glyph.bearing.y) - static_cast<float>(glyph.size.y)) * scale;
+        float gy = baseline - static_cast<float>(glyph.bearing.y) * scale;
         float w = static_cast<float>(glyph.size.x) * scale;
         float h = static_cast<float>(glyph.size.y) * scale;
 
@@ -136,32 +219,31 @@ void OpenGLTextRenderer::drawText(const std::string& text, const Vec2& screenPos
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-bool OpenGLTextRenderer::buildShaderProgram(const std::string& vertexShaderPath, const std::string& fragmentShaderPath)
+Vec2 OpenGLTextRenderer::measureText(const std::string& text, float scale) const
 {
-    auto vertex = std::make_shared<OpenGLShader>();
-    auto fragment = std::make_shared<OpenGLShader>();
-
-    if (!vertex->loadFromFile(Shader::Type::Vertex, vertexShaderPath) || !fragment->loadFromFile(Shader::Type::Fragment, fragmentShaderPath))
+    float width = 0.0f;
+    for (char c : text)
     {
-        return false;
+        auto it = m_glyphs.find(c);
+        if (it == m_glyphs.end())
+        {
+            continue;
+        }
+        width += (static_cast<float>(it->second.advance) / 64.0f) * scale;
     }
 
-    m_program = glCreateProgram();
-    glAttachShader(m_program, vertex->id());
-    glAttachShader(m_program, fragment->id());
-    glLinkProgram(m_program);
+    const float height = getLineHeight(scale);
+    return Vec2{ width, height };
+}
 
-    GLint linked = 0;
-    glGetProgramiv(m_program, GL_LINK_STATUS, &linked);
-    if (!linked)
+float OpenGLTextRenderer::getLineHeight(float scale) const
+{
+    const float lineHeight = (m_fontAscent - m_fontDescent);
+    if (lineHeight > 0.0f)
     {
-        Logger::Instance().log("OpenGLTextRenderer: Failed to link text shader program", Logger::LogLevel::ERROR);
-        glDeleteProgram(m_program);
-        m_program = 0;
-        return false;
+        return lineHeight * scale;
     }
-
-    return true;
+    return 48.0f * scale;
 }
 
 bool OpenGLTextRenderer::buildGlyphAtlas(const std::string& fontPath)
@@ -182,6 +264,8 @@ bool OpenGLTextRenderer::buildGlyphAtlas(const std::string& fontPath)
     }
 
     FT_Set_Pixel_Sizes(face, 0, 48);
+    m_fontAscent = static_cast<float>(face->size->metrics.ascender) / 64.0f;
+    m_fontDescent = static_cast<float>(face->size->metrics.descender) / 64.0f;
 
     const int atlasWidth = 1024;
     const int atlasHeight = 1024;

@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <functional>
 
 #include "../Core/MathTypes.h"
 #include "UIWidget.h"
@@ -33,6 +34,8 @@ public:
     void registerWidget(const std::string& id, const std::shared_ptr<Widget>& widget);
     const std::vector<WidgetEntry>& getRegisteredWidgets() const;
     void unregisterWidget(const std::string& id);
+
+    void updateLayouts(const std::function<Vec2(const std::string&, float)>& measureText);
 
 private:
     Vec2 m_availableViewportSize{};

@@ -23,6 +23,55 @@ namespace
         return WidgetElementType::Unknown;
     }
 
+    std::string toString(TextAlignH align)
+    {
+        switch (align)
+        {
+        case TextAlignH::Center: return "Center";
+        case TextAlignH::Right: return "Right";
+        default: return "Left";
+        }
+    }
+
+    std::string toString(TextAlignV align)
+    {
+        switch (align)
+        {
+        case TextAlignV::Center: return "Center";
+        case TextAlignV::Bottom: return "Bottom";
+        default: return "Top";
+        }
+    }
+
+    TextAlignH alignHFromString(const std::string& value)
+    {
+        if (value == "Center") return TextAlignH::Center;
+        if (value == "Right") return TextAlignH::Right;
+        return TextAlignH::Left;
+    }
+
+    TextAlignV alignVFromString(const std::string& value)
+    {
+        if (value == "Center") return TextAlignV::Center;
+        if (value == "Bottom") return TextAlignV::Bottom;
+        return TextAlignV::Top;
+    }
+
+    std::string toString(StackOrientation orientation)
+    {
+        switch (orientation)
+        {
+        case StackOrientation::Horizontal: return "Horizontal";
+        default: return "Vertical";
+        }
+    }
+
+    StackOrientation orientationFromString(const std::string& value)
+    {
+        if (value == "Horizontal") return StackOrientation::Horizontal;
+        return StackOrientation::Vertical;
+    }
+
     Vec2 readVec2(const json& value)
     {
         Vec2 out{};
@@ -56,11 +105,171 @@ namespace
     {
         return json{ {"x", value.x}, {"y", value.y}, {"z", value.z}, {"w", value.w} };
     }
+
+    WidgetElement readElement(const json& entry)
+    {
+        WidgetElement element{};
+        if (entry.contains("type"))
+        {
+            element.type = fromString(entry.at("type").get<std::string>());
+        }
+        if (entry.contains("from"))
+        {
+            element.from = readVec2(entry.at("from"));
+        }
+        if (entry.contains("to"))
+        {
+            element.to = readVec2(entry.at("to"));
+        }
+        if (entry.contains("color"))
+        {
+            element.color = readVec4(entry.at("color"));
+        }
+        if (entry.contains("textColor"))
+        {
+            element.textColor = readVec4(entry.at("textColor"));
+        }
+        if (entry.contains("text"))
+        {
+            element.text = entry.at("text").get<std::string>();
+        }
+        if (entry.contains("font"))
+        {
+            element.font = entry.at("font").get<std::string>();
+        }
+        if (entry.contains("fontSize"))
+        {
+            element.fontSize = entry.at("fontSize").get<float>();
+        }
+        if (entry.contains("minSize"))
+        {
+            element.minSize = readVec2(entry.at("minSize"));
+        }
+        if (entry.contains("textAlignH"))
+        {
+            element.textAlignH = alignHFromString(entry.at("textAlignH").get<std::string>());
+        }
+        if (entry.contains("textAlignV"))
+        {
+            element.textAlignV = alignVFromString(entry.at("textAlignV").get<std::string>());
+        }
+        if (entry.contains("padding"))
+        {
+            element.padding = readVec2(entry.at("padding"));
+        }
+        if (entry.contains("margin"))
+        {
+            element.margin = readVec2(entry.at("margin"));
+        }
+        if (entry.contains("fillX"))
+        {
+            element.fillX = entry.at("fillX").get<bool>();
+        }
+        if (entry.contains("fillY"))
+        {
+            element.fillY = entry.at("fillY").get<bool>();
+        }
+        if (entry.contains("sizeToContent"))
+        {
+            element.sizeToContent = entry.at("sizeToContent").get<bool>();
+        }
+        if (entry.contains("orientation"))
+        {
+            element.orientation = orientationFromString(entry.at("orientation").get<std::string>());
+        }
+        if (entry.contains("shaderVertex"))
+        {
+            element.shaderVertex = entry.at("shaderVertex").get<std::string>();
+        }
+        if (entry.contains("shaderFragment"))
+        {
+            element.shaderFragment = entry.at("shaderFragment").get<std::string>();
+        }
+        if (entry.contains("children") && entry.at("children").is_array())
+        {
+            for (const auto& child : entry.at("children"))
+            {
+                if (child.is_object())
+                {
+                    element.children.push_back(readElement(child));
+                }
+            }
+        }
+        return element;
+    }
+
+    json writeElement(const WidgetElement& element)
+    {
+        json entry = json::object();
+        entry["type"] = toString(element.type);
+        entry["from"] = writeVec2(element.from);
+        entry["to"] = writeVec2(element.to);
+        entry["color"] = writeVec4(element.color);
+        entry["textColor"] = writeVec4(element.textColor);
+        if (!element.text.empty())
+        {
+            entry["text"] = element.text;
+        }
+        if (!element.font.empty())
+        {
+            entry["font"] = element.font;
+        }
+        if (element.fontSize > 0.0f)
+        {
+            entry["fontSize"] = element.fontSize;
+        }
+        if (element.minSize.x > 0.0f || element.minSize.y > 0.0f)
+        {
+            entry["minSize"] = writeVec2(element.minSize);
+        }
+        entry["textAlignH"] = toString(element.textAlignH);
+        entry["textAlignV"] = toString(element.textAlignV);
+        if (element.padding.x > 0.0f || element.padding.y > 0.0f)
+        {
+            entry["padding"] = writeVec2(element.padding);
+        }
+        if (element.margin.x > 0.0f || element.margin.y > 0.0f)
+        {
+            entry["margin"] = writeVec2(element.margin);
+        }
+        if (element.fillX)
+        {
+            entry["fillX"] = element.fillX;
+        }
+        if (element.fillY)
+        {
+            entry["fillY"] = element.fillY;
+        }
+        if (element.type == WidgetElementType::StackPanel)
+        {
+            entry["orientation"] = toString(element.orientation);
+            entry["sizeToContent"] = element.sizeToContent;
+        }
+        if (!element.shaderVertex.empty())
+        {
+            entry["shaderVertex"] = element.shaderVertex;
+        }
+        if (!element.shaderFragment.empty())
+        {
+            entry["shaderFragment"] = element.shaderFragment;
+        }
+        if (!element.children.empty())
+        {
+            json children = json::array();
+            for (const auto& child : element.children)
+            {
+                children.push_back(writeElement(child));
+            }
+            entry["children"] = children;
+        }
+        return entry;
+    }
 }
 
 void Widget::setSizePixels(const Vec2& size)
 {
     m_sizePixels = size;
+    m_layoutDirty = true;
 }
 
 const Vec2& Widget::getSizePixels() const
@@ -68,12 +277,34 @@ const Vec2& Widget::getSizePixels() const
     return m_sizePixels;
 }
 
+const Vec2& Widget::getComputedSizePixels() const
+{
+    return m_computedSizePixels;
+}
+
+bool Widget::hasComputedSize() const
+{
+    return m_hasComputedSize;
+}
+
+void Widget::setComputedSizePixels(const Vec2& size, bool hasComputed)
+{
+    m_computedSizePixels = size;
+    m_hasComputedSize = hasComputed;
+}
+
 void Widget::setElements(std::vector<WidgetElement> elements)
 {
     m_elements = std::move(elements);
+    m_layoutDirty = true;
 }
 
 const std::vector<WidgetElement>& Widget::getElements() const
+{
+    return m_elements;
+}
+
+std::vector<WidgetElement>& Widget::getElementsMutable()
 {
     return m_elements;
 }
@@ -92,6 +323,7 @@ bool Widget::loadFromJson(const json& data)
 {
     m_sizePixels = {};
     m_elements.clear();
+    m_layoutDirty = true;
 
     if (!data.is_object())
     {
@@ -116,33 +348,7 @@ bool Widget::loadFromJson(const json& data)
             {
                 continue;
             }
-
-            WidgetElement element{};
-            if (entry.contains("type"))
-            {
-                element.type = fromString(entry.at("type").get<std::string>());
-            }
-            if (entry.contains("from"))
-            {
-                element.from = readVec2(entry.at("from"));
-            }
-            if (entry.contains("to"))
-            {
-                element.to = readVec2(entry.at("to"));
-            }
-            if (entry.contains("color"))
-            {
-                element.color = readVec4(entry.at("color"));
-            }
-            if (entry.contains("text"))
-            {
-                element.text = entry.at("text").get<std::string>();
-            }
-            if (entry.contains("font"))
-            {
-                element.font = entry.at("font").get<std::string>();
-            }
-            m_elements.push_back(element);
+            m_elements.push_back(readElement(entry));
         }
     }
 
@@ -158,22 +364,24 @@ json Widget::toJson() const
     json elements = json::array();
     for (const auto& element : m_elements)
     {
-        json entry = json::object();
-        entry["type"] = toString(element.type);
-        entry["from"] = writeVec2(element.from);
-        entry["to"] = writeVec2(element.to);
-        entry["color"] = writeVec4(element.color);
-        if (!element.text.empty())
-        {
-            entry["text"] = element.text;
-        }
-        if (!element.font.empty())
-        {
-            entry["font"] = element.font;
-        }
-        elements.push_back(entry);
+        elements.push_back(writeElement(element));
     }
 
     data["m_elements"] = elements;
     return data;
+}
+
+void Widget::markLayoutDirty()
+{
+    m_layoutDirty = true;
+}
+
+bool Widget::isLayoutDirty() const
+{
+    return m_layoutDirty;
+}
+
+void Widget::setLayoutDirty(bool dirty)
+{
+    m_layoutDirty = dirty;
 }

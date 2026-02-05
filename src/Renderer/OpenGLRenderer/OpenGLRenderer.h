@@ -8,6 +8,7 @@
 #include "../../Core/MathTypes.h"
 #include "glad/include/gl.h"
 #include <memory>
+#include <unordered_map>
 #include <vector>
 #include <glm/glm.hpp>
 
@@ -44,7 +45,9 @@ private:
     void renderWorld();
     void renderUI();
     bool ensureUIQuadRenderer();
-    void drawUIPanel(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection);
+    GLuint getUIQuadProgram(const std::string& vertexShaderPath, const std::string& fragmentShaderPath);
+    void drawUIPanel(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program);
+    void drawUIOutline(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program);
 
     struct RenderEntry
     {
@@ -82,4 +85,10 @@ private:
     GLuint m_uiQuadProgram{0};
     GLuint m_uiQuadVao{0};
     GLuint m_uiQuadVbo{0};
+    std::unordered_map<std::string, GLuint> m_uiQuadPrograms;
+    bool m_uiDebugEnabled{false};
+
+public:
+    void toggleUIDebug() { m_uiDebugEnabled = !m_uiDebugEnabled; }
+    bool isUIDebugEnabled() const { return m_uiDebugEnabled; }
 };

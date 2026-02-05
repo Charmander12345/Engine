@@ -3,6 +3,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <string>
 
 #include <glm/glm.hpp>
 
@@ -28,10 +29,16 @@ public:
     bool initialize(const std::string& fontPath, const std::string& vertexShaderPath, const std::string& fragmentShaderPath);
     void setScreenSize(int width, int height);
     void drawText(const std::string& text, const Vec2& screenPos, float scale, const Vec4& color);
+    void drawTextWithShader(const std::string& text, const Vec2& screenPos, float scale, const Vec4& color,
+        const std::string& vertexShaderPath, const std::string& fragmentShaderPath);
+    Vec2 measureText(const std::string& text, float scale) const;
+    float getLineHeight(float scale) const;
 
 private:
-    bool buildShaderProgram(const std::string& vertexShaderPath, const std::string& fragmentShaderPath);
+    bool buildShaderProgram(const std::string& vertexShaderPath, const std::string& fragmentShaderPath, GLuint& outProgram);
     bool buildGlyphAtlas(const std::string& fontPath);
+    GLuint getProgramForShaders(const std::string& vertexShaderPath, const std::string& fragmentShaderPath);
+    void drawTextWithProgram(const std::string& text, const Vec2& screenPos, float scale, const Vec4& color, GLuint program);
 
     std::unordered_map<char, Glyph> m_glyphs;
     GLuint m_program{0};
@@ -41,4 +48,7 @@ private:
     glm::mat4 m_projection{1.0f};
     int m_atlasWidth{0};
     int m_atlasHeight{0};
+    float m_fontAscent{0.0f};
+    float m_fontDescent{0.0f};
+    std::unordered_map<std::string, GLuint> m_programCache;
 };
