@@ -2,6 +2,7 @@
 
 #include "../Renderer.h"
 #include "../Camera.h"
+#include "../RenderResourceManager.h"
 #include "glad/include/gl.h"
 #include <memory>
 #include <vector>
@@ -38,6 +39,8 @@ private:
         std::shared_ptr<OpenGLObject3D> object3D;
     };
 
+    bool isRenderEntryRelevant(const RenderEntry& entry) const;
+
     bool m_initialized;
     std::string m_name;
     SDL_Window* m_window;
@@ -46,4 +49,6 @@ private:
     std::unique_ptr<Camera> m_camera;
     glm::mat4 m_projectionMatrix;
     std::vector<RenderEntry> m_renderEntries;
+    RenderResourceManager m_resourceManager;
+    EngineLevel* m_cachedLevel{ nullptr };
 };

@@ -3,11 +3,13 @@
 #include <memory>
 #include <glm/glm.hpp>
 
+#include "../../Core/EngineObject.h"
+
 class AssetData;
 class OpenGLMaterial;
 class Texture;
 
-class OpenGLObject3D
+class OpenGLObject3D : public EngineObject
 {
 public:
     explicit OpenGLObject3D(const std::shared_ptr<AssetData>& asset);

@@ -66,6 +66,9 @@ public:
 	// Synchronous: tidies up expired weak_ptr tracked resources.
 	void collectGarbage();
 
+	// Register runtime resources (e.g., render objects) with the GC.
+	bool registerRuntimeResource(const std::shared_ptr<EngineObject>& resource);
+
 	// Resolve <project>/Content/<relative> if a project is loaded. Returns empty string if no project is loaded.
     std::string getAbsoluteContentPath(const std::string& relativeToContent) const;
 

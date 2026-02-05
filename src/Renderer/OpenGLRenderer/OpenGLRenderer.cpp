@@ -1,5 +1,6 @@
 #include "OpenGLRenderer.h"
 #include <SDL3/SDL.h>
+#include <algorithm>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -77,7 +78,7 @@ bool OpenGLRenderer::initialize()
 
     logger.log(Logger::Category::Rendering, "Creating Window...", Logger::LogLevel::INFO);
 
-    m_window = SDL_CreateWindow("Engine Project", 800, 600, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL | SDL_WINDOW_MINIMIZED);
+    m_window = SDL_CreateWindow("Engine Project", 800, 600, SDL_WINDOW_FULLSCREEN | SDL_WINDOW_OPENGL);
     if (!m_window) {
         logger.log(Logger::Category::Rendering, std::string("Failed to create window: ") + SDL_GetError(), Logger::LogLevel::ERROR);
         SDL_Quit();
@@ -123,47 +124,30 @@ bool OpenGLRenderer::initialize()
 
     // Prime render resources as soon as the renderer is ready.
     {
-        RenderResourceManager rrm;
-        if (rrm.prepareActiveLevel())
+        if (m_resourceManager.prepareActiveLevel())
         {
             DiagnosticsManager::Instance().setScenePrepared(true);
         }
     }
 
     {
-        RenderResourceManager rrm;
         auto& ecs = ECS::ECSManager::Instance();
         m_renderEntries.clear();
-        const auto renderables = rrm.buildRenderablesForSchema(ecs.getRenderSchema());
+        const auto renderables = m_resourceManager.buildRenderablesForSchema(ecs.getRenderSchema());
         m_renderEntries.reserve(renderables.size());
         for (const auto& renderable : renderables)
         {
             RenderEntry entry;
             entry.transform = renderable.transform;
-            if (renderable.assetType == AssetType::Model3D)
-            {
-                entry.object3D = std::make_shared<OpenGLObject3D>(renderable.asset);
-                if (!entry.object3D->prepare())
-                {
-                    continue;
-                }
-                entry.object3D->setTextures(renderable.textures);
-            }
-            else if (renderable.assetType == AssetType::Model2D)
-            {
-                entry.object2D = std::make_shared<OpenGLObject2D>(renderable.asset);
-                if (!entry.object2D->prepare())
-                {
-                    continue;
-                }
-                entry.object2D->setTextures(renderable.textures);
-            }
-            else
+            entry.object3D = renderable.object3D;
+            entry.object2D = renderable.object2D;
+            if (!entry.object3D && !entry.object2D)
             {
                 continue;
             }
             m_renderEntries.push_back(std::move(entry));
         }
+        m_cachedLevel = DiagnosticsManager::Instance().getActiveLevelSoft();
     }
 
     SDL_ShowWindow(m_window);
@@ -192,6 +176,11 @@ void OpenGLRenderer::render()
         return;
     }
 
+    m_renderEntries.erase(
+        std::remove_if(m_renderEntries.begin(), m_renderEntries.end(),
+            [this](const RenderEntry& entry) { return !isRenderEntryRelevant(entry); }),
+        m_renderEntries.end());
+
     int width = 0;
     int height = 0;
     SDL_GetWindowSizeInPixels(m_window, &width, &height);
@@ -217,41 +206,32 @@ void OpenGLRenderer::render()
         return;
 	}
 
+    if (m_cachedLevel != level)
+    {
+        m_resourceManager.clearCaches();
+        m_renderEntries.clear();
+        diagnostics.setScenePrepared(false);
+        m_cachedLevel = level;
+    }
+
     if (!diagnostics.isScenePrepared())
     {
-        RenderResourceManager rrm;
-        if (rrm.prepareActiveLevel())
+        if (m_resourceManager.prepareActiveLevel())
         {
             diagnostics.setScenePrepared(true);
         }
 
         auto& ecs = ECS::ECSManager::Instance();
         m_renderEntries.clear();
-        const auto renderables = rrm.buildRenderablesForSchema(ecs.getRenderSchema());
+        const auto renderables = m_resourceManager.buildRenderablesForSchema(ecs.getRenderSchema());
         m_renderEntries.reserve(renderables.size());
         for (const auto& renderable : renderables)
         {
             RenderEntry entry;
             entry.transform = renderable.transform;
-            if (renderable.assetType == AssetType::Model3D)
-            {
-                entry.object3D = std::make_shared<OpenGLObject3D>(renderable.asset);
-                if (!entry.object3D->prepare())
-                {
-                    continue;
-                }
-                entry.object3D->setTextures(renderable.textures);
-            }
-            else if (renderable.assetType == AssetType::Model2D)
-            {
-                entry.object2D = std::make_shared<OpenGLObject2D>(renderable.asset);
-                if (!entry.object2D->prepare())
-                {
-                    continue;
-                }
-                entry.object2D->setTextures(renderable.textures);
-            }
-            else
+            entry.object3D = renderable.object3D;
+            entry.object2D = renderable.object2D;
+            if (!entry.object3D && !entry.object2D)
             {
                 continue;
             }
@@ -554,6 +534,12 @@ void OpenGLRenderer::moveCamera(float forward, float right, float up)
     if (!m_camera)
         return;
     m_camera->moveRelative(forward, right, up);
+}
+
+bool OpenGLRenderer::isRenderEntryRelevant(const RenderEntry& entry) const
+{
+    (void)entry;
+    return true;
 }
 
 void OpenGLRenderer::rotateCamera(float yawDeltaDegrees, float pitchDeltaDegrees)

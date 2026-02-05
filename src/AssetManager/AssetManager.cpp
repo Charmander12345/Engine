@@ -619,6 +619,20 @@ void AssetManager::ensureDefaultAssetsCreated()
         entity["components"] = components;
         entities.push_back(entity);
 
+        json entity2 = json::object();
+        entity2["id"] = 2;
+
+        json components2 = json::object();
+        components2["Transform"] = json{
+            {"position", json::array({ 2.0f, 0.0f, 0.0f })},
+            {"rotation", json::array({ 0.0f, 45.0f, 0.0f })},
+            {"scale", json::array({ 1.0f, 1.0f, 1.0f })}
+        };
+        components2["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
+        components2["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        entity2["components"] = components2;
+        entities.push_back(entity2);
+
         levelJson["Entities"] = entities;
 
         auto defaultLevel = std::make_unique<EngineLevel>();
@@ -724,6 +738,12 @@ void AssetManager::collectGarbage()
 {
     std::lock_guard<std::mutex> lock(m_stateMutex);
     m_garbageCollector.collect();
+}
+
+bool AssetManager::registerRuntimeResource(const std::shared_ptr<EngineObject>& resource)
+{
+	std::lock_guard<std::mutex> lock(m_stateMutex);
+	return m_garbageCollector.registerResource(resource);
 }
 
 AssetManager::~AssetManager()
