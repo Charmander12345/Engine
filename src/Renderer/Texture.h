@@ -5,7 +5,6 @@
 
 class Texture : public EngineObject
 {
-#define NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Texture, m_width, m_height, m_channels, m_data)
 public:
 	Texture() = default;
 	~Texture() override = default;

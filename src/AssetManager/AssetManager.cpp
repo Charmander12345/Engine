@@ -106,6 +106,7 @@ static bool readString(std::ifstream& in, std::string& outStr)
     return true;
 }
 
+
 static fs::path getRegistryPath(const std::string& projectRoot)
 {
     return fs::path(projectRoot) / "Config" / "AssetRegistry.bin";
@@ -113,43 +114,85 @@ static fs::path getRegistryPath(const std::string& projectRoot)
 
 static bool readAssetHeaderType(const fs::path& absoluteAssetPath, AssetType& outType)
 {
-    std::ifstream in(absoluteAssetPath, std::ios::binary);
-    if (!in.is_open()) return false;
+	std::ifstream in(absoluteAssetPath, std::ios::binary);
+	if (!in.is_open()) return false;
 
-    uint32_t magic = 0;
-    uint32_t version = 0;
-    if (!in.read(reinterpret_cast<char*>(&magic), sizeof(magic))) return false;
-    if (!in.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
-    if (magic != 0x41535453 || version != 2) return false;
+	char first = 0;
+	if (!in.get(first)) return false;
+	if (first == '{')
+	{
+		in.unget();
+		json j = json::parse(in, nullptr, false);
+		if (j.is_discarded()) return false;
+		if (!j.is_object() || !j.contains("type")) return false;
+		outType = static_cast<AssetType>(j.at("type").get<int>());
+		return true;
+	}
 
-    int32_t typeInt = 0;
-    if (!in.read(reinterpret_cast<char*>(&typeInt), sizeof(typeInt))) return false;
-    outType = static_cast<AssetType>(typeInt);
-    return true;
+	in.unget();
+	uint32_t magic = 0;
+	uint32_t version = 0;
+	if (!in.read(reinterpret_cast<char*>(&magic), sizeof(magic))) return false;
+	if (!in.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
+	if (magic != 0x41535453 || version != 2) return false;
+
+	int32_t typeInt = 0;
+	if (!in.read(reinterpret_cast<char*>(&typeInt), sizeof(typeInt))) return false;
+	outType = static_cast<AssetType>(typeInt);
+	return true;
 }
 
 static bool readAssetHeaderName(const fs::path& absoluteAssetPath, std::string& outName)
 {
-    std::ifstream in(absoluteAssetPath, std::ios::binary);
-    if (!in.is_open()) return false;
+	std::ifstream in(absoluteAssetPath, std::ios::binary);
+	if (!in.is_open()) return false;
 
-    uint32_t magic = 0;
-    uint32_t version = 0;
-    if (!in.read(reinterpret_cast<char*>(&magic), sizeof(magic))) return false;
-    if (!in.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
-    if (magic != 0x41535453 || version != 2) return false;
+	char first = 0;
+	if (!in.get(first)) return false;
+	if (first == '{')
+	{
+		in.unget();
+		json j = json::parse(in, nullptr, false);
+		if (j.is_discarded()) return false;
+		if (!j.is_object() || !j.contains("name")) return false;
+		outName = j.at("name").get<std::string>();
+		return true;
+	}
 
-    int32_t typeInt = 0;
-    if (!in.read(reinterpret_cast<char*>(&typeInt), sizeof(typeInt))) return false;
+	in.unget();
+	uint32_t magic = 0;
+	uint32_t version = 0;
+	if (!in.read(reinterpret_cast<char*>(&magic), sizeof(magic))) return false;
+	if (!in.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
+	if (magic != 0x41535453 || version != 2) return false;
 
-    std::string name;
-    if (!readString(in, name)) return false;
-    outName = std::move(name);
-    return true;
+	int32_t typeInt = 0;
+	if (!in.read(reinterpret_cast<char*>(&typeInt), sizeof(typeInt))) return false;
+
+	std::string name;
+	if (!readString(in, name)) return false;
+	outName = std::move(name);
+	return true;
 }
 
-static bool readAssetHeader(std::ifstream& in, AssetType& outType, std::string& outName)
+static bool readAssetHeader(std::ifstream& in, AssetType& outType, std::string& outName, bool& outIsJson)
 {
+	outIsJson = false;
+	char first = 0;
+	if (!in.get(first)) return false;
+	if (first == '{')
+	{
+		in.unget();
+		json j = json::parse(in, nullptr, false);
+		if (j.is_discarded()) return false;
+		if (!j.is_object() || !j.contains("type") || !j.contains("name")) return false;
+		outType = static_cast<AssetType>(j.at("type").get<int>());
+		outName = j.at("name").get<std::string>();
+		outIsJson = true;
+		return true;
+	}
+
+	in.unget();
 	uint32_t magic = 0;
 	uint32_t version = 0;
 	if (!in.read(reinterpret_cast<char*>(&magic), sizeof(magic))) return false;
@@ -166,8 +209,14 @@ static bool readAssetHeader(std::ifstream& in, AssetType& outType, std::string& 
 	return true;
 }
 
-static bool readAssetJson(std::ifstream& in, json& outJson, std::string& errorMessage)
+static bool readAssetJson(std::ifstream& in, json& outJson, std::string& errorMessage, bool isJsonFormat)
 {
+	if (isJsonFormat)
+	{
+		in.clear();
+		in.seekg(0, std::ios::beg);
+	}
+
 	std::string jsonText((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 	if (jsonText.empty())
 	{
@@ -181,8 +230,26 @@ static bool readAssetJson(std::ifstream& in, json& outJson, std::string& errorMe
 		errorMessage = "Failed to parse asset JSON.";
 		return false;
 	}
-
+	if (outJson.is_object() && outJson.contains("data"))
+	{
+		outJson = outJson.at("data");
+	}
 	return true;
+}
+
+std::vector<std::shared_ptr<AssetData>> AssetManager::getAssetsByType(AssetType type) const
+{
+	std::vector<std::shared_ptr<AssetData>> results;
+	std::lock_guard<std::mutex> lock(m_stateMutex);
+	results.reserve(m_loadedAssets.size());
+	for (const auto& [id, asset] : m_loadedAssets)
+	{
+		if (asset && asset->getAssetType() == type)
+		{
+			results.push_back(asset);
+		}
+	}
+	return results;
 }
 
 AssetManager& AssetManager::Instance()
@@ -371,7 +438,7 @@ void AssetManager::ensureDefaultAssetsCreated()
 
     const fs::path contentRoot = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
 
-    const auto ensureOnDisk = [&](const std::string& relPath, AssetType expectedType, const std::shared_ptr<EngineObject>& obj) -> bool
+    const auto ensureOnDisk = [&](const std::string& relPath, AssetType expectedType, const std::shared_ptr<AssetData>& obj, bool forceOverwrite = false) -> bool
     {
         const fs::path abs = contentRoot / fs::path(relPath);
 
@@ -380,6 +447,11 @@ void AssetManager::ensureDefaultAssetsCreated()
         {
             AssetType headerType{ AssetType::Unknown };
             existsAndOk = readAssetHeaderType(abs, headerType) && headerType == expectedType;
+        }
+
+        if (forceOverwrite && existsAndOk)
+        {
+            existsAndOk = false;
         }
 
         if (existsAndOk)
@@ -401,8 +473,13 @@ void AssetManager::ensureDefaultAssetsCreated()
 
         obj->setPath(relPath);
         obj->setAssetType(expectedType);
+        obj->setType(expectedType);
         obj->setIsSaved(false);
 		auto id = registerLoadedAsset(obj);
+        if (id != 0)
+        {
+            obj->setId(id);
+        }
 		Asset asset;
 		asset.ID = id;
 		asset.type = expectedType;
@@ -412,25 +489,41 @@ void AssetManager::ensureDefaultAssetsCreated()
     // 1) wall texture
     const std::string wallTexRel = (fs::path("Textures") / "wall.asset").generic_string();
     {
-        auto tex = std::make_shared<Texture>();
+        auto tex = std::make_shared<AssetData>();
         tex->setName("wall");
-        // Default debug texture (2x2 RGBA)
-        tex->setWidth(2);
-        tex->setHeight(2);
-        tex->setChannels(4);
-        tex->setData({
-            255,   0,   0, 255,   0, 255,   0, 255,
-              0,   0, 255, 255, 255, 255,   0, 255
-        });
-        ensureOnDisk(wallTexRel, AssetType::Texture, tex);
+        json texData = json::object();
+        const fs::path wallPngPath = fs::current_path() / "Content" / "Textures" / "wall.jpg";
+        if (fs::exists(wallPngPath))
+        {
+            texData["m_sourcePath"] = (fs::path("Content") / "Textures" / "wall.jpg").generic_string();
+        }
+        else
+        {
+            int width = 2;
+            int height = 2;
+            int channels = 4;
+            std::vector<unsigned char> pixels{
+                255,   0,   0, 255,   0, 255,   0, 255,
+                  0,   0, 255, 255, 255, 255,   0, 255
+            };
+            texData["m_width"] = width;
+            texData["m_height"] = height;
+            texData["m_channels"] = channels;
+            texData["m_data"] = std::move(pixels);
+        }
+        tex->setData(std::move(texData));
+        const bool forceOverwrite = fs::exists(wallPngPath);
+        ensureOnDisk(wallTexRel, AssetType::Texture, tex, forceOverwrite);
     }
 
     // 2) wall material
     const std::string wallMatRel = (fs::path("Materials") / "wall.asset").generic_string();
     {
-		auto mat = std::make_shared<Material>();
+		auto mat = std::make_shared<AssetData>();
         mat->setName("DefaultDebugMaterial");
-        mat->setTextureAssetPaths({ wallTexRel });
+        json matData = json::object();
+        matData["m_textureAssetPaths"] = std::vector<std::string>{ wallTexRel };
+        mat->setData(std::move(matData));
         ensureOnDisk(wallMatRel, AssetType::Material, mat);
     }
 
@@ -451,10 +544,11 @@ void AssetManager::ensureDefaultAssetsCreated()
         }
         else
         {
-            auto quad = std::make_shared<Object3D>();
+            auto quad = std::make_shared<AssetData>();
             quad->setName("DefaultQuad3D");
 				// Material assets/textures are handled by Material; Object3D only stores a runtime Material instance.
-            quad->setVertices({
+            json quadData = json::object();
+            quadData["m_vertices"] = std::vector<float>{
     -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,
      0.5f, -0.5f, -0.5f,  1.0f, 0.0f,
      0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
@@ -496,14 +590,67 @@ void AssetManager::ensureDefaultAssetsCreated()
      0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
     -0.5f,  0.5f,  0.5f,  0.0f, 0.0f,
     -0.5f,  0.5f, -0.5f,  0.0f, 1.0f
-            });
-            quad->setIndices({});
+            };
+            quadData["m_indices"] = std::vector<uint32_t>{};
+            quad->setData(std::move(quadData));
 
             ensureOnDisk(quad3dRel, AssetType::Model3D, quad);
         }
     }
 
-    // NOTE: Levels are ensured/loaded by loadProject(). This function only creates/saves default asset files.
+    const std::string defaultLevelRel = (fs::path("Levels") / "DefaultLevel.map").generic_string();
+    {
+        json levelJson = json::object();
+        levelJson["Objects"] = json::array();
+        levelJson["Groups"] = json::array();
+
+        json entities = json::array();
+        json entity = json::object();
+        entity["id"] = 1;
+
+        json components = json::object();
+        components["Transform"] = json{
+            {"position", json::array({ 0.0f, 0.0f, 0.0f })},
+            {"rotation", json::array({ 0.0f, 0.0f, 0.0f })},
+            {"scale", json::array({ 1.0f, 1.0f, 1.0f })}
+        };
+        components["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
+        components["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        entity["components"] = components;
+        entities.push_back(entity);
+
+        levelJson["Entities"] = entities;
+
+        auto defaultLevel = std::make_unique<EngineLevel>();
+        defaultLevel->setName("DefaultLevel");
+        defaultLevel->setPath(defaultLevelRel);
+        defaultLevel->setAssetType(AssetType::Level);
+        defaultLevel->setLevelData(levelJson);
+        defaultLevel->prepareEcs();
+
+        const fs::path abs = contentRoot / fs::path(defaultLevelRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Level;
+        }
+        if (!existsAndOk)
+        {
+            logger.log(Logger::Category::AssetManagement, "Default level missing/invalid, creating: " + defaultLevelRel, Logger::LogLevel::WARNING);
+            if (!saveLevelAsset(defaultLevel).success)
+            {
+                logger.log(Logger::Category::AssetManagement, "Failed to save default level asset.", Logger::LogLevel::ERROR);
+            }
+        }
+        else
+        {
+            logger.log(Logger::Category::AssetManagement, "Default level OK: " + defaultLevelRel, Logger::LogLevel::INFO);
+        }
+
+        diagnostics.setActiveLevel(std::move(defaultLevel));
+        diagnostics.setScenePrepared(false);
+    }
 
 	logger.log(Logger::Category::AssetManagement, "Default assets ensured.", Logger::LogLevel::INFO);
 }
@@ -584,7 +731,7 @@ AssetManager::~AssetManager()
     stopWorker();
 }
 
-unsigned int AssetManager::registerLoadedAsset(const std::shared_ptr<EngineObject>& object)
+unsigned int AssetManager::registerLoadedAsset(const std::shared_ptr<AssetData>& object)
 {
 	std::lock_guard<std::mutex> lock(m_stateMutex);
     for (const auto& [id, obj] : m_loadedAssets)
@@ -600,10 +747,10 @@ unsigned int AssetManager::registerLoadedAsset(const std::shared_ptr<EngineObjec
     return id;
 }
 
-std::shared_ptr<EngineObject> AssetManager::getLoadedAssetByID(unsigned int id) const
+std::shared_ptr<AssetData> AssetManager::getLoadedAssetByID(unsigned int id) const
 {
 	auto it = m_loadedAssets.find(id);
-	if (it != m_loadedAssets.end())
+	if (it == m_loadedAssets.end())
 	{
         return nullptr;
 	}
@@ -695,7 +842,7 @@ std::string AssetManager::getAbsoluteContentPath(const std::string& relativeToCo
 
 int AssetManager::loadAsset(const std::string& path, AssetType type, SyncState syncState)
 {
-	if (path.empty())
+    if (path.empty())
 	{
 		return 0;
 	}
@@ -765,6 +912,16 @@ int AssetManager::loadAsset(const std::string& path, AssetType type, SyncState s
 	{
 		return 0;
 	}
+	{
+		std::lock_guard<std::mutex> lock(m_stateMutex);
+		for (const auto& [id, obj] : m_loadedAssets)
+		{
+			if (obj && obj->getPath() == path)
+			{
+				return static_cast<int>(id);
+			}
+		}
+	}
 
 	return 0;
 }
@@ -777,8 +934,16 @@ bool AssetManager::saveAsset(const Asset& asset, SyncState syncState, Diagnostic
         Logger::Instance().log(Logger::Category::AssetManagement, "saveAsset(): dummy save for asset with ID 0.");
         return true;
     }
-    auto object = getLoadedAssetByID(asset.ID);
-    if (!object)
+	std::shared_ptr<AssetData> assetData;
+	{
+		std::lock_guard<std::mutex> lock(m_stateMutex);
+		auto it = m_loadedAssets.find(asset.ID);
+		if (it != m_loadedAssets.end())
+		{
+			assetData = it->second;
+		}
+	}
+	if (!assetData)
     {
         Logger::Instance().log(
             Logger::Category::AssetManagement,
@@ -795,22 +960,30 @@ bool AssetManager::saveAsset(const Asset& asset, SyncState syncState, Diagnostic
             {
                 enqueueJob([this, asset, newAction]()
                     {
-						auto object = getLoadedAssetByID(asset.ID);
-                        saveObject2DAsset(std::dynamic_pointer_cast<Object2D>(object));
+						std::shared_ptr<AssetData> queuedAssetData;
+						{
+							std::lock_guard<std::mutex> lock(m_stateMutex);
+							auto it = m_loadedAssets.find(asset.ID);
+							if (it != m_loadedAssets.end())
+							{
+								queuedAssetData = it->second;
+							}
+						}
+						saveObject2DAsset(queuedAssetData);
 						DiagnosticsManager::Instance().updateActionProgress(newAction.ID, false);
                     });
                 return true;
             }
-            result = saveObject2DAsset(std::dynamic_pointer_cast<Object2D>(object));
+			result = saveObject2DAsset(assetData);
             break;
         case AssetType::Model3D:
-            result = saveObject3DAsset(std::dynamic_pointer_cast<Object3D>(object));
+			result = saveObject3DAsset(assetData);
             break;
         case AssetType::Texture:
-            result = saveTextureAsset(std::dynamic_pointer_cast<Texture>(object));
+			result = saveTextureAsset(assetData);
             break;
         case AssetType::Material:
-            result = saveMaterialAsset(std::dynamic_pointer_cast<Material>(object));
+			result = saveMaterialAsset(assetData);
             break;
         case AssetType::Audio:
         case AssetType::Script:
@@ -819,7 +992,7 @@ bool AssetManager::saveAsset(const Asset& asset, SyncState syncState, Diagnostic
         default:
             Logger::Instance().log(
                 Logger::Category::AssetManagement,
-                "saveAsset(): Unsupported asset type for asset: " + object->getName(),
+				"saveAsset(): Unsupported asset type for asset: " + assetData->getName(),
                 Logger::LogLevel::ERROR);
             return false;
         }
@@ -827,7 +1000,7 @@ bool AssetManager::saveAsset(const Asset& asset, SyncState syncState, Diagnostic
         {
             Logger::Instance().log(
                 Logger::Category::AssetManagement,
-                "saveAsset(): Failed to save asset: " + object->getName() + ". Error: " + result.errorMessage,
+				"saveAsset(): Failed to save asset: " + assetData->getName() + ". Error: " + result.errorMessage,
                 Logger::LogLevel::ERROR);
             return false;
         }
@@ -1200,9 +1373,10 @@ AssetManager::LoadResult AssetManager::loadTextureAsset(const std::string& path)
 		return result;
 	}
 
-	AssetType headerType{ AssetType::Unknown };
-	std::string name;
-	if (!readAssetHeader(in, headerType, name))
+    AssetType headerType{ AssetType::Unknown };
+    std::string name;
+    bool isJson = false;
+    if (!readAssetHeader(in, headerType, name, isJson))
 	{
 		result.errorMessage = "Invalid texture asset header.";
 		return result;
@@ -1214,21 +1388,43 @@ AssetManager::LoadResult AssetManager::loadTextureAsset(const std::string& path)
 		return result;
 	}
 
-	if (!readAssetJson(in, result.j, result.errorMessage))
+    if (!readAssetJson(in, result.j, result.errorMessage, isJson))
 	{
 		return result;
 	}
 
-	auto texture = std::make_shared<Texture>();
+	auto texture = std::make_shared<AssetData>();
 	if (result.j.is_object())
 	{
-		texture->setWidth(result.j.value("m_width", 0));
-		texture->setHeight(result.j.value("m_height", 0));
-		texture->setChannels(result.j.value("m_channels", 0));
-		if (result.j.contains("m_data"))
+		if (result.j.contains("m_sourcePath"))
 		{
-			texture->setData(result.j.at("m_data").get<std::vector<unsigned char>>());
+			const auto& sourceValue = result.j.at("m_sourcePath");
+			if (sourceValue.is_string())
+			{
+				fs::path sourcePath = sourceValue.get<std::string>();
+				if (!sourcePath.is_absolute())
+				{
+					sourcePath = fs::current_path() / sourcePath;
+				}
+				if (fs::exists(sourcePath))
+				{
+					int width = 0;
+					int height = 0;
+					int channels = 0;
+					unsigned char* data = stbi_load(sourcePath.string().c_str(), &width, &height, &channels, 4);
+					if (data)
+					{
+						channels = 4;
+						result.j["m_width"] = width;
+						result.j["m_height"] = height;
+						result.j["m_channels"] = channels;
+						result.j["m_data"] = std::vector<unsigned char>(data, data + (width * height * channels));
+						stbi_image_free(data);
+					}
+				}
+			}
 		}
+		texture->setData(result.j);
 	}
 
 	if (name.empty())
@@ -1239,9 +1435,14 @@ AssetManager::LoadResult AssetManager::loadTextureAsset(const std::string& path)
 	texture->setName(name);
 	texture->setPath(path);
 	texture->setAssetType(headerType);
+	texture->setType(headerType);
 	texture->setIsSaved(true);
 
-	registerLoadedAsset(texture);
+	auto id = registerLoadedAsset(texture);
+	if (id != 0)
+	{
+		texture->setId(id);
+	}
 	m_garbageCollector.registerResource(texture);
 
 	result.success = true;
@@ -1258,9 +1459,10 @@ AssetManager::LoadResult AssetManager::loadMaterialAsset(const std::string& path
 		return result;
 	}
 
-	AssetType headerType{ AssetType::Unknown };
-	std::string name;
-	if (!readAssetHeader(in, headerType, name))
+    AssetType headerType{ AssetType::Unknown };
+    std::string name;
+    bool isJson = false;
+    if (!readAssetHeader(in, headerType, name, isJson))
 	{
 		result.errorMessage = "Invalid material asset header.";
 		return result;
@@ -1272,15 +1474,15 @@ AssetManager::LoadResult AssetManager::loadMaterialAsset(const std::string& path
 		return result;
 	}
 
-	if (!readAssetJson(in, result.j, result.errorMessage))
+    if (!readAssetJson(in, result.j, result.errorMessage, isJson))
 	{
 		return result;
 	}
 
-	auto material = std::make_shared<Material>();
-	if (result.j.is_object() && result.j.contains("m_textureAssetPaths"))
+	auto material = std::make_shared<AssetData>();
+	if (result.j.is_object())
 	{
-		material->setTextureAssetPaths(result.j.at("m_textureAssetPaths").get<std::vector<std::string>>());
+		material->setData(result.j);
 	}
 
 	if (name.empty())
@@ -1291,9 +1493,14 @@ AssetManager::LoadResult AssetManager::loadMaterialAsset(const std::string& path
 	material->setName(name);
 	material->setPath(path);
 	material->setAssetType(headerType);
+	material->setType(headerType);
 	material->setIsSaved(true);
 
-	registerLoadedAsset(material);
+	auto id = registerLoadedAsset(material);
+	if (id != 0)
+	{
+		material->setId(id);
+	}
 	m_garbageCollector.registerResource(material);
 
 	result.success = true;
@@ -1310,9 +1517,10 @@ AssetManager::LoadResult AssetManager::loadObject2DAsset(const std::string& path
 		return result;
 	}
 
-	AssetType headerType{ AssetType::Unknown };
-	std::string name;
-	if (!readAssetHeader(in, headerType, name))
+    AssetType headerType{ AssetType::Unknown };
+    std::string name;
+    bool isJson = false;
+    if (!readAssetHeader(in, headerType, name, isJson))
 	{
 		result.errorMessage = "Invalid Object2D asset header.";
 		return result;
@@ -1324,26 +1532,15 @@ AssetManager::LoadResult AssetManager::loadObject2DAsset(const std::string& path
 		return result;
 	}
 
-	if (!readAssetJson(in, result.j, result.errorMessage))
+    if (!readAssetJson(in, result.j, result.errorMessage, isJson))
 	{
 		return result;
 	}
 
-	auto object2D = std::make_shared<Object2D>();
+	auto object2D = std::make_shared<AssetData>();
 	if (result.j.is_object())
 	{
-		if (result.j.contains("m_vertices"))
-		{
-			object2D->setVertices(result.j.at("m_vertices").get<std::vector<float>>());
-		}
-		if (result.j.contains("m_indices"))
-		{
-			object2D->setIndices(result.j.at("m_indices").get<std::vector<uint32_t>>());
-		}
-		if (result.j.contains("materialAssetPath"))
-		{
-			object2D->setMaterialAssetPath(result.j.at("materialAssetPath").get<std::string>());
-		}
+		object2D->setData(result.j);
 	}
 
 	if (name.empty())
@@ -1354,9 +1551,14 @@ AssetManager::LoadResult AssetManager::loadObject2DAsset(const std::string& path
 	object2D->setName(name);
 	object2D->setPath(path);
 	object2D->setAssetType(headerType);
+	object2D->setType(headerType);
 	object2D->setIsSaved(true);
 
-	registerLoadedAsset(object2D);
+	auto id = registerLoadedAsset(object2D);
+	if (id != 0)
+	{
+		object2D->setId(id);
+	}
 	m_garbageCollector.registerResource(object2D);
 
 	result.success = true;
@@ -1373,9 +1575,10 @@ AssetManager::LoadResult AssetManager::loadObject3DAsset(const std::string& path
 		return result;
 	}
 
-	AssetType headerType{ AssetType::Unknown };
-	std::string name;
-	if (!readAssetHeader(in, headerType, name))
+    AssetType headerType{ AssetType::Unknown };
+    std::string name;
+    bool isJson = false;
+    if (!readAssetHeader(in, headerType, name, isJson))
 	{
 		result.errorMessage = "Invalid Object3D asset header.";
 		return result;
@@ -1387,26 +1590,15 @@ AssetManager::LoadResult AssetManager::loadObject3DAsset(const std::string& path
 		return result;
 	}
 
-	if (!readAssetJson(in, result.j, result.errorMessage))
+    if (!readAssetJson(in, result.j, result.errorMessage, isJson))
 	{
 		return result;
 	}
 
-	auto object3D = std::make_shared<Object3D>();
+	auto object3D = std::make_shared<AssetData>();
 	if (result.j.is_object())
 	{
-		if (result.j.contains("m_vertices"))
-		{
-			object3D->setVertices(result.j.at("m_vertices").get<std::vector<float>>());
-		}
-		if (result.j.contains("m_indices"))
-		{
-			object3D->setIndices(result.j.at("m_indices").get<std::vector<uint32_t>>());
-		}
-		if (result.j.contains("materialAssetPath"))
-		{
-			object3D->setMaterialAssetPath(result.j.at("materialAssetPath").get<std::string>());
-		}
+		object3D->setData(result.j);
 	}
 
 	if (name.empty())
@@ -1417,9 +1609,14 @@ AssetManager::LoadResult AssetManager::loadObject3DAsset(const std::string& path
 	object3D->setName(name);
 	object3D->setPath(path);
 	object3D->setAssetType(headerType);
+	object3D->setType(headerType);
 	object3D->setIsSaved(true);
 
-	registerLoadedAsset(object3D);
+	auto id = registerLoadedAsset(object3D);
+	if (id != 0)
+	{
+		object3D->setId(id);
+	}
 	m_garbageCollector.registerResource(object3D);
 
 	result.success = true;
@@ -1428,48 +1625,436 @@ AssetManager::LoadResult AssetManager::loadObject3DAsset(const std::string& path
 
 AssetManager::LoadResult AssetManager::loadLevelAsset(const std::string& path)
 {
-    LoadResult r;
-    r.success = false;
-    r.errorMessage = "loadLevelAsset not implemented";
-    return r;
+	LoadResult result;
+	std::ifstream in(path, std::ios::binary);
+	if (!in.is_open())
+	{
+		result.errorMessage = "Failed to open level asset file.";
+		return result;
+	}
+
+    AssetType headerType{ AssetType::Unknown };
+    std::string name;
+    bool isJson = false;
+    if (!readAssetHeader(in, headerType, name, isJson))
+	{
+		result.errorMessage = "Invalid level asset header.";
+		return result;
+	}
+
+	if (headerType != AssetType::Level)
+	{
+		result.errorMessage = "Asset type mismatch for level.";
+		return result;
+	}
+
+    if (!readAssetJson(in, result.j, result.errorMessage, isJson))
+	{
+		return result;
+	}
+
+	if (name.empty())
+	{
+		name = fs::path(path).stem().string();
+	}
+
+	auto level = std::make_unique<EngineLevel>();
+	level->setName(name);
+	level->setPath(path);
+	level->setAssetType(headerType);
+	level->setIsSaved(true);
+	level->setLevelData(result.j);
+
+	auto& diagnostics = DiagnosticsManager::Instance();
+	diagnostics.setActiveLevel(std::move(level));
+	diagnostics.setScenePrepared(false);
+	result.success = true;
+	return result;
 }
 
-AssetManager::SaveResult AssetManager::saveTextureAsset(const std::shared_ptr<Texture>& texture)
+AssetManager::SaveResult AssetManager::saveTextureAsset(const std::shared_ptr<AssetData>& texture)
 {
-    SaveResult r;
-    r.success = false;
-    r.errorMessage = "saveTextureAsset not implemented";
-    return r;
+    SaveResult result;
+    if (!texture)
+    {
+        result.errorMessage = "Texture asset is null.";
+        return result;
+    }
+
+    auto& diagnostics = DiagnosticsManager::Instance();
+    if (!diagnostics.isProjectLoaded())
+    {
+        result.errorMessage = "No project loaded for texture save.";
+        return result;
+    }
+
+    std::string name = texture->getName();
+    if (name.empty())
+    {
+        name = "Texture";
+        texture->setName(name);
+    }
+
+    std::string relPath = texture->getPath();
+    if (relPath.empty())
+    {
+        relPath = name + ".asset";
+        texture->setPath(relPath);
+    }
+
+    fs::path rel = fs::path(relPath);
+    if (rel.extension().empty())
+    {
+        rel.replace_extension(".asset");
+        relPath = rel.generic_string();
+        texture->setPath(relPath);
+    }
+
+    const fs::path absPath = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relPath);
+    std::error_code ec;
+    fs::create_directories(absPath.parent_path(), ec);
+
+    std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+    if (!out.is_open())
+    {
+        result.errorMessage = "Failed to open texture asset file for writing.";
+        return result;
+    }
+
+    json data = texture->getData();
+    if (data.is_null())
+    {
+        data = json::object();
+    }
+
+    json dataToSave = data;
+    if (dataToSave.is_object() && dataToSave.contains("m_sourcePath"))
+    {
+        dataToSave.erase("m_data");
+    }
+
+    json fileJson = json::object();
+    fileJson["magic"] = 0x41535453;
+    fileJson["version"] = 2;
+    fileJson["type"] = static_cast<int>(AssetType::Texture);
+    fileJson["name"] = name;
+    fileJson["data"] = dataToSave;
+
+    out << fileJson.dump(4);
+    if (!out.good())
+    {
+        result.errorMessage = "Failed to write texture asset data.";
+        return result;
+    }
+
+    texture->setIsSaved(true);
+    result.success = true;
+    return result;
 }
 
-AssetManager::SaveResult AssetManager::saveMaterialAsset(const std::shared_ptr<Material>& material)
+AssetManager::SaveResult AssetManager::saveMaterialAsset(const std::shared_ptr<AssetData>& material)
 {
-    SaveResult r;
-    r.success = false;
-    r.errorMessage = "saveMaterialAsset not implemented";
-    return r;
+    SaveResult result;
+    if (!material)
+    {
+        result.errorMessage = "Material asset is null.";
+        return result;
+    }
+
+    auto& diagnostics = DiagnosticsManager::Instance();
+    if (!diagnostics.isProjectLoaded())
+    {
+        result.errorMessage = "No project loaded for material save.";
+        return result;
+    }
+
+    std::string name = material->getName();
+    if (name.empty())
+    {
+        name = "Material";
+        material->setName(name);
+    }
+
+    std::string relPath = material->getPath();
+    if (relPath.empty())
+    {
+        relPath = name + ".asset";
+    }
+    relPath = normalizeAssetRelPath(AssetType::Material, relPath);
+    material->setPath(relPath);
+
+    const fs::path absPath = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relPath);
+    std::error_code ec;
+    fs::create_directories(absPath.parent_path(), ec);
+
+    std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+    if (!out.is_open())
+    {
+        result.errorMessage = "Failed to open material asset file for writing.";
+        return result;
+    }
+
+    json data = material->getData();
+    if (data.is_null())
+    {
+        data = json::object();
+    }
+
+    json fileJson = json::object();
+    fileJson["magic"] = 0x41535453;
+    fileJson["version"] = 2;
+    fileJson["type"] = static_cast<int>(AssetType::Material);
+    fileJson["name"] = name;
+    fileJson["data"] = data;
+
+    out << fileJson.dump(4);
+    if (!out.good())
+    {
+        result.errorMessage = "Failed to write material asset data.";
+        return result;
+    }
+
+    material->setIsSaved(true);
+    result.success = true;
+    return result;
 }
 
-AssetManager::SaveResult AssetManager::saveObject2DAsset(const std::shared_ptr<Object2D>& object2D)
+AssetManager::SaveResult AssetManager::saveObject2DAsset(const std::shared_ptr<AssetData>& object2D)
 {
-    SaveResult r;
-    r.success = false;
-    r.errorMessage = "saveObject2DAsset not implemented";
-    return r;
+    SaveResult result;
+    if (!object2D)
+    {
+        result.errorMessage = "Object2D asset is null.";
+        return result;
+    }
+
+    auto& diagnostics = DiagnosticsManager::Instance();
+    if (!diagnostics.isProjectLoaded())
+    {
+        result.errorMessage = "No project loaded for Object2D save.";
+        return result;
+    }
+
+    std::string name = object2D->getName();
+    if (name.empty())
+    {
+        name = "Object2D";
+        object2D->setName(name);
+    }
+
+    std::string relPath = object2D->getPath();
+    if (relPath.empty())
+    {
+        relPath = name + ".asset";
+        object2D->setPath(relPath);
+    }
+
+    fs::path rel = fs::path(relPath);
+    if (rel.extension().empty())
+    {
+        rel.replace_extension(".asset");
+        relPath = rel.generic_string();
+        object2D->setPath(relPath);
+    }
+
+    const fs::path absPath = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relPath);
+    std::error_code ec;
+    fs::create_directories(absPath.parent_path(), ec);
+
+    std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+    if (!out.is_open())
+    {
+        result.errorMessage = "Failed to open Object2D asset file for writing.";
+        return result;
+    }
+
+    json data = object2D->getData();
+    if (data.is_null())
+    {
+        data = json::object();
+    }
+
+    json fileJson = json::object();
+    fileJson["magic"] = 0x41535453;
+    fileJson["version"] = 2;
+    fileJson["type"] = static_cast<int>(AssetType::Model2D);
+    fileJson["name"] = name;
+    fileJson["data"] = data;
+
+    out << fileJson.dump(4);
+    if (!out.good())
+    {
+        result.errorMessage = "Failed to write Object2D asset data.";
+        return result;
+    }
+
+    object2D->setIsSaved(true);
+    result.success = true;
+    return result;
 }
 
-AssetManager::SaveResult AssetManager::saveObject3DAsset(const std::shared_ptr<Object3D>& object3D)
+AssetManager::SaveResult AssetManager::saveObject3DAsset(const std::shared_ptr<AssetData>& object3D)
 {
-    SaveResult r;
-    r.success = false;
-    r.errorMessage = "saveObject3DAsset not implemented";
-    return r;
+    SaveResult result;
+    if (!object3D)
+    {
+        result.errorMessage = "Object3D asset is null.";
+        return result;
+    }
+
+    auto& diagnostics = DiagnosticsManager::Instance();
+    if (!diagnostics.isProjectLoaded())
+    {
+        result.errorMessage = "No project loaded for Object3D save.";
+        return result;
+    }
+
+    std::string name = object3D->getName();
+    if (name.empty())
+    {
+        name = "Object3D";
+        object3D->setName(name);
+    }
+
+    std::string relPath = object3D->getPath();
+    if (relPath.empty())
+    {
+        relPath = name + ".asset";
+        object3D->setPath(relPath);
+    }
+
+    fs::path rel = fs::path(relPath);
+    if (rel.extension().empty())
+    {
+        rel.replace_extension(".asset");
+        relPath = rel.generic_string();
+        object3D->setPath(relPath);
+    }
+
+    const fs::path absPath = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relPath);
+    std::error_code ec;
+    fs::create_directories(absPath.parent_path(), ec);
+
+    std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+    if (!out.is_open())
+    {
+        result.errorMessage = "Failed to open Object3D asset file for writing.";
+        return result;
+    }
+
+    json data = object3D->getData();
+    if (data.is_null())
+    {
+        data = json::object();
+    }
+
+    json fileJson = json::object();
+    fileJson["magic"] = 0x41535453;
+    fileJson["version"] = 2;
+    fileJson["type"] = static_cast<int>(AssetType::Model3D);
+    fileJson["name"] = name;
+    fileJson["data"] = data;
+
+    out << fileJson.dump(4);
+    if (!out.good())
+    {
+        result.errorMessage = "Failed to write Object3D asset data.";
+        return result;
+    }
+
+    object3D->setIsSaved(true);
+    result.success = true;
+    return result;
 }
 
 AssetManager::SaveResult AssetManager::saveLevelAsset(const std::unique_ptr<EngineLevel>& level)
 {
-    SaveResult r;
-    r.success = false;
-    r.errorMessage = "saveLevelAsset not implemented";
-    return r;
+	SaveResult result;
+	if (!level)
+	{
+		result.errorMessage = "Level asset is null.";
+		return result;
+	}
+
+	auto& diagnostics = DiagnosticsManager::Instance();
+	if (!diagnostics.isProjectLoaded())
+	{
+		result.errorMessage = "No project loaded for level save.";
+		return result;
+	}
+
+	std::string name = level->getName();
+	if (name.empty())
+	{
+		name = "DefaultLevel";
+		level->setName(name);
+	}
+
+	std::string relPath = level->getPath();
+	if (relPath.empty())
+	{
+		relPath = (fs::path("Levels") / (name + ".map")).generic_string();
+		level->setPath(relPath);
+	}
+
+	const fs::path absPath = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relPath);
+	std::error_code ec;
+	fs::create_directories(absPath.parent_path(), ec);
+
+    std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+	if (!out.is_open())
+	{
+		result.errorMessage = "Failed to open level asset file for writing.";
+		return result;
+	}
+
+    json levelJson;
+	std::vector<std::string> objectPaths;
+	for (const auto& objInstance : level->getWorldObjects())
+	{
+		if (objInstance && objInstance->object)
+		{
+			objectPaths.push_back(objInstance->object->getPath());
+		}
+	}
+
+	std::vector<json> groupsJson;
+	for (const auto& grp : level->getGroups())
+	{
+		json g;
+		g["id"] = grp.id;
+		std::vector<std::string> groupObjectPaths;
+		for (const auto& obj : grp.objects)
+		{
+			if (obj)
+			{
+				groupObjectPaths.push_back(obj->getPath());
+			}
+		}
+		g["objects"] = groupObjectPaths;
+		g["isInstanced"] = grp.isInstanced;
+		groupsJson.push_back(g);
+	}
+
+	levelJson["Objects"] = objectPaths;
+	levelJson["Groups"] = groupsJson;
+    levelJson["Entities"] = level->serializeEcsEntities();
+
+    json fileJson = json::object();
+    fileJson["magic"] = 0x41535453;
+    fileJson["version"] = 2;
+    fileJson["type"] = static_cast<int>(AssetType::Level);
+    fileJson["name"] = name;
+    fileJson["data"] = levelJson;
+
+    out << fileJson.dump(4);
+    if (!out.good())
+    {
+        result.errorMessage = "Failed to write level asset data.";
+        return result;
+    }
+
+	level->setIsSaved(true);
+	result.success = true;
+	return result;
 }

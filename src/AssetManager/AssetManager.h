@@ -71,6 +71,8 @@ public:
 
     // Asset Registry
     bool doesAssetExist(const std::string& pathOrName) const;
+	std::vector<std::shared_ptr<AssetData>> getAssetsByType(AssetType type) const;
+	std::shared_ptr<AssetData> getLoadedAssetByID(unsigned int id) const;
 
 	//Project management
     bool loadProject(const std::string& projectPath, SyncState syncState = Sync);
@@ -99,10 +101,10 @@ private:
 		std::string errorMessage;
     };
 
-	SaveResult saveTextureAsset(const std::shared_ptr<Texture>& texture);
-	SaveResult saveMaterialAsset(const std::shared_ptr<Material>& material);
-	SaveResult saveObject2DAsset(const std::shared_ptr<Object2D>& object2D);
-	SaveResult saveObject3DAsset(const std::shared_ptr<Object3D>& object3D);
+	SaveResult saveTextureAsset(const std::shared_ptr<AssetData>& texture);
+	SaveResult saveMaterialAsset(const std::shared_ptr<AssetData>& material);
+	SaveResult saveObject2DAsset(const std::shared_ptr<AssetData>& object2D);
+	SaveResult saveObject3DAsset(const std::shared_ptr<AssetData>& object3D);
 	SaveResult saveLevelAsset(const std::unique_ptr<EngineLevel>& level);
 
 	//Loading specific assettypes
@@ -123,7 +125,7 @@ private:
 	// Creating specific assettypes
     struct CreateResult
 	{
-		std::shared_ptr<EngineObject> object{ nullptr };
+		std::shared_ptr<AssetData> object{ nullptr };
 		std::string errorMessage;
 		bool success{ false };
 	};
@@ -134,8 +136,7 @@ private:
 	CreateResult createObject3DAsset(const std::string& path, const std::string& name, const std::string& sourcePath);
 	CreateResult createLevelAsset(const std::string& path, const std::string& name, const std::string& sourcePath);
 
-	unsigned int registerLoadedAsset(const std::shared_ptr<EngineObject>& object);
-	std::shared_ptr<EngineObject> getLoadedAssetByID(unsigned int id) const;
+	unsigned int registerLoadedAsset(const std::shared_ptr<AssetData>& object);
 
     AssetManager() = default;
     ~AssetManager();
@@ -158,6 +159,6 @@ private:
     bool m_workerRunning{ false };
     bool m_workerStopRequested{ false };
 
-    std::unordered_map<unsigned int, std::shared_ptr<EngineObject>> m_loadedAssets;
+	std::unordered_map<unsigned int, std::shared_ptr<AssetData>> m_loadedAssets;
     static int s_nextAssetID;
 };

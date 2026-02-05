@@ -11,7 +11,6 @@ class Texture;
 // CPU-side material data asset. Rendering backends should derive from this and override build/bind/render.
 class Material : public EngineObject
 {
-#define NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(Material, m_textureAssetPaths)
 public:
     Material() = default;
     ~Material() override = default;

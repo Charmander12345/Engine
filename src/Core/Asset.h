@@ -5,7 +5,7 @@
 
 using json = nlohmann::json;
 
-class AssetData : EngineObject
+class AssetData : public EngineObject
 {
 public:
 	AssetData();

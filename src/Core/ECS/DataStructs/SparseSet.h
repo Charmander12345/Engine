@@ -25,6 +25,12 @@ struct SparseSet
 		++m_size;
 	}
 
+	void clear()
+	{
+		m_sparse.fill(npos);
+		m_size = 0;
+	}
+
 	void erase(Entity entity)
 	{
 		assert(entity < MaxEntities && m_sparse[entity] != npos && "Entity does not exist in SparseSet");
@@ -71,6 +77,6 @@ private:
 	std::array<size_t, MaxEntities> m_sparse{};
 	std::array<Entity, MaxEntities> m_dense{};
 	std::array<T, MaxEntities> m_data{};
-	size_t m_size;
+	size_t m_size{ 0 };
 };
 } // namespace ECS

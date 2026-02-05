@@ -6,15 +6,18 @@
 #include "Logger.h"
 #include "OpenGLMaterial.h"
 #include "OpenGLCamera.h"
+#include "OpenGLObject2D.h"
+#include "OpenGLObject3D.h"
 
 #include "../../Diagnostics/DiagnosticsManager.h"
 #include "../../Core/EngineLevel.h"
 
 #include "../RenderResourceManager.h"
 
-#include "../../Core/Object3D.h"
-#include "../../Core/Object2D.h"
+#include "../../Core/Asset.h"
 #include "../../Core/MathTypes.h"
+#include "../../AssetManager/AssetManager.h"
+#include "../Texture.h"
 
 OpenGLRenderer::OpenGLRenderer()
 {
@@ -47,32 +50,8 @@ void OpenGLRenderer::shutdown()
         SDL_GL_MakeCurrent(m_window, m_glContext);
     }
 
-    auto& diagnostics = DiagnosticsManager::Instance();
-    if (EngineLevel* level = diagnostics.getActiveLevelSoft())
-    {
-        auto& objs = level->getWorldObjects();
-        size_t cleared = 0;
-        for (auto& entry : objs)
-        {
-            if (!entry)
-                continue;
-
-            if (auto obj2d = (entry->object ? std::dynamic_pointer_cast<Object2D>(entry->object) : nullptr))
-            {
-                obj2d->setMaterial(nullptr);
-                ++cleared;
-            }
-            else if (auto obj3d = (entry->object ? std::dynamic_pointer_cast<Object3D>(entry->object) : nullptr))
-            {
-                obj3d->setMaterial(nullptr);
-                ++cleared;
-            }
-        }
-
-        logger.log(Logger::Category::Rendering,
-            "OpenGLRenderer shutdown: cleared materials on " + std::to_string(cleared) + " world objects.",
-            Logger::LogLevel::INFO);
-    }
+    OpenGLObject2D::ClearCache();
+    OpenGLObject3D::ClearCache();
 
     // Any additional renderer-owned GPU resources can be released here.
     m_camera.reset();
@@ -151,6 +130,42 @@ bool OpenGLRenderer::initialize()
         }
     }
 
+    {
+        RenderResourceManager rrm;
+        auto& ecs = ECS::ECSManager::Instance();
+        m_renderEntries.clear();
+        const auto renderables = rrm.buildRenderablesForSchema(ecs.getRenderSchema());
+        m_renderEntries.reserve(renderables.size());
+        for (const auto& renderable : renderables)
+        {
+            RenderEntry entry;
+            entry.transform = renderable.transform;
+            if (renderable.assetType == AssetType::Model3D)
+            {
+                entry.object3D = std::make_shared<OpenGLObject3D>(renderable.asset);
+                if (!entry.object3D->prepare())
+                {
+                    continue;
+                }
+                entry.object3D->setTextures(renderable.textures);
+            }
+            else if (renderable.assetType == AssetType::Model2D)
+            {
+                entry.object2D = std::make_shared<OpenGLObject2D>(renderable.asset);
+                if (!entry.object2D->prepare())
+                {
+                    continue;
+                }
+                entry.object2D->setTextures(renderable.textures);
+            }
+            else
+            {
+                continue;
+            }
+            m_renderEntries.push_back(std::move(entry));
+        }
+    }
+
     SDL_ShowWindow(m_window);
     SDL_RestoreWindow(m_window);
     return true;
@@ -209,6 +224,39 @@ void OpenGLRenderer::render()
         {
             diagnostics.setScenePrepared(true);
         }
+
+        auto& ecs = ECS::ECSManager::Instance();
+        m_renderEntries.clear();
+        const auto renderables = rrm.buildRenderablesForSchema(ecs.getRenderSchema());
+        m_renderEntries.reserve(renderables.size());
+        for (const auto& renderable : renderables)
+        {
+            RenderEntry entry;
+            entry.transform = renderable.transform;
+            if (renderable.assetType == AssetType::Model3D)
+            {
+                entry.object3D = std::make_shared<OpenGLObject3D>(renderable.asset);
+                if (!entry.object3D->prepare())
+                {
+                    continue;
+                }
+                entry.object3D->setTextures(renderable.textures);
+            }
+            else if (renderable.assetType == AssetType::Model2D)
+            {
+                entry.object2D = std::make_shared<OpenGLObject2D>(renderable.asset);
+                if (!entry.object2D->prepare())
+                {
+                    continue;
+                }
+                entry.object2D->setTextures(renderable.textures);
+            }
+            else
+            {
+                continue;
+            }
+            m_renderEntries.push_back(std::move(entry));
+        }
     }
 
     glm::mat4 view(1.0f);
@@ -218,8 +266,33 @@ void OpenGLRenderer::render()
         view = glm::make_mat4(engineView.m);
     }
 
+    if (!m_renderEntries.empty())
+    {
+        for (const auto& entry : m_renderEntries)
+        {
+            glm::mat4 modelMatrix(1.0f);
+            modelMatrix = glm::translate(modelMatrix, glm::vec3(entry.transform.position[0], entry.transform.position[1], entry.transform.position[2]));
+            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[0]), glm::vec3(1.0f, 0.0f, 0.0f));
+            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[1]), glm::vec3(0.0f, 1.0f, 0.0f));
+            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[2]), glm::vec3(0.0f, 0.0f, 1.0f));
+            modelMatrix = glm::scale(modelMatrix, glm::vec3(entry.transform.scale[0], entry.transform.scale[1], entry.transform.scale[2]));
+
+            if (entry.object3D)
+            {
+                entry.object3D->setMatrices(modelMatrix, view, m_projectionMatrix);
+                entry.object3D->render();
+            }
+            else if (entry.object2D)
+            {
+                entry.object2D->setMatrices(modelMatrix, view, m_projectionMatrix);
+                entry.object2D->render();
+            }
+        }
+    }
+
     const auto& objs = level->getWorldObjects();
 	const auto& groups = level->getGroups();
+    const auto& ecsEntities = level->getEntities();
 
     if (!objs.empty())
     {
@@ -230,40 +303,201 @@ void OpenGLRenderer::render()
 
             Transform* t = &entry->transform;
 
-            if (auto obj3d = std::dynamic_pointer_cast<Object3D>(entry->object))
+            auto asset = entry->object ? std::dynamic_pointer_cast<AssetData>(entry->object) : nullptr;
+            if (!asset)
+                continue;
+
+            if (asset->getAssetType() == AssetType::Model3D)
             {
-                auto material = obj3d->getMaterial();
-                auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
-                if (glMaterial && t)
+                OpenGLObject3D glObj(asset);
+                if (!glObj.prepare())
+                    continue;
+
+                if (t)
                 {
                     Mat4 engineMat = t->getMatrix4ColumnMajor();
                     glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-
                     modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 1.0f, 0.0f));
-
-                    glMaterial->setModelMatrix(modelMatrix);
-                    glMaterial->setViewMatrix(view);
-                    glMaterial->setProjectionMatrix(m_projectionMatrix);
+                    glObj.setMatrices(modelMatrix, view, m_projectionMatrix);
                 }
-                obj3d->render();
-            }
-            else if (auto obj2d = std::dynamic_pointer_cast<Object2D>(entry->object))
+
+    if (!ecsEntities.empty())
+    {
+        ECS::Schema meshSchema;
+        meshSchema.require<ECS::MeshComponent>();
+        auto& ecs = ECS::ECSManager::Instance();
+        const auto matches = ecs.getEntitiesMatchingSchema(meshSchema);
+        if (!matches.empty())
+        {
+            auto& assetManager = AssetManager::Instance();
+            for (const auto entity : matches)
             {
-                auto material = obj2d->getMaterial();
-                auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
-                if (glMaterial && t)
+                const auto* meshComponent = ecs.getComponent<ECS::MeshComponent>(entity);
+                if (!meshComponent || meshComponent->meshAssetPath.empty())
+                {
+                    continue;
+                }
+
+                std::vector<std::shared_ptr<Texture>> textures;
+                if (const auto* materialComponent = ecs.getComponent<ECS::MaterialComponent>(entity))
+                {
+                    if (!materialComponent->materialAssetPath.empty())
+                    {
+                        std::string materialPath = materialComponent->materialAssetPath;
+                        const std::filesystem::path matFs(materialPath);
+                        if (!matFs.is_absolute())
+                        {
+                            const auto absPath = assetManager.getAbsoluteContentPath(materialPath);
+                            if (!absPath.empty())
+                            {
+                                materialPath = absPath;
+                            }
+                        }
+
+                        int matId = assetManager.loadAsset(materialPath, AssetType::Material, AssetManager::Sync);
+                        if (matId != 0)
+                        {
+                            if (auto matAsset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(matId)))
+                            {
+                                const auto& matData = matAsset->getData();
+                                if (matData.is_object() && matData.contains("m_textureAssetPaths"))
+                                {
+                                    const auto& paths = matData.at("m_textureAssetPaths");
+                                    if (paths.is_array())
+                                    {
+                                        for (const auto& pathValue : paths)
+                                        {
+                                            if (!pathValue.is_string())
+                                            {
+                                                continue;
+                                            }
+                                            std::string texPath = pathValue.get<std::string>();
+                                            const std::filesystem::path texFs(texPath);
+                                            if (!texFs.is_absolute())
+                                            {
+                                                const auto absTex = assetManager.getAbsoluteContentPath(texPath);
+                                                if (!absTex.empty())
+                                                {
+                                                    texPath = absTex;
+                                                }
+                                            }
+                                            int texId = assetManager.loadAsset(texPath, AssetType::Texture, AssetManager::Sync);
+                                            if (texId == 0)
+                                            {
+                                                continue;
+                                            }
+                                            auto texAsset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(texId));
+                                            if (!texAsset)
+                                            {
+                                                continue;
+                                            }
+                                            const auto& texData = texAsset->getData();
+                                            if (!texData.is_object())
+                                            {
+                                                continue;
+                                            }
+                                            if (!texData.contains("m_width") || !texData.contains("m_height") || !texData.contains("m_channels") || !texData.contains("m_data"))
+                                            {
+                                                continue;
+                                            }
+                                            auto texture = std::make_shared<Texture>();
+                                            texture->setWidth(texData.at("m_width").get<int>());
+                                            texture->setHeight(texData.at("m_height").get<int>());
+                                            texture->setChannels(texData.at("m_channels").get<int>());
+                                            texture->setData(texData.at("m_data").get<std::vector<unsigned char>>());
+                                            textures.push_back(std::move(texture));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                std::string meshPath = meshComponent->meshAssetPath;
+                if (!meshPath.empty())
+                {
+                    const std::filesystem::path meshFs(meshPath);
+                    if (!meshFs.is_absolute())
+                    {
+                        const auto absPath = assetManager.getAbsoluteContentPath(meshPath);
+                        if (!absPath.empty())
+                        {
+                            meshPath = absPath;
+                        }
+                    }
+                }
+
+                int assetId = assetManager.loadAsset(meshPath, AssetType::Model3D, AssetManager::Sync);
+                if (assetId == 0)
+                {
+                    assetId = assetManager.loadAsset(meshPath, AssetType::Model2D, AssetManager::Sync);
+                }
+                if (assetId == 0)
+                {
+                    continue;
+                }
+
+                auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(assetId));
+                if (!asset)
+                {
+                    continue;
+                }
+
+                ECS::TransformComponent transform{};
+                if (const auto* transformComponent = ecs.getComponent<ECS::TransformComponent>(entity))
+                {
+                    transform = *transformComponent;
+                }
+
+                glm::mat4 modelMatrix(1.0f);
+                modelMatrix = glm::translate(modelMatrix, glm::vec3(transform.position[0], transform.position[1], transform.position[2]));
+                modelMatrix = glm::rotate(modelMatrix, glm::radians(transform.rotation[0]), glm::vec3(1.0f, 0.0f, 0.0f));
+                modelMatrix = glm::rotate(modelMatrix, glm::radians(transform.rotation[1]), glm::vec3(0.0f, 1.0f, 0.0f));
+                modelMatrix = glm::rotate(modelMatrix, glm::radians(transform.rotation[2]), glm::vec3(0.0f, 0.0f, 1.0f));
+                modelMatrix = glm::scale(modelMatrix, glm::vec3(transform.scale[0], transform.scale[1], transform.scale[2]));
+
+                if (asset->getAssetType() == AssetType::Model3D)
+                {
+                    OpenGLObject3D glObj(asset);
+                    if (!glObj.prepare())
+                    {
+                        continue;
+                    }
+                    glObj.setTextures(textures);
+                    glObj.setMatrices(modelMatrix, view, m_projectionMatrix);
+                    glObj.render();
+                }
+                else if (asset->getAssetType() == AssetType::Model2D)
+                {
+                    OpenGLObject2D glObj(asset);
+                    if (!glObj.prepare())
+                    {
+                        continue;
+                    }
+                    glObj.setTextures(textures);
+                    glObj.setMatrices(modelMatrix, view, m_projectionMatrix);
+                    glObj.render();
+                }
+            }
+        }
+    }
+                glObj.render();
+            }
+            else if (asset->getAssetType() == AssetType::Model2D)
+            {
+                OpenGLObject2D glObj(asset);
+                if (!glObj.prepare())
+                    continue;
+
+                if (t)
                 {
                     Mat4 engineMat = t->getMatrix4ColumnMajor();
                     glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-
                     modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 0.0f, 1.0f));
-
-
-                    glMaterial->setModelMatrix(modelMatrix);
-                    glMaterial->setViewMatrix(view);
-                    glMaterial->setProjectionMatrix(m_projectionMatrix);
+                    glObj.setMatrices(modelMatrix, view, m_projectionMatrix);
                 }
-                obj2d->render();
+                glObj.render();
             }
         }
     }
@@ -278,33 +512,37 @@ void OpenGLRenderer::render()
                 if (!entry || entry->getPath().empty())
                     continue;
 				Transform* t = (i < groupEntry.transforms.size()) ? const_cast<Transform*>(&groupEntry.transforms[i]) : nullptr;
-                if (auto obj3d = std::dynamic_pointer_cast<Object3D>(entry))
+                auto asset = entry ? std::dynamic_pointer_cast<AssetData>(entry) : nullptr;
+                if (!asset)
+                    continue;
+
+                if (asset->getAssetType() == AssetType::Model3D)
                 {
-                    auto material = obj3d->getMaterial();
-                    auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
-                    if (glMaterial && t)
+                    OpenGLObject3D glObj(asset);
+                    if (!glObj.prepare())
+                        continue;
+
+                    if (t)
                     {
                         Mat4 engineMat = t->getMatrix4ColumnMajor();
                         glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-                        glMaterial->setModelMatrix(modelMatrix);
-                        glMaterial->setViewMatrix(view);
-                        glMaterial->setProjectionMatrix(m_projectionMatrix);
+                        glObj.setMatrices(modelMatrix, view, m_projectionMatrix);
                     }
-                    obj3d->render();
+                    glObj.render();
                 }
-                else if (auto obj2d = std::dynamic_pointer_cast<Object2D>(entry))
+                else if (asset->getAssetType() == AssetType::Model2D)
                 {
-                    auto material = obj2d->getMaterial();
-                    auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
-                    if (glMaterial && t)
+                    OpenGLObject2D glObj(asset);
+                    if (!glObj.prepare())
+                        continue;
+
+                    if (t)
                     {
                         Mat4 engineMat = t->getMatrix4ColumnMajor();
                         glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-                        glMaterial->setModelMatrix(modelMatrix);
-                        glMaterial->setViewMatrix(view);
-                        glMaterial->setProjectionMatrix(m_projectionMatrix);
+                        glObj.setMatrices(modelMatrix, view, m_projectionMatrix);
                     }
-                    obj2d->render();
+                    glObj.render();
                 }
             }
         }

@@ -42,6 +42,11 @@ public:
 	// Log with specified category
     void log(Category category, const std::string& message, LogLevel level = LogLevel::INFO);
 
+    bool hasErrors() const;
+    bool hasFatal() const;
+    bool hasErrorsOrFatal() const;
+    const std::string& getLogFilename() const;
+
 private:
     Logger() = default;
     ~Logger();
@@ -54,6 +59,8 @@ private:
     std::ofstream logFile;
     bool initialized{false};
     std::string filename;
+	bool loggedError{ false };
+	bool loggedFatal{ false };
 
     LogLevel minimumLevel{ LogLevel::INFO };
 };

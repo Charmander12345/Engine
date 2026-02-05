@@ -1,5 +1,6 @@
 ﻿#include <iostream>
 #include <filesystem>
+#include <cstdlib>
 #include <SDL3/SDL.h>
 
 #if defined(_WIN32)
@@ -34,11 +35,29 @@ int main()
     std::string cwd = std::filesystem::current_path().string();
     logger.log(Logger::Category::Engine, "Startup path: " + cwd, Logger::LogLevel::INFO);
 
+    std::filesystem::path downloadsPath;
+#if defined(_WIN32)
+    if (const char* userProfile = std::getenv("USERPROFILE"))
+    {
+        downloadsPath = std::filesystem::path(userProfile) / "Downloads";
+    }
+#else
+    if (const char* home = std::getenv("HOME"))
+    {
+        downloadsPath = std::filesystem::path(home) / "Downloads";
+    }
+#endif
+    if (downloadsPath.empty())
+    {
+        downloadsPath = std::filesystem::current_path();
+    }
+
+    const std::filesystem::path projectRoot = downloadsPath / "SampleProject";
     logger.log(Logger::Category::Engine, "Loading project...", Logger::LogLevel::INFO);
-    if (!assetManager.loadProject("SampleProject"))
+    if (!assetManager.loadProject(projectRoot.string()))
     {
         logger.log(Logger::Category::Project, "Project not found. Creating default project: SampleProject", Logger::LogLevel::WARNING);
-        assetManager.createProject(cwd, "SampleProject", { "SampleProject", "1.0", "1.0", "", DiagnosticsManager::RHIType::OpenGL });
+        assetManager.createProject(downloadsPath.string(), "SampleProject", { "SampleProject", "1.0", "1.0", "", DiagnosticsManager::RHIType::OpenGL });
     }
 
     logger.log(Logger::Category::Engine, "Initialising SDL (video + audio)...", Logger::LogLevel::INFO);
@@ -73,6 +92,7 @@ int main()
 #endif
 
     auto& ecs = ECS::ECSManager::Instance();
+    ecs.initialize({});
     ecs.createEntity();
 
     bool running = true;
@@ -218,6 +238,23 @@ int main()
 
     logger.log(Logger::Category::Engine, "SDL_Quit()", Logger::LogLevel::INFO);
     SDL_Quit();
+
+    if (logger.hasErrorsOrFatal())
+    {
+        const auto& logFile = logger.getLogFilename();
+        if (!logFile.empty())
+        {
+#if defined(_WIN32)
+            ShellExecuteA(nullptr, "open", logFile.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#elif defined(__APPLE__)
+            std::string command = "open \"" + logFile + "\"";
+            std::system(command.c_str());
+#else
+            std::string command = "xdg-open \"" + logFile + "\"";
+            std::system(command.c_str());
+#endif
+        }
+    }
 
     logger.log(Logger::Category::Engine, "Engine shutdown complete.", Logger::LogLevel::INFO);
     return 0;

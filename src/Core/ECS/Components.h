@@ -14,11 +14,13 @@ namespace ECS
 	struct MeshComponent
 	{
 		std::string meshAssetPath;
+		unsigned int meshAssetId{ 0 };
 	};
 
 	struct MaterialComponent
 	{
 		std::string materialAssetPath;
+		unsigned int materialAssetId{ 0 };
 	};
 
 	struct LightComponent
@@ -57,5 +59,6 @@ namespace ECS
 	struct ScriptComponent
 	{
 		std::string scriptPath; // Path to the script file
+		unsigned int scriptAssetId{ 0 };
 	};
 }

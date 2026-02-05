@@ -6,8 +6,10 @@
 #include "../Logger/Logger.h"
 
 #include "../Core/EngineLevel.h"
-#include "../Core/Object2D.h"
-#include "../Core/Object3D.h"
+#include "../Core/Asset.h"
+#include "../AssetManager/AssetManager.h"
+#include "../Renderer/Texture.h"
+#include <filesystem>
 
 #include "OpenGLRenderer/OpenGLObject2D.h"
 #include "OpenGLRenderer/OpenGLObject3D.h"
@@ -21,6 +23,11 @@ bool RenderResourceManager::prepareActiveLevel()
         return false;
 
     auto& logger = Logger::Instance();
+	if (!level->prepareEcs())
+	{
+		logger.log(Logger::Category::Rendering, "RenderResourceManager: failed to prepare ECS for level", Logger::LogLevel::ERROR);
+		return false;
+	}
     logger.log(Logger::Category::Rendering, "RenderResourceManager: prepareActiveLevel() start", Logger::LogLevel::INFO);
 
     switch (diagnostics.getRHIType())
@@ -54,41 +61,34 @@ bool RenderResourceManager::prepareOpenGL(EngineLevel& level)
 		if (!engineObj)
 			continue;
 
-        // 2D objects
-		if (auto obj2d = std::dynamic_pointer_cast<Object2D>(engineObj))
+		if (auto asset = std::dynamic_pointer_cast<AssetData>(engineObj))
         {
-            logger.log(Logger::Category::Rendering,
-                "RenderResourceManager: Object2D geometry: vertexFloats=" + std::to_string(obj2d->getVertices().size()) +
-                ", indexCount=" + std::to_string(obj2d->getIndices().size()),
-                Logger::LogLevel::INFO);
-            logger.log(Logger::Category::Rendering, "RenderResourceManager: preparing Object2D '" + obj2d->getPath() + "'", Logger::LogLevel::INFO);
-            if (!prepareOpenGLObject2D(obj2d))
+            const auto type = asset->getAssetType();
+            if (type == AssetType::Model2D)
             {
-                logger.log(Logger::Category::Rendering, "RenderResourceManager: failed to prepare OpenGL resources for Object2D: " + obj2d->getPath(), Logger::LogLevel::ERROR);
-                ok = false;
+                logger.log(Logger::Category::Rendering, "RenderResourceManager: preparing Model2D '" + asset->getPath() + "'", Logger::LogLevel::INFO);
+                if (!prepareOpenGLObject2D(asset, {}))
+                {
+                    logger.log(Logger::Category::Rendering, "RenderResourceManager: failed to prepare OpenGL resources for Model2D: " + asset->getPath(), Logger::LogLevel::ERROR);
+                    ok = false;
+                }
+                else
+                {
+                    logger.log(Logger::Category::Rendering, "RenderResourceManager: prepared Model2D '" + asset->getPath() + "'", Logger::LogLevel::INFO);
+                }
             }
-            else
+            else if (type == AssetType::Model3D)
             {
-                logger.log(Logger::Category::Rendering, "RenderResourceManager: prepared Object2D '" + obj2d->getPath() + "'", Logger::LogLevel::INFO);
-            }
-        }
-
-        // 3D objects
-		if (auto obj3d = std::dynamic_pointer_cast<Object3D>(engineObj))
-        {
-            logger.log(Logger::Category::Rendering,
-                "RenderResourceManager: Object3D geometry: vertexFloats=" + std::to_string(obj3d->getVertices().size()) +
-                ", indexCount=" + std::to_string(obj3d->getIndices().size()),
-                Logger::LogLevel::INFO);
-            logger.log(Logger::Category::Rendering, "RenderResourceManager: preparing Object3D '" + obj3d->getPath() + "'", Logger::LogLevel::INFO);
-            if (!prepareOpenGLObject3D(obj3d))
-            {
-                logger.log(Logger::Category::Rendering, "RenderResourceManager: failed to prepare OpenGL resources for Object3D: " + obj3d->getPath(), Logger::LogLevel::ERROR);
-                ok = false;
-            }
-            else
-            {
-                logger.log(Logger::Category::Rendering, "RenderResourceManager: prepared Object3D '" + obj3d->getPath() + "'", Logger::LogLevel::INFO);
+                logger.log(Logger::Category::Rendering, "RenderResourceManager: preparing Model3D '" + asset->getPath() + "'", Logger::LogLevel::INFO);
+                if (!prepareOpenGLObject3D(asset, {}))
+                {
+                    logger.log(Logger::Category::Rendering, "RenderResourceManager: failed to prepare OpenGL resources for Model3D: " + asset->getPath() + "", Logger::LogLevel::ERROR);
+                    ok = false;
+                }
+                else
+                {
+                    logger.log(Logger::Category::Rendering, "RenderResourceManager: prepared Model3D '" + asset->getPath() + "'", Logger::LogLevel::INFO);
+                }
             }
         }
     }
@@ -100,38 +100,164 @@ bool RenderResourceManager::prepareOpenGL(EngineLevel& level)
     return ok;
 }
 
-bool RenderResourceManager::prepareOpenGLObject3D(const std::shared_ptr<Object3D>& obj3d)
+std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::buildRenderablesForSchema(const ECS::Schema& schema)
 {
-    if (!obj3d)
-        return false;
+    auto& logger = Logger::Instance();
+    auto& ecs = ECS::ECSManager::Instance();
+    auto matches = ecs.getAssetsMatchingSchema(schema);
+    std::vector<RenderableAsset> renderables;
+    renderables.reserve(matches.size());
 
-    // Only treat as prepared if the material is already backend-specific.
+    auto& assetManager = AssetManager::Instance();
+    for (const auto& match : matches)
     {
-        auto existing = obj3d->getMaterial();
-        if (std::dynamic_pointer_cast<OpenGLMaterial>(existing))
+        std::vector<std::shared_ptr<Texture>> textures;
+        if (!match.material.materialAssetPath.empty())
         {
-            return true;
+            std::string materialPath = match.material.materialAssetPath;
+            const std::filesystem::path matFs(materialPath);
+            if (!matFs.is_absolute())
+            {
+                const auto absPath = assetManager.getAbsoluteContentPath(materialPath);
+                if (!absPath.empty())
+                {
+                    materialPath = absPath;
+                }
+            }
+
+            int matId = assetManager.loadAsset(materialPath, AssetType::Material, AssetManager::Sync);
+            if (matId != 0)
+            {
+                logger.log(Logger::Category::Rendering, "RenderResourceManager: loaded material '" + materialPath + "'", Logger::LogLevel::INFO);
+                if (auto matAsset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(matId)))
+                {
+                    const auto& matData = matAsset->getData();
+                    if (matData.is_object() && matData.contains("m_textureAssetPaths"))
+                    {
+                        const auto& paths = matData.at("m_textureAssetPaths");
+                        if (paths.is_array())
+                        {
+                            for (const auto& pathValue : paths)
+                            {
+                                if (!pathValue.is_string())
+                                {
+                                    continue;
+                                }
+                                std::string texPath = pathValue.get<std::string>();
+                                const std::filesystem::path texFs(texPath);
+                                if (!texFs.is_absolute())
+                                {
+                                    const auto absTex = assetManager.getAbsoluteContentPath(texPath);
+                                    if (!absTex.empty())
+                                    {
+                                        texPath = absTex;
+                                    }
+                                }
+                                int texId = assetManager.loadAsset(texPath, AssetType::Texture, AssetManager::Sync);
+                                if (texId == 0)
+                                {
+                                    logger.log(Logger::Category::Rendering, "RenderResourceManager: failed to load texture '" + texPath + "'", Logger::LogLevel::WARNING);
+                                    continue;
+                                }
+                                auto texAsset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(texId));
+                                if (!texAsset)
+                                {
+                                    logger.log(Logger::Category::Rendering, "RenderResourceManager: texture asset missing after load '" + texPath + "'", Logger::LogLevel::WARNING);
+                                    continue;
+                                }
+                                const auto& texData = texAsset->getData();
+                                if (!texData.is_object())
+                                {
+                                    continue;
+                                }
+                                if (!texData.contains("m_width") || !texData.contains("m_height") || !texData.contains("m_channels") || !texData.contains("m_data"))
+                                {
+                                    continue;
+                                }
+                                auto texture = std::make_shared<Texture>();
+                                texture->setWidth(texData.at("m_width").get<int>());
+                                texture->setHeight(texData.at("m_height").get<int>());
+                                texture->setChannels(texData.at("m_channels").get<int>());
+                                texture->setData(texData.at("m_data").get<std::vector<unsigned char>>());
+                                textures.push_back(std::move(texture));
+                                logger.log(Logger::Category::Rendering, "RenderResourceManager: prepared texture '" + texPath + "'", Logger::LogLevel::INFO);
+                            }
+                        }
+                    }
+                }
+            }
         }
+
+        std::string meshPath = match.mesh.meshAssetPath;
+        if (!meshPath.empty())
+        {
+            const std::filesystem::path meshFs(meshPath);
+            if (!meshFs.is_absolute())
+            {
+                const auto absPath = assetManager.getAbsoluteContentPath(meshPath);
+                if (!absPath.empty())
+                {
+                    meshPath = absPath;
+                }
+            }
+        }
+
+        int assetId = assetManager.loadAsset(meshPath, AssetType::Model3D, AssetManager::Sync);
+        if (assetId == 0)
+        {
+            assetId = assetManager.loadAsset(meshPath, AssetType::Model2D, AssetManager::Sync);
+        }
+        if (assetId == 0)
+        {
+            logger.log(Logger::Category::Rendering, "RenderResourceManager: failed to load mesh asset '" + match.mesh.meshAssetPath + "'", Logger::LogLevel::ERROR);
+            continue;
+        }
+
+        auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(assetId));
+        if (!asset)
+        {
+            logger.log(Logger::Category::Rendering, "RenderResourceManager: mesh asset not found after load: '" + match.mesh.meshAssetPath + "'", Logger::LogLevel::ERROR);
+            continue;
+        }
+
+        RenderableAsset renderable;
+        renderable.asset = asset;
+        renderable.textures = std::move(textures);
+        renderable.assetType = asset->getAssetType();
+        if (match.hasTransform)
+        {
+            renderable.transform = match.transform;
+        }
+        renderables.push_back(std::move(renderable));
     }
 
-    OpenGLObject3D glObj(obj3d);
-    return glObj.prepare();
+    return renderables;
 }
 
-bool RenderResourceManager::prepareOpenGLObject2D(const std::shared_ptr<Object2D>& obj2d)
+bool RenderResourceManager::prepareOpenGLObject3D(const std::shared_ptr<AssetData>& asset, const std::vector<std::shared_ptr<Texture>>& textures)
 {
-    if (!obj2d)
+	if (!asset)
         return false;
 
-    // Only treat as prepared if the material is already backend-specific.
+    OpenGLObject3D glObj(asset);
+    if (!glObj.prepare())
     {
-        auto existing = obj2d->getMaterial();
-        if (std::dynamic_pointer_cast<OpenGLMaterial>(existing))
-        {
-            return true;
-        }
+        return false;
     }
+    glObj.setTextures(textures);
+    return true;
+}
 
-    OpenGLObject2D glObj(obj2d);
-    return glObj.prepare();
+bool RenderResourceManager::prepareOpenGLObject2D(const std::shared_ptr<AssetData>& asset, const std::vector<std::shared_ptr<Texture>>& textures)
+{
+	if (!asset)
+        return false;
+
+    OpenGLObject2D glObj(asset);
+    if (!glObj.prepare())
+    {
+        return false;
+    }
+    glObj.setTextures(textures);
+    return true;
 }

@@ -5,41 +5,13 @@
 #include <string>
 #include <memory>
 #include "EngineObject.h"
-#include "Object3D.h"
-#include "Object2D.h"
 #include "MathTypes.h"
 #include "../AssetManager/AssetTypes.h"
+#include "ECS/ECS.h"
 
 class EngineLevel : public EngineObject
 {
 public:
-
-	void to_json(json& j, const EngineLevel& level) const
-	{
-		std::vector<std::string> objectPaths;
-		for (const auto& objInstance : level.Objects)
-		{
-			objectPaths.push_back(objInstance->object->getPath());
-		}
-
-		std::vector<json> groupsJson;
-		for (const auto& grp : level.m_groups)
-		{
-			json g;
-			g["id"] = grp.id;
-			std::vector<std::string> groupObjectPaths;
-			for (const auto& obj : grp.objects)
-			{
-				groupObjectPaths.push_back(obj->getPath());
-			}
-			g["objects"] = groupObjectPaths;
-			//g["transforms"] = grp.transforms;
-			g["isInstanced"] = grp.isInstanced;
-			groupsJson.push_back(g);
-		}
-
-		j = json{ {"Objects", objectPaths}, {"Groups", groupsJson} };
-	}
 
 	struct ObjectInstance
 	{
@@ -72,15 +44,23 @@ public:
 	std::vector<std::shared_ptr<ObjectInstance>>& getWorldObjects();
 	std::vector<group>& getGroups();
 
-	void clearLoadedDependencies();
-
 	bool registerObject(const std::shared_ptr<EngineObject>& object, Transform transform, const std::string& groupID);
 	bool unregisterObject(const std::shared_ptr<EngineObject>& object);
 	bool setObjectTransform(const std::string& objectPath, const Transform& transform);
+
+	void setLevelData(const json& data);
+	const json& getLevelData() const;
+	bool prepareEcs();
+	json serializeEcsEntities() const;
+	const std::vector<ECS::Entity>& getEntities() const;
 
 
 private:
 
 	std::vector<std::shared_ptr<ObjectInstance>> Objects;
 	std::vector<group> m_groups;
+	std::vector<ECS::Entity> m_entities;
+	json m_levelData;
+	ECS::ECSManager* m_ecs{ nullptr };
+	bool m_ecsPrepared{ false };
 };

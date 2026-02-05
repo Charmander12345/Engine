@@ -121,6 +121,15 @@ void Logger::log(Category category, const std::string& message, LogLevel level)
         return;
     }
 
+    if (level == LogLevel::ERROR)
+    {
+        loggedError = true;
+    }
+    else if (level == LogLevel::FATAL)
+    {
+        loggedFatal = true;
+    }
+
     const std::string ts = nowTimestamp();
     const char* levelStr = toString(level);
     const char* catStr = toString(category);
@@ -131,4 +140,24 @@ void Logger::log(Category category, const std::string& message, LogLevel level)
     }
 
     std::cout << "[" << ts << "][" << catStr << "][" << levelStr << "] " << message << std::endl;
+}
+
+bool Logger::hasErrors() const
+{
+    return loggedError;
+}
+
+bool Logger::hasFatal() const
+{
+    return loggedFatal;
+}
+
+bool Logger::hasErrorsOrFatal() const
+{
+    return loggedError || loggedFatal;
+}
+
+const std::string& Logger::getLogFilename() const
+{
+    return filename;
 }

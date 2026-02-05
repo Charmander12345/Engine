@@ -4,7 +4,13 @@
 #include "../Camera.h"
 #include "glad/include/gl.h"
 #include <memory>
+#include <vector>
 #include <glm/glm.hpp>
+
+#include "../../Core/ECS/Components.h"
+
+class OpenGLObject2D;
+class OpenGLObject3D;
 
 class OpenGLRenderer : public Renderer
 {
@@ -25,6 +31,13 @@ public:
     void rotateCamera(float yawDeltaDegrees, float pitchDeltaDegrees) override;
 
 private:
+    struct RenderEntry
+    {
+        ECS::TransformComponent transform{};
+        std::shared_ptr<OpenGLObject2D> object2D;
+        std::shared_ptr<OpenGLObject3D> object3D;
+    };
+
     bool m_initialized;
     std::string m_name;
     SDL_Window* m_window;
@@ -32,4 +45,5 @@ private:
 
     std::unique_ptr<Camera> m_camera;
     glm::mat4 m_projectionMatrix;
+    std::vector<RenderEntry> m_renderEntries;
 };

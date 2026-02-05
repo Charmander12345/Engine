@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "../Core/Texture.h"
+#include "../Texture.h"
 
 class Texture;
 

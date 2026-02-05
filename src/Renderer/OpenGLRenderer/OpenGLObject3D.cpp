@@ -7,8 +7,9 @@
 #include "OpenGLShader.h"
 #include "Logger.h"
 
-#include "../../Core/Object3D.h"
-#include "../../AssetManager/AssetManager.h"
+#include "../../Core/Asset.h"
+
+#include <unordered_map>
 
 namespace
 {
@@ -22,24 +23,64 @@ namespace
         }
         return {};
     }
+
+    std::vector<float> ReadFloatArray(const json& data, const char* key)
+    {
+        if (!data.is_object())
+        {
+            return {};
+        }
+        auto it = data.find(key);
+        if (it == data.end() || !it->is_array())
+        {
+            return {};
+        }
+        return it->get<std::vector<float>>();
+    }
+
+    std::vector<uint32_t> ReadIndexArray(const json& data, const char* key)
+    {
+        if (!data.is_object())
+        {
+            return {};
+        }
+        auto it = data.find(key);
+        if (it == data.end() || !it->is_array())
+        {
+            return {};
+        }
+        return it->get<std::vector<uint32_t>>();
+    }
+
+    std::unordered_map<std::string, std::shared_ptr<OpenGLMaterial>> s_materialCache;
 }
 
-OpenGLObject3D::OpenGLObject3D(const std::shared_ptr<Object3D>& obj)
-    : m_obj(obj)
+OpenGLObject3D::OpenGLObject3D(const std::shared_ptr<AssetData>& asset)
+    : m_asset(asset)
 {
+}
+
+void OpenGLObject3D::ClearCache()
+{
+    s_materialCache.clear();
 }
 
 bool OpenGLObject3D::prepare()
 {
     auto& logger = Logger::Instance();
-    if (!m_obj)
+    if (!m_asset)
         return false;
 
-    // If already prepared (material backend-specific), nothing to do.
+    if (m_material)
+        return true;
+
+    const std::string path = m_asset->getPath();
+    if (!path.empty())
     {
-        auto existing = m_obj->getMaterial();
-        if (std::dynamic_pointer_cast<OpenGLMaterial>(existing))
+        auto it = s_materialCache.find(path);
+        if (it != s_materialCache.end())
         {
+            m_material = it->second;
             return true;
         }
     }
@@ -70,8 +111,11 @@ bool OpenGLObject3D::prepare()
     mat->addShader(vertexShader);
     mat->addShader(fragmentShader);
 
-    const auto vCount = m_obj->getVertices().size();
-    const auto iCount = m_obj->getIndices().size();
+    const auto& data = m_asset->getData();
+    auto vertices = ReadFloatArray(data, "m_vertices");
+    auto indices = ReadIndexArray(data, "m_indices");
+    const auto vCount = vertices.size();
+    const auto iCount = indices.size();
     logger.log(Logger::Category::Rendering,
         "OpenGLObject3D: vertexFloats=" + std::to_string(vCount) +
         ", indexCount=" + std::to_string(iCount),
@@ -88,8 +132,13 @@ bool OpenGLObject3D::prepare()
             Logger::LogLevel::WARNING);
     }
 
-    mat->setVertexData(m_obj->getVertices());
-    mat->setIndexData(m_obj->getIndices());
+    if (vCount == 0)
+    {
+        return false;
+    }
+
+    mat->setVertexData(vertices);
+    mat->setIndexData(indices);
 
     // Default layout: positions (x,y,z) + texcoords (u,v)
     const GLsizei stride = static_cast<GLsizei>(5 * sizeof(float));
@@ -98,18 +147,42 @@ bool OpenGLObject3D::prepare()
     layout.push_back(OpenGLMaterial::LayoutElement{ 2, 2, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(3 * sizeof(float)) });
     mat->setLayout(layout);
 
-    // Propagate textures from the runtime material (loaded by AssetManager) into the OpenGL material.
-    if (auto cpuMat = m_obj->getMaterial())
-    {
-        mat->setTextures(cpuMat->getTextures());
-    }
-
     if (!mat->build())
     {
         logger.log(Logger::Category::Rendering, "OpenGLObject3D: Failed to build OpenGL material.", Logger::LogLevel::ERROR);
         return false;
     }
 
-    m_obj->setMaterial(mat);
+    m_material = mat;
+    if (!path.empty())
+    {
+        s_materialCache[path] = m_material;
+    }
     return true;
+}
+
+void OpenGLObject3D::setMatrices(const glm::mat4& model, const glm::mat4& view, const glm::mat4& projection)
+{
+    if (!m_material)
+        return;
+
+    m_material->setModelMatrix(model);
+    m_material->setViewMatrix(view);
+    m_material->setProjectionMatrix(projection);
+}
+
+void OpenGLObject3D::render()
+{
+    if (m_material)
+    {
+        m_material->render();
+    }
+}
+
+void OpenGLObject3D::setTextures(const std::vector<std::shared_ptr<Texture>>& textures)
+{
+    if (m_material)
+    {
+        m_material->setTextures(textures);
+    }
 }
