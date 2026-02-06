@@ -71,6 +71,8 @@ public:
 
 	// Resolve <project>/Content/<relative> if a project is loaded. Returns empty string if no project is loaded.
     std::string getAbsoluteContentPath(const std::string& relativeToContent) const;
+    // Resolve <engine>/Editor/Widgets/<relative>.
+    std::string getEditorWidgetPath(const std::string& relativeToEditorWidgets) const;
 
     // Asset Registry
     bool doesAssetExist(const std::string& pathOrName) const;

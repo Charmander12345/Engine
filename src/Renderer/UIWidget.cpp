@@ -72,6 +72,25 @@ namespace
         return StackOrientation::Vertical;
     }
 
+    std::string toString(WidgetAnchor anchor)
+    {
+        switch (anchor)
+        {
+        case WidgetAnchor::TopRight: return "TopRight";
+        case WidgetAnchor::BottomLeft: return "BottomLeft";
+        case WidgetAnchor::BottomRight: return "BottomRight";
+        default: return "TopLeft";
+        }
+    }
+
+    WidgetAnchor anchorFromString(const std::string& value)
+    {
+        if (value == "TopRight") return WidgetAnchor::TopRight;
+        if (value == "BottomLeft") return WidgetAnchor::BottomLeft;
+        if (value == "BottomRight") return WidgetAnchor::BottomRight;
+        return WidgetAnchor::TopLeft;
+    }
+
     Vec2 readVec2(const json& value)
     {
         Vec2 out{};
@@ -161,6 +180,14 @@ namespace
         {
             element.margin = readVec2(entry.at("margin"));
         }
+        if (entry.contains("isHitTestable"))
+        {
+            element.isHitTestable = entry.at("isHitTestable").get<bool>();
+        }
+        else
+        {
+            element.isHitTestable = (element.type == WidgetElementType::Button);
+        }
         if (entry.contains("fillX"))
         {
             element.fillX = entry.at("fillX").get<bool>();
@@ -185,6 +212,10 @@ namespace
         {
             element.shaderFragment = entry.at("shaderFragment").get<std::string>();
         }
+        if (entry.contains("clickEvent"))
+        {
+            element.clickEvent = entry.at("clickEvent").get<std::string>();
+        }
         if (entry.contains("children") && entry.at("children").is_array())
         {
             for (const auto& child : entry.at("children"))
@@ -202,6 +233,10 @@ namespace
     {
         json entry = json::object();
         entry["type"] = toString(element.type);
+        if (!element.id.empty())
+        {
+            entry["id"] = element.id;
+        }
         entry["from"] = writeVec2(element.from);
         entry["to"] = writeVec2(element.to);
         entry["color"] = writeVec4(element.color);
@@ -232,6 +267,10 @@ namespace
         {
             entry["margin"] = writeVec2(element.margin);
         }
+        if (element.isHitTestable)
+        {
+            entry["isHitTestable"] = element.isHitTestable;
+        }
         if (element.fillX)
         {
             entry["fillX"] = element.fillX;
@@ -252,6 +291,10 @@ namespace
         if (!element.shaderFragment.empty())
         {
             entry["shaderFragment"] = element.shaderFragment;
+        }
+        if (!element.clickEvent.empty())
+        {
+            entry["clickEvent"] = element.clickEvent;
         }
         if (!element.children.empty())
         {
@@ -293,6 +336,22 @@ void Widget::setComputedSizePixels(const Vec2& size, bool hasComputed)
     m_hasComputedSize = hasComputed;
 }
 
+const Vec2& Widget::getComputedPositionPixels() const
+{
+    return m_computedPositionPixels;
+}
+
+bool Widget::hasComputedPosition() const
+{
+    return m_hasComputedPosition;
+}
+
+void Widget::setComputedPositionPixels(const Vec2& position, bool hasComputed)
+{
+    m_computedPositionPixels = position;
+    m_hasComputedPosition = hasComputed;
+}
+
 void Widget::setElements(std::vector<WidgetElement> elements)
 {
     m_elements = std::move(elements);
@@ -324,6 +383,23 @@ bool Widget::loadFromJson(const json& data)
     m_sizePixels = {};
     m_elements.clear();
     m_layoutDirty = true;
+
+    if (data.contains("m_positionPixels"))
+    {
+        m_positionPixels = readVec2(data.at("m_positionPixels"));
+    }
+    if (data.contains("m_anchor"))
+    {
+        m_anchor = anchorFromString(data.at("m_anchor").get<std::string>());
+    }
+    if (data.contains("m_fillX"))
+    {
+        m_fillX = data.at("m_fillX").get<bool>();
+    }
+    if (data.contains("m_fillY"))
+    {
+        m_fillY = data.at("m_fillY").get<bool>();
+    }
 
     if (!data.is_object())
     {
@@ -359,6 +435,10 @@ json Widget::toJson() const
 {
     json data = json::object();
     data["m_sizePixels"] = writeVec2(m_sizePixels);
+    data["m_positionPixels"] = writeVec2(m_positionPixels);
+    data["m_anchor"] = toString(m_anchor);
+    data["m_fillX"] = m_fillX;
+    data["m_fillY"] = m_fillY;
     data["m_zOrder"] = m_zOrder;
 
     json elements = json::array();
@@ -366,9 +446,52 @@ json Widget::toJson() const
     {
         elements.push_back(writeElement(element));
     }
-
     data["m_elements"] = elements;
     return data;
+}
+
+void Widget::setPositionPixels(const Vec2& position)
+{
+    m_positionPixels = position;
+    m_layoutDirty = true;
+}
+
+const Vec2& Widget::getPositionPixels() const
+{
+    return m_positionPixels;
+}
+
+void Widget::setAnchor(WidgetAnchor anchor)
+{
+    m_anchor = anchor;
+    m_layoutDirty = true;
+}
+
+WidgetAnchor Widget::getAnchor() const
+{
+    return m_anchor;
+}
+
+void Widget::setFillX(bool fill)
+{
+    m_fillX = fill;
+    m_layoutDirty = true;
+}
+
+bool Widget::getFillX() const
+{
+    return m_fillX;
+}
+
+void Widget::setFillY(bool fill)
+{
+    m_fillY = fill;
+    m_layoutDirty = true;
+}
+
+bool Widget::getFillY() const
+{
+    return m_fillY;
 }
 
 void Widget::markLayoutDirty()

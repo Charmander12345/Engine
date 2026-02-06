@@ -321,6 +321,18 @@ bool DiagnosticsManager::isScenePrepared() const
     return m_scenePrepared;
 }
 
+void DiagnosticsManager::requestShutdown()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_shutdownRequested = true;
+}
+
+bool DiagnosticsManager::isShutdownRequested() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_shutdownRequested;
+}
+
 DiagnosticsManager::DiagnosticsManager()
 {
 	m_projectInfo = { "", "", "", "", RHIType::Unknown };

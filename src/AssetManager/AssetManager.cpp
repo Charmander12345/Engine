@@ -112,6 +112,11 @@ static fs::path getRegistryPath(const std::string& projectRoot)
     return fs::path(projectRoot) / "Config" / "AssetRegistry.bin";
 }
 
+static fs::path getEditorWidgetsRootPath()
+{
+    return fs::current_path() / "Editor" / "Widgets";
+}
+
 static bool readAssetHeaderType(const fs::path& absoluteAssetPath, AssetType& outType)
 {
 	std::ifstream in(absoluteAssetPath, std::ios::binary);
@@ -708,14 +713,18 @@ void AssetManager::ensureDefaultAssetsCreated()
         diagnostics.setScenePrepared(false);
     }
 
-    const std::string defaultWidgetRel = (fs::path("Widgets") / "TitleBar.asset").generic_string();
+    const std::string defaultWidgetRel = "TitleBar.asset";
     {
         json widgetJson = json::object();
         widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 50.0f} };
+        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        widgetJson["m_anchor"] = "TopLeft";
+        widgetJson["m_fillX"] = true;
         widgetJson["m_zOrder"] = 0;
 
         json elements = json::array();
         json panel = json::object();
+        panel["id"] = "TitleBar.Background";
         panel["type"] = "Panel";
         panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
         panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
@@ -726,6 +735,7 @@ void AssetManager::ensureDefaultAssetsCreated()
         elements.push_back(panel);
 
         json label = json::object();
+        label["id"] = "TitleBar.Label";
         label["type"] = "Text";
         label["from"] = json{ {"x", 0.02f}, {"y", 0.2f} };
         label["to"] = json{ {"x", 0.5f}, {"y", 0.8f} };
@@ -739,6 +749,7 @@ void AssetManager::ensureDefaultAssetsCreated()
         elements.push_back(label);
 
         json buttonStack = json::object();
+        buttonStack["id"] = "TitleBar.Buttons";
         buttonStack["type"] = "StackPanel";
         buttonStack["from"] = json{ {"x", 0.85f}, {"y", 0.1f} };
         buttonStack["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
@@ -747,6 +758,7 @@ void AssetManager::ensureDefaultAssetsCreated()
         buttonStack["sizeToContent"] = true;
 
         json btnMin = json::object();
+        btnMin["id"] = "TitleBar.Minimize";
         btnMin["type"] = "Button";
         btnMin["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
         btnMin["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
@@ -763,6 +775,7 @@ void AssetManager::ensureDefaultAssetsCreated()
         btnMin["shaderFragment"] = "button_fragment.glsl";
 
         json btnMax = json::object();
+        btnMax["id"] = "TitleBar.Maximize";
         btnMax["type"] = "Button";
         btnMax["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
         btnMax["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
@@ -779,7 +792,9 @@ void AssetManager::ensureDefaultAssetsCreated()
         btnMax["shaderFragment"] = "button_fragment.glsl";
 
         json btnClose = json::object();
+        btnClose["id"] = "TitleBar.Close";
         btnClose["type"] = "Button";
+        btnClose["clickEvent"] = "TitleBar.Close";
         btnClose["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
         btnClose["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
         btnClose["color"] = json{ {"x", 0.3f}, {"y", 0.08f}, {"z", 0.08f}, {"w", 1.0f} };
@@ -802,7 +817,115 @@ void AssetManager::ensureDefaultAssetsCreated()
         auto widget = std::make_shared<AssetData>();
         widget->setName("TitleBar");
         widget->setData(std::move(widgetJson));
-        ensureOnDisk(defaultWidgetRel, AssetType::Widget, widget);
+
+        const fs::path widgetsRoot = getEditorWidgetsRootPath();
+        std::error_code ec;
+        fs::create_directories(widgetsRoot, ec);
+        const fs::path abs = widgetsRoot / fs::path(defaultWidgetRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+        }
+
+    const std::string outlinerWidgetRel = "WorldOutliner.asset";
+    {
+        json widgetJson = json::object();
+        widgetJson["m_sizePixels"] = json{ {"x", 200.0f}, {"y", 0.0f} };
+        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 50.0f} };
+        widgetJson["m_anchor"] = "TopRight";
+        widgetJson["m_fillY"] = true;
+        widgetJson["m_zOrder"] = 1;
+
+        json elements = json::array();
+        json panel = json::object();
+        panel["id"] = "Outliner.Background";
+        panel["type"] = "Panel";
+        panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        panel["fillX"] = true;
+        panel["fillY"] = true;
+        panel["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 1.0f} };
+        panel["shaderVertex"] = "panel_vertex.glsl";
+        panel["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(panel);
+
+        json label = json::object();
+        label["id"] = "Outliner.Title";
+        label["type"] = "Text";
+        label["from"] = json{ {"x", 0.05f}, {"y", 0.02f} };
+        label["to"] = json{ {"x", 0.95f}, {"y", 0.1f} };
+        label["color"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        label["text"] = "Outliner";
+        label["font"] = "default.ttf";
+        label["fontSize"] = 18.0f;
+        label["sizeToContent"] = true;
+        label["shaderVertex"] = "text_vertex.glsl";
+        label["shaderFragment"] = "text_fragment.glsl";
+        elements.push_back(label);
+
+        widgetJson["m_elements"] = elements;
+
+        auto widget = std::make_shared<AssetData>();
+        widget->setName("WorldOutliner");
+        widget->setData(std::move(widgetJson));
+
+        const fs::path widgetsRoot = getEditorWidgetsRootPath();
+        std::error_code ec;
+        fs::create_directories(widgetsRoot, ec);
+        const fs::path abs = widgetsRoot / fs::path(outlinerWidgetRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+        }
+        if (!existsAndOk)
+        {
+            std::ofstream out(abs, std::ios::out | std::ios::trunc);
+            if (out.is_open())
+            {
+                json fileJson = json::object();
+                fileJson["magic"] = 0x41535453;
+                fileJson["version"] = 2;
+                fileJson["type"] = static_cast<int>(AssetType::Widget);
+                fileJson["name"] = widget->getName();
+                fileJson["data"] = widget->getData();
+                out << fileJson.dump(4);
+                if (!out.good())
+                {
+                    logger.log(Logger::Category::AssetManagement, "Failed to write editor widget asset.", Logger::LogLevel::ERROR);
+                }
+            }
+            else
+            {
+                logger.log(Logger::Category::AssetManagement, "Failed to open editor widget asset for writing.", Logger::LogLevel::ERROR);
+            }
+        }
+    }
+        if (!existsAndOk)
+        {
+            std::ofstream out(abs, std::ios::out | std::ios::trunc);
+            if (out.is_open())
+            {
+                json fileJson = json::object();
+                fileJson["magic"] = 0x41535453;
+                fileJson["version"] = 2;
+                fileJson["type"] = static_cast<int>(AssetType::Widget);
+                fileJson["name"] = widget->getName();
+                fileJson["data"] = widget->getData();
+                out << fileJson.dump(4);
+                if (!out.good())
+                {
+                    logger.log(Logger::Category::AssetManagement, "Failed to write editor widget asset.", Logger::LogLevel::ERROR);
+                }
+            }
+            else
+            {
+                logger.log(Logger::Category::AssetManagement, "Failed to open editor widget asset for writing.", Logger::LogLevel::ERROR);
+            }
+        }
     }
 
 	logger.log(Logger::Category::AssetManagement, "Default assets ensured.", Logger::LogLevel::INFO);
@@ -996,6 +1119,12 @@ std::string AssetManager::getAbsoluteContentPath(const std::string& relativeToCo
     }
 
     fs::path p = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relativeToContent);
+    return p.lexically_normal().string();
+}
+
+std::string AssetManager::getEditorWidgetPath(const std::string& relativeToEditorWidgets) const
+{
+    fs::path p = getEditorWidgetsRootPath() / fs::path(relativeToEditorWidgets);
     return p.lexically_normal().string();
 }
 

@@ -23,6 +23,46 @@
 #include "../../AssetManager/AssetManager.h"
 #include "../Texture.h"
 
+namespace
+{
+    static SDL_HitTestResult SDLCALL WindowHitTestCallback(SDL_Window* window, const SDL_Point* area, void* data)
+    {
+        if (!window || !area || !data)
+        {
+            return SDL_HITTEST_NORMAL;
+        }
+
+        const auto* ctx = static_cast<WindowHitTestContext*>(data);
+        int width = 0;
+        int height = 0;
+        SDL_GetWindowSizeInPixels(window, &width, &height);
+
+        const int x = area->x;
+        const int y = area->y;
+
+        const bool left = x < ctx->resizeBorder;
+        const bool right = x >= width - ctx->resizeBorder;
+        const bool top = y < ctx->resizeBorder;
+        const bool bottom = y >= height - ctx->resizeBorder;
+
+        if (top && left) return SDL_HITTEST_RESIZE_TOPLEFT;
+        if (top && right) return SDL_HITTEST_RESIZE_TOPRIGHT;
+        if (bottom && left) return SDL_HITTEST_RESIZE_BOTTOMLEFT;
+        if (bottom && right) return SDL_HITTEST_RESIZE_BOTTOMRIGHT;
+        if (left) return SDL_HITTEST_RESIZE_LEFT;
+        if (right) return SDL_HITTEST_RESIZE_RIGHT;
+        if (top) return SDL_HITTEST_RESIZE_TOP;
+        if (bottom) return SDL_HITTEST_RESIZE_BOTTOM;
+
+        if (y < ctx->titlebarHeight)
+        {
+            return SDL_HITTEST_DRAGGABLE;
+        }
+
+        return SDL_HITTEST_NORMAL;
+    }
+}
+
 OpenGLRenderer::OpenGLRenderer()
 {
     m_initialized = false;
@@ -105,7 +145,8 @@ bool OpenGLRenderer::initialize()
 
     logger.log(Logger::Category::Rendering, "Creating Window...", Logger::LogLevel::INFO);
 
-    m_window = SDL_CreateWindow("Engine Project", 800, 600, SDL_WINDOW_FULLSCREEN | SDL_WINDOW_OPENGL);
+    m_window = SDL_CreateWindow("Engine Project", 800, 600,
+        SDL_WINDOW_MAXIMIZED | SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS | SDL_WINDOW_RESIZABLE);
     if (!m_window) {
         logger.log(Logger::Category::Rendering, std::string("Failed to create window: ") + SDL_GetError(), Logger::LogLevel::ERROR);
         SDL_Quit();
@@ -178,7 +219,12 @@ bool OpenGLRenderer::initialize()
     }
 
     SDL_ShowWindow(m_window);
-    SDL_RestoreWindow(m_window);
+    SDL_MaximizeWindow(m_window);
+
+    if (SDL_SetWindowHitTest(m_window, WindowHitTestCallback, &m_hitTestContext) != 0)
+    {
+        logger.log(Logger::Category::Rendering, std::string("Failed to set window hit test: ") + SDL_GetError(), Logger::LogLevel::WARNING);
+    }
     return true;
 }
 
@@ -803,9 +849,14 @@ void OpenGLRenderer::renderUI()
 
             const auto& widget = entry->widget;
             Vec2 widgetSize = widget->getSizePixels();
+            Vec2 widgetPosition{};
             if (widget->hasComputedSize())
             {
                 widgetSize = widget->getComputedSizePixels();
+            }
+            if (widget->hasComputedPosition())
+            {
+                widgetPosition = widget->getComputedPositionPixels();
             }
             if (widgetSize.x <= 0.0f)
             {
@@ -818,7 +869,7 @@ void OpenGLRenderer::renderUI()
 
             for (const auto& element : widget->getElements())
             {
-                renderElement(renderElement, element, 0.0f, 0.0f, widgetSize.x, widgetSize.y);
+                renderElement(renderElement, element, widgetPosition.x, widgetPosition.y, widgetSize.x, widgetSize.y);
             }
         }
     }

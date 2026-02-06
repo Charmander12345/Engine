@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <functional>
 
 #include "../AssetManager/json.hpp"
 #include "../Core/EngineObject.h"
@@ -39,9 +40,18 @@ enum class StackOrientation
     Vertical
 };
 
+enum class WidgetAnchor
+{
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight
+};
+
 struct WidgetElement
 {
     WidgetElementType type{ WidgetElementType::Unknown };
+    std::string id;
     Vec2 from{};
     Vec2 to{ 1.0f, 1.0f };
     Vec4 color{ 1.0f, 1.0f, 1.0f, 1.0f };
@@ -54,12 +64,14 @@ struct WidgetElement
     TextAlignV textAlignV{ TextAlignV::Top };
     Vec2 padding{ 0.0f, 0.0f };
     Vec2 margin{ 0.0f, 0.0f };
+    bool isHitTestable{ false };
     bool fillX{ false };
     bool fillY{ false };
     bool sizeToContent{ false };
     StackOrientation orientation{ StackOrientation::Vertical };
     std::string shaderVertex;
     std::string shaderFragment;
+    std::string clickEvent;
     std::vector<WidgetElement> children;
     Vec2 computedSizePixels{};
     bool hasComputedSize{ false };
@@ -67,6 +79,11 @@ struct WidgetElement
     bool hasContentSize{ false };
     Vec2 computedPositionPixels{};
     bool hasComputedPosition{ false };
+    bool isHovered{ false };
+    bool isPressed{ false };
+    std::function<void()> onClicked;
+    std::function<void()> onHovered;
+    std::function<void()> onUnhovered;
 };
 
 class Widget : public EngineObject
@@ -77,9 +94,20 @@ public:
 
     void setSizePixels(const Vec2& size);
     const Vec2& getSizePixels() const;
+    void setPositionPixels(const Vec2& position);
+    const Vec2& getPositionPixels() const;
+    void setAnchor(WidgetAnchor anchor);
+    WidgetAnchor getAnchor() const;
+    void setFillX(bool fill);
+    bool getFillX() const;
+    void setFillY(bool fill);
+    bool getFillY() const;
     const Vec2& getComputedSizePixels() const;
     bool hasComputedSize() const;
     void setComputedSizePixels(const Vec2& size, bool hasComputed);
+    const Vec2& getComputedPositionPixels() const;
+    bool hasComputedPosition() const;
+    void setComputedPositionPixels(const Vec2& position, bool hasComputed);
 
     void markLayoutDirty();
     bool isLayoutDirty() const;
@@ -97,8 +125,14 @@ public:
 
 private:
     Vec2 m_sizePixels{};
+    Vec2 m_positionPixels{};
+    WidgetAnchor m_anchor{ WidgetAnchor::TopLeft };
+    bool m_fillX{ false };
+    bool m_fillY{ false };
     Vec2 m_computedSizePixels{};
+    Vec2 m_computedPositionPixels{};
     bool m_hasComputedSize{ false };
+    bool m_hasComputedPosition{ false };
     bool m_layoutDirty{ true };
     std::vector<WidgetElement> m_elements;
     int m_zOrder{ 0 };

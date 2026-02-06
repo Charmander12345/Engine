@@ -32,6 +32,7 @@ int main()
         logger.log(Logger::Category::AssetManagement, "AssetManager initialisation failed.", Logger::LogLevel::FATAL);
         return -1;
     }
+
     logger.log(Logger::Category::AssetManagement, "AssetManager initialised successfully.", Logger::LogLevel::INFO);
 
     std::string cwd = std::filesystem::current_path().string();
@@ -87,6 +88,12 @@ int main()
         return -1;
     }
 
+    SDL_ShowCursor();
+    if (auto* w = renderer->window())
+    {
+        SDL_SetWindowRelativeMouseMode(w, false);
+    }
+
     logger.log(Logger::Category::Rendering, std::string("Renderer initialised successfully: ") + renderer->name(), Logger::LogLevel::INFO);
 
 #if defined(_WIN32)
@@ -99,7 +106,13 @@ int main()
 
     if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
     {
-        const std::string widgetPath = assetManager.getAbsoluteContentPath("Widgets/TitleBar.asset");
+        glRenderer->getUIManager().registerClickEvent("TitleBar.Close", []()
+            {
+                Logger::Instance().log(Logger::Category::Input, "TitleBar close button clicked.", Logger::LogLevel::INFO);
+                DiagnosticsManager::Instance().requestShutdown();
+            });
+
+        const std::string widgetPath = assetManager.getEditorWidgetPath("TitleBar.asset");
         if (!widgetPath.empty())
         {
             const int widgetId = assetManager.loadAsset(widgetPath, AssetType::Widget, AssetManager::Sync);
@@ -110,6 +123,22 @@ int main()
                     if (auto widget = glRenderer->createWidgetFromAsset(asset))
                     {
                         glRenderer->getUIManager().registerWidget("TitleBar", widget);
+                    }
+                }
+            }
+        }
+
+        const std::string outlinerPath = assetManager.getEditorWidgetPath("WorldOutliner.asset");
+        if (!outlinerPath.empty())
+        {
+            const int widgetId = assetManager.loadAsset(outlinerPath, AssetType::Widget, AssetManager::Sync);
+            if (widgetId != 0)
+            {
+                if (auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(widgetId)))
+                {
+                    if (auto widget = glRenderer->createWidgetFromAsset(asset))
+                    {
+                        glRenderer->getUIManager().registerWidget("WorldOutliner", widget);
                     }
                 }
             }
@@ -138,16 +167,6 @@ int main()
         return true;
         });
 
-    if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
-    {
-        diagnostics.registerKeyUpHandler(SDLK_F11, [glRenderer]() {
-            glRenderer->toggleUIDebug();
-            Logger::Instance().log(Logger::Category::Input,
-                std::string("UI debug bounds: ") + (glRenderer->isUIDebugEnabled() ? "ON" : "OFF"),
-                Logger::LogLevel::INFO);
-            return true;
-            });
-    }
 
     bool rightMouseDown = false;
 
@@ -208,6 +227,31 @@ int main()
             if (keys[SDL_SCANCODE_E]) renderer->moveCamera(0.0f, 0.0f, +moveSpeed);
         }
 
+        float mouseX = 0.0f;
+        float mouseY = 0.0f;
+        SDL_GetMouseState(&mouseX, &mouseY);
+        Vec2 mousePosPixels{ mouseX, mouseY };
+        bool isOverUI = false;
+        if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
+        {
+            int windowW = 0;
+            int windowH = 0;
+            int pixelW = 0;
+            int pixelH = 0;
+            if (auto* w = glRenderer->window())
+            {
+                SDL_GetWindowSize(w, &windowW, &windowH);
+                SDL_GetWindowSizeInPixels(w, &pixelW, &pixelH);
+            }
+
+            const float scaleX = (windowW > 0 && pixelW > 0) ? (static_cast<float>(pixelW) / static_cast<float>(windowW)) : 1.0f;
+            const float scaleY = (windowH > 0 && pixelH > 0) ? (static_cast<float>(pixelH) / static_cast<float>(windowH)) : 1.0f;
+            mousePosPixels = Vec2{ mouseX * scaleX, mouseY * scaleY };
+            auto& uiManager = glRenderer->getUIManager();
+            uiManager.setMousePosition(mousePosPixels);
+            isOverUI = uiManager.isPointerOverUI(mousePosPixels);
+        }
+
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
@@ -217,14 +261,66 @@ int main()
                 running = false;
             }
 
+            if (event.type == SDL_EVENT_MOUSE_MOTION)
+            {
+                if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
+                {
+                    int windowW = 0;
+                    int windowH = 0;
+                    int pixelW = 0;
+                    int pixelH = 0;
+                    if (auto* w = glRenderer->window())
+                    {
+                        SDL_GetWindowSize(w, &windowW, &windowH);
+                        SDL_GetWindowSizeInPixels(w, &pixelW, &pixelH);
+                    }
+
+                    const float scaleX = (windowW > 0 && pixelW > 0) ? (static_cast<float>(pixelW) / static_cast<float>(windowW)) : 1.0f;
+                    const float scaleY = (windowH > 0 && pixelH > 0) ? (static_cast<float>(pixelH) / static_cast<float>(windowH)) : 1.0f;
+                    mousePosPixels = Vec2{ event.motion.x * scaleX, event.motion.y * scaleY };
+                    auto& uiManager = glRenderer->getUIManager();
+                    uiManager.setMousePosition(mousePosPixels);
+                    isOverUI = uiManager.isPointerOverUI(mousePosPixels);
+                }
+            }
+
+            if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT)
+            {
+                if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
+                {
+                    int windowW = 0;
+                    int windowH = 0;
+                    int pixelW = 0;
+                    int pixelH = 0;
+                    if (auto* w = glRenderer->window())
+                    {
+                        SDL_GetWindowSize(w, &windowW, &windowH);
+                        SDL_GetWindowSizeInPixels(w, &pixelW, &pixelH);
+                    }
+
+                    const float scaleX = (windowW > 0 && pixelW > 0) ? (static_cast<float>(pixelW) / static_cast<float>(windowW)) : 1.0f;
+                    const float scaleY = (windowH > 0 && pixelH > 0) ? (static_cast<float>(pixelH) / static_cast<float>(windowH)) : 1.0f;
+                    const Vec2 mousePos{ static_cast<float>(event.button.x) * scaleX, static_cast<float>(event.button.y) * scaleY };
+                    auto& uiManager = glRenderer->getUIManager();
+                    uiManager.setMousePosition(mousePos);
+                    if (uiManager.handleMouseDown(mousePos, event.button.button))
+                    {
+                        continue;
+                    }
+                }
+            }
+
             if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_RIGHT)
             {
-                rightMouseDown = true;
-                if (auto* w = renderer->window())
+                if (!isOverUI)
                 {
-                    SDL_SetWindowRelativeMouseMode(w, true);
+                    rightMouseDown = true;
+                    if (auto* w = renderer->window())
+                    {
+                        SDL_SetWindowRelativeMouseMode(w, true);
+                    }
+                    SDL_HideCursor();
                 }
-                SDL_HideCursor();
             }
             else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_RIGHT)
             {
@@ -247,6 +343,17 @@ int main()
 
             if (event.type == SDL_EVENT_KEY_UP)
             {
+                if (event.key.key == SDLK_F11)
+                {
+                    if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
+                    {
+                        glRenderer->toggleUIDebug();
+                        Logger::Instance().log(Logger::Category::Input,
+                            std::string("UI debug bounds: ") + (glRenderer->isUIDebugEnabled() ? "ON" : "OFF"),
+                            Logger::LogLevel::INFO);
+                    }
+                    continue;
+                }
                 diagnostics.dispatchKeyUp(event.key.key);
                 if (event.key.key == SDLK_F12)
                 {
@@ -257,6 +364,11 @@ int main()
             {
                 diagnostics.dispatchKeyDown(event.key.key);
             }
+        }
+
+        if (diagnostics.isShutdownRequested())
+        {
+            running = false;
         }
 
         if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))

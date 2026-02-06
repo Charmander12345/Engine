@@ -102,6 +102,9 @@ public:
     void setScenePrepared(bool prepared);
     bool isScenePrepared() const;
 
+    void requestShutdown();
+    bool isShutdownRequested() const;
+
 	// Action tracking (only intended for async actions)
 	bool isActionFinished(unsigned int actionID) const;
 	Action& registerAction(ActionType type);
@@ -140,4 +143,5 @@ private:
     std::unordered_map<int, std::vector<KeyCallback>> m_keyUpHandlers;
 
 	std::unordered_map<unsigned int, Action> m_actions;
+	bool m_shutdownRequested{ false };
 };

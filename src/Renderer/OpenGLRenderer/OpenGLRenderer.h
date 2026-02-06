@@ -17,6 +17,12 @@
 class OpenGLObject2D;
 class OpenGLObject3D;
 
+struct WindowHitTestContext
+{
+    int titlebarHeight{ 50 };
+    int resizeBorder{ 6 };
+};
+
 class OpenGLRenderer : public Renderer
 {
 public:
@@ -87,6 +93,7 @@ private:
     GLuint m_uiQuadVbo{0};
     std::unordered_map<std::string, GLuint> m_uiQuadPrograms;
     bool m_uiDebugEnabled{false};
+    WindowHitTestContext m_hitTestContext{};
 
 public:
     void toggleUIDebug() { m_uiDebugEnabled = !m_uiDebugEnabled; }

@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <numeric>
+#include <SDL3/SDL.h>
+#include "../Diagnostics/DiagnosticsManager.h"
 
 namespace
 {
@@ -231,7 +233,18 @@ Vec2 UIManager::getAvailableViewportSize() const
 
 void UIManager::setAvailableViewportSize(const Vec2& size)
 {
+    if (m_availableViewportSize.x == size.x && m_availableViewportSize.y == size.y)
+    {
+        return;
+    }
     m_availableViewportSize = size;
+    for (auto& entry : m_widgets)
+    {
+        if (entry.widget)
+        {
+            entry.widget->markLayoutDirty();
+        }
+    }
 }
 
 void UIManager::registerUI(const std::string& id)
@@ -306,6 +319,17 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
         }
 
         Vec2 widgetSize = entry.widget->getSizePixels();
+        const Vec2 widgetOffset = entry.widget->getPositionPixels();
+        const WidgetAnchor widgetAnchor = entry.widget->getAnchor();
+
+        if (entry.widget->getFillX())
+        {
+            widgetSize.x = std::max(0.0f, m_availableViewportSize.x - widgetOffset.x);
+        }
+        if (entry.widget->getFillY())
+        {
+            widgetSize.y = std::max(0.0f, m_availableViewportSize.y - widgetOffset.y);
+        }
         if (widgetSize.x <= 0.0f)
         {
             widgetSize.x = m_availableViewportSize.x;
@@ -314,13 +338,337 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
         {
             widgetSize.y = hasComputedWidgetSize ? computedWidgetSize.y : m_availableViewportSize.y;
         }
+
+        Vec2 widgetPosition = widgetOffset;
+        switch (widgetAnchor)
+        {
+        case WidgetAnchor::TopRight:
+            widgetPosition.x = m_availableViewportSize.x - widgetSize.x - widgetOffset.x;
+            widgetPosition.y = widgetOffset.y;
+            break;
+        case WidgetAnchor::BottomLeft:
+            widgetPosition.x = widgetOffset.x;
+            widgetPosition.y = m_availableViewportSize.y - widgetSize.y - widgetOffset.y;
+            break;
+        case WidgetAnchor::BottomRight:
+            widgetPosition.x = m_availableViewportSize.x - widgetSize.x - widgetOffset.x;
+            widgetPosition.y = m_availableViewportSize.y - widgetSize.y - widgetOffset.y;
+            break;
+        default:
+            widgetPosition.x = widgetOffset.x;
+            widgetPosition.y = widgetOffset.y;
+            break;
+        }
         entry.widget->setComputedSizePixels(widgetSize, true);
+        entry.widget->setComputedPositionPixels(widgetPosition, true);
 
         for (auto& element : entry.widget->getElementsMutable())
         {
-            layoutElement(element, 0.0f, 0.0f, widgetSize.x, widgetSize.y, measureText);
+            layoutElement(element, widgetPosition.x, widgetPosition.y, widgetSize.x, widgetSize.y, measureText);
         }
 
         entry.widget->setLayoutDirty(false);
     }
+
+    if (!m_hasMousePosition)
+    {
+        return;
+    }
+
+    const auto pointInRect = [](const Vec2& pos, const Vec2& size, const Vec2& point)
+        {
+            return point.x >= pos.x && point.x <= (pos.x + size.x) &&
+                point.y >= pos.y && point.y <= (pos.y + size.y);
+        };
+
+    const std::function<bool(WidgetElement&, bool)> updateHover =
+        [&](WidgetElement& element, bool allowHover) -> bool
+        {
+            bool consumed = false;
+            for (auto it = element.children.rbegin(); it != element.children.rend(); ++it)
+            {
+                if (updateHover(*it, allowHover && !consumed))
+                {
+                    consumed = true;
+                }
+            }
+
+            bool isHover = false;
+            if (allowHover && element.isHitTestable && element.hasComputedPosition && element.hasComputedSize)
+            {
+                isHover = pointInRect(element.computedPositionPixels, element.computedSizePixels, m_mousePosition);
+            }
+
+            if (element.isHovered != isHover)
+            {
+                element.isHovered = isHover;
+                if (isHover)
+                {
+                    if (element.onHovered)
+                    {
+                        element.onHovered();
+                    }
+                }
+                else
+                {
+                    if (element.onUnhovered)
+                    {
+                        element.onUnhovered();
+                    }
+                }
+            }
+
+            return consumed || isHover;
+        };
+
+    for (auto& entry : m_widgets)
+    {
+        if (!entry.widget)
+        {
+            continue;
+        }
+        auto& elements = entry.widget->getElementsMutable();
+        bool consumed = false;
+        for (auto it = elements.rbegin(); it != elements.rend(); ++it)
+        {
+            if (updateHover(*it, !consumed))
+            {
+                consumed = true;
+            }
+        }
+    }
+
+    if (!m_pendingClick || m_pendingClickButton != SDL_BUTTON_LEFT)
+    {
+        return;
+    }
+
+    std::vector<WidgetEntry*> ordered;
+    ordered.reserve(m_widgets.size());
+    for (auto& entry : m_widgets)
+    {
+        ordered.push_back(&entry);
+    }
+
+    std::sort(ordered.begin(), ordered.end(), [](const WidgetEntry* a, const WidgetEntry* b)
+        {
+            const int za = (a && a->widget) ? a->widget->getZOrder() : 0;
+            const int zb = (b && b->widget) ? b->widget->getZOrder() : 0;
+            return za > zb;
+        });
+
+    const std::function<bool(WidgetElement&)> handleClick =
+        [&](WidgetElement& element) -> bool
+        {
+            for (auto it = element.children.rbegin(); it != element.children.rend(); ++it)
+            {
+                if (handleClick(*it))
+                {
+                    return true;
+                }
+            }
+
+            if (!element.isHitTestable || !element.hasComputedPosition || !element.hasComputedSize)
+            {
+                return false;
+            }
+
+            if (!pointInRect(element.computedPositionPixels, element.computedSizePixels, m_pendingClickPos))
+            {
+                return false;
+            }
+
+            element.isPressed = true;
+            if (element.onClicked)
+            {
+                element.onClicked();
+            }
+            else if (!element.clickEvent.empty())
+            {
+                auto it = m_clickEvents.find(element.clickEvent);
+                if (it != m_clickEvents.end() && it->second)
+                {
+                    it->second();
+                }
+            }
+            return true;
+        };
+
+    for (auto* entry : ordered)
+    {
+        if (!entry || !entry->widget)
+        {
+            continue;
+        }
+
+        auto& elements = entry->widget->getElementsMutable();
+        for (auto it = elements.rbegin(); it != elements.rend(); ++it)
+        {
+            if (handleClick(*it))
+            {
+                m_pendingClick = false;
+                return;
+            }
+        }
+    }
+
+    m_pendingClick = false;
+}
+
+bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
+{
+    if (button != SDL_BUTTON_LEFT)
+    {
+        return false;
+    }
+
+    std::vector<const WidgetEntry*> ordered;
+    ordered.reserve(m_widgets.size());
+    for (const auto& entry : m_widgets)
+    {
+        ordered.push_back(&entry);
+    }
+
+    std::sort(ordered.begin(), ordered.end(), [](const WidgetEntry* a, const WidgetEntry* b)
+        {
+            const int za = (a && a->widget) ? a->widget->getZOrder() : 0;
+            const int zb = (b && b->widget) ? b->widget->getZOrder() : 0;
+            return za > zb;
+        });
+
+    const auto pointInRect = [](const Vec2& pos, const Vec2& size, const Vec2& point)
+        {
+            return point.x >= pos.x && point.x <= (pos.x + size.x) &&
+                point.y >= pos.y && point.y <= (pos.y + size.y);
+        };
+
+    const std::function<bool(const WidgetElement&, const std::string&)> hitTestElement =
+        [&](const WidgetElement& element, const std::string& widgetId) -> bool
+        {
+            if (!element.hasComputedPosition || !element.hasComputedSize)
+            {
+                return false;
+            }
+
+            for (auto it = element.children.rbegin(); it != element.children.rend(); ++it)
+            {
+                if (hitTestElement(*it, widgetId))
+                {
+                    return true;
+                }
+            }
+
+            if (!pointInRect(element.computedPositionPixels, element.computedSizePixels, screenPos))
+            {
+                return false;
+            }
+
+            if (!element.isHitTestable)
+            {
+                return false;
+            }
+
+            if (element.onClicked)
+            {
+                element.onClicked();
+            }
+            else if (!element.clickEvent.empty())
+            {
+                auto it = m_clickEvents.find(element.clickEvent);
+                if (it != m_clickEvents.end() && it->second)
+                {
+                    it->second();
+                }
+            }
+
+            return true;
+        };
+
+    for (const auto* entry : ordered)
+    {
+        if (!entry || !entry->widget)
+        {
+            continue;
+        }
+
+        const auto& elements = entry->widget->getElements();
+        for (auto it = elements.rbegin(); it != elements.rend(); ++it)
+        {
+            if (hitTestElement(*it, entry->id))
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+void UIManager::setMousePosition(const Vec2& screenPos)
+{
+    m_mousePosition = screenPos;
+    m_hasMousePosition = true;
+}
+
+bool UIManager::hasClickEvent(const std::string& eventId) const
+{
+    return m_clickEvents.find(eventId) != m_clickEvents.end();
+}
+
+void UIManager::registerClickEvent(const std::string& eventId, std::function<void()> callback)
+{
+    if (eventId.empty())
+    {
+        return;
+    }
+    m_clickEvents[eventId] = std::move(callback);
+}
+
+bool UIManager::isPointerOverUI(const Vec2& screenPos) const
+{
+    const auto pointInRect = [](const Vec2& pos, const Vec2& size, const Vec2& point)
+        {
+            return point.x >= pos.x && point.x <= (pos.x + size.x) &&
+                point.y >= pos.y && point.y <= (pos.y + size.y);
+        };
+
+    const std::function<bool(const WidgetElement&)> hitTestElement =
+        [&](const WidgetElement& element) -> bool
+        {
+            if (element.isHitTestable && element.hasComputedPosition && element.hasComputedSize)
+            {
+                if (pointInRect(element.computedPositionPixels, element.computedSizePixels, screenPos))
+                {
+                    return true;
+                }
+            }
+
+            for (const auto& child : element.children)
+            {
+                if (hitTestElement(child))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+    for (const auto& entry : m_widgets)
+    {
+        if (!entry.widget)
+        {
+            continue;
+        }
+
+        for (const auto& element : entry.widget->getElements())
+        {
+            if (hitTestElement(element))
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }

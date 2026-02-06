@@ -4,6 +4,7 @@
 #include <vector>
 #include <memory>
 #include <functional>
+#include <unordered_map>
 
 #include "../Core/MathTypes.h"
 #include "UIWidget.h"
@@ -36,9 +37,20 @@ public:
     void unregisterWidget(const std::string& id);
 
     void updateLayouts(const std::function<Vec2(const std::string&, float)>& measureText);
+    bool handleMouseDown(const Vec2& screenPos, int button);
+    void setMousePosition(const Vec2& screenPos);
+    bool isPointerOverUI(const Vec2& screenPos) const;
+    bool hasClickEvent(const std::string& eventId) const;
+    void registerClickEvent(const std::string& eventId, std::function<void()> callback);
 
 private:
     Vec2 m_availableViewportSize{};
+    Vec2 m_mousePosition{};
+    bool m_hasMousePosition{ false };
+    std::unordered_map<std::string, std::function<void()>> m_clickEvents;
+    bool m_pendingClick{ false };
+    int m_pendingClickButton{ 0 };
+    Vec2 m_pendingClickPos{};
     std::vector<UIEntry> m_entries;
     std::vector<WidgetEntry> m_widgets;
 };
