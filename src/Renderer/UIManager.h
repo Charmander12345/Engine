@@ -44,13 +44,16 @@ public:
     void registerClickEvent(const std::string& eventId, std::function<void()> callback);
 
 private:
+    WidgetElement* hitTest(const Vec2& screenPos, bool logDetails = false) const;
+    void populateOutlinerWidget(const std::shared_ptr<Widget>& widget);
+
     Vec2 m_availableViewportSize{};
     Vec2 m_mousePosition{};
     bool m_hasMousePosition{ false };
     std::unordered_map<std::string, std::function<void()>> m_clickEvents;
-    bool m_pendingClick{ false };
-    int m_pendingClickButton{ 0 };
-    Vec2 m_pendingClickPos{};
     std::vector<UIEntry> m_entries;
     std::vector<WidgetEntry> m_widgets;
+
+    void bindClickEventsForWidget(const std::shared_ptr<Widget>& widget);
+    void bindClickEventsForElement(WidgetElement& element);
 };

@@ -206,6 +206,19 @@ static void deserializeScriptComponent(const json& value, ECS::ScriptComponent& 
 	}
 }
 
+static json serializeNameComponent(const ECS::NameComponent& component)
+{
+	return json{ {"displayName", component.displayName} };
+}
+
+static void deserializeNameComponent(const json& value, ECS::NameComponent& component)
+{
+	if (value.is_object() && value.contains("displayName"))
+	{
+		component.displayName = value.at("displayName").get<std::string>();
+	}
+}
+
 bool EngineLevel::prepareEcs()
 {
 	if (m_ecsPrepared)
@@ -306,7 +319,20 @@ bool EngineLevel::prepareEcs()
 					deserializeScriptComponent(componentsJson.at("Script"), component);
 					m_ecs->addComponent<ECS::ScriptComponent>(entity, component);
 				}
+				if (componentsJson.contains("Name"))
+				{
+					ECS::NameComponent component;
+					deserializeNameComponent(componentsJson.at("Name"), component);
+					m_ecs->addComponent<ECS::NameComponent>(entity, component);
+				}
 			}
+		}
+
+		if (!m_ecs->hasComponent<ECS::NameComponent>(entity))
+		{
+			ECS::NameComponent component;
+			component.displayName = "Entity " + std::to_string(entity);
+			m_ecs->addComponent<ECS::NameComponent>(entity, component);
 		}
 
 		m_entities.push_back(entity);
@@ -354,6 +380,10 @@ json EngineLevel::serializeEcsEntities() const
 		if (const auto* component = ecs.getComponent<ECS::ScriptComponent>(entity))
 		{
 			componentsJson["Script"] = serializeScriptComponent(*component);
+		}
+		if (const auto* component = ecs.getComponent<ECS::NameComponent>(entity))
+		{
+			componentsJson["Name"] = serializeNameComponent(*component);
 		}
 
 		entityJson["components"] = componentsJson;

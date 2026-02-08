@@ -21,6 +21,8 @@ struct WindowHitTestContext
 {
     int titlebarHeight{ 50 };
     int resizeBorder{ 6 };
+    int buttonStripWidth{ 120 };
+    int buttonStripHeight{ 45 };
 };
 
 class OpenGLRenderer : public Renderer
@@ -52,7 +54,8 @@ private:
     void renderUI();
     bool ensureUIQuadRenderer();
     GLuint getUIQuadProgram(const std::string& vertexShaderPath, const std::string& fragmentShaderPath);
-    void drawUIPanel(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program);
+    void drawUIPanel(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program,
+        const Vec4& hoverColor = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f }, bool isHovered = false);
     void drawUIOutline(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program);
 
     struct RenderEntry
@@ -87,6 +90,7 @@ private:
 
     std::shared_ptr<OpenGLTextRenderer> m_textRenderer;
     std::vector<TextCommand> m_textQueue;
+
 
     GLuint m_uiQuadProgram{0};
     GLuint m_uiQuadVao{0};

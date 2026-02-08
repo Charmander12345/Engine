@@ -46,6 +46,12 @@ public:
     void setModelMatrix(const glm::mat4& matrix) { m_modelMatrix = matrix; }
     void setViewMatrix(const glm::mat4& matrix) { m_viewMatrix = matrix; }
     void setProjectionMatrix(const glm::mat4& matrix) { m_projectionMatrix = matrix; }
+    void setLightData(const glm::vec3& position, const glm::vec3& color, float intensity)
+    {
+        m_lightPosition = position;
+        m_lightColor = color;
+        m_lightIntensity = intensity;
+    }
 
 private:
     void bindTextures();
@@ -68,4 +74,7 @@ private:
     glm::mat4 m_modelMatrix{1.0f};
     glm::mat4 m_viewMatrix{1.0f};
     glm::mat4 m_projectionMatrix{1.0f};
+    glm::vec3 m_lightPosition{0.0f, 1.0f, 0.0f};
+    glm::vec3 m_lightColor{1.0f, 1.0f, 1.0f};
+    float m_lightIntensity{1.0f};
 };

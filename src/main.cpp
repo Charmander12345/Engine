@@ -1,6 +1,8 @@
 ﻿#include <iostream>
 #include <filesystem>
 #include <cstdlib>
+#include <iomanip>
+#include <sstream>
 #include <SDL3/SDL.h>
 
 #if defined(_WIN32)
@@ -17,6 +19,7 @@
 #include "Core/MathTypes.h"
 
 using namespace std;
+
 
 int main()
 {
@@ -72,10 +75,12 @@ int main()
     logger.log(Logger::Category::Engine, "SDL initialised successfully.", Logger::LogLevel::INFO);
 
     auto& diagnostics = DiagnosticsManager::Instance();
-    diagnostics.setRHIType(DiagnosticsManager::RHIType::OpenGL);
-    logger.log(Logger::Category::Diagnostics,
-        std::string("Selected RHI: ") + DiagnosticsManager::rhiTypeToString(diagnostics.getRHIType()),
-        Logger::LogLevel::INFO);
+    //diagnostics.setRHIType(DiagnosticsManager::RHIType::OpenGL);
+    if (!diagnostics.loadConfig())
+    {
+        diagnostics.setWindowSize(Vec2{ 800.0f, 600.0f });
+        diagnostics.setWindowState(DiagnosticsManager::WindowState::Maximized);
+    }
 
     logger.log(Logger::Category::Rendering, "Initialising Renderer (OpenGL)...", Logger::LogLevel::INFO);
     Renderer* renderer = new OpenGLRenderer();
@@ -91,6 +96,26 @@ int main()
     SDL_ShowCursor();
     if (auto* w = renderer->window())
     {
+        const Vec2 windowSize = diagnostics.getWindowSize();
+        if (windowSize.x > 0.0f && windowSize.y > 0.0f)
+        {
+            SDL_SetWindowSize(w, static_cast<int>(windowSize.x), static_cast<int>(windowSize.y));
+        }
+
+        switch (diagnostics.getWindowState())
+        {
+        case DiagnosticsManager::WindowState::Fullscreen:
+            SDL_SetWindowFullscreen(w, SDL_WINDOW_FULLSCREEN);
+            break;
+        case DiagnosticsManager::WindowState::Normal:
+            SDL_RestoreWindow(w);
+            break;
+        case DiagnosticsManager::WindowState::Maximized:
+        default:
+            SDL_MaximizeWindow(w);
+            break;
+        }
+
         SDL_SetWindowRelativeMouseMode(w, false);
     }
 
@@ -169,6 +194,7 @@ int main()
 
 
     bool rightMouseDown = false;
+    float cameraSpeedMultiplier = 1.0f;
 
     uint64_t lastCounter = SDL_GetPerformanceCounter();
     const double freq = static_cast<double>(SDL_GetPerformanceFrequency());
@@ -215,7 +241,7 @@ int main()
         }
 
         // Basic movement (camera-relative)
-        const float moveSpeed = static_cast<float>(3.0 * dt); // units/sec
+        const float moveSpeed = static_cast<float>(3.0 * dt * cameraSpeedMultiplier); // units/sec
         const bool* keys = SDL_GetKeyboardState(nullptr);
         if (keys)
         {
@@ -227,26 +253,14 @@ int main()
             if (keys[SDL_SCANCODE_E]) renderer->moveCamera(0.0f, 0.0f, +moveSpeed);
         }
 
-        float mouseX = 0.0f;
-        float mouseY = 0.0f;
-        SDL_GetMouseState(&mouseX, &mouseY);
-        Vec2 mousePosPixels{ mouseX, mouseY };
+        Vec2 mousePosPixels{};
         bool isOverUI = false;
         if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
         {
-            int windowW = 0;
-            int windowH = 0;
-            int pixelW = 0;
-            int pixelH = 0;
-            if (auto* w = glRenderer->window())
-            {
-                SDL_GetWindowSize(w, &windowW, &windowH);
-                SDL_GetWindowSizeInPixels(w, &pixelW, &pixelH);
-            }
-
-            const float scaleX = (windowW > 0 && pixelW > 0) ? (static_cast<float>(pixelW) / static_cast<float>(windowW)) : 1.0f;
-            const float scaleY = (windowH > 0 && pixelH > 0) ? (static_cast<float>(pixelH) / static_cast<float>(windowH)) : 1.0f;
-            mousePosPixels = Vec2{ mouseX * scaleX, mouseY * scaleY };
+            float mouseX = 0.0f;
+            float mouseY = 0.0f;
+            SDL_GetMouseState(&mouseX, &mouseY);
+            mousePosPixels = Vec2{ mouseX, mouseY };
             auto& uiManager = glRenderer->getUIManager();
             uiManager.setMousePosition(mousePosPixels);
             isOverUI = uiManager.isPointerOverUI(mousePosPixels);
@@ -265,19 +279,7 @@ int main()
             {
                 if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
                 {
-                    int windowW = 0;
-                    int windowH = 0;
-                    int pixelW = 0;
-                    int pixelH = 0;
-                    if (auto* w = glRenderer->window())
-                    {
-                        SDL_GetWindowSize(w, &windowW, &windowH);
-                        SDL_GetWindowSizeInPixels(w, &pixelW, &pixelH);
-                    }
-
-                    const float scaleX = (windowW > 0 && pixelW > 0) ? (static_cast<float>(pixelW) / static_cast<float>(windowW)) : 1.0f;
-                    const float scaleY = (windowH > 0 && pixelH > 0) ? (static_cast<float>(pixelH) / static_cast<float>(windowH)) : 1.0f;
-                    mousePosPixels = Vec2{ event.motion.x * scaleX, event.motion.y * scaleY };
+                    mousePosPixels = Vec2{ event.motion.x, event.motion.y };
                     auto& uiManager = glRenderer->getUIManager();
                     uiManager.setMousePosition(mousePosPixels);
                     isOverUI = uiManager.isPointerOverUI(mousePosPixels);
@@ -288,19 +290,7 @@ int main()
             {
                 if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
                 {
-                    int windowW = 0;
-                    int windowH = 0;
-                    int pixelW = 0;
-                    int pixelH = 0;
-                    if (auto* w = glRenderer->window())
-                    {
-                        SDL_GetWindowSize(w, &windowW, &windowH);
-                        SDL_GetWindowSizeInPixels(w, &pixelW, &pixelH);
-                    }
-
-                    const float scaleX = (windowW > 0 && pixelW > 0) ? (static_cast<float>(pixelW) / static_cast<float>(windowW)) : 1.0f;
-                    const float scaleY = (windowH > 0 && pixelH > 0) ? (static_cast<float>(pixelH) / static_cast<float>(windowH)) : 1.0f;
-                    const Vec2 mousePos{ static_cast<float>(event.button.x) * scaleX, static_cast<float>(event.button.y) * scaleY };
+                    const Vec2 mousePos{ static_cast<float>(event.button.x), static_cast<float>(event.button.y) };
                     auto& uiManager = glRenderer->getUIManager();
                     uiManager.setMousePosition(mousePos);
                     if (uiManager.handleMouseDown(mousePos, event.button.button))
@@ -332,6 +322,19 @@ int main()
                 SDL_ShowCursor();
             }
 
+            if (event.type == SDL_EVENT_MOUSE_WHEEL && rightMouseDown)
+            {
+                const float step = 0.1f;
+                if (event.wheel.y > 0.0f)
+                {
+                    cameraSpeedMultiplier = std::min(5.0f, cameraSpeedMultiplier + step);
+                }
+                else if (event.wheel.y < 0.0f)
+                {
+                    cameraSpeedMultiplier = std::max(0.5f, cameraSpeedMultiplier - step);
+                }
+            }
+
             if (event.type == SDL_EVENT_MOUSE_MOTION && rightMouseDown)
             {
                 // Use a frame-rate independent sensitivity (degrees per pixel).
@@ -358,6 +361,7 @@ int main()
                 if (event.key.key == SDLK_F12)
                 {
 					fpscap = !fpscap;
+					SDL_GL_SetSwapInterval(fpscap ? 1 : 0);
                 }
             }
             else if (event.type == SDL_EVENT_KEY_DOWN)
@@ -377,6 +381,13 @@ int main()
                 Vec2{ 0.02f, 0.05f },
                 0.6f,
                 Vec4{ 1.0f, 1.0f, 1.0f, 1.0f });
+
+            std::ostringstream speedStream;
+            speedStream << std::fixed << std::setprecision(1) << cameraSpeedMultiplier;
+            glRenderer->queueText("Speed: x" + speedStream.str(),
+                Vec2{ 0.02f, 0.09f },
+                0.4f,
+                Vec4{ 0.9f, 0.9f, 0.9f, 1.0f });
         }
 
         renderer->clear();
@@ -402,13 +413,32 @@ int main()
         SDL_Delay(100);
     }
 
+    logger.log(Logger::Category::Diagnostics, "Saving configs...", Logger::LogLevel::INFO);
+    if (auto* w = renderer->window())
+    {
+        int windowW = 0;
+        int windowH = 0;
+        SDL_GetWindowSize(w, &windowW, &windowH);
+        diagnostics.setWindowSize(Vec2{ static_cast<float>(windowW), static_cast<float>(windowH) });
+
+        const Uint32 flags = SDL_GetWindowFlags(w);
+        DiagnosticsManager::WindowState state = DiagnosticsManager::WindowState::Normal;
+        if ((flags & SDL_WINDOW_FULLSCREEN) != 0)
+        {
+            state = DiagnosticsManager::WindowState::Fullscreen;
+        }
+        else if ((flags & SDL_WINDOW_MAXIMIZED) != 0)
+        {
+            state = DiagnosticsManager::WindowState::Maximized;
+        }
+        diagnostics.setWindowState(state);
+    }
+    diagnostics.saveProjectConfig();
+    diagnostics.saveConfig();
+
     renderer->shutdown();
 
     delete renderer;
-
-    logger.log(Logger::Category::Diagnostics, "Saving configs...", Logger::LogLevel::INFO);
-    diagnostics.saveProjectConfig();
-    diagnostics.saveConfig();
 
     logger.log(Logger::Category::Engine, "SDL_Quit()", Logger::LogLevel::INFO);
     SDL_Quit();

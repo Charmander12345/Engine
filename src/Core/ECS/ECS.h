@@ -16,7 +16,7 @@ struct ECSConfig
 };
 
 using Entity = unsigned int;
-static constexpr size_t MaxComponentTypes = 7;
+static constexpr size_t MaxComponentTypes = 8;
 
 enum class ComponentKind : size_t
 {
@@ -26,7 +26,8 @@ enum class ComponentKind : size_t
 	Light,
 	Camera,
 	Physics,
-	Script
+	Script,
+	Name
 };
 
 template<typename T>
@@ -72,6 +73,12 @@ template<>
 struct ComponentTraits<ScriptComponent>
 {
 	static constexpr ComponentKind kind = ComponentKind::Script;
+};
+
+template<>
+struct ComponentTraits<NameComponent>
+{
+	static constexpr ComponentKind kind = ComponentKind::Name;
 };
 
 class Schema
@@ -167,6 +174,7 @@ public:
 	SparseSet<CameraComponent, MaxEntities> m_cameraComponents;
 	SparseSet<PhysicsComponent, MaxEntities> m_physicsComponents;
 	SparseSet<ScriptComponent, MaxEntities> m_scriptComponents;
+	SparseSet<NameComponent, MaxEntities> m_nameComponents;
 
 	template<typename T>
 	SparseSet<T, MaxEntities>& getStorage();
@@ -264,6 +272,10 @@ inline SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage()
 	{
 		return m_physicsComponents;
 	}
+	else if constexpr (std::is_same_v<T, NameComponent>)
+	{
+		return m_nameComponents;
+	}
 	else
 	{
 		static_assert(std::is_same_v<T, ScriptComponent>, "Unsupported component type");
@@ -297,6 +309,10 @@ inline const SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage() con
 	else if constexpr (std::is_same_v<T, PhysicsComponent>)
 	{
 		return m_physicsComponents;
+	}
+	else if constexpr (std::is_same_v<T, NameComponent>)
+	{
+		return m_nameComponents;
 	}
 	else
 	{

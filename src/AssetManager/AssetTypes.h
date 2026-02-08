@@ -10,6 +10,7 @@ enum class AssetType
     Material,
     Model2D,
     Model3D,
+    PointLight,
     Audio,
     Script,
     Shader,

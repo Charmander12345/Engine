@@ -80,7 +80,7 @@ bool RenderResourceManager::prepareOpenGL(EngineLevel& level)
                     logger.log(Logger::Category::Rendering, "RenderResourceManager: prepared Model2D '" + asset->getPath() + "'", Logger::LogLevel::INFO);
                 }
             }
-            else if (type == AssetType::Model3D)
+            else if (type == AssetType::Model3D || type == AssetType::PointLight)
             {
                 logger.log(Logger::Category::Rendering, "RenderResourceManager: preparing Model3D '" + asset->getPath() + "'", Logger::LogLevel::INFO);
                 if (!prepareOpenGLObject3D(asset, {}))
@@ -302,7 +302,7 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
 
         const unsigned int cacheId = (asset->getId() != 0) ? asset->getId() : static_cast<unsigned int>(assetId);
 
-        if (renderable.assetType == AssetType::Model3D)
+        if (renderable.assetType == AssetType::Model3D || renderable.assetType == AssetType::PointLight)
         {
             auto it = m_object3DCache.find(cacheId);
             if (it != m_object3DCache.end())

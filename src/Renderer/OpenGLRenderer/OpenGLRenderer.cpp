@@ -40,6 +40,11 @@ namespace
         const int x = area->x;
         const int y = area->y;
 
+        if (y < ctx->buttonStripHeight && x >= width - ctx->buttonStripWidth)
+        {
+            return SDL_HITTEST_NORMAL;
+        }
+
         const bool left = x < ctx->resizeBorder;
         const bool right = x >= width - ctx->resizeBorder;
         const bool top = y < ctx->resizeBorder;
@@ -61,6 +66,7 @@ namespace
 
         return SDL_HITTEST_NORMAL;
     }
+
 }
 
 OpenGLRenderer::OpenGLRenderer()
@@ -145,8 +151,14 @@ bool OpenGLRenderer::initialize()
 
     logger.log(Logger::Category::Rendering, "Creating Window...", Logger::LogLevel::INFO);
 
-    m_window = SDL_CreateWindow("Engine Project", 800, 600,
-        SDL_WINDOW_MAXIMIZED | SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS | SDL_WINDOW_RESIZABLE);
+	auto& diagnostics = DiagnosticsManager::Instance();
+	Vec2 windowSize = diagnostics.getWindowSize();
+	int width = static_cast<int>(windowSize.x);
+	int height = static_cast<int>(windowSize.y);
+	DiagnosticsManager::WindowState windowState = diagnostics.getWindowState();
+
+    m_window = SDL_CreateWindow("Engine Project", width, height,
+        SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS | SDL_WINDOW_RESIZABLE);
     if (!m_window) {
         logger.log(Logger::Category::Rendering, std::string("Failed to create window: ") + SDL_GetError(), Logger::LogLevel::ERROR);
         SDL_Quit();
@@ -219,18 +231,45 @@ bool OpenGLRenderer::initialize()
     }
 
     SDL_ShowWindow(m_window);
-    SDL_MaximizeWindow(m_window);
+    switch (windowState)
+    {
+    case DiagnosticsManager::WindowState::Fullscreen:
+        SDL_SetWindowFullscreen(m_window, SDL_WINDOW_FULLSCREEN);
+        break;
+    case DiagnosticsManager::WindowState::Normal:
+        SDL_RestoreWindow(m_window);
+        break;
+    case DiagnosticsManager::WindowState::Maximized:
+        SDL_MaximizeWindow(m_window);
+        break;
+    }
 
+    SDL_ClearError();
     if (SDL_SetWindowHitTest(m_window, WindowHitTestCallback, &m_hitTestContext) != 0)
     {
-        logger.log(Logger::Category::Rendering, std::string("Failed to set window hit test: ") + SDL_GetError(), Logger::LogLevel::WARNING);
+        const char* err = SDL_GetError();
+        std::string msg = "Failed to set window hit test";
+        if (err && *err)
+        {
+            msg += ": ";
+            msg += err;
+        }
+        else
+        {
+            msg += ": (no SDL error string)";
+        }
+        logger.log(Logger::Category::Rendering, msg, Logger::LogLevel::WARNING);
+    }
+    else
+    {
+        logger.log(Logger::Category::Rendering, "Window hit test enabled.", Logger::LogLevel::INFO);
     }
     return true;
 }
 
 void OpenGLRenderer::clear()
 {
-    glClearColor(0.5f, 0.5f, 0.5f, 1.0f);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
@@ -332,6 +371,28 @@ void OpenGLRenderer::renderWorld()
         view = glm::make_mat4(engineView.m);
     }
 
+    auto& ecs = ECS::ECSManager::Instance();
+    glm::vec3 lightPosition{ 0.0f, 1.2f, 0.0f };
+    glm::vec3 lightColor{ 1.0f, 1.0f, 1.0f };
+    float lightIntensity = 1.0f;
+
+    ECS::Schema lightSchema;
+    lightSchema.require<ECS::LightComponent>().require<ECS::TransformComponent>();
+    const auto lightEntities = ecs.getEntitiesMatchingSchema(lightSchema);
+    if (!lightEntities.empty())
+    {
+        const auto lightEntity = lightEntities.front();
+        if (const auto* transform = ecs.getComponent<ECS::TransformComponent>(lightEntity))
+        {
+            lightPosition = glm::vec3(transform->position[0], transform->position[1], transform->position[2]);
+        }
+        if (const auto* light = ecs.getComponent<ECS::LightComponent>(lightEntity))
+        {
+            lightColor = glm::vec3(light->color[0], light->color[1], light->color[2]);
+            lightIntensity = light->intensity;
+        }
+    }
+
     if (!m_renderEntries.empty())
     {
         for (const auto& entry : m_renderEntries)
@@ -345,6 +406,7 @@ void OpenGLRenderer::renderWorld()
 
             if (entry.object3D)
             {
+                entry.object3D->setLightData(lightPosition, lightColor, lightIntensity);
                 entry.object3D->setMatrices(modelMatrix, view, m_projectionMatrix);
                 entry.object3D->render();
             }
@@ -373,7 +435,7 @@ void OpenGLRenderer::renderWorld()
             if (!asset)
                 continue;
 
-            if (asset->getAssetType() == AssetType::Model3D)
+            if (asset->getAssetType() == AssetType::Model3D || asset->getAssetType() == AssetType::PointLight)
             {
                 OpenGLObject3D glObj(asset);
                 if (!glObj.prepare())
@@ -384,8 +446,30 @@ void OpenGLRenderer::renderWorld()
                     Mat4 engineMat = t->getMatrix4ColumnMajor();
                     glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
                     modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+                    glObj.setLightData(lightPosition, lightColor, lightIntensity);
                     glObj.setMatrices(modelMatrix, view, m_projectionMatrix);
                 }
+
+                glObj.render();
+            }
+            else if (asset->getAssetType() == AssetType::Model2D)
+            {
+                OpenGLObject2D glObj(asset);
+                if (!glObj.prepare())
+                    continue;
+
+                if (t)
+                {
+                    Mat4 engineMat = t->getMatrix4ColumnMajor();
+                    glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
+                    modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 0.0f, 1.0f));
+                    glObj.setMatrices(modelMatrix, view, m_projectionMatrix);
+                }
+
+                glObj.render();
+            }
+        }
+    }
 
     if (!ecsEntities.empty())
     {
@@ -523,7 +607,7 @@ void OpenGLRenderer::renderWorld()
                 modelMatrix = glm::rotate(modelMatrix, glm::radians(transform.rotation[2]), glm::vec3(0.0f, 0.0f, 1.0f));
                 modelMatrix = glm::scale(modelMatrix, glm::vec3(transform.scale[0], transform.scale[1], transform.scale[2]));
 
-                if (asset->getAssetType() == AssetType::Model3D)
+                if (asset->getAssetType() == AssetType::Model3D || asset->getAssetType() == AssetType::PointLight)
                 {
                     OpenGLObject3D glObj(asset);
                     if (!glObj.prepare())
@@ -531,6 +615,7 @@ void OpenGLRenderer::renderWorld()
                         continue;
                     }
                     glObj.setTextures(textures);
+                    glObj.setLightData(lightPosition, lightColor, lightIntensity);
                     glObj.setMatrices(modelMatrix, view, m_projectionMatrix);
                     glObj.render();
                 }
@@ -545,25 +630,6 @@ void OpenGLRenderer::renderWorld()
                     glObj.setMatrices(modelMatrix, view, m_projectionMatrix);
                     glObj.render();
                 }
-            }
-        }
-    }
-                glObj.render();
-            }
-            else if (asset->getAssetType() == AssetType::Model2D)
-            {
-                OpenGLObject2D glObj(asset);
-                if (!glObj.prepare())
-                    continue;
-
-                if (t)
-                {
-                    Mat4 engineMat = t->getMatrix4ColumnMajor();
-                    glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-                    modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 0.0f, 1.0f));
-                    glObj.setMatrices(modelMatrix, view, m_projectionMatrix);
-                }
-                glObj.render();
             }
         }
     }
@@ -700,7 +766,7 @@ void OpenGLRenderer::renderUI()
                 const std::string vertexPath = resolveShaderPath(element.shaderVertex, defaultPanelVertex);
                 const std::string fragmentPath = resolveShaderPath(element.shaderFragment, defaultPanelFragment);
                 const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
-                drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program);
+                drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.color, false);
                 if (m_uiDebugEnabled)
                 {
                     drawUIOutline(x0, y0, x1, y1, Vec4{ 1.0f, 0.9f, 0.1f, 1.0f }, uiProjection, program);
@@ -761,7 +827,7 @@ void OpenGLRenderer::renderUI()
                 const std::string vertexPath = resolveShaderPath(element.shaderVertex, defaultButtonVertex);
                 const std::string fragmentPath = resolveShaderPath(element.shaderFragment, defaultButtonFragment);
                 const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
-                drawUIPanel(bx0, by0, bx1, by1, element.color, uiProjection, program);
+                drawUIPanel(bx0, by0, bx1, by1, element.color, uiProjection, program, element.hoverColor, element.isHovered);
 
                 if (!element.text.empty())
                 {
@@ -880,6 +946,50 @@ void OpenGLRenderer::renderUI()
         viewportSize = Vec2{ static_cast<float>(width), static_cast<float>(height) };
     }
 
+    float contentLeft = 0.0f;
+    float contentTop = 0.0f;
+    float contentRight = viewportSize.x;
+    float contentBottom = viewportSize.y;
+
+    const auto& uiWidgets = m_uiManager.getRegisteredWidgets();
+    for (const auto& entry : uiWidgets)
+    {
+        if (!entry.widget)
+        {
+            continue;
+        }
+
+        if (!entry.widget->hasComputedSize() || !entry.widget->hasComputedPosition())
+        {
+            continue;
+        }
+
+        const Vec2 widgetPos = entry.widget->getComputedPositionPixels();
+        const Vec2 widgetSize = entry.widget->getComputedSizePixels();
+        const bool spansWidth = widgetSize.x >= viewportSize.x * 0.8f;
+        const bool spansHeight = widgetSize.y >= viewportSize.y * 0.5f;
+
+        if (widgetPos.y <= 0.0f && spansWidth)
+        {
+            contentTop = std::max(contentTop, widgetPos.y + widgetSize.y);
+        }
+        if (widgetPos.x <= 0.0f && spansHeight)
+        {
+            contentLeft = std::max(contentLeft, widgetPos.x + widgetSize.x);
+        }
+        if (widgetPos.y + widgetSize.y >= viewportSize.y * 0.98f && spansWidth)
+        {
+            contentBottom = std::min(contentBottom, widgetPos.y);
+        }
+        if (widgetPos.x + widgetSize.x >= viewportSize.x * 0.98f && spansHeight)
+        {
+            contentRight = std::min(contentRight, widgetPos.x);
+        }
+    }
+
+    const float contentWidth = std::max(0.0f, contentRight - contentLeft);
+    const float contentHeight = std::max(0.0f, contentBottom - contentTop);
+
     if (!m_textQueue.empty())
     {
         m_textRenderer->setScreenSize(static_cast<int>(viewportSize.x), static_cast<int>(viewportSize.y));
@@ -888,8 +998,8 @@ void OpenGLRenderer::renderUI()
     for (const auto& command : m_textQueue)
     {
         Vec2 pixelPos{
-            command.screenPos.x * viewportSize.x,
-            command.screenPos.y * viewportSize.y
+            contentLeft + command.screenPos.x * contentWidth,
+            contentTop + command.screenPos.y * contentHeight
         };
         m_textRenderer->drawText(command.text, pixelPos, command.scale, command.color);
     }
@@ -984,7 +1094,8 @@ GLuint OpenGLRenderer::getUIQuadProgram(const std::string& vertexShaderPath, con
     return program;
 }
 
-void OpenGLRenderer::drawUIPanel(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program)
+void OpenGLRenderer::drawUIPanel(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program,
+    const Vec4& hoverColor, bool isHovered)
 {
     if (program == 0 || m_uiQuadVao == 0)
     {
@@ -992,6 +1103,7 @@ void OpenGLRenderer::drawUIPanel(float x0, float y0, float x1, float y1, const V
     }
 
     const glm::vec4 glColor{ color.x, color.y, color.z, color.w };
+    const glm::vec4 glHoverColor{ hoverColor.x, hoverColor.y, hoverColor.z, hoverColor.w };
 
     float vertices[6][2] = {
         { x0, y1 },
@@ -1005,6 +1117,18 @@ void OpenGLRenderer::drawUIPanel(float x0, float y0, float x1, float y1, const V
     glUseProgram(program);
     glUniformMatrix4fv(glGetUniformLocation(program, "uProjection"), 1, GL_FALSE, &projection[0][0]);
     glUniform4fv(glGetUniformLocation(program, "uColor"), 1, &glColor[0]);
+
+    const GLint hoverColorLoc = glGetUniformLocation(program, "uHoverColor");
+    if (hoverColorLoc >= 0)
+    {
+        glUniform4fv(hoverColorLoc, 1, &glHoverColor[0]);
+    }
+
+    const GLint hoverFlagLoc = glGetUniformLocation(program, "uIsHovered");
+    if (hoverFlagLoc >= 0)
+    {
+        glUniform1f(hoverFlagLoc, isHovered ? 1.0f : 0.0f);
+    }
 
     glBindVertexArray(m_uiQuadVao);
     glBindBuffer(GL_ARRAY_BUFFER, m_uiQuadVbo);
@@ -1023,7 +1147,7 @@ void OpenGLRenderer::drawUIOutline(float x0, float y0, float x1, float y1, const
 
     glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
     glLineWidth(1.0f);
-    drawUIPanel(x0, y0, x1, y1, color, projection, program);
+    drawUIPanel(x0, y0, x1, y1, color, projection, program, color, false);
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 }
 

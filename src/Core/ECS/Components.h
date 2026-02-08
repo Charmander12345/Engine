@@ -61,4 +61,9 @@ namespace ECS
 		std::string scriptPath; // Path to the script file
 		unsigned int scriptAssetId{ 0 };
 	};
+
+	struct NameComponent
+	{
+		std::string displayName;
+	};
 }

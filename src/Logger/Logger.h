@@ -29,7 +29,8 @@ public:
         Rendering,
         Input,
         Project,
-        IO
+        IO,
+        UI
     };
 
     static Logger& Instance();

@@ -65,6 +65,7 @@ const char* Logger::toString(Category category)
     case Category::Input: return "Input";
     case Category::Project: return "Project";
     case Category::IO: return "IO";
+    case Category::UI: return "UI";
     default: return "General";
     }
 }

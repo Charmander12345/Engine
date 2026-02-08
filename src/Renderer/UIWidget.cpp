@@ -125,6 +125,16 @@ namespace
         return json{ {"x", value.x}, {"y", value.y}, {"z", value.z}, {"w", value.w} };
     }
 
+    Vec4 brightenColor(const Vec4& color)
+    {
+        return Vec4{
+            std::min(1.0f, color.x + 0.15f),
+            std::min(1.0f, color.y + 0.15f),
+            std::min(1.0f, color.z + 0.15f),
+            color.w
+        };
+    }
+
     WidgetElement readElement(const json& entry)
     {
         WidgetElement element{};
@@ -143,6 +153,14 @@ namespace
         if (entry.contains("color"))
         {
             element.color = readVec4(entry.at("color"));
+        }
+        if (entry.contains("hoverColor"))
+        {
+            element.hoverColor = readVec4(entry.at("hoverColor"));
+        }
+        else
+        {
+            element.hoverColor = (element.type == WidgetElementType::Button) ? brightenColor(element.color) : element.color;
         }
         if (entry.contains("textColor"))
         {
@@ -231,6 +249,10 @@ namespace
 
     json writeElement(const WidgetElement& element)
     {
+        if (element.runtimeOnly)
+        {
+            return json();
+        }
         json entry = json::object();
         entry["type"] = toString(element.type);
         if (!element.id.empty())
@@ -241,6 +263,11 @@ namespace
         entry["to"] = writeVec2(element.to);
         entry["color"] = writeVec4(element.color);
         entry["textColor"] = writeVec4(element.textColor);
+        if (element.hoverColor.x != element.color.x || element.hoverColor.y != element.color.y ||
+            element.hoverColor.z != element.color.z || element.hoverColor.w != element.color.w)
+        {
+            entry["hoverColor"] = writeVec4(element.hoverColor);
+        }
         if (!element.text.empty())
         {
             entry["text"] = element.text;
@@ -301,7 +328,15 @@ namespace
             json children = json::array();
             for (const auto& child : element.children)
             {
-                children.push_back(writeElement(child));
+                if (child.runtimeOnly)
+                {
+                    continue;
+                }
+                json childJson = writeElement(child);
+                if (!childJson.is_null())
+                {
+                    children.push_back(std::move(childJson));
+                }
             }
             entry["children"] = children;
         }
@@ -444,7 +479,15 @@ json Widget::toJson() const
     json elements = json::array();
     for (const auto& element : m_elements)
     {
-        elements.push_back(writeElement(element));
+        if (element.runtimeOnly)
+        {
+            continue;
+        }
+        json elementJson = writeElement(element);
+        if (!elementJson.is_null())
+        {
+            elements.push_back(std::move(elementJson));
+        }
     }
     data["m_elements"] = elements;
     return data;

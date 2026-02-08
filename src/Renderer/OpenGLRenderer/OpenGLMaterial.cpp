@@ -222,6 +222,24 @@ void OpenGLMaterial::bind()
         glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(m_projectionMatrix));
     }
 
+    GLint lightPosLoc = glGetUniformLocation(m_program, "uLightPos");
+    if (lightPosLoc >= 0)
+    {
+        glUniform3fv(lightPosLoc, 1, glm::value_ptr(m_lightPosition));
+    }
+
+    GLint lightColorLoc = glGetUniformLocation(m_program, "uLightColor");
+    if (lightColorLoc >= 0)
+    {
+        glUniform3fv(lightColorLoc, 1, glm::value_ptr(m_lightColor));
+    }
+
+    GLint lightIntensityLoc = glGetUniformLocation(m_program, "uLightIntensity");
+    if (lightIntensityLoc >= 0)
+    {
+        glUniform1f(lightIntensityLoc, m_lightIntensity);
+    }
+
     bindTextures();
 }
 

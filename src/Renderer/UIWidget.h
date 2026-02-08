@@ -55,6 +55,7 @@ struct WidgetElement
     Vec2 from{};
     Vec2 to{ 1.0f, 1.0f };
     Vec4 color{ 1.0f, 1.0f, 1.0f, 1.0f };
+    Vec4 hoverColor{ 1.0f, 1.0f, 1.0f, 1.0f };
     Vec4 textColor{ 1.0f, 1.0f, 1.0f, 1.0f };
     std::string text;
     std::string font;
@@ -81,6 +82,7 @@ struct WidgetElement
     bool hasComputedPosition{ false };
     bool isHovered{ false };
     bool isPressed{ false };
+    bool runtimeOnly{ false };
     std::function<void()> onClicked;
     std::function<void()> onHovered;
     std::function<void()> onUnhovered;

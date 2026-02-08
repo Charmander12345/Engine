@@ -533,27 +533,8 @@ void AssetManager::ensureDefaultAssetsCreated()
     }
 
     // 3) default 3D quad model
-    const std::string quad3dRel = "default_quad3d.asset";
-    {
-        const fs::path abs = contentRoot / fs::path(quad3dRel);
-        bool existsAndOk = false;
-        if (fs::exists(abs))
-        {
-            AssetType headerType{ AssetType::Unknown };
-            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Model3D;
-        }
 
-        if (existsAndOk)
-        {
-            logger.log(Logger::Category::AssetManagement, "Default asset OK: " + quad3dRel, Logger::LogLevel::INFO);
-        }
-        else
-        {
-            auto quad = std::make_shared<AssetData>();
-            quad->setName("DefaultQuad3D");
-				// Material assets/textures are handled by Material; Object3D only stores a runtime Material instance.
-            json quadData = json::object();
-            quadData["m_vertices"] = std::vector<float>{
+    const std::vector<float> cubeVertices{
     -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,
      0.5f, -0.5f, -0.5f,  1.0f, 0.0f,
      0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
@@ -595,11 +576,57 @@ void AssetManager::ensureDefaultAssetsCreated()
      0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
     -0.5f,  0.5f,  0.5f,  0.0f, 0.0f,
     -0.5f,  0.5f, -0.5f,  0.0f, 1.0f
-            };
+    };
+    const std::string quad3dRel = "default_quad3d.asset";
+    const std::string pointLightRel = (fs::path("Lights") / "PointLight.asset").generic_string();
+    {
+
+        const fs::path abs = contentRoot / fs::path(quad3dRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Model3D;
+        }
+
+        if (existsAndOk)
+        {
+            logger.log(Logger::Category::AssetManagement, "Default asset OK: " + quad3dRel, Logger::LogLevel::INFO);
+        }
+        else
+        {
+            auto quad = std::make_shared<AssetData>();
+            quad->setName("DefaultQuad3D");
+				// Material assets/textures are handled by Material; Object3D only stores a runtime Material instance.
+            json quadData = json::object();
+            quadData["m_vertices"] = cubeVertices;
             quadData["m_indices"] = std::vector<uint32_t>{};
             quad->setData(std::move(quadData));
 
             ensureOnDisk(quad3dRel, AssetType::Model3D, quad);
+        }
+    }
+
+    {
+        const fs::path abs = contentRoot / fs::path(pointLightRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::PointLight;
+        }
+
+        if (!existsAndOk)
+        {
+            auto lightAsset = std::make_shared<AssetData>();
+            lightAsset->setName("PointLight");
+            json lightData = json::object();
+            lightData["m_vertices"] = cubeVertices;
+            lightData["m_indices"] = std::vector<uint32_t>{};
+            lightData["m_shaderVertex"] = "vertex.glsl";
+            lightData["m_shaderFragment"] = "light_fragment.glsl";
+            lightAsset->setData(std::move(lightData));
+            ensureOnDisk(pointLightRel, AssetType::PointLight, lightAsset);
         }
     }
 
@@ -621,6 +648,7 @@ void AssetManager::ensureDefaultAssetsCreated()
         };
         components["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
         components["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        components["Name"] = json{ {"displayName", "Cube A"} };
         entity["components"] = components;
         entities.push_back(entity);
 
@@ -635,6 +663,7 @@ void AssetManager::ensureDefaultAssetsCreated()
         };
         components2["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
         components2["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        components2["Name"] = json{ {"displayName", "Cube B"} };
         entity2["components"] = components2;
         entities.push_back(entity2);
 
@@ -649,6 +678,7 @@ void AssetManager::ensureDefaultAssetsCreated()
         };
         components3["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
         components3["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        components3["Name"] = json{ {"displayName", "Cube C"} };
         entity3["components"] = components3;
         entities.push_back(entity3);
 
@@ -663,6 +693,7 @@ void AssetManager::ensureDefaultAssetsCreated()
         };
         components4["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
         components4["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        components4["Name"] = json{ {"displayName", "Cube D"} };
         entity4["components"] = components4;
         entities.push_back(entity4);
 
@@ -677,8 +708,31 @@ void AssetManager::ensureDefaultAssetsCreated()
         };
         components5["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
         components5["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        components5["Name"] = json{ {"displayName", "Cube E"} };
         entity5["components"] = components5;
         entities.push_back(entity5);
+
+        json lightEntity = json::object();
+        lightEntity["id"] = 6;
+
+        json lightComponents = json::object();
+        lightComponents["Transform"] = json{
+            {"position", json::array({ 0.0f, 1.2f, 0.0f })},
+            {"rotation", json::array({ 0.0f, 0.0f, 0.0f })},
+            {"scale", json::array({ 0.25f, 0.25f, 0.25f })}
+        };
+        lightComponents["Mesh"] = json{ {"meshAssetPath", pointLightRel} };
+        lightComponents["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        lightComponents["Name"] = json{ {"displayName", "Point Light"} };
+        lightComponents["Light"] = json{
+            {"type", static_cast<int>(ECS::LightComponent::LightType::Point)},
+            {"color", json::array({ 1.0f, 1.0f, 1.0f })},
+            {"intensity", 1.0f},
+            {"range", 10.0f},
+            {"spotAngle", 30.0f}
+        };
+        lightEntity["components"] = lightComponents;
+        entities.push_back(lightEntity);
 
         levelJson["Entities"] = entities;
 
@@ -729,7 +783,7 @@ void AssetManager::ensureDefaultAssetsCreated()
         panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
         panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
         panel["fillX"] = true;
-        panel["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 1.0f} };
+        panel["color"] = json{ {"x", 0.08f}, {"y", 0.09f}, {"z", 0.11f}, {"w", 0.88f} };
         panel["shaderVertex"] = "panel_vertex.glsl";
         panel["shaderFragment"] = "panel_fragment.glsl";
         elements.push_back(panel);
@@ -846,7 +900,7 @@ void AssetManager::ensureDefaultAssetsCreated()
         panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
         panel["fillX"] = true;
         panel["fillY"] = true;
-        panel["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 1.0f} };
+        panel["color"] = json{ {"x", 0.07f}, {"y", 0.08f}, {"z", 0.1f}, {"w", 0.88f} };
         panel["shaderVertex"] = "panel_vertex.glsl";
         panel["shaderFragment"] = "panel_fragment.glsl";
         elements.push_back(panel);
@@ -864,6 +918,17 @@ void AssetManager::ensureDefaultAssetsCreated()
         label["shaderVertex"] = "text_vertex.glsl";
         label["shaderFragment"] = "text_fragment.glsl";
         elements.push_back(label);
+
+        json listPanel = json::object();
+        listPanel["id"] = "Outliner.EntityList";
+        listPanel["type"] = "StackPanel";
+        listPanel["from"] = json{ {"x", 0.05f}, {"y", 0.12f} };
+        listPanel["to"] = json{ {"x", 0.95f}, {"y", 0.98f} };
+        listPanel["orientation"] = "Vertical";
+        listPanel["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
+        listPanel["fillX"] = true;
+        listPanel["sizeToContent"] = false;
+        elements.push_back(listPanel);
 
         widgetJson["m_elements"] = elements;
 
@@ -1153,6 +1218,7 @@ int AssetManager::loadAsset(const std::string& path, AssetType type, SyncState s
 				switch (type)
 				{
 				case AssetType::Model3D:
+				case AssetType::PointLight:
 					loadObject3DAsset(path);
 					break;
 				case AssetType::Model2D:
@@ -1178,6 +1244,7 @@ int AssetManager::loadAsset(const std::string& path, AssetType type, SyncState s
 	switch (type)
 	{
 	case AssetType::Model3D:
+	case AssetType::PointLight:
 		result = loadObject3DAsset(path);
 		break;
 	case AssetType::Model2D:
@@ -1267,9 +1334,10 @@ bool AssetManager::saveAsset(const Asset& asset, SyncState syncState, Diagnostic
             }
 			result = saveObject2DAsset(assetData);
             break;
-        case AssetType::Model3D:
+	case AssetType::Model3D:
+	case AssetType::PointLight:
 			result = saveObject3DAsset(assetData);
-            break;
+			break;
         case AssetType::Texture:
 			result = saveTextureAsset(assetData);
             break;
@@ -1936,7 +2004,7 @@ AssetManager::LoadResult AssetManager::loadObject3DAsset(const std::string& path
 		return result;
 	}
 
-	if (headerType != AssetType::Model3D)
+							if (headerType != AssetType::Model3D && headerType != AssetType::PointLight)
 	{
 		result.errorMessage = "Asset type mismatch for Object3D.";
 		return result;
@@ -2303,7 +2371,12 @@ AssetManager::SaveResult AssetManager::saveObject3DAsset(const std::shared_ptr<A
     json fileJson = json::object();
     fileJson["magic"] = 0x41535453;
     fileJson["version"] = 2;
-    fileJson["type"] = static_cast<int>(AssetType::Model3D);
+    AssetType objectType = object3D->getAssetType();
+    if (objectType != AssetType::PointLight)
+    {
+        objectType = AssetType::Model3D;
+    }
+    fileJson["type"] = static_cast<int>(objectType);
     fileJson["name"] = name;
     fileJson["data"] = data;
 

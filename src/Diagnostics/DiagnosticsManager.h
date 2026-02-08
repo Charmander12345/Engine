@@ -9,6 +9,7 @@
 #include <memory>
 #include <functional>
 #include "../Core/EngineLevel.h"
+#include "../Core/MathTypes.h"
 
 class DiagnosticsManager
 {
@@ -51,6 +52,13 @@ public:
 		unsigned int ID{ 0 };
     };
 
+    enum WindowState
+    {
+        Normal,
+        Maximized,
+        Fullscreen
+    };
+
     static DiagnosticsManager& Instance();
 
     // Engine-wide states
@@ -69,6 +77,8 @@ public:
     void setRHIType(RHIType type);
     RHIType getRHIType() const;
     static std::string rhiTypeToString(RHIType type);
+    static std::string windowStateToString(WindowState state);
+    static WindowState windowStateFromString(const std::string& value);
 
     // Persist/load simple key=value pairs to/from config/config.ini in the engine directory
     bool saveConfig() const;
@@ -110,6 +120,14 @@ public:
 	Action& registerAction(ActionType type);
 	bool updateActionProgress(unsigned int actionID, bool inProgress);
 
+    //Set window size
+	void setWindowSize(const Vec2& size);
+	Vec2 getWindowSize() const;
+
+	//Set window state (normal, maximized, fullscreen)
+	void setWindowState(WindowState state);
+	WindowState getWindowState() const;
+
 private:
     DiagnosticsManager();
     ~DiagnosticsManager() = default;
@@ -144,4 +162,6 @@ private:
 
 	std::unordered_map<unsigned int, Action> m_actions;
 	bool m_shutdownRequested{ false };
+	Vec2 m_windowSize{ 0.0f, 0.0f };
+	WindowState m_windowState{ WindowState::Maximized };
 };

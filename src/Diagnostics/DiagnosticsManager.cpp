@@ -4,11 +4,31 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
+#include <cstdlib>
 
 DiagnosticsManager& DiagnosticsManager::Instance()
 {
     static DiagnosticsManager instance;
     return instance;
+}
+
+static float parseFloatOrDefault(const std::string& value, float fallback)
+{
+    if (value.empty())
+    {
+        return fallback;
+    }
+
+    char* end = nullptr;
+    errno = 0;
+    const float parsed = std::strtof(value.c_str(), &end);
+    if (end == value.c_str() || errno == ERANGE)
+    {
+        return fallback;
+    }
+
+    return parsed;
 }
 
 static void trim(std::string& s)
@@ -138,9 +158,31 @@ std::string DiagnosticsManager::rhiTypeToString(RHIType type)
     }
 }
 
+std::string DiagnosticsManager::windowStateToString(WindowState state)
+{
+    switch (state)
+    {
+    case WindowState::Maximized: return "Maximized";
+    case WindowState::Fullscreen: return "Fullscreen";
+    default: return "Normal";
+    }
+}
+
+DiagnosticsManager::WindowState DiagnosticsManager::windowStateFromString(const std::string& value)
+{
+    if (value == "Maximized") return WindowState::Maximized;
+    if (value == "Fullscreen") return WindowState::Fullscreen;
+    return WindowState::Normal;
+}
+
 std::filesystem::path DiagnosticsManager::getConfigPath() const
 {
-    std::filesystem::path base = std::filesystem::current_path();
+    std::error_code ec;
+    std::filesystem::path base = std::filesystem::current_path(ec);
+    if (ec)
+    {
+        return {};
+    }
     std::filesystem::path configDir = base / "config";
     return configDir / "config.ini";
 }
@@ -160,21 +202,31 @@ bool DiagnosticsManager::saveConfig() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
 
+    const auto cfg = getConfigPath();
+    if (cfg.empty())
+    {
+        return false;
+    }
+
     // persist RHI in engine config too
     std::unordered_map<std::string, std::string> data = m_states;
     data["RHI"] = rhiTypeToString(m_rhiType);
+    data["WindowWidth"] = std::to_string(m_windowSize.x);
+    data["WindowHeight"] = std::to_string(m_windowSize.y);
+    data["WindowState"] = windowStateToString(m_windowState);
 
-    return writeKeyValueFile(getConfigPath(), data);
+    return writeKeyValueFile(cfg, data);
 }
 
 bool DiagnosticsManager::loadConfig()
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    //std::lock_guard<std::mutex> lock(m_mutex);
 
     std::unordered_map<std::string, std::string> data;
-    if (!readKeyValueFile(getConfigPath(), data))
+    const auto cfg = getConfigPath();
+    if (cfg.empty() || !readKeyValueFile(cfg, data))
     {
-        return false;
+        data["RHI"] = "OpenGL";
     }
 
     m_states = data;
@@ -188,7 +240,32 @@ bool DiagnosticsManager::loadConfig()
         else if (val == "DirectX12") m_rhiType = RHIType::DirectX12;
         else m_rhiType = RHIType::Unknown;
     }
+    float width = 800.0f;
+    float height = 600.0f;
 
+    auto it2 = m_states.find("WindowWidth");
+    if (it2 != m_states.end())
+    {
+        width = parseFloatOrDefault(it2->second, 800.0f);
+    }
+
+    auto it3 = m_states.find("WindowHeight");
+    if (it3 != m_states.end())
+    {
+        height = parseFloatOrDefault(it3->second, 600.0f);
+    }
+
+    auto it4 = m_states.find("WindowState");
+    if (it4 != m_states.end())
+    {
+        m_windowState = windowStateFromString(it4->second);
+    }
+    else
+    {
+        m_windowState = WindowState::Maximized;
+    }
+
+    setWindowSize(Vec2{ width, height });
     return true;
 }
 
@@ -213,7 +290,8 @@ bool DiagnosticsManager::loadProjectConfig()
     }
 
     // if missing, create an empty defaults.ini
-    if (!std::filesystem::exists(cfg))
+    std::error_code ec;
+    if (!std::filesystem::exists(cfg, ec) || ec)
     {
         std::unordered_map<std::string, std::string> empty;
         if (!writeKeyValueFile(cfg, empty))
@@ -336,6 +414,7 @@ bool DiagnosticsManager::isShutdownRequested() const
 DiagnosticsManager::DiagnosticsManager()
 {
 	m_projectInfo = { "", "", "", "", RHIType::Unknown };
+    m_windowState = WindowState::Maximized;
 }
 
 void DiagnosticsManager::registerKeyDownHandler(int key, KeyCallback callback)
@@ -425,4 +504,26 @@ bool DiagnosticsManager::updateActionProgress(unsigned int actionID, bool inProg
         m_actions.erase(result);
 	}
     return true;
+}
+
+void DiagnosticsManager::setWindowSize(const Vec2& size)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+	m_windowSize = size;
+}
+
+Vec2 DiagnosticsManager::getWindowSize() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_windowSize;
+}
+
+void DiagnosticsManager::setWindowState(WindowState state)
+{
+    m_windowState = state;
+}
+
+DiagnosticsManager::WindowState DiagnosticsManager::getWindowState() const
+{
+    return m_windowState;
 }

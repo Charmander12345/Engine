@@ -2,11 +2,43 @@
 
 #include <algorithm>
 #include <numeric>
+#include <functional>
 #include <SDL3/SDL.h>
+#include "../Logger/Logger.h"
 #include "../Diagnostics/DiagnosticsManager.h"
+#include "../Core/EngineLevel.h"
+#include "../Core/ECS/ECS.h"
 
 namespace
 {
+    WidgetElement* FindElementById(WidgetElement& element, const std::string& id)
+    {
+        if (element.id == id)
+        {
+            return &element;
+        }
+        for (auto& child : element.children)
+        {
+            if (auto* match = FindElementById(child, id))
+            {
+                return match;
+            }
+        }
+        return nullptr;
+    }
+
+    WidgetElement* FindElementById(std::vector<WidgetElement>& elements, const std::string& id)
+    {
+        for (auto& element : elements)
+        {
+            if (auto* match = FindElementById(element, id))
+            {
+                return match;
+            }
+        }
+        return nullptr;
+    }
+
     Vec2 measureElementSize(WidgetElement& element, const std::function<Vec2(const std::string&, float)>& measureText)
     {
         Vec2 size{};
@@ -25,6 +57,7 @@ namespace
             element.hasContentSize = true;
             return size;
         }
+
         case WidgetElementType::Button:
         {
             float scale = (element.fontSize > 0.0f) ? (element.fontSize / 48.0f) : 1.0f;
@@ -266,6 +299,10 @@ void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widg
             entry.widget = widget;
             if (entry.widget)
             {
+                if (id == "WorldOutliner")
+                {
+                    populateOutlinerWidget(entry.widget);
+                }
                 entry.widget->markLayoutDirty();
             }
             return;
@@ -274,8 +311,73 @@ void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widg
     m_widgets.push_back(WidgetEntry{ id, widget });
     if (widget)
     {
+        if (id == "WorldOutliner")
+        {
+            populateOutlinerWidget(widget);
+        }
         widget->markLayoutDirty();
     }
+}
+
+void UIManager::populateOutlinerWidget(const std::shared_ptr<Widget>& widget)
+{
+    if (!widget)
+    {
+        return;
+    }
+
+    auto* level = DiagnosticsManager::Instance().getActiveLevelSoft();
+    if (!level)
+    {
+        return;
+    }
+
+    level->prepareEcs();
+    auto& elements = widget->getElementsMutable();
+    WidgetElement* listPanel = FindElementById(elements, "Outliner.EntityList");
+    if (!listPanel)
+    {
+        return;
+    }
+
+    listPanel->children.clear();
+
+    auto& ecs = ECS::ECSManager::Instance();
+    const auto& entities = level->getEntities();
+    for (const auto entity : entities)
+    {
+        std::string label = "Entity " + std::to_string(entity);
+        if (const auto* nameComponent = ecs.getComponent<ECS::NameComponent>(entity))
+        {
+            if (!nameComponent->displayName.empty())
+            {
+                label = nameComponent->displayName;
+            }
+        }
+
+        WidgetElement button{};
+        button.id = "Outliner.Entity." + std::to_string(entity);
+        button.type = WidgetElementType::Button;
+        button.from = Vec2{ 0.0f, 0.0f };
+        button.to = Vec2{ 1.0f, 1.0f };
+        button.fillX = true;
+        button.text = label;
+        button.font = "default.ttf";
+        button.fontSize = 14.0f;
+        button.textAlignH = TextAlignH::Left;
+        button.textAlignV = TextAlignV::Center;
+        button.padding = Vec2{ 6.0f, 4.0f };
+        button.minSize = Vec2{ 0.0f, 24.0f };
+        button.color = Vec4{ 0.12f, 0.12f, 0.14f, 0.9f };
+        button.hoverColor = Vec4{ 0.18f, 0.18f, 0.22f, 0.95f };
+        button.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+        button.shaderVertex = "button_vertex.glsl";
+        button.shaderFragment = "button_fragment.glsl";
+        button.runtimeOnly = true;
+        listPanel->children.push_back(std::move(button));
+    }
+
+    widget->markLayoutDirty();
 }
 
 const std::vector<UIManager::WidgetEntry>& UIManager::getRegisteredWidgets() const
@@ -303,6 +405,8 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
         {
             continue;
         }
+
+        bindClickEventsForWidget(entry.widget);
 
         Vec2 computedWidgetSize{};
         bool hasComputedWidgetSize = false;
@@ -375,35 +479,21 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
         return;
     }
 
-    const auto pointInRect = [](const Vec2& pos, const Vec2& size, const Vec2& point)
+    WidgetElement* hovered = hitTest(m_mousePosition, false);
+
+    const std::function<void(WidgetElement&)> applyHover =
+        [&](WidgetElement& element)
         {
-            return point.x >= pos.x && point.x <= (pos.x + size.x) &&
-                point.y >= pos.y && point.y <= (pos.y + size.y);
-        };
-
-    const std::function<bool(WidgetElement&, bool)> updateHover =
-        [&](WidgetElement& element, bool allowHover) -> bool
-        {
-            bool consumed = false;
-            for (auto it = element.children.rbegin(); it != element.children.rend(); ++it)
+            const bool newHover = (&element == hovered) && element.isHitTestable;
+            if (element.isHovered != newHover)
             {
-                if (updateHover(*it, allowHover && !consumed))
+                element.isHovered = newHover;
+                if (newHover)
                 {
-                    consumed = true;
-                }
-            }
-
-            bool isHover = false;
-            if (allowHover && element.isHitTestable && element.hasComputedPosition && element.hasComputedSize)
-            {
-                isHover = pointInRect(element.computedPositionPixels, element.computedSizePixels, m_mousePosition);
-            }
-
-            if (element.isHovered != isHover)
-            {
-                element.isHovered = isHover;
-                if (isHover)
-                {
+                    if (element.type == WidgetElementType::Button && !element.id.empty())
+                    {
+                        Logger::Instance().log(Logger::Category::UI, "Hover enter: " + element.id, Logger::LogLevel::INFO);
+                    }
                     if (element.onHovered)
                     {
                         element.onHovered();
@@ -411,6 +501,10 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
                 }
                 else
                 {
+                    if (element.type == WidgetElementType::Button && !element.id.empty())
+                    {
+                        Logger::Instance().log(Logger::Category::UI, "Hover leave: " + element.id, Logger::LogLevel::INFO);
+                    }
                     if (element.onUnhovered)
                     {
                         element.onUnhovered();
@@ -418,7 +512,10 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
                 }
             }
 
-            return consumed || isHover;
+            for (auto& child : element.children)
+            {
+                applyHover(child);
+            }
         };
 
     for (auto& entry : m_widgets)
@@ -427,92 +524,11 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
         {
             continue;
         }
-        auto& elements = entry.widget->getElementsMutable();
-        bool consumed = false;
-        for (auto it = elements.rbegin(); it != elements.rend(); ++it)
+        for (auto& element : entry.widget->getElementsMutable())
         {
-            if (updateHover(*it, !consumed))
-            {
-                consumed = true;
-            }
+            applyHover(element);
         }
     }
-
-    if (!m_pendingClick || m_pendingClickButton != SDL_BUTTON_LEFT)
-    {
-        return;
-    }
-
-    std::vector<WidgetEntry*> ordered;
-    ordered.reserve(m_widgets.size());
-    for (auto& entry : m_widgets)
-    {
-        ordered.push_back(&entry);
-    }
-
-    std::sort(ordered.begin(), ordered.end(), [](const WidgetEntry* a, const WidgetEntry* b)
-        {
-            const int za = (a && a->widget) ? a->widget->getZOrder() : 0;
-            const int zb = (b && b->widget) ? b->widget->getZOrder() : 0;
-            return za > zb;
-        });
-
-    const std::function<bool(WidgetElement&)> handleClick =
-        [&](WidgetElement& element) -> bool
-        {
-            for (auto it = element.children.rbegin(); it != element.children.rend(); ++it)
-            {
-                if (handleClick(*it))
-                {
-                    return true;
-                }
-            }
-
-            if (!element.isHitTestable || !element.hasComputedPosition || !element.hasComputedSize)
-            {
-                return false;
-            }
-
-            if (!pointInRect(element.computedPositionPixels, element.computedSizePixels, m_pendingClickPos))
-            {
-                return false;
-            }
-
-            element.isPressed = true;
-            if (element.onClicked)
-            {
-                element.onClicked();
-            }
-            else if (!element.clickEvent.empty())
-            {
-                auto it = m_clickEvents.find(element.clickEvent);
-                if (it != m_clickEvents.end() && it->second)
-                {
-                    it->second();
-                }
-            }
-            return true;
-        };
-
-    for (auto* entry : ordered)
-    {
-        if (!entry || !entry->widget)
-        {
-            continue;
-        }
-
-        auto& elements = entry->widget->getElementsMutable();
-        for (auto it = elements.rbegin(); it != elements.rend(); ++it)
-        {
-            if (handleClick(*it))
-            {
-                m_pendingClick = false;
-                return;
-            }
-        }
-    }
-
-    m_pendingClick = false;
 }
 
 bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
@@ -522,86 +538,45 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
         return false;
     }
 
-    std::vector<const WidgetEntry*> ordered;
-    ordered.reserve(m_widgets.size());
-    for (const auto& entry : m_widgets)
+    Logger::Instance().log(Logger::Category::UI,
+        "MouseDown at (" + std::to_string(screenPos.x) + ", " + std::to_string(screenPos.y) + ")",
+        Logger::LogLevel::INFO);
+
+    WidgetElement* target = hitTest(screenPos, true);
+    if (!target)
     {
-        ordered.push_back(&entry);
+        Logger::Instance().log(Logger::Category::UI, "Click miss at (" + std::to_string(screenPos.x) + ", " + std::to_string(screenPos.y) + ")", Logger::LogLevel::INFO);
+        return false;
     }
 
-    std::sort(ordered.begin(), ordered.end(), [](const WidgetEntry* a, const WidgetEntry* b)
-        {
-            const int za = (a && a->widget) ? a->widget->getZOrder() : 0;
-            const int zb = (b && b->widget) ? b->widget->getZOrder() : 0;
-            return za > zb;
-        });
-
-    const auto pointInRect = [](const Vec2& pos, const Vec2& size, const Vec2& point)
-        {
-            return point.x >= pos.x && point.x <= (pos.x + size.x) &&
-                point.y >= pos.y && point.y <= (pos.y + size.y);
-        };
-
-    const std::function<bool(const WidgetElement&, const std::string&)> hitTestElement =
-        [&](const WidgetElement& element, const std::string& widgetId) -> bool
-        {
-            if (!element.hasComputedPosition || !element.hasComputedSize)
-            {
-                return false;
-            }
-
-            for (auto it = element.children.rbegin(); it != element.children.rend(); ++it)
-            {
-                if (hitTestElement(*it, widgetId))
-                {
-                    return true;
-                }
-            }
-
-            if (!pointInRect(element.computedPositionPixels, element.computedSizePixels, screenPos))
-            {
-                return false;
-            }
-
-            if (!element.isHitTestable)
-            {
-                return false;
-            }
-
-            if (element.onClicked)
-            {
-                element.onClicked();
-            }
-            else if (!element.clickEvent.empty())
-            {
-                auto it = m_clickEvents.find(element.clickEvent);
-                if (it != m_clickEvents.end() && it->second)
-                {
-                    it->second();
-                }
-            }
-
-            return true;
-        };
-
-    for (const auto* entry : ordered)
+    target->isPressed = true;
+    if (target->type == WidgetElementType::Button && !target->id.empty())
     {
-        if (!entry || !entry->widget)
+        Logger::Instance().log(Logger::Category::UI, "Click: " + target->id, Logger::LogLevel::INFO);
+    }
+    if (target->onClicked)
+    {
+        target->onClicked();
+    }
+    else
+    {
+        std::string eventId = target->clickEvent;
+        if (eventId.empty())
         {
-            continue;
+            eventId = target->id;
         }
 
-        const auto& elements = entry->widget->getElements();
-        for (auto it = elements.rbegin(); it != elements.rend(); ++it)
+        if (!eventId.empty())
         {
-            if (hitTestElement(*it, entry->id))
+            auto it = m_clickEvents.find(eventId);
+            if (it != m_clickEvents.end() && it->second)
             {
-                return true;
+                it->second();
             }
         }
     }
 
-    return false;
+    return true;
 }
 
 void UIManager::setMousePosition(const Vec2& screenPos)
@@ -622,6 +597,16 @@ void UIManager::registerClickEvent(const std::string& eventId, std::function<voi
         return;
     }
     m_clickEvents[eventId] = std::move(callback);
+
+    // Re-bind existing widget elements that reference this event id
+    for (auto& entry : m_widgets)
+    {
+        if (!entry.widget)
+        {
+            continue;
+        }
+        bindClickEventsForWidget(entry.widget);
+    }
 }
 
 bool UIManager::isPointerOverUI(const Vec2& screenPos) const
@@ -632,10 +617,10 @@ bool UIManager::isPointerOverUI(const Vec2& screenPos) const
                 point.y >= pos.y && point.y <= (pos.y + size.y);
         };
 
-    const std::function<bool(const WidgetElement&)> hitTestElement =
+    const std::function<bool(const WidgetElement&)> hitAny =
         [&](const WidgetElement& element) -> bool
         {
-            if (element.isHitTestable && element.hasComputedPosition && element.hasComputedSize)
+            if (element.hasComputedPosition && element.hasComputedSize)
             {
                 if (pointInRect(element.computedPositionPixels, element.computedSizePixels, screenPos))
                 {
@@ -645,7 +630,7 @@ bool UIManager::isPointerOverUI(const Vec2& screenPos) const
 
             for (const auto& child : element.children)
             {
-                if (hitTestElement(child))
+                if (hitAny(child))
                 {
                     return true;
                 }
@@ -660,10 +645,9 @@ bool UIManager::isPointerOverUI(const Vec2& screenPos) const
         {
             continue;
         }
-
         for (const auto& element : entry.widget->getElements())
         {
-            if (hitTestElement(element))
+            if (hitAny(element))
             {
                 return true;
             }
@@ -671,4 +655,131 @@ bool UIManager::isPointerOverUI(const Vec2& screenPos) const
     }
 
     return false;
+}
+
+WidgetElement* UIManager::hitTest(const Vec2& screenPos, bool logDetails) const
+{
+    if (logDetails)
+    {
+        Logger::Instance().log(Logger::Category::UI,
+            "hitTest start at (" + std::to_string(screenPos.x) + ", " + std::to_string(screenPos.y) + ")",
+            Logger::LogLevel::INFO);
+    }
+
+    std::vector<const WidgetEntry*> ordered;
+    ordered.reserve(m_widgets.size());
+    for (const auto& entry : m_widgets)
+    {
+        if (entry.widget)
+        {
+            ordered.push_back(&entry);
+        }
+    }
+
+    // Top-most first by z-order
+    std::sort(ordered.begin(), ordered.end(), [](const WidgetEntry* a, const WidgetEntry* b)
+        {
+            const int za = (a && a->widget) ? a->widget->getZOrder() : 0;
+            const int zb = (b && b->widget) ? b->widget->getZOrder() : 0;
+            return za > zb;
+        });
+
+    const auto pointInRect = [](const Vec2& pos, const Vec2& size, const Vec2& point)
+        {
+            return point.x >= pos.x && point.x <= (pos.x + size.x) &&
+                point.y >= pos.y && point.y <= (pos.y + size.y);
+        };
+
+    const std::function<WidgetElement*(const WidgetElement&)> testElement =
+        [&](const WidgetElement& element) -> WidgetElement*
+        {
+            // Children rendered in insertion order; check from back to front for hit priority
+            for (auto it = element.children.rbegin(); it != element.children.rend(); ++it)
+            {
+                if (auto* hitChild = testElement(*it))
+                {
+                    return hitChild;
+                }
+            }
+
+            if (!element.hasComputedPosition || !element.hasComputedSize)
+            {
+                return nullptr;
+            }
+
+            if (!element.isHitTestable)
+            {
+                return nullptr;
+            }
+
+            const bool inside = pointInRect(element.computedPositionPixels, element.computedSizePixels, screenPos);
+            if (logDetails)
+            {
+                const std::string idStr = element.id.empty() ? std::string("<no-id>") : element.id;
+                Logger::Instance().log(Logger::Category::UI,
+                    "hitTest element id='" + idStr + "' pos=(" +
+                    std::to_string(element.computedPositionPixels.x) + ", " +
+                    std::to_string(element.computedPositionPixels.y) + ") size=(" +
+                    std::to_string(element.computedSizePixels.x) + ", " +
+                    std::to_string(element.computedSizePixels.y) + ") inside=" + (inside ? "true" : "false"),
+                    Logger::LogLevel::INFO);
+            }
+
+            if (inside)
+            {
+                return const_cast<WidgetElement*>(&element);
+            }
+
+            return nullptr;
+        };
+
+    for (const auto* entry : ordered)
+    {
+        if (!entry || !entry->widget)
+        {
+            continue;
+        }
+
+        const auto& elements = entry->widget->getElements();
+        for (auto it = elements.rbegin(); it != elements.rend(); ++it)
+        {
+            if (auto* hit = testElement(*it))
+            {
+                return hit;
+            }
+        }
+    }
+
+    return nullptr;
+}
+
+void UIManager::bindClickEventsForWidget(const std::shared_ptr<Widget>& widget)
+{
+    if (!widget)
+    {
+        return;
+    }
+    for (auto& element : widget->getElementsMutable())
+    {
+        bindClickEventsForElement(element);
+    }
+}
+
+void UIManager::bindClickEventsForElement(WidgetElement& element)
+{
+    // Prefer explicit clickEvent; fall back to id for convenience.
+    std::string eventId = element.clickEvent.empty() ? element.id : element.clickEvent;
+    if (!eventId.empty())
+    {
+        auto it = m_clickEvents.find(eventId);
+        if (it != m_clickEvents.end())
+        {
+            element.onClicked = it->second;
+        }
+    }
+
+    for (auto& child : element.children)
+    {
+        bindClickEventsForElement(child);
+    }
 }

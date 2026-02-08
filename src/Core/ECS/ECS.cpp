@@ -25,6 +25,7 @@ namespace ECS
 		m_cameraComponents.clear();
 		m_physicsComponents.clear();
 		m_scriptComponents.clear();
+		m_nameComponents.clear();
 
 		m_renderSchema = Schema();
 		m_renderSchema.require<MeshComponent>().require<MaterialComponent>();
@@ -74,6 +75,7 @@ namespace ECS
 		removeComponent<CameraComponent>(entity);
 		removeComponent<PhysicsComponent>(entity);
 		removeComponent<ScriptComponent>(entity);
+		removeComponent<NameComponent>(entity);
 		m_entityMasks[entity].reset();
 		m_entities.erase(std::remove(m_entities.begin(), m_entities.end(), entity), m_entities.end());
 		return true;
