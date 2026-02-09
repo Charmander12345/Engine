@@ -892,8 +892,15 @@ void OpenGLRenderer::renderUI()
                 }
                 return;
             }
-            if (element.type == WidgetElementType::StackPanel)
+            if (element.type == WidgetElementType::StackPanel || element.type == WidgetElementType::Grid)
             {
+                if (element.color.w > 0.0f)
+                {
+                    const std::string vertexPath = resolveShaderPath(element.shaderVertex, defaultPanelVertex);
+                    const std::string fragmentPath = resolveShaderPath(element.shaderFragment, defaultPanelFragment);
+                    const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
+                    drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.color, false);
+                }
                 for (const auto& child : element.children)
                 {
                     self(self, child, x0, y0, widthPx, heightPx);
@@ -1104,6 +1111,16 @@ void OpenGLRenderer::drawUIPanel(float x0, float y0, float x1, float y1, const V
 
     const glm::vec4 glColor{ color.x, color.y, color.z, color.w };
     const glm::vec4 glHoverColor{ hoverColor.x, hoverColor.y, hoverColor.z, hoverColor.w };
+    const Vec4 baseColor = isHovered ? hoverColor : color;
+    const glm::vec4 glBorderColor{
+        std::min(1.0f, baseColor.x + 0.1f),
+        std::min(1.0f, baseColor.y + 0.1f),
+        std::min(1.0f, baseColor.z + 0.1f),
+        baseColor.w
+    };
+    const Vec2 viewportSize = (m_uiManager.getAvailableViewportSize().x > 0.0f && m_uiManager.getAvailableViewportSize().y > 0.0f)
+        ? m_uiManager.getAvailableViewportSize()
+        : getViewportSize();
 
     float vertices[6][2] = {
         { x0, y1 },
@@ -1117,6 +1134,27 @@ void OpenGLRenderer::drawUIPanel(float x0, float y0, float x1, float y1, const V
     glUseProgram(program);
     glUniformMatrix4fv(glGetUniformLocation(program, "uProjection"), 1, GL_FALSE, &projection[0][0]);
     glUniform4fv(glGetUniformLocation(program, "uColor"), 1, &glColor[0]);
+
+    const GLint borderColorLoc = glGetUniformLocation(program, "uBorderColor");
+    if (borderColorLoc >= 0)
+    {
+        glUniform4fv(borderColorLoc, 1, &glBorderColor[0]);
+    }
+    const GLint borderSizeLoc = glGetUniformLocation(program, "uBorderSize");
+    if (borderSizeLoc >= 0)
+    {
+        glUniform1f(borderSizeLoc, 1.0f);
+    }
+    const GLint rectLoc = glGetUniformLocation(program, "uRect");
+    if (rectLoc >= 0)
+    {
+        glUniform4f(rectLoc, x0, y0, x1, y1);
+    }
+    const GLint viewportLoc = glGetUniformLocation(program, "uViewportSize");
+    if (viewportLoc >= 0)
+    {
+        glUniform2f(viewportLoc, viewportSize.x, viewportSize.y);
+    }
 
     const GLint hoverColorLoc = glGetUniformLocation(program, "uHoverColor");
     if (hoverColorLoc >= 0)

@@ -10,6 +10,7 @@ namespace
         case WidgetElementType::Button: return "Button";
         case WidgetElementType::Panel: return "Panel";
         case WidgetElementType::StackPanel: return "StackPanel";
+        case WidgetElementType::Grid: return "Grid";
         default: return "Unknown";
         }
     }
@@ -20,6 +21,7 @@ namespace
         if (value == "Button") return WidgetElementType::Button;
         if (value == "Panel") return WidgetElementType::Panel;
         if (value == "StackPanel") return WidgetElementType::StackPanel;
+        if (value == "Grid") return WidgetElementType::Grid;
         return WidgetElementType::Unknown;
     }
 
@@ -150,9 +152,14 @@ namespace
         {
             element.to = readVec2(entry.at("to"));
         }
-        if (entry.contains("color"))
+        const bool hasColor = entry.contains("color");
+        if (hasColor)
         {
             element.color = readVec4(entry.at("color"));
+        }
+        else if (element.type == WidgetElementType::StackPanel || element.type == WidgetElementType::Grid)
+        {
+            element.color = Vec4{ 0.1f, 0.1f, 0.12f, 0.65f };
         }
         if (entry.contains("hoverColor"))
         {
@@ -217,6 +224,10 @@ namespace
         if (entry.contains("sizeToContent"))
         {
             element.sizeToContent = entry.at("sizeToContent").get<bool>();
+        }
+        if (entry.contains("scrollable"))
+        {
+            element.scrollable = entry.at("scrollable").get<bool>();
         }
         if (entry.contains("orientation"))
         {
@@ -310,6 +321,18 @@ namespace
         {
             entry["orientation"] = toString(element.orientation);
             entry["sizeToContent"] = element.sizeToContent;
+            if (element.scrollable)
+            {
+                entry["scrollable"] = element.scrollable;
+            }
+        }
+        else if (element.type == WidgetElementType::Grid)
+        {
+            entry["sizeToContent"] = element.sizeToContent;
+            if (element.scrollable)
+            {
+                entry["scrollable"] = element.scrollable;
+            }
         }
         if (!element.shaderVertex.empty())
         {

@@ -168,17 +168,28 @@ int main()
                 }
             }
         }
+
+        const std::string contentBrowserPath = assetManager.getEditorWidgetPath("ContentBrowser.asset");
+        if (!contentBrowserPath.empty())
+        {
+            const int widgetId = assetManager.loadAsset(contentBrowserPath, AssetType::Widget, AssetManager::Sync);
+            if (widgetId != 0)
+            {
+                if (auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(widgetId)))
+                {
+                    if (auto widget = glRenderer->createWidgetFromAsset(asset))
+                    {
+                        glRenderer->getUIManager().registerWidget("ContentBrowser", widget);
+                    }
+                }
+            }
+        }
+
     }
 
     bool running = true;
     uint64_t frame = 0;
     logger.log(Logger::Category::Engine, "Entering main loop.", Logger::LogLevel::INFO);
-
-    diagnostics.registerKeyUpHandler(SDLK_ESCAPE, [&]() {
-        logger.log(Logger::Category::Input, "Escape pressed - exiting.", Logger::LogLevel::INFO);
-        running = false;
-        return true;
-        });
 
     diagnostics.registerKeyUpHandler(SDLK_F1, [&]() {
         logger.log(Logger::Category::Input, "F1 pressed - saving all assets (async).", Logger::LogLevel::INFO);
@@ -322,16 +333,28 @@ int main()
                 SDL_ShowCursor();
             }
 
-            if (event.type == SDL_EVENT_MOUSE_WHEEL && rightMouseDown)
+            if (event.type == SDL_EVENT_MOUSE_WHEEL)
             {
-                const float step = 0.1f;
-                if (event.wheel.y > 0.0f)
+                if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
                 {
-                    cameraSpeedMultiplier = std::min(5.0f, cameraSpeedMultiplier + step);
+                    auto& uiManager = glRenderer->getUIManager();
+                    if (uiManager.handleScroll(mousePosPixels, event.wheel.y))
+                    {
+                        continue;
+                    }
                 }
-                else if (event.wheel.y < 0.0f)
+
+                if (rightMouseDown)
                 {
-                    cameraSpeedMultiplier = std::max(0.5f, cameraSpeedMultiplier - step);
+                    const float step = 0.1f;
+                    if (event.wheel.y > 0.0f)
+                    {
+                        cameraSpeedMultiplier = std::min(5.0f, cameraSpeedMultiplier + step);
+                    }
+                    else if (event.wheel.y < 0.0f)
+                    {
+                        cameraSpeedMultiplier = std::max(0.5f, cameraSpeedMultiplier - step);
+                    }
                 }
             }
 
@@ -397,11 +420,6 @@ int main()
         if (fpscap)
         {
             SDL_Delay(16);
-        }
-
-        if ((frame % 600) == 0)
-        {
-            logger.log(Logger::Category::Engine, "Heartbeat: frame=" + std::to_string(frame), Logger::LogLevel::INFO);
         }
     }
 

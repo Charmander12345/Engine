@@ -17,7 +17,7 @@ void main()
     float diff = max(dot(normal, lightDir), 0.0);
     float distance = length(uLightPos - vWorldPos);
     float attenuation = 1.0 / (1.0 + distance * distance);
-    vec3 ambient = tex.rgb * 0.05;
+    vec3 ambient = tex.rgb * 0.1;
     vec3 diffuse = tex.rgb * (uLightColor * (uLightIntensity * attenuation * diff));
     vec3 lit = ambient + diffuse;
     FragColor = vec4(lit, tex.a);

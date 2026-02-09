@@ -17,7 +17,8 @@ enum class WidgetElementType
     Text,
     Button,
     Panel,
-    StackPanel
+    StackPanel,
+    Grid
 };
 
 enum class TextAlignH
@@ -83,6 +84,8 @@ struct WidgetElement
     bool isHovered{ false };
     bool isPressed{ false };
     bool runtimeOnly{ false };
+    bool scrollable{ false };
+    float scrollOffset{ 0.0f };
     std::function<void()> onClicked;
     std::function<void()> onHovered;
     std::function<void()> onUnhovered;

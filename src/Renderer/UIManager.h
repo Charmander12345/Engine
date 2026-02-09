@@ -38,6 +38,7 @@ public:
 
     void updateLayouts(const std::function<Vec2(const std::string&, float)>& measureText);
     bool handleMouseDown(const Vec2& screenPos, int button);
+    bool handleScroll(const Vec2& screenPos, float delta);
     void setMousePosition(const Vec2& screenPos);
     bool isPointerOverUI(const Vec2& screenPos) const;
     bool hasClickEvent(const std::string& eventId) const;
@@ -46,6 +47,7 @@ public:
 private:
     WidgetElement* hitTest(const Vec2& screenPos, bool logDetails = false) const;
     void populateOutlinerWidget(const std::shared_ptr<Widget>& widget);
+    void populateContentBrowserWidget(const std::shared_ptr<Widget>& widget);
 
     Vec2 m_availableViewportSize{};
     Vec2 m_mousePosition{};

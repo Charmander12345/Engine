@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <numeric>
 #include <functional>
+#include <cmath>
+#include <filesystem>
 #include <SDL3/SDL.h>
 #include "../Logger/Logger.h"
 #include "../Diagnostics/DiagnosticsManager.h"
@@ -39,6 +41,20 @@ namespace
         return nullptr;
     }
 
+    void computeGridDimensions(size_t count, int& outColumns, int& outRows)
+    {
+        outColumns = 0;
+        outRows = 0;
+        if (count == 0)
+        {
+            return;
+        }
+
+        const float root = std::sqrt(static_cast<float>(count));
+        outColumns = std::max(1, static_cast<int>(std::ceil(root)));
+        outRows = static_cast<int>((count + static_cast<size_t>(outColumns) - 1) / static_cast<size_t>(outColumns));
+    }
+
     Vec2 measureElementSize(WidgetElement& element, const std::function<Vec2(const std::string&, float)>& measureText)
     {
         Vec2 size{};
@@ -71,6 +87,7 @@ namespace
             return size;
         }
         case WidgetElementType::StackPanel:
+        case WidgetElementType::Grid:
         {
             childSizes.reserve(element.children.size());
             for (auto& child : element.children)
@@ -121,6 +138,32 @@ namespace
                     maxWidth += element.padding.x * 2.0f;
                 }
                 size = Vec2{ maxWidth, heightSum };
+            }
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
+
+        if (element.type == WidgetElementType::Grid)
+        {
+            int columns = 0;
+            int rows = 0;
+            computeGridDimensions(childSizes.size(), columns, rows);
+
+            float maxWidth = 0.0f;
+            float maxHeight = 0.0f;
+            for (const auto& childSize : childSizes)
+            {
+                maxWidth = std::max(maxWidth, childSize.x);
+                maxHeight = std::max(maxHeight, childSize.y);
+            }
+
+            if (columns > 0 && rows > 0)
+            {
+                size.x = maxWidth * static_cast<float>(columns);
+                size.y = maxHeight * static_cast<float>(rows);
+                size.x += element.padding.x * 2.0f + element.padding.x * static_cast<float>(columns - 1);
+                size.y += element.padding.y * 2.0f + element.padding.y * static_cast<float>(rows - 1);
             }
             element.contentSizePixels = size;
             element.hasContentSize = true;
@@ -196,17 +239,17 @@ namespace
         element.hasComputedPosition = true;
         element.hasComputedSize = true;
 
-        if (element.type != WidgetElementType::StackPanel || element.children.empty())
+        if (element.children.empty())
         {
             return;
         }
 
         const float contentX = x0 + element.padding.x;
-        const float contentY = y0 + element.padding.y;
+        float contentY = y0 + element.padding.y;
         const float contentW = std::max(0.0f, width - element.padding.x * 2.0f);
         const float contentH = std::max(0.0f, height - element.padding.y * 2.0f);
 
-        if (element.orientation == StackOrientation::Horizontal)
+        if (element.type == WidgetElementType::StackPanel && element.orientation == StackOrientation::Horizontal)
         {
             float spacing = element.padding.x;
             float totalSpacing = spacing * static_cast<float>(element.children.size() > 0 ? (element.children.size() - 1) : 0);
@@ -231,12 +274,34 @@ namespace
                 cursorX += slotW + spacing;
             }
         }
-        else
+        else if (element.type == WidgetElementType::StackPanel)
         {
             float spacing = element.padding.y;
             float totalSpacing = spacing * static_cast<float>(element.children.size() > 0 ? (element.children.size() - 1) : 0);
             float availableH = std::max(0.0f, contentH - totalSpacing);
             float defaultH = (element.children.size() > 0) ? (availableH / static_cast<float>(element.children.size())) : 0.0f;
+            float totalHeight = 0.0f;
+            for (auto& child : element.children)
+            {
+                float slotH = defaultH;
+                if (element.sizeToContent && child.hasContentSize)
+                {
+                    slotH = child.contentSizePixels.y + child.margin.y * 2.0f;
+                }
+                totalHeight += slotH;
+            }
+            if (!element.children.empty())
+            {
+                totalHeight += totalSpacing;
+            }
+
+            if (element.scrollable)
+            {
+                const float maxScroll = std::max(0.0f, totalHeight - contentH);
+                element.scrollOffset = std::clamp(element.scrollOffset, 0.0f, maxScroll);
+                contentY -= element.scrollOffset;
+            }
+
             float cursorY = contentY;
 
             for (auto& child : element.children)
@@ -254,6 +319,47 @@ namespace
                 const float childH = std::max(0.0f, slotH - child.margin.y * 2.0f);
                 layoutElement(child, childX, childY, childW, childH, measureText);
                 cursorY += slotH + spacing;
+            }
+        }
+        else if (element.type == WidgetElementType::Grid)
+        {
+            int columns = 0;
+            int rows = 0;
+            computeGridDimensions(element.children.size(), columns, rows);
+
+            if (columns <= 0 || rows <= 0)
+            {
+                return;
+            }
+
+            const float spacingX = element.padding.x;
+            const float spacingY = element.padding.y;
+            const float totalSpacingX = spacingX * static_cast<float>(columns > 0 ? (columns - 1) : 0);
+            const float totalSpacingY = spacingY * static_cast<float>(rows > 0 ? (rows - 1) : 0);
+            const float cellW = (columns > 0) ? std::max(0.0f, (contentW - totalSpacingX) / static_cast<float>(columns)) : 0.0f;
+            const float cellH = (rows > 0) ? std::max(0.0f, (contentH - totalSpacingY) / static_cast<float>(rows)) : 0.0f;
+
+            if (element.scrollable)
+            {
+                const float totalHeight = cellH * static_cast<float>(rows) + totalSpacingY;
+                const float maxScroll = std::max(0.0f, totalHeight - contentH);
+                element.scrollOffset = std::clamp(element.scrollOffset, 0.0f, maxScroll);
+                contentY -= element.scrollOffset;
+            }
+
+            for (size_t index = 0; index < element.children.size(); ++index)
+            {
+                auto& child = element.children[index];
+                const int col = static_cast<int>(index % static_cast<size_t>(columns));
+                const int row = static_cast<int>(index / static_cast<size_t>(columns));
+
+                const float slotX = contentX + static_cast<float>(col) * (cellW + spacingX);
+                const float slotY = contentY + static_cast<float>(row) * (cellH + spacingY);
+                const float childX = slotX + child.margin.x;
+                const float childY = slotY + child.margin.y;
+                const float childW = std::max(0.0f, cellW - child.margin.x * 2.0f);
+                const float childH = std::max(0.0f, cellH - child.margin.y * 2.0f);
+                layoutElement(child, childX, childY, childW, childH, measureText);
             }
         }
     }
@@ -303,6 +409,10 @@ void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widg
                 {
                     populateOutlinerWidget(entry.widget);
                 }
+                else if (id == "ContentBrowser")
+                {
+                    populateContentBrowserWidget(entry.widget);
+                }
                 entry.widget->markLayoutDirty();
             }
             return;
@@ -314,6 +424,10 @@ void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widg
         if (id == "WorldOutliner")
         {
             populateOutlinerWidget(widget);
+        }
+        else if (id == "ContentBrowser")
+        {
+            populateContentBrowserWidget(widget);
         }
         widget->markLayoutDirty();
     }
@@ -380,6 +494,74 @@ void UIManager::populateOutlinerWidget(const std::shared_ptr<Widget>& widget)
     widget->markLayoutDirty();
 }
 
+void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widget)
+{
+    if (!widget)
+    {
+        return;
+    }
+
+    const auto& diagnostics = DiagnosticsManager::Instance();
+    const auto& projectInfo = diagnostics.getProjectInfo();
+    if (projectInfo.projectPath.empty())
+    {
+        return;
+    }
+
+    const std::filesystem::path contentRoot = std::filesystem::path(projectInfo.projectPath) / "Content";
+    if (!std::filesystem::exists(contentRoot))
+    {
+        return;
+    }
+
+    auto& elements = widget->getElementsMutable();
+    WidgetElement* treePanel = FindElementById(elements, "ContentBrowser.Tree");
+    if (!treePanel)
+    {
+        return;
+    }
+
+    treePanel->children.clear();
+    treePanel->scrollable = true;
+
+    std::vector<std::string> folderNames;
+    for (const auto& entry : std::filesystem::directory_iterator(contentRoot))
+    {
+        if (!entry.is_directory())
+        {
+            continue;
+        }
+        folderNames.push_back(entry.path().filename().string());
+    }
+    std::sort(folderNames.begin(), folderNames.end());
+
+    for (const auto& name : folderNames)
+    {
+        WidgetElement row{};
+        row.id = "ContentBrowser.Dir." + name;
+        row.type = WidgetElementType::Button;
+        row.from = Vec2{ 0.0f, 0.0f };
+        row.to = Vec2{ 1.0f, 1.0f };
+        row.fillX = true;
+        row.text = name;
+        row.font = "default.ttf";
+        row.fontSize = 14.0f;
+        row.textAlignH = TextAlignH::Left;
+        row.textAlignV = TextAlignV::Center;
+        row.padding = Vec2{ 6.0f, 4.0f };
+        row.minSize = Vec2{ 0.0f, 22.0f };
+        row.color = Vec4{ 0.13f, 0.14f, 0.17f, 0.9f };
+        row.hoverColor = Vec4{ 0.2f, 0.22f, 0.27f, 0.95f };
+        row.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+        row.shaderVertex = "button_vertex.glsl";
+        row.shaderFragment = "button_fragment.glsl";
+        row.runtimeOnly = true;
+        treePanel->children.push_back(std::move(row));
+    }
+
+    widget->markLayoutDirty();
+}
+
 const std::vector<UIManager::WidgetEntry>& UIManager::getRegisteredWidgets() const
 {
     return m_widgets;
@@ -395,23 +577,114 @@ void UIManager::unregisterWidget(const std::string& id)
 
 void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float)>& measureText)
 {
+    bool anyDirty = false;
+    for (const auto& entry : m_widgets)
+    {
+        if (entry.widget && entry.widget->isLayoutDirty())
+        {
+            anyDirty = true;
+            break;
+        }
+    }
+
+    if (!anyDirty)
+    {
+        if (!m_hasMousePosition)
+        {
+            return;
+        }
+    }
+
+    enum class DockSide
+    {
+        None,
+        Top,
+        Bottom,
+        Left,
+        Right
+    };
+
+    const auto getDockSide = [](const Widget& widget) -> DockSide
+        {
+            const bool fillX = widget.getFillX();
+            const bool fillY = widget.getFillY();
+            const WidgetAnchor anchor = widget.getAnchor();
+
+            if (fillX && !fillY)
+            {
+                return (anchor == WidgetAnchor::BottomLeft || anchor == WidgetAnchor::BottomRight) ? DockSide::Bottom : DockSide::Top;
+            }
+            if (fillY && !fillX)
+            {
+                return (anchor == WidgetAnchor::TopRight || anchor == WidgetAnchor::BottomRight) ? DockSide::Right : DockSide::Left;
+            }
+            return DockSide::None;
+        };
+
+    std::vector<WidgetEntry*> orderedEntries;
+    orderedEntries.reserve(m_widgets.size());
+    std::vector<WidgetEntry*> topEntries;
+    std::vector<WidgetEntry*> bottomEntries;
+    std::vector<WidgetEntry*> leftEntries;
+    std::vector<WidgetEntry*> rightEntries;
+    std::vector<WidgetEntry*> otherEntries;
+
     for (auto& entry : m_widgets)
     {
         if (!entry.widget)
         {
             continue;
         }
-        if (!entry.widget->isLayoutDirty())
+        switch (getDockSide(*entry.widget))
+        {
+        case DockSide::Top:
+            topEntries.push_back(&entry);
+            break;
+        case DockSide::Bottom:
+            bottomEntries.push_back(&entry);
+            break;
+        case DockSide::Left:
+            leftEntries.push_back(&entry);
+            break;
+        case DockSide::Right:
+            rightEntries.push_back(&entry);
+            break;
+        default:
+            otherEntries.push_back(&entry);
+            break;
+        }
+    }
+
+    orderedEntries.insert(orderedEntries.end(), topEntries.begin(), topEntries.end());
+    orderedEntries.insert(orderedEntries.end(), bottomEntries.begin(), bottomEntries.end());
+    orderedEntries.insert(orderedEntries.end(), leftEntries.begin(), leftEntries.end());
+    orderedEntries.insert(orderedEntries.end(), rightEntries.begin(), rightEntries.end());
+    orderedEntries.insert(orderedEntries.end(), otherEntries.begin(), otherEntries.end());
+
+    struct LayoutRect
+    {
+        float x{ 0.0f };
+        float y{ 0.0f };
+        float w{ 0.0f };
+        float h{ 0.0f };
+    };
+
+    LayoutRect available{ 0.0f, 0.0f, m_availableViewportSize.x, m_availableViewportSize.y };
+
+    for (auto* entryPtr : orderedEntries)
+    {
+        if (!entryPtr || !entryPtr->widget)
         {
             continue;
         }
+        auto& widget = entryPtr->widget;
 
-        bindClickEventsForWidget(entry.widget);
+        bindClickEventsForWidget(widget);
 
         Vec2 computedWidgetSize{};
         bool hasComputedWidgetSize = false;
 
-        for (auto& element : entry.widget->getElementsMutable())
+        for (auto& element : widget->getElementsMutable())
         {
             const Vec2 elementSize = measureElementSize(element, measureText);
             if (element.hasContentSize)
@@ -422,56 +695,88 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
             }
         }
 
-        Vec2 widgetSize = entry.widget->getSizePixels();
-        const Vec2 widgetOffset = entry.widget->getPositionPixels();
-        const WidgetAnchor widgetAnchor = entry.widget->getAnchor();
+        Vec2 widgetSize = widget->getSizePixels();
+        const Vec2 widgetOffset = widget->getPositionPixels();
+        const WidgetAnchor widgetAnchor = widget->getAnchor();
 
-        if (entry.widget->getFillX())
+        if (widget->getFillX())
         {
-            widgetSize.x = std::max(0.0f, m_availableViewportSize.x - widgetOffset.x);
+            widgetSize.x = std::max(0.0f, available.w - widgetOffset.x);
         }
-        if (entry.widget->getFillY())
+        if (widget->getFillY())
         {
-            widgetSize.y = std::max(0.0f, m_availableViewportSize.y - widgetOffset.y);
+            widgetSize.y = std::max(0.0f, available.h - widgetOffset.y);
         }
         if (widgetSize.x <= 0.0f)
         {
-            widgetSize.x = m_availableViewportSize.x;
+            widgetSize.x = available.w;
         }
         if (widgetSize.y <= 0.0f)
         {
-            widgetSize.y = hasComputedWidgetSize ? computedWidgetSize.y : m_availableViewportSize.y;
+            widgetSize.y = hasComputedWidgetSize ? computedWidgetSize.y : available.h;
         }
 
         Vec2 widgetPosition = widgetOffset;
         switch (widgetAnchor)
         {
         case WidgetAnchor::TopRight:
-            widgetPosition.x = m_availableViewportSize.x - widgetSize.x - widgetOffset.x;
-            widgetPosition.y = widgetOffset.y;
+            widgetPosition.x = available.x + available.w - widgetSize.x - widgetOffset.x;
+            widgetPosition.y = available.y + widgetOffset.y;
             break;
         case WidgetAnchor::BottomLeft:
-            widgetPosition.x = widgetOffset.x;
-            widgetPosition.y = m_availableViewportSize.y - widgetSize.y - widgetOffset.y;
+            widgetPosition.x = available.x + widgetOffset.x;
+            widgetPosition.y = available.y + available.h - widgetSize.y - widgetOffset.y;
             break;
         case WidgetAnchor::BottomRight:
-            widgetPosition.x = m_availableViewportSize.x - widgetSize.x - widgetOffset.x;
-            widgetPosition.y = m_availableViewportSize.y - widgetSize.y - widgetOffset.y;
+            widgetPosition.x = available.x + available.w - widgetSize.x - widgetOffset.x;
+            widgetPosition.y = available.y + available.h - widgetSize.y - widgetOffset.y;
             break;
         default:
-            widgetPosition.x = widgetOffset.x;
-            widgetPosition.y = widgetOffset.y;
+            widgetPosition.x = available.x + widgetOffset.x;
+            widgetPosition.y = available.y + widgetOffset.y;
             break;
         }
-        entry.widget->setComputedSizePixels(widgetSize, true);
-        entry.widget->setComputedPositionPixels(widgetPosition, true);
+        widget->setComputedSizePixels(widgetSize, true);
+        widget->setComputedPositionPixels(widgetPosition, true);
 
-        for (auto& element : entry.widget->getElementsMutable())
+        for (auto& element : widget->getElementsMutable())
         {
             layoutElement(element, widgetPosition.x, widgetPosition.y, widgetSize.x, widgetSize.y, measureText);
         }
 
-        entry.widget->setLayoutDirty(false);
+        switch (getDockSide(*widget))
+        {
+        case DockSide::Top:
+        {
+            const float consumed = widgetSize.y + widgetOffset.y;
+            available.y += consumed;
+            available.h = std::max(0.0f, available.h - consumed);
+            break;
+        }
+        case DockSide::Bottom:
+        {
+            const float consumed = widgetSize.y + widgetOffset.y;
+            available.h = std::max(0.0f, available.h - consumed);
+            break;
+        }
+        case DockSide::Left:
+        {
+            const float consumed = widgetSize.x + widgetOffset.x;
+            available.x += consumed;
+            available.w = std::max(0.0f, available.w - consumed);
+            break;
+        }
+        case DockSide::Right:
+        {
+            const float consumed = widgetSize.x + widgetOffset.x;
+            available.w = std::max(0.0f, available.w - consumed);
+            break;
+        }
+        default:
+            break;
+        }
+
+        widget->setLayoutDirty(false);
     }
 
     if (!m_hasMousePosition)
@@ -577,6 +882,69 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
     }
 
     return true;
+}
+
+bool UIManager::handleScroll(const Vec2& screenPos, float delta)
+{
+    if (delta == 0.0f)
+    {
+        return false;
+    }
+
+    const auto pointInRect = [](const Vec2& pos, const Vec2& size, const Vec2& point)
+        {
+            return point.x >= pos.x && point.x <= (pos.x + size.x) &&
+                point.y >= pos.y && point.y <= (pos.y + size.y);
+        };
+
+    const std::function<WidgetElement*(WidgetElement&)> findScrollable =
+        [&](WidgetElement& element) -> WidgetElement*
+        {
+            for (auto it = element.children.rbegin(); it != element.children.rend(); ++it)
+            {
+                if (auto* hitChild = findScrollable(*it))
+                {
+                    return hitChild;
+                }
+            }
+
+            if (!element.hasComputedPosition || !element.hasComputedSize)
+            {
+                return nullptr;
+            }
+            if (!element.scrollable || (element.type != WidgetElementType::StackPanel && element.type != WidgetElementType::Grid))
+            {
+                return nullptr;
+            }
+            if (!pointInRect(element.computedPositionPixels, element.computedSizePixels, screenPos))
+            {
+                return nullptr;
+            }
+            return &element;
+        };
+
+    for (auto& entry : m_widgets)
+    {
+        if (!entry.widget)
+        {
+            continue;
+        }
+        for (auto it = entry.widget->getElementsMutable().rbegin(); it != entry.widget->getElementsMutable().rend(); ++it)
+        {
+            if (auto* target = findScrollable(*it))
+            {
+                const float scrollStep = 30.0f;
+                const float maxScroll = (target->hasContentSize && target->hasComputedSize)
+                    ? std::max(0.0f, target->contentSizePixels.y - target->computedSizePixels.y)
+                    : 0.0f;
+                target->scrollOffset = std::clamp(target->scrollOffset - delta * scrollStep, 0.0f, maxScroll);
+                entry.widget->markLayoutDirty();
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 void UIManager::setMousePosition(const Vec2& screenPos)
