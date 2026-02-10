@@ -14,6 +14,11 @@ if (MSVC)
     # Prefer 64-bit tools/libraries when generating with Ninja inside Visual Studio.
     # This avoids accidental linkage against x86 Windows SDK libs.
     set(CMAKE_VS_PLATFORM_NAME "x64" CACHE STRING "" FORCE)
+
+    if (CMAKE_CONFIGURATION_TYPES)
+        set(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO} /PROFILE")
+        set(CMAKE_EXE_LINKER_FLAGS_DEBUG "${CMAKE_EXE_LINKER_FLAGS_DEBUG} /PROFILE")
+    endif()
 endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
@@ -60,6 +65,19 @@ set(ENGINE_DEPLOY_DIR "C:/Users/conno/source/repos/EngineBuild")
 # This is more reliable than post-build copying, especially with Ninja.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}")
+set(CMAKE_PDB_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}")
+set(CMAKE_PDB_OUTPUT_DIRECTORY_DEBUG "${ENGINE_DEPLOY_DIR}")
+set(CMAKE_PDB_OUTPUT_DIRECTORY_RELWITHDEBINFO "${ENGINE_DEPLOY_DIR}")
+set(CMAKE_PDB_OUTPUT_DIRECTORY_RELEASE "${ENGINE_DEPLOY_DIR}")
+set(CMAKE_PDB_OUTPUT_DIRECTORY_MINSIZEREL "${ENGINE_DEPLOY_DIR}")
+
+set_target_properties(Engine PROPERTIES
+    PDB_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}"
+    PDB_OUTPUT_DIRECTORY_DEBUG "${ENGINE_DEPLOY_DIR}"
+    PDB_OUTPUT_DIRECTORY_RELWITHDEBINFO "${ENGINE_DEPLOY_DIR}"
+    PDB_OUTPUT_DIRECTORY_RELEASE "${ENGINE_DEPLOY_DIR}"
+    PDB_OUTPUT_DIRECTORY_MINSIZEREL "${ENGINE_DEPLOY_DIR}"
+)
 
 # Always copy from the source tree to avoid stale files in the build directory.
 # NOTE: There are two shader directories in the repo; use Renderer/OpenGLRenderer/shaders as the authoritative one.

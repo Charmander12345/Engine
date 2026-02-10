@@ -10,6 +10,7 @@
 #include <memory>
 #include <unordered_map>
 #include <vector>
+#include <array>
 #include <glm/glm.hpp>
 
 #include "../../Core/ECS/Components.h"
@@ -38,6 +39,13 @@ public:
     void present() override;
     const std::string& name() const override;
 
+    double getLastGpuFrameMs() const { return m_lastGpuFrameMs; }
+    double getLastCpuRenderWorldMs() const { return m_cpuRenderWorldMs; }
+    double getLastCpuRenderUiMs() const { return m_cpuRenderUiMs; }
+    double getLastCpuUiLayoutMs() const { return m_cpuUiLayoutMs; }
+    double getLastCpuUiDrawMs() const { return m_cpuUiDrawMs; }
+    double getLastCpuEcsMs() const { return m_cpuEcsMs; }
+
     SDL_Window* window() const override;
 
     void moveCamera(float forward, float right, float up) override;
@@ -54,6 +62,13 @@ private:
     void renderUI();
     bool ensureUIQuadRenderer();
     GLuint getUIQuadProgram(const std::string& vertexShaderPath, const std::string& fragmentShaderPath);
+    void ensureUIShaderDefaults();
+    const std::string& resolveUIShaderPath(const std::string& value, const std::string& fallback);
+    bool ensureOcclusionResources();
+    void releaseOcclusionResources();
+    void updateOcclusionResults();
+    bool shouldRenderOcclusion(const OpenGLObject3D* object) const;
+    void issueOcclusionQuery(const OpenGLObject3D* object, const glm::vec3& center, float radius, const glm::mat4& viewProj);
     void drawUIPanel(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program,
         const Vec4& hoverColor = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f }, bool isHovered = false);
     void drawUIOutline(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program);
@@ -83,6 +98,7 @@ private:
     std::unique_ptr<Camera> m_camera;
     glm::mat4 m_projectionMatrix;
     std::vector<RenderEntry> m_renderEntries;
+    std::vector<RenderEntry> m_meshEntries;
     RenderResourceManager m_resourceManager;
     EngineLevel* m_cachedLevel{ nullptr };
 
@@ -96,10 +112,54 @@ private:
     GLuint m_uiQuadVao{0};
     GLuint m_uiQuadVbo{0};
     std::unordered_map<std::string, GLuint> m_uiQuadPrograms;
+    std::unordered_map<std::string, std::string> m_uiShaderPathCache;
+    std::string m_uiShaderBaseDir;
+    std::string m_defaultPanelVertex;
+    std::string m_defaultPanelFragment;
+    std::string m_defaultButtonVertex;
+    std::string m_defaultButtonFragment;
+    std::string m_defaultTextVertex;
+    std::string m_defaultTextFragment;
+    bool m_uiShaderDefaultsInitialized{false};
+    ECS::Schema m_lightSchema{};
+    bool m_lightSchemaInitialized{false};
     bool m_uiDebugEnabled{false};
     WindowHitTestContext m_hitTestContext{};
+
+    struct OcclusionQueryData
+    {
+        GLuint queryId{0};
+        bool hasResult{false};
+        bool lastVisible{true};
+        uint8_t occludedFrames{0};
+    };
+
+    std::unordered_map<const OpenGLObject3D*, OcclusionQueryData> m_occlusionQueries;
+    GLuint m_occlusionVao{0};
+    GLuint m_occlusionVbo{0};
+    GLuint m_occlusionProgram{0};
+    bool m_occlusionResourcesReady{false};
+    bool m_occlusionEnabled{true};
+    uint32_t m_lastVisibleCount{0};
+    uint32_t m_lastHiddenCount{0};
+    uint32_t m_lastTotalCount{0};
+
+    static constexpr size_t kFrameQueryCount = 3;
+    std::array<GLuint, kFrameQueryCount> m_gpuTimerQueries{};
+    size_t m_gpuQueryIndex{0};
+    bool m_gpuQueriesInitialized{false};
+    double m_lastGpuFrameMs{0.0};
+    double m_cpuRenderWorldMs{0.0};
+    double m_cpuRenderUiMs{0.0};
+    double m_cpuUiLayoutMs{0.0};
+    double m_cpuUiDrawMs{0.0};
+    double m_cpuEcsMs{0.0};
 
 public:
     void toggleUIDebug() { m_uiDebugEnabled = !m_uiDebugEnabled; }
     bool isUIDebugEnabled() const { return m_uiDebugEnabled; }
+    uint32_t getLastVisibleCount() const { return m_lastVisibleCount; }
+    uint32_t getLastHiddenCount() const { return m_lastHiddenCount; }
+    uint32_t getLastTotalCount() const { return m_lastTotalCount; }
+    
 };

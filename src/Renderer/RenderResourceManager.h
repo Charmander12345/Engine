@@ -38,6 +38,10 @@ public:
     };
 
     std::vector<RenderableAsset> buildRenderablesForSchema(const ECS::Schema& schema);
+    std::shared_ptr<OpenGLObject2D> getOrCreateObject2D(const std::shared_ptr<AssetData>& asset,
+        const std::vector<std::shared_ptr<Texture>>& textures);
+    std::shared_ptr<OpenGLObject3D> getOrCreateObject3D(const std::shared_ptr<AssetData>& asset,
+        const std::vector<std::shared_ptr<Texture>>& textures);
     void clearCaches();
     std::shared_ptr<OpenGLTextRenderer> prepareTextRenderer();
     void prepareAssets(const std::vector<AssetPrepKind>& kinds);

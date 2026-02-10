@@ -81,6 +81,9 @@ struct WidgetElement
     bool hasContentSize{ false };
     Vec2 computedPositionPixels{};
     bool hasComputedPosition{ false };
+    Vec2 boundsMinPixels{};
+    Vec2 boundsMaxPixels{};
+    bool hasBounds{ false };
     bool isHovered{ false };
     bool isPressed{ false };
     bool runtimeOnly{ false };

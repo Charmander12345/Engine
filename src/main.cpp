@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
+#include <algorithm>
 #include <SDL3/SDL.h>
 
 #if defined(_WIN32)
@@ -26,20 +27,25 @@ int main()
     auto& logger = Logger::Instance();
     logger.initialize();
 
-    logger.log(Logger::Category::Engine, "Engine starting...", Logger::LogLevel::INFO);
+    auto logTimed = [&](Logger::Category category, const std::string& message, Logger::LogLevel level)
+    {
+        logger.log(category, message, level);
+    };
+
+    logTimed(Logger::Category::Engine, "Engine starting...", Logger::LogLevel::INFO);
 
     auto& assetManager = AssetManager::Instance();
-    logger.log(Logger::Category::AssetManagement, "Initialising AssetManager...", Logger::LogLevel::INFO);
+    logTimed(Logger::Category::AssetManagement, "Initialising AssetManager...", Logger::LogLevel::INFO);
     if (!assetManager.initialize())
     {
-        logger.log(Logger::Category::AssetManagement, "AssetManager initialisation failed.", Logger::LogLevel::FATAL);
+        logTimed(Logger::Category::AssetManagement, "AssetManager initialisation failed.", Logger::LogLevel::FATAL);
         return -1;
     }
 
-    logger.log(Logger::Category::AssetManagement, "AssetManager initialised successfully.", Logger::LogLevel::INFO);
+    logTimed(Logger::Category::AssetManagement, "AssetManager initialised successfully.", Logger::LogLevel::INFO);
 
     std::string cwd = std::filesystem::current_path().string();
-    logger.log(Logger::Category::Engine, "Startup path: " + cwd, Logger::LogLevel::INFO);
+    logTimed(Logger::Category::Engine, "Startup path: " + cwd, Logger::LogLevel::INFO);
 
     std::filesystem::path downloadsPath;
 #if defined(_WIN32)
@@ -59,20 +65,20 @@ int main()
     }
 
     const std::filesystem::path projectRoot = downloadsPath / "SampleProject";
-    logger.log(Logger::Category::Engine, "Loading project...", Logger::LogLevel::INFO);
+    logTimed(Logger::Category::Engine, "Loading project...", Logger::LogLevel::INFO);
     if (!assetManager.loadProject(projectRoot.string()))
     {
-        logger.log(Logger::Category::Project, "Project not found. Creating default project: SampleProject", Logger::LogLevel::WARNING);
+        logTimed(Logger::Category::Project, "Project not found. Creating default project: SampleProject", Logger::LogLevel::WARNING);
         assetManager.createProject(downloadsPath.string(), "SampleProject", { "SampleProject", "1.0", "1.0", "", DiagnosticsManager::RHIType::OpenGL });
     }
 
-    logger.log(Logger::Category::Engine, "Initialising SDL (video + audio)...", Logger::LogLevel::INFO);
+    logTimed(Logger::Category::Engine, "Initialising SDL (video + audio)...", Logger::LogLevel::INFO);
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO))
     {
-        logger.log(Logger::Category::Engine, std::string("Failed to initialise SDL: ") + SDL_GetError(), Logger::LogLevel::FATAL);
+        logTimed(Logger::Category::Engine, std::string("Failed to initialise SDL: ") + SDL_GetError(), Logger::LogLevel::FATAL);
         return -1;
     }
-    logger.log(Logger::Category::Engine, "SDL initialised successfully.", Logger::LogLevel::INFO);
+    logTimed(Logger::Category::Engine, "SDL initialised successfully.", Logger::LogLevel::INFO);
 
     auto& diagnostics = DiagnosticsManager::Instance();
     //diagnostics.setRHIType(DiagnosticsManager::RHIType::OpenGL);
@@ -82,12 +88,13 @@ int main()
         diagnostics.setWindowState(DiagnosticsManager::WindowState::Maximized);
     }
 
-    logger.log(Logger::Category::Rendering, "Initialising Renderer (OpenGL)...", Logger::LogLevel::INFO);
-    Renderer* renderer = new OpenGLRenderer();
+    logTimed(Logger::Category::Rendering, "Initialising Renderer (OpenGL)...", Logger::LogLevel::INFO);
+    auto* glRenderer = new OpenGLRenderer();
+    Renderer* renderer = glRenderer;
 
     if (!renderer->initialize())
     {
-        logger.log(Logger::Category::Rendering, "Failed to initialise renderer.", Logger::LogLevel::FATAL);
+        logTimed(Logger::Category::Rendering, "Failed to initialise renderer.", Logger::LogLevel::FATAL);
         delete renderer;
         SDL_Quit();
         return -1;
@@ -119,7 +126,8 @@ int main()
         SDL_SetWindowRelativeMouseMode(w, false);
     }
 
-    logger.log(Logger::Category::Rendering, std::string("Renderer initialised successfully: ") + renderer->name(), Logger::LogLevel::INFO);
+    logTimed(Logger::Category::Rendering, std::string("Renderer initialised successfully: ") + renderer->name(), Logger::LogLevel::INFO);
+    SDL_GL_SetSwapInterval(0);
 
 #if defined(_WIN32)
     FreeConsole();
@@ -129,7 +137,7 @@ int main()
     ecs.initialize({});
     ecs.createEntity();
 
-    if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
+    if (glRenderer)
     {
         glRenderer->getUIManager().registerClickEvent("TitleBar.Close", []()
             {
@@ -189,16 +197,16 @@ int main()
 
     bool running = true;
     uint64_t frame = 0;
-    logger.log(Logger::Category::Engine, "Entering main loop.", Logger::LogLevel::INFO);
+    logTimed(Logger::Category::Engine, "Entering main loop.", Logger::LogLevel::INFO);
 
     diagnostics.registerKeyUpHandler(SDLK_F1, [&]() {
-        logger.log(Logger::Category::Input, "F1 pressed - saving all assets (async).", Logger::LogLevel::INFO);
+        logTimed(Logger::Category::Input, "F1 pressed - saving all assets (async).", Logger::LogLevel::INFO);
         //assetManager.saveAllAssetsAsync();
         return true;
         });
 
     diagnostics.registerKeyUpHandler(SDLK_F2, [&]() {
-        logger.log(Logger::Category::Input, "F2 pressed - opening import dialog.", Logger::LogLevel::INFO);
+        logTimed(Logger::Category::Input, "F2 pressed - opening import dialog.", Logger::LogLevel::INFO);
         //assetManager.importAssetWithDialog(nullptr, AssetType::Unknown);
         return true;
         });
@@ -206,6 +214,11 @@ int main()
 
     bool rightMouseDown = false;
     float cameraSpeedMultiplier = 1.0f;
+    bool showMetrics = true;
+    bool showOcclusionStats = false;
+    Vec2 mousePosPixels{};
+    bool hasMousePos = false;
+    bool isOverUI = false;
 
     uint64_t lastCounter = SDL_GetPerformanceCounter();
     const double freq = static_cast<double>(SDL_GetPerformanceFrequency());
@@ -214,14 +227,36 @@ int main()
     uint32_t fpsFrames = 0;
     double fpsValue = 0.0;
 
+    double metricsUpdateTimer = 0.0;
+    constexpr double kMetricsUpdateIntervalSec = 0.25;
+    bool metricsUpdatePending = true;
+    std::string fpsText = "FPS: 0";
+    std::string speedText = "Speed: x1.0";
+    std::string cpuText;
+    std::string renderText;
+    std::string uiText;
+    std::string inputText;
+    std::string otherText;
+    std::string gcText;
+    std::string ecsText;
+    std::string frameText;
+    std::string occlusionText;
+
     uint64_t lastGcCounter = lastCounter;
     constexpr double kGcIntervalSec = 60.0;
     uint64_t gcRuns = 0;
 
     bool fpscap = true;
+    double cpuInputMs = 0.0;
+    double cpuEventMs = 0.0;
+    double cpuRenderMs = 0.0;
+    double cpuOtherMs = 0.0;
+    double cpuLoggerMs = 0.0;
+    double cpuGcMs = 0.0;
 
     while (running)
     {
+        const uint64_t frameStartCounter = SDL_GetPerformanceCounter();
         ++frame;
 
         const uint64_t now = SDL_GetPerformanceCounter();
@@ -237,19 +272,44 @@ int main()
             fpsTimer = 0.0;
         }
 
+        metricsUpdateTimer += dt;
+        if (metricsUpdateTimer >= kMetricsUpdateIntervalSec)
+        {
+            metricsUpdateTimer = 0.0;
+            metricsUpdatePending = true;
+        }
+
+        cpuLoggerMs = 0.0;
+        cpuGcMs = 0.0;
+
+        auto logTimed = [&](Logger::Category category, const std::string& message, Logger::LogLevel level)
+        {
+            const uint64_t logStart = SDL_GetPerformanceCounter();
+            logger.log(category, message, level);
+            const uint64_t logEnd = SDL_GetPerformanceCounter();
+            if (freq > 0.0)
+            {
+                cpuLoggerMs += (static_cast<double>(logEnd - logStart) / freq * 1000.0);
+            }
+        };
+
         if (freq > 0.0 && (static_cast<double>(now - lastGcCounter) / freq) >= kGcIntervalSec)
         {
+            const uint64_t gcStart = SDL_GetPerformanceCounter();
             assetManager.collectGarbage();
+            const uint64_t gcEnd = SDL_GetPerformanceCounter();
+            cpuGcMs = (freq > 0.0) ? (static_cast<double>(gcEnd - gcStart) / freq * 1000.0) : 0.0;
             lastGcCounter = now;
 
-
-			logger.log(Logger::Category::Rendering, "Delta time (dt): " + std::to_string(dt) + " seconds.", Logger::LogLevel::INFO);
+			logTimed(Logger::Category::Rendering, "Delta time (dt): " + std::to_string(dt) + " seconds.", Logger::LogLevel::INFO);
             ++gcRuns;
             if ((gcRuns % 12) == 0)
             {
-                logger.log(Logger::Category::AssetManagement, "Periodic GC runs=" + std::to_string(gcRuns), Logger::LogLevel::INFO);
+				logTimed(Logger::Category::AssetManagement, "Periodic GC runs=" + std::to_string(gcRuns), Logger::LogLevel::INFO);
             }
         }
+
+        const uint64_t inputStartCounter = SDL_GetPerformanceCounter();
 
         // Basic movement (camera-relative)
         const float moveSpeed = static_cast<float>(3.0 * dt * cameraSpeedMultiplier); // units/sec
@@ -264,33 +324,37 @@ int main()
             if (keys[SDL_SCANCODE_E]) renderer->moveCamera(0.0f, 0.0f, +moveSpeed);
         }
 
-        Vec2 mousePosPixels{};
-        bool isOverUI = false;
-        if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
+        if (!hasMousePos)
         {
             float mouseX = 0.0f;
             float mouseY = 0.0f;
             SDL_GetMouseState(&mouseX, &mouseY);
             mousePosPixels = Vec2{ mouseX, mouseY };
-            auto& uiManager = glRenderer->getUIManager();
-            uiManager.setMousePosition(mousePosPixels);
-            isOverUI = uiManager.isPointerOverUI(mousePosPixels);
+            hasMousePos = true;
+            if (glRenderer)
+            {
+                auto& uiManager = glRenderer->getUIManager();
+                uiManager.setMousePosition(mousePosPixels);
+                isOverUI = uiManager.isPointerOverUI(mousePosPixels);
+            }
         }
 
+        const uint64_t eventStartCounter = SDL_GetPerformanceCounter();
         SDL_Event event;
         while (SDL_PollEvent(&event))
         {
             if (event.type == SDL_EVENT_QUIT)
             {
-                logger.log(Logger::Category::Input, "SDL_EVENT_QUIT received.", Logger::LogLevel::INFO);
+				logTimed(Logger::Category::Input, "SDL_EVENT_QUIT received.", Logger::LogLevel::INFO);
                 running = false;
             }
 
             if (event.type == SDL_EVENT_MOUSE_MOTION)
             {
-                if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
+                if (glRenderer)
                 {
                     mousePosPixels = Vec2{ event.motion.x, event.motion.y };
+                    hasMousePos = true;
                     auto& uiManager = glRenderer->getUIManager();
                     uiManager.setMousePosition(mousePosPixels);
                     isOverUI = uiManager.isPointerOverUI(mousePosPixels);
@@ -299,11 +363,14 @@ int main()
 
             if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT)
             {
-                if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
+                if (glRenderer)
                 {
                     const Vec2 mousePos{ static_cast<float>(event.button.x), static_cast<float>(event.button.y) };
+                    mousePosPixels = mousePos;
+                    hasMousePos = true;
                     auto& uiManager = glRenderer->getUIManager();
                     uiManager.setMousePosition(mousePos);
+                    isOverUI = uiManager.isPointerOverUI(mousePos);
                     if (uiManager.handleMouseDown(mousePos, event.button.button))
                     {
                         continue;
@@ -313,6 +380,15 @@ int main()
 
             if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_RIGHT)
             {
+                if (glRenderer)
+                {
+                    const Vec2 mousePos{ static_cast<float>(event.button.x), static_cast<float>(event.button.y) };
+                    mousePosPixels = mousePos;
+                    hasMousePos = true;
+                    auto& uiManager = glRenderer->getUIManager();
+                    uiManager.setMousePosition(mousePos);
+                    isOverUI = uiManager.isPointerOverUI(mousePos);
+                }
                 if (!isOverUI)
                 {
                     rightMouseDown = true;
@@ -335,7 +411,7 @@ int main()
 
             if (event.type == SDL_EVENT_MOUSE_WHEEL)
             {
-                if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
+                if (glRenderer)
                 {
                     auto& uiManager = glRenderer->getUIManager();
                     if (uiManager.handleScroll(mousePosPixels, event.wheel.y))
@@ -371,20 +447,29 @@ int main()
             {
                 if (event.key.key == SDLK_F11)
                 {
-                    if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
+                    if (glRenderer)
                     {
                         glRenderer->toggleUIDebug();
-                        Logger::Instance().log(Logger::Category::Input,
+						logTimed(Logger::Category::Input,
                             std::string("UI debug bounds: ") + (glRenderer->isUIDebugEnabled() ? "ON" : "OFF"),
                             Logger::LogLevel::INFO);
                     }
+                    continue;
+                }
+                if (event.key.key == SDLK_F10)
+                {
+                    showMetrics = !showMetrics;
+                    continue;
+                }
+                if (event.key.key == SDLK_F9)
+                {
+                    showOcclusionStats = !showOcclusionStats;
                     continue;
                 }
                 diagnostics.dispatchKeyUp(event.key.key);
                 if (event.key.key == SDLK_F12)
                 {
 					fpscap = !fpscap;
-					SDL_GL_SetSwapInterval(fpscap ? 1 : 0);
                 }
             }
             else if (event.type == SDL_EVENT_KEY_DOWN)
@@ -392,46 +477,173 @@ int main()
                 diagnostics.dispatchKeyDown(event.key.key);
             }
         }
+        const uint64_t eventEndCounter = SDL_GetPerformanceCounter();
+        cpuEventMs = (freq > 0.0) ? (static_cast<double>(eventEndCounter - eventStartCounter) / freq * 1000.0) : 0.0;
+
+        const uint64_t inputEndCounter = SDL_GetPerformanceCounter();
+        cpuInputMs = (freq > 0.0) ? (static_cast<double>(inputEndCounter - inputStartCounter) / freq * 1000.0) : 0.0;
 
         if (diagnostics.isShutdownRequested())
         {
             running = false;
         }
 
-        if (auto* glRenderer = dynamic_cast<OpenGLRenderer*>(renderer))
+        if (glRenderer)
         {
-            glRenderer->queueText("FPS: " + std::to_string(static_cast<int>(fpsValue + 0.5)),
+            if (metricsUpdatePending)
+            {
+                fpsText = "FPS: " + std::to_string(static_cast<int>(fpsValue + 0.5));
+
+                std::ostringstream speedStream;
+                speedStream << std::fixed << std::setprecision(1) << cameraSpeedMultiplier;
+                speedText = "Speed: x" + speedStream.str();
+            }
+
+            glRenderer->queueText(fpsText,
                 Vec2{ 0.02f, 0.05f },
                 0.6f,
                 Vec4{ 1.0f, 1.0f, 1.0f, 1.0f });
 
-            std::ostringstream speedStream;
-            speedStream << std::fixed << std::setprecision(1) << cameraSpeedMultiplier;
-            glRenderer->queueText("Speed: x" + speedStream.str(),
+            glRenderer->queueText(speedText,
                 Vec2{ 0.02f, 0.09f },
                 0.4f,
                 Vec4{ 0.9f, 0.9f, 0.9f, 1.0f });
         }
 
+        const uint64_t renderStartCounter = SDL_GetPerformanceCounter();
         renderer->clear();
         renderer->render();
         renderer->present();
+        const uint64_t renderEndCounter = SDL_GetPerformanceCounter();
+        cpuRenderMs = (freq > 0.0) ? (static_cast<double>(renderEndCounter - renderStartCounter) / freq * 1000.0) : 0.0;
+
+        const uint64_t frameEndCounter = SDL_GetPerformanceCounter();
+        const double cpuFrameMs = (freq > 0.0) ? (static_cast<double>(frameEndCounter - frameStartCounter) / freq * 1000.0) : 0.0;
+        cpuOtherMs = std::max(0.0, cpuFrameMs - cpuInputMs - cpuRenderMs);
+        if (glRenderer)
+        {
+            if (metricsUpdatePending)
+            {
+                std::ostringstream statsStream;
+                statsStream << std::fixed << std::setprecision(3)
+                    << "CPU: " << cpuFrameMs << " ms"
+                    << " | GPU: " << glRenderer->getLastGpuFrameMs() << " ms";
+                cpuText = statsStream.str();
+
+                std::ostringstream renderStream;
+                renderStream << std::fixed << std::setprecision(3)
+                    << "World: " << glRenderer->getLastCpuRenderWorldMs() << " ms"
+                    << " | UI: " << glRenderer->getLastCpuRenderUiMs() << " ms";
+                renderText = renderStream.str();
+
+                std::ostringstream uiStream;
+                uiStream << std::fixed << std::setprecision(3)
+                    << "UI Layout: " << glRenderer->getLastCpuUiLayoutMs() << " ms"
+                    << " | UI Draw: " << glRenderer->getLastCpuUiDrawMs() << " ms";
+                uiText = uiStream.str();
+
+                std::ostringstream inputStream;
+                inputStream << std::fixed << std::setprecision(3)
+                    << "Input: " << cpuInputMs << " ms"
+                    << " | Events: " << cpuEventMs << " ms";
+                inputText = inputStream.str();
+
+                std::ostringstream otherStream;
+                otherStream << std::fixed << std::setprecision(3)
+                    << "Render: " << cpuRenderMs << " ms"
+                    << " | Other: " << cpuOtherMs << " ms";
+                otherText = otherStream.str();
+
+                std::ostringstream gcStream;
+                gcStream << std::fixed << std::setprecision(3)
+                    << "GC: " << cpuGcMs << " ms"
+                    << " | Logger: " << cpuLoggerMs << " ms";
+                gcText = gcStream.str();
+
+                std::ostringstream ecsStream;
+                ecsStream << std::fixed << std::setprecision(3)
+                    << "ECS: " << glRenderer->getLastCpuEcsMs() << " ms";
+                ecsText = ecsStream.str();
+
+                std::ostringstream frameStream;
+                frameStream << std::fixed << std::setprecision(3)
+                    << "Frame: " << cpuFrameMs << " ms";
+                frameText = frameStream.str();
+
+                std::ostringstream occlusionStream;
+                occlusionStream << "Visible: " << glRenderer->getLastVisibleCount()
+                    << " | Hidden: " << glRenderer->getLastHiddenCount()
+                    << " | Total: " << glRenderer->getLastTotalCount();
+                occlusionText = occlusionStream.str();
+            }
+
+            if (showMetrics)
+            {
+                if (!cpuText.empty())
+                {
+                    glRenderer->queueText(cpuText, Vec2{ 0.02f, 0.13f }, 0.4f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
+                }
+                if (!renderText.empty())
+                {
+                    glRenderer->queueText(renderText, Vec2{ 0.02f, 0.17f }, 0.35f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
+                }
+                if (!uiText.empty())
+                {
+                    glRenderer->queueText(uiText, Vec2{ 0.02f, 0.21f }, 0.35f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
+                }
+                if (!inputText.empty())
+                {
+                    glRenderer->queueText(inputText, Vec2{ 0.02f, 0.25f }, 0.35f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
+                }
+                if (!otherText.empty())
+                {
+                    glRenderer->queueText(otherText, Vec2{ 0.02f, 0.29f }, 0.35f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
+                }
+                if (!gcText.empty())
+                {
+                    glRenderer->queueText(gcText, Vec2{ 0.02f, 0.33f }, 0.35f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
+                }
+                if (!ecsText.empty())
+                {
+                    glRenderer->queueText(ecsText, Vec2{ 0.02f, 0.37f }, 0.35f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
+                }
+                if (!frameText.empty())
+                {
+                    glRenderer->queueText(frameText, Vec2{ 0.02f, 0.41f }, 0.35f, Vec4{ 0.7f, 1.0f, 0.7f, 1.0f });
+                }
+            }
+            if (showOcclusionStats && !occlusionText.empty())
+            {
+                glRenderer->queueText(occlusionText, Vec2{ 0.02f, 0.45f }, 0.35f, Vec4{ 1.0f, 0.85f, 0.4f, 1.0f });
+            }
+        }
+
+        if (metricsUpdatePending)
+        {
+            metricsUpdatePending = false;
+        }
 
         if (fpscap)
         {
-            SDL_Delay(16);
+            const uint64_t frameEndCounter = SDL_GetPerformanceCounter();
+            const double frameMs = (freq > 0.0) ? (static_cast<double>(frameEndCounter - frameStartCounter) / freq * 1000.0) : 0.0;
+            const double remainingMs = 16.66 - frameMs;
+            if (remainingMs > 0.0)
+            {
+                SDL_Delay(static_cast<Uint32>(remainingMs + 0.5));
+            }
         }
     }
 
-    logger.log(Logger::Category::Engine, "Shutting down...", Logger::LogLevel::INFO);
+    logTimed(Logger::Category::Engine, "Shutting down...", Logger::LogLevel::INFO);
 
 	while (diagnostics.isActionInProgress())
     {
-        logger.log(Logger::Category::Engine, "Waiting for ongoing actions to complete...", Logger::LogLevel::INFO);
+        logTimed(Logger::Category::Engine, "Waiting for ongoing actions to complete...", Logger::LogLevel::INFO);
         SDL_Delay(100);
     }
 
-    logger.log(Logger::Category::Diagnostics, "Saving configs...", Logger::LogLevel::INFO);
+    logTimed(Logger::Category::Diagnostics, "Saving configs...", Logger::LogLevel::INFO);
     if (auto* w = renderer->window())
     {
         int windowW = 0;
@@ -458,7 +670,7 @@ int main()
 
     delete renderer;
 
-    logger.log(Logger::Category::Engine, "SDL_Quit()", Logger::LogLevel::INFO);
+    logTimed(Logger::Category::Engine, "SDL_Quit()", Logger::LogLevel::INFO);
     SDL_Quit();
 
     if (logger.hasErrorsOrFatal())
@@ -478,6 +690,6 @@ int main()
         }
     }
 
-    logger.log(Logger::Category::Engine, "Engine shutdown complete.", Logger::LogLevel::INFO);
+    logTimed(Logger::Category::Engine, "Engine shutdown complete.", Logger::LogLevel::INFO);
     return 0;
 }

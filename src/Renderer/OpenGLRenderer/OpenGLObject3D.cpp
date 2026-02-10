@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <vector>
+#include <limits>
 
 #include "OpenGLMaterial.h"
 #include "OpenGLShader.h"
@@ -147,6 +148,21 @@ OpenGLObject3D::OpenGLObject3D(const std::shared_ptr<AssetData>& asset)
 {
 }
 
+bool OpenGLObject3D::hasLocalBounds() const
+{
+    return m_hasLocalBounds;
+}
+
+const glm::vec3& OpenGLObject3D::getLocalBoundsCenter() const
+{
+    return m_localBoundsCenter;
+}
+
+float OpenGLObject3D::getLocalBoundsRadius() const
+{
+    return m_localBoundsRadius;
+}
+
 void OpenGLObject3D::ClearCache()
 {
     s_materialCache.clear();
@@ -236,6 +252,30 @@ bool OpenGLObject3D::prepare()
     if (vCount == 0)
     {
         return false;
+    }
+
+    if ((vCount % 5) == 0)
+    {
+        glm::vec3 minPos(std::numeric_limits<float>::max());
+        glm::vec3 maxPos(std::numeric_limits<float>::lowest());
+        for (size_t i = 0; i + 4 < vCount; i += 5)
+        {
+            glm::vec3 pos(vertices[i + 0], vertices[i + 1], vertices[i + 2]);
+            minPos = glm::min(minPos, pos);
+            maxPos = glm::max(maxPos, pos);
+        }
+
+        m_localBoundsCenter = (minPos + maxPos) * 0.5f;
+        float maxRadiusSq = 0.0f;
+        for (size_t i = 0; i + 4 < vCount; i += 5)
+        {
+            glm::vec3 pos(vertices[i + 0], vertices[i + 1], vertices[i + 2]);
+            const glm::vec3 diff = pos - m_localBoundsCenter;
+            const float distSq = glm::dot(diff, diff);
+            maxRadiusSq = std::max(maxRadiusSq, distSq);
+        }
+        m_localBoundsRadius = std::sqrt(maxRadiusSq);
+        m_hasLocalBounds = true;
     }
 
     auto verticesWithNormals = BuildVerticesWithFlatNormals(vertices, indices);

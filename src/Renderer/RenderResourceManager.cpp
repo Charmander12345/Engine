@@ -360,6 +360,80 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
     return renderables;
 }
 
+std::shared_ptr<OpenGLObject2D> RenderResourceManager::getOrCreateObject2D(const std::shared_ptr<AssetData>& asset,
+    const std::vector<std::shared_ptr<Texture>>& textures)
+{
+    if (!asset)
+    {
+        return nullptr;
+    }
+
+    const unsigned int cacheId = asset->getId();
+    if (cacheId != 0)
+    {
+        auto it = m_object2DCache.find(cacheId);
+        if (it != m_object2DCache.end())
+        {
+            if (auto existing = it->second.lock())
+            {
+                existing->setTextures(textures);
+                return existing;
+            }
+            m_object2DCache.erase(it);
+        }
+    }
+
+    auto obj = std::make_shared<OpenGLObject2D>(asset);
+    if (!obj->prepare())
+    {
+        return nullptr;
+    }
+    obj->setTextures(textures);
+    if (cacheId != 0)
+    {
+        m_object2DCache[cacheId] = obj;
+    }
+    AssetManager::Instance().registerRuntimeResource(obj);
+    return obj;
+}
+
+std::shared_ptr<OpenGLObject3D> RenderResourceManager::getOrCreateObject3D(const std::shared_ptr<AssetData>& asset,
+    const std::vector<std::shared_ptr<Texture>>& textures)
+{
+    if (!asset)
+    {
+        return nullptr;
+    }
+
+    const unsigned int cacheId = asset->getId();
+    if (cacheId != 0)
+    {
+        auto it = m_object3DCache.find(cacheId);
+        if (it != m_object3DCache.end())
+        {
+            if (auto existing = it->second.lock())
+            {
+                existing->setTextures(textures);
+                return existing;
+            }
+            m_object3DCache.erase(it);
+        }
+    }
+
+    auto obj = std::make_shared<OpenGLObject3D>(asset);
+    if (!obj->prepare())
+    {
+        return nullptr;
+    }
+    obj->setTextures(textures);
+    if (cacheId != 0)
+    {
+        m_object3DCache[cacheId] = obj;
+    }
+    AssetManager::Instance().registerRuntimeResource(obj);
+    return obj;
+}
+
 void RenderResourceManager::clearCaches()
 {
     m_object2DCache.clear();

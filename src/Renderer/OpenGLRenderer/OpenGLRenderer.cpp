@@ -1,6 +1,7 @@
 #include "OpenGLRenderer.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -25,6 +26,61 @@
 
 namespace
 {
+    struct FrustumPlane
+    {
+        glm::vec3 normal{0.0f};
+        float d{0.0f};
+    };
+
+    std::array<FrustumPlane, 6> ExtractFrustumPlanes(const glm::mat4& matrix)
+    {
+        std::array<FrustumPlane, 6> planes{};
+
+        auto makePlane = [&](float a, float b, float c, float d)
+        {
+            FrustumPlane plane;
+            plane.normal = glm::vec3(a, b, c);
+            const float length = glm::length(plane.normal);
+            if (length > 0.0f)
+            {
+                plane.normal /= length;
+                plane.d = d / length;
+            }
+            else
+            {
+                plane.d = d;
+            }
+            return plane;
+        };
+
+        planes[0] = makePlane(matrix[0][3] + matrix[0][0], matrix[1][3] + matrix[1][0], matrix[2][3] + matrix[2][0], matrix[3][3] + matrix[3][0]); // Left
+        planes[1] = makePlane(matrix[0][3] - matrix[0][0], matrix[1][3] - matrix[1][0], matrix[2][3] - matrix[2][0], matrix[3][3] - matrix[3][0]); // Right
+        planes[2] = makePlane(matrix[0][3] + matrix[0][1], matrix[1][3] + matrix[1][1], matrix[2][3] + matrix[2][1], matrix[3][3] + matrix[3][1]); // Bottom
+        planes[3] = makePlane(matrix[0][3] - matrix[0][1], matrix[1][3] - matrix[1][1], matrix[2][3] - matrix[2][1], matrix[3][3] - matrix[3][1]); // Top
+        planes[4] = makePlane(matrix[0][3] + matrix[0][2], matrix[1][3] + matrix[1][2], matrix[2][3] + matrix[2][2], matrix[3][3] + matrix[3][2]); // Near
+        planes[5] = makePlane(matrix[0][3] - matrix[0][2], matrix[1][3] - matrix[1][2], matrix[2][3] - matrix[2][2], matrix[3][3] - matrix[3][2]); // Far
+
+        return planes;
+    }
+
+    bool IsSphereInsideFrustum(const std::array<FrustumPlane, 6>& planes, const glm::vec3& center, float radius)
+    {
+        for (const auto& plane : planes)
+        {
+            const float distance = glm::dot(plane.normal, center) + plane.d;
+            if (distance < -radius)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    float MaxScale(float sx, float sy, float sz)
+    {
+        return std::max(sx, std::max(sy, sz));
+    }
+
     static SDL_HitTestResult SDLCALL WindowHitTestCallback(SDL_Window* window, const SDL_Point* area, void* data)
     {
         if (!window || !area || !data)
@@ -91,6 +147,13 @@ OpenGLRenderer::OpenGLRenderer()
 
 void OpenGLRenderer::shutdown()
 {
+    if (m_gpuQueriesInitialized)
+    {
+        glDeleteQueries(static_cast<GLsizei>(m_gpuTimerQueries.size()), m_gpuTimerQueries.data());
+        m_gpuQueriesInitialized = false;
+        m_gpuTimerQueries.fill(0);
+    }
+    releaseOcclusionResources();
     auto& logger = Logger::Instance();
     logger.log(Logger::Category::Rendering, "OpenGLRenderer shutdown: releasing GPU resources...", Logger::LogLevel::INFO);
 
@@ -202,6 +265,9 @@ bool OpenGLRenderer::initialize()
     m_initialized = true;
     logger.log(Logger::Category::Rendering, "Initialisation of the OpenGL renderer complete.", Logger::LogLevel::INFO);
 
+    glGenQueries(static_cast<GLsizei>(m_gpuTimerQueries.size()), m_gpuTimerQueries.data());
+    m_gpuQueriesInitialized = true;
+
     // Prime render resources as soon as the renderer is ready.
     {
         if (m_resourceManager.prepareActiveLevel())
@@ -288,8 +354,34 @@ void OpenGLRenderer::render()
         return;
     }
 
+    const uint64_t freq = SDL_GetPerformanceFrequency();
+
+    if (m_gpuQueriesInitialized)
+    {
+        glBeginQuery(GL_TIME_ELAPSED, m_gpuTimerQueries[m_gpuQueryIndex]);
+    }
+
+    const uint64_t worldStart = SDL_GetPerformanceCounter();
     renderWorld();
+    const uint64_t worldEnd = SDL_GetPerformanceCounter();
+    m_cpuRenderWorldMs = (freq > 0) ? (static_cast<double>(worldEnd - worldStart) * 1000.0 / static_cast<double>(freq)) : 0.0;
+
     renderUI();
+
+    if (m_gpuQueriesInitialized)
+    {
+        glEndQuery(GL_TIME_ELAPSED);
+        const size_t readIndex = (m_gpuQueryIndex + m_gpuTimerQueries.size() - 1) % m_gpuTimerQueries.size();
+        GLuint available = 0;
+        glGetQueryObjectuiv(m_gpuTimerQueries[readIndex], GL_QUERY_RESULT_AVAILABLE, &available);
+        if (available != 0)
+        {
+            GLuint64 elapsedNs = 0;
+            glGetQueryObjectui64v(m_gpuTimerQueries[readIndex], GL_QUERY_RESULT, &elapsedNs);
+            m_lastGpuFrameMs = static_cast<double>(elapsedNs) / 1'000'000.0;
+        }
+        m_gpuQueryIndex = (m_gpuQueryIndex + 1) % m_gpuTimerQueries.size();
+    }
 }
 
 void OpenGLRenderer::renderWorld()
@@ -298,6 +390,10 @@ void OpenGLRenderer::renderWorld()
     {
         return;
     }
+
+    m_lastVisibleCount = 0;
+    m_lastHiddenCount = 0;
+    m_lastTotalCount = 0;
 
     m_renderEntries.erase(
         std::remove_if(m_renderEntries.begin(), m_renderEntries.end(),
@@ -334,6 +430,7 @@ void OpenGLRenderer::renderWorld()
     {
         m_resourceManager.clearCaches();
         m_renderEntries.clear();
+        m_meshEntries.clear();
         diagnostics.setScenePrepared(false);
         m_cachedLevel = level;
         m_textRenderer.reset();
@@ -362,6 +459,24 @@ void OpenGLRenderer::renderWorld()
             }
             m_renderEntries.push_back(std::move(entry));
         }
+
+        ECS::Schema meshSchema;
+        meshSchema.require<ECS::MeshComponent>().require<ECS::TransformComponent>();
+        m_meshEntries.clear();
+        const auto meshRenderables = m_resourceManager.buildRenderablesForSchema(meshSchema);
+        m_meshEntries.reserve(meshRenderables.size());
+        for (const auto& renderable : meshRenderables)
+        {
+            RenderEntry entry;
+            entry.transform = renderable.transform;
+            entry.object3D = renderable.object3D;
+            entry.object2D = renderable.object2D;
+            if (!entry.object3D && !entry.object2D)
+            {
+                continue;
+            }
+            m_meshEntries.push_back(std::move(entry));
+        }
     }
 
     glm::mat4 view(1.0f);
@@ -370,15 +485,26 @@ void OpenGLRenderer::renderWorld()
         Mat4 engineView = m_camera->getViewMatrixColumnMajor();
         view = glm::make_mat4(engineView.m);
     }
+    const glm::mat4 viewProj = m_projectionMatrix * view;
+    const auto frustumPlanes = ExtractFrustumPlanes(viewProj);
 
+    if (m_occlusionEnabled)
+    {
+        updateOcclusionResults();
+    }
+
+    const uint64_t ecsStartCounter = SDL_GetPerformanceCounter();
     auto& ecs = ECS::ECSManager::Instance();
     glm::vec3 lightPosition{ 0.0f, 1.2f, 0.0f };
     glm::vec3 lightColor{ 1.0f, 1.0f, 1.0f };
     float lightIntensity = 1.0f;
 
-    ECS::Schema lightSchema;
-    lightSchema.require<ECS::LightComponent>().require<ECS::TransformComponent>();
-    const auto lightEntities = ecs.getEntitiesMatchingSchema(lightSchema);
+    if (!m_lightSchemaInitialized)
+    {
+        m_lightSchema.require<ECS::LightComponent>().require<ECS::TransformComponent>();
+        m_lightSchemaInitialized = true;
+    }
+    const auto lightEntities = ecs.getEntitiesMatchingSchema(m_lightSchema);
     if (!lightEntities.empty())
     {
         const auto lightEntity = lightEntities.front();
@@ -392,6 +518,9 @@ void OpenGLRenderer::renderWorld()
             lightIntensity = light->intensity;
         }
     }
+    const uint64_t ecsEndCounter = SDL_GetPerformanceCounter();
+    const uint64_t freq = SDL_GetPerformanceFrequency();
+    m_cpuEcsMs = (freq > 0) ? (static_cast<double>(ecsEndCounter - ecsStartCounter) * 1000.0 / static_cast<double>(freq)) : 0.0;
 
     if (!m_renderEntries.empty())
     {
@@ -406,9 +535,40 @@ void OpenGLRenderer::renderWorld()
 
             if (entry.object3D)
             {
-                entry.object3D->setLightData(lightPosition, lightColor, lightIntensity);
-                entry.object3D->setMatrices(modelMatrix, view, m_projectionMatrix);
-                entry.object3D->render();
+                ++m_lastTotalCount;
+                bool hasBounds = false;
+                glm::vec3 center{};
+                float radius = 0.0f;
+                if (entry.object3D->hasLocalBounds())
+                {
+                    const float scale = MaxScale(entry.transform.scale[0], entry.transform.scale[1], entry.transform.scale[2]);
+                    center = glm::vec3(entry.transform.position[0], entry.transform.position[1], entry.transform.position[2])
+                        + entry.object3D->getLocalBoundsCenter() * scale;
+                    radius = entry.object3D->getLocalBoundsRadius() * scale;
+                    hasBounds = true;
+                    if (!IsSphereInsideFrustum(frustumPlanes, center, radius))
+                    {
+                        ++m_lastHiddenCount;
+                        continue;
+                    }
+                }
+
+                const bool shouldRender = !m_occlusionEnabled || !hasBounds || shouldRenderOcclusion(entry.object3D.get());
+                if (shouldRender)
+                {
+                    ++m_lastVisibleCount;
+                    entry.object3D->setLightData(lightPosition, lightColor, lightIntensity);
+                    entry.object3D->setMatrices(modelMatrix, view, m_projectionMatrix);
+                    entry.object3D->render();
+                }
+                else
+                {
+                    ++m_lastHiddenCount;
+                }
+                if (m_occlusionEnabled && hasBounds)
+                {
+                    issueOcclusionQuery(entry.object3D.get(), center, radius, viewProj);
+                }
             }
             else if (entry.object2D)
             {
@@ -420,7 +580,6 @@ void OpenGLRenderer::renderWorld()
 
     const auto& objs = level->getWorldObjects();
 	const auto& groups = level->getGroups();
-    const auto& ecsEntities = level->getEntities();
 
     if (!objs.empty())
     {
@@ -437,25 +596,63 @@ void OpenGLRenderer::renderWorld()
 
             if (asset->getAssetType() == AssetType::Model3D || asset->getAssetType() == AssetType::PointLight)
             {
-                OpenGLObject3D glObj(asset);
-                if (!glObj.prepare())
+                auto glObj = m_resourceManager.getOrCreateObject3D(asset, {});
+                if (!glObj)
                     continue;
+
+                ++m_lastTotalCount;
+                const bool skipOcclusion = (asset->getAssetType() == AssetType::PointLight);
 
                 if (t)
                 {
                     Mat4 engineMat = t->getMatrix4ColumnMajor();
                     glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
                     modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 1.0f, 0.0f));
-                    glObj.setLightData(lightPosition, lightColor, lightIntensity);
-                    glObj.setMatrices(modelMatrix, view, m_projectionMatrix);
+                    bool hasBounds = false;
+                    glm::vec3 center{};
+                    float radius = 0.0f;
+                    if (glObj->hasLocalBounds())
+                    {
+                        const Vec3& scale = t->getScale();
+                        const float maxScale = MaxScale(scale.x, scale.y, scale.z);
+                        const Vec3& pos = t->getPosition();
+                        center = glm::vec3(pos.x, pos.y, pos.z) + glObj->getLocalBoundsCenter() * maxScale;
+                        radius = glObj->getLocalBoundsRadius() * maxScale;
+                        hasBounds = true;
+                        if (!IsSphereInsideFrustum(frustumPlanes, center, radius))
+                        {
+                            ++m_lastHiddenCount;
+                            continue;
+                        }
+                    }
+
+                    const bool shouldRender = skipOcclusion || !m_occlusionEnabled || !hasBounds || shouldRenderOcclusion(glObj.get());
+                    if (shouldRender)
+                    {
+                        ++m_lastVisibleCount;
+                        glObj->setLightData(lightPosition, lightColor, lightIntensity);
+                        glObj->setMatrices(modelMatrix, view, m_projectionMatrix);
+                    }
+                    else
+                    {
+                        ++m_lastHiddenCount;
+                    }
+                    if (m_occlusionEnabled && hasBounds && !skipOcclusion)
+                    {
+                        issueOcclusionQuery(glObj.get(), center, radius, viewProj);
+                    }
+                    if (!shouldRender)
+                    {
+                        continue;
+                    }
                 }
 
-                glObj.render();
+                glObj->render();
             }
             else if (asset->getAssetType() == AssetType::Model2D)
             {
-                OpenGLObject2D glObj(asset);
-                if (!glObj.prepare())
+                auto glObj = m_resourceManager.getOrCreateObject2D(asset, {});
+                if (!glObj)
                     continue;
 
                 if (t)
@@ -463,176 +660,14 @@ void OpenGLRenderer::renderWorld()
                     Mat4 engineMat = t->getMatrix4ColumnMajor();
                     glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
                     modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 0.0f, 1.0f));
-                    glObj.setMatrices(modelMatrix, view, m_projectionMatrix);
+                    glObj->setMatrices(modelMatrix, view, m_projectionMatrix);
                 }
 
-                glObj.render();
+                glObj->render();
             }
         }
     }
 
-    if (!ecsEntities.empty())
-    {
-        ECS::Schema meshSchema;
-        meshSchema.require<ECS::MeshComponent>();
-        auto& ecs = ECS::ECSManager::Instance();
-        const auto matches = ecs.getEntitiesMatchingSchema(meshSchema);
-        if (!matches.empty())
-        {
-            auto& assetManager = AssetManager::Instance();
-            for (const auto entity : matches)
-            {
-                const auto* meshComponent = ecs.getComponent<ECS::MeshComponent>(entity);
-                if (!meshComponent || meshComponent->meshAssetPath.empty())
-                {
-                    continue;
-                }
-
-                std::vector<std::shared_ptr<Texture>> textures;
-                if (const auto* materialComponent = ecs.getComponent<ECS::MaterialComponent>(entity))
-                {
-                    if (!materialComponent->materialAssetPath.empty())
-                    {
-                        std::string materialPath = materialComponent->materialAssetPath;
-                        const std::filesystem::path matFs(materialPath);
-                        if (!matFs.is_absolute())
-                        {
-                            const auto absPath = assetManager.getAbsoluteContentPath(materialPath);
-                            if (!absPath.empty())
-                            {
-                                materialPath = absPath;
-                            }
-                        }
-
-                        int matId = assetManager.loadAsset(materialPath, AssetType::Material, AssetManager::Sync);
-                        if (matId != 0)
-                        {
-                            if (auto matAsset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(matId)))
-                            {
-                                const auto& matData = matAsset->getData();
-                                if (matData.is_object() && matData.contains("m_textureAssetPaths"))
-                                {
-                                    const auto& paths = matData.at("m_textureAssetPaths");
-                                    if (paths.is_array())
-                                    {
-                                        for (const auto& pathValue : paths)
-                                        {
-                                            if (!pathValue.is_string())
-                                            {
-                                                continue;
-                                            }
-                                            std::string texPath = pathValue.get<std::string>();
-                                            const std::filesystem::path texFs(texPath);
-                                            if (!texFs.is_absolute())
-                                            {
-                                                const auto absTex = assetManager.getAbsoluteContentPath(texPath);
-                                                if (!absTex.empty())
-                                                {
-                                                    texPath = absTex;
-                                                }
-                                            }
-                                            int texId = assetManager.loadAsset(texPath, AssetType::Texture, AssetManager::Sync);
-                                            if (texId == 0)
-                                            {
-                                                continue;
-                                            }
-                                            auto texAsset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(texId));
-                                            if (!texAsset)
-                                            {
-                                                continue;
-                                            }
-                                            const auto& texData = texAsset->getData();
-                                            if (!texData.is_object())
-                                            {
-                                                continue;
-                                            }
-                                            if (!texData.contains("m_width") || !texData.contains("m_height") || !texData.contains("m_channels") || !texData.contains("m_data"))
-                                            {
-                                                continue;
-                                            }
-                                            auto texture = std::make_shared<Texture>();
-                                            texture->setWidth(texData.at("m_width").get<int>());
-                                            texture->setHeight(texData.at("m_height").get<int>());
-                                            texture->setChannels(texData.at("m_channels").get<int>());
-                                            texture->setData(texData.at("m_data").get<std::vector<unsigned char>>());
-                                            textures.push_back(std::move(texture));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                std::string meshPath = meshComponent->meshAssetPath;
-                if (!meshPath.empty())
-                {
-                    const std::filesystem::path meshFs(meshPath);
-                    if (!meshFs.is_absolute())
-                    {
-                        const auto absPath = assetManager.getAbsoluteContentPath(meshPath);
-                        if (!absPath.empty())
-                        {
-                            meshPath = absPath;
-                        }
-                    }
-                }
-
-                int assetId = assetManager.loadAsset(meshPath, AssetType::Model3D, AssetManager::Sync);
-                if (assetId == 0)
-                {
-                    assetId = assetManager.loadAsset(meshPath, AssetType::Model2D, AssetManager::Sync);
-                }
-                if (assetId == 0)
-                {
-                    continue;
-                }
-
-                auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(assetId));
-                if (!asset)
-                {
-                    continue;
-                }
-
-                ECS::TransformComponent transform{};
-                if (const auto* transformComponent = ecs.getComponent<ECS::TransformComponent>(entity))
-                {
-                    transform = *transformComponent;
-                }
-
-                glm::mat4 modelMatrix(1.0f);
-                modelMatrix = glm::translate(modelMatrix, glm::vec3(transform.position[0], transform.position[1], transform.position[2]));
-                modelMatrix = glm::rotate(modelMatrix, glm::radians(transform.rotation[0]), glm::vec3(1.0f, 0.0f, 0.0f));
-                modelMatrix = glm::rotate(modelMatrix, glm::radians(transform.rotation[1]), glm::vec3(0.0f, 1.0f, 0.0f));
-                modelMatrix = glm::rotate(modelMatrix, glm::radians(transform.rotation[2]), glm::vec3(0.0f, 0.0f, 1.0f));
-                modelMatrix = glm::scale(modelMatrix, glm::vec3(transform.scale[0], transform.scale[1], transform.scale[2]));
-
-                if (asset->getAssetType() == AssetType::Model3D || asset->getAssetType() == AssetType::PointLight)
-                {
-                    OpenGLObject3D glObj(asset);
-                    if (!glObj.prepare())
-                    {
-                        continue;
-                    }
-                    glObj.setTextures(textures);
-                    glObj.setLightData(lightPosition, lightColor, lightIntensity);
-                    glObj.setMatrices(modelMatrix, view, m_projectionMatrix);
-                    glObj.render();
-                }
-                else if (asset->getAssetType() == AssetType::Model2D)
-                {
-                    OpenGLObject2D glObj(asset);
-                    if (!glObj.prepare())
-                    {
-                        continue;
-                    }
-                    glObj.setTextures(textures);
-                    glObj.setMatrices(modelMatrix, view, m_projectionMatrix);
-                    glObj.render();
-                }
-            }
-        }
-    }
 	if (!groups.empty())
     {
         for (const auto& groupEntry : groups)
@@ -650,32 +685,126 @@ void OpenGLRenderer::renderWorld()
 
                 if (asset->getAssetType() == AssetType::Model3D)
                 {
-                    OpenGLObject3D glObj(asset);
-                    if (!glObj.prepare())
+                    auto glObj = m_resourceManager.getOrCreateObject3D(asset, {});
+                    if (!glObj)
                         continue;
+
+                    ++m_lastTotalCount;
 
                     if (t)
                     {
                         Mat4 engineMat = t->getMatrix4ColumnMajor();
                         glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-                        glObj.setMatrices(modelMatrix, view, m_projectionMatrix);
+                        bool hasBounds = false;
+                        glm::vec3 center{};
+                        float radius = 0.0f;
+                        if (glObj->hasLocalBounds())
+                        {
+                            const Vec3& scale = t->getScale();
+                            const float maxScale = MaxScale(scale.x, scale.y, scale.z);
+                            const Vec3& pos = t->getPosition();
+                            center = glm::vec3(pos.x, pos.y, pos.z) + glObj->getLocalBoundsCenter() * maxScale;
+                            radius = glObj->getLocalBoundsRadius() * maxScale;
+                            hasBounds = true;
+                            if (!IsSphereInsideFrustum(frustumPlanes, center, radius))
+                            {
+                                ++m_lastHiddenCount;
+                                continue;
+                            }
+                        }
+
+                        const bool shouldRender = !m_occlusionEnabled || !hasBounds || shouldRenderOcclusion(glObj.get());
+                        if (shouldRender)
+                        {
+                            ++m_lastVisibleCount;
+                            glObj->setMatrices(modelMatrix, view, m_projectionMatrix);
+                        }
+                        else
+                        {
+                            ++m_lastHiddenCount;
+                        }
+                        if (m_occlusionEnabled && hasBounds)
+                        {
+                            issueOcclusionQuery(glObj.get(), center, radius, viewProj);
+                        }
+                        if (!shouldRender)
+                        {
+                            continue;
+                        }
                     }
-                    glObj.render();
+                    glObj->render();
                 }
                 else if (asset->getAssetType() == AssetType::Model2D)
                 {
-                    OpenGLObject2D glObj(asset);
-                    if (!glObj.prepare())
+                    auto glObj = m_resourceManager.getOrCreateObject2D(asset, {});
+                    if (!glObj)
                         continue;
 
                     if (t)
                     {
                         Mat4 engineMat = t->getMatrix4ColumnMajor();
                         glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-                        glObj.setMatrices(modelMatrix, view, m_projectionMatrix);
+                        glObj->setMatrices(modelMatrix, view, m_projectionMatrix);
                     }
-                    glObj.render();
+                    glObj->render();
                 }
+            }
+        }
+
+}
+
+    if (!m_meshEntries.empty())
+    {
+        for (const auto& entry : m_meshEntries)
+        {
+            glm::mat4 modelMatrix(1.0f);
+            modelMatrix = glm::translate(modelMatrix, glm::vec3(entry.transform.position[0], entry.transform.position[1], entry.transform.position[2]));
+            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[0]), glm::vec3(1.0f, 0.0f, 0.0f));
+            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[1]), glm::vec3(0.0f, 1.0f, 0.0f));
+            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[2]), glm::vec3(0.0f, 0.0f, 1.0f));
+            modelMatrix = glm::scale(modelMatrix, glm::vec3(entry.transform.scale[0], entry.transform.scale[1], entry.transform.scale[2]));
+
+            if (entry.object3D)
+            {
+                ++m_lastTotalCount;
+                bool hasBounds = false;
+                glm::vec3 center{};
+                float radius = 0.0f;
+                if (entry.object3D->hasLocalBounds())
+                {
+                    const float scale = MaxScale(entry.transform.scale[0], entry.transform.scale[1], entry.transform.scale[2]);
+                    center = glm::vec3(entry.transform.position[0], entry.transform.position[1], entry.transform.position[2])
+                        + entry.object3D->getLocalBoundsCenter() * scale;
+                    radius = entry.object3D->getLocalBoundsRadius() * scale;
+                    hasBounds = true;
+                    if (!IsSphereInsideFrustum(frustumPlanes, center, radius))
+                    {
+                        ++m_lastHiddenCount;
+                        continue;
+                    }
+                }
+
+                const bool shouldRender = !m_occlusionEnabled || !hasBounds || shouldRenderOcclusion(entry.object3D.get());
+                if (shouldRender)
+                {
+                    ++m_lastVisibleCount;
+                    entry.object3D->setLightData(lightPosition, lightColor, lightIntensity);
+                    entry.object3D->setMatrices(modelMatrix, view, m_projectionMatrix);
+                    entry.object3D->render();
+                }
+                else
+                {
+                    ++m_lastHiddenCount;
+                }
+                if (m_occlusionEnabled && hasBounds)
+                {
+                    issueOcclusionQuery(entry.object3D.get(), center, radius, viewProj);
+                }
+            }
+            else if (entry.object2D)
+            {
+                entry.object2D->setMatrices(modelMatrix, view, m_projectionMatrix);
+                entry.object2D->render();
             }
         }
     }
@@ -683,6 +812,9 @@ void OpenGLRenderer::renderWorld()
 
 void OpenGLRenderer::renderUI()
 {
+    const uint64_t freq = SDL_GetPerformanceFrequency();
+    const uint64_t uiStart = SDL_GetPerformanceCounter();
+    const uint64_t drawStart = SDL_GetPerformanceCounter();
     const GLboolean depthEnabled = glIsEnabled(GL_DEPTH_TEST);
     if (depthEnabled)
     {
@@ -706,50 +838,19 @@ void OpenGLRenderer::renderUI()
     m_textRenderer->setScreenSize(width, height);
     m_uiManager.setAvailableViewportSize(Vec2{ static_cast<float>(width), static_cast<float>(height) });
 
-    m_uiManager.updateLayouts([this](const std::string& text, float scale)
-        {
-            return m_textRenderer ? m_textRenderer->measureText(text, scale) : Vec2{};
-        });
-
-    const auto& widgets = m_uiManager.getRegisteredWidgets();
-    if (!widgets.empty() && ensureUIQuadRenderer())
+    if (m_uiManager.needsLayoutUpdate())
     {
-        std::vector<const UIManager::WidgetEntry*> ordered;
-        ordered.reserve(widgets.size());
-        for (const auto& entry : widgets)
-        {
-            ordered.push_back(&entry);
-        }
+        m_uiManager.updateLayouts([this](const std::string& text, float scale)
+            {
+                return m_textRenderer ? m_textRenderer->measureText(text, scale) : Vec2{};
+            });
+    }
 
-        std::sort(ordered.begin(), ordered.end(), [](const UIManager::WidgetEntry* a, const UIManager::WidgetEntry* b)
-        {
-            const int za = (a && a->widget) ? a->widget->getZOrder() : 0;
-            const int zb = (b && b->widget) ? b->widget->getZOrder() : 0;
-            return za < zb;
-        });
-
+    const auto& ordered = m_uiManager.getWidgetsOrderedByZ();
+    if (!ordered.empty() && ensureUIQuadRenderer())
+    {
+        ensureUIShaderDefaults();
         const glm::mat4 uiProjection = glm::ortho(0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f);
-        const std::filesystem::path shadersDir = std::filesystem::current_path() / "shaders";
-        const std::string defaultPanelVertex = (shadersDir / "panel_vertex.glsl").string();
-        const std::string defaultPanelFragment = (shadersDir / "panel_fragment.glsl").string();
-        const std::string defaultButtonVertex = (shadersDir / "button_vertex.glsl").string();
-        const std::string defaultButtonFragment = (shadersDir / "button_fragment.glsl").string();
-        const std::string defaultTextVertex = (shadersDir / "text_vertex.glsl").string();
-        const std::string defaultTextFragment = (shadersDir / "text_fragment.glsl").string();
-
-        const auto resolveShaderPath = [&](const std::string& value, const std::string& fallback)
-        {
-            if (value.empty())
-            {
-                return fallback;
-            }
-            std::filesystem::path p(value);
-            if (p.is_relative())
-            {
-                p = shadersDir / p;
-            }
-            return p.string();
-        };
 
         const auto renderElement = [&](const auto& self, const WidgetElement& element,
             float parentX, float parentY, float parentW, float parentH) -> void
@@ -763,8 +864,8 @@ void OpenGLRenderer::renderUI()
 
             if (element.type == WidgetElementType::Panel)
             {
-                const std::string vertexPath = resolveShaderPath(element.shaderVertex, defaultPanelVertex);
-                const std::string fragmentPath = resolveShaderPath(element.shaderFragment, defaultPanelFragment);
+                const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+                const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
                 const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
                 drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.color, false);
                 if (m_uiDebugEnabled)
@@ -796,8 +897,8 @@ void OpenGLRenderer::renderUI()
                         scale = heightPx / 48.0f;
                     }
                 }
-                const std::string vertexPath = resolveShaderPath(element.shaderVertex, defaultTextVertex);
-                const std::string fragmentPath = resolveShaderPath(element.shaderFragment, defaultTextFragment);
+                const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultTextVertex);
+                const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultTextFragment);
                 if (!element.shaderVertex.empty() || !element.shaderFragment.empty())
                 {
                     m_textRenderer->drawTextWithShader(element.text, Vec2{ x0, y0 }, scale, element.color,
@@ -809,7 +910,7 @@ void OpenGLRenderer::renderUI()
                 }
                 if (m_uiDebugEnabled)
                 {
-                    const GLuint program = getUIQuadProgram(defaultPanelVertex, defaultPanelFragment);
+                    const GLuint program = getUIQuadProgram(m_defaultPanelVertex, m_defaultPanelFragment);
                     drawUIOutline(x0, y0, x1, y1, Vec4{ 0.1f, 0.8f, 1.0f, 1.0f }, uiProjection, program);
                 }
                 return;
@@ -824,8 +925,8 @@ void OpenGLRenderer::renderUI()
                 const float bx1 = bx0 + sizePx;
                 const float by1 = by0 + sizePx;
 
-                const std::string vertexPath = resolveShaderPath(element.shaderVertex, defaultButtonVertex);
-                const std::string fragmentPath = resolveShaderPath(element.shaderFragment, defaultButtonFragment);
+                const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
+                const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);
                 const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
                 drawUIPanel(bx0, by0, bx1, by1, element.color, uiProjection, program, element.hoverColor, element.isHovered);
 
@@ -896,8 +997,8 @@ void OpenGLRenderer::renderUI()
             {
                 if (element.color.w > 0.0f)
                 {
-                    const std::string vertexPath = resolveShaderPath(element.shaderVertex, defaultPanelVertex);
-                    const std::string fragmentPath = resolveShaderPath(element.shaderFragment, defaultPanelFragment);
+                    const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+                    const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
                     const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
                     drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.color, false);
                 }
@@ -907,7 +1008,7 @@ void OpenGLRenderer::renderUI()
                 }
                 if (m_uiDebugEnabled)
                 {
-                    const GLuint program = getUIQuadProgram(defaultPanelVertex, defaultPanelFragment);
+                    const GLuint program = getUIQuadProgram(m_defaultPanelVertex, m_defaultPanelFragment);
                     drawUIOutline(x0, y0, x1, y1, Vec4{ 1.0f, 0.4f, 0.8f, 1.0f }, uiProjection, program);
                 }
             }
@@ -945,6 +1046,12 @@ void OpenGLRenderer::renderUI()
                 renderElement(renderElement, element, widgetPosition.x, widgetPosition.y, widgetSize.x, widgetSize.y);
             }
         }
+        const uint64_t drawEnd = SDL_GetPerformanceCounter();
+        m_cpuUiDrawMs = (freq > 0) ? (static_cast<double>(drawEnd - drawStart) * 1000.0 / static_cast<double>(freq)) : 0.0;
+    }
+    else
+    {
+        m_cpuUiDrawMs = 0.0;
     }
 
     Vec2 viewportSize = m_uiManager.getAvailableViewportSize();
@@ -1017,6 +1124,9 @@ void OpenGLRenderer::renderUI()
     {
         glEnable(GL_DEPTH_TEST);
     }
+
+    const uint64_t uiEnd = SDL_GetPerformanceCounter();
+    m_cpuRenderUiMs = (freq > 0) ? (static_cast<double>(uiEnd - uiStart) * 1000.0 / static_cast<double>(freq)) : 0.0;
 }
 
 void OpenGLRenderer::moveCamera(float forward, float right, float up)
@@ -1034,6 +1144,290 @@ void OpenGLRenderer::queueText(const std::string& text, const Vec2& screenPos, f
     command.scale = scale;
     command.color = color;
     m_textQueue.push_back(std::move(command));
+}
+
+bool OpenGLRenderer::ensureOcclusionResources()
+{
+    if (m_occlusionResourcesReady)
+    {
+        return true;
+    }
+
+    auto vertex = std::make_shared<OpenGLShader>();
+    auto fragment = std::make_shared<OpenGLShader>();
+
+    const std::string vertexSource =
+        "#version 460 core\n"
+        "layout(location = 0) in vec3 aPos;\n"
+        "uniform mat4 uViewProj;\n"
+        "uniform mat4 uModel;\n"
+        "void main() {\n"
+        "    gl_Position = uViewProj * uModel * vec4(aPos, 1.0);\n"
+        "}\n";
+
+    const std::string fragmentSource =
+        "#version 460 core\n"
+        "out vec4 FragColor;\n"
+        "void main() {\n"
+        "    FragColor = vec4(1.0);\n"
+        "}\n";
+
+    if (!vertex->loadFromSource(Shader::Type::Vertex, vertexSource) ||
+        !fragment->loadFromSource(Shader::Type::Fragment, fragmentSource))
+    {
+        return false;
+    }
+
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vertex->id());
+    glAttachShader(program, fragment->id());
+    glLinkProgram(program);
+
+    GLint linked = 0;
+    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    if (!linked)
+    {
+        glDeleteProgram(program);
+        return false;
+    }
+
+    glGenVertexArrays(1, &m_occlusionVao);
+    glGenBuffers(1, &m_occlusionVbo);
+    glBindVertexArray(m_occlusionVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_occlusionVbo);
+
+    const float cubeVerts[] = {
+        -1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f,  1.0f, -1.0f,
+         1.0f,  1.0f, -1.0f,
+        -1.0f,  1.0f, -1.0f,
+        -1.0f, -1.0f, -1.0f,
+
+        -1.0f, -1.0f,  1.0f,
+         1.0f, -1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+        -1.0f,  1.0f,  1.0f,
+        -1.0f, -1.0f,  1.0f,
+
+        -1.0f,  1.0f,  1.0f,
+        -1.0f,  1.0f, -1.0f,
+        -1.0f, -1.0f, -1.0f,
+        -1.0f, -1.0f, -1.0f,
+        -1.0f, -1.0f,  1.0f,
+        -1.0f,  1.0f,  1.0f,
+
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+
+        -1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f,  1.0f,
+         1.0f, -1.0f,  1.0f,
+        -1.0f, -1.0f,  1.0f,
+        -1.0f, -1.0f, -1.0f,
+
+        -1.0f,  1.0f, -1.0f,
+         1.0f,  1.0f, -1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+        -1.0f,  1.0f,  1.0f,
+        -1.0f,  1.0f, -1.0f
+    };
+
+    glBufferData(GL_ARRAY_BUFFER, sizeof(cubeVerts), cubeVerts, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), reinterpret_cast<void*>(0));
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    m_occlusionProgram = program;
+    m_occlusionResourcesReady = true;
+    return true;
+}
+
+void OpenGLRenderer::releaseOcclusionResources()
+{
+    for (auto& [object, data] : m_occlusionQueries)
+    {
+        if (data.queryId != 0)
+        {
+            glDeleteQueries(1, &data.queryId);
+        }
+    }
+    m_occlusionQueries.clear();
+
+    if (m_occlusionProgram)
+    {
+        glDeleteProgram(m_occlusionProgram);
+        m_occlusionProgram = 0;
+    }
+    if (m_occlusionVbo)
+    {
+        glDeleteBuffers(1, &m_occlusionVbo);
+        m_occlusionVbo = 0;
+    }
+    if (m_occlusionVao)
+    {
+        glDeleteVertexArrays(1, &m_occlusionVao);
+        m_occlusionVao = 0;
+    }
+    m_occlusionResourcesReady = false;
+}
+
+void OpenGLRenderer::updateOcclusionResults()
+{
+    for (auto& [object, data] : m_occlusionQueries)
+    {
+        if (data.queryId == 0)
+        {
+            continue;
+        }
+        GLuint available = 0;
+        glGetQueryObjectuiv(data.queryId, GL_QUERY_RESULT_AVAILABLE, &available);
+        if (available == 0)
+        {
+            continue;
+        }
+        GLuint result = 0;
+        glGetQueryObjectuiv(data.queryId, GL_QUERY_RESULT, &result);
+        if (result != 0)
+        {
+            data.lastVisible = true;
+            data.occludedFrames = 0;
+        }
+        else
+        {
+            data.lastVisible = false;
+            data.occludedFrames = static_cast<uint8_t>(std::min<uint8_t>(data.occludedFrames + 1, 3));
+        }
+        data.hasResult = true;
+    }
+}
+
+bool OpenGLRenderer::shouldRenderOcclusion(const OpenGLObject3D* object) const
+{
+    auto it = m_occlusionQueries.find(object);
+    if (it == m_occlusionQueries.end())
+    {
+        return true;
+    }
+    if (!it->second.hasResult)
+    {
+        return true;
+    }
+    if (it->second.lastVisible)
+    {
+        return true;
+    }
+    return it->second.occludedFrames < 2;
+}
+
+void OpenGLRenderer::issueOcclusionQuery(const OpenGLObject3D* object, const glm::vec3& center, float radius, const glm::mat4& viewProj)
+{
+    if (!object || !m_occlusionEnabled)
+    {
+        return;
+    }
+    if (!ensureOcclusionResources())
+    {
+        return;
+    }
+
+    auto& data = m_occlusionQueries[object];
+    if (data.queryId == 0)
+    {
+        glGenQueries(1, &data.queryId);
+    }
+
+    const GLboolean depthEnabled = glIsEnabled(GL_DEPTH_TEST);
+    GLboolean colorMask[4];
+    glGetBooleanv(GL_COLOR_WRITEMASK, colorMask);
+    GLboolean depthMask = GL_TRUE;
+    glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
+
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+
+    glUseProgram(m_occlusionProgram);
+    glBindVertexArray(m_occlusionVao);
+
+    glm::mat4 model(1.0f);
+    model = glm::translate(model, center);
+    model = glm::scale(model, glm::vec3(radius));
+
+    const GLint viewProjLoc = glGetUniformLocation(m_occlusionProgram, "uViewProj");
+    if (viewProjLoc >= 0)
+    {
+        glUniformMatrix4fv(viewProjLoc, 1, GL_FALSE, &viewProj[0][0]);
+    }
+    const GLint modelLoc = glGetUniformLocation(m_occlusionProgram, "uModel");
+    if (modelLoc >= 0)
+    {
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, &model[0][0]);
+    }
+
+    glBeginQuery(GL_ANY_SAMPLES_PASSED, data.queryId);
+    glDrawArrays(GL_TRIANGLES, 0, 36);
+    glEndQuery(GL_ANY_SAMPLES_PASSED);
+
+    glBindVertexArray(0);
+    glUseProgram(0);
+
+    glColorMask(colorMask[0], colorMask[1], colorMask[2], colorMask[3]);
+    glDepthMask(depthMask);
+    if (!depthEnabled)
+    {
+        glDisable(GL_DEPTH_TEST);
+    }
+}
+
+
+void OpenGLRenderer::ensureUIShaderDefaults()
+{
+    if (m_uiShaderDefaultsInitialized)
+    {
+        return;
+    }
+
+    const std::filesystem::path shadersDir = std::filesystem::current_path() / "shaders";
+    m_uiShaderBaseDir = shadersDir.string();
+    m_defaultPanelVertex = (shadersDir / "panel_vertex.glsl").string();
+    m_defaultPanelFragment = (shadersDir / "panel_fragment.glsl").string();
+    m_defaultButtonVertex = (shadersDir / "button_vertex.glsl").string();
+    m_defaultButtonFragment = (shadersDir / "button_fragment.glsl").string();
+    m_defaultTextVertex = (shadersDir / "text_vertex.glsl").string();
+    m_defaultTextFragment = (shadersDir / "text_fragment.glsl").string();
+    m_uiShaderDefaultsInitialized = true;
+}
+
+const std::string& OpenGLRenderer::resolveUIShaderPath(const std::string& value, const std::string& fallback)
+{
+    if (value.empty())
+    {
+        return fallback;
+    }
+
+    auto it = m_uiShaderPathCache.find(value);
+    if (it != m_uiShaderPathCache.end())
+    {
+        return it->second;
+    }
+
+    std::filesystem::path resolved(value);
+    if (resolved.is_relative())
+    {
+        resolved = std::filesystem::path(m_uiShaderBaseDir) / resolved;
+    }
+
+    auto [insertedIt, inserted] = m_uiShaderPathCache.emplace(value, resolved.string());
+    return insertedIt->second;
 }
 
 bool OpenGLRenderer::ensureUIQuadRenderer()

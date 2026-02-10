@@ -34,9 +34,11 @@ public:
 
     void registerWidget(const std::string& id, const std::shared_ptr<Widget>& widget);
     const std::vector<WidgetEntry>& getRegisteredWidgets() const;
+    const std::vector<const WidgetEntry*>& getWidgetsOrderedByZ() const;
     void unregisterWidget(const std::string& id);
 
     void updateLayouts(const std::function<Vec2(const std::string&, float)>& measureText);
+    bool needsLayoutUpdate() const;
     bool handleMouseDown(const Vec2& screenPos, int button);
     bool handleScroll(const Vec2& screenPos, float delta);
     void setMousePosition(const Vec2& screenPos);
@@ -48,6 +50,7 @@ private:
     WidgetElement* hitTest(const Vec2& screenPos, bool logDetails = false) const;
     void populateOutlinerWidget(const std::shared_ptr<Widget>& widget);
     void populateContentBrowserWidget(const std::shared_ptr<Widget>& widget);
+    void updateHoverStates();
 
     Vec2 m_availableViewportSize{};
     Vec2 m_mousePosition{};
@@ -55,6 +58,12 @@ private:
     std::unordered_map<std::string, std::function<void()>> m_clickEvents;
     std::vector<UIEntry> m_entries;
     std::vector<WidgetEntry> m_widgets;
+    mutable std::vector<const WidgetEntry*> m_widgetOrderCache;
+    mutable bool m_widgetOrderDirty{ true };
+    mutable Vec2 m_lastPointerQueryPos{};
+    mutable bool m_hasPointerQueryPos{ false };
+    mutable bool m_lastPointerOverUI{ false };
+    mutable bool m_pointerCacheDirty{ true };
 
     void bindClickEventsForWidget(const std::shared_ptr<Widget>& widget);
     void bindClickEventsForElement(WidgetElement& element);
