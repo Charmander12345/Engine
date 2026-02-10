@@ -244,7 +244,7 @@ namespace
             return;
         }
 
-        const float contentX = x0 + element.padding.x;
+        float contentX = x0 + element.padding.x;
         float contentY = y0 + element.padding.y;
         const float contentW = std::max(0.0f, width - element.padding.x * 2.0f);
         const float contentH = std::max(0.0f, height - element.padding.y * 2.0f);
@@ -255,6 +255,27 @@ namespace
             float totalSpacing = spacing * static_cast<float>(element.children.size() > 0 ? (element.children.size() - 1) : 0);
             float availableW = std::max(0.0f, contentW - totalSpacing);
             float defaultW = (element.children.size() > 0) ? (availableW / static_cast<float>(element.children.size())) : 0.0f;
+            float totalWidth = 0.0f;
+            for (auto& child : element.children)
+            {
+                float slotW = defaultW;
+                if (element.sizeToContent && child.hasContentSize)
+                {
+                    slotW = child.contentSizePixels.x + child.margin.x * 2.0f;
+                }
+                totalWidth += slotW;
+            }
+            if (!element.children.empty())
+            {
+                totalWidth += totalSpacing;
+            }
+
+            if (element.scrollable)
+            {
+                const float maxScroll = std::max(0.0f, totalWidth - contentW);
+                element.scrollOffset = std::clamp(element.scrollOffset, 0.0f, maxScroll);
+                contentX -= element.scrollOffset;
+            }
             float cursorX = contentX;
 
             for (auto& child : element.children)
@@ -934,9 +955,15 @@ bool UIManager::handleScroll(const Vec2& screenPos, float delta)
             if (auto* target = findScrollable(*it))
             {
                 const float scrollStep = 30.0f;
-                const float maxScroll = (target->hasContentSize && target->hasComputedSize)
-                    ? std::max(0.0f, target->contentSizePixels.y - target->computedSizePixels.y)
-                    : 0.0f;
+                float maxScroll = 0.0f;
+                const bool horizontal = (target->type == WidgetElementType::StackPanel &&
+                    target->orientation == StackOrientation::Horizontal);
+                if (target->hasContentSize && target->hasComputedSize)
+                {
+                    maxScroll = horizontal
+                        ? std::max(0.0f, target->contentSizePixels.x - target->computedSizePixels.x)
+                        : std::max(0.0f, target->contentSizePixels.y - target->computedSizePixels.y);
+                }
                 target->scrollOffset = std::clamp(target->scrollOffset - delta * scrollStep, 0.0f, maxScroll);
                 entry.widget->markLayoutDirty();
                 return true;
