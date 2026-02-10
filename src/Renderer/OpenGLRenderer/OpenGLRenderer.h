@@ -68,7 +68,10 @@ private:
     void releaseOcclusionResources();
     void updateOcclusionResults();
     bool shouldRenderOcclusion(const OpenGLObject3D* object) const;
-    void issueOcclusionQuery(const OpenGLObject3D* object, const glm::vec3& center, float radius, const glm::mat4& viewProj);
+    void issueOcclusionQuery(const OpenGLObject3D* object, const glm::vec3& center, const glm::vec3& extent, const glm::mat4& viewProj);
+    bool ensureBoundsDebugResources();
+    void releaseBoundsDebugResources();
+    void drawBoundsDebugBox(const glm::vec3& center, const glm::vec3& extent, const glm::mat4& viewProj);
     void drawUIPanel(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program,
         const Vec4& hoverColor = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f }, bool isHovered = false);
     void drawUIOutline(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program);
@@ -132,6 +135,7 @@ private:
         bool hasResult{false};
         bool lastVisible{true};
         uint8_t occludedFrames{0};
+        uint64_t lastResultFrame{0};
     };
 
     std::unordered_map<const OpenGLObject3D*, OcclusionQueryData> m_occlusionQueries;
@@ -143,6 +147,13 @@ private:
     uint32_t m_lastVisibleCount{0};
     uint32_t m_lastHiddenCount{0};
     uint32_t m_lastTotalCount{0};
+    uint64_t m_frameIndex{0};
+
+    GLuint m_boundsDebugVao{0};
+    GLuint m_boundsDebugVbo{0};
+    GLuint m_boundsDebugProgram{0};
+    GLsizei m_boundsDebugVertexCount{0};
+    bool m_boundsDebugEnabled{false};
 
     static constexpr size_t kFrameQueryCount = 3;
     std::array<GLuint, kFrameQueryCount> m_gpuTimerQueries{};
@@ -161,5 +172,7 @@ public:
     uint32_t getLastVisibleCount() const { return m_lastVisibleCount; }
     uint32_t getLastHiddenCount() const { return m_lastHiddenCount; }
     uint32_t getLastTotalCount() const { return m_lastTotalCount; }
+    void toggleBoundsDebug() { m_boundsDebugEnabled = !m_boundsDebugEnabled; }
+    bool isBoundsDebugEnabled() const { return m_boundsDebugEnabled; }
     
 };

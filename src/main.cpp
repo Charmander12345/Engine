@@ -456,6 +456,17 @@ int main()
                     }
                     continue;
                 }
+                if (event.key.key == SDLK_F8)
+                {
+                    if (glRenderer)
+                    {
+                        glRenderer->toggleBoundsDebug();
+                        logTimed(Logger::Category::Input,
+                            std::string("Bounds debug boxes: ") + (glRenderer->isBoundsDebugEnabled() ? "ON" : "OFF"),
+                            Logger::LogLevel::INFO);
+                    }
+                    continue;
+                }
                 if (event.key.key == SDLK_F10)
                 {
                     showMetrics = !showMetrics;

@@ -153,14 +153,14 @@ bool OpenGLObject3D::hasLocalBounds() const
     return m_hasLocalBounds;
 }
 
-const glm::vec3& OpenGLObject3D::getLocalBoundsCenter() const
+const glm::vec3& OpenGLObject3D::getLocalBoundsMin() const
 {
-    return m_localBoundsCenter;
+    return m_localBoundsMin;
 }
 
-float OpenGLObject3D::getLocalBoundsRadius() const
+const glm::vec3& OpenGLObject3D::getLocalBoundsMax() const
 {
-    return m_localBoundsRadius;
+    return m_localBoundsMax;
 }
 
 void OpenGLObject3D::ClearCache()
@@ -265,16 +265,8 @@ bool OpenGLObject3D::prepare()
             maxPos = glm::max(maxPos, pos);
         }
 
-        m_localBoundsCenter = (minPos + maxPos) * 0.5f;
-        float maxRadiusSq = 0.0f;
-        for (size_t i = 0; i + 4 < vCount; i += 5)
-        {
-            glm::vec3 pos(vertices[i + 0], vertices[i + 1], vertices[i + 2]);
-            const glm::vec3 diff = pos - m_localBoundsCenter;
-            const float distSq = glm::dot(diff, diff);
-            maxRadiusSq = std::max(maxRadiusSq, distSq);
-        }
-        m_localBoundsRadius = std::sqrt(maxRadiusSq);
+        m_localBoundsMin = minPos;
+        m_localBoundsMax = maxPos;
         m_hasLocalBounds = true;
     }
 

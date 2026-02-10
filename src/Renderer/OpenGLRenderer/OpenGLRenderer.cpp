@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <cmath>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -81,6 +82,48 @@ namespace
         return std::max(sx, std::max(sy, sz));
     }
 
+    void ComputeWorldAabb(const glm::vec3& localMin, const glm::vec3& localMax, const glm::mat4& model, glm::vec3& outMin, glm::vec3& outMax)
+    {
+        const glm::vec3 corners[8] = {
+            glm::vec3(localMin.x, localMin.y, localMin.z),
+            glm::vec3(localMax.x, localMin.y, localMin.z),
+            glm::vec3(localMax.x, localMax.y, localMin.z),
+            glm::vec3(localMin.x, localMax.y, localMin.z),
+            glm::vec3(localMin.x, localMin.y, localMax.z),
+            glm::vec3(localMax.x, localMin.y, localMax.z),
+            glm::vec3(localMax.x, localMax.y, localMax.z),
+            glm::vec3(localMin.x, localMax.y, localMax.z)
+        };
+
+        glm::vec3 minPos(std::numeric_limits<float>::max());
+        glm::vec3 maxPos(std::numeric_limits<float>::lowest());
+        for (const auto& corner : corners)
+        {
+            const glm::vec4 world = model * glm::vec4(corner, 1.0f);
+            const glm::vec3 pos = glm::vec3(world);
+            minPos = glm::min(minPos, pos);
+            maxPos = glm::max(maxPos, pos);
+        }
+        outMin = minPos;
+        outMax = maxPos;
+    }
+
+    bool IsAabbInsideFrustum(const std::array<FrustumPlane, 6>& planes, const glm::vec3& minBounds, const glm::vec3& maxBounds)
+    {
+        for (const auto& plane : planes)
+        {
+            glm::vec3 positive = minBounds;
+            if (plane.normal.x >= 0.0f) positive.x = maxBounds.x;
+            if (plane.normal.y >= 0.0f) positive.y = maxBounds.y;
+            if (plane.normal.z >= 0.0f) positive.z = maxBounds.z;
+            if (glm::dot(plane.normal, positive) + plane.d < 0.0f)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     static SDL_HitTestResult SDLCALL WindowHitTestCallback(SDL_Window* window, const SDL_Point* area, void* data)
     {
         if (!window || !area || !data)
@@ -154,6 +197,7 @@ void OpenGLRenderer::shutdown()
         m_gpuTimerQueries.fill(0);
     }
     releaseOcclusionResources();
+    releaseBoundsDebugResources();
     auto& logger = Logger::Instance();
     logger.log(Logger::Category::Rendering, "OpenGLRenderer shutdown: releasing GPU resources...", Logger::LogLevel::INFO);
 
@@ -354,6 +398,8 @@ void OpenGLRenderer::render()
         return;
     }
 
+    ++m_frameIndex;
+
     const uint64_t freq = SDL_GetPerformanceFrequency();
 
     if (m_gpuQueriesInitialized)
@@ -493,6 +539,7 @@ void OpenGLRenderer::renderWorld()
         updateOcclusionResults();
     }
 
+
     const uint64_t ecsStartCounter = SDL_GetPerformanceCounter();
     auto& ecs = ECS::ECSManager::Instance();
     glm::vec3 lightPosition{ 0.0f, 1.2f, 0.0f };
@@ -537,16 +584,13 @@ void OpenGLRenderer::renderWorld()
             {
                 ++m_lastTotalCount;
                 bool hasBounds = false;
-                glm::vec3 center{};
-                float radius = 0.0f;
+                glm::vec3 boundsMin{};
+                glm::vec3 boundsMax{};
                 if (entry.object3D->hasLocalBounds())
                 {
-                    const float scale = MaxScale(entry.transform.scale[0], entry.transform.scale[1], entry.transform.scale[2]);
-                    center = glm::vec3(entry.transform.position[0], entry.transform.position[1], entry.transform.position[2])
-                        + entry.object3D->getLocalBoundsCenter() * scale;
-                    radius = entry.object3D->getLocalBoundsRadius() * scale;
+                    ComputeWorldAabb(entry.object3D->getLocalBoundsMin(), entry.object3D->getLocalBoundsMax(), modelMatrix, boundsMin, boundsMax);
                     hasBounds = true;
-                    if (!IsSphereInsideFrustum(frustumPlanes, center, radius))
+                    if (!IsAabbInsideFrustum(frustumPlanes, boundsMin, boundsMax))
                     {
                         ++m_lastHiddenCount;
                         continue;
@@ -567,7 +611,15 @@ void OpenGLRenderer::renderWorld()
                 }
                 if (m_occlusionEnabled && hasBounds)
                 {
-                    issueOcclusionQuery(entry.object3D.get(), center, radius, viewProj);
+                    const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
+                    const glm::vec3 extent = (boundsMax - boundsMin) * 0.5f;
+                    issueOcclusionQuery(entry.object3D.get(), center, extent, viewProj);
+                }
+                if (m_boundsDebugEnabled && hasBounds && shouldRender)
+                {
+                    const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
+                    const glm::vec3 extent = (boundsMax - boundsMin) * 0.5f;
+                    drawBoundsDebugBox(center, extent, viewProj);
                 }
             }
             else if (entry.object2D)
@@ -580,6 +632,121 @@ void OpenGLRenderer::renderWorld()
 
     const auto& objs = level->getWorldObjects();
 	const auto& groups = level->getGroups();
+
+    if (m_occlusionEnabled)
+    {
+        const GLboolean depthEnabled = glIsEnabled(GL_DEPTH_TEST);
+        GLboolean colorMask[4];
+        glGetBooleanv(GL_COLOR_WRITEMASK, colorMask);
+        GLboolean depthMask = GL_TRUE;
+        glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
+
+        glEnable(GL_DEPTH_TEST);
+        glDepthMask(GL_TRUE);
+        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+
+        for (const auto& entry : m_renderEntries)
+        {
+            if (!entry.object3D)
+            {
+                continue;
+            }
+            glm::mat4 modelMatrix(1.0f);
+            modelMatrix = glm::translate(modelMatrix, glm::vec3(entry.transform.position[0], entry.transform.position[1], entry.transform.position[2]));
+            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[0]), glm::vec3(1.0f, 0.0f, 0.0f));
+            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[1]), glm::vec3(0.0f, 1.0f, 0.0f));
+            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[2]), glm::vec3(0.0f, 0.0f, 1.0f));
+            modelMatrix = glm::scale(modelMatrix, glm::vec3(entry.transform.scale[0], entry.transform.scale[1], entry.transform.scale[2]));
+            entry.object3D->setMatrices(modelMatrix, view, m_projectionMatrix);
+            entry.object3D->render();
+        }
+
+        for (const auto& entry : objs)
+        {
+            if (!entry || entry->object->getPath().empty())
+            {
+                continue;
+            }
+            auto asset = entry->object ? std::dynamic_pointer_cast<AssetData>(entry->object) : nullptr;
+            if (!asset)
+            {
+                continue;
+            }
+            if (asset->getAssetType() != AssetType::Model3D && asset->getAssetType() != AssetType::PointLight)
+            {
+                continue;
+            }
+            auto glObj = m_resourceManager.getOrCreateObject3D(asset, {});
+            if (!glObj)
+            {
+                continue;
+            }
+            Mat4 engineMat = entry->transform.getMatrix4ColumnMajor();
+            glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
+            modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+            glObj->setMatrices(modelMatrix, view, m_projectionMatrix);
+            glObj->render();
+        }
+
+        for (const auto& groupEntry : groups)
+        {
+            const auto& groupObjects = groupEntry.objects;
+            for (size_t i = 0; i < groupObjects.size(); ++i)
+            {
+                const auto& entry = groupObjects[i];
+                if (!entry || entry->getPath().empty())
+                {
+                    continue;
+                }
+                auto asset = entry ? std::dynamic_pointer_cast<AssetData>(entry) : nullptr;
+                if (!asset)
+                {
+                    continue;
+                }
+                if (asset->getAssetType() != AssetType::Model3D)
+                {
+                    continue;
+                }
+                auto glObj = m_resourceManager.getOrCreateObject3D(asset, {});
+                if (!glObj)
+                {
+                    continue;
+                }
+                Transform* t = (i < groupEntry.transforms.size()) ? const_cast<Transform*>(&groupEntry.transforms[i]) : nullptr;
+                if (!t)
+                {
+                    continue;
+                }
+                Mat4 engineMat = t->getMatrix4ColumnMajor();
+                glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
+                glObj->setMatrices(modelMatrix, view, m_projectionMatrix);
+                glObj->render();
+            }
+        }
+
+        for (const auto& entry : m_meshEntries)
+        {
+            if (!entry.object3D)
+            {
+                continue;
+            }
+            glm::mat4 modelMatrix(1.0f);
+            modelMatrix = glm::translate(modelMatrix, glm::vec3(entry.transform.position[0], entry.transform.position[1], entry.transform.position[2]));
+            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[0]), glm::vec3(1.0f, 0.0f, 0.0f));
+            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[1]), glm::vec3(0.0f, 1.0f, 0.0f));
+            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[2]), glm::vec3(0.0f, 0.0f, 1.0f));
+            modelMatrix = glm::scale(modelMatrix, glm::vec3(entry.transform.scale[0], entry.transform.scale[1], entry.transform.scale[2]));
+            entry.object3D->setMatrices(modelMatrix, view, m_projectionMatrix);
+            entry.object3D->render();
+        }
+
+        glColorMask(colorMask[0], colorMask[1], colorMask[2], colorMask[3]);
+        glDepthMask(depthMask);
+        if (!depthEnabled)
+        {
+            glDisable(GL_DEPTH_TEST);
+        }
+    }
 
     if (!objs.empty())
     {
@@ -609,17 +776,13 @@ void OpenGLRenderer::renderWorld()
                     glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
                     modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 1.0f, 0.0f));
                     bool hasBounds = false;
-                    glm::vec3 center{};
-                    float radius = 0.0f;
+                    glm::vec3 boundsMin{};
+                    glm::vec3 boundsMax{};
                     if (glObj->hasLocalBounds())
                     {
-                        const Vec3& scale = t->getScale();
-                        const float maxScale = MaxScale(scale.x, scale.y, scale.z);
-                        const Vec3& pos = t->getPosition();
-                        center = glm::vec3(pos.x, pos.y, pos.z) + glObj->getLocalBoundsCenter() * maxScale;
-                        radius = glObj->getLocalBoundsRadius() * maxScale;
+                        ComputeWorldAabb(glObj->getLocalBoundsMin(), glObj->getLocalBoundsMax(), modelMatrix, boundsMin, boundsMax);
                         hasBounds = true;
-                        if (!IsSphereInsideFrustum(frustumPlanes, center, radius))
+                        if (!IsAabbInsideFrustum(frustumPlanes, boundsMin, boundsMax))
                         {
                             ++m_lastHiddenCount;
                             continue;
@@ -639,7 +802,15 @@ void OpenGLRenderer::renderWorld()
                     }
                     if (m_occlusionEnabled && hasBounds && !skipOcclusion)
                     {
-                        issueOcclusionQuery(glObj.get(), center, radius, viewProj);
+                        const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
+                        const glm::vec3 extent = (boundsMax - boundsMin) * 0.5f;
+                        issueOcclusionQuery(glObj.get(), center, extent, viewProj);
+                    }
+                    if (m_boundsDebugEnabled && hasBounds && shouldRender)
+                    {
+                        const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
+                        const glm::vec3 extent = (boundsMax - boundsMin) * 0.5f;
+                        drawBoundsDebugBox(center, extent, viewProj);
                     }
                     if (!shouldRender)
                     {
@@ -696,17 +867,13 @@ void OpenGLRenderer::renderWorld()
                         Mat4 engineMat = t->getMatrix4ColumnMajor();
                         glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
                         bool hasBounds = false;
-                        glm::vec3 center{};
-                        float radius = 0.0f;
+                        glm::vec3 boundsMin{};
+                        glm::vec3 boundsMax{};
                         if (glObj->hasLocalBounds())
                         {
-                            const Vec3& scale = t->getScale();
-                            const float maxScale = MaxScale(scale.x, scale.y, scale.z);
-                            const Vec3& pos = t->getPosition();
-                            center = glm::vec3(pos.x, pos.y, pos.z) + glObj->getLocalBoundsCenter() * maxScale;
-                            radius = glObj->getLocalBoundsRadius() * maxScale;
+                            ComputeWorldAabb(glObj->getLocalBoundsMin(), glObj->getLocalBoundsMax(), modelMatrix, boundsMin, boundsMax);
                             hasBounds = true;
-                            if (!IsSphereInsideFrustum(frustumPlanes, center, radius))
+                            if (!IsAabbInsideFrustum(frustumPlanes, boundsMin, boundsMax))
                             {
                                 ++m_lastHiddenCount;
                                 continue;
@@ -725,7 +892,15 @@ void OpenGLRenderer::renderWorld()
                         }
                         if (m_occlusionEnabled && hasBounds)
                         {
-                            issueOcclusionQuery(glObj.get(), center, radius, viewProj);
+                            const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
+                            const glm::vec3 extent = (boundsMax - boundsMin) * 0.5f;
+                            issueOcclusionQuery(glObj.get(), center, extent, viewProj);
+                        }
+                        if (m_boundsDebugEnabled && hasBounds && shouldRender)
+                        {
+                            const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
+                            const glm::vec3 extent = (boundsMax - boundsMin) * 0.5f;
+                            drawBoundsDebugBox(center, extent, viewProj);
                         }
                         if (!shouldRender)
                         {
@@ -768,16 +943,13 @@ void OpenGLRenderer::renderWorld()
             {
                 ++m_lastTotalCount;
                 bool hasBounds = false;
-                glm::vec3 center{};
-                float radius = 0.0f;
+                glm::vec3 boundsMin{};
+                glm::vec3 boundsMax{};
                 if (entry.object3D->hasLocalBounds())
                 {
-                    const float scale = MaxScale(entry.transform.scale[0], entry.transform.scale[1], entry.transform.scale[2]);
-                    center = glm::vec3(entry.transform.position[0], entry.transform.position[1], entry.transform.position[2])
-                        + entry.object3D->getLocalBoundsCenter() * scale;
-                    radius = entry.object3D->getLocalBoundsRadius() * scale;
+                    ComputeWorldAabb(entry.object3D->getLocalBoundsMin(), entry.object3D->getLocalBoundsMax(), modelMatrix, boundsMin, boundsMax);
                     hasBounds = true;
-                    if (!IsSphereInsideFrustum(frustumPlanes, center, radius))
+                    if (!IsAabbInsideFrustum(frustumPlanes, boundsMin, boundsMax))
                     {
                         ++m_lastHiddenCount;
                         continue;
@@ -798,7 +970,15 @@ void OpenGLRenderer::renderWorld()
                 }
                 if (m_occlusionEnabled && hasBounds)
                 {
-                    issueOcclusionQuery(entry.object3D.get(), center, radius, viewProj);
+                    const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
+                    const glm::vec3 extent = (boundsMax - boundsMin) * 0.5f;
+                    issueOcclusionQuery(entry.object3D.get(), center, extent, viewProj);
+                }
+                if (m_boundsDebugEnabled && hasBounds && shouldRender)
+                {
+                    const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
+                    const glm::vec3 extent = (boundsMax - boundsMin) * 0.5f;
+                    drawBoundsDebugBox(center, extent, viewProj);
                 }
             }
             else if (entry.object2D)
@@ -1280,8 +1460,172 @@ void OpenGLRenderer::releaseOcclusionResources()
     m_occlusionResourcesReady = false;
 }
 
+bool OpenGLRenderer::ensureBoundsDebugResources()
+{
+    if (m_boundsDebugProgram != 0 && m_boundsDebugVao != 0 && m_boundsDebugVbo != 0)
+    {
+        return true;
+    }
+
+    auto vertex = std::make_shared<OpenGLShader>();
+    auto fragment = std::make_shared<OpenGLShader>();
+
+    const std::string vertexSource =
+        "#version 460 core\n"
+        "layout(location = 0) in vec3 aPos;\n"
+        "uniform mat4 uViewProj;\n"
+        "uniform mat4 uModel;\n"
+        "void main() {\n"
+        "    gl_Position = uViewProj * uModel * vec4(aPos, 1.0);\n"
+        "}\n";
+
+    const std::string fragmentSource =
+        "#version 460 core\n"
+        "out vec4 FragColor;\n"
+        "uniform vec4 uColor;\n"
+        "void main() {\n"
+        "    FragColor = uColor;\n"
+        "}\n";
+
+    if (!vertex->loadFromSource(Shader::Type::Vertex, vertexSource) ||
+        !fragment->loadFromSource(Shader::Type::Fragment, fragmentSource))
+    {
+        return false;
+    }
+
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vertex->id());
+    glAttachShader(program, fragment->id());
+    glLinkProgram(program);
+
+    GLint linked = 0;
+    glGetProgramiv(program, GL_LINK_STATUS, &linked);
+    if (!linked)
+    {
+        glDeleteProgram(program);
+        return false;
+    }
+
+    std::vector<float> vertices;
+    vertices.reserve(24 * 3);
+
+    const glm::vec3 corners[8] = {
+        glm::vec3(-1.0f, -1.0f, -1.0f),
+        glm::vec3(1.0f, -1.0f, -1.0f),
+        glm::vec3(1.0f, 1.0f, -1.0f),
+        glm::vec3(-1.0f, 1.0f, -1.0f),
+        glm::vec3(-1.0f, -1.0f, 1.0f),
+        glm::vec3(1.0f, -1.0f, 1.0f),
+        glm::vec3(1.0f, 1.0f, 1.0f),
+        glm::vec3(-1.0f, 1.0f, 1.0f)
+    };
+
+    const int edges[24] = {
+        0, 1, 1, 2, 2, 3, 3, 0,
+        4, 5, 5, 6, 6, 7, 7, 4,
+        0, 4, 1, 5, 2, 6, 3, 7
+    };
+
+    for (int i = 0; i < 24; ++i)
+    {
+        const glm::vec3& p = corners[edges[i]];
+        vertices.push_back(p.x);
+        vertices.push_back(p.y);
+        vertices.push_back(p.z);
+    }
+
+    glGenVertexArrays(1, &m_boundsDebugVao);
+    glGenBuffers(1, &m_boundsDebugVbo);
+    glBindVertexArray(m_boundsDebugVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_boundsDebugVbo);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), reinterpret_cast<void*>(0));
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    m_boundsDebugProgram = program;
+    m_boundsDebugVertexCount = static_cast<GLsizei>(vertices.size() / 3);
+    return true;
+}
+
+void OpenGLRenderer::releaseBoundsDebugResources()
+{
+    if (m_boundsDebugProgram)
+    {
+        glDeleteProgram(m_boundsDebugProgram);
+        m_boundsDebugProgram = 0;
+    }
+    if (m_boundsDebugVbo)
+    {
+        glDeleteBuffers(1, &m_boundsDebugVbo);
+        m_boundsDebugVbo = 0;
+    }
+    if (m_boundsDebugVao)
+    {
+        glDeleteVertexArrays(1, &m_boundsDebugVao);
+        m_boundsDebugVao = 0;
+    }
+    m_boundsDebugVertexCount = 0;
+}
+
+void OpenGLRenderer::drawBoundsDebugBox(const glm::vec3& center, const glm::vec3& extent, const glm::mat4& viewProj)
+{
+    if (!m_boundsDebugEnabled)
+    {
+        return;
+    }
+    if (!ensureBoundsDebugResources() || m_boundsDebugVertexCount == 0)
+    {
+        return;
+    }
+
+    const GLboolean depthEnabled = glIsEnabled(GL_DEPTH_TEST);
+    const GLboolean cullEnabled = glIsEnabled(GL_CULL_FACE);
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+
+    glUseProgram(m_boundsDebugProgram);
+    glBindVertexArray(m_boundsDebugVao);
+
+    glm::mat4 model(1.0f);
+    model = glm::translate(model, center);
+    model = glm::scale(model, extent);
+
+    const GLint viewProjLoc = glGetUniformLocation(m_boundsDebugProgram, "uViewProj");
+    if (viewProjLoc >= 0)
+    {
+        glUniformMatrix4fv(viewProjLoc, 1, GL_FALSE, &viewProj[0][0]);
+    }
+    const GLint modelLoc = glGetUniformLocation(m_boundsDebugProgram, "uModel");
+    if (modelLoc >= 0)
+    {
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, &model[0][0]);
+    }
+    const GLint colorLoc = glGetUniformLocation(m_boundsDebugProgram, "uColor");
+    if (colorLoc >= 0)
+    {
+        glUniform4f(colorLoc, 0.95f, 0.4f, 0.2f, 1.0f);
+    }
+
+    glDrawArrays(GL_LINES, 0, m_boundsDebugVertexCount);
+
+    glBindVertexArray(0);
+    glUseProgram(0);
+
+    if (!depthEnabled)
+    {
+        glDisable(GL_DEPTH_TEST);
+    }
+    if (cullEnabled)
+    {
+        glEnable(GL_CULL_FACE);
+    }
+}
+
 void OpenGLRenderer::updateOcclusionResults()
 {
+    constexpr uint8_t kOcclusionGraceFrames = 4;
     for (auto& [object, data] : m_occlusionQueries)
     {
         if (data.queryId == 0)
@@ -1300,11 +1644,16 @@ void OpenGLRenderer::updateOcclusionResults()
         {
             data.lastVisible = true;
             data.occludedFrames = 0;
+            data.lastResultFrame = m_frameIndex;
         }
         else
         {
-            data.lastVisible = false;
-            data.occludedFrames = static_cast<uint8_t>(std::min<uint8_t>(data.occludedFrames + 1, 3));
+            data.occludedFrames = static_cast<uint8_t>(std::min<uint8_t>(data.occludedFrames + 1, kOcclusionGraceFrames));
+            if (data.occludedFrames >= kOcclusionGraceFrames)
+            {
+                data.lastVisible = false;
+            }
+            data.lastResultFrame = m_frameIndex;
         }
         data.hasResult = true;
     }
@@ -1312,6 +1661,8 @@ void OpenGLRenderer::updateOcclusionResults()
 
 bool OpenGLRenderer::shouldRenderOcclusion(const OpenGLObject3D* object) const
 {
+    constexpr uint8_t kOcclusionGraceFrames = 4;
+    constexpr uint64_t kOcclusionDelayFrames = 2;
     auto it = m_occlusionQueries.find(object);
     if (it == m_occlusionQueries.end())
     {
@@ -1321,14 +1672,18 @@ bool OpenGLRenderer::shouldRenderOcclusion(const OpenGLObject3D* object) const
     {
         return true;
     }
+    if (m_frameIndex - it->second.lastResultFrame < kOcclusionDelayFrames)
+    {
+        return true;
+    }
     if (it->second.lastVisible)
     {
         return true;
     }
-    return it->second.occludedFrames < 2;
+    return it->second.occludedFrames < kOcclusionGraceFrames;
 }
 
-void OpenGLRenderer::issueOcclusionQuery(const OpenGLObject3D* object, const glm::vec3& center, float radius, const glm::mat4& viewProj)
+void OpenGLRenderer::issueOcclusionQuery(const OpenGLObject3D* object, const glm::vec3& center, const glm::vec3& extent, const glm::mat4& viewProj)
 {
     if (!object || !m_occlusionEnabled)
     {
@@ -1360,7 +1715,7 @@ void OpenGLRenderer::issueOcclusionQuery(const OpenGLObject3D* object, const glm
 
     glm::mat4 model(1.0f);
     model = glm::translate(model, center);
-    model = glm::scale(model, glm::vec3(radius));
+    model = glm::scale(model, extent);
 
     const GLint viewProjLoc = glGetUniformLocation(m_occlusionProgram, "uViewProj");
     if (viewProjLoc >= 0)
@@ -1373,9 +1728,13 @@ void OpenGLRenderer::issueOcclusionQuery(const OpenGLObject3D* object, const glm
         glUniformMatrix4fv(modelLoc, 1, GL_FALSE, &model[0][0]);
     }
 
-    glBeginQuery(GL_ANY_SAMPLES_PASSED, data.queryId);
+    GLenum queryTarget = GL_ANY_SAMPLES_PASSED;
+#if defined(GL_ANY_SAMPLES_PASSED_CONSERVATIVE)
+    queryTarget = GL_ANY_SAMPLES_PASSED_CONSERVATIVE;
+#endif
+    glBeginQuery(queryTarget, data.queryId);
     glDrawArrays(GL_TRIANGLES, 0, 36);
-    glEndQuery(GL_ANY_SAMPLES_PASSED);
+    glEndQuery(queryTarget);
 
     glBindVertexArray(0);
     glUseProgram(0);
