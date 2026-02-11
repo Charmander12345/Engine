@@ -140,6 +140,64 @@ namespace
             element.hasContentSize = true;
             return size;
         }
+        case WidgetElementType::EntryBar:
+        {
+            const float fontSize = (element.fontSize > 0.0f) ? element.fontSize : 14.0f;
+            const float scale = fontSize / 48.0f;
+            std::string display = element.value;
+            if (element.isPassword)
+            {
+                display.assign(element.value.size(), '*');
+            }
+            const Vec2 textSize = (!display.empty() && measureText) ? measureText(display, scale) : Vec2{};
+            size.x = textSize.x + element.padding.x * 2.0f;
+            size.y = textSize.y + element.padding.y * 2.0f;
+            size.x = std::max(size.x, element.minSize.x);
+            size.y = std::max(size.y, element.minSize.y);
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
+        case WidgetElementType::ColorPicker:
+        {
+            if (element.isCompact && !element.children.empty())
+            {
+                childSizes.reserve(element.children.size());
+                for (auto& child : element.children)
+                {
+                    const Vec2 childSize = measureElementSize(child, measureText);
+                    Vec2 withMargin{
+                        childSize.x + child.margin.x * 2.0f,
+                        childSize.y + child.margin.y * 2.0f
+                    };
+                    childSizes.push_back(withMargin);
+                }
+
+                float widthSum = 0.0f;
+                float maxHeight = 0.0f;
+                for (const auto& childSize : childSizes)
+                {
+                    widthSum += childSize.x;
+                    maxHeight = std::max(maxHeight, childSize.y);
+                }
+                if (!childSizes.empty())
+                {
+                    widthSum += element.padding.x * 2.0f + element.padding.x * static_cast<float>(childSizes.size() - 1);
+                    maxHeight += element.padding.y * 2.0f;
+                }
+                size = Vec2{ widthSum, maxHeight };
+            }
+            else
+            {
+                size.x = std::max(element.minSize.x, 0.0f);
+                size.y = std::max(element.minSize.y, 0.0f);
+            }
+            size.x = std::max(size.x, element.minSize.x);
+            size.y = std::max(size.y, element.minSize.y);
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
         case WidgetElementType::StackPanel:
         case WidgetElementType::Grid:
         {
@@ -229,6 +287,51 @@ namespace
         return size;
     }
 
+    Vec4 hsvToRgb(float hue, float saturation, float value)
+    {
+        hue = std::fmod(std::max(0.0f, hue), 1.0f) * 6.0f;
+        const float c = value * saturation;
+        const float x = c * (1.0f - std::fabs(std::fmod(hue, 2.0f) - 1.0f));
+        const float m = value - c;
+
+        float r = 0.0f;
+        float g = 0.0f;
+        float b = 0.0f;
+
+        if (hue < 1.0f)
+        {
+            r = c;
+            g = x;
+        }
+        else if (hue < 2.0f)
+        {
+            r = x;
+            g = c;
+        }
+        else if (hue < 3.0f)
+        {
+            g = c;
+            b = x;
+        }
+        else if (hue < 4.0f)
+        {
+            g = x;
+            b = c;
+        }
+        else if (hue < 5.0f)
+        {
+            r = x;
+            b = c;
+        }
+        else
+        {
+            r = c;
+            b = x;
+        }
+
+        return Vec4{ r + m, g + m, b + m, 1.0f };
+    }
+
     void layoutElement(WidgetElement& element,
         float parentX,
         float parentY,
@@ -302,6 +405,15 @@ namespace
         float contentY = y0 + element.padding.y;
         const float contentW = std::max(0.0f, width - element.padding.x * 2.0f);
         const float contentH = std::max(0.0f, height - element.padding.y * 2.0f);
+
+        if (element.type == WidgetElementType::ColorPicker && element.isCompact)
+        {
+            for (auto& child : element.children)
+            {
+                layoutElement(child, contentX, contentY, contentW, contentH, measureText);
+            }
+            return;
+        }
 
         if (element.type == WidgetElementType::StackPanel && element.orientation == StackOrientation::Horizontal)
         {
@@ -918,13 +1030,37 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
     if (!target)
     {
         Logger::Instance().log(Logger::Category::UI, "Click miss at (" + std::to_string(screenPos.x) + ", " + std::to_string(screenPos.y) + ")", Logger::LogLevel::INFO);
+        setFocusedEntry(nullptr);
         return false;
+    }
+
+    if (target->type == WidgetElementType::EntryBar)
+    {
+        setFocusedEntry(target);
+        return true;
+    }
+
+    if (m_focusedEntry)
+    {
+        setFocusedEntry(nullptr);
     }
 
     target->isPressed = true;
     if (target->type == WidgetElementType::Button && !target->id.empty())
     {
         Logger::Instance().log(Logger::Category::UI, "Click: " + target->id, Logger::LogLevel::INFO);
+    }
+    if (target->type == WidgetElementType::ColorPicker && !target->isCompact)
+    {
+        const float relX = (screenPos.x - target->computedPositionPixels.x) / std::max(1.0f, target->computedSizePixels.x);
+        const float relY = (screenPos.y - target->computedPositionPixels.y) / std::max(1.0f, target->computedSizePixels.y);
+        const float hue = std::clamp(relX, 0.0f, 1.0f);
+        const float value = std::clamp(1.0f - relY, 0.0f, 1.0f);
+        target->color = hsvToRgb(hue, 1.0f, value);
+        if (target->onColorChanged)
+        {
+            target->onColorChanged(target->color);
+        }
     }
     if (target->onClicked)
     {
@@ -949,6 +1085,51 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
     }
 
     return true;
+}
+
+bool UIManager::handleTextInput(const std::string& text)
+{
+    if (!m_focusedEntry || text.empty())
+    {
+        return false;
+    }
+
+    m_focusedEntry->value += text;
+    markAllWidgetsDirty();
+    return true;
+}
+
+bool UIManager::handleKeyDown(int key)
+{
+    if (!m_focusedEntry)
+    {
+        return false;
+    }
+
+    if (key == SDLK_BACKSPACE)
+    {
+        if (!m_focusedEntry->value.empty())
+        {
+            m_focusedEntry->value.pop_back();
+            markAllWidgetsDirty();
+        }
+        return true;
+    }
+    if (key == SDLK_RETURN || key == SDLK_KP_ENTER)
+    {
+        if (m_focusedEntry->onValueChanged)
+        {
+            m_focusedEntry->onValueChanged(m_focusedEntry->value);
+        }
+        return true;
+    }
+    if (key == SDLK_ESCAPE)
+    {
+        setFocusedEntry(nullptr);
+        return true;
+    }
+
+    return false;
 }
 
 bool UIManager::handleScroll(const Vec2& screenPos, float delta)
@@ -1029,6 +1210,38 @@ void UIManager::setMousePosition(const Vec2& screenPos)
     m_mousePosition = screenPos;
     m_hasMousePosition = true;
     updateHoverStates();
+}
+
+void UIManager::setFocusedEntry(WidgetElement* element)
+{
+    if (m_focusedEntry == element)
+    {
+        return;
+    }
+
+    if (m_focusedEntry)
+    {
+        m_focusedEntry->isFocused = false;
+    }
+
+    m_focusedEntry = element;
+    if (m_focusedEntry)
+    {
+        m_focusedEntry->isFocused = true;
+    }
+
+    markAllWidgetsDirty();
+}
+
+void UIManager::markAllWidgetsDirty()
+{
+    for (auto& entry : m_widgets)
+    {
+        if (entry.widget)
+        {
+            entry.widget->markLayoutDirty();
+        }
+    }
 }
 
 bool UIManager::hasClickEvent(const std::string& eventId) const

@@ -18,7 +18,9 @@ enum class WidgetElementType
     Button,
     Panel,
     StackPanel,
-    Grid
+    Grid,
+    ColorPicker,
+    EntryBar
 };
 
 enum class TextAlignH
@@ -62,6 +64,9 @@ struct WidgetElement
     std::string font;
     float fontSize{ 0.0f };
     Vec2 minSize{ 0.0f, 0.0f };
+    std::string value;
+    bool isPassword{ false };
+    bool isCompact{ false };
     TextAlignH textAlignH{ TextAlignH::Left };
     TextAlignV textAlignV{ TextAlignV::Top };
     Vec2 padding{ 0.0f, 0.0f };
@@ -86,10 +91,13 @@ struct WidgetElement
     bool hasBounds{ false };
     bool isHovered{ false };
     bool isPressed{ false };
+    bool isFocused{ false };
     bool runtimeOnly{ false };
     bool scrollable{ false };
     float scrollOffset{ 0.0f };
     std::function<void()> onClicked;
+    std::function<void(const Vec4&)> onColorChanged;
+    std::function<void(const std::string&)> onValueChanged;
     std::function<void()> onHovered;
     std::function<void()> onUnhovered;
 };

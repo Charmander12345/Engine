@@ -33,7 +33,6 @@ namespace
         {
             if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
         }
-
         // Textures
         if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga")
             return AssetType::Texture;
@@ -424,7 +423,472 @@ bool AssetManager::initialize()
 {
     startWorker();
 	s_nextAssetID = 1;
+    ensureEditorWidgetsCreated();
     return true;
+}
+
+void AssetManager::ensureEditorWidgetsCreated()
+{
+    auto& logger = Logger::Instance();
+
+    const std::string defaultWidgetRel = "TitleBar.asset";
+    {
+        json widgetJson = json::object();
+        widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 50.0f} };
+        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        widgetJson["m_anchor"] = "TopLeft";
+        widgetJson["m_fillX"] = true;
+        widgetJson["m_zOrder"] = 0;
+
+        json elements = json::array();
+        json panel = json::object();
+        panel["id"] = "TitleBar.Background";
+        panel["type"] = "Panel";
+        panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        panel["fillX"] = true;
+        panel["color"] = json{ {"x", 0.08f}, {"y", 0.09f}, {"z", 0.11f}, {"w", 0.88f} };
+        panel["shaderVertex"] = "panel_vertex.glsl";
+        panel["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(panel);
+
+        json label = json::object();
+        label["id"] = "TitleBar.Label";
+        label["type"] = "Text";
+        label["from"] = json{ {"x", 0.02f}, {"y", 0.2f} };
+        label["to"] = json{ {"x", 0.5f}, {"y", 0.8f} };
+        label["color"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        label["text"] = "Engine";
+        label["font"] = "default.ttf";
+        label["fontSize"] = 20.0f;
+        label["sizeToContent"] = true;
+        label["shaderVertex"] = "text_vertex.glsl";
+        label["shaderFragment"] = "text_fragment.glsl";
+        elements.push_back(label);
+
+        json buttonStack = json::object();
+        buttonStack["id"] = "TitleBar.Buttons";
+        buttonStack["type"] = "StackPanel";
+        buttonStack["from"] = json{ {"x", 0.85f}, {"y", 0.0f} };
+        buttonStack["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        buttonStack["orientation"] = "Horizontal";
+        buttonStack["padding"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        buttonStack["sizeToContent"] = true;
+
+        json btnMin = json::object();
+        btnMin["id"] = "TitleBar.Minimize";
+        btnMin["type"] = "Button";
+        btnMin["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        btnMin["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        btnMin["color"] = json{ {"x", 0.2f}, {"y", 0.2f}, {"z", 0.2f}, {"w", 1.0f} };
+        btnMin["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        btnMin["text"] = "_";
+        btnMin["font"] = "default.ttf";
+        btnMin["fontSize"] = 16.0f;
+        btnMin["textAlignH"] = "Center";
+        btnMin["textAlignV"] = "Center";
+        btnMin["minSize"] = json{ {"x", 40.0f}, {"y", 0.0f} };
+        btnMin["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
+        btnMin["shaderVertex"] = "button_vertex.glsl";
+        btnMin["shaderFragment"] = "button_fragment.glsl";
+
+        json btnMax = json::object();
+        btnMax["id"] = "TitleBar.Maximize";
+        btnMax["type"] = "Button";
+        btnMax["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        btnMax["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        btnMax["color"] = json{ {"x", 0.26f}, {"y", 0.26f}, {"z", 0.26f}, {"w", 1.0f} };
+        btnMax["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        btnMax["text"] = "[ ]";
+        btnMax["font"] = "default.ttf";
+        btnMax["fontSize"] = 16.0f;
+        btnMax["textAlignH"] = "Center";
+        btnMax["textAlignV"] = "Center";
+        btnMax["minSize"] = json{ {"x", 40.0f}, {"y", 0.0f} };
+        btnMax["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
+        btnMax["shaderVertex"] = "button_vertex.glsl";
+        btnMax["shaderFragment"] = "button_fragment.glsl";
+
+        json btnClose = json::object();
+        btnClose["id"] = "TitleBar.Close";
+        btnClose["type"] = "Button";
+        btnClose["clickEvent"] = "TitleBar.Close";
+        btnClose["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        btnClose["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        btnClose["color"] = json{ {"x", 0.3f}, {"y", 0.08f}, {"z", 0.08f}, {"w", 1.0f} };
+        btnClose["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        btnClose["text"] = "X";
+        btnClose["font"] = "default.ttf";
+        btnClose["fontSize"] = 16.0f;
+        btnClose["textAlignH"] = "Center";
+        btnClose["textAlignV"] = "Center";
+        btnClose["minSize"] = json{ {"x", 40.0f}, {"y", 0.0f} };
+        btnClose["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
+        btnClose["shaderVertex"] = "button_vertex.glsl";
+        btnClose["shaderFragment"] = "button_fragment.glsl";
+
+        buttonStack["children"] = json::array({ btnMin, btnMax, btnClose });
+        elements.push_back(buttonStack);
+
+        widgetJson["m_elements"] = elements;
+
+        auto widget = std::make_shared<AssetData>();
+        widget->setName("TitleBar");
+        widget->setData(std::move(widgetJson));
+
+        const fs::path widgetsRoot = getEditorWidgetsRootPath();
+        std::error_code ec;
+        fs::create_directories(widgetsRoot, ec);
+        const fs::path abs = widgetsRoot / fs::path(defaultWidgetRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+        }
+        if (!existsAndOk)
+        {
+            std::ofstream out(abs, std::ios::out | std::ios::trunc);
+            if (out.is_open())
+            {
+                json fileJson = json::object();
+                fileJson["magic"] = 0x41535453;
+                fileJson["version"] = 2;
+                fileJson["type"] = static_cast<int>(AssetType::Widget);
+                fileJson["name"] = widget->getName();
+                fileJson["data"] = widget->getData();
+                out << fileJson.dump(4);
+                if (!out.good())
+                {
+                    logger.log(Logger::Category::AssetManagement, "Failed to write editor widget asset.", Logger::LogLevel::ERROR);
+                }
+            }
+            else
+            {
+                logger.log(Logger::Category::AssetManagement, "Failed to open editor widget asset for writing.", Logger::LogLevel::ERROR);
+            }
+        }
+    }
+
+    const std::string worldSettingsWidgetRel = "WorldSettings.asset";
+    {
+        json widgetJson = json::object();
+        widgetJson["m_sizePixels"] = json{ {"x", 260.0f}, {"y", 0.0f} };
+        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        widgetJson["m_anchor"] = "TopLeft";
+        widgetJson["m_fillY"] = true;
+        widgetJson["m_zOrder"] = 1;
+
+        json elements = json::array();
+
+        json panel = json::object();
+        panel["id"] = "WorldSettings.Background";
+        panel["type"] = "Panel";
+        panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        panel["fillX"] = true;
+        panel["fillY"] = true;
+        panel["color"] = json{ {"x", 0.09f}, {"y", 0.1f}, {"z", 0.12f}, {"w", 0.95f} };
+        panel["shaderVertex"] = "panel_vertex.glsl";
+        panel["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(panel);
+
+        json stack = json::object();
+        stack["id"] = "WorldSettings.Stack";
+        stack["type"] = "StackPanel";
+        stack["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        stack["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        stack["fillX"] = true;
+        stack["fillY"] = true;
+        stack["padding"] = json{ {"x", 12.0f}, {"y", 12.0f} };
+        stack["orientation"] = "Vertical";
+        stack["scrollable"] = true;
+        stack["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+
+        json title = json::object();
+        title["id"] = "WorldSettings.Title";
+        title["type"] = "Text";
+        title["text"] = "World Settings";
+        title["font"] = "default.ttf";
+        title["fontSize"] = 18.0f;
+        title["textAlignH"] = "Left";
+        title["textAlignV"] = "Center";
+        title["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
+        title["textColor"] = json{ {"x", 0.95f}, {"y", 0.95f}, {"z", 0.95f}, {"w", 1.0f} };
+        title["minSize"] = json{ {"x", 0.0f}, {"y", 26.0f} };
+
+        json clearLabel = json::object();
+        clearLabel["id"] = "WorldSettings.ClearColor.Label";
+        clearLabel["type"] = "Text";
+        clearLabel["text"] = "Clear Color";
+        clearLabel["font"] = "default.ttf";
+        clearLabel["fontSize"] = 14.0f;
+        clearLabel["textAlignH"] = "Left";
+        clearLabel["textAlignV"] = "Center";
+        clearLabel["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
+        clearLabel["textColor"] = json{ {"x", 0.85f}, {"y", 0.85f}, {"z", 0.85f}, {"w", 1.0f} };
+        clearLabel["minSize"] = json{ {"x", 0.0f}, {"y", 20.0f} };
+
+        json colorPicker = json::object();
+        colorPicker["id"] = "WorldSettings.ClearColor";
+        colorPicker["type"] = "ColorPicker";
+        colorPicker["compact"] = true;
+        colorPicker["minSize"] = json{ {"x", 200.0f}, {"y", 30.0f} };
+
+        json compactStack = json::object();
+        compactStack["id"] = "WorldSettings.ClearColor.Fields";
+        compactStack["type"] = "StackPanel";
+        compactStack["orientation"] = "Horizontal";
+        compactStack["padding"] = json{ {"x", 6.0f}, {"y", 2.0f} };
+        compactStack["fillX"] = true;
+        compactStack["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+
+        json entryR = json::object();
+        entryR["id"] = "WorldSettings.ClearColor.R";
+        entryR["type"] = "EntryBar";
+        entryR["minSize"] = json{ {"x", 50.0f}, {"y", 24.0f} };
+        entryR["value"] = "128";
+
+        json entryG = json::object();
+        entryG["id"] = "WorldSettings.ClearColor.G";
+        entryG["type"] = "EntryBar";
+        entryG["minSize"] = json{ {"x", 50.0f}, {"y", 24.0f} };
+        entryG["value"] = "128";
+
+        json entryB = json::object();
+        entryB["id"] = "WorldSettings.ClearColor.B";
+        entryB["type"] = "EntryBar";
+        entryB["minSize"] = json{ {"x", 50.0f}, {"y", 24.0f} };
+        entryB["value"] = "128";
+
+        compactStack["children"] = json::array({ entryR, entryG, entryB });
+        colorPicker["children"] = json::array({ compactStack });
+
+        stack["children"] = json::array({ title, clearLabel, colorPicker });
+
+        elements.push_back(stack);
+        widgetJson["m_elements"] = elements;
+
+        auto widget = std::make_shared<AssetData>();
+        widget->setName("WorldSettings");
+        widget->setData(std::move(widgetJson));
+
+        const fs::path widgetsRoot = getEditorWidgetsRootPath();
+        std::error_code ec;
+        fs::create_directories(widgetsRoot, ec);
+        const fs::path abs = widgetsRoot / fs::path(worldSettingsWidgetRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+        }
+        if (!existsAndOk)
+        {
+            std::ofstream out(abs, std::ios::out | std::ios::trunc);
+            if (out.is_open())
+            {
+                json fileJson = json::object();
+                fileJson["magic"] = 0x41535453;
+                fileJson["version"] = 2;
+                fileJson["type"] = static_cast<int>(AssetType::Widget);
+                fileJson["name"] = widget->getName();
+                fileJson["data"] = widget->getData();
+                out << fileJson.dump(4);
+                if (!out.good())
+                {
+                    logger.log(Logger::Category::AssetManagement, "Failed to write editor widget asset.", Logger::LogLevel::ERROR);
+                }
+            }
+            else
+            {
+                logger.log(Logger::Category::AssetManagement, "Failed to open editor widget asset for writing.", Logger::LogLevel::ERROR);
+            }
+        }
+    }
+
+    const std::string outlinerWidgetRel = "WorldOutliner.asset";
+    {
+        json widgetJson = json::object();
+        widgetJson["m_sizePixels"] = json{ {"x", 200.0f}, {"y", 0.0f} };
+        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        widgetJson["m_anchor"] = "TopRight";
+        widgetJson["m_fillY"] = true;
+        widgetJson["m_zOrder"] = 1;
+
+        json elements = json::array();
+        json panel = json::object();
+        panel["id"] = "Outliner.Background";
+        panel["type"] = "Panel";
+        panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        panel["fillX"] = true;
+        panel["fillY"] = true;
+        panel["color"] = json{ {"x", 0.07f}, {"y", 0.08f}, {"z", 0.1f}, {"w", 0.88f} };
+        panel["shaderVertex"] = "panel_vertex.glsl";
+        panel["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(panel);
+
+        json label = json::object();
+        label["id"] = "Outliner.Title";
+        label["type"] = "Text";
+        label["from"] = json{ {"x", 0.05f}, {"y", 0.02f} };
+        label["to"] = json{ {"x", 0.95f}, {"y", 0.1f} };
+        label["color"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        label["text"] = "Outliner";
+        label["font"] = "default.ttf";
+        label["fontSize"] = 18.0f;
+        label["sizeToContent"] = true;
+        label["shaderVertex"] = "text_vertex.glsl";
+        label["shaderFragment"] = "text_fragment.glsl";
+        elements.push_back(label);
+
+        json listPanel = json::object();
+        listPanel["id"] = "Outliner.EntityList";
+        listPanel["type"] = "StackPanel";
+        listPanel["from"] = json{ {"x", 0.05f}, {"y", 0.12f} };
+        listPanel["to"] = json{ {"x", 0.95f}, {"y", 0.98f} };
+        listPanel["orientation"] = "Vertical";
+        listPanel["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
+        listPanel["fillX"] = true;
+        listPanel["sizeToContent"] = false;
+        elements.push_back(listPanel);
+
+        widgetJson["m_elements"] = elements;
+
+        auto widget = std::make_shared<AssetData>();
+        widget->setName("WorldOutliner");
+        widget->setData(std::move(widgetJson));
+
+        const fs::path widgetsRoot = getEditorWidgetsRootPath();
+        std::error_code ec;
+        fs::create_directories(widgetsRoot, ec);
+        const fs::path abs = widgetsRoot / fs::path(outlinerWidgetRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+        }
+        if (!existsAndOk)
+        {
+            std::ofstream out(abs, std::ios::out | std::ios::trunc);
+            if (out.is_open())
+            {
+                json fileJson = json::object();
+                fileJson["magic"] = 0x41535453;
+                fileJson["version"] = 2;
+                fileJson["type"] = static_cast<int>(AssetType::Widget);
+                fileJson["name"] = widget->getName();
+                fileJson["data"] = widget->getData();
+                out << fileJson.dump(4);
+                if (!out.good())
+                {
+                    logger.log(Logger::Category::AssetManagement, "Failed to write editor widget asset.", Logger::LogLevel::ERROR);
+                }
+            }
+            else
+            {
+                logger.log(Logger::Category::AssetManagement, "Failed to open editor widget asset for writing.", Logger::LogLevel::ERROR);
+            }
+        }
+    }
+
+    const std::string contentBrowserWidgetRel = "ContentBrowser.asset";
+    {
+        json widgetJson = json::object();
+        widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 220.0f} };
+        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        widgetJson["m_anchor"] = "BottomLeft";
+        widgetJson["m_fillX"] = true;
+        widgetJson["m_zOrder"] = 2;
+
+        json elements = json::array();
+        json panel = json::object();
+        panel["id"] = "ContentBrowser.Background";
+        panel["type"] = "Panel";
+        panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        panel["fillX"] = true;
+        panel["fillY"] = true;
+        panel["color"] = json{ {"x", 0.08f}, {"y", 0.09f}, {"z", 0.12f}, {"w", 0.9f} };
+        panel["shaderVertex"] = "panel_vertex.glsl";
+        panel["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(panel);
+
+        json label = json::object();
+        label["id"] = "ContentBrowser.Title";
+        label["type"] = "Text";
+        label["from"] = json{ {"x", 0.02f}, {"y", 0.05f} };
+        label["to"] = json{ {"x", 0.6f}, {"y", 0.2f} };
+        label["color"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        label["text"] = "Content Browser";
+        label["font"] = "default.ttf";
+        label["fontSize"] = 18.0f;
+        label["sizeToContent"] = true;
+        label["shaderVertex"] = "text_vertex.glsl";
+        label["shaderFragment"] = "text_fragment.glsl";
+        elements.push_back(label);
+
+        json treePanel = json::object();
+        treePanel["id"] = "ContentBrowser.Tree";
+        treePanel["type"] = "StackPanel";
+        treePanel["from"] = json{ {"x", 0.02f}, {"y", 0.22f} };
+        treePanel["to"] = json{ {"x", 0.22f}, {"y", 0.95f} };
+        treePanel["orientation"] = "Vertical";
+        treePanel["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
+        treePanel["fillY"] = false;
+        treePanel["sizeToContent"] = false;
+        treePanel["scrollable"] = true;
+        elements.push_back(treePanel);
+
+        json grid = json::object();
+        grid["id"] = "ContentBrowser.Grid";
+        grid["type"] = "Grid";
+        grid["from"] = json{ {"x", 0.25f}, {"y", 0.05f} };
+        grid["to"] = json{ {"x", 0.98f}, {"y", 0.95f} };
+        grid["padding"] = json{ {"x", 8.0f}, {"y", 8.0f} };
+        elements.push_back(grid);
+
+        widgetJson["m_elements"] = elements;
+
+        auto widget = std::make_shared<AssetData>();
+        widget->setName("ContentBrowser");
+        widget->setData(std::move(widgetJson));
+
+        const fs::path widgetsRoot = getEditorWidgetsRootPath();
+        std::error_code ec;
+        fs::create_directories(widgetsRoot, ec);
+        const fs::path abs = widgetsRoot / fs::path(contentBrowserWidgetRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+        }
+        if (!existsAndOk)
+        {
+            std::ofstream out(abs, std::ios::out | std::ios::trunc);
+            if (out.is_open())
+            {
+                json fileJson = json::object();
+                fileJson["magic"] = 0x41535453;
+                fileJson["version"] = 2;
+                fileJson["type"] = static_cast<int>(AssetType::Widget);
+                fileJson["name"] = widget->getName();
+                fileJson["data"] = widget->getData();
+                out << fileJson.dump(4);
+                if (!out.good())
+                {
+                    logger.log(Logger::Category::AssetManagement, "Failed to write editor widget asset.", Logger::LogLevel::ERROR);
+                }
+            }
+            else
+            {
+                logger.log(Logger::Category::AssetManagement, "Failed to open editor widget asset for writing.", Logger::LogLevel::ERROR);
+            }
+        }
+    }
 }
 
 void AssetManager::ensureDefaultAssetsCreated()
@@ -765,328 +1229,6 @@ void AssetManager::ensureDefaultAssetsCreated()
 
         diagnostics.setActiveLevel(std::move(defaultLevel));
         diagnostics.setScenePrepared(false);
-    }
-
-    const std::string defaultWidgetRel = "TitleBar.asset";
-    {
-        json widgetJson = json::object();
-        widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 50.0f} };
-        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        widgetJson["m_anchor"] = "TopLeft";
-        widgetJson["m_fillX"] = true;
-        widgetJson["m_zOrder"] = 0;
-
-        json elements = json::array();
-        json panel = json::object();
-        panel["id"] = "TitleBar.Background";
-        panel["type"] = "Panel";
-        panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
-        panel["fillX"] = true;
-        panel["color"] = json{ {"x", 0.08f}, {"y", 0.09f}, {"z", 0.11f}, {"w", 0.88f} };
-        panel["shaderVertex"] = "panel_vertex.glsl";
-        panel["shaderFragment"] = "panel_fragment.glsl";
-        elements.push_back(panel);
-
-        json label = json::object();
-        label["id"] = "TitleBar.Label";
-        label["type"] = "Text";
-        label["from"] = json{ {"x", 0.02f}, {"y", 0.2f} };
-        label["to"] = json{ {"x", 0.5f}, {"y", 0.8f} };
-        label["color"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
-        label["text"] = "Engine";
-        label["font"] = "default.ttf";
-        label["fontSize"] = 20.0f;
-        label["sizeToContent"] = true;
-        label["shaderVertex"] = "text_vertex.glsl";
-        label["shaderFragment"] = "text_fragment.glsl";
-        elements.push_back(label);
-
-        json buttonStack = json::object();
-        buttonStack["id"] = "TitleBar.Buttons";
-        buttonStack["type"] = "StackPanel";
-        buttonStack["from"] = json{ {"x", 0.85f}, {"y", 0.0f} };
-        buttonStack["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
-        buttonStack["orientation"] = "Horizontal";
-        buttonStack["padding"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        buttonStack["sizeToContent"] = true;
-
-        json btnMin = json::object();
-        btnMin["id"] = "TitleBar.Minimize";
-        btnMin["type"] = "Button";
-        btnMin["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        btnMin["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
-        btnMin["color"] = json{ {"x", 0.2f}, {"y", 0.2f}, {"z", 0.2f}, {"w", 1.0f} };
-        btnMin["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
-        btnMin["text"] = "_";
-        btnMin["font"] = "default.ttf";
-        btnMin["fontSize"] = 16.0f;
-        btnMin["textAlignH"] = "Center";
-        btnMin["textAlignV"] = "Center";
-        btnMin["minSize"] = json{ {"x", 40.0f}, {"y", 0.0f} };
-        btnMin["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
-        btnMin["shaderVertex"] = "button_vertex.glsl";
-        btnMin["shaderFragment"] = "button_fragment.glsl";
-
-        json btnMax = json::object();
-        btnMax["id"] = "TitleBar.Maximize";
-        btnMax["type"] = "Button";
-        btnMax["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        btnMax["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
-        btnMax["color"] = json{ {"x", 0.26f}, {"y", 0.26f}, {"z", 0.26f}, {"w", 1.0f} };
-        btnMax["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
-        btnMax["text"] = "[ ]";
-        btnMax["font"] = "default.ttf";
-        btnMax["fontSize"] = 16.0f;
-        btnMax["textAlignH"] = "Center";
-        btnMax["textAlignV"] = "Center";
-        btnMax["minSize"] = json{ {"x", 40.0f}, {"y", 0.0f} };
-        btnMax["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
-        btnMax["shaderVertex"] = "button_vertex.glsl";
-        btnMax["shaderFragment"] = "button_fragment.glsl";
-
-        json btnClose = json::object();
-        btnClose["id"] = "TitleBar.Close";
-        btnClose["type"] = "Button";
-        btnClose["clickEvent"] = "TitleBar.Close";
-        btnClose["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        btnClose["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
-        btnClose["color"] = json{ {"x", 0.3f}, {"y", 0.08f}, {"z", 0.08f}, {"w", 1.0f} };
-        btnClose["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
-        btnClose["text"] = "X";
-        btnClose["font"] = "default.ttf";
-        btnClose["fontSize"] = 16.0f;
-        btnClose["textAlignH"] = "Center";
-        btnClose["textAlignV"] = "Center";
-        btnClose["minSize"] = json{ {"x", 40.0f}, {"y", 0.0f} };
-        btnClose["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
-        btnClose["shaderVertex"] = "button_vertex.glsl";
-        btnClose["shaderFragment"] = "button_fragment.glsl";
-
-        buttonStack["children"] = json::array({ btnMin, btnMax, btnClose });
-        elements.push_back(buttonStack);
-
-        widgetJson["m_elements"] = elements;
-
-        auto widget = std::make_shared<AssetData>();
-        widget->setName("TitleBar");
-        widget->setData(std::move(widgetJson));
-
-        const fs::path widgetsRoot = getEditorWidgetsRootPath();
-        std::error_code ec;
-        fs::create_directories(widgetsRoot, ec);
-        const fs::path abs = widgetsRoot / fs::path(defaultWidgetRel);
-        bool existsAndOk = false;
-        if (fs::exists(abs))
-        {
-            AssetType headerType{ AssetType::Unknown };
-            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
-        }
-
-    const std::string outlinerWidgetRel = "WorldOutliner.asset";
-    {
-        json widgetJson = json::object();
-        widgetJson["m_sizePixels"] = json{ {"x", 200.0f}, {"y", 0.0f} };
-        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        widgetJson["m_anchor"] = "TopRight";
-        widgetJson["m_fillY"] = true;
-        widgetJson["m_zOrder"] = 1;
-
-        json elements = json::array();
-        json panel = json::object();
-        panel["id"] = "Outliner.Background";
-        panel["type"] = "Panel";
-        panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
-        panel["fillX"] = true;
-        panel["fillY"] = true;
-        panel["color"] = json{ {"x", 0.07f}, {"y", 0.08f}, {"z", 0.1f}, {"w", 0.88f} };
-        panel["shaderVertex"] = "panel_vertex.glsl";
-        panel["shaderFragment"] = "panel_fragment.glsl";
-        elements.push_back(panel);
-
-        json label = json::object();
-        label["id"] = "Outliner.Title";
-        label["type"] = "Text";
-        label["from"] = json{ {"x", 0.05f}, {"y", 0.02f} };
-        label["to"] = json{ {"x", 0.95f}, {"y", 0.1f} };
-        label["color"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
-        label["text"] = "Outliner";
-        label["font"] = "default.ttf";
-        label["fontSize"] = 18.0f;
-        label["sizeToContent"] = true;
-        label["shaderVertex"] = "text_vertex.glsl";
-        label["shaderFragment"] = "text_fragment.glsl";
-        elements.push_back(label);
-
-        json listPanel = json::object();
-        listPanel["id"] = "Outliner.EntityList";
-        listPanel["type"] = "StackPanel";
-        listPanel["from"] = json{ {"x", 0.05f}, {"y", 0.12f} };
-        listPanel["to"] = json{ {"x", 0.95f}, {"y", 0.98f} };
-        listPanel["orientation"] = "Vertical";
-        listPanel["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
-        listPanel["fillX"] = true;
-        listPanel["sizeToContent"] = false;
-        elements.push_back(listPanel);
-
-        widgetJson["m_elements"] = elements;
-
-        auto widget = std::make_shared<AssetData>();
-        widget->setName("WorldOutliner");
-        widget->setData(std::move(widgetJson));
-
-        const fs::path widgetsRoot = getEditorWidgetsRootPath();
-        std::error_code ec;
-        fs::create_directories(widgetsRoot, ec);
-        const fs::path abs = widgetsRoot / fs::path(outlinerWidgetRel);
-        bool existsAndOk = false;
-        if (fs::exists(abs))
-        {
-            AssetType headerType{ AssetType::Unknown };
-            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
-        }
-        if (!existsAndOk)
-        {
-            std::ofstream out(abs, std::ios::out | std::ios::trunc);
-            if (out.is_open())
-            {
-                json fileJson = json::object();
-                fileJson["magic"] = 0x41535453;
-                fileJson["version"] = 2;
-                fileJson["type"] = static_cast<int>(AssetType::Widget);
-                fileJson["name"] = widget->getName();
-                fileJson["data"] = widget->getData();
-                out << fileJson.dump(4);
-                if (!out.good())
-                {
-                    logger.log(Logger::Category::AssetManagement, "Failed to write editor widget asset.", Logger::LogLevel::ERROR);
-                }
-            }
-            else
-            {
-                logger.log(Logger::Category::AssetManagement, "Failed to open editor widget asset for writing.", Logger::LogLevel::ERROR);
-            }
-        }
-    }
-        if (!existsAndOk)
-        {
-            std::ofstream out(abs, std::ios::out | std::ios::trunc);
-            if (out.is_open())
-            {
-                json fileJson = json::object();
-                fileJson["magic"] = 0x41535453;
-                fileJson["version"] = 2;
-                fileJson["type"] = static_cast<int>(AssetType::Widget);
-                fileJson["name"] = widget->getName();
-                fileJson["data"] = widget->getData();
-                out << fileJson.dump(4);
-                if (!out.good())
-                {
-                    logger.log(Logger::Category::AssetManagement, "Failed to write editor widget asset.", Logger::LogLevel::ERROR);
-                }
-            }
-            else
-            {
-                logger.log(Logger::Category::AssetManagement, "Failed to open editor widget asset for writing.", Logger::LogLevel::ERROR);
-            }
-        }
-    }
-
-    const std::string contentBrowserWidgetRel = "ContentBrowser.asset";
-    {
-        json widgetJson = json::object();
-        widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 220.0f} };
-        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        widgetJson["m_anchor"] = "BottomLeft";
-        widgetJson["m_fillX"] = true;
-        widgetJson["m_zOrder"] = 2;
-
-        json elements = json::array();
-        json panel = json::object();
-        panel["id"] = "ContentBrowser.Background";
-        panel["type"] = "Panel";
-        panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
-        panel["fillX"] = true;
-        panel["fillY"] = true;
-        panel["color"] = json{ {"x", 0.08f}, {"y", 0.09f}, {"z", 0.12f}, {"w", 0.9f} };
-        panel["shaderVertex"] = "panel_vertex.glsl";
-        panel["shaderFragment"] = "panel_fragment.glsl";
-        elements.push_back(panel);
-
-        json label = json::object();
-        label["id"] = "ContentBrowser.Title";
-        label["type"] = "Text";
-        label["from"] = json{ {"x", 0.02f}, {"y", 0.05f} };
-        label["to"] = json{ {"x", 0.6f}, {"y", 0.2f} };
-        label["color"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
-        label["text"] = "Content Browser";
-        label["font"] = "default.ttf";
-        label["fontSize"] = 18.0f;
-        label["sizeToContent"] = true;
-        label["shaderVertex"] = "text_vertex.glsl";
-        label["shaderFragment"] = "text_fragment.glsl";
-        elements.push_back(label);
-
-        json treePanel = json::object();
-        treePanel["id"] = "ContentBrowser.Tree";
-        treePanel["type"] = "StackPanel";
-        treePanel["from"] = json{ {"x", 0.02f}, {"y", 0.22f} };
-        treePanel["to"] = json{ {"x", 0.22f}, {"y", 0.95f} };
-        treePanel["orientation"] = "Vertical";
-        treePanel["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
-        treePanel["fillY"] = false;
-        treePanel["sizeToContent"] = false;
-        treePanel["scrollable"] = true;
-        elements.push_back(treePanel);
-
-        json grid = json::object();
-        grid["id"] = "ContentBrowser.Grid";
-        grid["type"] = "Grid";
-        grid["from"] = json{ {"x", 0.25f}, {"y", 0.05f} };
-        grid["to"] = json{ {"x", 0.98f}, {"y", 0.95f} };
-        grid["padding"] = json{ {"x", 8.0f}, {"y", 8.0f} };
-        elements.push_back(grid);
-
-        widgetJson["m_elements"] = elements;
-
-        auto widget = std::make_shared<AssetData>();
-        widget->setName("ContentBrowser");
-        widget->setData(std::move(widgetJson));
-
-        const fs::path widgetsRoot = getEditorWidgetsRootPath();
-        std::error_code ec;
-        fs::create_directories(widgetsRoot, ec);
-        const fs::path abs = widgetsRoot / fs::path(contentBrowserWidgetRel);
-        bool existsAndOk = false;
-        if (fs::exists(abs))
-        {
-            AssetType headerType{ AssetType::Unknown };
-            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
-        }
-        if (!existsAndOk)
-        {
-            std::ofstream out(abs, std::ios::out | std::ios::trunc);
-            if (out.is_open())
-            {
-                json fileJson = json::object();
-                fileJson["magic"] = 0x41535453;
-                fileJson["version"] = 2;
-                fileJson["type"] = static_cast<int>(AssetType::Widget);
-                fileJson["name"] = widget->getName();
-                fileJson["data"] = widget->getData();
-                out << fileJson.dump(4);
-                if (!out.good())
-                {
-                    logger.log(Logger::Category::AssetManagement, "Failed to write editor widget asset.", Logger::LogLevel::ERROR);
-                }
-            }
-            else
-            {
-                logger.log(Logger::Category::AssetManagement, "Failed to open editor widget asset for writing.", Logger::LogLevel::ERROR);
-            }
-        }
     }
 
 	logger.log(Logger::Category::AssetManagement, "Default assets ensured.", Logger::LogLevel::INFO);

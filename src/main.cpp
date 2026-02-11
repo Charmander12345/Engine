@@ -12,6 +12,7 @@
 
 #include "Renderer/Renderer.h"
 #include "Renderer/OpenGLRenderer/OpenGLRenderer.h"
+#include "Renderer/UIWidget.h"
 #include "Logger/Logger.h"
 #include "Diagnostics/DiagnosticsManager.h"
 #include "AssetManager/AssetManager.h"
@@ -36,11 +37,11 @@ int main()
 
     auto& assetManager = AssetManager::Instance();
     logTimed(Logger::Category::AssetManagement, "Initialising AssetManager...", Logger::LogLevel::INFO);
-    if (!assetManager.initialize())
-    {
-        logTimed(Logger::Category::AssetManagement, "AssetManager initialisation failed.", Logger::LogLevel::FATAL);
-        return -1;
-    }
+        if (!assetManager.initialize())
+        {
+            logTimed(Logger::Category::AssetManagement, "AssetManager initialisation failed.", Logger::LogLevel::FATAL);
+            return -1;
+        }
 
     logTimed(Logger::Category::AssetManagement, "AssetManager initialised successfully.", Logger::LogLevel::INFO);
 
@@ -124,6 +125,7 @@ int main()
         }
 
         SDL_SetWindowRelativeMouseMode(w, false);
+        SDL_StartTextInput(w);
     }
 
     logTimed(Logger::Category::Rendering, std::string("Renderer initialised successfully: ") + renderer->name(), Logger::LogLevel::INFO);
@@ -156,6 +158,128 @@ int main()
                     if (auto widget = glRenderer->createWidgetFromAsset(asset))
                     {
                         glRenderer->getUIManager().registerWidget("TitleBar", widget);
+                    }
+                }
+            }
+        }
+
+        const std::string worldSettingsPath = assetManager.getEditorWidgetPath("WorldSettings.asset");
+        if (!worldSettingsPath.empty())
+        {
+            const int widgetId = assetManager.loadAsset(worldSettingsPath, AssetType::Widget, AssetManager::Sync);
+            if (widgetId != 0)
+            {
+                if (auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(widgetId)))
+                {
+                    if (auto widget = glRenderer->createWidgetFromAsset(asset))
+                    {
+                        auto findElementById = [](std::vector<WidgetElement>& elements, const std::string& id) -> WidgetElement*
+                        {
+                            const std::function<WidgetElement*(WidgetElement&)> findRecursive =
+                                [&](WidgetElement& element) -> WidgetElement*
+                                {
+                                    if (element.id == id)
+                                    {
+                                        return &element;
+                                    }
+                                    for (auto& child : element.children)
+                                    {
+                                        if (auto* hit = findRecursive(child))
+                                        {
+                                            return hit;
+                                        }
+                                    }
+                                    return nullptr;
+                                };
+
+                            for (auto& element : elements)
+                            {
+                                if (auto* hit = findRecursive(element))
+                                {
+                                    return hit;
+                                }
+                            }
+                            return nullptr;
+                        };
+
+                        if (auto* picker = findElementById(widget->getElementsMutable(), "WorldSettings.ClearColor"))
+                        {
+                            picker->color = glRenderer->getClearColor();
+                            picker->onColorChanged = [glRenderer](const Vec4& color)
+                                {
+                                    glRenderer->setClearColor(color);
+                                };
+
+                            auto& children = picker->children;
+                            WidgetElement* stack = nullptr;
+                            for (auto& child : children)
+                            {
+                                if (child.type == WidgetElementType::StackPanel)
+                                {
+                                    stack = &child;
+                                    break;
+                                }
+                            }
+
+                            if (stack)
+                            {
+                                struct RgbState
+                                {
+                                    int r{ 0 };
+                                    int g{ 0 };
+                                    int b{ 0 };
+                                    WidgetElement* picker{ nullptr };
+                                };
+
+                                auto state = std::make_shared<RgbState>();
+                                state->r = static_cast<int>(std::round(std::clamp(picker->color.x, 0.0f, 1.0f) * 255.0f));
+                                state->g = static_cast<int>(std::round(std::clamp(picker->color.y, 0.0f, 1.0f) * 255.0f));
+                                state->b = static_cast<int>(std::round(std::clamp(picker->color.z, 0.0f, 1.0f) * 255.0f));
+                                state->picker = picker;
+
+                                const auto applyColor = [state]()
+                                {
+                                    if (!state->picker || !state->picker->onColorChanged)
+                                    {
+                                        return;
+                                    }
+                                    Vec4 color{
+                                        std::clamp(state->r / 255.0f, 0.0f, 1.0f),
+                                        std::clamp(state->g / 255.0f, 0.0f, 1.0f),
+                                        std::clamp(state->b / 255.0f, 0.0f, 1.0f),
+                                        1.0f
+                                    };
+                                    state->picker->color = color;
+                                    state->picker->onColorChanged(color);
+                                };
+
+                                auto configureEntry = [&](const std::string& id, int& channel)
+                                {
+                                    if (auto* entry = findElementById(stack->children, id))
+                                    {
+                                        entry->value = std::to_string(channel);
+                                        entry->onValueChanged = [&channel, applyColor](const std::string& value)
+                                            {
+                                                try
+                                                {
+                                                    int parsed = std::stoi(value);
+                                                    channel = std::clamp(parsed, 0, 255);
+                                                    applyColor();
+                                                }
+                                                catch (...)
+                                                {
+                                                }
+                                            };
+                                    }
+                                };
+
+                                configureEntry("WorldSettings.ClearColor.R", state->r);
+                                configureEntry("WorldSettings.ClearColor.G", state->g);
+                                configureEntry("WorldSettings.ClearColor.B", state->b);
+                            }
+                        }
+
+                        glRenderer->getUIManager().registerWidget("WorldSettings", widget);
                     }
                 }
             }
@@ -443,6 +567,18 @@ int main()
                     -static_cast<float>(event.motion.yrel) * sensitivity);
             }
 
+            if (event.type == SDL_EVENT_TEXT_INPUT)
+            {
+                if (glRenderer)
+                {
+                    auto& uiManager = glRenderer->getUIManager();
+                    if (uiManager.handleTextInput(event.text.text))
+                    {
+                        continue;
+                    }
+                }
+            }
+
             if (event.type == SDL_EVENT_KEY_UP)
             {
                 if (event.key.key == SDLK_F11)
@@ -485,6 +621,14 @@ int main()
             }
             else if (event.type == SDL_EVENT_KEY_DOWN)
             {
+                if (glRenderer)
+                {
+                    auto& uiManager = glRenderer->getUIManager();
+                    if (uiManager.handleKeyDown(event.key.key))
+                    {
+                        continue;
+                    }
+                }
                 diagnostics.dispatchKeyDown(event.key.key);
             }
         }

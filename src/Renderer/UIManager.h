@@ -41,6 +41,8 @@ public:
     bool needsLayoutUpdate() const;
     bool handleMouseDown(const Vec2& screenPos, int button);
     bool handleScroll(const Vec2& screenPos, float delta);
+    bool handleTextInput(const std::string& text);
+    bool handleKeyDown(int key);
     void setMousePosition(const Vec2& screenPos);
     bool isPointerOverUI(const Vec2& screenPos) const;
     bool hasClickEvent(const std::string& eventId) const;
@@ -51,6 +53,8 @@ private:
     void populateOutlinerWidget(const std::shared_ptr<Widget>& widget);
     void populateContentBrowserWidget(const std::shared_ptr<Widget>& widget);
     void updateHoverStates();
+    void setFocusedEntry(WidgetElement* element);
+    void markAllWidgetsDirty();
 
     Vec2 m_availableViewportSize{};
     Vec2 m_mousePosition{};
@@ -64,6 +68,7 @@ private:
     mutable bool m_hasPointerQueryPos{ false };
     mutable bool m_lastPointerOverUI{ false };
     mutable bool m_pointerCacheDirty{ true };
+    WidgetElement* m_focusedEntry{ nullptr };
 
     void bindClickEventsForWidget(const std::shared_ptr<Widget>& widget);
     void bindClickEventsForElement(WidgetElement& element);

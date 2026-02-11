@@ -33,6 +33,9 @@ add_library(Renderer SHARED
     UIWidgets/StackPanelWidget.h
     UIWidgets/TextWidget.cpp
     UIWidgets/TextWidget.h
+    UIWidgets/ColorPickerWidget.cpp
+    UIWidgets/ColorPickerWidget.h
+    UIWidgets/EntryBarWidget.h
 )
 set_target_properties(Renderer PROPERTIES
     CXX_STANDARD 20

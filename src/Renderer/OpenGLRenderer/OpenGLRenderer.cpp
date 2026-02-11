@@ -27,6 +27,51 @@
 
 namespace
 {
+    Vec4 HsvToRgb(float hue, float saturation, float value)
+    {
+        hue = std::fmod(std::max(0.0f, hue), 1.0f) * 6.0f;
+        const float c = value * saturation;
+        const float x = c * (1.0f - std::fabs(std::fmod(hue, 2.0f) - 1.0f));
+        const float m = value - c;
+
+        float r = 0.0f;
+        float g = 0.0f;
+        float b = 0.0f;
+
+        if (hue < 1.0f)
+        {
+            r = c;
+            g = x;
+        }
+        else if (hue < 2.0f)
+        {
+            r = x;
+            g = c;
+        }
+        else if (hue < 3.0f)
+        {
+            g = c;
+            b = x;
+        }
+        else if (hue < 4.0f)
+        {
+            g = x;
+            b = c;
+        }
+        else if (hue < 5.0f)
+        {
+            r = x;
+            b = c;
+        }
+        else
+        {
+            r = c;
+            b = x;
+        }
+
+        return Vec4{ r + m, g + m, b + m, 1.0f };
+    }
+
     struct FrustumPlane
     {
         glm::vec3 normal{0.0f};
@@ -379,8 +424,18 @@ bool OpenGLRenderer::initialize()
 
 void OpenGLRenderer::clear()
 {
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClearColor(m_clearColor.x, m_clearColor.y, m_clearColor.z, m_clearColor.w);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+}
+
+void OpenGLRenderer::setClearColor(const Vec4& color)
+{
+    m_clearColor = color;
+}
+
+const Vec4& OpenGLRenderer::getClearColor() const
+{
+    return m_clearColor;
 }
 
 void OpenGLRenderer::present()
@@ -1054,6 +1109,64 @@ void OpenGLRenderer::renderUI()
                 }
                 return;
             }
+            if (element.type == WidgetElementType::ColorPicker)
+            {
+                const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+                const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+                const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
+
+                if (element.isCompact)
+                {
+                    if (element.color.w > 0.0f)
+                    {
+                        drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.color, false);
+                    }
+                    for (const auto& child : element.children)
+                    {
+                        self(self, child, x0, y0, widthPx, heightPx);
+                    }
+                    if (m_uiDebugEnabled)
+                    {
+                        drawUIOutline(x0, y0, x1, y1, Vec4{ 0.6f, 0.9f, 0.2f, 1.0f }, uiProjection, program);
+                    }
+                    return;
+                }
+
+                const int columns = 24;
+                const int rows = 6;
+                const float cellW = (columns > 0) ? (widthPx / static_cast<float>(columns)) : widthPx;
+                const float cellH = (rows > 0) ? (heightPx / static_cast<float>(rows)) : heightPx;
+
+                for (int row = 0; row < rows; ++row)
+                {
+                    const float value = 1.0f - (static_cast<float>(row) / std::max(1.0f, static_cast<float>(rows - 1)));
+                    for (int col = 0; col < columns; ++col)
+                    {
+                        const float hue = static_cast<float>(col) / std::max(1.0f, static_cast<float>(columns - 1));
+                        const Vec4 color = HsvToRgb(hue, 1.0f, value);
+                        const float cx0 = x0 + cellW * static_cast<float>(col);
+                        const float cy0 = y0 + cellH * static_cast<float>(row);
+                        drawUIPanel(cx0, cy0, cx0 + cellW, cy0 + cellH, color, uiProjection, program, color, false);
+                    }
+                }
+
+                const float swatchSize = std::min(heightPx, 18.0f);
+                if (swatchSize > 0.0f)
+                {
+                    const float swatchX0 = x1 - swatchSize - 4.0f;
+                    const float swatchY0 = y0 + 4.0f;
+                    drawUIPanel(swatchX0, swatchY0, swatchX0 + swatchSize, swatchY0 + swatchSize,
+                        element.color, uiProjection, program, element.color, false);
+                    drawUIOutline(swatchX0, swatchY0, swatchX0 + swatchSize, swatchY0 + swatchSize,
+                        Vec4{ 0.1f, 0.1f, 0.1f, 0.9f }, uiProjection, program);
+                }
+
+                if (m_uiDebugEnabled)
+                {
+                    drawUIOutline(x0, y0, x1, y1, Vec4{ 0.6f, 0.9f, 0.2f, 1.0f }, uiProjection, program);
+                }
+                return;
+            }
             if (element.type == WidgetElementType::Text)
             {
                 const float heightPx = std::max(0.0f, y1 - y0);
@@ -1092,6 +1205,102 @@ void OpenGLRenderer::renderUI()
                 {
                     const GLuint program = getUIQuadProgram(m_defaultPanelVertex, m_defaultPanelFragment);
                     drawUIOutline(x0, y0, x1, y1, Vec4{ 0.1f, 0.8f, 1.0f, 1.0f }, uiProjection, program);
+                }
+                return;
+            }
+            if (element.type == WidgetElementType::EntryBar)
+            {
+                const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+                const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+                const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
+                drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.hoverColor, element.isHovered);
+
+                const float fontSize = (element.fontSize > 0.0f) ? element.fontSize : 14.0f;
+                const float scale = fontSize / 48.0f;
+                std::string display = element.value;
+                if (element.isPassword)
+                {
+                    display.assign(element.value.size(), '*');
+                }
+
+                const float contentX0 = x0 + element.padding.x;
+                const float contentY0 = y0 + element.padding.y;
+                const float contentX1 = x1 - element.padding.x;
+                const float contentY1 = y1 - element.padding.y;
+                const float contentW = std::max(0.0f, contentX1 - contentX0);
+                const float contentH = std::max(0.0f, contentY1 - contentY0);
+
+                Vec2 textSize{};
+                if (!display.empty())
+                {
+                    textSize = m_textRenderer->measureText(display, scale);
+                    const float textX = contentX0;
+                    const float textY = contentY0 + std::max(0.0f, (contentH - textSize.y) * 0.5f);
+                    m_textRenderer->drawText(display, Vec2{ textX, textY }, scale, element.textColor);
+                }
+
+                if (element.isFocused)
+                {
+                    const float caretHeight = std::max(0.0f, contentH - 2.0f);
+                    const float caretX = contentX0 + textSize.x + 1.0f;
+                    if (caretX < contentX1)
+                    {
+                        drawUIPanel(caretX, contentY0 + 1.0f, caretX + 2.0f, contentY0 + 1.0f + caretHeight,
+                            element.textColor, uiProjection, program, element.textColor, false);
+                    }
+                }
+
+                if (m_uiDebugEnabled)
+                {
+                    drawUIOutline(x0, y0, x1, y1, Vec4{ 0.5f, 0.8f, 1.0f, 1.0f }, uiProjection, program);
+                }
+                return;
+            }
+            if (element.type == WidgetElementType::EntryBar)
+            {
+                const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+                const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+                const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
+                drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.hoverColor, element.isHovered);
+
+                const float fontSize = (element.fontSize > 0.0f) ? element.fontSize : 14.0f;
+                const float scale = fontSize / 48.0f;
+                std::string display = element.value;
+                if (element.isPassword)
+                {
+                    display.assign(element.value.size(), '*');
+                }
+
+                const float contentX0 = x0 + element.padding.x;
+                const float contentY0 = y0 + element.padding.y;
+                const float contentX1 = x1 - element.padding.x;
+                const float contentY1 = y1 - element.padding.y;
+                const float contentW = std::max(0.0f, contentX1 - contentX0);
+                const float contentH = std::max(0.0f, contentY1 - contentY0);
+
+                Vec2 textSize{};
+                if (!display.empty())
+                {
+                    textSize = m_textRenderer->measureText(display, scale);
+                    const float textX = contentX0;
+                    const float textY = contentY0 + std::max(0.0f, (contentH - textSize.y) * 0.5f);
+                    m_textRenderer->drawText(display, Vec2{ textX, textY }, scale, element.textColor);
+                }
+
+                if (element.isFocused)
+                {
+                    const float caretHeight = std::max(0.0f, contentH - 2.0f);
+                    const float caretX = contentX0 + textSize.x + 1.0f;
+                    if (caretX < contentX1)
+                    {
+                        drawUIPanel(caretX, contentY0 + 1.0f, caretX + 2.0f, contentY0 + 1.0f + caretHeight,
+                            element.textColor, uiProjection, program, element.textColor, false);
+                    }
+                }
+
+                if (m_uiDebugEnabled)
+                {
+                    drawUIOutline(x0, y0, x1, y1, Vec4{ 0.5f, 0.8f, 1.0f, 1.0f }, uiProjection, program);
                 }
                 return;
             }

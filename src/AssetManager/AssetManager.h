@@ -48,6 +48,7 @@ public:
     static AssetManager& Instance();
 
 	bool initialize();
+	void ensureEditorWidgetsCreated();
 
 	// Load and return the asset object if successful (also registers with GC) - Returns nullptr on failure.
 	int loadAsset(const std::string& path, AssetType type, SyncState syncState = Sync);

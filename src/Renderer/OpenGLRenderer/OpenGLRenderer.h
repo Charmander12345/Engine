@@ -51,6 +51,9 @@ public:
     void moveCamera(float forward, float right, float up) override;
     void rotateCamera(float yawDeltaDegrees, float pitchDeltaDegrees) override;
 
+    void setClearColor(const Vec4& color);
+    const Vec4& getClearColor() const;
+
     void queueText(const std::string& text, const Vec2& screenPos, float scale, const Vec4& color);
     Vec2 getViewportSize() const;
     UIManager& getUIManager();
@@ -104,6 +107,7 @@ private:
     std::vector<RenderEntry> m_meshEntries;
     RenderResourceManager m_resourceManager;
     EngineLevel* m_cachedLevel{ nullptr };
+    Vec4 m_clearColor{ 0.5f, 0.5f, 0.5f, 1.0f };
 
     UIManager m_uiManager;
 

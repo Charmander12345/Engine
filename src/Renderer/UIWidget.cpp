@@ -11,6 +11,8 @@ namespace
         case WidgetElementType::Panel: return "Panel";
         case WidgetElementType::StackPanel: return "StackPanel";
         case WidgetElementType::Grid: return "Grid";
+        case WidgetElementType::ColorPicker: return "ColorPicker";
+        case WidgetElementType::EntryBar: return "EntryBar";
         default: return "Unknown";
         }
     }
@@ -22,6 +24,8 @@ namespace
         if (value == "Panel") return WidgetElementType::Panel;
         if (value == "StackPanel") return WidgetElementType::StackPanel;
         if (value == "Grid") return WidgetElementType::Grid;
+        if (value == "ColorPicker") return WidgetElementType::ColorPicker;
+        if (value == "EntryBar") return WidgetElementType::EntryBar;
         return WidgetElementType::Unknown;
     }
 
@@ -161,6 +165,14 @@ namespace
         {
             element.color = Vec4{ 0.1f, 0.1f, 0.12f, 0.65f };
         }
+        else if (element.type == WidgetElementType::EntryBar)
+        {
+            element.color = Vec4{ 0.12f, 0.12f, 0.15f, 0.9f };
+        }
+        else if (element.type == WidgetElementType::ColorPicker)
+        {
+            element.color = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+        }
         if (entry.contains("hoverColor"))
         {
             element.hoverColor = readVec4(entry.at("hoverColor"));
@@ -177,6 +189,10 @@ namespace
         {
             element.text = entry.at("text").get<std::string>();
         }
+        if (entry.contains("value"))
+        {
+            element.value = entry.at("value").get<std::string>();
+        }
         if (entry.contains("font"))
         {
             element.font = entry.at("font").get<std::string>();
@@ -188,6 +204,14 @@ namespace
         if (entry.contains("minSize"))
         {
             element.minSize = readVec2(entry.at("minSize"));
+        }
+        if (entry.contains("isPassword"))
+        {
+            element.isPassword = entry.at("isPassword").get<bool>();
+        }
+        if (entry.contains("compact"))
+        {
+            element.isCompact = entry.at("compact").get<bool>();
         }
         if (entry.contains("textAlignH"))
         {
@@ -211,7 +235,9 @@ namespace
         }
         else
         {
-            element.isHitTestable = (element.type == WidgetElementType::Button);
+            element.isHitTestable = (element.type == WidgetElementType::Button ||
+                element.type == WidgetElementType::ColorPicker ||
+                element.type == WidgetElementType::EntryBar);
         }
         if (entry.contains("fillX"))
         {
@@ -332,6 +358,24 @@ namespace
             if (element.scrollable)
             {
                 entry["scrollable"] = element.scrollable;
+            }
+        }
+        else if (element.type == WidgetElementType::EntryBar)
+        {
+            if (!element.value.empty())
+            {
+                entry["value"] = element.value;
+            }
+            if (element.isPassword)
+            {
+                entry["isPassword"] = element.isPassword;
+            }
+        }
+        else if (element.type == WidgetElementType::ColorPicker)
+        {
+            if (element.isCompact)
+            {
+                entry["compact"] = element.isCompact;
             }
         }
         if (!element.shaderVertex.empty())
