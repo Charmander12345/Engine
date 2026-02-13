@@ -31,6 +31,8 @@ target_include_directories(Core
         ${CMAKE_SOURCE_DIR}/ECS
 )
 
+target_link_libraries(Core PRIVATE Logger)
+
 
 if (WIN32)
     set_target_properties(Core PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)

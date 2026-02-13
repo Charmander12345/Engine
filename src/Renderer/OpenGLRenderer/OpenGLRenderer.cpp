@@ -373,6 +373,7 @@ bool OpenGLRenderer::initialize()
         for (const auto& renderable : renderables)
         {
             RenderEntry entry;
+            entry.entity = renderable.entity;
             entry.transform = renderable.transform;
             entry.object3D = renderable.object3D;
             entry.object2D = renderable.object2D;
@@ -569,6 +570,7 @@ void OpenGLRenderer::renderWorld()
         for (const auto& renderable : meshRenderables)
         {
             RenderEntry entry;
+            entry.entity = renderable.entity;
             entry.transform = renderable.transform;
             entry.object3D = renderable.object3D;
             entry.object2D = renderable.object2D;
@@ -626,8 +628,16 @@ void OpenGLRenderer::renderWorld()
 
     if (!m_renderEntries.empty())
     {
-        for (const auto& entry : m_renderEntries)
+        for (auto& entry : m_renderEntries)
         {
+            if (entry.entity != 0)
+            {
+                if (const auto* transform = ecs.getComponent<ECS::TransformComponent>(entry.entity))
+                {
+                    entry.transform = *transform;
+                }
+            }
+
             glm::mat4 modelMatrix(1.0f);
             modelMatrix = glm::translate(modelMatrix, glm::vec3(entry.transform.position[0], entry.transform.position[1], entry.transform.position[2]));
             modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[0]), glm::vec3(1.0f, 0.0f, 0.0f));
@@ -2175,7 +2185,52 @@ const UIManager& OpenGLRenderer::getUIManager() const
 
 std::shared_ptr<Widget> OpenGLRenderer::createWidgetFromAsset(const std::shared_ptr<AssetData>& asset)
 {
-    return m_resourceManager.buildWidgetAsset(asset);
+    auto widget = m_resourceManager.buildWidgetAsset(asset);
+    if (!widget || !asset)
+    {
+        return widget;
+    }
+
+    if (asset->getName() == "WorldSettings")
+    {
+        const auto findById = [](std::vector<WidgetElement>& elements, const std::string& id) -> WidgetElement*
+        {
+            const std::function<WidgetElement*(WidgetElement&)> find = [&](WidgetElement& element) -> WidgetElement*
+                {
+                    if (element.id == id)
+                    {
+                        return &element;
+                    }
+                    for (auto& child : element.children)
+                    {
+                        if (auto* match = find(child))
+                        {
+                            return match;
+                        }
+                    }
+                    return nullptr;
+                };
+            for (auto& element : elements)
+            {
+                if (auto* match = find(element))
+                {
+                    return match;
+                }
+            }
+            return nullptr;
+        };
+
+        if (auto* picker = findById(widget->getElementsMutable(), "WorldSettings.ClearColor"))
+        {
+            picker->color = m_clearColor;
+            picker->onColorChanged = [this](const Vec4& color)
+                {
+                    setClearColor(color);
+                };
+        }
+    }
+
+    return widget;
 }
 
 bool OpenGLRenderer::isRenderEntryRelevant(const RenderEntry& entry) const

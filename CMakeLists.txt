@@ -6,6 +6,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 project ("Engine" LANGUAGES C CXX)
 
+set(Python3_USE_DEBUG_LIBS OFF CACHE BOOL "" FORCE)
+find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+if (Python3_LIBRARY_RELEASE)
+    set(Python3_LIBRARY_DEBUG ${Python3_LIBRARY_RELEASE} CACHE FILEPATH "" FORCE)
+endif()
+
 # Ensure consistent MSVC runtime across all targets (prevents CRT/linker unresolved externals)
 if (MSVC)
     # Use the DLL runtime (/MD, /MDd)
@@ -34,7 +40,9 @@ add_subdirectory(src/Logger)
 
 add_executable(Engine
     src/main.cpp
- "src/Core/Asset.h")
+ "src/Core/Asset.h"
+ "src/Scripting/PythonScripting.h"
+ "src/Scripting/PythonScripting.cpp")
 
 # Engine is a console executable
 set_target_properties(Engine PROPERTIES WIN32_EXECUTABLE OFF)
@@ -47,6 +55,7 @@ target_include_directories(Engine
         ${CMAKE_SOURCE_DIR}/src/AssetManager
         ${CMAKE_SOURCE_DIR}/src/Diagnostics
         ${CMAKE_SOURCE_DIR}/src/Core
+        ${Python3_INCLUDE_DIRS}
 )
 
 target_link_libraries(Engine
@@ -57,7 +66,19 @@ target_link_libraries(Engine
         AssetManager
         Diagnostics
         Core
+        ${Python3_LIBRARY_RELEASE}
 )
+
+if (Python3_LIBRARY_RELEASE)
+    get_filename_component(PYTHON_LIB_BASENAME ${Python3_LIBRARY_RELEASE} NAME_WE)
+    set(PYTHON_DEBUG_LIB_DIR "${CMAKE_BINARY_DIR}/python")
+    set(PYTHON_DEBUG_LIB "${PYTHON_DEBUG_LIB_DIR}/${PYTHON_LIB_BASENAME}_d.lib")
+    target_link_directories(Engine PRIVATE "${PYTHON_DEBUG_LIB_DIR}")
+    add_custom_command(TARGET Engine PRE_LINK
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${PYTHON_DEBUG_LIB_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${Python3_LIBRARY_RELEASE}" "${PYTHON_DEBUG_LIB}"
+    )
+endif()
 
 set(ENGINE_DEPLOY_DIR "C:/Users/conno/source/repos/EngineBuild")
 
@@ -100,6 +121,8 @@ add_custom_command(TARGET Engine POST_BUILD
 
     # Copy shaders to deploy directory
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${SHADERS_SOURCE_DIR}" "${ENGINE_DEPLOY_DIR}/shaders"
+
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${Python3_RUNTIME_LIBRARY_RELEASE}" "${ENGINE_DEPLOY_DIR}"
 
     COMMAND_EXPAND_LISTS
 )

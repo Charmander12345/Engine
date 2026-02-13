@@ -390,6 +390,13 @@ inline bool ECSManager::setComponentAsset(Entity entity, const std::shared_ptr<A
 		component.materialAssetId = asset->getId();
 		return setComponent(entity, component);
 	}
+	else if constexpr (std::is_same_v<T, ScriptComponent>)
+	{
+		ScriptComponent component;
+		component.scriptPath = asset->getPath();
+		component.scriptAssetId = asset->getId();
+		return setComponent(entity, component);
+	}
 	else
 	{
 		return false;

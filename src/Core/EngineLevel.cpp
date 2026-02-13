@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "../Logger/Logger.h"
+
 EngineLevel::EngineLevel()
 {
 	this->setAssetType(AssetType::Level);
@@ -15,6 +17,12 @@ EngineLevel::~EngineLevel()
 void EngineLevel::setLevelData(const json& data)
 {
 	m_levelData = data;
+	m_levelScriptPath.clear();
+	m_scriptEntitiesPrepared = false;
+	if (m_levelData.is_object() && m_levelData.contains("Script") && m_levelData.at("Script").is_string())
+	{
+		m_levelScriptPath = m_levelData.at("Script").get<std::string>();
+	}
 	m_ecsPrepared = false;
 }
 
@@ -23,9 +31,24 @@ const json& EngineLevel::getLevelData() const
 	return m_levelData;
 }
 
+void EngineLevel::setLevelScriptPath(const std::string& scriptPath)
+{
+	m_levelScriptPath = scriptPath;
+}
+
+const std::string& EngineLevel::getLevelScriptPath() const
+{
+	return m_levelScriptPath;
+}
+
 const std::vector<ECS::Entity>& EngineLevel::getEntities() const
 {
 	return m_entities;
+}
+
+const std::vector<ECS::Entity>& EngineLevel::getScriptEntities() const
+{
+	return m_scriptEntities;
 }
 
 static json serializeFloat3(const float values[3])
@@ -226,9 +249,15 @@ bool EngineLevel::prepareEcs()
 		return true;
 	}
 
+	Logger::Instance().log(Logger::Category::Engine,
+		"EngineLevel: prepareEcs start",
+		Logger::LogLevel::INFO);
+
 	m_ecs = &ECS::ECSManager::Instance();
 	m_ecs->initialize({});
 	m_entities.clear();
+	m_scriptEntities.clear();
+	m_scriptEntitiesPrepared = false;
 
 	if (!m_levelData.is_object() || !m_levelData.contains("Entities"))
 	{
@@ -335,11 +364,107 @@ bool EngineLevel::prepareEcs()
 			m_ecs->addComponent<ECS::NameComponent>(entity, component);
 		}
 
-		m_entities.push_back(entity);
+		onEntityAdded(entity);
 	}
 
+	Logger::Instance().log(Logger::Category::Engine,
+		"EngineLevel: prepareEcs built entities: " + std::to_string(m_entities.size()),
+		Logger::LogLevel::INFO);
+
+	buildScriptEntityCache();
 	m_ecsPrepared = true;
+	Logger::Instance().log(Logger::Category::Engine,
+		"EngineLevel: prepareEcs done",
+		Logger::LogLevel::INFO);
 	return true;
+}
+
+void EngineLevel::onEntityAdded(ECS::Entity entity)
+{
+	if (entity == 0)
+	{
+		return;
+	}
+	if (std::find(m_entities.begin(), m_entities.end(), entity) == m_entities.end())
+	{
+		m_entities.push_back(entity);
+	}
+	if (m_ecs)
+	{
+		const auto* script = m_ecs->getComponent<ECS::ScriptComponent>(entity);
+		if (script && !script->scriptPath.empty())
+		{
+			if (std::find(m_scriptEntities.begin(), m_scriptEntities.end(), entity) == m_scriptEntities.end())
+			{
+				m_scriptEntities.push_back(entity);
+			}
+		}
+	}
+	else
+	{
+		m_scriptEntitiesPrepared = false;
+	}
+}
+
+void EngineLevel::onEntityRemoved(ECS::Entity entity)
+{
+	if (entity == 0)
+	{
+		return;
+	}
+	m_entities.erase(std::remove(m_entities.begin(), m_entities.end(), entity), m_entities.end());
+	m_scriptEntities.erase(std::remove(m_scriptEntities.begin(), m_scriptEntities.end(), entity), m_scriptEntities.end());
+}
+
+void EngineLevel::buildScriptEntityCache()
+{
+	if (m_scriptEntitiesPrepared)
+	{
+		return;
+	}
+
+	m_scriptEntities.clear();
+	if (!m_ecs)
+	{
+		m_scriptEntitiesPrepared = true;
+		return;
+	}
+
+	m_scriptEntitiesPrepared = false;
+
+	for (const auto entity : m_entities)
+	{
+		const auto* script = m_ecs->getComponent<ECS::ScriptComponent>(entity);
+		const auto* name = m_ecs->getComponent<ECS::NameComponent>(entity);
+		const std::string displayName = name ? name->displayName : std::string("(unnamed)");
+		Logger::Instance().log(Logger::Category::Engine,
+			"EngineLevel: checking entity " + std::to_string(entity) + " name=" + displayName,
+			Logger::LogLevel::INFO);
+		if (!script)
+		{
+			Logger::Instance().log(Logger::Category::Engine,
+				"EngineLevel: entity " + std::to_string(entity) + " has no ScriptComponent.",
+				Logger::LogLevel::INFO);
+			continue;
+		}
+		if (script->scriptPath.empty())
+		{
+			Logger::Instance().log(Logger::Category::Engine,
+				"EngineLevel: ScriptComponent missing scriptPath for entity " + std::to_string(entity) + " name=" + displayName,
+				Logger::LogLevel::WARNING);
+			continue;
+		}
+		Logger::Instance().log(Logger::Category::Engine,
+			"EngineLevel: entity " + std::to_string(entity) + " scriptPath=" + script->scriptPath,
+			Logger::LogLevel::INFO);
+		m_scriptEntities.push_back(entity);
+	}
+
+	Logger::Instance().log(Logger::Category::Engine,
+		"EngineLevel: script entities cached: " + std::to_string(m_scriptEntities.size()),
+		Logger::LogLevel::INFO);
+
+	m_scriptEntitiesPrepared = true;
 }
 
 json EngineLevel::serializeEcsEntities() const

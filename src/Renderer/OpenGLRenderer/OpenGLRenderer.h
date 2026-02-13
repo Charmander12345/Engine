@@ -81,6 +81,7 @@ private:
 
     struct RenderEntry
     {
+        ECS::Entity entity{ 0 };
         ECS::TransformComponent transform{};
         std::shared_ptr<OpenGLObject2D> object2D;
         std::shared_ptr<OpenGLObject3D> object3D;

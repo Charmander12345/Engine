@@ -292,6 +292,7 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
         }
 
         RenderableAsset renderable;
+        renderable.entity = match.entity;
         renderable.asset = asset;
         renderable.textures = textures;
         renderable.assetType = asset->getAssetType();

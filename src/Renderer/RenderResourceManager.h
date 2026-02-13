@@ -29,6 +29,7 @@ public:
 
     struct RenderableAsset
     {
+        ECS::Entity entity{ 0 };
         ECS::TransformComponent transform{};
         std::shared_ptr<AssetData> asset;
         std::vector<std::shared_ptr<Texture>> textures;

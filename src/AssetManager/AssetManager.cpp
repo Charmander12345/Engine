@@ -570,142 +570,7 @@ void AssetManager::ensureEditorWidgetsCreated()
         }
     }
 
-    const std::string worldSettingsWidgetRel = "WorldSettings.asset";
-    {
-        json widgetJson = json::object();
-        widgetJson["m_sizePixels"] = json{ {"x", 260.0f}, {"y", 0.0f} };
-        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        widgetJson["m_anchor"] = "TopLeft";
-        widgetJson["m_fillY"] = true;
-        widgetJson["m_zOrder"] = 1;
-
-        json elements = json::array();
-
-        json panel = json::object();
-        panel["id"] = "WorldSettings.Background";
-        panel["type"] = "Panel";
-        panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
-        panel["fillX"] = true;
-        panel["fillY"] = true;
-        panel["color"] = json{ {"x", 0.09f}, {"y", 0.1f}, {"z", 0.12f}, {"w", 0.95f} };
-        panel["shaderVertex"] = "panel_vertex.glsl";
-        panel["shaderFragment"] = "panel_fragment.glsl";
-        elements.push_back(panel);
-
-        json stack = json::object();
-        stack["id"] = "WorldSettings.Stack";
-        stack["type"] = "StackPanel";
-        stack["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        stack["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
-        stack["fillX"] = true;
-        stack["fillY"] = true;
-        stack["padding"] = json{ {"x", 12.0f}, {"y", 12.0f} };
-        stack["orientation"] = "Vertical";
-        stack["scrollable"] = true;
-        stack["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
-
-        json title = json::object();
-        title["id"] = "WorldSettings.Title";
-        title["type"] = "Text";
-        title["text"] = "World Settings";
-        title["font"] = "default.ttf";
-        title["fontSize"] = 18.0f;
-        title["textAlignH"] = "Left";
-        title["textAlignV"] = "Center";
-        title["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
-        title["textColor"] = json{ {"x", 0.95f}, {"y", 0.95f}, {"z", 0.95f}, {"w", 1.0f} };
-        title["minSize"] = json{ {"x", 0.0f}, {"y", 26.0f} };
-
-        json clearLabel = json::object();
-        clearLabel["id"] = "WorldSettings.ClearColor.Label";
-        clearLabel["type"] = "Text";
-        clearLabel["text"] = "Clear Color";
-        clearLabel["font"] = "default.ttf";
-        clearLabel["fontSize"] = 14.0f;
-        clearLabel["textAlignH"] = "Left";
-        clearLabel["textAlignV"] = "Center";
-        clearLabel["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
-        clearLabel["textColor"] = json{ {"x", 0.85f}, {"y", 0.85f}, {"z", 0.85f}, {"w", 1.0f} };
-        clearLabel["minSize"] = json{ {"x", 0.0f}, {"y", 20.0f} };
-
-        json colorPicker = json::object();
-        colorPicker["id"] = "WorldSettings.ClearColor";
-        colorPicker["type"] = "ColorPicker";
-        colorPicker["compact"] = true;
-        colorPicker["minSize"] = json{ {"x", 200.0f}, {"y", 30.0f} };
-
-        json compactStack = json::object();
-        compactStack["id"] = "WorldSettings.ClearColor.Fields";
-        compactStack["type"] = "StackPanel";
-        compactStack["orientation"] = "Horizontal";
-        compactStack["padding"] = json{ {"x", 6.0f}, {"y", 2.0f} };
-        compactStack["fillX"] = true;
-        compactStack["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
-
-        json entryR = json::object();
-        entryR["id"] = "WorldSettings.ClearColor.R";
-        entryR["type"] = "EntryBar";
-        entryR["minSize"] = json{ {"x", 50.0f}, {"y", 24.0f} };
-        entryR["value"] = "128";
-
-        json entryG = json::object();
-        entryG["id"] = "WorldSettings.ClearColor.G";
-        entryG["type"] = "EntryBar";
-        entryG["minSize"] = json{ {"x", 50.0f}, {"y", 24.0f} };
-        entryG["value"] = "128";
-
-        json entryB = json::object();
-        entryB["id"] = "WorldSettings.ClearColor.B";
-        entryB["type"] = "EntryBar";
-        entryB["minSize"] = json{ {"x", 50.0f}, {"y", 24.0f} };
-        entryB["value"] = "128";
-
-        compactStack["children"] = json::array({ entryR, entryG, entryB });
-        colorPicker["children"] = json::array({ compactStack });
-
-        stack["children"] = json::array({ title, clearLabel, colorPicker });
-
-        elements.push_back(stack);
-        widgetJson["m_elements"] = elements;
-
-        auto widget = std::make_shared<AssetData>();
-        widget->setName("WorldSettings");
-        widget->setData(std::move(widgetJson));
-
-        const fs::path widgetsRoot = getEditorWidgetsRootPath();
-        std::error_code ec;
-        fs::create_directories(widgetsRoot, ec);
-        const fs::path abs = widgetsRoot / fs::path(worldSettingsWidgetRel);
-        bool existsAndOk = false;
-        if (fs::exists(abs))
-        {
-            AssetType headerType{ AssetType::Unknown };
-            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
-        }
-        if (!existsAndOk)
-        {
-            std::ofstream out(abs, std::ios::out | std::ios::trunc);
-            if (out.is_open())
-            {
-                json fileJson = json::object();
-                fileJson["magic"] = 0x41535453;
-                fileJson["version"] = 2;
-                fileJson["type"] = static_cast<int>(AssetType::Widget);
-                fileJson["name"] = widget->getName();
-                fileJson["data"] = widget->getData();
-                out << fileJson.dump(4);
-                if (!out.good())
-                {
-                    logger.log(Logger::Category::AssetManagement, "Failed to write editor widget asset.", Logger::LogLevel::ERROR);
-                }
-            }
-            else
-            {
-                logger.log(Logger::Category::AssetManagement, "Failed to open editor widget asset for writing.", Logger::LogLevel::ERROR);
-            }
-        }
-    }
+    createWorldSettingsWidgetAsset();
 
     const std::string outlinerWidgetRel = "WorldOutliner.asset";
     {
@@ -887,6 +752,118 @@ void AssetManager::ensureEditorWidgetsCreated()
             {
                 logger.log(Logger::Category::AssetManagement, "Failed to open editor widget asset for writing.", Logger::LogLevel::ERROR);
             }
+        }
+    }
+}
+
+void AssetManager::createWorldSettingsWidgetAsset()
+{
+    auto& logger = Logger::Instance();
+    const std::string worldSettingsWidgetRel = "WorldSettings.asset";
+
+    json widgetJson = json::object();
+    widgetJson["m_sizePixels"] = json{ {"x", 260.0f}, {"y", 0.0f} };
+    widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+    widgetJson["m_anchor"] = "TopLeft";
+    widgetJson["m_fillY"] = true;
+    widgetJson["m_zOrder"] = 1;
+
+    json elements = json::array();
+
+    json panel = json::object();
+    panel["id"] = "WorldSettings.Background";
+    panel["type"] = "Panel";
+    panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+    panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+    panel["fillX"] = true;
+    panel["fillY"] = true;
+    panel["color"] = json{ {"x", 0.09f}, {"y", 0.1f}, {"z", 0.12f}, {"w", 0.95f} };
+    panel["shaderVertex"] = "panel_vertex.glsl";
+    panel["shaderFragment"] = "panel_fragment.glsl";
+    elements.push_back(panel);
+
+    json stack = json::object();
+    stack["id"] = "WorldSettings.Stack";
+    stack["type"] = "StackPanel";
+    stack["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+    stack["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+    stack["fillX"] = true;
+    stack["fillY"] = true;
+    stack["sizeToContent"] = true;
+    stack["padding"] = json{ {"x", 12.0f}, {"y", 12.0f} };
+    stack["orientation"] = "Vertical";
+    stack["scrollable"] = true;
+    stack["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+
+    json title = json::object();
+    title["id"] = "WorldSettings.Title";
+    title["type"] = "Text";
+    title["text"] = "World Settings";
+    title["font"] = "default.ttf";
+    title["fontSize"] = 18.0f;
+    title["textAlignH"] = "Left";
+    title["textAlignV"] = "Center";
+    title["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
+    title["textColor"] = json{ {"x", 0.95f}, {"y", 0.95f}, {"z", 0.95f}, {"w", 1.0f} };
+    title["minSize"] = json{ {"x", 0.0f}, {"y", 26.0f} };
+
+    json clearLabel = json::object();
+    clearLabel["id"] = "WorldSettings.ClearColor.Label";
+    clearLabel["type"] = "Text";
+    clearLabel["text"] = "Clear Color";
+    clearLabel["font"] = "default.ttf";
+    clearLabel["fontSize"] = 14.0f;
+    clearLabel["textAlignH"] = "Left";
+    clearLabel["textAlignV"] = "Center";
+    clearLabel["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
+    clearLabel["textColor"] = json{ {"x", 0.85f}, {"y", 0.85f}, {"z", 0.85f}, {"w", 1.0f} };
+    clearLabel["minSize"] = json{ {"x", 0.0f}, {"y", 20.0f} };
+
+    json colorPicker = json::object();
+    colorPicker["id"] = "WorldSettings.ClearColor";
+    colorPicker["type"] = "ColorPicker";
+    colorPicker["compact"] = false;
+    colorPicker["minSize"] = json{ {"x", 200.0f}, {"y", 80.0f} };
+
+    stack["children"] = json::array({ title, clearLabel, colorPicker });
+
+    elements.push_back(stack);
+    widgetJson["m_elements"] = elements;
+
+    auto widget = std::make_shared<AssetData>();
+    widget->setName("WorldSettings");
+    widget->setData(std::move(widgetJson));
+
+    const fs::path widgetsRoot = getEditorWidgetsRootPath();
+    std::error_code ec;
+    fs::create_directories(widgetsRoot, ec);
+    const fs::path abs = widgetsRoot / fs::path(worldSettingsWidgetRel);
+    bool existsAndOk = false;
+    if (fs::exists(abs))
+    {
+        AssetType headerType{ AssetType::Unknown };
+        existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+    }
+    if (!existsAndOk)
+    {
+        std::ofstream out(abs, std::ios::out | std::ios::trunc);
+        if (out.is_open())
+        {
+            json fileJson = json::object();
+            fileJson["magic"] = 0x41535453;
+            fileJson["version"] = 2;
+            fileJson["type"] = static_cast<int>(AssetType::Widget);
+            fileJson["name"] = widget->getName();
+            fileJson["data"] = widget->getData();
+            out << fileJson.dump(4);
+            if (!out.good())
+            {
+                logger.log(Logger::Category::AssetManagement, "Failed to write editor widget asset.", Logger::LogLevel::ERROR);
+            }
+        }
+        else
+        {
+            logger.log(Logger::Category::AssetManagement, "Failed to open editor widget asset for writing.", Logger::LogLevel::ERROR);
         }
     }
 }
@@ -1096,6 +1073,22 @@ void AssetManager::ensureDefaultAssetsCreated()
 
     const std::string defaultLevelRel = (fs::path("Levels") / "DefaultLevel.map").generic_string();
     {
+        std::error_code ec;
+        const fs::path scriptsRoot = contentRoot / "Scripts";
+        fs::create_directories(scriptsRoot, ec);
+        const fs::path defaultScriptAbs = scriptsRoot / "DefaultCubeScript.py";
+        if (!fs::exists(defaultScriptAbs))
+        {
+            std::ofstream scriptOut(defaultScriptAbs, std::ios::out | std::ios::trunc);
+            if (scriptOut.is_open())
+            {
+                scriptOut << "def onloaded(entity):\n";
+                scriptOut << "    print('Default script loaded for', entity)\n\n";
+                scriptOut << "def tick(entity, dt):\n";
+                scriptOut << "    pass\n";
+            }
+        }
+
         json levelJson = json::object();
         levelJson["Objects"] = json::array();
         levelJson["Groups"] = json::array();
@@ -1113,6 +1106,7 @@ void AssetManager::ensureDefaultAssetsCreated()
         components["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
         components["Material"] = json{ {"materialAssetPath", wallMatRel} };
         components["Name"] = json{ {"displayName", "Cube A"} };
+        components["Script"] = json{ {"scriptPath", (fs::path("Scripts") / "DefaultCubeScript.py").generic_string()} };
         entity["components"] = components;
         entities.push_back(entity);
 
@@ -1303,6 +1297,23 @@ void AssetManager::collectGarbage()
 {
     std::lock_guard<std::mutex> lock(m_stateMutex);
     m_garbageCollector.collect();
+}
+
+bool AssetManager::unloadAsset(unsigned int assetId)
+{
+    if (assetId == 0)
+    {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(m_stateMutex);
+    auto it = m_loadedAssets.find(assetId);
+    if (it == m_loadedAssets.end())
+    {
+        return false;
+    }
+    m_loadedAssets.erase(it);
+    m_garbageCollector.collect();
+    return true;
 }
 
 bool AssetManager::registerRuntimeResource(const std::shared_ptr<EngineObject>& resource)
@@ -1802,6 +1813,51 @@ bool AssetManager::loadProject(const std::string& projectPath, SyncState syncSta
     // New project/level context: force re-prepare of renderer resources.
     diagnostics.setScenePrepared(false);
 
+    {
+        const fs::path scriptsRoot = fs::path(info.projectPath) / "Content" / "Scripts";
+        std::error_code scriptsEc;
+        fs::create_directories(scriptsRoot, scriptsEc);
+        const fs::path stubPath = scriptsRoot / "engine.pyi";
+        if (!fs::exists(stubPath))
+        {
+            std::ofstream stubOut(stubPath, std::ios::out | std::ios::trunc);
+            if (stubOut.is_open())
+            {
+                stubOut << "from typing import List, Optional, Tuple\n\n";
+                stubOut << "Component_Transform: int\nComponent_Mesh: int\nComponent_Material: int\n";
+                stubOut << "Component_Light: int\nComponent_Camera: int\nComponent_Physics: int\n";
+                stubOut << "Component_Script: int\nComponent_Name: int\n\n";
+                stubOut << "Asset_Texture: int\nAsset_Material: int\nAsset_Model2D: int\n";
+                stubOut << "Asset_Model3D: int\nAsset_PointLight: int\nAsset_Level: int\nAsset_Widget: int\n\n";
+                stubOut << "Log_Info: int\nLog_Warning: int\nLog_Error: int\n\n";
+                stubOut << "# Entity management\n";
+                stubOut << "def create_entity() -> int: ...\n";
+                stubOut << "def attach_component(entity: int, kind: int) -> bool: ...\n";
+                stubOut << "def detach_component(entity: int, kind: int) -> bool: ...\n";
+                stubOut << "def get_entities(kinds: List[int]) -> List[int]: ...\n";
+                stubOut << "\n# Transform helpers\n";
+                stubOut << "def get_transform(entity: int) -> Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float]]]: ...\n";
+                stubOut << "def set_position(entity: int, x: float, y: float, z: float) -> bool: ...\n";
+                stubOut << "def translate(entity: int, dx: float, dy: float, dz: float) -> bool: ...\n";
+                stubOut << "def set_rotation(entity: int, pitch: float, yaw: float, roll: float) -> bool: ...\n";
+                stubOut << "def rotate(entity: int, dp: float, dy: float, dr: float) -> bool: ...\n";
+                stubOut << "def set_scale(entity: int, sx: float, sy: float, sz: float) -> bool: ...\n";
+                stubOut << "\n# Asset helpers\n";
+                stubOut << "def load_asset(path: str, type: int) -> int: ...\n";
+                stubOut << "def save_asset(id: int, type: int) -> bool: ...\n";
+                stubOut << "def unload_asset(id: int) -> bool: ...\n";
+                stubOut << "def set_mesh(entity: int, path: str) -> bool: ...\n";
+                stubOut << "def get_mesh(entity: int) -> Optional[str]: ...\n";
+                stubOut << "\n# Timing and state\n";
+                stubOut << "def get_delta_time() -> float: ...\n";
+                stubOut << "def get_state(key: str) -> Optional[str]: ...\n";
+                stubOut << "def set_state(key: str, value: str) -> bool: ...\n";
+                stubOut << "\n# Logging\n";
+                stubOut << "def log(message: str, level: int = 0) -> bool: ...\n";
+            }
+        }
+    }
+
     // Ensure default assets exist, but do not create/override the active level here.
     ensureDefaultAssetsCreated();
 
@@ -1858,6 +1914,8 @@ bool AssetManager::saveProject(const std::string& projectPath, SyncState syncSta
     fs::create_directories(root / "Config", ec);
     fs::create_directories(root / "Content", ec);
     fs::create_directories(root / "Content" / "Levels");
+    fs::create_directories(root / "Content" / "Scripts", ec);
+    fs::create_directories(root / "Content" / "Scripts");
 
     if (ec)
     {
@@ -1925,6 +1983,48 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
         logger.log("Failed to create project directory: " + root.string(), Logger::LogLevel::ERROR);
         diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingProject, false);
         return false;
+    }
+
+    {
+        const fs::path stubPath = root / "Content" / "Scripts" / "engine.pyi";
+        if (!fs::exists(stubPath))
+        {
+            std::ofstream stubOut(stubPath, std::ios::out | std::ios::trunc);
+            if (stubOut.is_open())
+            {
+                stubOut << "from typing import List, Optional, Tuple\n\n";
+                stubOut << "Component_Transform: int\nComponent_Mesh: int\nComponent_Material: int\n";
+                stubOut << "Component_Light: int\nComponent_Camera: int\nComponent_Physics: int\n";
+                stubOut << "Component_Script: int\nComponent_Name: int\n\n";
+                stubOut << "Asset_Texture: int\nAsset_Material: int\nAsset_Model2D: int\n";
+                stubOut << "Asset_Model3D: int\nAsset_PointLight: int\nAsset_Level: int\nAsset_Widget: int\n\n";
+                stubOut << "Log_Info: int\nLog_Warning: int\nLog_Error: int\n\n";
+                stubOut << "# Entity management\n";
+                stubOut << "def create_entity() -> int: ...\n";
+                stubOut << "def attach_component(entity: int, kind: int) -> bool: ...\n";
+                stubOut << "def detach_component(entity: int, kind: int) -> bool: ...\n";
+                stubOut << "def get_entities(kinds: List[int]) -> List[int]: ...\n";
+                stubOut << "\n# Transform helpers\n";
+                stubOut << "def get_transform(entity: int) -> Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float]]]: ...\n";
+                stubOut << "def set_position(entity: int, x: float, y: float, z: float) -> bool: ...\n";
+                stubOut << "def translate(entity: int, dx: float, dy: float, dz: float) -> bool: ...\n";
+                stubOut << "def set_rotation(entity: int, pitch: float, yaw: float, roll: float) -> bool: ...\n";
+                stubOut << "def rotate(entity: int, dp: float, dy: float, dr: float) -> bool: ...\n";
+                stubOut << "def set_scale(entity: int, sx: float, sy: float, sz: float) -> bool: ...\n";
+                stubOut << "\n# Asset helpers\n";
+                stubOut << "def load_asset(path: str, type: int) -> int: ...\n";
+                stubOut << "def save_asset(id: int, type: int) -> bool: ...\n";
+                stubOut << "def unload_asset(id: int) -> bool: ...\n";
+                stubOut << "def set_mesh(entity: int, path: str) -> bool: ...\n";
+                stubOut << "def get_mesh(entity: int) -> Optional[str]: ...\n";
+                stubOut << "\n# Timing and state\n";
+                stubOut << "def get_delta_time() -> float: ...\n";
+                stubOut << "def get_state(key: str) -> Optional[str]: ...\n";
+                stubOut << "def set_state(key: str, value: str) -> bool: ...\n";
+                stubOut << "\n# Logging\n";
+                stubOut << "def log(message: str, level: int = 0) -> bool: ...\n";
+            }
+        }
     }
 
     auto infoWithPath = info;
@@ -2702,6 +2802,10 @@ AssetManager::SaveResult AssetManager::saveLevelAsset(const std::unique_ptr<Engi
 	levelJson["Objects"] = objectPaths;
 	levelJson["Groups"] = groupsJson;
     levelJson["Entities"] = level->serializeEcsEntities();
+    if (!level->getLevelScriptPath().empty())
+    {
+        levelJson["Script"] = level->getLevelScriptPath();
+    }
 
     json fileJson = json::object();
     fileJson["magic"] = 0x41535453;

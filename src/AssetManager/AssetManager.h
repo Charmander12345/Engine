@@ -66,6 +66,7 @@ public:
 
 	// Synchronous: tidies up expired weak_ptr tracked resources.
 	void collectGarbage();
+	bool unloadAsset(unsigned int assetId);
 
 	// Register runtime resources (e.g., render objects) with the GC.
 	bool registerRuntimeResource(const std::shared_ptr<EngineObject>& resource);
@@ -90,6 +91,8 @@ private:
     void startWorker();
     void stopWorker();
     void enqueueJob(std::function<void()> job);
+
+    void createWorldSettingsWidgetAsset();
 
     bool loadAssetRegistry(const std::string& projectRoot);
     bool saveAssetRegistry(const std::string& projectRoot) const;

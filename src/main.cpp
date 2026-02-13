@@ -19,6 +19,7 @@
 #include "AssetManager/AssetTypes.h"
 #include "Core/ECS/ECS.h"
 #include "Core/MathTypes.h"
+#include "Scripting/PythonScripting.h"
 
 using namespace std;
 
@@ -34,6 +35,11 @@ int main()
     };
 
     logTimed(Logger::Category::Engine, "Engine starting...", Logger::LogLevel::INFO);
+
+    if (!Scripting::Initialize())
+    {
+        logTimed(Logger::Category::Engine, "Failed to initialize Python scripting.", Logger::LogLevel::ERROR);
+    }
 
     auto& assetManager = AssetManager::Instance();
     logTimed(Logger::Category::AssetManagement, "Initialising AssetManager...", Logger::LogLevel::INFO);
@@ -134,10 +140,6 @@ int main()
 #if defined(_WIN32)
     FreeConsole();
 #endif
-
-    auto& ecs = ECS::ECSManager::Instance();
-    ecs.initialize({});
-    ecs.createEntity();
 
     if (glRenderer)
     {
@@ -643,6 +645,8 @@ int main()
             running = false;
         }
 
+        Scripting::UpdateScripts(static_cast<float>(dt));
+
         if (glRenderer)
         {
             if (metricsUpdatePending)
@@ -846,5 +850,6 @@ int main()
     }
 
     logTimed(Logger::Category::Engine, "Engine shutdown complete.", Logger::LogLevel::INFO);
+    Scripting::Shutdown();
     return 0;
 }
