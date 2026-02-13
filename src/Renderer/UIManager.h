@@ -9,6 +9,8 @@
 #include "../Core/MathTypes.h"
 #include "UIWidget.h"
 
+class EngineLevel;
+
 class UIManager
 {
 public:
@@ -21,9 +23,10 @@ public:
     {
         std::string id;
         std::shared_ptr<Widget> widget;
+        uint64_t runtimeId{ 0 };
     };
 
-    UIManager() = default;
+    UIManager();
     ~UIManager() = default;
 
     Vec2 getAvailableViewportSize() const;
@@ -49,6 +52,8 @@ public:
     void registerClickEvent(const std::string& eventId, std::function<void()> callback);
 
 private:
+    WidgetEntry* findWidgetEntry(const std::string& id);
+    const WidgetEntry* findWidgetEntry(const std::string& id) const;
     WidgetElement* hitTest(const Vec2& screenPos, bool logDetails = false) const;
     void populateOutlinerWidget(const std::shared_ptr<Widget>& widget);
     void populateContentBrowserWidget(const std::shared_ptr<Widget>& widget);
@@ -62,6 +67,7 @@ private:
     std::unordered_map<std::string, std::function<void()>> m_clickEvents;
     std::vector<UIEntry> m_entries;
     std::vector<WidgetEntry> m_widgets;
+    uint64_t m_nextWidgetRuntimeId{ 1 };
     mutable std::vector<const WidgetEntry*> m_widgetOrderCache;
     mutable bool m_widgetOrderDirty{ true };
     mutable Vec2 m_lastPointerQueryPos{};
@@ -72,4 +78,6 @@ private:
 
     void bindClickEventsForWidget(const std::shared_ptr<Widget>& widget);
     void bindClickEventsForElement(WidgetElement& element);
+	void refreshWorldOutliner();
+	EngineLevel* m_outlinerLevel{ nullptr };
 };

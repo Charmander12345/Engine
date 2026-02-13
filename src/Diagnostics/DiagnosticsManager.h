@@ -15,6 +15,7 @@ class DiagnosticsManager
 {
 public:
     using KeyCallback = std::function<bool()>;
+	using ActiveLevelChangedCallback = std::function<void(EngineLevel*)>;
 
     enum class RHIType
     {
@@ -108,6 +109,7 @@ public:
     void setActiveLevel(std::unique_ptr<EngineLevel> level);
     std::unique_ptr<EngineLevel> getActiveLevel();
     EngineLevel* getActiveLevelSoft();
+	void registerActiveLevelChangedCallback(ActiveLevelChangedCallback callback);
 
     void setScenePrepared(bool prepared);
     bool isScenePrepared() const;
@@ -159,6 +161,7 @@ private:
 
     std::unordered_map<int, std::vector<KeyCallback>> m_keyDownHandlers;
     std::unordered_map<int, std::vector<KeyCallback>> m_keyUpHandlers;
+	std::vector<ActiveLevelChangedCallback> m_activeLevelChangedCallbacks;
 
 	std::unordered_map<unsigned int, Action> m_actions;
 	bool m_shutdownRequested{ false };

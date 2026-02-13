@@ -58,6 +58,7 @@ public:
 	json serializeEcsEntities() const;
 	const std::vector<ECS::Entity>& getEntities() const;
 	const std::vector<ECS::Entity>& getScriptEntities() const;
+	void registerEntityListChangedCallback(std::function<void()> callback);
 
 
 private:
@@ -67,8 +68,11 @@ private:
 	std::vector<ECS::Entity> m_entities;
 	std::vector<ECS::Entity> m_scriptEntities;
 	bool m_scriptEntitiesPrepared{ false };
+	std::vector<std::function<void()>> m_entityListChangedCallbacks;
+	bool m_suppressEntityListNotifications{ false };
 	json m_levelData;
 	std::string m_levelScriptPath;
 	ECS::ECSManager* m_ecs{ nullptr };
 	bool m_ecsPrepared{ false };
+	bool m_ecsPreparing{ false };
 };

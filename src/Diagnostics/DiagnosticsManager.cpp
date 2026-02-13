@@ -326,6 +326,14 @@ void DiagnosticsManager::clearProjectInfo()
     m_projectStates.clear();
     m_activeLevel.reset();
     m_scenePrepared = false;
+
+    for (auto& callback : m_activeLevelChangedCallbacks)
+    {
+        if (callback)
+        {
+            callback(nullptr);
+        }
+    }
 }
 
 bool DiagnosticsManager::isActionInProgress() const
@@ -360,6 +368,14 @@ void DiagnosticsManager::setActionInProgress(ActionType action, bool inProgress)
 void DiagnosticsManager::setActiveLevel(std::unique_ptr<EngineLevel> level)
 {
     m_activeLevel = std::move(level);
+    EngineLevel* active = m_activeLevel.get();
+    for (auto& callback : m_activeLevelChangedCallbacks)
+    {
+        if (callback)
+        {
+            callback(active);
+        }
+    }
 }
 
 std::unique_ptr<EngineLevel> DiagnosticsManager::getActiveLevel()
@@ -373,6 +389,11 @@ std::unique_ptr<EngineLevel> DiagnosticsManager::getActiveLevel()
 EngineLevel* DiagnosticsManager::getActiveLevelSoft()
 {
     return m_activeLevel.get();
+}
+
+void DiagnosticsManager::registerActiveLevelChangedCallback(ActiveLevelChangedCallback callback)
+{
+    m_activeLevelChangedCallbacks.push_back(std::move(callback));
 }
 
 // Alternativ, wenn Sie den Besitz übertragen wollen (Achtung: m_activeLevel ist danach nullptr!):

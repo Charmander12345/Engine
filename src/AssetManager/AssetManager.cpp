@@ -480,6 +480,8 @@ void AssetManager::ensureEditorWidgetsCreated()
         btnMin["type"] = "Button";
         btnMin["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
         btnMin["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        btnMin["fillX"] = true;
+        btnMin["fillY"] = true;
         btnMin["color"] = json{ {"x", 0.2f}, {"y", 0.2f}, {"z", 0.2f}, {"w", 1.0f} };
         btnMin["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
         btnMin["text"] = "_";
@@ -497,6 +499,8 @@ void AssetManager::ensureEditorWidgetsCreated()
         btnMax["type"] = "Button";
         btnMax["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
         btnMax["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        btnMax["fillX"] = true;
+        btnMax["fillY"] = true;
         btnMax["color"] = json{ {"x", 0.26f}, {"y", 0.26f}, {"z", 0.26f}, {"w", 1.0f} };
         btnMax["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
         btnMax["text"] = "[ ]";
@@ -515,6 +519,8 @@ void AssetManager::ensureEditorWidgetsCreated()
         btnClose["clickEvent"] = "TitleBar.Close";
         btnClose["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
         btnClose["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        btnClose["fillX"] = true;
+        btnClose["fillY"] = true;
         btnClose["color"] = json{ {"x", 0.3f}, {"y", 0.08f}, {"z", 0.08f}, {"w", 1.0f} };
         btnClose["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
         btnClose["text"] = "X";
@@ -634,6 +640,35 @@ void AssetManager::ensureEditorWidgetsCreated()
         {
             AssetType headerType{ AssetType::Unknown };
             existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+            if (existsAndOk)
+            {
+                std::ifstream in(abs, std::ios::in | std::ios::binary);
+                if (in.is_open())
+                {
+                    json fileJson = json::parse(in, nullptr, false);
+                    bool hasList = false;
+                    if (!fileJson.is_discarded() && fileJson.is_object() && fileJson.contains("data"))
+                    {
+                        const auto& data = fileJson.at("data");
+                        if (data.is_object() && data.contains("m_elements"))
+                        {
+                            const auto& elements = data.at("m_elements");
+                            if (elements.is_array())
+                            {
+                                for (const auto& element : elements)
+                                {
+                                    if (element.is_object() && element.value("id", "") == "Outliner.EntityList")
+                                    {
+                                        hasList = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    existsAndOk = existsAndOk && hasList;
+                }
+            }
         }
         if (!existsAndOk)
         {
@@ -973,6 +1008,40 @@ void AssetManager::ensureDefaultAssetsCreated()
         ensureOnDisk(wallMatRel, AssetType::Material, mat);
     }
 
+    const std::string defaultCubeScripts[] =
+    {
+        (fs::path("Scripts") / "DefaultCube1.py").generic_string(),
+        (fs::path("Scripts") / "DefaultCube2.py").generic_string(),
+        (fs::path("Scripts") / "DefaultCube3.py").generic_string(),
+        (fs::path("Scripts") / "DefaultCube4.py").generic_string(),
+        (fs::path("Scripts") / "DefaultCube5.py").generic_string()
+    };
+    for (const auto& scriptRel : defaultCubeScripts)
+    {
+        const fs::path absScript = contentRoot / fs::path(scriptRel);
+        if (fs::exists(absScript))
+        {
+            continue;
+        }
+        std::error_code ec;
+        fs::create_directories(absScript.parent_path(), ec);
+        std::ofstream out(absScript, std::ios::out | std::ios::trunc);
+        if (out.is_open())
+        {
+            out << "import engine\n\n";
+            out << "def tick(entity, dt):\n";
+            out << "    engine.rotate(entity, 0.0, 45.0 * dt, 0.0)\n";
+            if (!out.good())
+            {
+                logger.log(Logger::Category::AssetManagement, "Failed to write default cube script.", Logger::LogLevel::ERROR);
+            }
+        }
+        else
+        {
+            logger.log(Logger::Category::AssetManagement, "Failed to open default cube script for writing.", Logger::LogLevel::ERROR);
+        }
+    }
+
     // 3) default 3D quad model
 
     const std::vector<float> cubeVertices{
@@ -1106,7 +1175,7 @@ void AssetManager::ensureDefaultAssetsCreated()
         components["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
         components["Material"] = json{ {"materialAssetPath", wallMatRel} };
         components["Name"] = json{ {"displayName", "Cube A"} };
-        components["Script"] = json{ {"scriptPath", (fs::path("Scripts") / "DefaultCubeScript.py").generic_string()} };
+        components["Script"] = json{ {"scriptPath", defaultCubeScripts[0]}};
         entity["components"] = components;
         entities.push_back(entity);
 
@@ -1121,6 +1190,7 @@ void AssetManager::ensureDefaultAssetsCreated()
         };
         components2["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
         components2["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        components2["Script"] = json{ {"scriptPath", defaultCubeScripts[1]} };
         components2["Name"] = json{ {"displayName", "Cube B"} };
         entity2["components"] = components2;
         entities.push_back(entity2);
@@ -1136,6 +1206,7 @@ void AssetManager::ensureDefaultAssetsCreated()
         };
         components3["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
         components3["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        components3["Script"] = json{ {"scriptPath", defaultCubeScripts[2]} };
         components3["Name"] = json{ {"displayName", "Cube C"} };
         entity3["components"] = components3;
         entities.push_back(entity3);
@@ -1151,6 +1222,7 @@ void AssetManager::ensureDefaultAssetsCreated()
         };
         components4["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
         components4["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        components4["Script"] = json{ {"scriptPath", defaultCubeScripts[3]} };
         components4["Name"] = json{ {"displayName", "Cube D"} };
         entity4["components"] = components4;
         entities.push_back(entity4);
@@ -1166,6 +1238,7 @@ void AssetManager::ensureDefaultAssetsCreated()
         };
         components5["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
         components5["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        components5["Script"] = json{ {"scriptPath", defaultCubeScripts[4]} };
         components5["Name"] = json{ {"displayName", "Cube E"} };
         entity5["components"] = components5;
         entities.push_back(entity5);
@@ -1199,8 +1272,6 @@ void AssetManager::ensureDefaultAssetsCreated()
         defaultLevel->setPath(defaultLevelRel);
         defaultLevel->setAssetType(AssetType::Level);
         defaultLevel->setLevelData(levelJson);
-        defaultLevel->prepareEcs();
-
         const fs::path abs = contentRoot / fs::path(defaultLevelRel);
         bool existsAndOk = false;
         if (fs::exists(abs))
@@ -1890,6 +1961,18 @@ bool AssetManager::loadProject(const std::string& projectPath, SyncState syncSta
     diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingProject, false);
     logger.log(Logger::Category::Project, "Project loaded: " + info.projectName, Logger::LogLevel::INFO);
     return true;
+}
+
+void AssetManager::unloadAllAssets()
+{
+	auto& logger = Logger::Instance();
+	logger.log(Logger::Category::AssetManagement, "Unloading all cached assets.", Logger::LogLevel::INFO);
+	{
+		std::lock_guard<std::mutex> lock(m_stateMutex);
+		m_loadedAssets.clear();
+		s_nextAssetID = 1;
+	}
+	m_garbageCollector.clear();
 }
 
 bool AssetManager::saveProject(const std::string& projectPath, SyncState syncState)

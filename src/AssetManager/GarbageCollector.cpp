@@ -12,6 +12,12 @@ void GarbageCollector::collect()
         m_trackedResources.end());
 }
 
+void GarbageCollector::clear()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_trackedResources.clear();
+}
+
 bool GarbageCollector::registerResource(const std::shared_ptr<EngineObject>& resource)
 {
     if (!resource)

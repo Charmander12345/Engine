@@ -2,3 +2,5 @@
 
 ## Project Guidelines
 - User prefers an embedded Python interpreter using the newest available Python version.
+- User prefers minimal, simple code changes without losing functionality.
+- Simplify widget lookup to a single function that searches all widgets in the UIManager member list.

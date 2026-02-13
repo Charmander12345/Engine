@@ -54,6 +54,40 @@ namespace
             }
         }
 
+        if (excType || excValue || excTrace)
+        {
+            PyObject* tracebackModule = PyImport_ImportModule("traceback");
+            if (tracebackModule)
+            {
+                PyObject* formatFunc = PyObject_GetAttrString(tracebackModule, "format_exception");
+                if (formatFunc && PyCallable_Check(formatFunc))
+                {
+                    PyObject* formatted = PyObject_CallFunctionObjArgs(formatFunc,
+                        excType ? excType : Py_None,
+                        excValue ? excValue : Py_None,
+                        excTrace ? excTrace : Py_None,
+                        nullptr);
+                    if (formatted)
+                    {
+                        PyObject* joined = PyUnicode_Join(PyUnicode_FromString(""), formatted);
+                        if (joined)
+                        {
+                            const char* utf8 = PyUnicode_AsUTF8(joined);
+                            if (utf8 && *utf8)
+                            {
+                                message += "\n";
+                                message += utf8;
+                            }
+                            Py_DECREF(joined);
+                        }
+                        Py_DECREF(formatted);
+                    }
+                }
+                Py_XDECREF(formatFunc);
+                Py_DECREF(tracebackModule);
+            }
+        }
+
         Logger::Instance().log(Logger::Category::Engine, message, Logger::LogLevel::ERROR);
 
         Py_XDECREF(excType);
@@ -863,8 +897,31 @@ namespace Scripting
                 ReleaseScriptState(state);
             }
             s_scripts.clear();
+            ReleaseLevelScriptState();
+            s_lastLevel = nullptr;
+            s_lastLevelScriptPath.clear();
             Py_Finalize();
         }
+    }
+
+    void ReloadScripts()
+    {
+        if (!Py_IsInitialized())
+        {
+            return;
+        }
+
+        Logger::Instance().log(Logger::Category::Engine, "Python: reloading scripts", Logger::LogLevel::INFO);
+        PyGILState_STATE gilState = PyGILState_Ensure();
+        for (auto& [path, state] : s_scripts)
+        {
+            ReleaseScriptState(state);
+        }
+        s_scripts.clear();
+        ReleaseLevelScriptState();
+        s_lastLevel = nullptr;
+        s_lastLevelScriptPath.clear();
+        PyGILState_Release(gilState);
     }
 
     void UpdateScripts(float deltaSeconds)
@@ -938,7 +995,7 @@ namespace Scripting
             }
         }
 
-		if (level && scenePrepared && !s_lastLevelScriptPath.empty())
+		if (level && !s_lastLevelScriptPath.empty())
         {
             if (!LoadLevelScriptModule(s_lastLevelScriptPath))
             {
@@ -962,11 +1019,17 @@ namespace Scripting
             }
         }
 
-        if (!scenePrepared || !level)
+        if (!level)
         {
             PyGILState_Release(gilState);
             return;
         }
+
+		if (!diagnostics.isScenePrepared())
+		{
+			PyGILState_Release(gilState);
+			return;
+		}
 
 		const auto& entities = level->getScriptEntities();
 

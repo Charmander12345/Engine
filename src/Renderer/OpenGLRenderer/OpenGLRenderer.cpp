@@ -552,6 +552,7 @@ void OpenGLRenderer::renderWorld()
         for (const auto& renderable : renderables)
         {
             RenderEntry entry;
+            entry.entity = renderable.entity;
             entry.transform = renderable.transform;
             entry.object3D = renderable.object3D;
             entry.object2D = renderable.object2D;
@@ -1316,13 +1317,10 @@ void OpenGLRenderer::renderUI()
             }
             if (element.type == WidgetElementType::Button)
             {
-                const float widthPx = std::max(0.0f, x1 - x0);
-                const float heightPx = std::max(0.0f, y1 - y0);
-                const float sizePx = std::min(widthPx, heightPx);
-                const float bx0 = x0 + (widthPx - sizePx) * 0.5f;
-                const float by0 = y0 + (heightPx - sizePx) * 0.5f;
-                const float bx1 = bx0 + sizePx;
-                const float by1 = by0 + sizePx;
+                const float bx0 = x0;
+                const float by0 = y0;
+                const float bx1 = x1;
+                const float by1 = y1;
 
                 const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
                 const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);

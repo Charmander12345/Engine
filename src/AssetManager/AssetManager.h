@@ -85,6 +85,7 @@ public:
     bool loadProject(const std::string& projectPath, SyncState syncState = Sync);
     bool saveProject(const std::string& projectPath, SyncState syncState = Sync);
     bool createProject(const std::string& parentDir, const std::string& projectName, const DiagnosticsManager::ProjectInfo& info, SyncState syncState = Sync);
+	void unloadAllAssets();
 
 private:
     // Worker lifecycle

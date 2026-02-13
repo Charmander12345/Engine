@@ -337,6 +337,33 @@ int main()
         return true;
         });
 
+    diagnostics.registerKeyUpHandler(SDLK_F7, [&]() {
+        logTimed(Logger::Category::Input, "F7 pressed - hot reloading level and scripts.", Logger::LogLevel::INFO);
+        std::string levelPath;
+        if (auto* level = diagnostics.getActiveLevelSoft())
+        {
+            levelPath = level->getPath();
+        }
+        Scripting::Shutdown();
+        if (!Scripting::Initialize())
+        {
+            logTimed(Logger::Category::Engine, "Failed to reinitialize Python scripting.", Logger::LogLevel::ERROR);
+        }
+        assetManager.unloadAllAssets();
+        diagnostics.setActiveLevel(nullptr);
+        diagnostics.setScenePrepared(false);
+        if (!levelPath.empty())
+        {
+            std::string absPath = assetManager.getAbsoluteContentPath(levelPath);
+            if (absPath.empty())
+            {
+                absPath = levelPath;
+            }
+            assetManager.loadAsset(absPath, AssetType::Level, AssetManager::Sync);
+        }
+        return true;
+        });
+
 
     bool rightMouseDown = false;
     float cameraSpeedMultiplier = 1.0f;

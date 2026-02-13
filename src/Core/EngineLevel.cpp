@@ -244,10 +244,11 @@ static void deserializeNameComponent(const json& value, ECS::NameComponent& comp
 
 bool EngineLevel::prepareEcs()
 {
-	if (m_ecsPrepared)
+	if (m_ecsPrepared || m_ecsPreparing)
 	{
 		return true;
 	}
+	m_ecsPreparing = true;
 
 	Logger::Instance().log(Logger::Category::Engine,
 		"EngineLevel: prepareEcs start",
@@ -259,9 +260,19 @@ bool EngineLevel::prepareEcs()
 	m_scriptEntities.clear();
 	m_scriptEntitiesPrepared = false;
 
+	m_suppressEntityListNotifications = true;
 	if (!m_levelData.is_object() || !m_levelData.contains("Entities"))
 	{
 		m_ecsPrepared = true;
+		m_suppressEntityListNotifications = false;
+		for (auto& callback : m_entityListChangedCallbacks)
+		{
+			if (callback)
+			{
+				callback();
+			}
+		}
+		m_ecsPreparing = false;
 		return true;
 	}
 
@@ -269,6 +280,15 @@ bool EngineLevel::prepareEcs()
 	if (!entitiesJson.is_array())
 	{
 		m_ecsPrepared = true;
+		m_suppressEntityListNotifications = false;
+		for (auto& callback : m_entityListChangedCallbacks)
+		{
+			if (callback)
+			{
+				callback();
+			}
+		}
+		m_ecsPreparing = false;
 		return true;
 	}
 
@@ -373,9 +393,18 @@ bool EngineLevel::prepareEcs()
 
 	buildScriptEntityCache();
 	m_ecsPrepared = true;
+	m_suppressEntityListNotifications = false;
+	for (auto& callback : m_entityListChangedCallbacks)
+	{
+		if (callback)
+		{
+			callback();
+		}
+	}
 	Logger::Instance().log(Logger::Category::Engine,
 		"EngineLevel: prepareEcs done",
 		Logger::LogLevel::INFO);
+	m_ecsPreparing = false;
 	return true;
 }
 
@@ -404,6 +433,17 @@ void EngineLevel::onEntityAdded(ECS::Entity entity)
 	{
 		m_scriptEntitiesPrepared = false;
 	}
+
+	if (!m_suppressEntityListNotifications)
+	{
+		for (auto& callback : m_entityListChangedCallbacks)
+		{
+			if (callback)
+			{
+				callback();
+			}
+		}
+	}
 }
 
 void EngineLevel::onEntityRemoved(ECS::Entity entity)
@@ -414,6 +454,21 @@ void EngineLevel::onEntityRemoved(ECS::Entity entity)
 	}
 	m_entities.erase(std::remove(m_entities.begin(), m_entities.end(), entity), m_entities.end());
 	m_scriptEntities.erase(std::remove(m_scriptEntities.begin(), m_scriptEntities.end(), entity), m_scriptEntities.end());
+	if (!m_suppressEntityListNotifications)
+	{
+		for (auto& callback : m_entityListChangedCallbacks)
+		{
+			if (callback)
+			{
+				callback();
+			}
+		}
+	}
+}
+
+void EngineLevel::registerEntityListChangedCallback(std::function<void()> callback)
+{
+	m_entityListChangedCallbacks.push_back(std::move(callback));
 }
 
 void EngineLevel::buildScriptEntityCache()
@@ -469,6 +524,15 @@ void EngineLevel::buildScriptEntityCache()
 
 json EngineLevel::serializeEcsEntities() const
 {
+	if (m_entities.empty() && m_levelData.is_object() && m_levelData.contains("Entities"))
+	{
+		const auto& entitiesJson = m_levelData.at("Entities");
+		if (entitiesJson.is_array())
+		{
+			return entitiesJson;
+		}
+	}
+
 	json entitiesJson = json::array();
 	auto& ecs = m_ecs ? *m_ecs : ECS::ECSManager::Instance();
 

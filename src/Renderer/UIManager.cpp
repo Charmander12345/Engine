@@ -19,6 +19,7 @@ namespace
         {
             return &element;
         }
+
         for (auto& child : element.children)
         {
             if (auto* match = FindElementById(child, id))
@@ -39,6 +40,49 @@ namespace
             }
         }
         return nullptr;
+    }
+
+    WidgetElement* FindFirstStackPanel(std::vector<WidgetElement>& elements)
+    {
+        const std::function<WidgetElement*(WidgetElement&)> findRecursive =
+            [&](WidgetElement& element) -> WidgetElement*
+        {
+            if (element.type == WidgetElementType::StackPanel)
+            {
+                return &element;
+            }
+            for (auto& child : element.children)
+            {
+                if (auto* match = findRecursive(child))
+                {
+                    return match;
+                }
+            }
+            return nullptr;
+        };
+
+        for (auto& element : elements)
+        {
+            if (auto* match = findRecursive(element))
+            {
+                return match;
+            }
+        }
+        return nullptr;
+    }
+
+    void LogWidgetElementIds(const WidgetElement& element, const std::string& widgetId)
+    {
+        if (!element.id.empty())
+        {
+            Logger::Instance().log(Logger::Category::UI,
+                "UIManager widget=" + widgetId + " element id=" + element.id,
+                Logger::LogLevel::INFO);
+        }
+        for (const auto& child : element.children)
+        {
+            LogWidgetElementIds(child, widgetId);
+        }
     }
 
     void computeElementBounds(WidgetElement& element)
@@ -387,8 +431,15 @@ namespace
         }
         if (element.fillY)
         {
-            y0 = parentY;
-            height = parentH;
+            if (element.from.y > 0.0f)
+            {
+                height = std::max(0.0f, (parentY + parentH) - y0);
+            }
+            else
+            {
+                y0 = parentY;
+                height = parentH;
+            }
         }
 
         element.computedPositionPixels = { x0, y0 };
@@ -419,17 +470,36 @@ namespace
         {
             float spacing = element.padding.x;
             float totalSpacing = spacing * static_cast<float>(element.children.size() > 0 ? (element.children.size() - 1) : 0);
-            float availableW = std::max(0.0f, contentW - totalSpacing);
-            float defaultW = (element.children.size() > 0) ? (availableW / static_cast<float>(element.children.size())) : 0.0f;
-            float totalWidth = 0.0f;
+            float fixedWidth = 0.0f;
+            size_t fillCount = 0;
+            std::vector<float> fixedSlots;
+            fixedSlots.reserve(element.children.size());
             for (auto& child : element.children)
             {
-                float slotW = defaultW;
-                if (element.sizeToContent && child.hasContentSize)
+                if (child.fillX)
                 {
-                    slotW = child.contentSizePixels.x + child.margin.x * 2.0f;
+                    fixedSlots.push_back(0.0f);
+                    ++fillCount;
+                    continue;
+                }
+                float slotW = child.minSize.x + child.margin.x * 2.0f;
+                fixedSlots.push_back(slotW);
+                fixedWidth += slotW;
+            }
+
+            float availableW = std::max(0.0f, contentW - totalSpacing - fixedWidth);
+            float fillSlotW = (fillCount > 0) ? (availableW / static_cast<float>(fillCount)) : 0.0f;
+            float totalWidth = 0.0f;
+            for (size_t index = 0; index < element.children.size(); ++index)
+            {
+                auto& child = element.children[index];
+                float slotW = fixedSlots[index];
+                if (child.fillX)
+                {
+                    slotW = fillSlotW;
                 }
                 totalWidth += slotW;
+                fixedSlots[index] = slotW;
             }
             if (!element.children.empty())
             {
@@ -444,15 +514,11 @@ namespace
             }
             float cursorX = contentX;
 
-            for (auto& child : element.children)
+            for (size_t index = 0; index < element.children.size(); ++index)
             {
-                float slotW = defaultW;
-                float slotH = contentH;
-                if (element.sizeToContent && child.hasContentSize)
-                {
-                    slotW = child.contentSizePixels.x + child.margin.x * 2.0f;
-                }
-                slotH = std::max(slotH, child.minSize.y);
+                auto& child = element.children[index];
+                float slotW = fixedSlots[index];
+                float slotH = child.fillY ? contentH : (child.minSize.y + child.margin.y * 2.0f);
                 const float childX = cursorX + child.margin.x;
                 const float childY = contentY + child.margin.y;
                 const float childW = std::max(0.0f, slotW - child.margin.x * 2.0f);
@@ -465,17 +531,36 @@ namespace
         {
             float spacing = element.padding.y;
             float totalSpacing = spacing * static_cast<float>(element.children.size() > 0 ? (element.children.size() - 1) : 0);
-            float availableH = std::max(0.0f, contentH - totalSpacing);
-            float defaultH = (element.children.size() > 0) ? (availableH / static_cast<float>(element.children.size())) : 0.0f;
-            float totalHeight = 0.0f;
+            float fixedHeight = 0.0f;
+            size_t fillCount = 0;
+            std::vector<float> fixedSlots;
+            fixedSlots.reserve(element.children.size());
             for (auto& child : element.children)
             {
-                float slotH = defaultH;
-                if (element.sizeToContent && child.hasContentSize)
+                if (child.fillY)
                 {
-                    slotH = child.contentSizePixels.y + child.margin.y * 2.0f;
+                    fixedSlots.push_back(0.0f);
+                    ++fillCount;
+                    continue;
+                }
+                float slotH = child.minSize.y + child.margin.y * 2.0f;
+                fixedSlots.push_back(slotH);
+                fixedHeight += slotH;
+            }
+
+            float availableH = std::max(0.0f, contentH - totalSpacing - fixedHeight);
+            float fillSlotH = (fillCount > 0) ? (availableH / static_cast<float>(fillCount)) : 0.0f;
+            float totalHeight = 0.0f;
+            for (size_t index = 0; index < element.children.size(); ++index)
+            {
+                auto& child = element.children[index];
+                float slotH = fixedSlots[index];
+                if (child.fillY)
+                {
+                    slotH = fillSlotH;
                 }
                 totalHeight += slotH;
+                fixedSlots[index] = slotH;
             }
             if (!element.children.empty())
             {
@@ -491,15 +576,11 @@ namespace
 
             float cursorY = contentY;
 
-            for (auto& child : element.children)
+            for (size_t index = 0; index < element.children.size(); ++index)
             {
-                float slotH = defaultH;
-                float slotW = contentW;
-                if (element.sizeToContent && child.hasContentSize)
-                {
-                    slotH = child.contentSizePixels.y + child.margin.y * 2.0f;
-                }
-                slotW = std::max(slotW, child.minSize.x);
+                auto& child = element.children[index];
+                float slotH = fixedSlots[index];
+                float slotW = child.fillX ? contentW : (child.minSize.x + child.margin.x * 2.0f);
                 const float childX = contentX + child.margin.x;
                 const float childY = cursorY + child.margin.y;
                 const float childW = std::max(0.0f, slotW - child.margin.x * 2.0f);
@@ -552,6 +633,59 @@ namespace
     }
 }
 
+UIManager::WidgetEntry* UIManager::findWidgetEntry(const std::string& id)
+{
+    for (auto& entry : m_widgets)
+    {
+        if (entry.id == id)
+        {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+const UIManager::WidgetEntry* UIManager::findWidgetEntry(const std::string& id) const
+{
+    for (const auto& entry : m_widgets)
+    {
+        if (entry.id == id)
+        {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+UIManager::UIManager()
+{
+    DiagnosticsManager::Instance().registerActiveLevelChangedCallback(
+        [this](EngineLevel* level)
+        {
+            m_outlinerLevel = level;
+            if (m_outlinerLevel)
+            {
+                m_outlinerLevel->registerEntityListChangedCallback([this]()
+                    {
+                        refreshWorldOutliner();
+                    });
+            }
+            refreshWorldOutliner();
+        });
+}
+
+void UIManager::refreshWorldOutliner()
+{
+    if (auto* entry = findWidgetEntry("WorldOutliner"))
+    {
+        if (entry->widget)
+        {
+            Logger::Instance().log(Logger::Category::UI, "Refreshing WorldOutliner widget.", Logger::LogLevel::INFO);
+            populateOutlinerWidget(entry->widget);
+        }
+    }
+}
+
 Vec2 UIManager::getAvailableViewportSize() const
 {
     return m_availableViewportSize;
@@ -586,40 +720,36 @@ const std::vector<UIManager::UIEntry>& UIManager::getRegisteredUI() const
 
 void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widget>& widget)
 {
-    for (auto& entry : m_widgets)
+    WidgetEntry* entry = findWidgetEntry(id);
+    if (!entry)
     {
-        if (entry.id == id)
-        {
-            entry.widget = widget;
-            if (entry.widget)
-            {
-                if (id == "WorldOutliner")
-                {
-                    populateOutlinerWidget(entry.widget);
-                }
-                else if (id == "ContentBrowser")
-                {
-                    populateContentBrowserWidget(entry.widget);
-                }
-                entry.widget->markLayoutDirty();
-            }
-            m_widgetOrderDirty = true;
-            m_pointerCacheDirty = true;
-            return;
-        }
+        m_widgets.push_back(WidgetEntry{ id, widget, m_nextWidgetRuntimeId++ });
+        entry = &m_widgets.back();
     }
-    m_widgets.push_back(WidgetEntry{ id, widget });
-    if (widget)
+    else
     {
+        entry->widget = widget;
+    }
+
+    if (entry->widget)
+    {
+        Logger::Instance().log(Logger::Category::UI,
+            "UIManager registerWidget id=" + id + " runtimeId=" + std::to_string(entry->runtimeId) +
+            " elements=" + std::to_string(entry->widget->getElements().size()),
+            Logger::LogLevel::INFO);
         if (id == "WorldOutliner")
         {
-            populateOutlinerWidget(widget);
+            populateOutlinerWidget(entry->widget);
         }
         else if (id == "ContentBrowser")
         {
-            populateContentBrowserWidget(widget);
+            populateContentBrowserWidget(entry->widget);
         }
-        widget->markLayoutDirty();
+        for (const auto& element : entry->widget->getElements())
+        {
+            LogWidgetElementIds(element, id);
+        }
+        entry->widget->markLayoutDirty();
     }
     m_widgetOrderDirty = true;
     m_pointerCacheDirty = true;
@@ -629,27 +759,61 @@ void UIManager::populateOutlinerWidget(const std::shared_ptr<Widget>& widget)
 {
     if (!widget)
     {
+		Logger::Instance().log(Logger::Category::UI, "WorldOutliner widget is null.", Logger::LogLevel::WARNING);
         return;
     }
 
-    auto* level = DiagnosticsManager::Instance().getActiveLevelSoft();
+    auto& diagnostics = DiagnosticsManager::Instance();
+    auto* level = m_outlinerLevel ? m_outlinerLevel : diagnostics.getActiveLevelSoft();
     if (!level)
     {
+		Logger::Instance().log(Logger::Category::UI, "No active level for WorldOutliner.", Logger::LogLevel::WARNING);
+        auto& elements = widget->getElementsMutable();
+        if (auto* listPanel = FindElementById(elements, "Outliner.EntityList"))
+        {
+            listPanel->children.clear();
+            widget->markLayoutDirty();
+        }
         return;
     }
 
-    level->prepareEcs();
+    if (!diagnostics.isScenePrepared())
+    {
+		Logger::Instance().log(Logger::Category::UI, "Scene not prepared for WorldOutliner.", Logger::LogLevel::WARNING);
+    }
     auto& elements = widget->getElementsMutable();
     WidgetElement* listPanel = FindElementById(elements, "Outliner.EntityList");
     if (!listPanel)
     {
+        listPanel = FindFirstStackPanel(elements);
+        if (listPanel && listPanel->id.empty())
+        {
+            listPanel->id = "Outliner.EntityList";
+        }
+    }
+    if (!listPanel)
+    {
+        Logger::Instance().log(Logger::Category::UI, "WorldOutliner list panel not found.", Logger::LogLevel::WARNING);
         return;
     }
 
     listPanel->children.clear();
+    if (listPanel->from.y <= 0.1f)
+    {
+        listPanel->from.y = 0.12f;
+    }
+    if (listPanel->to.y <= listPanel->from.y)
+    {
+        listPanel->to.y = 0.98f;
+    }
+    listPanel->scrollable = true;
+    listPanel->fillX = true;
+    listPanel->fillY = true;
+    listPanel->sizeToContent = false;
 
     auto& ecs = ECS::ECSManager::Instance();
-    const auto& entities = level->getEntities();
+    ECS::Schema schema;
+    const auto entities = ecs.getEntitiesMatchingSchema(schema);
     for (const auto entity : entities)
     {
         std::string label = "Entity " + std::to_string(entity);
@@ -670,7 +834,7 @@ void UIManager::populateOutlinerWidget(const std::shared_ptr<Widget>& widget)
         button.text = label;
         button.font = "default.ttf";
         button.fontSize = 14.0f;
-        button.textAlignH = TextAlignH::Left;
+        button.textAlignH = TextAlignH::Center;
         button.textAlignV = TextAlignV::Center;
         button.padding = Vec2{ 6.0f, 4.0f };
         button.minSize = Vec2{ 0.0f, 24.0f };
@@ -681,6 +845,9 @@ void UIManager::populateOutlinerWidget(const std::shared_ptr<Widget>& widget)
         button.shaderFragment = "button_fragment.glsl";
         button.runtimeOnly = true;
         listPanel->children.push_back(std::move(button));
+        Logger::Instance().log(Logger::Category::UI,
+            "WorldOutliner created button for entity " + std::to_string(entity) + " label=" + label,
+            Logger::LogLevel::INFO);
     }
 
     widget->markLayoutDirty();
