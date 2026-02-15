@@ -24,6 +24,7 @@ public:
     enum class Category {
         General,
         Engine,
+        Scripting,
         AssetManagement,
         Diagnostics,
         Rendering,

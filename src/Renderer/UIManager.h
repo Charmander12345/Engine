@@ -51,6 +51,14 @@ public:
     bool hasClickEvent(const std::string& eventId) const;
     void registerClickEvent(const std::string& eventId, std::function<void()> callback);
 
+    void showModalMessage(const std::string& message, std::function<void()> onClosed = {});
+    void closeModalMessage();
+    void showToastMessage(const std::string& message, float durationSeconds);
+    void updateNotifications(float deltaSeconds);
+
+    static UIManager* GetActiveInstance();
+    static void SetActiveInstance(UIManager* instance);
+
 private:
     WidgetEntry* findWidgetEntry(const std::string& id);
     const WidgetEntry* findWidgetEntry(const std::string& id) const;
@@ -60,6 +68,9 @@ private:
     void updateHoverStates();
     void setFocusedEntry(WidgetElement* element);
     void markAllWidgetsDirty();
+    void ensureModalWidget();
+    std::shared_ptr<Widget> createToastWidget(const std::string& message, const std::string& name) const;
+    void updateToastStackLayout();
 
     Vec2 m_availableViewportSize{};
     Vec2 m_mousePosition{};
@@ -75,6 +86,27 @@ private:
     mutable bool m_lastPointerOverUI{ false };
     mutable bool m_pointerCacheDirty{ true };
     WidgetElement* m_focusedEntry{ nullptr };
+
+    std::shared_ptr<Widget> m_modalWidget;
+    std::string m_modalMessage;
+    bool m_modalVisible{ false };
+    std::function<void()> m_modalOnClosed;
+    float m_notificationPollTimer{ 0.0f };
+    struct ModalRequest
+    {
+        std::string message;
+        std::function<void()> onClosed;
+    };
+    struct ToastNotification
+    {
+        std::string id;
+        std::shared_ptr<Widget> widget;
+        float timer{ 0.0f };
+        float duration{ 0.0f };
+    };
+    std::vector<ModalRequest> m_modalQueue;
+    std::vector<ToastNotification> m_toasts;
+    uint64_t m_nextToastId{ 1 };
 
     void bindClickEventsForWidget(const std::shared_ptr<Widget>& widget);
     void bindClickEventsForElement(WidgetElement& element);

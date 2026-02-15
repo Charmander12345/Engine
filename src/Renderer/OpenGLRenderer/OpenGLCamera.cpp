@@ -19,6 +19,22 @@ void OpenGLCamera::clampPitch()
     m_pitchDeg = std::clamp(m_pitchDeg, -kMaxPitch, kMaxPitch);
 }
 
+void OpenGLCamera::updateVectors()
+{
+    const float yaw = glm::radians(m_yawDeg);
+    const float pitch = glm::radians(m_pitchDeg);
+
+    glm::vec3 front;
+    front.x = cosf(yaw) * cosf(pitch);
+    front.y = sinf(pitch);
+    front.z = sinf(yaw) * cosf(pitch);
+    m_front = glm::normalize(front);
+
+    const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+    auto right = glm::normalize(glm::cross(m_front, worldUp));
+    m_up = glm::normalize(glm::cross(right, m_front));
+}
+
 void OpenGLCamera::move(const Vec3& delta)
 {
     // delta is expected in world space for now.
@@ -45,19 +61,25 @@ void OpenGLCamera::rotate(float yawDeltaDegrees, float pitchDeltaDegrees)
     m_yawDeg += yawDeltaDegrees;
     m_pitchDeg += pitchDeltaDegrees;
     clampPitch();
+    updateVectors();
+}
 
-    const float yaw = glm::radians(m_yawDeg);
-    const float pitch = glm::radians(m_pitchDeg);
+void OpenGLCamera::setPosition(const Vec3& position)
+{
+    m_position = position;
+}
 
-    glm::vec3 front;
-    front.x = cosf(yaw) * cosf(pitch);
-    front.y = sinf(pitch);
-    front.z = sinf(yaw) * cosf(pitch);
-    m_front = glm::normalize(front);
+Vec2 OpenGLCamera::getRotationDegrees() const
+{
+    return Vec2{ m_yawDeg, m_pitchDeg };
+}
 
-    const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
-    auto right = glm::normalize(glm::cross(m_front, worldUp));
-    m_up = glm::normalize(glm::cross(right, m_front));
+void OpenGLCamera::setRotationDegrees(float yawDegrees, float pitchDegrees)
+{
+    m_yawDeg = yawDegrees;
+    m_pitchDeg = pitchDegrees;
+    clampPitch();
+    updateVectors();
 }
 
 Mat4 OpenGLCamera::getViewMatrixColumnMajor() const

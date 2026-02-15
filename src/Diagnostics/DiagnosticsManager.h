@@ -2,6 +2,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <optional>
 #include <mutex>
 #include <filesystem>
@@ -117,6 +118,17 @@ public:
     void requestShutdown();
     bool isShutdownRequested() const;
 
+    struct ToastNotification
+    {
+        std::string message;
+        float durationSeconds{ 0.0f };
+    };
+
+    void enqueueModalNotification(const std::string& message, bool dedupe = true);
+    void enqueueToastNotification(const std::string& message, float durationSeconds);
+    std::vector<std::string> consumeModalNotifications();
+    std::vector<ToastNotification> consumeToastNotifications();
+
 	// Action tracking (only intended for async actions)
 	bool isActionFinished(unsigned int actionID) const;
 	Action& registerAction(ActionType type);
@@ -167,4 +179,7 @@ private:
 	bool m_shutdownRequested{ false };
 	Vec2 m_windowSize{ 0.0f, 0.0f };
 	WindowState m_windowState{ WindowState::Maximized };
+    std::unordered_set<std::string> m_modalNotificationCache;
+    std::vector<std::string> m_modalNotifications;
+    std::vector<ToastNotification> m_toastNotifications;
 };

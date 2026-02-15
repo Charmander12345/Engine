@@ -59,6 +59,7 @@ const char* Logger::toString(Category category)
     {
     case Category::General: return "General";
     case Category::Engine: return "Engine";
+    case Category::Scripting: return "Scripting";
     case Category::AssetManagement: return "AssetManagement";
     case Category::Diagnostics: return "Diagnostics";
     case Category::Rendering: return "Rendering";

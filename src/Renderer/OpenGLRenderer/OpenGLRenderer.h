@@ -50,6 +50,10 @@ public:
 
     void moveCamera(float forward, float right, float up) override;
     void rotateCamera(float yawDeltaDegrees, float pitchDeltaDegrees) override;
+    Vec3 getCameraPosition() const override;
+    void setCameraPosition(const Vec3& position) override;
+    Vec2 getCameraRotationDegrees() const override;
+    void setCameraRotationDegrees(float yawDegrees, float pitchDegrees) override;
 
     void setClearColor(const Vec4& color);
     const Vec4& getClearColor() const;

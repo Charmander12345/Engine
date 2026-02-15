@@ -6,6 +6,8 @@
 #include <filesystem>
 #include <fstream>
 #include <cstdint>
+#include <unordered_set>
+#include <cctype>
 #include "AssetTypes.h"
 
 #include <SDL3/SDL.h>
@@ -43,6 +45,57 @@ namespace
         // if (ext == ".glsl" || ext == ".vert" || ext == ".frag") return AssetType::Shader;
 
         return AssetType::Unknown;
+    }
+
+
+    static std::string normalizeKeyConstantName(const std::string& name)
+    {
+        std::string result;
+        bool lastUnderscore = false;
+        for (unsigned char c : name)
+        {
+            if (std::isalnum(c))
+            {
+                result.push_back(static_cast<char>(std::toupper(c)));
+                lastUnderscore = false;
+            }
+            else if (!lastUnderscore)
+            {
+                result.push_back('_');
+                lastUnderscore = true;
+            }
+        }
+        while (!result.empty() && result.back() == '_')
+        {
+            result.pop_back();
+        }
+        if (result.empty())
+        {
+            return {};
+        }
+        return "Key_" + result;
+    }
+
+    static void writeKeyConstants(std::ofstream& stubOut)
+    {
+        stubOut << "Keys: Dict[str, int]\n";
+        stubOut << "def get_key(name: str) -> int: ...\n";
+
+        std::unordered_set<std::string> added;
+        for (int scancode = 0; scancode < SDL_SCANCODE_COUNT; ++scancode)
+        {
+            const char* name = SDL_GetScancodeName(static_cast<SDL_Scancode>(scancode));
+            if (!name || !*name)
+            {
+                continue;
+            }
+            const std::string constantName = normalizeKeyConstantName(name);
+            if (constantName.empty() || !added.insert(constantName).second)
+            {
+                continue;
+            }
+            stubOut << constantName << ": int\n";
+        }
     }
 
     static void SDLCALL OnImportDialogClosed(void* userdata, const char* const* filelist, int filter)
@@ -1889,43 +1942,58 @@ bool AssetManager::loadProject(const std::string& projectPath, SyncState syncSta
         std::error_code scriptsEc;
         fs::create_directories(scriptsRoot, scriptsEc);
         const fs::path stubPath = scriptsRoot / "engine.pyi";
-        if (!fs::exists(stubPath))
+        std::ofstream stubOut(stubPath, std::ios::out | std::ios::trunc);
+        if (stubOut.is_open())
         {
-            std::ofstream stubOut(stubPath, std::ios::out | std::ios::trunc);
-            if (stubOut.is_open())
-            {
-                stubOut << "from typing import List, Optional, Tuple\n\n";
-                stubOut << "Component_Transform: int\nComponent_Mesh: int\nComponent_Material: int\n";
-                stubOut << "Component_Light: int\nComponent_Camera: int\nComponent_Physics: int\n";
-                stubOut << "Component_Script: int\nComponent_Name: int\n\n";
-                stubOut << "Asset_Texture: int\nAsset_Material: int\nAsset_Model2D: int\n";
-                stubOut << "Asset_Model3D: int\nAsset_PointLight: int\nAsset_Level: int\nAsset_Widget: int\n\n";
-                stubOut << "Log_Info: int\nLog_Warning: int\nLog_Error: int\n\n";
-                stubOut << "# Entity management\n";
-                stubOut << "def create_entity() -> int: ...\n";
-                stubOut << "def attach_component(entity: int, kind: int) -> bool: ...\n";
-                stubOut << "def detach_component(entity: int, kind: int) -> bool: ...\n";
-                stubOut << "def get_entities(kinds: List[int]) -> List[int]: ...\n";
-                stubOut << "\n# Transform helpers\n";
-                stubOut << "def get_transform(entity: int) -> Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float]]]: ...\n";
-                stubOut << "def set_position(entity: int, x: float, y: float, z: float) -> bool: ...\n";
-                stubOut << "def translate(entity: int, dx: float, dy: float, dz: float) -> bool: ...\n";
-                stubOut << "def set_rotation(entity: int, pitch: float, yaw: float, roll: float) -> bool: ...\n";
-                stubOut << "def rotate(entity: int, dp: float, dy: float, dr: float) -> bool: ...\n";
-                stubOut << "def set_scale(entity: int, sx: float, sy: float, sz: float) -> bool: ...\n";
-                stubOut << "\n# Asset helpers\n";
-                stubOut << "def load_asset(path: str, type: int) -> int: ...\n";
-                stubOut << "def save_asset(id: int, type: int) -> bool: ...\n";
-                stubOut << "def unload_asset(id: int) -> bool: ...\n";
-                stubOut << "def set_mesh(entity: int, path: str) -> bool: ...\n";
-                stubOut << "def get_mesh(entity: int) -> Optional[str]: ...\n";
-                stubOut << "\n# Timing and state\n";
-                stubOut << "def get_delta_time() -> float: ...\n";
-                stubOut << "def get_state(key: str) -> Optional[str]: ...\n";
-                stubOut << "def set_state(key: str, value: str) -> bool: ...\n";
-                stubOut << "\n# Logging\n";
-                stubOut << "def log(message: str, level: int = 0) -> bool: ...\n";
-            }
+            stubOut << "from typing import Callable, Dict, List, Optional, Tuple\n\n";
+            stubOut << "Component_Transform: int\nComponent_Mesh: int\nComponent_Material: int\n";
+            stubOut << "Component_Light: int\nComponent_Camera: int\nComponent_Physics: int\n";
+            stubOut << "Component_Script: int\nComponent_Name: int\n\n";
+            stubOut << "Asset_Texture: int\nAsset_Material: int\nAsset_Model2D: int\n";
+            stubOut << "Asset_Model3D: int\nAsset_PointLight: int\nAsset_Level: int\nAsset_Widget: int\n\n";
+            stubOut << "Log_Info: int\nLog_Warning: int\nLog_Error: int\n\n";
+            stubOut << "# Entity management\n";
+            stubOut << "def create_entity() -> int: ...\n";
+            stubOut << "def attach_component(entity: int, kind: int) -> bool: ...\n";
+            stubOut << "def detach_component(entity: int, kind: int) -> bool: ...\n";
+            stubOut << "def get_entities(kinds: List[int]) -> List[int]: ...\n";
+            stubOut << "\n# Transform helpers\n";
+            stubOut << "def get_transform(entity: int) -> Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float]]]: ...\n";
+            stubOut << "def set_position(entity: int, x: float, y: float, z: float) -> bool: ...\n";
+            stubOut << "def translate(entity: int, dx: float, dy: float, dz: float) -> bool: ...\n";
+            stubOut << "def set_rotation(entity: int, pitch: float, yaw: float, roll: float) -> bool: ...\n";
+            stubOut << "def rotate(entity: int, dp: float, dy: float, dr: float) -> bool: ...\n";
+            stubOut << "def set_scale(entity: int, sx: float, sy: float, sz: float) -> bool: ...\n";
+            stubOut << "\n# Asset helpers\n";
+            stubOut << "def load_asset(path: str, type: int) -> int: ...\n";
+            stubOut << "def save_asset(id: int, type: int) -> bool: ...\n";
+            stubOut << "def unload_asset(id: int) -> bool: ...\n";
+            stubOut << "def set_mesh(entity: int, path: str) -> bool: ...\n";
+            stubOut << "def get_mesh(entity: int) -> Optional[str]: ...\n";
+            stubOut << "\n# Timing and state\n";
+            stubOut << "def get_delta_time() -> float: ...\n";
+            stubOut << "def get_state(key: str) -> Optional[str]: ...\n";
+            stubOut << "def set_state(key: str, value: str) -> bool: ...\n";
+            stubOut << "\n# UI notifications\n";
+            stubOut << "def show_modal_message(message: str, on_closed: Optional[Callable[[], None]] = None) -> bool: ...\n";
+            stubOut << "def close_modal_message() -> bool: ...\n";
+            stubOut << "def show_toast_message(message: str, duration: float = 2.5) -> bool: ...\n";
+            stubOut << "\n# Input\n";
+            stubOut << "def set_on_key_pressed(callback: Optional[Callable[[int], None]]) -> bool: ...\n";
+            stubOut << "def set_on_key_released(callback: Optional[Callable[[int], None]]) -> bool: ...\n";
+            stubOut << "def register_key_pressed(key: int, callback: Callable[[int], None]) -> bool: ...\n";
+            stubOut << "def register_key_released(key: int, callback: Callable[[int], None]) -> bool: ...\n";
+            stubOut << "def is_shift_pressed() -> bool: ...\n";
+            stubOut << "def is_ctrl_pressed() -> bool: ...\n";
+            stubOut << "def is_alt_pressed() -> bool: ...\n";
+            writeKeyConstants(stubOut);
+            stubOut << "\n# Camera\n";
+            stubOut << "def get_camera_position() -> Tuple[float, float, float]: ...\n";
+            stubOut << "def set_camera_position(x: float, y: float, z: float) -> bool: ...\n";
+            stubOut << "def get_camera_rotation() -> Tuple[float, float]: ...\n";
+            stubOut << "def set_camera_rotation(yaw: float, pitch: float) -> bool: ...\n";
+            stubOut << "\n# Logging\n";
+            stubOut << "def log(message: str, level: int = 0) -> bool: ...\n";
         }
     }
 
@@ -2075,7 +2143,7 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
             std::ofstream stubOut(stubPath, std::ios::out | std::ios::trunc);
             if (stubOut.is_open())
             {
-                stubOut << "from typing import List, Optional, Tuple\n\n";
+                stubOut << "from typing import Callable, Dict, List, Optional, Tuple\n\n";
                 stubOut << "Component_Transform: int\nComponent_Mesh: int\nComponent_Material: int\n";
                 stubOut << "Component_Light: int\nComponent_Camera: int\nComponent_Physics: int\n";
                 stubOut << "Component_Script: int\nComponent_Name: int\n\n";
@@ -2104,6 +2172,24 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
                 stubOut << "def get_delta_time() -> float: ...\n";
                 stubOut << "def get_state(key: str) -> Optional[str]: ...\n";
                 stubOut << "def set_state(key: str, value: str) -> bool: ...\n";
+                stubOut << "\n# UI notifications\n";
+                stubOut << "def show_modal_message(message: str, on_closed: Optional[Callable[[], None]] = None) -> bool: ...\n";
+                stubOut << "def close_modal_message() -> bool: ...\n";
+                stubOut << "def show_toast_message(message: str, duration: float = 2.5) -> bool: ...\n";
+                stubOut << "\n# Input\n";
+                stubOut << "def set_on_key_pressed(callback: Optional[Callable[[int], None]]) -> bool: ...\n";
+                stubOut << "def set_on_key_released(callback: Optional[Callable[[int], None]]) -> bool: ...\n";
+                stubOut << "def register_key_pressed(key: int, callback: Callable[[int], None]) -> bool: ...\n";
+                stubOut << "def register_key_released(key: int, callback: Callable[[int], None]) -> bool: ...\n";
+                stubOut << "def is_shift_pressed() -> bool: ...\n";
+                stubOut << "def is_ctrl_pressed() -> bool: ...\n";
+                stubOut << "def is_alt_pressed() -> bool: ...\n";
+                writeKeyConstants(stubOut);
+                stubOut << "\n# Camera\n";
+                stubOut << "def get_camera_position() -> Tuple[float, float, float]: ...\n";
+                stubOut << "def set_camera_position(x: float, y: float, z: float) -> bool: ...\n";
+                stubOut << "def get_camera_rotation() -> Tuple[float, float]: ...\n";
+                stubOut << "def set_camera_rotation(yaw: float, pitch: float) -> bool: ...\n";
                 stubOut << "\n# Logging\n";
                 stubOut << "def log(message: str, level: int = 0) -> bool: ...\n";
             }

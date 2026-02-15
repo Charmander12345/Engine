@@ -107,6 +107,8 @@ int main()
         return -1;
     }
 
+    Scripting::SetRenderer(renderer);
+
     SDL_ShowCursor();
     if (auto* w = renderer->window())
     {
@@ -344,11 +346,7 @@ int main()
         {
             levelPath = level->getPath();
         }
-        Scripting::Shutdown();
-        if (!Scripting::Initialize())
-        {
-            logTimed(Logger::Category::Engine, "Failed to reinitialize Python scripting.", Logger::LogLevel::ERROR);
-        }
+        Scripting::ReloadScripts();
         assetManager.unloadAllAssets();
         diagnostics.setActiveLevel(nullptr);
         diagnostics.setScenePrepared(false);
@@ -643,6 +641,7 @@ int main()
                     continue;
                 }
                 diagnostics.dispatchKeyUp(event.key.key);
+                Scripting::HandleKeyUp(event.key.key);
                 if (event.key.key == SDLK_F12)
                 {
 					fpscap = !fpscap;
@@ -659,6 +658,7 @@ int main()
                     }
                 }
                 diagnostics.dispatchKeyDown(event.key.key);
+                Scripting::HandleKeyDown(event.key.key);
             }
         }
         const uint64_t eventEndCounter = SDL_GetPerformanceCounter();
@@ -673,6 +673,11 @@ int main()
         }
 
         Scripting::UpdateScripts(static_cast<float>(dt));
+
+        if (glRenderer)
+        {
+            glRenderer->getUIManager().updateNotifications(static_cast<float>(dt));
+        }
 
         if (glRenderer)
         {

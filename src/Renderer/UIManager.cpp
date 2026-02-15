@@ -13,6 +13,8 @@
 
 namespace
 {
+    UIManager* s_activeUIManager = nullptr;
+
     WidgetElement* FindElementById(WidgetElement& element, const std::string& id)
     {
         if (element.id == id)
@@ -657,8 +659,19 @@ const UIManager::WidgetEntry* UIManager::findWidgetEntry(const std::string& id) 
     return nullptr;
 }
 
+UIManager* UIManager::GetActiveInstance()
+{
+    return s_activeUIManager;
+}
+
+void UIManager::SetActiveInstance(UIManager* instance)
+{
+    s_activeUIManager = instance;
+}
+
 UIManager::UIManager()
 {
+    SetActiveInstance(this);
     DiagnosticsManager::Instance().registerActiveLevelChangedCallback(
         [this](EngineLevel* level)
         {
@@ -753,6 +766,110 @@ void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widg
     }
     m_widgetOrderDirty = true;
     m_pointerCacheDirty = true;
+}
+
+void UIManager::showModalMessage(const std::string& message, std::function<void()> onClosed)
+{
+    if (message.empty())
+    {
+        return;
+    }
+
+    if (m_modalVisible)
+    {
+        m_modalQueue.push_back(ModalRequest{ message, std::move(onClosed) });
+        return;
+    }
+
+    m_modalMessage = message;
+    m_modalOnClosed = std::move(onClosed);
+    ensureModalWidget();
+    registerWidget("ModalMessage", m_modalWidget);
+    m_modalVisible = true;
+}
+
+void UIManager::closeModalMessage()
+{
+    if (!m_modalVisible)
+    {
+        return;
+    }
+    unregisterWidget("ModalMessage");
+    m_modalVisible = false;
+    if (m_modalOnClosed)
+    {
+        auto callback = std::move(m_modalOnClosed);
+        m_modalOnClosed = {};
+        callback();
+    }
+    if (!m_modalQueue.empty())
+    {
+        ModalRequest next = std::move(m_modalQueue.front());
+        m_modalQueue.erase(m_modalQueue.begin());
+        m_modalMessage = std::move(next.message);
+        m_modalOnClosed = std::move(next.onClosed);
+        ensureModalWidget();
+        registerWidget("ModalMessage", m_modalWidget);
+        m_modalVisible = true;
+    }
+}
+
+void UIManager::showToastMessage(const std::string& message, float durationSeconds)
+{
+    if (message.empty())
+    {
+        return;
+    }
+
+    ToastNotification toast{};
+    toast.duration = std::max(0.1f, durationSeconds);
+    toast.timer = toast.duration;
+    toast.id = "ToastMessage." + std::to_string(m_nextToastId++);
+    toast.widget = createToastWidget(message, toast.id);
+    if (toast.widget)
+    {
+        registerWidget(toast.id, toast.widget);
+        m_toasts.push_back(std::move(toast));
+        updateToastStackLayout();
+    }
+}
+
+void UIManager::updateNotifications(float deltaSeconds)
+{
+    m_notificationPollTimer += deltaSeconds;
+    if (m_notificationPollTimer >= 1.0f)
+    {
+        m_notificationPollTimer = 0.0f;
+        auto& diagnostics = DiagnosticsManager::Instance();
+        const auto modalNotifications = diagnostics.consumeModalNotifications();
+        for (const auto& message : modalNotifications)
+        {
+            showModalMessage(message);
+        }
+        const auto toastNotifications = diagnostics.consumeToastNotifications();
+        for (const auto& toast : toastNotifications)
+        {
+            showToastMessage(toast.message, toast.durationSeconds);
+        }
+    }
+
+    bool removed = false;
+    for (auto it = m_toasts.begin(); it != m_toasts.end();)
+    {
+        it->timer = std::max(0.0f, it->timer - deltaSeconds);
+        if (it->timer <= 0.0f)
+        {
+            unregisterWidget(it->id);
+            it = m_toasts.erase(it);
+            removed = true;
+            continue;
+        }
+        ++it;
+    }
+    if (removed)
+    {
+        updateToastStackLayout();
+    }
 }
 
 void UIManager::populateOutlinerWidget(const std::shared_ptr<Widget>& widget)
@@ -1408,6 +1525,178 @@ void UIManager::markAllWidgetsDirty()
         {
             entry.widget->markLayoutDirty();
         }
+    }
+}
+
+void UIManager::ensureModalWidget()
+{
+    if (!m_modalWidget)
+    {
+        m_modalWidget = std::make_shared<Widget>();
+        m_modalWidget->setName("ModalMessage");
+        m_modalWidget->setAnchor(WidgetAnchor::TopLeft);
+        m_modalWidget->setFillX(true);
+        m_modalWidget->setFillY(true);
+        m_modalWidget->setZOrder(10000);
+    }
+
+    WidgetElement overlay{};
+    overlay.id = "Modal.Overlay";
+    overlay.type = WidgetElementType::Panel;
+    overlay.from = Vec2{ 0.0f, 0.0f };
+    overlay.to = Vec2{ 1.0f, 1.0f };
+    overlay.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.45f };
+    overlay.isHitTestable = true;
+    overlay.runtimeOnly = true;
+
+    WidgetElement panel{};
+    panel.id = "Modal.Panel";
+    panel.type = WidgetElementType::StackPanel;
+    panel.from = Vec2{ 0.3f, 0.35f };
+    panel.to = Vec2{ 0.7f, 0.65f };
+    panel.padding = Vec2{ 20.0f, 16.0f };
+    panel.orientation = StackOrientation::Vertical;
+    panel.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.95f };
+    panel.isHitTestable = false;
+    panel.runtimeOnly = true;
+
+    WidgetElement message{};
+    message.id = "Modal.Text";
+    message.type = WidgetElementType::Text;
+    message.text = m_modalMessage;
+    message.font = "default.ttf";
+    message.fontSize = 18.0f;
+    message.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+    message.wrapText = true;
+    message.fillX = true;
+    message.fillY = true;
+    message.minSize = Vec2{ 0.0f, 28.0f };
+    message.runtimeOnly = true;
+
+    WidgetElement closeButton{};
+    closeButton.id = "Modal.Close";
+    closeButton.type = WidgetElementType::Button;
+    closeButton.text = "Close";
+    closeButton.font = "default.ttf";
+    closeButton.fontSize = 16.0f;
+    closeButton.textAlignH = TextAlignH::Center;
+    closeButton.textAlignV = TextAlignV::Center;
+    closeButton.padding = Vec2{ 8.0f, 6.0f };
+    closeButton.minSize = Vec2{ 0.0f, 32.0f };
+    closeButton.color = Vec4{ 0.25f, 0.26f, 0.32f, 0.95f };
+    closeButton.hoverColor = Vec4{ 0.35f, 0.36f, 0.42f, 0.98f };
+    closeButton.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+    closeButton.shaderVertex = "button_vertex.glsl";
+    closeButton.shaderFragment = "button_fragment.glsl";
+    closeButton.isHitTestable = true;
+    closeButton.runtimeOnly = true;
+    closeButton.onClicked = [this]()
+        {
+            closeModalMessage();
+        };
+
+    WidgetElement buttonRow{};
+    buttonRow.id = "Modal.ButtonRow";
+    buttonRow.type = WidgetElementType::StackPanel;
+    buttonRow.from = Vec2{ 0.0f, 0.0f };
+    buttonRow.to = Vec2{ 1.0f, 1.0f };
+    buttonRow.fillX = true;
+    buttonRow.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    buttonRow.minSize = Vec2{ 0.0f, 32.0f };
+    buttonRow.orientation = StackOrientation::Horizontal;
+    buttonRow.padding = Vec2{ 8.0f, 0.0f };
+    buttonRow.runtimeOnly = true;
+
+    WidgetElement spacerLeft{};
+    spacerLeft.id = "Modal.ButtonSpacerLeft";
+    spacerLeft.type = WidgetElementType::Panel;
+    spacerLeft.fillX = true;
+    spacerLeft.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    spacerLeft.runtimeOnly = true;
+
+    WidgetElement spacerRight{};
+    spacerRight.id = "Modal.ButtonSpacerRight";
+    spacerRight.type = WidgetElementType::Panel;
+    spacerRight.fillX = true;
+    spacerRight.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    spacerRight.runtimeOnly = true;
+
+    closeButton.minSize = Vec2{ 120.0f, 32.0f };
+    buttonRow.children.clear();
+    buttonRow.children.push_back(std::move(spacerLeft));
+    buttonRow.children.push_back(std::move(closeButton));
+    buttonRow.children.push_back(std::move(spacerRight));
+
+    panel.children.clear();
+    panel.children.push_back(std::move(message));
+    panel.children.push_back(std::move(buttonRow));
+
+    std::vector<WidgetElement> elements;
+    elements.reserve(2);
+    elements.push_back(std::move(overlay));
+    elements.push_back(std::move(panel));
+    m_modalWidget->setElements(std::move(elements));
+    m_modalWidget->markLayoutDirty();
+}
+
+std::shared_ptr<Widget> UIManager::createToastWidget(const std::string& message, const std::string& name) const
+{
+    auto widget = std::make_shared<Widget>();
+    widget->setName(name);
+    widget->setAnchor(WidgetAnchor::BottomRight);
+    widget->setPositionPixels(Vec2{ 20.0f, 20.0f });
+    widget->setSizePixels(Vec2{ 320.0f, 70.0f });
+    widget->setZOrder(9000);
+
+    WidgetElement panel{};
+    panel.id = name + ".Panel";
+    panel.type = WidgetElementType::StackPanel;
+    panel.from = Vec2{ 0.0f, 0.0f };
+    panel.to = Vec2{ 1.0f, 1.0f };
+    panel.padding = Vec2{ 12.0f, 10.0f };
+    panel.orientation = StackOrientation::Vertical;
+    panel.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.92f };
+    panel.isHitTestable = false;
+    panel.runtimeOnly = true;
+
+    WidgetElement messageElement{};
+    messageElement.id = name + ".Text";
+    messageElement.type = WidgetElementType::Text;
+    messageElement.text = message;
+    messageElement.font = "default.ttf";
+    messageElement.fontSize = 14.0f;
+    messageElement.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+    messageElement.fillX = true;
+    messageElement.minSize = Vec2{ 0.0f, 22.0f };
+    messageElement.runtimeOnly = true;
+
+    panel.children.clear();
+    panel.children.push_back(std::move(messageElement));
+
+    std::vector<WidgetElement> elements;
+    elements.reserve(1);
+    elements.push_back(std::move(panel));
+    widget->setElements(std::move(elements));
+    widget->markLayoutDirty();
+    return widget;
+}
+
+void UIManager::updateToastStackLayout()
+{
+    const float spacing = 10.0f;
+    Vec2 offset{ 20.0f, 20.0f };
+    for (size_t index = 0; index < m_toasts.size(); ++index)
+    {
+        auto& toast = m_toasts[index];
+        if (!toast.widget)
+        {
+            continue;
+        }
+        const Vec2 size = toast.widget->getSizePixels();
+        Vec2 position = offset;
+        position.y += static_cast<float>(index) * (size.y + spacing);
+        toast.widget->setPositionPixels(position);
+        toast.widget->setZOrder(9000 + static_cast<int>(index));
     }
 }
 

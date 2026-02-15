@@ -16,22 +16,39 @@
 #include "../Diagnostics/DiagnosticsManager.h"
 #include "../Core/EngineLevel.h"
 #include "../Logger/Logger.h"
+#include "../Renderer/UIManager.h"
+#include <SDL3/SDL.h>
+#include <cctype>
+#include "../Renderer/Renderer.h"
 
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <memory>
 
 namespace
 {
+    std::string DescribeEntity(ECS::Entity entity)
+    {
+        std::string label = "entity " + std::to_string(entity);
+        if (const auto* nameComponent = ECS::ECSManager::Instance().getComponent<ECS::NameComponent>(entity))
+        {
+            if (!nameComponent->displayName.empty())
+            {
+                label += " (" + nameComponent->displayName + ")";
+            }
+        }
+        return label;
+    }
+
     void LogPythonError(const std::string& context)
     {
         if (!PyErr_Occurred())
         {
             return;
         }
-
         PyObject* excType = nullptr;
         PyObject* excValue = nullptr;
         PyObject* excTrace = nullptr;
@@ -89,6 +106,7 @@ namespace
         }
 
         Logger::Instance().log(Logger::Category::Engine, message, Logger::LogLevel::ERROR);
+        DiagnosticsManager::Instance().enqueueModalNotification(message, true);
 
         Py_XDECREF(excType);
         Py_XDECREF(excValue);
@@ -128,6 +146,11 @@ namespace
     EngineLevel* s_lastLevel{ nullptr };
     std::string s_lastLevelScriptPath;
     LevelScriptState s_levelScript;
+    PyObject* s_onKeyPressed{ nullptr };
+    PyObject* s_onKeyReleased{ nullptr };
+    std::unordered_map<int, std::vector<PyObject*>> s_keyPressedCallbacks;
+    std::unordered_map<int, std::vector<PyObject*>> s_keyReleasedCallbacks;
+    Renderer* s_renderer{ nullptr };
 
     void ReleaseScriptState(ScriptState& state)
     {
@@ -167,6 +190,129 @@ namespace
             s_levelScript.module = nullptr;
         }
         s_levelScript.loadedCalled = false;
+    }
+
+    void ClearKeyCallbacks()
+    {
+        if (s_onKeyPressed)
+        {
+            Py_DECREF(s_onKeyPressed);
+            s_onKeyPressed = nullptr;
+        }
+        if (s_onKeyReleased)
+        {
+            Py_DECREF(s_onKeyReleased);
+            s_onKeyReleased = nullptr;
+        }
+        for (auto& [key, callbacks] : s_keyPressedCallbacks)
+        {
+            for (auto* callback : callbacks)
+            {
+                Py_DECREF(callback);
+            }
+        }
+        for (auto& [key, callbacks] : s_keyReleasedCallbacks)
+        {
+            for (auto* callback : callbacks)
+            {
+                Py_DECREF(callback);
+            }
+        }
+        s_keyPressedCallbacks.clear();
+        s_keyReleasedCallbacks.clear();
+    }
+
+    bool StoreKeyCallback(PyObject* callback, PyObject*& target)
+    {
+        if (callback == Py_None)
+        {
+            if (target)
+            {
+                Py_DECREF(target);
+                target = nullptr;
+            }
+            return true;
+        }
+        if (!PyCallable_Check(callback))
+        {
+            PyErr_SetString(PyExc_TypeError, "callback must be callable");
+            return false;
+        }
+        Py_INCREF(callback);
+        if (target)
+        {
+            Py_DECREF(target);
+        }
+        target = callback;
+        return true;
+    }
+
+    bool StoreKeyCallbackForKey(PyObject* callback, std::unordered_map<int, std::vector<PyObject*>>& map, int key)
+    {
+        if (!PyCallable_Check(callback))
+        {
+            PyErr_SetString(PyExc_TypeError, "callback must be callable");
+            return false;
+        }
+        Py_INCREF(callback);
+        map[key].push_back(callback);
+        return true;
+    }
+
+    void InvokeKeyCallbacks(PyObject* callback, int key)
+    {
+        if (!callback)
+        {
+            return;
+        }
+        PyObject* result = PyObject_CallFunction(callback, "i", key);
+        if (!result)
+        {
+            LogPythonError("Python: key callback failed");
+            return;
+        }
+        Py_DECREF(result);
+    }
+
+    void InvokeKeyCallbacksForKey(const std::unordered_map<int, std::vector<PyObject*>>& map, int key)
+    {
+        auto it = map.find(key);
+        if (it == map.end())
+        {
+            return;
+        }
+        for (auto* callback : it->second)
+        {
+            InvokeKeyCallbacks(callback, key);
+        }
+    }
+
+    std::string NormalizeKeyConstantName(const char* name)
+    {
+        std::string result;
+        bool lastUnderscore = false;
+        for (const unsigned char c : std::string(name))
+        {
+            if (std::isalnum(c))
+            {
+                result.push_back(static_cast<char>(std::toupper(c)));
+                lastUnderscore = false;
+            }
+            else if (!lastUnderscore)
+            {
+                result.push_back('_');
+                lastUnderscore = true;
+            }
+        }
+        while (!result.empty() && result.back() == '_')
+        {
+            result.pop_back();
+        }
+        if (result.empty())
+        {
+            return {};
+        }
+        return "Key_" + result;
     }
 
     std::filesystem::path ResolveScriptPath(const std::string& scriptPath)
@@ -461,7 +607,232 @@ namespace
         {
             return nullptr;
         }
-        Logger::Instance().log(Logger::Category::Engine, message, ResolveLogLevel(level));
+        Logger::Instance().log(Logger::Category::Scripting, message, ResolveLogLevel(level));
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_set_on_key_pressed(PyObject*, PyObject* args)
+    {
+        PyObject* callback = Py_None;
+        if (!PyArg_ParseTuple(args, "O", &callback))
+        {
+            return nullptr;
+        }
+        if (!StoreKeyCallback(callback, s_onKeyPressed))
+        {
+            return nullptr;
+        }
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_set_on_key_released(PyObject*, PyObject* args)
+    {
+        PyObject* callback = Py_None;
+        if (!PyArg_ParseTuple(args, "O", &callback))
+        {
+            return nullptr;
+        }
+        if (!StoreKeyCallback(callback, s_onKeyReleased))
+        {
+            return nullptr;
+        }
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_register_key_pressed(PyObject*, PyObject* args)
+    {
+        int key = 0;
+        PyObject* callback = nullptr;
+        if (!PyArg_ParseTuple(args, "iO", &key, &callback))
+        {
+            return nullptr;
+        }
+        if (!StoreKeyCallbackForKey(callback, s_keyPressedCallbacks, key))
+        {
+            return nullptr;
+        }
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_register_key_released(PyObject*, PyObject* args)
+    {
+        int key = 0;
+        PyObject* callback = nullptr;
+        if (!PyArg_ParseTuple(args, "iO", &key, &callback))
+        {
+            return nullptr;
+        }
+        if (!StoreKeyCallbackForKey(callback, s_keyReleasedCallbacks, key))
+        {
+            return nullptr;
+        }
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_is_shift_pressed(PyObject*, PyObject*)
+    {
+        const SDL_Keymod mods = SDL_GetModState();
+        if (mods & SDL_KMOD_SHIFT)
+        {
+            Py_RETURN_TRUE;
+        }
+        Py_RETURN_FALSE;
+    }
+
+    PyObject* py_is_ctrl_pressed(PyObject*, PyObject*)
+    {
+        const SDL_Keymod mods = SDL_GetModState();
+        if (mods & SDL_KMOD_CTRL)
+        {
+            Py_RETURN_TRUE;
+        }
+        Py_RETURN_FALSE;
+    }
+
+    PyObject* py_is_alt_pressed(PyObject*, PyObject*)
+    {
+        const SDL_Keymod mods = SDL_GetModState();
+        if (mods & SDL_KMOD_ALT)
+        {
+            Py_RETURN_TRUE;
+        }
+        Py_RETURN_FALSE;
+    }
+
+    PyObject* py_get_key(PyObject*, PyObject* args)
+    {
+        const char* name = nullptr;
+        if (!PyArg_ParseTuple(args, "s", &name))
+        {
+            return nullptr;
+        }
+        const SDL_Keycode key = SDL_GetKeyFromName(name);
+        return PyLong_FromLong(static_cast<long>(key));
+    }
+
+    PyObject* py_get_camera_position(PyObject*, PyObject*)
+    {
+        if (!s_renderer)
+        {
+            PyErr_SetString(PyExc_RuntimeError, "Renderer not available.");
+            return nullptr;
+        }
+        const Vec3 pos = s_renderer->getCameraPosition();
+        return Py_BuildValue("(f,f,f)", pos.x, pos.y, pos.z);
+    }
+
+    PyObject* py_set_camera_position(PyObject*, PyObject* args)
+    {
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = 0.0f;
+        if (!PyArg_ParseTuple(args, "fff", &x, &y, &z))
+        {
+            return nullptr;
+        }
+        if (!s_renderer)
+        {
+            PyErr_SetString(PyExc_RuntimeError, "Renderer not available.");
+            return nullptr;
+        }
+        s_renderer->setCameraPosition(Vec3{ x, y, z });
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_get_camera_rotation(PyObject*, PyObject*)
+    {
+        if (!s_renderer)
+        {
+            PyErr_SetString(PyExc_RuntimeError, "Renderer not available.");
+            return nullptr;
+        }
+        const Vec2 rot = s_renderer->getCameraRotationDegrees();
+        return Py_BuildValue("(f,f)", rot.x, rot.y);
+    }
+
+    PyObject* py_set_camera_rotation(PyObject*, PyObject* args)
+    {
+        float yaw = 0.0f;
+        float pitch = 0.0f;
+        if (!PyArg_ParseTuple(args, "ff", &yaw, &pitch))
+        {
+            return nullptr;
+        }
+        if (!s_renderer)
+        {
+            PyErr_SetString(PyExc_RuntimeError, "Renderer not available.");
+            return nullptr;
+        }
+        s_renderer->setCameraRotationDegrees(yaw, pitch);
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_show_modal_message(PyObject*, PyObject* args)
+    {
+        const char* message = nullptr;
+        PyObject* callback = Py_None;
+        if (!PyArg_ParseTuple(args, "s|O", &message, &callback))
+        {
+            return nullptr;
+        }
+        if (callback != Py_None && !PyCallable_Check(callback))
+        {
+            PyErr_SetString(PyExc_TypeError, "callback must be callable");
+            return nullptr;
+        }
+
+        std::function<void()> onClosed;
+        if (callback != Py_None)
+        {
+            Py_INCREF(callback);
+            std::shared_ptr<PyObject> callbackRef(callback, [](PyObject* obj)
+                {
+                    Py_DECREF(obj);
+                });
+            onClosed = [callbackRef]()
+                {
+                    PyGILState_STATE gilState = PyGILState_Ensure();
+                    PyObject* result = PyObject_CallFunctionObjArgs(callbackRef.get(), nullptr);
+                    if (!result)
+                    {
+                        LogPythonError("Python: modal close callback failed");
+                    }
+                    else
+                    {
+                        Py_DECREF(result);
+                    }
+                    PyGILState_Release(gilState);
+                };
+        }
+
+        if (auto* uiManager = UIManager::GetActiveInstance())
+        {
+            uiManager->showModalMessage(message, std::move(onClosed));
+        }
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_close_modal_message(PyObject*, PyObject*)
+    {
+        if (auto* uiManager = UIManager::GetActiveInstance())
+        {
+            uiManager->closeModalMessage();
+        }
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_show_toast_message(PyObject*, PyObject* args)
+    {
+        const char* message = nullptr;
+        float duration = 2.5f;
+        if (!PyArg_ParseTuple(args, "s|f", &message, &duration))
+        {
+            return nullptr;
+        }
+        if (auto* uiManager = UIManager::GetActiveInstance())
+        {
+            uiManager->showToastMessage(message, duration);
+        }
         Py_RETURN_TRUE;
     }
 
@@ -813,6 +1184,21 @@ namespace
         { "get_delta_time", py_get_delta_time, METH_NOARGS, "Get last frame delta time." },
         { "get_state", py_get_state, METH_VARARGS, "Get engine state string." },
         { "set_state", py_set_state, METH_VARARGS, "Set engine state string." },
+        { "show_modal_message", py_show_modal_message, METH_VARARGS, "Show a blocking modal message." },
+        { "close_modal_message", py_close_modal_message, METH_NOARGS, "Close the active modal message." },
+        { "show_toast_message", py_show_toast_message, METH_VARARGS, "Show a toast message." },
+        { "set_on_key_pressed", py_set_on_key_pressed, METH_VARARGS, "Set a global key pressed callback." },
+        { "set_on_key_released", py_set_on_key_released, METH_VARARGS, "Set a global key released callback." },
+        { "register_key_pressed", py_register_key_pressed, METH_VARARGS, "Register a key pressed callback for a key." },
+        { "register_key_released", py_register_key_released, METH_VARARGS, "Register a key released callback for a key." },
+        { "is_shift_pressed", py_is_shift_pressed, METH_NOARGS, "Check if shift is pressed." },
+        { "is_ctrl_pressed", py_is_ctrl_pressed, METH_NOARGS, "Check if ctrl is pressed." },
+        { "is_alt_pressed", py_is_alt_pressed, METH_NOARGS, "Check if alt is pressed." },
+        { "get_key", py_get_key, METH_VARARGS, "Resolve a keycode from a key name." },
+        { "get_camera_position", py_get_camera_position, METH_NOARGS, "Get the camera position." },
+        { "set_camera_position", py_set_camera_position, METH_VARARGS, "Set the camera position." },
+        { "get_camera_rotation", py_get_camera_rotation, METH_NOARGS, "Get the camera rotation (yaw, pitch)." },
+        { "set_camera_rotation", py_set_camera_rotation, METH_VARARGS, "Set the camera rotation (yaw, pitch)." },
         { "log", py_log, METH_VARARGS, "Log a message (level: 0=info,1=warn,2=error)." },
         { nullptr, nullptr, 0, nullptr }
     };
@@ -853,6 +1239,28 @@ namespace
         PyModule_AddIntConstant(module, "Log_Info", 0);
         PyModule_AddIntConstant(module, "Log_Warning", 1);
         PyModule_AddIntConstant(module, "Log_Error", 2);
+
+        PyObject* keyDict = PyDict_New();
+        std::unordered_set<std::string> addedKeys;
+        for (int scancode = 0; scancode < SDL_SCANCODE_COUNT; ++scancode)
+        {
+            const char* name = SDL_GetScancodeName(static_cast<SDL_Scancode>(scancode));
+            if (!name || !*name)
+            {
+                continue;
+            }
+            const SDL_Keycode keycode = SDL_GetKeyFromScancode(static_cast<SDL_Scancode>(scancode), SDL_KMOD_NONE, false);
+            PyObject* keyValue = PyLong_FromLong(static_cast<long>(keycode));
+            PyDict_SetItemString(keyDict, name, keyValue);
+            Py_DECREF(keyValue);
+
+            const std::string constantName = NormalizeKeyConstantName(name);
+            if (!constantName.empty() && addedKeys.insert(constantName).second)
+            {
+                PyModule_AddIntConstant(module, constantName.c_str(), static_cast<int>(keycode));
+            }
+        }
+        PyModule_AddObject(module, "Keys", keyDict);
 
         return module;
     }
@@ -898,6 +1306,7 @@ namespace Scripting
             }
             s_scripts.clear();
             ReleaseLevelScriptState();
+            ClearKeyCallbacks();
             s_lastLevel = nullptr;
             s_lastLevelScriptPath.clear();
             Py_Finalize();
@@ -919,6 +1328,7 @@ namespace Scripting
         }
         s_scripts.clear();
         ReleaseLevelScriptState();
+        ClearKeyCallbacks();
         s_lastLevel = nullptr;
         s_lastLevelScriptPath.clear();
         PyGILState_Release(gilState);
@@ -932,6 +1342,7 @@ namespace Scripting
         }
 
         s_lastDeltaSeconds = deltaSeconds;
+
 
         auto& diagnostics = DiagnosticsManager::Instance();
         EngineLevel* level = diagnostics.getActiveLevelSoft();
@@ -1008,7 +1419,7 @@ namespace Scripting
 					PyObject* result = PyObject_CallFunction(s_levelScript.onLoadedFunc, nullptr);
 					if (!result)
 					{
-						LogPythonError("Python: on_level_loaded failed");
+						LogPythonError("Python: on_level_loaded failed (level script: " + s_lastLevelScriptPath + ")");
 					}
 					else
 					{
@@ -1056,7 +1467,7 @@ namespace Scripting
                 PyObject* result = PyObject_CallFunction(state.onLoadedFunc, "k", static_cast<unsigned long>(entity));
                 if (!result)
                 {
-                    LogPythonError("Python: onloaded failed for entity " + std::to_string(entity));
+                    LogPythonError("Python: onloaded failed for " + DescribeEntity(entity) + " (script: " + component->scriptPath + ")");
                 }
                 else
                 {
@@ -1070,7 +1481,7 @@ namespace Scripting
                 PyObject* result = PyObject_CallFunction(state.tickFunc, "kf", static_cast<unsigned long>(entity), deltaSeconds);
                 if (!result)
                 {
-                    LogPythonError("Python: tick failed for entity " + std::to_string(entity));
+                    LogPythonError("Python: tick failed for " + DescribeEntity(entity) + " (script: " + component->scriptPath + ")");
                 }
                 else
                 {
@@ -1080,5 +1491,34 @@ namespace Scripting
         }
 
         PyGILState_Release(gilState);
+    }
+
+    void HandleKeyDown(int key)
+    {
+        if (!Py_IsInitialized())
+        {
+            return;
+        }
+        PyGILState_STATE gilState = PyGILState_Ensure();
+        InvokeKeyCallbacks(s_onKeyPressed, key);
+        InvokeKeyCallbacksForKey(s_keyPressedCallbacks, key);
+        PyGILState_Release(gilState);
+    }
+
+    void HandleKeyUp(int key)
+    {
+        if (!Py_IsInitialized())
+        {
+            return;
+        }
+        PyGILState_STATE gilState = PyGILState_Ensure();
+        InvokeKeyCallbacks(s_onKeyReleased, key);
+        InvokeKeyCallbacksForKey(s_keyReleasedCallbacks, key);
+        PyGILState_Release(gilState);
+    }
+
+    void SetRenderer(Renderer* renderer)
+    {
+        s_renderer = renderer;
     }
 }

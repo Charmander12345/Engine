@@ -221,6 +221,10 @@ namespace
         {
             element.textAlignV = alignVFromString(entry.at("textAlignV").get<std::string>());
         }
+        if (entry.contains("wrapText"))
+        {
+            element.wrapText = entry.at("wrapText").get<bool>();
+        }
         if (entry.contains("padding"))
         {
             element.padding = readVec2(entry.at("padding"));
@@ -323,6 +327,10 @@ namespace
         }
         entry["textAlignH"] = toString(element.textAlignH);
         entry["textAlignV"] = toString(element.textAlignV);
+        if (element.wrapText)
+        {
+            entry["wrapText"] = element.wrapText;
+        }
         if (element.padding.x > 0.0f || element.padding.y > 0.0f)
         {
             entry["padding"] = writeVec2(element.padding);

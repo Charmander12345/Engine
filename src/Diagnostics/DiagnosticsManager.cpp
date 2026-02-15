@@ -133,6 +133,52 @@ void DiagnosticsManager::clear()
     m_states.clear();
     m_projectStates.clear();
     m_rhiType = RHIType::Unknown;
+    m_modalNotificationCache.clear();
+    m_modalNotifications.clear();
+    m_toastNotifications.clear();
+}
+
+void DiagnosticsManager::enqueueModalNotification(const std::string& message, bool dedupe)
+{
+    if (message.empty())
+    {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (dedupe && !m_modalNotificationCache.insert(message).second)
+    {
+        return;
+    }
+    m_modalNotifications.push_back(message);
+}
+
+void DiagnosticsManager::enqueueToastNotification(const std::string& message, float durationSeconds)
+{
+    if (message.empty())
+    {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    ToastNotification toast{};
+    toast.message = message;
+    toast.durationSeconds = durationSeconds;
+    m_toastNotifications.push_back(std::move(toast));
+}
+
+std::vector<std::string> DiagnosticsManager::consumeModalNotifications()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<std::string> result = std::move(m_modalNotifications);
+    m_modalNotifications.clear();
+    return result;
+}
+
+std::vector<DiagnosticsManager::ToastNotification> DiagnosticsManager::consumeToastNotifications()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<ToastNotification> result = std::move(m_toastNotifications);
+    m_toastNotifications.clear();
+    return result;
 }
 
 void DiagnosticsManager::setRHIType(RHIType type)

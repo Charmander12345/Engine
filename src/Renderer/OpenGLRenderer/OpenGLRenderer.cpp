@@ -4,6 +4,7 @@
 #include <array>
 #include <filesystem>
 #include <cmath>
+#include <cctype>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -364,7 +365,6 @@ bool OpenGLRenderer::initialize()
             DiagnosticsManager::Instance().setScenePrepared(true);
         }
     }
-
     {
         auto& ecs = ECS::ECSManager::Instance();
         m_renderEntries.clear();
@@ -1182,6 +1182,12 @@ void OpenGLRenderer::renderUI()
             {
                 const float heightPx = std::max(0.0f, y1 - y0);
                 const float widthPx = std::max(0.0f, x1 - x0);
+                const float contentX0 = x0 + element.padding.x;
+                const float contentY0 = y0 + element.padding.y;
+                const float contentX1 = x1 - element.padding.x;
+                const float contentY1 = y1 - element.padding.y;
+                const float contentW = std::max(0.0f, contentX1 - contentX0);
+                const float contentH = std::max(0.0f, contentY1 - contentY0);
                 float scale = 1.0f;
                 if (element.fontSize > 0.0f)
                 {
@@ -1203,14 +1209,180 @@ void OpenGLRenderer::renderUI()
                 }
                 const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultTextVertex);
                 const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultTextFragment);
-                if (!element.shaderVertex.empty() || !element.shaderFragment.empty())
+                const auto drawLine = [&](const std::string& line, const Vec2& pos)
+                    {
+                        if (!element.shaderVertex.empty() || !element.shaderFragment.empty())
+                        {
+                            m_textRenderer->drawTextWithShader(line, pos, scale, element.textColor, vertexPath, fragmentPath);
+                        }
+                        else
+                        {
+                            m_textRenderer->drawText(line, pos, scale, element.textColor);
+                        }
+                    };
+
+                if (element.wrapText && contentW > 0.0f)
                 {
-                    m_textRenderer->drawTextWithShader(element.text, Vec2{ x0, y0 }, scale, element.color,
-                        vertexPath, fragmentPath);
+                    std::vector<std::string> lines;
+                    std::vector<std::string> paragraphs;
+                    std::string paragraph;
+                    for (char c : element.text)
+                    {
+                        if (c == '\n')
+                        {
+                            paragraphs.push_back(paragraph);
+                            paragraph.clear();
+                        }
+                        else
+                        {
+                            paragraph.push_back(c);
+                        }
+                    }
+                    paragraphs.push_back(paragraph);
+
+                    const auto pushWrappedLine = [&](const std::string& line)
+                        {
+                            if (!line.empty())
+                            {
+                                lines.push_back(line);
+                            }
+                        };
+
+                    const auto wrapWord = [&](const std::string& word, std::string& currentLine)
+                        {
+                            const Vec2 wordSize = m_textRenderer->measureText(word, scale);
+                            if (currentLine.empty() && wordSize.x > contentW)
+                            {
+                                std::string chunk;
+                                for (char wc : word)
+                                {
+                                    std::string candidate = chunk;
+                                    candidate.push_back(wc);
+                                    const Vec2 chunkSize = m_textRenderer->measureText(candidate, scale);
+                                    if (chunkSize.x > contentW && !chunk.empty())
+                                    {
+                                        lines.push_back(chunk);
+                                        chunk.clear();
+                                        chunk.push_back(wc);
+                                    }
+                                    else
+                                    {
+                                        chunk = candidate;
+                                    }
+                                }
+                                currentLine = chunk;
+                                return;
+                            }
+
+                            std::string candidate = currentLine.empty() ? word : (currentLine + " " + word);
+                            const Vec2 candidateSize = m_textRenderer->measureText(candidate, scale);
+                            if (candidateSize.x <= contentW || currentLine.empty())
+                            {
+                                currentLine = candidate;
+                            }
+                            else
+                            {
+                                lines.push_back(currentLine);
+                                currentLine = word;
+                            }
+                        };
+
+                    for (const auto& para : paragraphs)
+                    {
+                        std::string currentLine;
+                        std::string currentWord;
+                        for (char c : para)
+                        {
+                            if (std::isspace(static_cast<unsigned char>(c)))
+                            {
+                                if (!currentWord.empty())
+                                {
+                                    wrapWord(currentWord, currentLine);
+                                    currentWord.clear();
+                                }
+                            }
+                            else
+                            {
+                                currentWord.push_back(c);
+                            }
+                        }
+                        if (!currentWord.empty())
+                        {
+                            wrapWord(currentWord, currentLine);
+                        }
+                        pushWrappedLine(currentLine);
+                    }
+
+                    const float lineHeight = m_textRenderer->getLineHeight(scale);
+                    const float totalHeight = lineHeight * static_cast<float>(lines.size());
+                    float startY = contentY0;
+                    switch (element.textAlignV)
+                    {
+                    case TextAlignV::Center:
+                        startY = contentY0 + (contentH - totalHeight) * 0.5f;
+                        break;
+                    case TextAlignV::Bottom:
+                        startY = contentY1 - totalHeight;
+                        break;
+                    default:
+                        startY = contentY0;
+                        break;
+                    }
+
+                    for (size_t i = 0; i < lines.size(); ++i)
+                    {
+                        const std::string& line = lines[i];
+                        const Vec2 lineSize = m_textRenderer->measureText(line, scale);
+                        float textX = contentX0;
+                        switch (element.textAlignH)
+                        {
+                        case TextAlignH::Center:
+                            textX = contentX0 + (contentW - lineSize.x) * 0.5f;
+                            break;
+                        case TextAlignH::Right:
+                            textX = contentX1 - lineSize.x;
+                            break;
+                        default:
+                            textX = contentX0;
+                            break;
+                        }
+                        const float textY = startY + lineHeight * static_cast<float>(i);
+                        drawLine(line, Vec2{ textX, textY });
+                    }
                 }
                 else
                 {
-                    m_textRenderer->drawText(element.text, Vec2{ x0, y0 }, scale, element.color);
+                    Vec2 textSize = m_textRenderer->measureText(element.text, scale);
+                    float textX = contentX0;
+                    float textY = contentY0;
+
+                    switch (element.textAlignH)
+                    {
+                    case TextAlignH::Center:
+                        textX = contentX0 + (contentW - textSize.x) * 0.5f;
+                        break;
+                    case TextAlignH::Right:
+                        textX = contentX1 - textSize.x;
+                        break;
+                    default:
+                        textX = contentX0;
+                        break;
+                    }
+
+                    switch (element.textAlignV)
+                    {
+                    case TextAlignV::Center:
+                        textY = contentY0 + (contentH - textSize.y) * 0.5f;
+                        break;
+                    case TextAlignV::Bottom:
+                        textY = contentY1 - textSize.y;
+                        break;
+                    default:
+                        textY = contentY0;
+                        break;
+                    }
+
+                    drawLine(element.text, Vec2{ textX, textY });
                 }
                 if (m_uiDebugEnabled)
                 {
@@ -2242,6 +2414,40 @@ void OpenGLRenderer::rotateCamera(float yawDeltaDegrees, float pitchDeltaDegrees
     if (!m_camera)
         return;
     m_camera->rotate(yawDeltaDegrees, pitchDeltaDegrees);
+}
+
+Vec3 OpenGLRenderer::getCameraPosition() const
+{
+    if (m_camera)
+    {
+        return m_camera->getPosition();
+    }
+    return Vec3{};
+}
+
+void OpenGLRenderer::setCameraPosition(const Vec3& position)
+{
+    if (m_camera)
+    {
+        m_camera->setPosition(position);
+    }
+}
+
+Vec2 OpenGLRenderer::getCameraRotationDegrees() const
+{
+    if (m_camera)
+    {
+        return m_camera->getRotationDegrees();
+    }
+    return Vec2{};
+}
+
+void OpenGLRenderer::setCameraRotationDegrees(float yawDegrees, float pitchDegrees)
+{
+    if (m_camera)
+    {
+        m_camera->setRotationDegrees(yawDegrees, pitchDegrees);
+    }
 }
 
 const std::string& OpenGLRenderer::name() const

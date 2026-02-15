@@ -69,6 +69,7 @@ struct WidgetElement
     bool isCompact{ false };
     TextAlignH textAlignH{ TextAlignH::Left };
     TextAlignV textAlignV{ TextAlignV::Top };
+    bool wrapText{ false };
     Vec2 padding{ 0.0f, 0.0f };
     Vec2 margin{ 0.0f, 0.0f };
     bool isHitTestable{ false };
