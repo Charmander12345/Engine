@@ -169,7 +169,7 @@ void OpenGLRenderer::present()
 
 void OpenGLRenderer::render()
 {
-    if (!m_initialized)
+    if (!m_initialized || !m_window)
     {
         return;
     }
@@ -219,8 +219,8 @@ void OpenGLRenderer::render()
 	const auto& groups = level->getGroups();
 
     // Helper lambda to render a single object
-    auto renderObject = [&](const std::shared_ptr<EngineObject>& obj, Transform* t, bool is3D) {
-        if (!obj || obj->getPath().empty())
+    auto renderObject = [&](const std::shared_ptr<EngineObject>& obj, const Transform* t, bool is3D) {
+        if (!obj || obj->getPath().empty() || !t)
             return;
 
         auto renderableObj = std::dynamic_pointer_cast<RenderableObject>(obj);
@@ -229,7 +229,7 @@ void OpenGLRenderer::render()
 
         auto material = renderableObj->getMaterial();
         auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
-        if (glMaterial && t)
+        if (glMaterial)
         {
             Mat4 engineMat = t->getMatrix4ColumnMajor();
             glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
@@ -257,7 +257,7 @@ void OpenGLRenderer::render()
             if (!entry)
                 continue;
 
-            Transform* t = &entry->transform;
+            const Transform* t = &entry->transform;
             bool is3D = std::dynamic_pointer_cast<Object3D>(entry->object) != nullptr;
             renderObject(entry->object, t, is3D);
         }
@@ -270,7 +270,7 @@ void OpenGLRenderer::render()
             for (size_t i = 0; i < groupObjects.size(); ++i)
             {
                 const auto& entry = groupObjects[i];
-				Transform* t = (i < groupEntry.transforms.size()) ? const_cast<Transform*>(&groupEntry.transforms[i]) : nullptr;
+				const Transform* t = (i < groupEntry.transforms.size()) ? &groupEntry.transforms[i] : nullptr;
                 bool is3D = std::dynamic_pointer_cast<Object3D>(entry) != nullptr;
                 renderObject(entry, t, is3D);
             }

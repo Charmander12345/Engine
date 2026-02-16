@@ -6,6 +6,7 @@
 #include "../Logger/Logger.h"
 
 #include "../Basics/EngineLevel.h"
+#include "../Basics/RenderableObject.h"
 #include "../Basics/Object2D.h"
 #include "../Basics/Object3D.h"
 
