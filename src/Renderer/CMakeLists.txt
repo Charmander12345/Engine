@@ -36,6 +36,12 @@ add_library(Renderer SHARED
     UIWidgets/ColorPickerWidget.cpp
     UIWidgets/ColorPickerWidget.h
     UIWidgets/EntryBarWidget.h
+    UIWidgets/SeparatorWidget.cpp
+    UIWidgets/SeparatorWidget.h
+    UIWidgets/ProgressBarWidget.cpp
+    UIWidgets/ProgressBarWidget.h
+    UIWidgets/SliderWidget.cpp
+    UIWidgets/SliderWidget.h
 )
 set_target_properties(Renderer PROPERTIES
     CXX_STANDARD 20

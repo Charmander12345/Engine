@@ -145,6 +145,27 @@ bool OpenGLMaterial::build()
     }
     m_vertexCount = static_cast<GLsizei>((m_vertexData.size() * sizeof(float)) / stride);
 
+    // Cache uniform locations once
+    m_locModel = glGetUniformLocation(m_program, "uModel");
+    m_locView = glGetUniformLocation(m_program, "uView");
+    m_locProjection = glGetUniformLocation(m_program, "uProjection");
+    m_locLightPos = glGetUniformLocation(m_program, "uLightPos");
+    m_locLightColor = glGetUniformLocation(m_program, "uLightColor");
+    m_locLightIntensity = glGetUniformLocation(m_program, "uLightIntensity");
+
+    // Cache texture sampler locations (texture0, texture1, ...)
+    m_texUniformLocs.clear();
+    for (int i = 0; i < 16; ++i)
+    {
+        const std::string name = "texture" + std::to_string(i);
+        GLint loc = glGetUniformLocation(m_program, name.c_str());
+        if (loc < 0)
+        {
+            break;
+        }
+        m_texUniformLocs.push_back(loc);
+    }
+
     return true;
 }
 
@@ -154,9 +175,6 @@ void OpenGLMaterial::bindTextures()
     {
         return;
     }
-
-    // Must have the program bound before calling glUniform*
-    glUseProgram(m_program);
 
     uint32_t unit = 0;
     for (const auto& texCpu : m_textures)
@@ -181,20 +199,16 @@ void OpenGLMaterial::bindTextures()
             it = m_textureCache.emplace(key, std::move(glTex)).first;
         }
 
-        // Bind texture to unit first
         it->second->bind(unit);
 
-        const std::string uniformName = "texture" + std::to_string(unit);
-        GLint loc = glGetUniformLocation(m_program, uniformName.c_str());
-        if (loc >= 0)
+        if (unit < static_cast<uint32_t>(m_texUniformLocs.size()) && m_texUniformLocs[unit] >= 0)
         {
-            glUniform1i(loc, static_cast<GLint>(unit));
+            glUniform1i(m_texUniformLocs[unit], static_cast<GLint>(unit));
         }
 
         ++unit;
     }
 
-    // Ensure we return to texture unit 0
     glActiveTexture(GL_TEXTURE0);
 }
 
@@ -203,41 +217,29 @@ void OpenGLMaterial::bind()
     glUseProgram(m_program);
     glBindVertexArray(m_vao);
 
-    // Set matrix uniforms
-    GLint modelLoc = glGetUniformLocation(m_program, "uModel");
-    if (modelLoc >= 0)
+    if (m_locModel >= 0)
     {
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(m_modelMatrix));
+        glUniformMatrix4fv(m_locModel, 1, GL_FALSE, glm::value_ptr(m_modelMatrix));
     }
-
-    GLint viewLoc = glGetUniformLocation(m_program, "uView");
-    if (viewLoc >= 0)
+    if (m_locView >= 0)
     {
-        glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(m_viewMatrix));
+        glUniformMatrix4fv(m_locView, 1, GL_FALSE, glm::value_ptr(m_viewMatrix));
     }
-
-    GLint projectionLoc = glGetUniformLocation(m_program, "uProjection");
-    if (projectionLoc >= 0)
+    if (m_locProjection >= 0)
     {
-        glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(m_projectionMatrix));
+        glUniformMatrix4fv(m_locProjection, 1, GL_FALSE, glm::value_ptr(m_projectionMatrix));
     }
-
-    GLint lightPosLoc = glGetUniformLocation(m_program, "uLightPos");
-    if (lightPosLoc >= 0)
+    if (m_locLightPos >= 0)
     {
-        glUniform3fv(lightPosLoc, 1, glm::value_ptr(m_lightPosition));
+        glUniform3fv(m_locLightPos, 1, glm::value_ptr(m_lightPosition));
     }
-
-    GLint lightColorLoc = glGetUniformLocation(m_program, "uLightColor");
-    if (lightColorLoc >= 0)
+    if (m_locLightColor >= 0)
     {
-        glUniform3fv(lightColorLoc, 1, glm::value_ptr(m_lightColor));
+        glUniform3fv(m_locLightColor, 1, glm::value_ptr(m_lightColor));
     }
-
-    GLint lightIntensityLoc = glGetUniformLocation(m_program, "uLightIntensity");
-    if (lightIntensityLoc >= 0)
+    if (m_locLightIntensity >= 0)
     {
-        glUniform1f(lightIntensityLoc, m_lightIntensity);
+        glUniform1f(m_locLightIntensity, m_lightIntensity);
     }
 
     bindTextures();
@@ -245,19 +247,6 @@ void OpenGLMaterial::bind()
 
 void OpenGLMaterial::unbind()
 {
-    // Unbind textures (by unit)
-    uint32_t unit = 0;
-    for (const auto& texCpu : m_textures)
-    {
-        (void)texCpu;
-        glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + unit));
-        glBindTexture(GL_TEXTURE_2D, 0);
-        ++unit;
-    }
-    glActiveTexture(GL_TEXTURE0);
-
-    glBindVertexArray(0);
-    glUseProgram(0);
 }
 
 void OpenGLMaterial::render()
@@ -272,4 +261,25 @@ void OpenGLMaterial::render()
         glDrawArrays(GL_TRIANGLES, 0, m_vertexCount);
     }
     unbind();
+}
+
+void OpenGLMaterial::renderBatchContinuation()
+{
+    glBindVertexArray(m_vao);
+
+    if (m_locModel >= 0)
+    {
+        glUniformMatrix4fv(m_locModel, 1, GL_FALSE, glm::value_ptr(m_modelMatrix));
+    }
+
+    bindTextures();
+
+    if (m_indexCount > 0)
+    {
+        glDrawElements(GL_TRIANGLES, m_indexCount, GL_UNSIGNED_INT, nullptr);
+    }
+    else
+    {
+        glDrawArrays(GL_TRIANGLES, 0, m_vertexCount);
+    }
 }

@@ -11,9 +11,11 @@
 #include "AssetTypes.h"
 
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_audio.h>
 #include <SDL3/SDL_dialog.h>
 
 #include "../Renderer/Material.h"
+#include "../Core/AudioManager.h"
 
 namespace fs = std::filesystem;
 
@@ -38,6 +40,9 @@ namespace
         // Textures
         if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga")
             return AssetType::Texture;
+
+        if (ext == ".wav")
+            return AssetType::Audio;
 
         // Future: models/audio/shaders/scripts...
         // if (ext == ".obj" || ext == ".fbx" ... ) return AssetType::Model3D;
@@ -76,10 +81,11 @@ namespace
         return "Key_" + result;
     }
 
-    static void writeKeyConstants(std::ofstream& stubOut)
+    static void writeKeyConstants(std::ofstream& stubOut, const std::string& indent)
     {
-        stubOut << "Keys: Dict[str, int]\n";
-        stubOut << "def get_key(name: str) -> int: ...\n";
+        stubOut << indent << "Keys: Dict[str, int]\n";
+        stubOut << indent << "@staticmethod\n";
+        stubOut << indent << "def get_key(name: str) -> int: ...\n";
 
         std::unordered_set<std::string> added;
         for (int scancode = 0; scancode < SDL_SCANCODE_COUNT; ++scancode)
@@ -94,7 +100,7 @@ namespace
             {
                 continue;
             }
-            stubOut << constantName << ": int\n";
+            stubOut << indent << constantName << ": int\n";
         }
     }
 
@@ -476,6 +482,31 @@ bool AssetManager::initialize()
 {
     startWorker();
 	s_nextAssetID = 1;
+    AudioManager::Instance().setAudioResolver([](unsigned int assetId) -> std::optional<AudioManager::AudioBufferData>
+    {
+        auto asset = AssetManager::Instance().getLoadedAssetByID(assetId);
+        if (!asset || asset->getType() != AssetType::Audio)
+        {
+            return std::nullopt;
+        }
+
+        const auto& data = asset->getData();
+        if (!data.is_object())
+        {
+            return std::nullopt;
+        }
+
+        AudioManager::AudioBufferData bufferData;
+        bufferData.channels = data.value("m_channels", 0);
+        bufferData.sampleRate = data.value("m_sampleRate", 0);
+        bufferData.format = data.value("m_format", 0);
+        bufferData.data = data.value("m_data", std::vector<unsigned char>{});
+        return bufferData;
+    });
+    AudioManager::Instance().setAudioReleaseCallback([](unsigned int assetId)
+    {
+        AssetManager::Instance().releaseAudioAsset(assetId);
+    });
     ensureEditorWidgetsCreated();
     return true;
 }
@@ -484,10 +515,84 @@ void AssetManager::ensureEditorWidgetsCreated()
 {
     auto& logger = Logger::Instance();
 
+    // Ensure Editor/Textures icons exist
+    {
+        const fs::path texturesDir = fs::current_path() / "Editor" / "Textures";
+        std::error_code ec;
+        fs::create_directories(texturesDir, ec);
+
+        auto writeTga = [&](const std::string& name, const std::vector<uint8_t>& rgba, int w, int h)
+        {
+            const fs::path path = texturesDir / name;
+            if (fs::exists(path))
+            {
+                return;
+            }
+            std::ofstream out(path, std::ios::binary);
+            if (!out.is_open())
+            {
+                return;
+            }
+            uint8_t header[18] = {};
+            header[2] = 2;
+            header[12] = static_cast<uint8_t>(w & 0xFF);
+            header[13] = static_cast<uint8_t>((w >> 8) & 0xFF);
+            header[14] = static_cast<uint8_t>(h & 0xFF);
+            header[15] = static_cast<uint8_t>((h >> 8) & 0xFF);
+            header[16] = 32;
+            header[17] = 0x28;
+            out.write(reinterpret_cast<const char*>(header), 18);
+            for (int y = 0; y < h; ++y)
+            {
+                for (int x = 0; x < w; ++x)
+                {
+                    const int idx = (y * w + x) * 4;
+                    const uint8_t bgra[4] = { rgba[idx + 2], rgba[idx + 1], rgba[idx], rgba[idx + 3] };
+                    out.write(reinterpret_cast<const char*>(bgra), 4);
+                }
+            }
+        };
+
+        constexpr int sz = 24;
+        {
+            std::vector<uint8_t> play(sz * sz * 4, 0);
+            for (int y = 0; y < sz; ++y)
+            {
+                const float fy = static_cast<float>(y) / static_cast<float>(sz - 1);
+                const float halfH = 0.5f - std::abs(fy - 0.5f);
+                const int maxX = static_cast<int>(halfH * 2.0f * static_cast<float>(sz) * 0.85f);
+                for (int x = 0; x < sz; ++x)
+                {
+                    const int idx = (y * sz + x) * 4;
+                    if (x >= 4 && x < 4 + maxX)
+                    {
+                        play[idx] = 220; play[idx + 1] = 220; play[idx + 2] = 220; play[idx + 3] = 255;
+                    }
+                }
+            }
+            writeTga("Play.tga", play, sz, sz);
+        }
+        {
+            std::vector<uint8_t> stop(sz * sz * 4, 0);
+            for (int y = 0; y < sz; ++y)
+            {
+                for (int x = 0; x < sz; ++x)
+                {
+                    const int idx = (y * sz + x) * 4;
+                    if (x >= 4 && x < sz - 4 && y >= 4 && y < sz - 4)
+                    {
+                        stop[idx] = 220; stop[idx + 1] = 100; stop[idx + 2] = 100; stop[idx + 3] = 255;
+                    }
+                }
+            }
+            writeTga("Stop.tga", stop, sz, sz);
+        }
+    }
+
     const std::string defaultWidgetRel = "TitleBar.asset";
     {
         json widgetJson = json::object();
-        widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 50.0f} };
+        widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 40.0f} };
         widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
         widgetJson["m_anchor"] = "TopLeft";
         widgetJson["m_fillX"] = true;
@@ -500,7 +605,7 @@ void AssetManager::ensureEditorWidgetsCreated()
         panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
         panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
         panel["fillX"] = true;
-        panel["color"] = json{ {"x", 0.08f}, {"y", 0.09f}, {"z", 0.11f}, {"w", 0.88f} };
+        panel["color"] = json{ {"x", 0.1f}, {"y", 0.1f}, {"z", 0.1f}, {"w", 1.0f} };
         panel["shaderVertex"] = "panel_vertex.glsl";
         panel["shaderFragment"] = "panel_fragment.glsl";
         elements.push_back(panel);
@@ -508,12 +613,12 @@ void AssetManager::ensureEditorWidgetsCreated()
         json label = json::object();
         label["id"] = "TitleBar.Label";
         label["type"] = "Text";
-        label["from"] = json{ {"x", 0.02f}, {"y", 0.2f} };
-        label["to"] = json{ {"x", 0.5f}, {"y", 0.8f} };
-        label["color"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        label["from"] = json{ {"x", 0.01f}, {"y", 0.15f} };
+        label["to"] = json{ {"x", 0.4f}, {"y", 0.85f} };
+        label["color"] = json{ {"x", 0.75f}, {"y", 0.75f}, {"z", 0.75f}, {"w", 1.0f} };
         label["text"] = "Engine";
         label["font"] = "default.ttf";
-        label["fontSize"] = 20.0f;
+        label["fontSize"] = 14.0f;
         label["sizeToContent"] = true;
         label["shaderVertex"] = "text_vertex.glsl";
         label["shaderFragment"] = "text_fragment.glsl";
@@ -535,7 +640,8 @@ void AssetManager::ensureEditorWidgetsCreated()
         btnMin["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
         btnMin["fillX"] = true;
         btnMin["fillY"] = true;
-        btnMin["color"] = json{ {"x", 0.2f}, {"y", 0.2f}, {"z", 0.2f}, {"w", 1.0f} };
+        btnMin["color"] = json{ {"x", 0.1f}, {"y", 0.1f}, {"z", 0.1f}, {"w", 1.0f} };
+        btnMin["hoverColor"] = json{ {"x", 0.2f}, {"y", 0.2f}, {"z", 0.2f}, {"w", 1.0f} };
         btnMin["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
         btnMin["text"] = "_";
         btnMin["font"] = "default.ttf";
@@ -554,7 +660,8 @@ void AssetManager::ensureEditorWidgetsCreated()
         btnMax["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
         btnMax["fillX"] = true;
         btnMax["fillY"] = true;
-        btnMax["color"] = json{ {"x", 0.26f}, {"y", 0.26f}, {"z", 0.26f}, {"w", 1.0f} };
+        btnMax["color"] = json{ {"x", 0.1f}, {"y", 0.1f}, {"z", 0.1f}, {"w", 1.0f} };
+        btnMax["hoverColor"] = json{ {"x", 0.2f}, {"y", 0.2f}, {"z", 0.2f}, {"w", 1.0f} };
         btnMax["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
         btnMax["text"] = "[ ]";
         btnMax["font"] = "default.ttf";
@@ -574,7 +681,8 @@ void AssetManager::ensureEditorWidgetsCreated()
         btnClose["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
         btnClose["fillX"] = true;
         btnClose["fillY"] = true;
-        btnClose["color"] = json{ {"x", 0.3f}, {"y", 0.08f}, {"z", 0.08f}, {"w", 1.0f} };
+        btnClose["color"] = json{ {"x", 0.1f}, {"y", 0.1f}, {"z", 0.1f}, {"w", 1.0f} };
+        btnClose["hoverColor"] = json{ {"x", 0.7f}, {"y", 0.15f}, {"z", 0.15f}, {"w", 1.0f} };
         btnClose["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
         btnClose["text"] = "X";
         btnClose["font"] = "default.ttf";
@@ -604,6 +712,18 @@ void AssetManager::ensureEditorWidgetsCreated()
         {
             AssetType headerType{ AssetType::Unknown };
             existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+            if (existsAndOk)
+            {
+                std::ifstream check(abs, std::ios::in);
+                if (check.is_open())
+                {
+                    const std::string content((std::istreambuf_iterator<char>(check)), std::istreambuf_iterator<char>());
+                    if (content.find("TitleBar.PIE") != std::string::npos)
+                    {
+                        existsAndOk = false;
+                    }
+                }
+            }
         }
         if (!existsAndOk)
         {
@@ -625,6 +745,111 @@ void AssetManager::ensureEditorWidgetsCreated()
             else
             {
                 logger.log(Logger::Category::AssetManagement, "Failed to open editor widget asset for writing.", Logger::LogLevel::ERROR);
+            }
+        }
+    }
+
+    const std::string toolbarWidgetRel = "Toolbar.asset";
+    {
+        json widgetJson = json::object();
+        widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 32.0f} };
+        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        widgetJson["m_anchor"] = "TopLeft";
+        widgetJson["m_fillX"] = true;
+        widgetJson["m_zOrder"] = 0;
+
+        json elements = json::array();
+        json bg = json::object();
+        bg["id"] = "Toolbar.Background";
+        bg["type"] = "Panel";
+        bg["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        bg["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        bg["fillX"] = true;
+        bg["color"] = json{ {"x", 0.13f}, {"y", 0.13f}, {"z", 0.13f}, {"w", 1.0f} };
+        bg["shaderVertex"] = "panel_vertex.glsl";
+        bg["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(bg);
+
+        json centerStack = json::object();
+        centerStack["id"] = "Toolbar.Center";
+        centerStack["type"] = "StackPanel";
+        centerStack["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        centerStack["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        centerStack["orientation"] = "Horizontal";
+        centerStack["fillX"] = true;
+        centerStack["fillY"] = true;
+        centerStack["padding"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+
+        json spacerLeft = json::object();
+        spacerLeft["id"] = "Toolbar.SpacerL";
+        spacerLeft["type"] = "Panel";
+        spacerLeft["fillX"] = true;
+        spacerLeft["fillY"] = true;
+        spacerLeft["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+
+        json btnPIE = json::object();
+        btnPIE["id"] = "Toolbar.PIE";
+        btnPIE["type"] = "Button";
+        btnPIE["clickEvent"] = "Toolbar.PIE";
+        btnPIE["color"] = json{ {"x", 0.18f}, {"y", 0.18f}, {"z", 0.18f}, {"w", 1.0f} };
+        btnPIE["hoverColor"] = json{ {"x", 0.25f}, {"y", 0.25f}, {"z", 0.25f}, {"w", 1.0f} };
+        btnPIE["imagePath"] = "Play.tga";
+        btnPIE["minSize"] = json{ {"x", 32.0f}, {"y", 24.0f} };
+        btnPIE["sizeToContent"] = true;
+        btnPIE["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
+        btnPIE["shaderVertex"] = "button_vertex.glsl";
+        btnPIE["shaderFragment"] = "button_fragment.glsl";
+
+        json spacerRight = json::object();
+        spacerRight["id"] = "Toolbar.SpacerR";
+        spacerRight["type"] = "Panel";
+        spacerRight["fillX"] = true;
+        spacerRight["fillY"] = true;
+        spacerRight["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+
+        centerStack["children"] = json::array({ spacerLeft, btnPIE, spacerRight });
+        elements.push_back(centerStack);
+
+        widgetJson["m_elements"] = elements;
+
+        auto widget = std::make_shared<AssetData>();
+        widget->setName("Toolbar");
+        widget->setData(std::move(widgetJson));
+
+        const fs::path widgetsRoot = getEditorWidgetsRootPath();
+        std::error_code ec;
+        fs::create_directories(widgetsRoot, ec);
+        const fs::path abs = widgetsRoot / fs::path(toolbarWidgetRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+            if (existsAndOk)
+            {
+                std::ifstream check(abs, std::ios::in);
+                if (check.is_open())
+                {
+                    const std::string content((std::istreambuf_iterator<char>(check)), std::istreambuf_iterator<char>());
+                    if (content.find("Toolbar.Center") == std::string::npos)
+                    {
+                        existsAndOk = false;
+                    }
+                }
+            }
+        }
+        if (!existsAndOk)
+        {
+            std::ofstream out(abs, std::ios::out | std::ios::trunc);
+            if (out.is_open())
+            {
+                json fileJson = json::object();
+                fileJson["magic"] = 0x41535453;
+                fileJson["version"] = 2;
+                fileJson["type"] = static_cast<int>(AssetType::Widget);
+                fileJson["name"] = widget->getName();
+                fileJson["data"] = widget->getData();
+                out << fileJson.dump(4);
             }
         }
     }
@@ -673,9 +898,10 @@ void AssetManager::ensureEditorWidgetsCreated()
         listPanel["from"] = json{ {"x", 0.05f}, {"y", 0.12f} };
         listPanel["to"] = json{ {"x", 0.95f}, {"y", 0.98f} };
         listPanel["orientation"] = "Vertical";
-        listPanel["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
+        listPanel["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
         listPanel["fillX"] = true;
         listPanel["sizeToContent"] = false;
+        listPanel["scrollable"] = true;
         elements.push_back(listPanel);
 
         widgetJson["m_elements"] = elements;
@@ -700,26 +926,30 @@ void AssetManager::ensureEditorWidgetsCreated()
                 {
                     json fileJson = json::parse(in, nullptr, false);
                     bool hasList = false;
+                    bool hasNoDetails = true;
                     if (!fileJson.is_discarded() && fileJson.is_object() && fileJson.contains("data"))
                     {
                         const auto& data = fileJson.at("data");
                         if (data.is_object() && data.contains("m_elements"))
                         {
-                            const auto& elements = data.at("m_elements");
-                            if (elements.is_array())
+                            const auto& elems = data.at("m_elements");
+                            if (elems.is_array())
                             {
-                                for (const auto& element : elements)
+                                for (const auto& elem : elems)
                                 {
-                                    if (element.is_object() && element.value("id", "") == "Outliner.EntityList")
+                                    if (elem.is_object() && elem.value("id", "") == "Outliner.EntityList")
                                     {
                                         hasList = true;
-                                        break;
+                                    }
+                                    if (elem.is_object() && elem.value("id", "") == "Outliner.Details")
+                                    {
+                                        hasNoDetails = false;
                                     }
                                 }
                             }
                         }
                     }
-                    existsAndOk = existsAndOk && hasList;
+                    existsAndOk = existsAndOk && hasList && hasNoDetails;
                 }
             }
         }
@@ -743,6 +973,114 @@ void AssetManager::ensureEditorWidgetsCreated()
             else
             {
                 logger.log(Logger::Category::AssetManagement, "Failed to open editor widget asset for writing.", Logger::LogLevel::ERROR);
+            }
+        }
+    }
+
+    const std::string entityDetailsWidgetRel = "EntityDetails.asset";
+    {
+        json widgetJson = json::object();
+        widgetJson["m_sizePixels"] = json{ {"x", 200.0f}, {"y", 0.0f} };
+        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        widgetJson["m_anchor"] = "TopRight";
+        widgetJson["m_zOrder"] = 2;
+
+        json elements = json::array();
+        json panel = json::object();
+        panel["id"] = "Details.Background";
+        panel["type"] = "Panel";
+        panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        panel["fillX"] = true;
+        panel["fillY"] = true;
+        panel["color"] = json{ {"x", 0.07f}, {"y", 0.08f}, {"z", 0.1f}, {"w", 0.9f} };
+        panel["shaderVertex"] = "panel_vertex.glsl";
+        panel["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(panel);
+
+        json label = json::object();
+        label["id"] = "Details.Title";
+        label["type"] = "Text";
+        label["from"] = json{ {"x", 0.05f}, {"y", 0.0f} };
+        label["to"] = json{ {"x", 0.95f}, {"y", 0.1f} };
+        label["color"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        label["text"] = "Details";
+        label["font"] = "default.ttf";
+        label["fontSize"] = 16.0f;
+        label["sizeToContent"] = true;
+        label["shaderVertex"] = "text_vertex.glsl";
+        label["shaderFragment"] = "text_fragment.glsl";
+        elements.push_back(label);
+
+        json contentPanel = json::object();
+        contentPanel["id"] = "Details.Content";
+        contentPanel["type"] = "StackPanel";
+        contentPanel["from"] = json{ {"x", 0.02f}, {"y", 0.12f} };
+        contentPanel["to"] = json{ {"x", 0.98f}, {"y", 0.98f} };
+        contentPanel["orientation"] = "Vertical";
+        contentPanel["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
+        contentPanel["fillX"] = true;
+        contentPanel["sizeToContent"] = false;
+        contentPanel["scrollable"] = true;
+        contentPanel["color"] = json{ {"x", 0.08f}, {"y", 0.09f}, {"z", 0.12f}, {"w", 0.65f} };
+        elements.push_back(contentPanel);
+
+        widgetJson["m_elements"] = elements;
+
+        auto widget = std::make_shared<AssetData>();
+        widget->setName("EntityDetails");
+        widget->setData(std::move(widgetJson));
+
+        const fs::path widgetsRoot = getEditorWidgetsRootPath();
+        std::error_code ec;
+        fs::create_directories(widgetsRoot, ec);
+        const fs::path abs = widgetsRoot / fs::path(entityDetailsWidgetRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+            if (existsAndOk)
+            {
+                std::ifstream in(abs, std::ios::in | std::ios::binary);
+                if (in.is_open())
+                {
+                    json fileJson = json::parse(in, nullptr, false);
+                    bool hasContent = false;
+                    if (!fileJson.is_discarded() && fileJson.is_object() && fileJson.contains("data"))
+                    {
+                        const auto& data = fileJson.at("data");
+                        if (data.is_object() && data.contains("m_elements"))
+                        {
+                            const auto& elems = data.at("m_elements");
+                            if (elems.is_array())
+                            {
+                                for (const auto& elem : elems)
+                                {
+                                    if (elem.is_object() && elem.value("id", "") == "Details.Content")
+                                    {
+                                        hasContent = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    existsAndOk = existsAndOk && hasContent;
+                }
+            }
+        }
+        if (!existsAndOk)
+        {
+            std::ofstream out(abs, std::ios::out | std::ios::trunc);
+            if (out.is_open())
+            {
+                json fileJson = json::object();
+                fileJson["magic"] = 0x41535453;
+                fileJson["version"] = 2;
+                fileJson["type"] = static_cast<int>(AssetType::Widget);
+                fileJson["name"] = widget->getName();
+                fileJson["data"] = widget->getData();
+                out << fileJson.dump(4);
             }
         }
     }
@@ -1211,6 +1549,20 @@ void AssetManager::ensureDefaultAssetsCreated()
             }
         }
 
+        const std::string defaultLevelScriptRel = (fs::path("Scripts") / "LevelScript.py").generic_string();
+        const fs::path defaultLevelScriptAbs = scriptsRoot / "LevelScript.py";
+        if (!fs::exists(defaultLevelScriptAbs))
+        {
+            std::ofstream scriptOut(defaultLevelScriptAbs, std::ios::out | std::ios::trunc);
+            if (scriptOut.is_open())
+            {
+                scriptOut << "def on_level_loaded():\n";
+                scriptOut << "    pass\n\n";
+                scriptOut << "def on_level_unloaded():\n";
+                scriptOut << "    pass\n";
+            }
+        }
+
         json levelJson = json::object();
         levelJson["Objects"] = json::array();
         levelJson["Groups"] = json::array();
@@ -1419,8 +1771,38 @@ void AssetManager::enqueueJob(std::function<void()> job)
 
 void AssetManager::collectGarbage()
 {
-    std::lock_guard<std::mutex> lock(m_stateMutex);
-    m_garbageCollector.collect();
+    std::vector<unsigned int> toUnload;
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        m_garbageCollector.collect();
+
+        for (const auto id : m_gcEligibleAssets)
+        {
+            auto it = m_loadedAssets.find(id);
+            if (it == m_loadedAssets.end() || !it->second)
+            {
+                toUnload.push_back(id);
+                continue;
+            }
+
+            if (it->second.use_count() > 1)
+            {
+                continue;
+            }
+
+            if (it->second->getType() == AssetType::Audio && AudioManager::Instance().isAssetPlaying(id))
+            {
+                continue;
+            }
+
+            toUnload.push_back(id);
+        }
+    }
+
+    for (const auto id : toUnload)
+    {
+        unloadAsset(id);
+    }
 }
 
 bool AssetManager::unloadAsset(unsigned int assetId)
@@ -1436,6 +1818,7 @@ bool AssetManager::unloadAsset(unsigned int assetId)
         return false;
     }
     m_loadedAssets.erase(it);
+    m_gcEligibleAssets.erase(assetId);
     m_garbageCollector.collect();
     return true;
 }
@@ -1460,11 +1843,85 @@ unsigned int AssetManager::registerLoadedAsset(const std::shared_ptr<AssetData>&
         {
             return 0;
 		}
-    }
+	}
 	auto id = s_nextAssetID;
 	m_loadedAssets[id] = object;
 	s_nextAssetID++;
-    return id;
+	return id;
+}
+
+int AssetManager::loadAssetAsync(const std::string& path, AssetType type, bool allowGc)
+{
+	if (path.empty())
+	{
+		Logger::Instance().log(Logger::Category::AssetManagement, "loadAssetAsync() called with empty path.", Logger::LogLevel::WARNING);
+		return 0;
+	}
+
+	const std::string normalizedPath = fs::path(path).lexically_normal().string();
+	int existingId = 0;
+	{
+		std::lock_guard<std::mutex> lock(m_stateMutex);
+		for (const auto& [id, obj] : m_loadedAssets)
+		{
+			if (obj && fs::path(obj->getPath()).lexically_normal().string() == normalizedPath)
+			{
+				existingId = static_cast<int>(id);
+				if (allowGc)
+				{
+					m_gcEligibleAssets.insert(id);
+				}
+				break;
+			}
+		}
+	}
+
+	int jobId = 0;
+	{
+		std::lock_guard<std::mutex> lock(m_asyncJobMutex);
+		jobId = m_nextAsyncJobId++;
+		if (existingId != 0)
+		{
+			m_finishedAssetJobs[jobId] = existingId;
+			return jobId;
+		}
+		m_runningAssetJobs.insert(jobId);
+	}
+
+	enqueueJob([this, normalizedPath, type, allowGc, jobId]()
+		{
+			const int loadedId = loadAsset(normalizedPath, type, Sync);
+			if (allowGc && loadedId != 0)
+			{
+				markAssetGcEligible(static_cast<unsigned int>(loadedId), true);
+			}
+			{
+				std::lock_guard<std::mutex> lock(m_asyncJobMutex);
+				m_runningAssetJobs.erase(jobId);
+				m_finishedAssetJobs[jobId] = loadedId;
+			}
+		});
+
+	return jobId;
+}
+
+bool AssetManager::tryConsumeAssetLoadResult(int jobId, int& outAssetId)
+{
+	std::lock_guard<std::mutex> lock(m_asyncJobMutex);
+	auto it = m_finishedAssetJobs.find(jobId);
+	if (it == m_finishedAssetJobs.end())
+	{
+		return false;
+	}
+	outAssetId = it->second;
+	m_finishedAssetJobs.erase(it);
+	return true;
+}
+
+std::vector<int> AssetManager::getRunningAssetLoadJobs() const
+{
+	std::lock_guard<std::mutex> lock(m_asyncJobMutex);
+	return std::vector<int>(m_runningAssetJobs.begin(), m_runningAssetJobs.end());
 }
 
 std::shared_ptr<AssetData> AssetManager::getLoadedAssetByID(unsigned int id) const
@@ -1475,6 +1932,33 @@ std::shared_ptr<AssetData> AssetManager::getLoadedAssetByID(unsigned int id) con
         return nullptr;
 	}
     return it->second;
+}
+
+bool AssetManager::isAssetLoaded(const std::string& path) const
+{
+	if (path.empty())
+	{
+		return false;
+	}
+
+	fs::path relPath = fs::path(path).lexically_normal();
+	const std::string relPathString = relPath.generic_string();
+	const std::string absPath = getAbsoluteContentPath(path);
+
+	std::lock_guard<std::mutex> lock(m_stateMutex);
+	for (const auto& [id, asset] : m_loadedAssets)
+	{
+		if (!asset)
+		{
+			continue;
+		}
+		const std::string& assetPath = asset->getPath();
+		if (assetPath == path || assetPath == relPathString || (!absPath.empty() && assetPath == absPath))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 bool AssetManager::saveAllAssets(SyncState syncState)
@@ -1556,14 +2040,172 @@ std::string AssetManager::getAbsoluteContentPath(const std::string& relativeToCo
         return {};
     }
 
-    fs::path p = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relativeToContent);
-    return p.lexically_normal().string();
+    fs::path inputPath(relativeToContent);
+    if (inputPath.is_absolute())
+    {
+        return inputPath.lexically_normal().string();
+    }
+
+    const fs::path projectRoot(diagnostics.getProjectInfo().projectPath);
+    if (!relativeToContent.empty())
+    {
+        auto it = inputPath.begin();
+        if (it != inputPath.end() && *it == "Content")
+        {
+            return (projectRoot / inputPath).lexically_normal().string();
+        }
+    }
+
+    return (projectRoot / "Content" / inputPath).lexically_normal().string();
 }
 
 std::string AssetManager::getEditorWidgetPath(const std::string& relativeToEditorWidgets) const
 {
     fs::path p = getEditorWidgetsRootPath() / fs::path(relativeToEditorWidgets);
     return p.lexically_normal().string();
+}
+
+int AssetManager::loadAudioFromContentPath(const std::string& relativeToContent, bool allowGc)
+{
+    if (relativeToContent.empty())
+    {
+        return 0;
+    }
+
+    const std::string absPath = getAbsoluteContentPath(relativeToContent);
+    if (absPath.empty())
+    {
+        Logger::Instance().log(Logger::Category::AssetManagement, "Audio load failed: project not loaded.", Logger::LogLevel::ERROR);
+        return 0;
+    }
+
+    fs::path relPath = fs::path(relativeToContent).lexically_normal();
+    const std::string relPathString = relPath.generic_string();
+    const std::string extension = relPath.extension().string();
+
+    if (extension == ".asset")
+    {
+        return loadAsset(absPath, AssetType::Audio, Sync);
+    }
+
+    if (extension != ".wav")
+    {
+        Logger::Instance().log(Logger::Category::AssetManagement, "Audio load failed: unsupported extension for " + relPathString, Logger::LogLevel::ERROR);
+        return 0;
+    }
+
+    SDL_AudioSpec spec{};
+    Uint8* buffer = nullptr;
+    Uint32 length = 0;
+    if (!SDL_LoadWAV(absPath.c_str(), &spec, &buffer, &length))
+    {
+        Logger::Instance().log(Logger::Category::AssetManagement, "Audio load failed: " + absPath, Logger::LogLevel::ERROR);
+        return 0;
+    }
+
+    auto audio = std::make_shared<AssetData>();
+    json audioData = json::object();
+    audioData["m_channels"] = static_cast<int>(spec.channels);
+    audioData["m_sampleRate"] = static_cast<int>(spec.freq);
+    audioData["m_format"] = static_cast<int>(spec.format);
+    audioData["m_data"] = std::vector<unsigned char>(buffer, buffer + length);
+    SDL_free(buffer);
+
+    audio->setName(relPath.stem().string());
+    audio->setPath(relPathString);
+    audio->setAssetType(AssetType::Audio);
+    audio->setType(AssetType::Audio);
+    audio->setData(std::move(audioData));
+    audio->setIsSaved(true);
+
+    auto id = registerLoadedAsset(audio);
+    if (id != 0)
+    {
+        audio->setId(id);
+    }
+    m_garbageCollector.registerResource(audio);
+    if (allowGc && id != 0)
+    {
+        markAssetGcEligible(id, true);
+    }
+    return static_cast<int>(id);
+}
+
+void AssetManager::markAssetGcEligible(unsigned int id, bool eligible)
+{
+    if (id == 0)
+    {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(m_stateMutex);
+    if (eligible)
+    {
+        m_gcEligibleAssets.insert(id);
+    }
+    else
+    {
+        m_gcEligibleAssets.erase(id);
+    }
+}
+
+void AssetManager::releaseAudioAsset(unsigned int assetId)
+{
+    if (assetId == 0)
+    {
+        return;
+    }
+
+    if (AudioManager::Instance().isAssetPlaying(assetId))
+    {
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        if (m_gcEligibleAssets.find(assetId) == m_gcEligibleAssets.end())
+        {
+            return;
+        }
+    }
+
+    unloadAsset(assetId);
+}
+
+bool AssetManager::isAudioPlayingContentPath(const std::string& relativeToContent) const
+{
+    if (relativeToContent.empty())
+    {
+        return false;
+    }
+
+    const std::string absPath = getAbsoluteContentPath(relativeToContent);
+    fs::path relPath = fs::path(relativeToContent).lexically_normal();
+    const std::string relPathString = relPath.generic_string();
+
+    unsigned int assetId = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        for (const auto& [id, asset] : m_loadedAssets)
+        {
+            if (!asset || asset->getType() != AssetType::Audio)
+            {
+                continue;
+            }
+            const std::string& assetPath = asset->getPath();
+            if (assetPath == relPathString || (!absPath.empty() && assetPath == absPath))
+            {
+                assetId = id;
+                break;
+            }
+        }
+    }
+
+    if (assetId == 0)
+    {
+        return false;
+    }
+
+    return AudioManager::Instance().isAssetPlaying(assetId);
 }
 
 int AssetManager::loadAsset(const std::string& path, AssetType type, SyncState syncState)
@@ -1600,6 +2242,9 @@ int AssetManager::loadAsset(const std::string& path, AssetType type, SyncState s
 				case AssetType::Texture:
 					loadTextureAsset(path);
 					break;
+			case AssetType::Audio:
+				loadAudioAsset(path);
+				break;
 				case AssetType::Material:
 					loadMaterialAsset(path);
 					break;
@@ -1625,6 +2270,9 @@ int AssetManager::loadAsset(const std::string& path, AssetType type, SyncState s
 		break;
 	case AssetType::Texture:
 		result = loadTextureAsset(path);
+		break;
+	case AssetType::Audio:
+		result = loadAudioAsset(path);
 		break;
 	case AssetType::Material:
 		result = loadMaterialAsset(path);
@@ -1720,7 +2368,9 @@ bool AssetManager::saveAsset(const Asset& asset, SyncState syncState, Diagnostic
 	case AssetType::Widget:
 		result = saveWidgetAsset(assetData);
 		break;
-        case AssetType::Audio:
+	case AssetType::Audio:
+		result = saveAudioAsset(assetData);
+		break;
         case AssetType::Script:
         case AssetType::Shader:
         case AssetType::Unknown:
@@ -1945,55 +2595,82 @@ bool AssetManager::loadProject(const std::string& projectPath, SyncState syncSta
         std::ofstream stubOut(stubPath, std::ios::out | std::ios::trunc);
         if (stubOut.is_open())
         {
-            stubOut << "from typing import Callable, Dict, List, Optional, Tuple\n\n";
-            stubOut << "Component_Transform: int\nComponent_Mesh: int\nComponent_Material: int\n";
-            stubOut << "Component_Light: int\nComponent_Camera: int\nComponent_Physics: int\n";
-            stubOut << "Component_Script: int\nComponent_Name: int\n\n";
-            stubOut << "Asset_Texture: int\nAsset_Material: int\nAsset_Model2D: int\n";
-            stubOut << "Asset_Model3D: int\nAsset_PointLight: int\nAsset_Level: int\nAsset_Widget: int\n\n";
-            stubOut << "Log_Info: int\nLog_Warning: int\nLog_Error: int\n\n";
-            stubOut << "# Entity management\n";
-            stubOut << "def create_entity() -> int: ...\n";
-            stubOut << "def attach_component(entity: int, kind: int) -> bool: ...\n";
-            stubOut << "def detach_component(entity: int, kind: int) -> bool: ...\n";
-            stubOut << "def get_entities(kinds: List[int]) -> List[int]: ...\n";
-            stubOut << "\n# Transform helpers\n";
-            stubOut << "def get_transform(entity: int) -> Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float]]]: ...\n";
-            stubOut << "def set_position(entity: int, x: float, y: float, z: float) -> bool: ...\n";
-            stubOut << "def translate(entity: int, dx: float, dy: float, dz: float) -> bool: ...\n";
-            stubOut << "def set_rotation(entity: int, pitch: float, yaw: float, roll: float) -> bool: ...\n";
-            stubOut << "def rotate(entity: int, dp: float, dy: float, dr: float) -> bool: ...\n";
-            stubOut << "def set_scale(entity: int, sx: float, sy: float, sz: float) -> bool: ...\n";
-            stubOut << "\n# Asset helpers\n";
-            stubOut << "def load_asset(path: str, type: int) -> int: ...\n";
-            stubOut << "def save_asset(id: int, type: int) -> bool: ...\n";
-            stubOut << "def unload_asset(id: int) -> bool: ...\n";
-            stubOut << "def set_mesh(entity: int, path: str) -> bool: ...\n";
-            stubOut << "def get_mesh(entity: int) -> Optional[str]: ...\n";
-            stubOut << "\n# Timing and state\n";
-            stubOut << "def get_delta_time() -> float: ...\n";
-            stubOut << "def get_state(key: str) -> Optional[str]: ...\n";
-            stubOut << "def set_state(key: str, value: str) -> bool: ...\n";
-            stubOut << "\n# UI notifications\n";
-            stubOut << "def show_modal_message(message: str, on_closed: Optional[Callable[[], None]] = None) -> bool: ...\n";
-            stubOut << "def close_modal_message() -> bool: ...\n";
-            stubOut << "def show_toast_message(message: str, duration: float = 2.5) -> bool: ...\n";
-            stubOut << "\n# Input\n";
-            stubOut << "def set_on_key_pressed(callback: Optional[Callable[[int], None]]) -> bool: ...\n";
-            stubOut << "def set_on_key_released(callback: Optional[Callable[[int], None]]) -> bool: ...\n";
-            stubOut << "def register_key_pressed(key: int, callback: Callable[[int], None]) -> bool: ...\n";
-            stubOut << "def register_key_released(key: int, callback: Callable[[int], None]) -> bool: ...\n";
-            stubOut << "def is_shift_pressed() -> bool: ...\n";
-            stubOut << "def is_ctrl_pressed() -> bool: ...\n";
-            stubOut << "def is_alt_pressed() -> bool: ...\n";
-            writeKeyConstants(stubOut);
-            stubOut << "\n# Camera\n";
-            stubOut << "def get_camera_position() -> Tuple[float, float, float]: ...\n";
-            stubOut << "def set_camera_position(x: float, y: float, z: float) -> bool: ...\n";
-            stubOut << "def get_camera_rotation() -> Tuple[float, float]: ...\n";
-            stubOut << "def set_camera_rotation(yaw: float, pitch: float) -> bool: ...\n";
-            stubOut << "\n# Logging\n";
-            stubOut << "def log(message: str, level: int = 0) -> bool: ...\n";
+			stubOut << "from typing import Callable, Dict, List, Optional, Tuple\n\n";
+			stubOut << "Component_Transform: int\nComponent_Mesh: int\nComponent_Material: int\n";
+			stubOut << "Component_Light: int\nComponent_Camera: int\nComponent_Physics: int\n";
+			stubOut << "Component_Script: int\nComponent_Name: int\n\n";
+			stubOut << "Asset_Texture: int\nAsset_Material: int\nAsset_Model2D: int\n";
+			stubOut << "Asset_Model3D: int\nAsset_PointLight: int\nAsset_Audio: int\n";
+			stubOut << "Asset_Script: int\nAsset_Shader: int\nAsset_Level: int\nAsset_Widget: int\n\n";
+			stubOut << "Log_Info: int\nLog_Warning: int\nLog_Error: int\n\n";
+			stubOut << "class _entity:\n";
+			stubOut << "    @staticmethod\n    def create_entity() -> int: ...\n";
+			stubOut << "    @staticmethod\n    def attach_component(entity: int, kind: int) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def detach_component(entity: int, kind: int) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def get_entities(kinds: List[int]) -> List[int]: ...\n";
+			stubOut << "    @staticmethod\n    def get_transform(entity: int) -> Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float]]]: ...\n";
+			stubOut << "    @staticmethod\n    def set_position(entity: int, x: float, y: float, z: float) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def translate(entity: int, dx: float, dy: float, dz: float) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def set_rotation(entity: int, pitch: float, yaw: float, roll: float) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def rotate(entity: int, dp: float, dy: float, dr: float) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def set_scale(entity: int, sx: float, sy: float, sz: float) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def set_mesh(entity: int, path: str) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def get_mesh(entity: int) -> Optional[str]: ...\n\n";
+			stubOut << "class _assetmanagement:\n";
+			stubOut << "    Asset_Texture: int\n";
+			stubOut << "    Asset_Material: int\n";
+			stubOut << "    Asset_Model2D: int\n";
+			stubOut << "    Asset_Model3D: int\n";
+			stubOut << "    Asset_PointLight: int\n";
+			stubOut << "    Asset_Audio: int\n";
+			stubOut << "    Asset_Script: int\n";
+			stubOut << "    Asset_Shader: int\n";
+			stubOut << "    Asset_Level: int\n";
+			stubOut << "    Asset_Widget: int\n";
+			stubOut << "    @staticmethod\n    def is_asset_loaded(path: str) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def load_asset(path: str, type: int, allow_gc: bool = False) -> int: ...\n";
+			stubOut << "    @staticmethod\n    def load_asset_async(path: str, type: int, on_loaded: Optional[Callable[[int], None]] = None, allow_gc: bool = False) -> int: ...\n";
+			stubOut << "    @staticmethod\n    def save_asset(id: int, type: int, sync: bool = True) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def unload_asset(id: int) -> bool: ...\n\n";
+			stubOut << "class _diagnostics:\n";
+			stubOut << "    @staticmethod\n    def get_delta_time() -> float: ...\n";
+			stubOut << "    @staticmethod\n    def get_state(key: str) -> Optional[str]: ...\n";
+			stubOut << "    @staticmethod\n    def set_state(key: str, value: str) -> bool: ...\n\n";
+			stubOut << "class _ui:\n";
+			stubOut << "    @staticmethod\n    def show_modal_message(message: str, on_closed: Optional[Callable[[], None]] = None) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def close_modal_message() -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def show_toast_message(message: str, duration: float = 2.5) -> bool: ...\n\n";
+			stubOut << "class _audio:\n";
+			stubOut << "    @staticmethod\n    def create_audio(path: str, loop: bool = False, gain: float = 1.0, keep_loaded: bool = False) -> int: ...\n";
+			stubOut << "    @staticmethod\n    def create_audio_from_asset(asset_id: int, loop: bool = False, gain: float = 1.0) -> int: ...\n";
+			stubOut << "    @staticmethod\n    def play_audio(path: str, loop: bool = False, gain: float = 1.0, keep_loaded: bool = False) -> int: ...\n";
+			stubOut << "    @staticmethod\n    def play_audio_handle(handle: int) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def set_audio_volume(handle: int, volume: float) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def get_audio_volume(handle: int) -> float: ...\n";
+			stubOut << "    @staticmethod\n    def pause_audio(handle: int) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def pause_audio_handle(handle: int) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def is_audio_playing(handle: int) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def is_audio_playing_path(path: str) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def stop_audio(handle: int) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def stop_audio_handle(handle: int) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def invalidate_audio_handle(handle: int) -> bool: ...\n\n";
+			stubOut << "class _input:\n";
+			stubOut << "    @staticmethod\n    def set_on_key_pressed(callback: Optional[Callable[[int], None]]) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def set_on_key_released(callback: Optional[Callable[[int], None]]) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def register_key_pressed(key: int, callback: Callable[[int], None]) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def register_key_released(key: int, callback: Callable[[int], None]) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def is_shift_pressed() -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def is_ctrl_pressed() -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def is_alt_pressed() -> bool: ...\n";
+			writeKeyConstants(stubOut, "    ");
+			stubOut << "\nclass _camera:\n";
+			stubOut << "    @staticmethod\n    def get_camera_position() -> Tuple[float, float, float]: ...\n";
+			stubOut << "    @staticmethod\n    def set_camera_position(x: float, y: float, z: float) -> bool: ...\n";
+			stubOut << "    @staticmethod\n    def get_camera_rotation() -> Tuple[float, float]: ...\n";
+			stubOut << "    @staticmethod\n    def set_camera_rotation(yaw: float, pitch: float) -> bool: ...\n\n";
+			stubOut << "class _logging:\n";
+			stubOut << "    @staticmethod\n    def log(message: str, level: int = 0) -> bool: ...\n\n";
+			stubOut << "entity: _entity\nassetmanagement: _assetmanagement\naudio: _audio\ninput: _input\nui: _ui\ncamera: _camera\ndiagnostics: _diagnostics\nlogging: _logging\n";
         }
     }
 
@@ -2038,6 +2715,7 @@ void AssetManager::unloadAllAssets()
 	{
 		std::lock_guard<std::mutex> lock(m_stateMutex);
 		m_loadedAssets.clear();
+		m_gcEligibleAssets.clear();
 		s_nextAssetID = 1;
 	}
 	m_garbageCollector.clear();
@@ -2143,55 +2821,82 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
             std::ofstream stubOut(stubPath, std::ios::out | std::ios::trunc);
             if (stubOut.is_open())
             {
-                stubOut << "from typing import Callable, Dict, List, Optional, Tuple\n\n";
-                stubOut << "Component_Transform: int\nComponent_Mesh: int\nComponent_Material: int\n";
-                stubOut << "Component_Light: int\nComponent_Camera: int\nComponent_Physics: int\n";
-                stubOut << "Component_Script: int\nComponent_Name: int\n\n";
-                stubOut << "Asset_Texture: int\nAsset_Material: int\nAsset_Model2D: int\n";
-                stubOut << "Asset_Model3D: int\nAsset_PointLight: int\nAsset_Level: int\nAsset_Widget: int\n\n";
-                stubOut << "Log_Info: int\nLog_Warning: int\nLog_Error: int\n\n";
-                stubOut << "# Entity management\n";
-                stubOut << "def create_entity() -> int: ...\n";
-                stubOut << "def attach_component(entity: int, kind: int) -> bool: ...\n";
-                stubOut << "def detach_component(entity: int, kind: int) -> bool: ...\n";
-                stubOut << "def get_entities(kinds: List[int]) -> List[int]: ...\n";
-                stubOut << "\n# Transform helpers\n";
-                stubOut << "def get_transform(entity: int) -> Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float]]]: ...\n";
-                stubOut << "def set_position(entity: int, x: float, y: float, z: float) -> bool: ...\n";
-                stubOut << "def translate(entity: int, dx: float, dy: float, dz: float) -> bool: ...\n";
-                stubOut << "def set_rotation(entity: int, pitch: float, yaw: float, roll: float) -> bool: ...\n";
-                stubOut << "def rotate(entity: int, dp: float, dy: float, dr: float) -> bool: ...\n";
-                stubOut << "def set_scale(entity: int, sx: float, sy: float, sz: float) -> bool: ...\n";
-                stubOut << "\n# Asset helpers\n";
-                stubOut << "def load_asset(path: str, type: int) -> int: ...\n";
-                stubOut << "def save_asset(id: int, type: int) -> bool: ...\n";
-                stubOut << "def unload_asset(id: int) -> bool: ...\n";
-                stubOut << "def set_mesh(entity: int, path: str) -> bool: ...\n";
-                stubOut << "def get_mesh(entity: int) -> Optional[str]: ...\n";
-                stubOut << "\n# Timing and state\n";
-                stubOut << "def get_delta_time() -> float: ...\n";
-                stubOut << "def get_state(key: str) -> Optional[str]: ...\n";
-                stubOut << "def set_state(key: str, value: str) -> bool: ...\n";
-                stubOut << "\n# UI notifications\n";
-                stubOut << "def show_modal_message(message: str, on_closed: Optional[Callable[[], None]] = None) -> bool: ...\n";
-                stubOut << "def close_modal_message() -> bool: ...\n";
-                stubOut << "def show_toast_message(message: str, duration: float = 2.5) -> bool: ...\n";
-                stubOut << "\n# Input\n";
-                stubOut << "def set_on_key_pressed(callback: Optional[Callable[[int], None]]) -> bool: ...\n";
-                stubOut << "def set_on_key_released(callback: Optional[Callable[[int], None]]) -> bool: ...\n";
-                stubOut << "def register_key_pressed(key: int, callback: Callable[[int], None]) -> bool: ...\n";
-                stubOut << "def register_key_released(key: int, callback: Callable[[int], None]) -> bool: ...\n";
-                stubOut << "def is_shift_pressed() -> bool: ...\n";
-                stubOut << "def is_ctrl_pressed() -> bool: ...\n";
-                stubOut << "def is_alt_pressed() -> bool: ...\n";
-                writeKeyConstants(stubOut);
-                stubOut << "\n# Camera\n";
-                stubOut << "def get_camera_position() -> Tuple[float, float, float]: ...\n";
-                stubOut << "def set_camera_position(x: float, y: float, z: float) -> bool: ...\n";
-                stubOut << "def get_camera_rotation() -> Tuple[float, float]: ...\n";
-                stubOut << "def set_camera_rotation(yaw: float, pitch: float) -> bool: ...\n";
-                stubOut << "\n# Logging\n";
-                stubOut << "def log(message: str, level: int = 0) -> bool: ...\n";
+				stubOut << "from typing import Callable, Dict, List, Optional, Tuple\n\n";
+				stubOut << "Component_Transform: int\nComponent_Mesh: int\nComponent_Material: int\n";
+				stubOut << "Component_Light: int\nComponent_Camera: int\nComponent_Physics: int\n";
+				stubOut << "Component_Script: int\nComponent_Name: int\n\n";
+				stubOut << "Asset_Texture: int\nAsset_Material: int\nAsset_Model2D: int\n";
+				stubOut << "Asset_Model3D: int\nAsset_PointLight: int\nAsset_Audio: int\n";
+				stubOut << "Asset_Script: int\nAsset_Shader: int\nAsset_Level: int\nAsset_Widget: int\n\n";
+				stubOut << "Log_Info: int\nLog_Warning: int\nLog_Error: int\n\n";
+				stubOut << "class _entity:\n";
+				stubOut << "    @staticmethod\n    def create_entity() -> int: ...\n";
+				stubOut << "    @staticmethod\n    def attach_component(entity: int, kind: int) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def detach_component(entity: int, kind: int) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def get_entities(kinds: List[int]) -> List[int]: ...\n";
+				stubOut << "    @staticmethod\n    def get_transform(entity: int) -> Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float]]]: ...\n";
+				stubOut << "    @staticmethod\n    def set_position(entity: int, x: float, y: float, z: float) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def translate(entity: int, dx: float, dy: float, dz: float) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def set_rotation(entity: int, pitch: float, yaw: float, roll: float) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def rotate(entity: int, dp: float, dy: float, dr: float) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def set_scale(entity: int, sx: float, sy: float, sz: float) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def set_mesh(entity: int, path: str) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def get_mesh(entity: int) -> Optional[str]: ...\n\n";
+				stubOut << "class _assetmanagement:\n";
+				stubOut << "    Asset_Texture: int\n";
+				stubOut << "    Asset_Material: int\n";
+				stubOut << "    Asset_Model2D: int\n";
+				stubOut << "    Asset_Model3D: int\n";
+				stubOut << "    Asset_PointLight: int\n";
+				stubOut << "    Asset_Audio: int\n";
+				stubOut << "    Asset_Script: int\n";
+				stubOut << "    Asset_Shader: int\n";
+				stubOut << "    Asset_Level: int\n";
+				stubOut << "    Asset_Widget: int\n";
+				stubOut << "    @staticmethod\n    def is_asset_loaded(path: str) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def load_asset(path: str, type: int, allow_gc: bool = False) -> int: ...\n";
+				stubOut << "    @staticmethod\n    def load_asset_async(path: str, type: int, on_loaded: Optional[Callable[[int], None]] = None, allow_gc: bool = False) -> int: ...\n";
+				stubOut << "    @staticmethod\n    def save_asset(id: int, type: int, sync: bool = True) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def unload_asset(id: int) -> bool: ...\n\n";
+				stubOut << "class _diagnostics:\n";
+				stubOut << "    @staticmethod\n    def get_delta_time() -> float: ...\n";
+				stubOut << "    @staticmethod\n    def get_state(key: str) -> Optional[str]: ...\n";
+				stubOut << "    @staticmethod\n    def set_state(key: str, value: str) -> bool: ...\n\n";
+				stubOut << "class _ui:\n";
+				stubOut << "    @staticmethod\n    def show_modal_message(message: str, on_closed: Optional[Callable[[], None]] = None) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def close_modal_message() -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def show_toast_message(message: str, duration: float = 2.5) -> bool: ...\n\n";
+				stubOut << "class _audio:\n";
+				stubOut << "    @staticmethod\n    def create_audio(path: str, loop: bool = False, gain: float = 1.0, keep_loaded: bool = False) -> int: ...\n";
+				stubOut << "    @staticmethod\n    def create_audio_from_asset(asset_id: int, loop: bool = False, gain: float = 1.0) -> int: ...\n";
+				stubOut << "    @staticmethod\n    def play_audio(path: str, loop: bool = False, gain: float = 1.0, keep_loaded: bool = False) -> int: ...\n";
+				stubOut << "    @staticmethod\n    def play_audio_handle(handle: int) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def set_audio_volume(handle: int, volume: float) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def get_audio_volume(handle: int) -> float: ...\n";
+				stubOut << "    @staticmethod\n    def pause_audio(handle: int) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def pause_audio_handle(handle: int) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def is_audio_playing(handle: int) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def is_audio_playing_path(path: str) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def stop_audio(handle: int) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def stop_audio_handle(handle: int) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def invalidate_audio_handle(handle: int) -> bool: ...\n\n";
+				stubOut << "class _input:\n";
+				stubOut << "    @staticmethod\n    def set_on_key_pressed(callback: Optional[Callable[[int], None]]) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def set_on_key_released(callback: Optional[Callable[[int], None]]) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def register_key_pressed(key: int, callback: Callable[[int], None]) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def register_key_released(key: int, callback: Callable[[int], None]) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def is_shift_pressed() -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def is_ctrl_pressed() -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def is_alt_pressed() -> bool: ...\n";
+				writeKeyConstants(stubOut, "    ");
+				stubOut << "\nclass _camera:\n";
+				stubOut << "    @staticmethod\n    def get_camera_position() -> Tuple[float, float, float]: ...\n";
+				stubOut << "    @staticmethod\n    def set_camera_position(x: float, y: float, z: float) -> bool: ...\n";
+				stubOut << "    @staticmethod\n    def get_camera_rotation() -> Tuple[float, float]: ...\n";
+				stubOut << "    @staticmethod\n    def set_camera_rotation(yaw: float, pitch: float) -> bool: ...\n\n";
+				stubOut << "class _logging:\n";
+				stubOut << "    @staticmethod\n    def log(message: str, level: int = 0) -> bool: ...\n\n";
+				stubOut << "entity: _entity\nassetmanagement: _assetmanagement\naudio: _audio\ninput: _input\nui: _ui\ncamera: _camera\ndiagnostics: _diagnostics\nlogging: _logging\n";
             }
         }
     }
@@ -2313,6 +3018,138 @@ AssetManager::LoadResult AssetManager::loadTextureAsset(const std::string& path)
 		texture->setId(id);
 	}
 	m_garbageCollector.registerResource(texture);
+
+	result.success = true;
+	return result;
+}
+
+AssetManager::LoadResult AssetManager::loadAudioAsset(const std::string& path)
+{
+	LoadResult result;
+	const fs::path inputPath(path);
+	std::string extension = inputPath.extension().string();
+	for (auto& c : extension)
+	{
+		c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+	}
+	if (extension == ".wav")
+	{
+		SDL_AudioSpec spec{};
+		Uint8* buffer = nullptr;
+		Uint32 length = 0;
+		if (!SDL_LoadWAV(path.c_str(), &spec, &buffer, &length))
+		{
+			result.errorMessage = "Failed to load WAV data.";
+			return result;
+		}
+
+		auto audio = std::make_shared<AssetData>();
+		json audioData = json::object();
+		audioData["m_channels"] = static_cast<int>(spec.channels);
+		audioData["m_sampleRate"] = static_cast<int>(spec.freq);
+		audioData["m_format"] = static_cast<int>(spec.format);
+		audioData["m_data"] = std::vector<unsigned char>(buffer, buffer + length);
+		SDL_free(buffer);
+
+		audio->setName(inputPath.stem().string());
+		audio->setPath(path);
+		audio->setAssetType(AssetType::Audio);
+		audio->setType(AssetType::Audio);
+		audio->setData(std::move(audioData));
+		audio->setIsSaved(true);
+
+		auto id = registerLoadedAsset(audio);
+		if (id != 0)
+		{
+			audio->setId(id);
+		}
+		m_garbageCollector.registerResource(audio);
+
+		result.success = true;
+		return result;
+	}
+
+	std::ifstream in(path, std::ios::binary);
+	if (!in.is_open())
+	{
+		result.errorMessage = "Failed to open audio asset file.";
+		return result;
+	}
+
+	AssetType headerType{ AssetType::Unknown };
+	std::string name;
+	bool isJson = false;
+	if (!readAssetHeader(in, headerType, name, isJson))
+	{
+		result.errorMessage = "Invalid audio asset header.";
+		return result;
+	}
+
+	if (headerType != AssetType::Audio)
+	{
+		result.errorMessage = "Asset type mismatch for audio.";
+		return result;
+	}
+
+	if (!readAssetJson(in, result.j, result.errorMessage, isJson))
+	{
+		return result;
+	}
+
+	auto audio = std::make_shared<AssetData>();
+	if (result.j.is_object())
+	{
+		if (result.j.contains("m_sourcePath"))
+		{
+			const auto& sourceValue = result.j.at("m_sourcePath");
+			if (sourceValue.is_string())
+			{
+				fs::path sourcePath = sourceValue.get<std::string>();
+				if (!sourcePath.is_absolute())
+				{
+					sourcePath = fs::current_path() / sourcePath;
+				}
+				if (fs::exists(sourcePath))
+				{
+					SDL_AudioSpec spec{};
+					Uint8* buffer = nullptr;
+					Uint32 length = 0;
+					if (SDL_LoadWAV(sourcePath.string().c_str(), &spec, &buffer, &length))
+					{
+						result.j["m_channels"] = static_cast<int>(spec.channels);
+						result.j["m_sampleRate"] = static_cast<int>(spec.freq);
+						result.j["m_format"] = static_cast<int>(spec.format);
+						result.j["m_data"] = std::vector<unsigned char>(buffer, buffer + length);
+						SDL_free(buffer);
+					}
+					else
+					{
+						Logger::Instance().log(Logger::Category::AssetManagement,
+							"Failed to load WAV data: " + sourcePath.string(), Logger::LogLevel::ERROR);
+					}
+				}
+			}
+		}
+		audio->setData(result.j);
+	}
+
+	if (name.empty())
+	{
+		name = fs::path(path).stem().string();
+	}
+
+	audio->setName(name);
+	audio->setPath(path);
+	audio->setAssetType(headerType);
+	audio->setType(headerType);
+	audio->setIsSaved(true);
+
+	auto id = registerLoadedAsset(audio);
+	if (id != 0)
+	{
+		audio->setId(id);
+	}
+	m_garbageCollector.registerResource(audio);
 
 	result.success = true;
 	return result;
@@ -2677,6 +3514,86 @@ AssetManager::SaveResult AssetManager::saveTextureAsset(const std::shared_ptr<As
     texture->setIsSaved(true);
     result.success = true;
     return result;
+}
+
+AssetManager::SaveResult AssetManager::saveAudioAsset(const std::shared_ptr<AssetData>& audio)
+{
+	SaveResult result;
+	if (!audio)
+	{
+		result.errorMessage = "Audio asset is null.";
+		return result;
+	}
+
+	auto& diagnostics = DiagnosticsManager::Instance();
+	if (!diagnostics.isProjectLoaded())
+	{
+		result.errorMessage = "No project loaded for audio save.";
+		return result;
+	}
+
+	std::string name = audio->getName();
+	if (name.empty())
+	{
+		name = "Audio";
+		audio->setName(name);
+	}
+
+	std::string relPath = audio->getPath();
+	if (relPath.empty())
+	{
+		relPath = name + ".asset";
+		audio->setPath(relPath);
+	}
+
+	fs::path rel = fs::path(relPath);
+	if (rel.extension().empty())
+	{
+		rel.replace_extension(".asset");
+		relPath = rel.generic_string();
+		audio->setPath(relPath);
+	}
+
+	const fs::path absPath = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relPath);
+	std::error_code ec;
+	fs::create_directories(absPath.parent_path(), ec);
+
+	std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+	if (!out.is_open())
+	{
+		result.errorMessage = "Failed to open audio asset file for writing.";
+		return result;
+	}
+
+	json data = audio->getData();
+	if (data.is_null())
+	{
+		data = json::object();
+	}
+
+	json dataToSave = data;
+	if (dataToSave.is_object() && dataToSave.contains("m_sourcePath"))
+	{
+		dataToSave.erase("m_data");
+	}
+
+	json fileJson = json::object();
+	fileJson["magic"] = 0x41535453;
+	fileJson["version"] = 2;
+	fileJson["type"] = static_cast<int>(AssetType::Audio);
+	fileJson["name"] = name;
+	fileJson["data"] = dataToSave;
+
+	out << fileJson.dump(4);
+	if (!out.good())
+	{
+		result.errorMessage = "Failed to write audio asset data.";
+		return result;
+	}
+
+	audio->setIsSaved(true);
+	result.success = true;
+	return result;
 }
 
 AssetManager::SaveResult AssetManager::saveMaterialAsset(const std::shared_ptr<AssetData>& material)
@@ -3067,4 +3984,26 @@ AssetManager::SaveResult AssetManager::saveWidgetAsset(const std::shared_ptr<Ass
     widget->setIsSaved(true);
     result.success = true;
     return result;
+}
+
+unsigned char* AssetManager::loadRawImageData(const std::string& path, int& width, int& height, int& channels)
+{
+    width = 0;
+    height = 0;
+    channels = 0;
+    unsigned char* data = stbi_load(path.c_str(), &width, &height, &channels, 0);
+    if (!data)
+    {
+        Logger::Instance().log(Logger::Category::AssetManagement,
+            "Failed to load raw image: " + path, Logger::LogLevel::ERROR);
+    }
+    return data;
+}
+
+void AssetManager::freeRawImageData(unsigned char* data)
+{
+    if (data)
+    {
+        stbi_image_free(data);
+    }
 }

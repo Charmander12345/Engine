@@ -20,10 +20,10 @@ class OpenGLObject3D;
 
 struct WindowHitTestContext
 {
-    int titlebarHeight{ 50 };
+    int titlebarHeight{ 40 };
     int resizeBorder{ 6 };
     int buttonStripWidth{ 120 };
-    int buttonStripHeight{ 45 };
+    int buttonStripHeight{ 40 };
 };
 
 class OpenGLRenderer : public Renderer
@@ -63,6 +63,7 @@ public:
     UIManager& getUIManager();
     const UIManager& getUIManager() const;
     std::shared_ptr<Widget> createWidgetFromAsset(const std::shared_ptr<AssetData>& asset);
+    GLuint preloadUITexture(const std::string& path);
 
 private:
     void renderWorld();
@@ -71,16 +72,17 @@ private:
     GLuint getUIQuadProgram(const std::string& vertexShaderPath, const std::string& fragmentShaderPath);
     void ensureUIShaderDefaults();
     const std::string& resolveUIShaderPath(const std::string& value, const std::string& fallback);
-    bool ensureOcclusionResources();
-    void releaseOcclusionResources();
-    void updateOcclusionResults();
-    bool shouldRenderOcclusion(const OpenGLObject3D* object) const;
-    void issueOcclusionQuery(const OpenGLObject3D* object, const glm::vec3& center, const glm::vec3& extent, const glm::mat4& viewProj);
+    bool ensureHzbResources(int width, int height);
+    void releaseHzbResources();
+    void buildHzb();
+    bool testAabbAgainstHzb(const glm::vec3& boundsMin, const glm::vec3& boundsMax, const glm::mat4& viewProj) const;
     bool ensureBoundsDebugResources();
     void releaseBoundsDebugResources();
     void drawBoundsDebugBox(const glm::vec3& center, const glm::vec3& extent, const glm::mat4& viewProj);
     void drawUIPanel(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program,
         const Vec4& hoverColor = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f }, bool isHovered = false);
+    void drawUIImage(float x0, float y0, float x1, float y1, GLuint textureId, const glm::mat4& projection);
+    GLuint getOrLoadUITexture(const std::string& path);
     void drawUIOutline(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program);
 
     struct RenderEntry
@@ -89,6 +91,7 @@ private:
         ECS::TransformComponent transform{};
         std::shared_ptr<OpenGLObject2D> object2D;
         std::shared_ptr<OpenGLObject3D> object3D;
+        glm::mat4 cachedModelMatrix{1.0f};
     };
 
     bool isRenderEntryRelevant(const RenderEntry& entry) const;
@@ -133,30 +136,44 @@ private:
     std::string m_defaultTextVertex;
     std::string m_defaultTextFragment;
     bool m_uiShaderDefaultsInitialized{false};
+    GLuint m_uiImageProgram{0};
+    std::unordered_map<std::string, GLuint> m_uiTextureCache;
     ECS::Schema m_lightSchema{};
     bool m_lightSchemaInitialized{false};
     bool m_uiDebugEnabled{false};
     WindowHitTestContext m_hitTestContext{};
 
-    struct OcclusionQueryData
+    struct HzbLevel
     {
-        GLuint queryId{0};
-        bool hasResult{false};
-        bool lastVisible{true};
-        uint8_t occludedFrames{0};
-        uint64_t lastResultFrame{0};
+        std::vector<float> data;
+        int width{0};
+        int height{0};
     };
 
-    std::unordered_map<const OpenGLObject3D*, OcclusionQueryData> m_occlusionQueries;
-    GLuint m_occlusionVao{0};
-    GLuint m_occlusionVbo{0};
-    GLuint m_occlusionProgram{0};
-    bool m_occlusionResourcesReady{false};
+    GLuint m_hzbTexture{0};
+    GLuint m_hzbFbo{0};
+    GLuint m_hzbDepthCopyFbo{0};
+    GLuint m_hzbDepthTexture{0};
+    GLuint m_hzbDownsampleProgram{0};
+    GLuint m_hzbCopyProgram{0};
+    GLuint m_hzbFullscreenVao{0};
+    GLint m_hzbPrevMipLoc{-1};
+    GLint m_hzbCopyDepthTexLoc{-1};
+    GLint m_hzbDownsampleTexLoc{-1};
+    int m_hzbWidth{0};
+    int m_hzbHeight{0};
+    int m_hzbMipLevels{0};
+    bool m_hzbResourcesReady{false};
+    std::vector<HzbLevel> m_hzbCpuData;
+    static constexpr int kHzbPboCount = 2;
+    std::array<GLuint, kHzbPboCount> m_hzbPbos{};
+    int m_hzbPboIndex{0};
+    size_t m_hzbPboSize{0};
+    bool m_hzbPboReady{false};
     bool m_occlusionEnabled{true};
     uint32_t m_lastVisibleCount{0};
     uint32_t m_lastHiddenCount{0};
     uint32_t m_lastTotalCount{0};
-    uint64_t m_frameIndex{0};
 
     GLuint m_boundsDebugVao{0};
     GLuint m_boundsDebugVbo{0};

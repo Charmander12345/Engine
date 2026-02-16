@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <cmath>
 #include <cctype>
+#include <cstring>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -242,7 +243,7 @@ void OpenGLRenderer::shutdown()
         m_gpuQueriesInitialized = false;
         m_gpuTimerQueries.fill(0);
     }
-    releaseOcclusionResources();
+    releaseHzbResources();
     releaseBoundsDebugResources();
     auto& logger = Logger::Instance();
     logger.log(Logger::Category::Rendering, "OpenGLRenderer shutdown: releasing GPU resources...", Logger::LogLevel::INFO);
@@ -454,8 +455,6 @@ void OpenGLRenderer::render()
         return;
     }
 
-    ++m_frameIndex;
-
     const uint64_t freq = SDL_GetPerformanceFrequency();
 
     if (m_gpuQueriesInitialized)
@@ -503,7 +502,6 @@ void OpenGLRenderer::renderWorld()
         m_renderEntries.end());
 
     const Vec2 viewportSize = getViewportSize();
-    m_uiManager.setAvailableViewportSize(viewportSize);
     const int width = static_cast<int>(viewportSize.x);
     const int height = static_cast<int>(viewportSize.y);
     glViewport(0, 0, width, height);
@@ -521,11 +519,10 @@ void OpenGLRenderer::renderWorld()
     }
 
     auto& diagnostics = DiagnosticsManager::Instance();
-    EngineLevel* level = diagnostics.getActiveLevelSoft();
-    if (!level)
+	EngineLevel* level = diagnostics.getActiveLevelSoft();
+	if (!level)
 	{
-		Logger::Instance().log(Logger::Category::Rendering, "No active level to render.", Logger::LogLevel::WARNING);
-        return;
+		return;
 	}
 
     if (m_cachedLevel != level)
@@ -592,480 +589,317 @@ void OpenGLRenderer::renderWorld()
     const glm::mat4 viewProj = m_projectionMatrix * view;
     const auto frustumPlanes = ExtractFrustumPlanes(viewProj);
 
-    if (m_occlusionEnabled)
-    {
-        updateOcclusionResults();
-    }
+	const uint64_t ecsStartCounter = SDL_GetPerformanceCounter();
+	auto& ecs = ECS::ECSManager::Instance();
+	glm::vec3 lightPosition{ 0.0f, 1.2f, 0.0f };
+	glm::vec3 lightColor{ 1.0f, 1.0f, 1.0f };
+	float lightIntensity = 1.0f;
 
+	if (!m_lightSchemaInitialized)
+	{
+		m_lightSchema.require<ECS::LightComponent>().require<ECS::TransformComponent>();
+		m_lightSchemaInitialized = true;
+	}
+	const auto lightEntities = ecs.getEntitiesMatchingSchema(m_lightSchema);
+	if (!lightEntities.empty())
+	{
+		const auto lightEntity = lightEntities.front();
+		if (const auto* transform = ecs.getComponent<ECS::TransformComponent>(lightEntity))
+		{
+			lightPosition = glm::vec3(transform->position[0], transform->position[1], transform->position[2]);
+		}
+		if (const auto* light = ecs.getComponent<ECS::LightComponent>(lightEntity))
+		{
+			lightColor = glm::vec3(light->color[0], light->color[1], light->color[2]);
+			lightIntensity = light->intensity;
+		}
+	}
+	const uint64_t ecsEndCounter = SDL_GetPerformanceCounter();
+	const uint64_t freq = SDL_GetPerformanceFrequency();
+	m_cpuEcsMs = (freq > 0) ? (static_cast<double>(ecsEndCounter - ecsStartCounter) * 1000.0 / static_cast<double>(freq)) : 0.0;
 
-    const uint64_t ecsStartCounter = SDL_GetPerformanceCounter();
-    auto& ecs = ECS::ECSManager::Instance();
-    glm::vec3 lightPosition{ 0.0f, 1.2f, 0.0f };
-    glm::vec3 lightColor{ 1.0f, 1.0f, 1.0f };
-    float lightIntensity = 1.0f;
+	// Pre-compute model matrices for ECS render entries
+	for (auto& entry : m_renderEntries)
+	{
+		if (entry.entity != 0)
+		{
+			if (const auto* transform = ecs.getComponent<ECS::TransformComponent>(entry.entity))
+			{
+				entry.transform = *transform;
+			}
+		}
+		auto& modelMatrix = entry.cachedModelMatrix;
+		modelMatrix = glm::mat4(1.0f);
+		modelMatrix = glm::translate(modelMatrix, glm::vec3(entry.transform.position[0], entry.transform.position[1], entry.transform.position[2]));
+		modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[0]), glm::vec3(1.0f, 0.0f, 0.0f));
+		modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[1]), glm::vec3(0.0f, 1.0f, 0.0f));
+		modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[2]), glm::vec3(0.0f, 0.0f, 1.0f));
+		modelMatrix = glm::scale(modelMatrix, glm::vec3(entry.transform.scale[0], entry.transform.scale[1], entry.transform.scale[2]));
+	}
 
-    if (!m_lightSchemaInitialized)
-    {
-        m_lightSchema.require<ECS::LightComponent>().require<ECS::TransformComponent>();
-        m_lightSchemaInitialized = true;
-    }
-    const auto lightEntities = ecs.getEntitiesMatchingSchema(m_lightSchema);
-    if (!lightEntities.empty())
-    {
-        const auto lightEntity = lightEntities.front();
-        if (const auto* transform = ecs.getComponent<ECS::TransformComponent>(lightEntity))
-        {
-            lightPosition = glm::vec3(transform->position[0], transform->position[1], transform->position[2]);
-        }
-        if (const auto* light = ecs.getComponent<ECS::LightComponent>(lightEntity))
-        {
-            lightColor = glm::vec3(light->color[0], light->color[1], light->color[2]);
-            lightIntensity = light->intensity;
-        }
-    }
-    const uint64_t ecsEndCounter = SDL_GetPerformanceCounter();
-    const uint64_t freq = SDL_GetPerformanceFrequency();
-    m_cpuEcsMs = (freq > 0) ? (static_cast<double>(ecsEndCounter - ecsStartCounter) * 1000.0 / static_cast<double>(freq)) : 0.0;
+	// Pre-compute model matrices for mesh entries
+	for (auto& entry : m_meshEntries)
+	{
+		auto& m = entry.cachedModelMatrix;
+		m = glm::mat4(1.0f);
+		m = glm::translate(m, glm::vec3(entry.transform.position[0], entry.transform.position[1], entry.transform.position[2]));
+		m = glm::rotate(m, glm::radians(entry.transform.rotation[0]), glm::vec3(1.0f, 0.0f, 0.0f));
+		m = glm::rotate(m, glm::radians(entry.transform.rotation[1]), glm::vec3(0.0f, 1.0f, 0.0f));
+		m = glm::rotate(m, glm::radians(entry.transform.rotation[2]), glm::vec3(0.0f, 0.0f, 1.0f));
+		m = glm::scale(m, glm::vec3(entry.transform.scale[0], entry.transform.scale[1], entry.transform.scale[2]));
+	}
 
-    if (!m_renderEntries.empty())
-    {
-        for (auto& entry : m_renderEntries)
-        {
-            if (entry.entity != 0)
-            {
-                if (const auto* transform = ecs.getComponent<ECS::TransformComponent>(entry.entity))
-                {
-                    entry.transform = *transform;
-                }
-            }
-
-            glm::mat4 modelMatrix(1.0f);
-            modelMatrix = glm::translate(modelMatrix, glm::vec3(entry.transform.position[0], entry.transform.position[1], entry.transform.position[2]));
-            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[0]), glm::vec3(1.0f, 0.0f, 0.0f));
-            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[1]), glm::vec3(0.0f, 1.0f, 0.0f));
-            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[2]), glm::vec3(0.0f, 0.0f, 1.0f));
-            modelMatrix = glm::scale(modelMatrix, glm::vec3(entry.transform.scale[0], entry.transform.scale[1], entry.transform.scale[2]));
-
-            if (entry.object3D)
-            {
-                ++m_lastTotalCount;
-                bool hasBounds = false;
-                glm::vec3 boundsMin{};
-                glm::vec3 boundsMax{};
-                if (entry.object3D->hasLocalBounds())
-                {
-                    ComputeWorldAabb(entry.object3D->getLocalBoundsMin(), entry.object3D->getLocalBoundsMax(), modelMatrix, boundsMin, boundsMax);
-                    hasBounds = true;
-                    if (!IsAabbInsideFrustum(frustumPlanes, boundsMin, boundsMax))
-                    {
-                        ++m_lastHiddenCount;
-                        continue;
-                    }
-                }
-
-                const bool shouldRender = !m_occlusionEnabled || !hasBounds || shouldRenderOcclusion(entry.object3D.get());
-                if (shouldRender)
-                {
-                    ++m_lastVisibleCount;
-                    entry.object3D->setLightData(lightPosition, lightColor, lightIntensity);
-                    entry.object3D->setMatrices(modelMatrix, view, m_projectionMatrix);
-                    entry.object3D->render();
-                }
-                else
-                {
-                    ++m_lastHiddenCount;
-                }
-                if (m_occlusionEnabled && hasBounds)
-                {
-                    const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
-                    const glm::vec3 extent = (boundsMax - boundsMin) * 0.5f;
-                    issueOcclusionQuery(entry.object3D.get(), center, extent, viewProj);
-                }
-                if (m_boundsDebugEnabled && hasBounds && shouldRender)
-                {
-                    const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
-                    const glm::vec3 extent = (boundsMax - boundsMin) * 0.5f;
-                    drawBoundsDebugBox(center, extent, viewProj);
-                }
-            }
-            else if (entry.object2D)
-            {
-                entry.object2D->setMatrices(modelMatrix, view, m_projectionMatrix);
-                entry.object2D->render();
-            }
-        }
-    }
-
-    const auto& objs = level->getWorldObjects();
+	const auto& objs = level->getWorldObjects();
 	const auto& groups = level->getGroups();
 
-    if (m_occlusionEnabled)
-    {
-        const GLboolean depthEnabled = glIsEnabled(GL_DEPTH_TEST);
-        GLboolean colorMask[4];
-        glGetBooleanv(GL_COLOR_WRITEMASK, colorMask);
-        GLboolean depthMask = GL_TRUE;
-        glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
+	// Collect all visible 3D objects into a unified draw list for batching
+	struct DrawCmd
+	{
+		OpenGLObject3D* obj{nullptr};
+		glm::mat4 modelMatrix{1.0f};
+		GLuint program{0};
+		glm::vec3 boundsMin{};
+		glm::vec3 boundsMax{};
+		bool hasBounds{false};
+	};
+	std::vector<DrawCmd> drawList;
+	drawList.reserve(m_renderEntries.size() + objs.size() + m_meshEntries.size() + 16);
 
-        glEnable(GL_DEPTH_TEST);
-        glDepthMask(GL_TRUE);
-        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+	const float timeRotation = static_cast<float>(SDL_GetTicks()) / 1000.0f;
 
-        for (const auto& entry : m_renderEntries)
-        {
-            if (!entry.object3D)
-            {
-                continue;
-            }
-            glm::mat4 modelMatrix(1.0f);
-            modelMatrix = glm::translate(modelMatrix, glm::vec3(entry.transform.position[0], entry.transform.position[1], entry.transform.position[2]));
-            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[0]), glm::vec3(1.0f, 0.0f, 0.0f));
-            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[1]), glm::vec3(0.0f, 1.0f, 0.0f));
-            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[2]), glm::vec3(0.0f, 0.0f, 1.0f));
-            modelMatrix = glm::scale(modelMatrix, glm::vec3(entry.transform.scale[0], entry.transform.scale[1], entry.transform.scale[2]));
-            entry.object3D->setMatrices(modelMatrix, view, m_projectionMatrix);
-            entry.object3D->render();
-        }
+	// Gather ECS render entries
+	for (auto& entry : m_renderEntries)
+	{
+		if (entry.object3D)
+		{
+			++m_lastTotalCount;
+			DrawCmd cmd;
+			cmd.obj = entry.object3D.get();
+			cmd.modelMatrix = entry.cachedModelMatrix;
+			if (entry.object3D->hasLocalBounds())
+			{
+				ComputeWorldAabb(entry.object3D->getLocalBoundsMin(), entry.object3D->getLocalBoundsMax(), cmd.modelMatrix, cmd.boundsMin, cmd.boundsMax);
+				cmd.hasBounds = true;
+				if (!IsAabbInsideFrustum(frustumPlanes, cmd.boundsMin, cmd.boundsMax))
+				{
+					++m_lastHiddenCount;
+					continue;
+				}
+				if (m_occlusionEnabled && !testAabbAgainstHzb(cmd.boundsMin, cmd.boundsMax, viewProj))
+				{
+					++m_lastHiddenCount;
+					continue;
+				}
+			}
+			cmd.program = entry.object3D->getProgram();
+			++m_lastVisibleCount;
+			drawList.push_back(std::move(cmd));
+		}
+		else if (entry.object2D)
+		{
+			entry.object2D->setMatrices(entry.cachedModelMatrix, view, m_projectionMatrix);
+			entry.object2D->render();
+		}
+	}
 
-        for (const auto& entry : objs)
-        {
-            if (!entry || entry->object->getPath().empty())
-            {
-                continue;
-            }
-            auto asset = entry->object ? std::dynamic_pointer_cast<AssetData>(entry->object) : nullptr;
-            if (!asset)
-            {
-                continue;
-            }
-            if (asset->getAssetType() != AssetType::Model3D && asset->getAssetType() != AssetType::PointLight)
-            {
-                continue;
-            }
-            auto glObj = m_resourceManager.getOrCreateObject3D(asset, {});
-            if (!glObj)
-            {
-                continue;
-            }
-            Mat4 engineMat = entry->transform.getMatrix4ColumnMajor();
-            glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-            modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 1.0f, 0.0f));
-            glObj->setMatrices(modelMatrix, view, m_projectionMatrix);
-            glObj->render();
-        }
+	// Gather world objects
+	for (const auto& entry : objs)
+	{
+		if (!entry || entry->object->getPath().empty())
+			continue;
 
-        for (const auto& groupEntry : groups)
-        {
-            const auto& groupObjects = groupEntry.objects;
-            for (size_t i = 0; i < groupObjects.size(); ++i)
-            {
-                const auto& entry = groupObjects[i];
-                if (!entry || entry->getPath().empty())
-                {
-                    continue;
-                }
-                auto asset = entry ? std::dynamic_pointer_cast<AssetData>(entry) : nullptr;
-                if (!asset)
-                {
-                    continue;
-                }
-                if (asset->getAssetType() != AssetType::Model3D)
-                {
-                    continue;
-                }
-                auto glObj = m_resourceManager.getOrCreateObject3D(asset, {});
-                if (!glObj)
-                {
-                    continue;
-                }
-                Transform* t = (i < groupEntry.transforms.size()) ? const_cast<Transform*>(&groupEntry.transforms[i]) : nullptr;
-                if (!t)
-                {
-                    continue;
-                }
-                Mat4 engineMat = t->getMatrix4ColumnMajor();
-                glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-                glObj->setMatrices(modelMatrix, view, m_projectionMatrix);
-                glObj->render();
-            }
-        }
+		auto asset = entry->object ? std::dynamic_pointer_cast<AssetData>(entry->object) : nullptr;
+		if (!asset)
+			continue;
 
-        for (const auto& entry : m_meshEntries)
-        {
-            if (!entry.object3D)
-            {
-                continue;
-            }
-            glm::mat4 modelMatrix(1.0f);
-            modelMatrix = glm::translate(modelMatrix, glm::vec3(entry.transform.position[0], entry.transform.position[1], entry.transform.position[2]));
-            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[0]), glm::vec3(1.0f, 0.0f, 0.0f));
-            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[1]), glm::vec3(0.0f, 1.0f, 0.0f));
-            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[2]), glm::vec3(0.0f, 0.0f, 1.0f));
-            modelMatrix = glm::scale(modelMatrix, glm::vec3(entry.transform.scale[0], entry.transform.scale[1], entry.transform.scale[2]));
-            entry.object3D->setMatrices(modelMatrix, view, m_projectionMatrix);
-            entry.object3D->render();
-        }
+		if (asset->getAssetType() == AssetType::Model3D || asset->getAssetType() == AssetType::PointLight)
+		{
+			auto glObj = m_resourceManager.getOrCreateObject3D(asset, {});
+			if (!glObj)
+				continue;
 
-        glColorMask(colorMask[0], colorMask[1], colorMask[2], colorMask[3]);
-        glDepthMask(depthMask);
-        if (!depthEnabled)
-        {
-            glDisable(GL_DEPTH_TEST);
-        }
-    }
+			++m_lastTotalCount;
+			const bool skipOcclusion = (asset->getAssetType() == AssetType::PointLight);
 
-    if (!objs.empty())
-    {
-        for (const auto& entry : objs)
-        {
-            if (!entry || entry->object->getPath().empty())
-                continue;
+			DrawCmd cmd;
+			cmd.obj = glObj.get();
+			Mat4 engineMat = entry->transform.getMatrix4ColumnMajor();
+			cmd.modelMatrix = glm::make_mat4(engineMat.m);
+			cmd.modelMatrix = glm::rotate(cmd.modelMatrix, timeRotation, glm::vec3(0.0f, 1.0f, 0.0f));
 
-            Transform* t = &entry->transform;
+			if (glObj->hasLocalBounds())
+			{
+				ComputeWorldAabb(glObj->getLocalBoundsMin(), glObj->getLocalBoundsMax(), cmd.modelMatrix, cmd.boundsMin, cmd.boundsMax);
+				cmd.hasBounds = true;
+				if (!IsAabbInsideFrustum(frustumPlanes, cmd.boundsMin, cmd.boundsMax))
+				{
+					++m_lastHiddenCount;
+					continue;
+				}
+				if (!skipOcclusion && m_occlusionEnabled && !testAabbAgainstHzb(cmd.boundsMin, cmd.boundsMax, viewProj))
+				{
+					++m_lastHiddenCount;
+					continue;
+				}
+			}
 
-            auto asset = entry->object ? std::dynamic_pointer_cast<AssetData>(entry->object) : nullptr;
-            if (!asset)
-                continue;
+			cmd.program = glObj->getProgram();
+			++m_lastVisibleCount;
+			drawList.push_back(std::move(cmd));
+		}
+		else if (asset->getAssetType() == AssetType::Model2D)
+		{
+			auto glObj = m_resourceManager.getOrCreateObject2D(asset, {});
+			if (!glObj)
+				continue;
 
-            if (asset->getAssetType() == AssetType::Model3D || asset->getAssetType() == AssetType::PointLight)
-            {
-                auto glObj = m_resourceManager.getOrCreateObject3D(asset, {});
-                if (!glObj)
-                    continue;
+			Mat4 engineMat = entry->transform.getMatrix4ColumnMajor();
+			glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
+			modelMatrix = glm::rotate(modelMatrix, timeRotation, glm::vec3(0.0f, 0.0f, 1.0f));
+			glObj->setMatrices(modelMatrix, view, m_projectionMatrix);
+			glObj->render();
+		}
+	}
 
-                ++m_lastTotalCount;
-                const bool skipOcclusion = (asset->getAssetType() == AssetType::PointLight);
+	// Gather groups
+	for (const auto& groupEntry : groups)
+	{
+		const auto& groupObjects = groupEntry.objects;
+		for (size_t i = 0; i < groupObjects.size(); ++i)
+		{
+			const auto& entry = groupObjects[i];
+			if (!entry || entry->getPath().empty())
+				continue;
+			Transform* t = (i < groupEntry.transforms.size()) ? const_cast<Transform*>(&groupEntry.transforms[i]) : nullptr;
+			auto asset = entry ? std::dynamic_pointer_cast<AssetData>(entry) : nullptr;
+			if (!asset)
+				continue;
 
-                if (t)
-                {
-                    Mat4 engineMat = t->getMatrix4ColumnMajor();
-                    glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-                    modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 1.0f, 0.0f));
-                    bool hasBounds = false;
-                    glm::vec3 boundsMin{};
-                    glm::vec3 boundsMax{};
-                    if (glObj->hasLocalBounds())
-                    {
-                        ComputeWorldAabb(glObj->getLocalBoundsMin(), glObj->getLocalBoundsMax(), modelMatrix, boundsMin, boundsMax);
-                        hasBounds = true;
-                        if (!IsAabbInsideFrustum(frustumPlanes, boundsMin, boundsMax))
-                        {
-                            ++m_lastHiddenCount;
-                            continue;
-                        }
-                    }
+			if (asset->getAssetType() == AssetType::Model3D)
+			{
+				auto glObj = m_resourceManager.getOrCreateObject3D(asset, {});
+				if (!glObj || !t)
+					continue;
 
-                    const bool shouldRender = skipOcclusion || !m_occlusionEnabled || !hasBounds || shouldRenderOcclusion(glObj.get());
-                    if (shouldRender)
-                    {
-                        ++m_lastVisibleCount;
-                        glObj->setLightData(lightPosition, lightColor, lightIntensity);
-                        glObj->setMatrices(modelMatrix, view, m_projectionMatrix);
-                    }
-                    else
-                    {
-                        ++m_lastHiddenCount;
-                    }
-                    if (m_occlusionEnabled && hasBounds && !skipOcclusion)
-                    {
-                        const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
-                        const glm::vec3 extent = (boundsMax - boundsMin) * 0.5f;
-                        issueOcclusionQuery(glObj.get(), center, extent, viewProj);
-                    }
-                    if (m_boundsDebugEnabled && hasBounds && shouldRender)
-                    {
-                        const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
-                        const glm::vec3 extent = (boundsMax - boundsMin) * 0.5f;
-                        drawBoundsDebugBox(center, extent, viewProj);
-                    }
-                    if (!shouldRender)
-                    {
-                        continue;
-                    }
-                }
+				++m_lastTotalCount;
 
-                glObj->render();
-            }
-            else if (asset->getAssetType() == AssetType::Model2D)
-            {
-                auto glObj = m_resourceManager.getOrCreateObject2D(asset, {});
-                if (!glObj)
-                    continue;
+				DrawCmd cmd;
+				cmd.obj = glObj.get();
+				Mat4 engineMat = t->getMatrix4ColumnMajor();
+				cmd.modelMatrix = glm::make_mat4(engineMat.m);
 
-                if (t)
-                {
-                    Mat4 engineMat = t->getMatrix4ColumnMajor();
-                    glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-                    modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 0.0f, 1.0f));
-                    glObj->setMatrices(modelMatrix, view, m_projectionMatrix);
-                }
+				if (glObj->hasLocalBounds())
+				{
+					ComputeWorldAabb(glObj->getLocalBoundsMin(), glObj->getLocalBoundsMax(), cmd.modelMatrix, cmd.boundsMin, cmd.boundsMax);
+					cmd.hasBounds = true;
+					if (!IsAabbInsideFrustum(frustumPlanes, cmd.boundsMin, cmd.boundsMax))
+					{
+						++m_lastHiddenCount;
+						continue;
+					}
+					if (m_occlusionEnabled && !testAabbAgainstHzb(cmd.boundsMin, cmd.boundsMax, viewProj))
+					{
+						++m_lastHiddenCount;
+						continue;
+					}
+				}
 
-                glObj->render();
-            }
-        }
-    }
+				cmd.program = glObj->getProgram();
+				++m_lastVisibleCount;
+				drawList.push_back(std::move(cmd));
+			}
+			else if (asset->getAssetType() == AssetType::Model2D)
+			{
+				auto glObj = m_resourceManager.getOrCreateObject2D(asset, {});
+				if (!glObj || !t)
+					continue;
 
-	if (!groups.empty())
-    {
-        for (const auto& groupEntry : groups)
-        {
-            const auto& groupObjects = groupEntry.objects;
-            for (size_t i = 0; i < groupObjects.size(); ++i)
-            {
-                const auto& entry = groupObjects[i];
-                if (!entry || entry->getPath().empty())
-                    continue;
-				Transform* t = (i < groupEntry.transforms.size()) ? const_cast<Transform*>(&groupEntry.transforms[i]) : nullptr;
-                auto asset = entry ? std::dynamic_pointer_cast<AssetData>(entry) : nullptr;
-                if (!asset)
-                    continue;
+				Mat4 engineMat = t->getMatrix4ColumnMajor();
+				glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
+				glObj->setMatrices(modelMatrix, view, m_projectionMatrix);
+				glObj->render();
+			}
+		}
+	}
 
-                if (asset->getAssetType() == AssetType::Model3D)
-                {
-                    auto glObj = m_resourceManager.getOrCreateObject3D(asset, {});
-                    if (!glObj)
-                        continue;
+	// Gather mesh entries
+	for (auto& entry : m_meshEntries)
+	{
+		if (entry.object3D)
+		{
+			++m_lastTotalCount;
+			DrawCmd cmd;
+			cmd.obj = entry.object3D.get();
+			cmd.modelMatrix = entry.cachedModelMatrix;
+			if (entry.object3D->hasLocalBounds())
+			{
+				ComputeWorldAabb(entry.object3D->getLocalBoundsMin(), entry.object3D->getLocalBoundsMax(), cmd.modelMatrix, cmd.boundsMin, cmd.boundsMax);
+				cmd.hasBounds = true;
+				if (!IsAabbInsideFrustum(frustumPlanes, cmd.boundsMin, cmd.boundsMax))
+				{
+					++m_lastHiddenCount;
+					continue;
+				}
+				if (m_occlusionEnabled && !testAabbAgainstHzb(cmd.boundsMin, cmd.boundsMax, viewProj))
+				{
+					++m_lastHiddenCount;
+					continue;
+				}
+			}
+			cmd.program = entry.object3D->getProgram();
+			++m_lastVisibleCount;
+			drawList.push_back(std::move(cmd));
+		}
+		else if (entry.object2D)
+		{
+			entry.object2D->setMatrices(entry.cachedModelMatrix, view, m_projectionMatrix);
+			entry.object2D->render();
+		}
+	}
 
-                    ++m_lastTotalCount;
+	// Sort by shader program to minimize state changes
+	std::sort(drawList.begin(), drawList.end(),
+		[](const DrawCmd& a, const DrawCmd& b) { return a.program < b.program; });
 
-                    if (t)
-                    {
-                        Mat4 engineMat = t->getMatrix4ColumnMajor();
-                        glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-                        bool hasBounds = false;
-                        glm::vec3 boundsMin{};
-                        glm::vec3 boundsMax{};
-                        if (glObj->hasLocalBounds())
-                        {
-                            ComputeWorldAabb(glObj->getLocalBoundsMin(), glObj->getLocalBoundsMax(), modelMatrix, boundsMin, boundsMax);
-                            hasBounds = true;
-                            if (!IsAabbInsideFrustum(frustumPlanes, boundsMin, boundsMax))
-                            {
-                                ++m_lastHiddenCount;
-                                continue;
-                            }
-                        }
+	// Render sorted draw list
+	GLuint lastProgram = 0;
+	for (const auto& cmd : drawList)
+	{
+		cmd.obj->setMatrices(cmd.modelMatrix, view, m_projectionMatrix);
+		if (cmd.program != lastProgram)
+		{
+			cmd.obj->setLightData(lightPosition, lightColor, lightIntensity);
+			cmd.obj->render();
+			lastProgram = cmd.program;
+		}
+		else
+		{
+			cmd.obj->renderBatchContinuation();
+		}
 
-                        const bool shouldRender = !m_occlusionEnabled || !hasBounds || shouldRenderOcclusion(glObj.get());
-                        if (shouldRender)
-                        {
-                            ++m_lastVisibleCount;
-                            glObj->setMatrices(modelMatrix, view, m_projectionMatrix);
-                        }
-                        else
-                        {
-                            ++m_lastHiddenCount;
-                        }
-                        if (m_occlusionEnabled && hasBounds)
-                        {
-                            const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
-                            const glm::vec3 extent = (boundsMax - boundsMin) * 0.5f;
-                            issueOcclusionQuery(glObj.get(), center, extent, viewProj);
-                        }
-                        if (m_boundsDebugEnabled && hasBounds && shouldRender)
-                        {
-                            const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
-                            const glm::vec3 extent = (boundsMax - boundsMin) * 0.5f;
-                            drawBoundsDebugBox(center, extent, viewProj);
-                        }
-                        if (!shouldRender)
-                        {
-                            continue;
-                        }
-                    }
-                    glObj->render();
-                }
-                else if (asset->getAssetType() == AssetType::Model2D)
-                {
-                    auto glObj = m_resourceManager.getOrCreateObject2D(asset, {});
-                    if (!glObj)
-                        continue;
+		if (m_boundsDebugEnabled && cmd.hasBounds)
+		{
+			const glm::vec3 center = (cmd.boundsMin + cmd.boundsMax) * 0.5f;
+			const glm::vec3 extent = (cmd.boundsMax - cmd.boundsMin) * 0.5f;
+			drawBoundsDebugBox(center, extent, viewProj);
+		}
+	}
 
-                    if (t)
-                    {
-                        Mat4 engineMat = t->getMatrix4ColumnMajor();
-                        glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-                        glObj->setMatrices(modelMatrix, view, m_projectionMatrix);
-                    }
-                    glObj->render();
-                }
-            }
-        }
-
-}
-
-    if (!m_meshEntries.empty())
-    {
-        for (const auto& entry : m_meshEntries)
-        {
-            glm::mat4 modelMatrix(1.0f);
-            modelMatrix = glm::translate(modelMatrix, glm::vec3(entry.transform.position[0], entry.transform.position[1], entry.transform.position[2]));
-            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[0]), glm::vec3(1.0f, 0.0f, 0.0f));
-            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[1]), glm::vec3(0.0f, 1.0f, 0.0f));
-            modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[2]), glm::vec3(0.0f, 0.0f, 1.0f));
-            modelMatrix = glm::scale(modelMatrix, glm::vec3(entry.transform.scale[0], entry.transform.scale[1], entry.transform.scale[2]));
-
-            if (entry.object3D)
-            {
-                ++m_lastTotalCount;
-                bool hasBounds = false;
-                glm::vec3 boundsMin{};
-                glm::vec3 boundsMax{};
-                if (entry.object3D->hasLocalBounds())
-                {
-                    ComputeWorldAabb(entry.object3D->getLocalBoundsMin(), entry.object3D->getLocalBoundsMax(), modelMatrix, boundsMin, boundsMax);
-                    hasBounds = true;
-                    if (!IsAabbInsideFrustum(frustumPlanes, boundsMin, boundsMax))
-                    {
-                        ++m_lastHiddenCount;
-                        continue;
-                    }
-                }
-
-                const bool shouldRender = !m_occlusionEnabled || !hasBounds || shouldRenderOcclusion(entry.object3D.get());
-                if (shouldRender)
-                {
-                    ++m_lastVisibleCount;
-                    entry.object3D->setLightData(lightPosition, lightColor, lightIntensity);
-                    entry.object3D->setMatrices(modelMatrix, view, m_projectionMatrix);
-                    entry.object3D->render();
-                }
-                else
-                {
-                    ++m_lastHiddenCount;
-                }
-                if (m_occlusionEnabled && hasBounds)
-                {
-                    const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
-                    const glm::vec3 extent = (boundsMax - boundsMin) * 0.5f;
-                    issueOcclusionQuery(entry.object3D.get(), center, extent, viewProj);
-                }
-                if (m_boundsDebugEnabled && hasBounds && shouldRender)
-                {
-                    const glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
-                    const glm::vec3 extent = (boundsMax - boundsMin) * 0.5f;
-                    drawBoundsDebugBox(center, extent, viewProj);
-                }
-            }
-            else if (entry.object2D)
-            {
-                entry.object2D->setMatrices(modelMatrix, view, m_projectionMatrix);
-                entry.object2D->render();
-            }
-        }
-    }
+	// Build HZB from current frame's depth buffer for next frame's occlusion tests
+	// Skip HZB when scene has few objects (overhead exceeds benefit)
+	static constexpr uint32_t kHzbMinObjects = 20;
+	if (m_occlusionEnabled && m_lastTotalCount >= kHzbMinObjects)
+	{
+		buildHzb();
+	}
 }
 
 void OpenGLRenderer::renderUI()
 {
     const uint64_t freq = SDL_GetPerformanceFrequency();
     const uint64_t uiStart = SDL_GetPerformanceCounter();
-    const uint64_t drawStart = SDL_GetPerformanceCounter();
-    const GLboolean depthEnabled = glIsEnabled(GL_DEPTH_TEST);
-    if (depthEnabled)
-    {
-        glDisable(GL_DEPTH_TEST);
-    }
+    const uint64_t drawStart = uiStart;
+    glDisable(GL_DEPTH_TEST);
 
     if (!m_textRenderer)
     {
@@ -1391,6 +1225,61 @@ void OpenGLRenderer::renderUI()
                 }
                 return;
             }
+            if (element.type == WidgetElementType::ProgressBar)
+            {
+                const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+                const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+                const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
+                drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.color, false);
+
+                const float range = element.maxValue - element.minValue;
+                const float ratio = (range > 0.0f)
+                    ? std::clamp((element.valueFloat - element.minValue) / range, 0.0f, 1.0f)
+                    : 0.0f;
+                if (ratio > 0.0f)
+                {
+                    const float fillX1 = x0 + widthPx * ratio;
+                    drawUIPanel(x0, y0, fillX1, y1, element.fillColor, uiProjection, program, element.fillColor, false);
+                }
+
+                if (m_uiDebugEnabled)
+                {
+                    drawUIOutline(x0, y0, x1, y1, Vec4{ 0.2f, 0.9f, 0.6f, 1.0f }, uiProjection, program);
+                }
+                return;
+            }
+            if (element.type == WidgetElementType::Slider)
+            {
+                const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+                const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+                const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
+
+                const float range = element.maxValue - element.minValue;
+                const float ratio = (range > 0.0f)
+                    ? std::clamp((element.valueFloat - element.minValue) / range, 0.0f, 1.0f)
+                    : 0.0f;
+
+                const float trackHeight = std::min(heightPx, 6.0f);
+                const float trackY0 = y0 + (heightPx - trackHeight) * 0.5f;
+                const float trackY1 = trackY0 + trackHeight;
+                drawUIPanel(x0, trackY0, x1, trackY1, element.color, uiProjection, program, element.color, false);
+                if (ratio > 0.0f)
+                {
+                    const float fillX1 = x0 + widthPx * ratio;
+                    drawUIPanel(x0, trackY0, fillX1, trackY1, element.fillColor, uiProjection, program, element.fillColor, false);
+                }
+
+                const float handleSize = std::max(10.0f, heightPx);
+                float handleX0 = x0 + widthPx * ratio - handleSize * 0.5f;
+                handleX0 = std::clamp(handleX0, x0, x1 - handleSize);
+                drawUIPanel(handleX0, y0, handleX0 + handleSize, y1, element.textColor, uiProjection, program, element.textColor, false);
+
+                if (m_uiDebugEnabled)
+                {
+                    drawUIOutline(x0, y0, x1, y1, Vec4{ 0.2f, 0.7f, 1.0f, 1.0f }, uiProjection, program);
+                }
+                return;
+            }
             if (element.type == WidgetElementType::EntryBar)
             {
                 const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
@@ -1556,9 +1445,39 @@ void OpenGLRenderer::renderUI()
 
                     m_textRenderer->drawText(element.text, Vec2{ textX, textY }, scale, element.textColor);
                 }
+                else if (element.textureId != 0 || !element.imagePath.empty())
+                {
+                    const GLuint tex = (element.textureId != 0) ? static_cast<GLuint>(element.textureId) : getOrLoadUITexture(element.imagePath);
+                    if (tex != 0)
+                    {
+                        const float pad = 4.0f;
+                        drawUIImage(bx0 + pad, by0 + pad, bx1 - pad, by1 - pad, tex, uiProjection);
+                    }
+                }
+                for (const auto& child : element.children)
+                {
+                    self(self, child, bx0, by0, bx1 - bx0, by1 - by0);
+                }
                 if (m_uiDebugEnabled)
                 {
                     drawUIOutline(bx0, by0, bx1, by1, Vec4{ 0.7f, 1.0f, 0.3f, 1.0f }, uiProjection, program);
+                }
+                return;
+            }
+            if (element.type == WidgetElementType::Image)
+            {
+                if (element.textureId != 0 || !element.imagePath.empty())
+                {
+                    const GLuint tex = (element.textureId != 0) ? static_cast<GLuint>(element.textureId) : getOrLoadUITexture(element.imagePath);
+                    if (tex != 0)
+                    {
+                        drawUIImage(x0, y0, x1, y1, tex, uiProjection);
+                    }
+                }
+                if (m_uiDebugEnabled)
+                {
+                    const GLuint program = getUIQuadProgram(m_defaultPanelVertex, m_defaultPanelFragment);
+                    drawUIOutline(x0, y0, x1, y1, Vec4{ 0.2f, 1.0f, 1.0f, 1.0f }, uiProjection, program);
                 }
                 return;
             }
@@ -1689,10 +1608,7 @@ void OpenGLRenderer::renderUI()
 
     m_textQueue.clear();
 
-    if (depthEnabled)
-    {
-        glEnable(GL_DEPTH_TEST);
-    }
+    glEnable(GL_DEPTH_TEST);
 
     const uint64_t uiEnd = SDL_GetPerformanceCounter();
     m_cpuRenderUiMs = (freq > 0) ? (static_cast<double>(uiEnd - uiStart) * 1000.0 / static_cast<double>(freq)) : 0.0;
@@ -1715,138 +1631,228 @@ void OpenGLRenderer::queueText(const std::string& text, const Vec2& screenPos, f
     m_textQueue.push_back(std::move(command));
 }
 
-bool OpenGLRenderer::ensureOcclusionResources()
+bool OpenGLRenderer::ensureHzbResources(int width, int height)
 {
-    if (m_occlusionResourcesReady)
+    if (m_hzbResourcesReady && m_hzbWidth == width && m_hzbHeight == height)
     {
         return true;
     }
 
-    auto vertex = std::make_shared<OpenGLShader>();
-    auto fragment = std::make_shared<OpenGLShader>();
+    releaseHzbResources();
 
-    const std::string vertexSource =
+    m_hzbWidth = width;
+    m_hzbHeight = height;
+    m_hzbMipLevels = 1 + static_cast<int>(std::floor(std::log2(static_cast<float>(std::max(width, height)))));
+
+    // Depth texture to receive a copy of the default framebuffer depth
+    glGenTextures(1, &m_hzbDepthTexture);
+    glBindTexture(GL_TEXTURE_2D, m_hzbDepthTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+
+    glGenFramebuffers(1, &m_hzbDepthCopyFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_hzbDepthCopyFbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_hzbDepthTexture, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // R32F texture for HZB mip chain
+    glGenTextures(1, &m_hzbTexture);
+    glBindTexture(GL_TEXTURE_2D, m_hzbTexture);
+    glTexStorage2D(GL_TEXTURE_2D, m_hzbMipLevels, GL_R32F, width, height);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // FBO for writing to HZB mip levels
+    glGenFramebuffers(1, &m_hzbFbo);
+
+    // Empty VAO for fullscreen triangle (positions generated from gl_VertexID)
+    glGenVertexArrays(1, &m_hzbFullscreenVao);
+
+    // Shared vertex shader for fullscreen triangle
+    const std::string fullscreenVert =
         "#version 460 core\n"
-        "layout(location = 0) in vec3 aPos;\n"
-        "uniform mat4 uViewProj;\n"
-        "uniform mat4 uModel;\n"
+        "out vec2 vTexCoord;\n"
         "void main() {\n"
-        "    gl_Position = uViewProj * uModel * vec4(aPos, 1.0);\n"
+        "    vec2 pos = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);\n"
+        "    vTexCoord = pos;\n"
+        "    gl_Position = vec4(pos * 2.0 - 1.0, 0.0, 1.0);\n"
         "}\n";
 
-    const std::string fragmentSource =
+    // Copy shader: reads depth texture, writes to R32F mip 0
+    const std::string copyFrag =
         "#version 460 core\n"
-        "out vec4 FragColor;\n"
+        "uniform sampler2D uDepthTexture;\n"
+        "in vec2 vTexCoord;\n"
+        "out float FragColor;\n"
         "void main() {\n"
-        "    FragColor = vec4(1.0);\n"
+        "    FragColor = texture(uDepthTexture, vTexCoord).r;\n"
         "}\n";
 
-    if (!vertex->loadFromSource(Shader::Type::Vertex, vertexSource) ||
-        !fragment->loadFromSource(Shader::Type::Fragment, fragmentSource))
+    // Downsample shader: reads from previous HZB mip, writes max to current mip
+    const std::string downsampleFrag =
+        "#version 460 core\n"
+        "uniform sampler2D uHzbTexture;\n"
+        "uniform int uPrevMipLevel;\n"
+        "in vec2 vTexCoord;\n"
+        "out float FragColor;\n"
+        "void main() {\n"
+        "    ivec2 coord = ivec2(gl_FragCoord.xy) * 2;\n"
+        "    ivec2 prevSize = textureSize(uHzbTexture, uPrevMipLevel);\n"
+        "    ivec2 c00 = min(coord, prevSize - 1);\n"
+        "    ivec2 c10 = min(coord + ivec2(1, 0), prevSize - 1);\n"
+        "    ivec2 c01 = min(coord + ivec2(0, 1), prevSize - 1);\n"
+        "    ivec2 c11 = min(coord + ivec2(1, 1), prevSize - 1);\n"
+        "    float d0 = texelFetch(uHzbTexture, c00, uPrevMipLevel).r;\n"
+        "    float d1 = texelFetch(uHzbTexture, c10, uPrevMipLevel).r;\n"
+        "    float d2 = texelFetch(uHzbTexture, c01, uPrevMipLevel).r;\n"
+        "    float d3 = texelFetch(uHzbTexture, c11, uPrevMipLevel).r;\n"
+        "    FragColor = max(max(d0, d1), max(d2, d3));\n"
+        "}\n";
+
+    auto compileShader = [](const std::string& source, Shader::Type type) -> std::shared_ptr<OpenGLShader>
     {
-        return false;
-    }
-
-    GLuint program = glCreateProgram();
-    glAttachShader(program, vertex->id());
-    glAttachShader(program, fragment->id());
-    glLinkProgram(program);
-
-    GLint linked = 0;
-    glGetProgramiv(program, GL_LINK_STATUS, &linked);
-    if (!linked)
-    {
-        glDeleteProgram(program);
-        return false;
-    }
-
-    glGenVertexArrays(1, &m_occlusionVao);
-    glGenBuffers(1, &m_occlusionVbo);
-    glBindVertexArray(m_occlusionVao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_occlusionVbo);
-
-    const float cubeVerts[] = {
-        -1.0f, -1.0f, -1.0f,
-         1.0f, -1.0f, -1.0f,
-         1.0f,  1.0f, -1.0f,
-         1.0f,  1.0f, -1.0f,
-        -1.0f,  1.0f, -1.0f,
-        -1.0f, -1.0f, -1.0f,
-
-        -1.0f, -1.0f,  1.0f,
-         1.0f, -1.0f,  1.0f,
-         1.0f,  1.0f,  1.0f,
-         1.0f,  1.0f,  1.0f,
-        -1.0f,  1.0f,  1.0f,
-        -1.0f, -1.0f,  1.0f,
-
-        -1.0f,  1.0f,  1.0f,
-        -1.0f,  1.0f, -1.0f,
-        -1.0f, -1.0f, -1.0f,
-        -1.0f, -1.0f, -1.0f,
-        -1.0f, -1.0f,  1.0f,
-        -1.0f,  1.0f,  1.0f,
-
-         1.0f,  1.0f,  1.0f,
-         1.0f,  1.0f, -1.0f,
-         1.0f, -1.0f, -1.0f,
-         1.0f, -1.0f, -1.0f,
-         1.0f, -1.0f,  1.0f,
-         1.0f,  1.0f,  1.0f,
-
-        -1.0f, -1.0f, -1.0f,
-         1.0f, -1.0f, -1.0f,
-         1.0f, -1.0f,  1.0f,
-         1.0f, -1.0f,  1.0f,
-        -1.0f, -1.0f,  1.0f,
-        -1.0f, -1.0f, -1.0f,
-
-        -1.0f,  1.0f, -1.0f,
-         1.0f,  1.0f, -1.0f,
-         1.0f,  1.0f,  1.0f,
-         1.0f,  1.0f,  1.0f,
-        -1.0f,  1.0f,  1.0f,
-        -1.0f,  1.0f, -1.0f
+        auto s = std::make_shared<OpenGLShader>();
+        if (!s->loadFromSource(type, source))
+        {
+            return nullptr;
+        }
+        return s;
     };
 
-    glBufferData(GL_ARRAY_BUFFER, sizeof(cubeVerts), cubeVerts, GL_STATIC_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), reinterpret_cast<void*>(0));
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
+    auto linkProgram = [](GLuint vs, GLuint fs) -> GLuint
+    {
+        GLuint prog = glCreateProgram();
+        glAttachShader(prog, vs);
+        glAttachShader(prog, fs);
+        glLinkProgram(prog);
+        GLint linked = 0;
+        glGetProgramiv(prog, GL_LINK_STATUS, &linked);
+        if (!linked)
+        {
+            glDeleteProgram(prog);
+            return 0;
+        }
+        return prog;
+    };
 
-    m_occlusionProgram = program;
-    m_occlusionResourcesReady = true;
+    auto vertShader = compileShader(fullscreenVert, Shader::Type::Vertex);
+    auto copyFragShader = compileShader(copyFrag, Shader::Type::Fragment);
+    auto downsampleFragShader = compileShader(downsampleFrag, Shader::Type::Fragment);
+
+    if (!vertShader || !copyFragShader || !downsampleFragShader)
+    {
+        releaseHzbResources();
+        return false;
+    }
+
+    m_hzbCopyProgram = linkProgram(vertShader->id(), copyFragShader->id());
+    m_hzbDownsampleProgram = linkProgram(vertShader->id(), downsampleFragShader->id());
+    if (!m_hzbCopyProgram || !m_hzbDownsampleProgram)
+    {
+        releaseHzbResources();
+        return false;
+    }
+
+    m_hzbPrevMipLoc = glGetUniformLocation(m_hzbDownsampleProgram, "uPrevMipLevel");
+    m_hzbCopyDepthTexLoc = glGetUniformLocation(m_hzbCopyProgram, "uDepthTexture");
+    m_hzbDownsampleTexLoc = glGetUniformLocation(m_hzbDownsampleProgram, "uHzbTexture");
+
+    // Allocate CPU readback storage (only for mip levels >= kMinReadbackMip)
+    constexpr int kMinReadbackMip = 3;
+    const int readbackLevels = std::max(0, m_hzbMipLevels - kMinReadbackMip);
+    m_hzbCpuData.resize(readbackLevels);
+
+    // Create PBOs for async readback (double-buffered)
+    size_t totalPixels = 0;
+    for (int i = 0; i < readbackLevels; ++i)
+    {
+        const int mip = kMinReadbackMip + i;
+        const int mipW = std::max(1, width >> mip);
+        const int mipH = std::max(1, height >> mip);
+        totalPixels += static_cast<size_t>(mipW) * mipH;
+    }
+    m_hzbPboSize = totalPixels * sizeof(float);
+    if (m_hzbPboSize > 0)
+    {
+        glGenBuffers(kHzbPboCount, m_hzbPbos.data());
+        for (int i = 0; i < kHzbPboCount; ++i)
+        {
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, m_hzbPbos[i]);
+            glBufferData(GL_PIXEL_PACK_BUFFER, static_cast<GLsizeiptr>(m_hzbPboSize), nullptr, GL_STREAM_READ);
+        }
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    }
+    m_hzbPboIndex = 0;
+    m_hzbPboReady = false;
+
+    m_hzbResourcesReady = true;
     return true;
 }
 
-void OpenGLRenderer::releaseOcclusionResources()
+void OpenGLRenderer::releaseHzbResources()
 {
-    for (auto& [object, data] : m_occlusionQueries)
+    if (m_hzbCopyProgram)
     {
-        if (data.queryId != 0)
+        glDeleteProgram(m_hzbCopyProgram);
+        m_hzbCopyProgram = 0;
+    }
+    if (m_hzbDownsampleProgram)
+    {
+        glDeleteProgram(m_hzbDownsampleProgram);
+        m_hzbDownsampleProgram = 0;
+    }
+    m_hzbPrevMipLoc = -1;
+    m_hzbCopyDepthTexLoc = -1;
+    m_hzbDownsampleTexLoc = -1;
+    if (m_hzbFbo)
+    {
+        glDeleteFramebuffers(1, &m_hzbFbo);
+        m_hzbFbo = 0;
+    }
+    if (m_hzbDepthCopyFbo)
+    {
+        glDeleteFramebuffers(1, &m_hzbDepthCopyFbo);
+        m_hzbDepthCopyFbo = 0;
+    }
+    if (m_hzbTexture)
+    {
+        glDeleteTextures(1, &m_hzbTexture);
+        m_hzbTexture = 0;
+    }
+    if (m_hzbDepthTexture)
+    {
+        glDeleteTextures(1, &m_hzbDepthTexture);
+        m_hzbDepthTexture = 0;
+    }
+    if (m_hzbFullscreenVao)
+    {
+        glDeleteVertexArrays(1, &m_hzbFullscreenVao);
+        m_hzbFullscreenVao = 0;
+    }
+    m_hzbCpuData.clear();
+    for (auto& pbo : m_hzbPbos)
+    {
+        if (pbo)
         {
-            glDeleteQueries(1, &data.queryId);
+            glDeleteBuffers(1, &pbo);
+            pbo = 0;
         }
     }
-    m_occlusionQueries.clear();
-
-    if (m_occlusionProgram)
-    {
-        glDeleteProgram(m_occlusionProgram);
-        m_occlusionProgram = 0;
-    }
-    if (m_occlusionVbo)
-    {
-        glDeleteBuffers(1, &m_occlusionVbo);
-        m_occlusionVbo = 0;
-    }
-    if (m_occlusionVao)
-    {
-        glDeleteVertexArrays(1, &m_occlusionVao);
-        m_occlusionVao = 0;
-    }
-    m_occlusionResourcesReady = false;
+    m_hzbPboSize = 0;
+    m_hzbPboIndex = 0;
+    m_hzbPboReady = false;
+    m_hzbWidth = 0;
+    m_hzbHeight = 0;
+    m_hzbMipLevels = 0;
+    m_hzbResourcesReady = false;
 }
 
 bool OpenGLRenderer::ensureBoundsDebugResources()
@@ -1969,9 +1975,6 @@ void OpenGLRenderer::drawBoundsDebugBox(const glm::vec3& center, const glm::vec3
         return;
     }
 
-    const GLboolean depthEnabled = glIsEnabled(GL_DEPTH_TEST);
-    const GLboolean cullEnabled = glIsEnabled(GL_CULL_FACE);
-    glEnable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
 
     glUseProgram(m_boundsDebugProgram);
@@ -2001,139 +2004,227 @@ void OpenGLRenderer::drawBoundsDebugBox(const glm::vec3& center, const glm::vec3
 
     glBindVertexArray(0);
     glUseProgram(0);
-
-    if (!depthEnabled)
-    {
-        glDisable(GL_DEPTH_TEST);
-    }
-    if (cullEnabled)
-    {
-        glEnable(GL_CULL_FACE);
-    }
 }
 
-void OpenGLRenderer::updateOcclusionResults()
+void OpenGLRenderer::buildHzb()
 {
-    constexpr uint8_t kOcclusionGraceFrames = 4;
-    for (auto& [object, data] : m_occlusionQueries)
+    const Vec2 viewportSize = getViewportSize();
+    const int width = static_cast<int>(viewportSize.x);
+    const int height = static_cast<int>(viewportSize.y);
+    if (width <= 0 || height <= 0)
     {
-        if (data.queryId == 0)
+        return;
+    }
+    if (!ensureHzbResources(width, height))
+    {
+        return;
+    }
+
+    constexpr int kMinReadbackMip = 3;
+    const int readbackLevels = static_cast<int>(m_hzbCpuData.size());
+
+    // Map the previous frame's PBO to retrieve async readback data (non-blocking)
+    if (m_hzbPboReady && m_hzbPboSize > 0)
+    {
+        const int readPbo = (m_hzbPboIndex + 1) % kHzbPboCount;
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, m_hzbPbos[readPbo]);
+        const float* mapped = static_cast<const float*>(glMapBuffer(GL_PIXEL_PACK_BUFFER, GL_READ_ONLY));
+        if (mapped)
         {
-            continue;
-        }
-        GLuint available = 0;
-        glGetQueryObjectuiv(data.queryId, GL_QUERY_RESULT_AVAILABLE, &available);
-        if (available == 0)
-        {
-            continue;
-        }
-        GLuint result = 0;
-        glGetQueryObjectuiv(data.queryId, GL_QUERY_RESULT, &result);
-        if (result != 0)
-        {
-            data.lastVisible = true;
-            data.occludedFrames = 0;
-            data.lastResultFrame = m_frameIndex;
-        }
-        else
-        {
-            data.occludedFrames = static_cast<uint8_t>(std::min<uint8_t>(data.occludedFrames + 1, kOcclusionGraceFrames));
-            if (data.occludedFrames >= kOcclusionGraceFrames)
+            size_t offset = 0;
+            for (int i = 0; i < readbackLevels; ++i)
             {
-                data.lastVisible = false;
+                const int mip = kMinReadbackMip + i;
+                if (mip >= m_hzbMipLevels)
+                {
+                    break;
+                }
+                const int mipW = std::max(1, width >> mip);
+                const int mipH = std::max(1, height >> mip);
+                const size_t count = static_cast<size_t>(mipW) * mipH;
+                auto& level = m_hzbCpuData[i];
+                level.width = mipW;
+                level.height = mipH;
+                level.data.resize(count);
+                std::memcpy(level.data.data(), mapped + offset, count * sizeof(float));
+                offset += count;
             }
-            data.lastResultFrame = m_frameIndex;
+            glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
         }
-        data.hasResult = true;
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
     }
-}
 
-bool OpenGLRenderer::shouldRenderOcclusion(const OpenGLObject3D* object) const
-{
-    constexpr uint8_t kOcclusionGraceFrames = 4;
-    constexpr uint64_t kOcclusionDelayFrames = 2;
-    auto it = m_occlusionQueries.find(object);
-    if (it == m_occlusionQueries.end())
+    // Copy default framebuffer depth into the depth texture via blit
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_hzbDepthCopyFbo);
+    glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    glDisable(GL_DEPTH_TEST);
+    glBindVertexArray(m_hzbFullscreenVao);
+
+    // Mip 0: copy depth texture into HZB R32F texture
+    glBindFramebuffer(GL_FRAMEBUFFER, m_hzbFbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_hzbTexture, 0);
+    glViewport(0, 0, width, height);
+    glUseProgram(m_hzbCopyProgram);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_hzbDepthTexture);
+    if (m_hzbCopyDepthTexLoc >= 0)
     {
-        return true;
+        glUniform1i(m_hzbCopyDepthTexLoc, 0);
     }
-    if (!it->second.hasResult)
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    // Mip 1+: downsample with max operator
+    glUseProgram(m_hzbDownsampleProgram);
+    if (m_hzbDownsampleTexLoc >= 0)
     {
-        return true;
+        glUniform1i(m_hzbDownsampleTexLoc, 0);
     }
-    if (m_frameIndex - it->second.lastResultFrame < kOcclusionDelayFrames)
+    glBindTexture(GL_TEXTURE_2D, m_hzbTexture);
+
+    for (int mip = 1; mip < m_hzbMipLevels; ++mip)
     {
-        return true;
+        const int mipW = std::max(1, width >> mip);
+        const int mipH = std::max(1, height >> mip);
+
+        glTextureBarrier();
+
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_hzbTexture, mip);
+        glViewport(0, 0, mipW, mipH);
+
+        if (m_hzbPrevMipLoc >= 0)
+        {
+            glUniform1i(m_hzbPrevMipLoc, mip - 1);
+        }
+
+        glDrawArrays(GL_TRIANGLES, 0, 3);
     }
-    if (it->second.lastVisible)
+
+    // Initiate async readback into the current PBO (GPU will fill it in the background)
+    if (m_hzbPboSize > 0)
     {
-        return true;
-    }
-    return it->second.occludedFrames < kOcclusionGraceFrames;
-}
-
-void OpenGLRenderer::issueOcclusionQuery(const OpenGLObject3D* object, const glm::vec3& center, const glm::vec3& extent, const glm::mat4& viewProj)
-{
-    if (!object || !m_occlusionEnabled)
-    {
-        return;
-    }
-    if (!ensureOcclusionResources())
-    {
-        return;
-    }
-
-    auto& data = m_occlusionQueries[object];
-    if (data.queryId == 0)
-    {
-        glGenQueries(1, &data.queryId);
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, m_hzbPbos[m_hzbPboIndex]);
+        size_t offset = 0;
+        for (int i = 0; i < readbackLevels; ++i)
+        {
+            const int mip = kMinReadbackMip + i;
+            if (mip >= m_hzbMipLevels)
+            {
+                break;
+            }
+            const int mipW = std::max(1, width >> mip);
+            const int mipH = std::max(1, height >> mip);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_hzbTexture, mip);
+            glReadPixels(0, 0, mipW, mipH, GL_RED, GL_FLOAT, reinterpret_cast<void*>(offset * sizeof(float)));
+            offset += static_cast<size_t>(mipW) * mipH;
+        }
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        m_hzbPboIndex = (m_hzbPboIndex + 1) % kHzbPboCount;
+        m_hzbPboReady = true;
     }
 
-    const GLboolean depthEnabled = glIsEnabled(GL_DEPTH_TEST);
-    GLboolean colorMask[4];
-    glGetBooleanv(GL_COLOR_WRITEMASK, colorMask);
-    GLboolean depthMask = GL_TRUE;
-    glGetBooleanv(GL_DEPTH_WRITEMASK, &depthMask);
-
-    glEnable(GL_DEPTH_TEST);
-    glDepthMask(GL_FALSE);
-    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-
-    glUseProgram(m_occlusionProgram);
-    glBindVertexArray(m_occlusionVao);
-
-    glm::mat4 model(1.0f);
-    model = glm::translate(model, center);
-    model = glm::scale(model, extent);
-
-    const GLint viewProjLoc = glGetUniformLocation(m_occlusionProgram, "uViewProj");
-    if (viewProjLoc >= 0)
-    {
-        glUniformMatrix4fv(viewProjLoc, 1, GL_FALSE, &viewProj[0][0]);
-    }
-    const GLint modelLoc = glGetUniformLocation(m_occlusionProgram, "uModel");
-    if (modelLoc >= 0)
-    {
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, &model[0][0]);
-    }
-
-    GLenum queryTarget = GL_ANY_SAMPLES_PASSED;
-#if defined(GL_ANY_SAMPLES_PASSED_CONSERVATIVE)
-    queryTarget = GL_ANY_SAMPLES_PASSED_CONSERVATIVE;
-#endif
-    glBeginQuery(queryTarget, data.queryId);
-    glDrawArrays(GL_TRIANGLES, 0, 36);
-    glEndQuery(queryTarget);
-
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glBindVertexArray(0);
     glUseProgram(0);
 
-    glColorMask(colorMask[0], colorMask[1], colorMask[2], colorMask[3]);
-    glDepthMask(depthMask);
-    if (!depthEnabled)
+    glEnable(GL_DEPTH_TEST);
+    glViewport(0, 0, width, height);
+}
+
+bool OpenGLRenderer::testAabbAgainstHzb(const glm::vec3& boundsMin, const glm::vec3& boundsMax, const glm::mat4& viewProj) const
+{
+    if (m_hzbCpuData.empty() || m_hzbWidth <= 0 || m_hzbHeight <= 0)
     {
-        glDisable(GL_DEPTH_TEST);
+        return true;
     }
+
+    constexpr int kMinReadbackMip = 3;
+
+    const glm::vec3 corners[8] = {
+        {boundsMin.x, boundsMin.y, boundsMin.z},
+        {boundsMax.x, boundsMin.y, boundsMin.z},
+        {boundsMin.x, boundsMax.y, boundsMin.z},
+        {boundsMax.x, boundsMax.y, boundsMin.z},
+        {boundsMin.x, boundsMin.y, boundsMax.z},
+        {boundsMax.x, boundsMin.y, boundsMax.z},
+        {boundsMin.x, boundsMax.y, boundsMax.z},
+        {boundsMax.x, boundsMax.y, boundsMax.z}
+    };
+
+    float sMinX = 1.0f, sMaxX = 0.0f;
+    float sMinY = 1.0f, sMaxY = 0.0f;
+    float minZ = 1.0f;
+
+    for (int i = 0; i < 8; ++i)
+    {
+        const glm::vec4 clip = viewProj * glm::vec4(corners[i], 1.0f);
+        if (clip.w <= 0.0f)
+        {
+            return true;
+        }
+        const float invW = 1.0f / clip.w;
+        const float sx = clip.x * invW * 0.5f + 0.5f;
+        const float sy = clip.y * invW * 0.5f + 0.5f;
+        const float sz = clip.z * invW * 0.5f + 0.5f;
+
+        sMinX = std::min(sMinX, sx);
+        sMaxX = std::max(sMaxX, sx);
+        sMinY = std::min(sMinY, sy);
+        sMaxY = std::max(sMaxY, sy);
+        minZ = std::min(minZ, sz);
+    }
+
+    sMinX = std::max(0.0f, sMinX);
+    sMaxX = std::min(1.0f, sMaxX);
+    sMinY = std::max(0.0f, sMinY);
+    sMaxY = std::min(1.0f, sMaxY);
+
+    if (sMinX >= sMaxX || sMinY >= sMaxY)
+    {
+        return true;
+    }
+
+    const float screenW = (sMaxX - sMinX) * static_cast<float>(m_hzbWidth);
+    const float screenH = (sMaxY - sMinY) * static_cast<float>(m_hzbHeight);
+    const float maxDim = std::max(screenW, screenH);
+    int mipLevel = (maxDim > 1.0f) ? static_cast<int>(std::ceil(std::log2(maxDim))) : 0;
+
+    // Clamp to available readback range
+    if (mipLevel < kMinReadbackMip)
+    {
+        return true;
+    }
+
+    const int idx = mipLevel - kMinReadbackMip;
+    if (idx >= static_cast<int>(m_hzbCpuData.size()))
+    {
+        return true;
+    }
+
+    const auto& level = m_hzbCpuData[idx];
+    if (level.width <= 0 || level.height <= 0 || level.data.empty())
+    {
+        return true;
+    }
+
+    const int x0 = std::max(0, static_cast<int>(sMinX * level.width));
+    const int y0 = std::max(0, static_cast<int>(sMinY * level.height));
+    const int x1 = std::min(level.width - 1, static_cast<int>(sMaxX * level.width));
+    const int y1 = std::min(level.height - 1, static_cast<int>(sMaxY * level.height));
+
+    float maxHzbDepth = 0.0f;
+    for (int y = y0; y <= y1; ++y)
+    {
+        for (int x = x0; x <= x1; ++x)
+        {
+            const float d = level.data[y * level.width + x];
+            maxHzbDepth = std::max(maxHzbDepth, d);
+        }
+    }
+
+    return minZ <= maxHzbDepth;
 }
 
 
@@ -2329,6 +2420,145 @@ void OpenGLRenderer::drawUIOutline(float x0, float y0, float x1, float y1, const
     glLineWidth(1.0f);
     drawUIPanel(x0, y0, x1, y1, color, projection, program, color, false);
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+}
+
+GLuint OpenGLRenderer::getOrLoadUITexture(const std::string& path)
+{
+    if (path.empty())
+    {
+        return 0;
+    }
+    auto it = m_uiTextureCache.find(path);
+    if (it != m_uiTextureCache.end())
+    {
+        return it->second;
+    }
+
+    std::string resolved = path;
+    {
+        const std::filesystem::path p(resolved);
+        if (p.is_relative())
+        {
+            const std::filesystem::path editorPath = std::filesystem::current_path() / "Editor" / "Textures" / path;
+            if (std::filesystem::exists(editorPath))
+            {
+                resolved = editorPath.string();
+            }
+        }
+    }
+
+    int w = 0;
+    int h = 0;
+    int ch = 0;
+    auto* data = AssetManager::Instance().loadRawImageData(resolved, w, h, ch);
+    if (!data || w <= 0 || h <= 0)
+    {
+        m_uiTextureCache[path] = 0;
+        return 0;
+    }
+
+    GLenum format = GL_RGBA;
+    GLenum internalFormat = GL_RGBA8;
+    if (ch == 3)
+    {
+        format = GL_RGB;
+        internalFormat = GL_RGB8;
+    }
+    else if (ch == 1)
+    {
+        format = GL_RED;
+        internalFormat = GL_R8;
+    }
+
+    GLuint tex = 0;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(internalFormat), w, h, 0, format, GL_UNSIGNED_BYTE, data);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    AssetManager::Instance().freeRawImageData(data);
+
+    m_uiTextureCache[path] = tex;
+    return tex;
+}
+
+GLuint OpenGLRenderer::preloadUITexture(const std::string& path)
+{
+    return getOrLoadUITexture(path);
+}
+
+void OpenGLRenderer::drawUIImage(float x0, float y0, float x1, float y1, GLuint textureId, const glm::mat4& projection)
+{
+    if (textureId == 0 || m_uiQuadVao == 0)
+    {
+        return;
+    }
+
+    if (m_uiImageProgram == 0)
+    {
+        const char* vsSource = R"(
+#version 330 core
+layout(location = 0) in vec2 aPos;
+out vec2 vTexCoord;
+uniform mat4 uProjection;
+uniform vec4 uRect;
+void main() {
+    gl_Position = uProjection * vec4(aPos, 0.0, 1.0);
+    vec2 normalised = (aPos - uRect.xy) / max(uRect.zw - uRect.xy, vec2(1.0));
+    vTexCoord = vec2(normalised.x, normalised.y);
+}
+)";
+        const char* fsSource = R"(
+#version 330 core
+in vec2 vTexCoord;
+out vec4 FragColor;
+uniform sampler2D uTexture;
+void main() {
+    FragColor = texture(uTexture, vTexCoord);
+}
+)";
+        GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+        glShaderSource(vs, 1, &vsSource, nullptr);
+        glCompileShader(vs);
+        GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+        glShaderSource(fs, 1, &fsSource, nullptr);
+        glCompileShader(fs);
+        m_uiImageProgram = glCreateProgram();
+        glAttachShader(m_uiImageProgram, vs);
+        glAttachShader(m_uiImageProgram, fs);
+        glLinkProgram(m_uiImageProgram);
+        glDeleteShader(vs);
+        glDeleteShader(fs);
+    }
+
+    float vertices[6][2] = {
+        { x0, y1 },
+        { x0, y0 },
+        { x1, y0 },
+        { x0, y1 },
+        { x1, y0 },
+        { x1, y1 }
+    };
+
+    glUseProgram(m_uiImageProgram);
+    glUniformMatrix4fv(glGetUniformLocation(m_uiImageProgram, "uProjection"), 1, GL_FALSE, &projection[0][0]);
+    glUniform4f(glGetUniformLocation(m_uiImageProgram, "uRect"), x0, y0, x1, y1);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, textureId);
+    glUniform1i(glGetUniformLocation(m_uiImageProgram, "uTexture"), 0);
+
+    glBindVertexArray(m_uiQuadVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_uiQuadVbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindVertexArray(0);
+    glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 Vec2 OpenGLRenderer::getViewportSize() const

@@ -56,10 +56,24 @@ public:
 	void onEntityAdded(ECS::Entity entity);
 	void onEntityRemoved(ECS::Entity entity);
 	json serializeEcsEntities() const;
+	void snapshotEcsState();
+	bool restoreEcsSnapshot();
 	const std::vector<ECS::Entity>& getEntities() const;
 	const std::vector<ECS::Entity>& getScriptEntities() const;
 	void registerEntityListChangedCallback(std::function<void()> callback);
 
+	struct EntitySnapshot
+	{
+		ECS::TransformComponent transform{};
+		ECS::MeshComponent mesh{};
+		ECS::MaterialComponent material{};
+		ECS::LightComponent light{};
+		ECS::CameraComponent camera{};
+		ECS::PhysicsComponent physics{};
+		ECS::ScriptComponent script{};
+		ECS::NameComponent name{};
+		std::bitset<ECS::MaxComponentTypes> mask{};
+	};
 
 private:
 
@@ -75,4 +89,6 @@ private:
 	ECS::ECSManager* m_ecs{ nullptr };
 	bool m_ecsPrepared{ false };
 	bool m_ecsPreparing{ false };
+	json m_ecsSnapshot;
+	std::unordered_map<ECS::Entity, EntitySnapshot> m_componentSnapshot;
 };

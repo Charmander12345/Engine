@@ -52,6 +52,9 @@ public:
 
 	// Load and return the asset object if successful (also registers with GC) - Returns nullptr on failure.
 	int loadAsset(const std::string& path, AssetType type, SyncState syncState = Sync);
+	int loadAssetAsync(const std::string& path, AssetType type, bool allowGc = false);
+	bool tryConsumeAssetLoadResult(int jobId, int& outAssetId);
+	std::vector<int> getRunningAssetLoadJobs() const;
     //Saves the specified asset to a file. returns whether saving was successful. Note: when saving async function returns whether the job was queued successfully.
     bool saveAsset(const Asset& asset, SyncState syncState = Async, DiagnosticsManager::Action action = DiagnosticsManager::Action{});
 	//Saves all currently loaded and altered assets. returns whether all saves were successful. Note: when saving async function returns whether the job was queued successfully.
@@ -76,10 +79,22 @@ public:
     // Resolve <engine>/Editor/Widgets/<relative>.
     std::string getEditorWidgetPath(const std::string& relativeToEditorWidgets) const;
 
-    // Asset Registry
+	// Load an audio asset by content-relative path (.asset or .wav). Returns asset ID or 0 on failure.
+	int loadAudioFromContentPath(const std::string& relativeToContent, bool allowGc = false);
+	// Check if an audio asset is currently playing by content-relative path.
+	bool isAudioPlayingContentPath(const std::string& relativeToContent) const;
+	void markAssetGcEligible(unsigned int id, bool eligible);
+	void releaseAudioAsset(unsigned int assetId);
+
+	// Raw image loading (stb_image)
+	unsigned char* loadRawImageData(const std::string& path, int& width, int& height, int& channels);
+	void freeRawImageData(unsigned char* data);
+
+	// Asset Registry
     bool doesAssetExist(const std::string& pathOrName) const;
 	std::vector<std::shared_ptr<AssetData>> getAssetsByType(AssetType type) const;
 	std::shared_ptr<AssetData> getLoadedAssetByID(unsigned int id) const;
+	bool isAssetLoaded(const std::string& path) const;
 
 	//Project management
     bool loadProject(const std::string& projectPath, SyncState syncState = Sync);
@@ -112,6 +127,7 @@ private:
     };
 
 	SaveResult saveTextureAsset(const std::shared_ptr<AssetData>& texture);
+	SaveResult saveAudioAsset(const std::shared_ptr<AssetData>& audio);
 	SaveResult saveMaterialAsset(const std::shared_ptr<AssetData>& material);
 	SaveResult saveObject2DAsset(const std::shared_ptr<AssetData>& object2D);
 	SaveResult saveObject3DAsset(const std::shared_ptr<AssetData>& object3D);
@@ -128,6 +144,7 @@ private:
 
 	LoadResult ReadAssetHeader(const std::string& path, AssetType& outType);
 	LoadResult loadTextureAsset(const std::string& path);
+	LoadResult loadAudioAsset(const std::string& path);
 	LoadResult loadMaterialAsset(const std::string& path);
 	LoadResult loadObject2DAsset(const std::string& path);
 	LoadResult loadObject3DAsset(const std::string& path);
@@ -172,5 +189,10 @@ private:
     bool m_workerStopRequested{ false };
 
 	std::unordered_map<unsigned int, std::shared_ptr<AssetData>> m_loadedAssets;
+	std::unordered_set<unsigned int> m_gcEligibleAssets;
+	mutable std::mutex m_asyncJobMutex;
+	int m_nextAsyncJobId{ 1 };
+	std::unordered_set<int> m_runningAssetJobs;
+	std::unordered_map<int, int> m_finishedAssetJobs;
     static int s_nextAssetID;
 };

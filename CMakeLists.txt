@@ -32,11 +32,20 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 add_subdirectory(external/SDL3 EXCLUDE_FROM_ALL)
 add_subdirectory(external/freetype)
+set(ALSOFT_UTILS OFF CACHE BOOL "" FORCE)
+set(ALSOFT_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(ALSOFT_TESTS OFF CACHE BOOL "" FORCE)
+set(ALSOFT_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(external/openal-soft EXCLUDE_FROM_ALL)
 add_subdirectory(src/AssetManager)
 add_subdirectory(src/Diagnostics)
 add_subdirectory(src/Core)
 add_subdirectory(src/Renderer)
 add_subdirectory(src/Logger)
+
+if (NOT TARGET OpenAL::OpenAL)
+    message(FATAL_ERROR "OpenAL target not available from external/openal-soft.")
+endif()
 
 add_executable(Engine
     src/main.cpp

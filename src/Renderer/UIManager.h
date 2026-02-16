@@ -39,6 +39,7 @@ public:
     const std::vector<WidgetEntry>& getRegisteredWidgets() const;
     const std::vector<const WidgetEntry*>& getWidgetsOrderedByZ() const;
     void unregisterWidget(const std::string& id);
+    WidgetElement* findElementById(const std::string& elementId);
 
     void updateLayouts(const std::function<Vec2(const std::string&, float)>& measureText);
     bool needsLayoutUpdate() const;
@@ -50,6 +51,7 @@ public:
     bool isPointerOverUI(const Vec2& screenPos) const;
     bool hasClickEvent(const std::string& eventId) const;
     void registerClickEvent(const std::string& eventId, std::function<void()> callback);
+    void markAllWidgetsDirty();
 
     void showModalMessage(const std::string& message, std::function<void()> onClosed = {});
     void closeModalMessage();
@@ -64,10 +66,10 @@ private:
     const WidgetEntry* findWidgetEntry(const std::string& id) const;
     WidgetElement* hitTest(const Vec2& screenPos, bool logDetails = false) const;
     void populateOutlinerWidget(const std::shared_ptr<Widget>& widget);
+    void populateOutlinerDetails(unsigned int entity);
     void populateContentBrowserWidget(const std::shared_ptr<Widget>& widget);
     void updateHoverStates();
     void setFocusedEntry(WidgetElement* element);
-    void markAllWidgetsDirty();
     void ensureModalWidget();
     std::shared_ptr<Widget> createToastWidget(const std::string& message, const std::string& name) const;
     void updateToastStackLayout();
@@ -108,8 +110,11 @@ private:
     std::vector<ToastNotification> m_toasts;
     uint64_t m_nextToastId{ 1 };
 
-    void bindClickEventsForWidget(const std::shared_ptr<Widget>& widget);
-    void bindClickEventsForElement(WidgetElement& element);
-	void refreshWorldOutliner();
+	void bindClickEventsForWidget(const std::shared_ptr<Widget>& widget);
+	void bindClickEventsForElement(WidgetElement& element);
 	EngineLevel* m_outlinerLevel{ nullptr };
+	unsigned int m_outlinerSelectedEntity{ 0 };
+
+public:
+	void refreshWorldOutliner();
 };

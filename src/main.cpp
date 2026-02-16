@@ -1,9 +1,8 @@
 ﻿#include <iostream>
 #include <filesystem>
 #include <cstdlib>
-#include <iomanip>
-#include <sstream>
 #include <algorithm>
+#include <cstdio>
 #include <SDL3/SDL.h>
 
 #if defined(_WIN32)
@@ -19,6 +18,7 @@
 #include "AssetManager/AssetTypes.h"
 #include "Core/ECS/ECS.h"
 #include "Core/MathTypes.h"
+#include "Core/AudioManager.h"
 #include "Scripting/PythonScripting.h"
 
 using namespace std;
@@ -87,6 +87,13 @@ int main()
     }
     logTimed(Logger::Category::Engine, "SDL initialised successfully.", Logger::LogLevel::INFO);
 
+    auto& audioManager = AudioManager::Instance();
+    logTimed(Logger::Category::Engine, "Initialising AudioManager (OpenAL)...", Logger::LogLevel::INFO);
+    if (!audioManager.initialize())
+    {
+        logTimed(Logger::Category::Engine, "AudioManager initialization failed.", Logger::LogLevel::ERROR);
+    }
+
     auto& diagnostics = DiagnosticsManager::Instance();
     //diagnostics.setRHIType(DiagnosticsManager::RHIType::OpenGL);
     if (!diagnostics.loadConfig())
@@ -145,10 +152,56 @@ int main()
 
     if (glRenderer)
     {
+        const GLuint playTexId = glRenderer->preloadUITexture("Play.tga");
+        const GLuint stopTexId = glRenderer->preloadUITexture("Stop.tga");
+
         glRenderer->getUIManager().registerClickEvent("TitleBar.Close", []()
             {
                 Logger::Instance().log(Logger::Category::Input, "TitleBar close button clicked.", Logger::LogLevel::INFO);
                 DiagnosticsManager::Instance().requestShutdown();
+            });
+
+        glRenderer->getUIManager().registerClickEvent("Toolbar.PIE", [&glRenderer, playTexId, stopTexId]()
+            {
+                auto& diag = DiagnosticsManager::Instance();
+                const bool wasActive = diag.isPIEActive();
+                auto& uiMgr = glRenderer->getUIManager();
+
+                if (!wasActive)
+                {
+                    auto* level = diag.getActiveLevelSoft();
+                    if (!level)
+                    {
+                        Logger::Instance().log(Logger::Category::Engine, "PIE: no active level to play.", Logger::LogLevel::WARNING);
+                        return;
+                    }
+                    level->snapshotEcsState();
+                    diag.setPIEActive(true);
+                    if (auto* el = uiMgr.findElementById("Toolbar.PIE"))
+                    {
+                        el->textureId = stopTexId;
+                    }
+                    uiMgr.markAllWidgetsDirty();
+                    Logger::Instance().log(Logger::Category::Engine, "PIE: started.", Logger::LogLevel::INFO);
+                }
+                else
+                {
+                    diag.setPIEActive(false);
+                    AudioManager::Instance().stopAll();
+                    Scripting::ReloadScripts();
+                    auto* level = diag.getActiveLevelSoft();
+                    if (level)
+                    {
+                        level->restoreEcsSnapshot();
+                    }
+                    if (auto* el = uiMgr.findElementById("Toolbar.PIE"))
+                    {
+                        el->textureId = playTexId;
+                    }
+                    uiMgr.markAllWidgetsDirty();
+                    uiMgr.refreshWorldOutliner();
+                    Logger::Instance().log(Logger::Category::Engine, "PIE: stopped.", Logger::LogLevel::INFO);
+                }
             });
 
         const std::string widgetPath = assetManager.getEditorWidgetPath("TitleBar.asset");
@@ -162,6 +215,22 @@ int main()
                     if (auto widget = glRenderer->createWidgetFromAsset(asset))
                     {
                         glRenderer->getUIManager().registerWidget("TitleBar", widget);
+                    }
+                }
+            }
+        }
+
+        const std::string toolbarPath = assetManager.getEditorWidgetPath("Toolbar.asset");
+        if (!toolbarPath.empty())
+        {
+            const int widgetId = assetManager.loadAsset(toolbarPath, AssetType::Widget, AssetManager::Sync);
+            if (widgetId != 0)
+            {
+                if (auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(widgetId)))
+                {
+                    if (auto widget = glRenderer->createWidgetFromAsset(asset))
+                    {
+                        glRenderer->getUIManager().registerWidget("Toolbar", widget);
                     }
                 }
             }
@@ -305,6 +374,22 @@ int main()
             }
         }
 
+        const std::string entityDetailsPath = assetManager.getEditorWidgetPath("EntityDetails.asset");
+        if (!entityDetailsPath.empty())
+        {
+            const int widgetId = assetManager.loadAsset(entityDetailsPath, AssetType::Widget, AssetManager::Sync);
+            if (widgetId != 0)
+            {
+                if (auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(widgetId)))
+                {
+                    if (auto widget = glRenderer->createWidgetFromAsset(asset))
+                    {
+                        glRenderer->getUIManager().registerWidget("EntityDetails", widget);
+                    }
+                }
+            }
+        }
+
         const std::string contentBrowserPath = assetManager.getEditorWidgetPath("ContentBrowser.asset");
         if (!contentBrowserPath.empty())
         {
@@ -338,30 +423,6 @@ int main()
         //assetManager.importAssetWithDialog(nullptr, AssetType::Unknown);
         return true;
         });
-
-    diagnostics.registerKeyUpHandler(SDLK_F7, [&]() {
-        logTimed(Logger::Category::Input, "F7 pressed - hot reloading level and scripts.", Logger::LogLevel::INFO);
-        std::string levelPath;
-        if (auto* level = diagnostics.getActiveLevelSoft())
-        {
-            levelPath = level->getPath();
-        }
-        Scripting::ReloadScripts();
-        assetManager.unloadAllAssets();
-        diagnostics.setActiveLevel(nullptr);
-        diagnostics.setScenePrepared(false);
-        if (!levelPath.empty())
-        {
-            std::string absPath = assetManager.getAbsoluteContentPath(levelPath);
-            if (absPath.empty())
-            {
-                absPath = levelPath;
-            }
-            assetManager.loadAsset(absPath, AssetType::Level, AssetManager::Sync);
-        }
-        return true;
-        });
-
 
     bool rightMouseDown = false;
     float cameraSpeedMultiplier = 1.0f;
@@ -429,6 +490,8 @@ int main()
             metricsUpdateTimer = 0.0;
             metricsUpdatePending = true;
         }
+
+        audioManager.update();
 
         cpuLoggerMs = 0.0;
         cpuGcMs = 0.0;
@@ -641,7 +704,10 @@ int main()
                     continue;
                 }
                 diagnostics.dispatchKeyUp(event.key.key);
-                Scripting::HandleKeyUp(event.key.key);
+                if (diagnostics.isPIEActive())
+                {
+                    Scripting::HandleKeyUp(event.key.key);
+                }
                 if (event.key.key == SDLK_F12)
                 {
 					fpscap = !fpscap;
@@ -658,7 +724,10 @@ int main()
                     }
                 }
                 diagnostics.dispatchKeyDown(event.key.key);
-                Scripting::HandleKeyDown(event.key.key);
+                if (diagnostics.isPIEActive())
+                {
+                    Scripting::HandleKeyDown(event.key.key);
+                }
             }
         }
         const uint64_t eventEndCounter = SDL_GetPerformanceCounter();
@@ -672,7 +741,10 @@ int main()
             running = false;
         }
 
-        Scripting::UpdateScripts(static_cast<float>(dt));
+        if (diagnostics.isPIEActive())
+        {
+            Scripting::UpdateScripts(static_cast<float>(dt));
+        }
 
         if (glRenderer)
         {
@@ -685,9 +757,9 @@ int main()
             {
                 fpsText = "FPS: " + std::to_string(static_cast<int>(fpsValue + 0.5));
 
-                std::ostringstream speedStream;
-                speedStream << std::fixed << std::setprecision(1) << cameraSpeedMultiplier;
-                speedText = "Speed: x" + speedStream.str();
+                char speedBuf[32];
+                std::snprintf(speedBuf, sizeof(speedBuf), "Speed: x%.1f", cameraSpeedMultiplier);
+                speedText = speedBuf;
             }
 
             glRenderer->queueText(fpsText,
@@ -715,57 +787,43 @@ int main()
         {
             if (metricsUpdatePending)
             {
-                std::ostringstream statsStream;
-                statsStream << std::fixed << std::setprecision(3)
-                    << "CPU: " << cpuFrameMs << " ms"
-                    << " | GPU: " << glRenderer->getLastGpuFrameMs() << " ms";
-                cpuText = statsStream.str();
+                char buf[128];
 
-                std::ostringstream renderStream;
-                renderStream << std::fixed << std::setprecision(3)
-                    << "World: " << glRenderer->getLastCpuRenderWorldMs() << " ms"
-                    << " | UI: " << glRenderer->getLastCpuRenderUiMs() << " ms";
-                renderText = renderStream.str();
+                std::snprintf(buf, sizeof(buf), "CPU: %.3f ms | GPU: %.3f ms",
+                    cpuFrameMs, glRenderer->getLastGpuFrameMs());
+                cpuText = buf;
 
-                std::ostringstream uiStream;
-                uiStream << std::fixed << std::setprecision(3)
-                    << "UI Layout: " << glRenderer->getLastCpuUiLayoutMs() << " ms"
-                    << " | UI Draw: " << glRenderer->getLastCpuUiDrawMs() << " ms";
-                uiText = uiStream.str();
+                std::snprintf(buf, sizeof(buf), "World: %.3f ms | UI: %.3f ms",
+                    glRenderer->getLastCpuRenderWorldMs(), glRenderer->getLastCpuRenderUiMs());
+                renderText = buf;
 
-                std::ostringstream inputStream;
-                inputStream << std::fixed << std::setprecision(3)
-                    << "Input: " << cpuInputMs << " ms"
-                    << " | Events: " << cpuEventMs << " ms";
-                inputText = inputStream.str();
+                std::snprintf(buf, sizeof(buf), "UI Layout: %.3f ms | UI Draw: %.3f ms",
+                    glRenderer->getLastCpuUiLayoutMs(), glRenderer->getLastCpuUiDrawMs());
+                uiText = buf;
 
-                std::ostringstream otherStream;
-                otherStream << std::fixed << std::setprecision(3)
-                    << "Render: " << cpuRenderMs << " ms"
-                    << " | Other: " << cpuOtherMs << " ms";
-                otherText = otherStream.str();
+                std::snprintf(buf, sizeof(buf), "Input: %.3f ms | Events: %.3f ms",
+                    cpuInputMs, cpuEventMs);
+                inputText = buf;
 
-                std::ostringstream gcStream;
-                gcStream << std::fixed << std::setprecision(3)
-                    << "GC: " << cpuGcMs << " ms"
-                    << " | Logger: " << cpuLoggerMs << " ms";
-                gcText = gcStream.str();
+                std::snprintf(buf, sizeof(buf), "Render: %.3f ms | Other: %.3f ms",
+                    cpuRenderMs, cpuOtherMs);
+                otherText = buf;
 
-                std::ostringstream ecsStream;
-                ecsStream << std::fixed << std::setprecision(3)
-                    << "ECS: " << glRenderer->getLastCpuEcsMs() << " ms";
-                ecsText = ecsStream.str();
+                std::snprintf(buf, sizeof(buf), "GC: %.3f ms | Logger: %.3f ms",
+                    cpuGcMs, cpuLoggerMs);
+                gcText = buf;
 
-                std::ostringstream frameStream;
-                frameStream << std::fixed << std::setprecision(3)
-                    << "Frame: " << cpuFrameMs << " ms";
-                frameText = frameStream.str();
+                std::snprintf(buf, sizeof(buf), "ECS: %.3f ms",
+                    glRenderer->getLastCpuEcsMs());
+                ecsText = buf;
 
-                std::ostringstream occlusionStream;
-                occlusionStream << "Visible: " << glRenderer->getLastVisibleCount()
-                    << " | Hidden: " << glRenderer->getLastHiddenCount()
-                    << " | Total: " << glRenderer->getLastTotalCount();
-                occlusionText = occlusionStream.str();
+                std::snprintf(buf, sizeof(buf), "Frame: %.3f ms", cpuFrameMs);
+                frameText = buf;
+
+                std::snprintf(buf, sizeof(buf), "Visible: %u | Hidden: %u | Total: %u",
+                    glRenderer->getLastVisibleCount(), glRenderer->getLastHiddenCount(),
+                    glRenderer->getLastTotalCount());
+                occlusionText = buf;
             }
 
             if (showMetrics)
@@ -856,6 +914,8 @@ int main()
     }
     diagnostics.saveProjectConfig();
     diagnostics.saveConfig();
+
+    audioManager.shutdown();
 
     renderer->shutdown();
 

@@ -13,6 +13,9 @@ namespace
         case WidgetElementType::Grid: return "Grid";
         case WidgetElementType::ColorPicker: return "ColorPicker";
         case WidgetElementType::EntryBar: return "EntryBar";
+        case WidgetElementType::ProgressBar: return "ProgressBar";
+        case WidgetElementType::Slider: return "Slider";
+        case WidgetElementType::Image: return "Image";
         default: return "Unknown";
         }
     }
@@ -26,6 +29,9 @@ namespace
         if (value == "Grid") return WidgetElementType::Grid;
         if (value == "ColorPicker") return WidgetElementType::ColorPicker;
         if (value == "EntryBar") return WidgetElementType::EntryBar;
+        if (value == "ProgressBar") return WidgetElementType::ProgressBar;
+        if (value == "Slider") return WidgetElementType::Slider;
+        if (value == "Image") return WidgetElementType::Image;
         return WidgetElementType::Unknown;
     }
 
@@ -169,6 +175,10 @@ namespace
         {
             element.color = Vec4{ 0.12f, 0.12f, 0.15f, 0.9f };
         }
+        else if (element.type == WidgetElementType::ProgressBar || element.type == WidgetElementType::Slider)
+        {
+            element.color = Vec4{ 0.14f, 0.14f, 0.18f, 0.9f };
+        }
         else if (element.type == WidgetElementType::ColorPicker)
         {
             element.color = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
@@ -181,6 +191,16 @@ namespace
         {
             element.hoverColor = (element.type == WidgetElementType::Button) ? brightenColor(element.color) : element.color;
         }
+        if (entry.contains("fillColor"))
+        {
+            element.fillColor = readVec4(entry.at("fillColor"));
+        }
+        else
+        {
+            element.fillColor = (element.type == WidgetElementType::ProgressBar || element.type == WidgetElementType::Slider)
+                ? brightenColor(element.color)
+                : element.color;
+        }
         if (entry.contains("textColor"))
         {
             element.textColor = readVec4(entry.at("textColor"));
@@ -191,7 +211,23 @@ namespace
         }
         if (entry.contains("value"))
         {
-            element.value = entry.at("value").get<std::string>();
+            const auto& valueEntry = entry.at("value");
+            if ((element.type == WidgetElementType::ProgressBar || element.type == WidgetElementType::Slider) && valueEntry.is_number())
+            {
+                element.valueFloat = valueEntry.get<float>();
+            }
+            else if (valueEntry.is_string())
+            {
+                element.value = valueEntry.get<std::string>();
+            }
+        }
+        if (entry.contains("minValue"))
+        {
+            element.minValue = entry.at("minValue").get<float>();
+        }
+        if (entry.contains("maxValue"))
+        {
+            element.maxValue = entry.at("maxValue").get<float>();
         }
         if (entry.contains("font"))
         {
@@ -241,7 +277,8 @@ namespace
         {
             element.isHitTestable = (element.type == WidgetElementType::Button ||
                 element.type == WidgetElementType::ColorPicker ||
-                element.type == WidgetElementType::EntryBar);
+                element.type == WidgetElementType::EntryBar ||
+                element.type == WidgetElementType::Slider);
         }
         if (entry.contains("fillX"))
         {
@@ -271,9 +308,24 @@ namespace
         {
             element.shaderFragment = entry.at("shaderFragment").get<std::string>();
         }
+        if (element.shaderFragment.empty())
+        {
+            if (element.type == WidgetElementType::ProgressBar)
+            {
+                element.shaderFragment = "progress_fragment.glsl";
+            }
+            else if (element.type == WidgetElementType::Slider)
+            {
+                element.shaderFragment = "slider_fragment.glsl";
+            }
+        }
         if (entry.contains("clickEvent"))
         {
             element.clickEvent = entry.at("clickEvent").get<std::string>();
+        }
+        if (entry.contains("imagePath"))
+        {
+            element.imagePath = entry.at("imagePath").get<std::string>();
         }
         if (entry.contains("children") && entry.at("children").is_array())
         {
@@ -303,6 +355,11 @@ namespace
         entry["from"] = writeVec2(element.from);
         entry["to"] = writeVec2(element.to);
         entry["color"] = writeVec4(element.color);
+        if (element.fillColor.x != element.color.x || element.fillColor.y != element.color.y ||
+            element.fillColor.z != element.color.z || element.fillColor.w != element.color.w)
+        {
+            entry["fillColor"] = writeVec4(element.fillColor);
+        }
         entry["textColor"] = writeVec4(element.textColor);
         if (element.hoverColor.x != element.color.x || element.hoverColor.y != element.color.y ||
             element.hoverColor.z != element.color.z || element.hoverColor.w != element.color.w)
@@ -379,6 +436,12 @@ namespace
                 entry["isPassword"] = element.isPassword;
             }
         }
+        else if (element.type == WidgetElementType::ProgressBar || element.type == WidgetElementType::Slider)
+        {
+            entry["value"] = element.valueFloat;
+            entry["minValue"] = element.minValue;
+            entry["maxValue"] = element.maxValue;
+        }
         else if (element.type == WidgetElementType::ColorPicker)
         {
             if (element.isCompact)
@@ -397,6 +460,10 @@ namespace
         if (!element.clickEvent.empty())
         {
             entry["clickEvent"] = element.clickEvent;
+        }
+        if (!element.imagePath.empty())
+        {
+            entry["imagePath"] = element.imagePath;
         }
         if (!element.children.empty())
         {

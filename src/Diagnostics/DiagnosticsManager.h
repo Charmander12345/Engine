@@ -115,6 +115,9 @@ public:
     void setScenePrepared(bool prepared);
     bool isScenePrepared() const;
 
+    void setPIEActive(bool active);
+    bool isPIEActive() const;
+
     void requestShutdown();
     bool isShutdownRequested() const;
 
@@ -164,6 +167,7 @@ private:
     std::unique_ptr<EngineLevel> m_activeLevel;
 
     bool m_scenePrepared{ false };
+    bool m_pieActive{ false };
 
 	bool isLoadingAsset{ false };
     bool isSavingAsset{ false };

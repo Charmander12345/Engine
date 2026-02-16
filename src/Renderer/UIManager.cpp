@@ -5,11 +5,16 @@
 #include <functional>
 #include <cmath>
 #include <filesystem>
+#include <cstdlib>
+#include <sstream>
+#include <iomanip>
+#include <cctype>
 #include <SDL3/SDL.h>
 #include "../Logger/Logger.h"
 #include "../Diagnostics/DiagnosticsManager.h"
 #include "../Core/EngineLevel.h"
 #include "../Core/ECS/ECS.h"
+#include "UIWidgets/SeparatorWidget.h"
 
 namespace
 {
@@ -173,6 +178,16 @@ namespace
             element.hasContentSize = true;
             return size;
         }
+        case WidgetElementType::ProgressBar:
+        case WidgetElementType::Slider:
+        {
+            const float width = (element.minSize.x > 0.0f) ? element.minSize.x : 140.0f;
+            const float height = (element.minSize.y > 0.0f) ? element.minSize.y : 18.0f;
+            size = Vec2{ width, height };
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
 
         case WidgetElementType::Button:
         {
@@ -180,6 +195,12 @@ namespace
             const Vec2 textSize = (!element.text.empty() && measureText) ? measureText(element.text, scale) : Vec2{};
             size.x = textSize.x + element.padding.x * 2.0f;
             size.y = textSize.y + element.padding.y * 2.0f;
+            if (!element.imagePath.empty() && element.text.empty())
+            {
+                const float imgDefault = 24.0f;
+                size.x = std::max(size.x, imgDefault + element.padding.x * 2.0f);
+                size.y = std::max(size.y, imgDefault + element.padding.y * 2.0f);
+            }
             size.x = std::max(size.x, element.minSize.x);
             size.y = std::max(size.y, element.minSize.y);
             element.contentSizePixels = size;
@@ -484,7 +505,12 @@ namespace
                     ++fillCount;
                     continue;
                 }
-                float slotW = child.minSize.x + child.margin.x * 2.0f;
+                float childMinW = child.minSize.x;
+                if (child.hasContentSize)
+                {
+                    childMinW = std::max(childMinW, child.contentSizePixels.x);
+                }
+                float slotW = childMinW + child.margin.x * 2.0f;
                 fixedSlots.push_back(slotW);
                 fixedWidth += slotW;
             }
@@ -520,7 +546,7 @@ namespace
             {
                 auto& child = element.children[index];
                 float slotW = fixedSlots[index];
-                float slotH = child.fillY ? contentH : (child.minSize.y + child.margin.y * 2.0f);
+                float slotH = child.fillY ? contentH : ((child.hasContentSize ? std::max(child.minSize.y, child.contentSizePixels.y) : child.minSize.y) + child.margin.y * 2.0f);
                 const float childX = cursorX + child.margin.x;
                 const float childY = contentY + child.margin.y;
                 const float childW = std::max(0.0f, slotW - child.margin.x * 2.0f);
@@ -545,7 +571,12 @@ namespace
                     ++fillCount;
                     continue;
                 }
-                float slotH = child.minSize.y + child.margin.y * 2.0f;
+                float childMinH = child.minSize.y;
+                if (child.hasContentSize)
+                {
+                    childMinH = std::max(childMinH, child.contentSizePixels.y);
+                }
+                float slotH = childMinH + child.margin.y * 2.0f;
                 fixedSlots.push_back(slotH);
                 fixedHeight += slotH;
             }
@@ -582,7 +613,7 @@ namespace
             {
                 auto& child = element.children[index];
                 float slotH = fixedSlots[index];
-                float slotW = child.fillX ? contentW : (child.minSize.x + child.margin.x * 2.0f);
+                float slotW = child.fillX ? contentW : ((child.hasContentSize ? std::max(child.minSize.x, child.contentSizePixels.x) : child.minSize.x) + child.margin.x * 2.0f);
                 const float childX = contentX + child.margin.x;
                 const float childY = cursorY + child.margin.y;
                 const float childW = std::max(0.0f, slotW - child.margin.x * 2.0f);
@@ -753,6 +784,10 @@ void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widg
         if (id == "WorldOutliner")
         {
             populateOutlinerWidget(entry->widget);
+        }
+        else if (id == "EntityDetails")
+        {
+            populateOutlinerDetails(m_outlinerSelectedEntity);
         }
         else if (id == "ContentBrowser")
         {
@@ -925,12 +960,14 @@ void UIManager::populateOutlinerWidget(const std::shared_ptr<Widget>& widget)
     }
     listPanel->scrollable = true;
     listPanel->fillX = true;
-    listPanel->fillY = true;
+    listPanel->fillY = false;
     listPanel->sizeToContent = false;
+    listPanel->padding = Vec2{ 2.0f, 2.0f };
 
     auto& ecs = ECS::ECSManager::Instance();
     ECS::Schema schema;
     const auto entities = ecs.getEntitiesMatchingSchema(schema);
+    bool hasSelectedEntity = false;
     for (const auto entity : entities)
     {
         std::string label = "Entity " + std::to_string(entity);
@@ -960,14 +997,215 @@ void UIManager::populateOutlinerWidget(const std::shared_ptr<Widget>& widget)
         button.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
         button.shaderVertex = "button_vertex.glsl";
         button.shaderFragment = "button_fragment.glsl";
+        button.isHitTestable = true;
+        button.onClicked = [this, entity]()
+            {
+                m_outlinerSelectedEntity = entity;
+                populateOutlinerDetails(entity);
+            };
         button.runtimeOnly = true;
         listPanel->children.push_back(std::move(button));
         Logger::Instance().log(Logger::Category::UI,
             "WorldOutliner created button for entity " + std::to_string(entity) + " label=" + label,
             Logger::LogLevel::INFO);
+        if (entity == m_outlinerSelectedEntity)
+        {
+            hasSelectedEntity = true;
+        }
     }
 
+    if (!hasSelectedEntity)
+    {
+        m_outlinerSelectedEntity = 0;
+    }
+    populateOutlinerDetails(m_outlinerSelectedEntity);
+
     widget->markLayoutDirty();
+}
+
+void UIManager::populateOutlinerDetails(unsigned int entity)
+{
+    auto* detailsEntry = findWidgetEntry("EntityDetails");
+    if (!detailsEntry || !detailsEntry->widget)
+    {
+        return;
+    }
+
+    auto& elements = detailsEntry->widget->getElementsMutable();
+    WidgetElement* detailsPanel = FindElementById(elements, "Details.Content");
+    if (!detailsPanel)
+    {
+        return;
+    }
+
+    detailsPanel->children.clear();
+
+    const auto formatVec3 = [](const float values[3])
+        {
+            std::ostringstream stream;
+            stream << std::fixed << std::setprecision(2)
+                << values[0] << ", " << values[1] << ", " << values[2];
+            return stream.str();
+        };
+
+    const auto makeTextLine = [](const std::string& text) -> WidgetElement
+        {
+            WidgetElement line{};
+            line.type = WidgetElementType::Text;
+            line.text = text;
+            line.font = "default.ttf";
+            line.fontSize = 12.0f;
+            line.textAlignH = TextAlignH::Left;
+            line.textAlignV = TextAlignV::Center;
+            line.textColor = Vec4{ 0.85f, 0.86f, 0.9f, 1.0f };
+            line.fillX = true;
+            line.minSize = Vec2{ 0.0f, 18.0f };
+            line.runtimeOnly = true;
+            return line;
+        };
+
+    const auto sanitizeId = [](const std::string& text)
+        {
+            std::string result;
+            result.reserve(text.size());
+            for (unsigned char c : text)
+            {
+                result.push_back(std::isalnum(c) ? static_cast<char>(c) : '_');
+            }
+            if (result.empty())
+            {
+                result = "Section";
+            }
+            return result;
+        };
+
+    const auto addSeparator = [&](const std::string& title, const std::vector<WidgetElement>& lines)
+        {
+            SeparatorWidget separator;
+            separator.setId(sanitizeId(title));
+            separator.setTitle(title);
+            separator.setChildren(lines);
+            detailsPanel->children.push_back(separator.toElement());
+        };
+
+    if (entity == 0)
+    {
+        detailsPanel->children.push_back(makeTextLine("Select an entity to see details."));
+        detailsEntry->widget->markLayoutDirty();
+        return;
+    }
+
+    auto& ecs = ECS::ECSManager::Instance();
+
+    std::vector<WidgetElement> entityLines;
+    entityLines.push_back(makeTextLine("ID: " + std::to_string(entity)));
+    {
+        std::string nameValue = "<unnamed>";
+        if (const auto* nameComponent = ecs.getComponent<ECS::NameComponent>(entity))
+        {
+            if (!nameComponent->displayName.empty())
+            {
+                nameValue = nameComponent->displayName;
+            }
+        }
+        entityLines.push_back(makeTextLine("Name: " + nameValue));
+    }
+    addSeparator("Entity", entityLines);
+
+    if (const auto* nameComponent = ecs.getComponent<ECS::NameComponent>(entity))
+    {
+        std::vector<WidgetElement> lines;
+        lines.push_back(makeTextLine("Display Name: " + nameComponent->displayName));
+        addSeparator("Name", lines);
+    }
+
+    if (const auto* transform = ecs.getComponent<ECS::TransformComponent>(entity))
+    {
+        std::vector<WidgetElement> lines;
+        lines.push_back(makeTextLine("Position: " + formatVec3(transform->position)));
+        lines.push_back(makeTextLine("Rotation: " + formatVec3(transform->rotation)));
+        lines.push_back(makeTextLine("Scale: " + formatVec3(transform->scale)));
+        addSeparator("Transform", lines);
+    }
+
+    if (const auto* mesh = ecs.getComponent<ECS::MeshComponent>(entity))
+    {
+        std::vector<WidgetElement> lines;
+        lines.push_back(makeTextLine("Asset Path: " + mesh->meshAssetPath));
+        lines.push_back(makeTextLine("Asset Id: " + std::to_string(mesh->meshAssetId)));
+        addSeparator("Mesh", lines);
+    }
+
+    if (const auto* material = ecs.getComponent<ECS::MaterialComponent>(entity))
+    {
+        std::vector<WidgetElement> lines;
+        lines.push_back(makeTextLine("Asset Path: " + material->materialAssetPath));
+        lines.push_back(makeTextLine("Asset Id: " + std::to_string(material->materialAssetId)));
+        addSeparator("Material", lines);
+    }
+
+    if (const auto* light = ecs.getComponent<ECS::LightComponent>(entity))
+    {
+        std::string typeLabel = "Point";
+        switch (light->type)
+        {
+        case ECS::LightComponent::LightType::Directional:
+            typeLabel = "Directional";
+            break;
+        case ECS::LightComponent::LightType::Spot:
+            typeLabel = "Spot";
+            break;
+        default:
+            break;
+        }
+        std::vector<WidgetElement> lines;
+        lines.push_back(makeTextLine("Type: " + typeLabel));
+        lines.push_back(makeTextLine("Color: " + formatVec3(light->color)));
+        lines.push_back(makeTextLine("Intensity: " + std::to_string(light->intensity)));
+        lines.push_back(makeTextLine("Range: " + std::to_string(light->range)));
+        lines.push_back(makeTextLine("Spot Angle: " + std::to_string(light->spotAngle)));
+        addSeparator("Light", lines);
+    }
+
+    if (const auto* camera = ecs.getComponent<ECS::CameraComponent>(entity))
+    {
+        std::vector<WidgetElement> lines;
+        lines.push_back(makeTextLine("FOV: " + std::to_string(camera->fov)));
+        lines.push_back(makeTextLine("Near Clip: " + std::to_string(camera->nearClip)));
+        lines.push_back(makeTextLine("Far Clip: " + std::to_string(camera->farClip)));
+        addSeparator("Camera", lines);
+    }
+
+    if (const auto* physics = ecs.getComponent<ECS::PhysicsComponent>(entity))
+    {
+        std::string colliderType = "Box";
+        switch (physics->colliderType)
+        {
+        case ECS::PhysicsComponent::ColliderType::Sphere:
+            colliderType = "Sphere";
+            break;
+        case ECS::PhysicsComponent::ColliderType::Mesh:
+            colliderType = "Mesh";
+            break;
+        default:
+            break;
+        }
+        std::vector<WidgetElement> lines;
+        lines.push_back(makeTextLine("Collider: " + colliderType));
+        lines.push_back(makeTextLine(std::string("Static: ") + (physics->isStatic ? "true" : "false")));
+        lines.push_back(makeTextLine("Mass: " + std::to_string(physics->mass)));
+        addSeparator("Physics", lines);
+    }
+
+    if (const auto* script = ecs.getComponent<ECS::ScriptComponent>(entity))
+    {
+        std::vector<WidgetElement> lines;
+        lines.push_back(makeTextLine("Script Path: " + script->scriptPath));
+        lines.push_back(makeTextLine("Asset Id: " + std::to_string(script->scriptAssetId)));
+        addSeparator("Script", lines);
+    }
+
+    detailsEntry->widget->markLayoutDirty();
 }
 
 void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widget)
@@ -1075,6 +1313,42 @@ void UIManager::unregisterWidget(const std::string& id)
         m_widgets.end());
     m_widgetOrderDirty = true;
     m_pointerCacheDirty = true;
+}
+
+WidgetElement* UIManager::findElementById(const std::string& elementId)
+{
+    const std::function<WidgetElement*(WidgetElement&)> search =
+        [&](WidgetElement& el) -> WidgetElement*
+        {
+            if (el.id == elementId)
+            {
+                return &el;
+            }
+            for (auto& child : el.children)
+            {
+                if (auto* found = search(child))
+                {
+                    return found;
+                }
+            }
+            return nullptr;
+        };
+
+    for (auto& entry : m_widgets)
+    {
+        if (!entry.widget)
+        {
+            continue;
+        }
+        for (auto& element : entry.widget->getElementsMutable())
+        {
+            if (auto* found = search(element))
+            {
+                return found;
+            }
+        }
+    }
+    return nullptr;
 }
 
 void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float)>& measureText)
@@ -1283,6 +1557,38 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
         widget->setLayoutDirty(false);
     }
 
+    {
+        const auto* outlinerEntry = findWidgetEntry("WorldOutliner");
+        auto* detailsEntry = findWidgetEntry("EntityDetails");
+        if (outlinerEntry && outlinerEntry->widget && outlinerEntry->widget->hasComputedPosition() &&
+            detailsEntry && detailsEntry->widget)
+        {
+            const Vec2 outlinerPos = outlinerEntry->widget->getComputedPositionPixels();
+            const Vec2 outlinerSize = outlinerEntry->widget->getComputedSizePixels();
+
+            const float splitRatio = 0.45f;
+            const Vec2 detailsPos{ outlinerPos.x, outlinerPos.y + outlinerSize.y * splitRatio };
+            const Vec2 detailsSize{ outlinerSize.x, outlinerSize.y * (1.0f - splitRatio) };
+
+            detailsEntry->widget->setComputedPositionPixels(detailsPos, true);
+            detailsEntry->widget->setComputedSizePixels(detailsSize, true);
+
+            for (auto& element : detailsEntry->widget->getElementsMutable())
+            {
+                measureElementSize(element, measureText);
+            }
+            for (auto& element : detailsEntry->widget->getElementsMutable())
+            {
+                layoutElement(element, detailsPos.x, detailsPos.y, detailsSize.x, detailsSize.y, measureText);
+            }
+            for (auto& element : detailsEntry->widget->getElementsMutable())
+            {
+                computeElementBounds(element);
+            }
+            detailsEntry->widget->setLayoutDirty(false);
+        }
+    }
+
     m_pointerCacheDirty = true;
 
 }
@@ -1333,6 +1639,54 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
     if (target->type == WidgetElementType::Button && !target->id.empty())
     {
         Logger::Instance().log(Logger::Category::UI, "Click: " + target->id, Logger::LogLevel::INFO);
+    }
+    const std::string outlinerPrefix = "Outliner.Entity.";
+    if (target->id.rfind(outlinerPrefix, 0) == 0)
+    {
+        const char* start = target->id.c_str() + outlinerPrefix.size();
+        char* end = nullptr;
+        const unsigned long entityValue = std::strtoul(start, &end, 10);
+        if (end && end != start)
+        {
+            m_outlinerSelectedEntity = static_cast<unsigned int>(entityValue);
+            populateOutlinerDetails(m_outlinerSelectedEntity);
+        }
+    }
+    const std::string separatorPrefix = "Separator.Toggle.";
+    if (target->id.rfind(separatorPrefix, 0) == 0)
+    {
+        const std::string separatorId = target->id.substr(separatorPrefix.size());
+        const std::string contentId = "Separator.Content." + separatorId;
+        for (auto& entry : m_widgets)
+        {
+            if (!entry.widget)
+                continue;
+            auto& elements = entry.widget->getElementsMutable();
+            if (auto* content = FindElementById(elements, contentId))
+            {
+                if (content->isCollapsed)
+                {
+                    content->children = content->cachedChildren;
+                    content->isCollapsed = false;
+                    if (target->text.size() >= 2 && target->text[0] == '>' && target->text[1] == ' ')
+                    {
+                        target->text = "v " + target->text.substr(2);
+                    }
+                }
+                else
+                {
+                    content->cachedChildren = content->children;
+                    content->children.clear();
+                    content->isCollapsed = true;
+                    if (target->text.size() >= 2 && target->text[0] == 'v' && target->text[1] == ' ')
+                    {
+                        target->text = "> " + target->text.substr(2);
+                    }
+                }
+                entry.widget->markLayoutDirty();
+                break;
+            }
+        }
     }
     if (target->type == WidgetElementType::ColorPicker && !target->isCompact)
     {

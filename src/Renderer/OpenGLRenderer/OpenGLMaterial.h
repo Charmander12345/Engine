@@ -41,6 +41,10 @@ public:
     void bind() override;
     void unbind() override;
     void render() override;
+    void renderBatchContinuation();
+
+    GLuint getProgram() const { return m_program; }
+    GLuint getVao() const { return m_vao; }
 
     // Matrix uniform setters
     void setModelMatrix(const glm::mat4& matrix) { m_modelMatrix = matrix; }
@@ -77,4 +81,13 @@ private:
     glm::vec3 m_lightPosition{0.0f, 1.0f, 0.0f};
     glm::vec3 m_lightColor{1.0f, 1.0f, 1.0f};
     float m_lightIntensity{1.0f};
+
+    // Cached uniform locations (queried once at build time)
+    GLint m_locModel{-1};
+    GLint m_locView{-1};
+    GLint m_locProjection{-1};
+    GLint m_locLightPos{-1};
+    GLint m_locLightColor{-1};
+    GLint m_locLightIntensity{-1};
+    std::vector<GLint> m_texUniformLocs;
 };

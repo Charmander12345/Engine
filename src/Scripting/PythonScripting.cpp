@@ -15,6 +15,7 @@
 #include "../AssetManager/AssetTypes.h"
 #include "../Diagnostics/DiagnosticsManager.h"
 #include "../Core/EngineLevel.h"
+#include "../Core/AudioManager.h"
 #include "../Logger/Logger.h"
 #include "../Renderer/UIManager.h"
 #include <SDL3/SDL.h>
@@ -27,6 +28,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <memory>
+#include <mutex>
 
 namespace
 {
@@ -151,6 +153,8 @@ namespace
     std::unordered_map<int, std::vector<PyObject*>> s_keyPressedCallbacks;
     std::unordered_map<int, std::vector<PyObject*>> s_keyReleasedCallbacks;
     Renderer* s_renderer{ nullptr };
+    std::unordered_map<int, std::shared_ptr<PyObject>> s_assetLoadCallbacks;
+    std::mutex s_assetLoadCallbacksMutex;
 
     void ReleaseScriptState(ScriptState& state)
     {
@@ -220,6 +224,50 @@ namespace
         }
         s_keyPressedCallbacks.clear();
         s_keyReleasedCallbacks.clear();
+    }
+
+    void ClearAssetLoadCallbacks()
+    {
+        std::lock_guard<std::mutex> lock(s_assetLoadCallbacksMutex);
+        s_assetLoadCallbacks.clear();
+    }
+
+    void ProcessAssetLoadCallbacks()
+    {
+        std::vector<std::pair<std::shared_ptr<PyObject>, int>> ready;
+        {
+            std::lock_guard<std::mutex> lock(s_assetLoadCallbacksMutex);
+            for (auto it = s_assetLoadCallbacks.begin(); it != s_assetLoadCallbacks.end();)
+            {
+                int assetId = 0;
+                if (AssetManager::Instance().tryConsumeAssetLoadResult(it->first, assetId))
+                {
+                    ready.emplace_back(it->second, assetId);
+                    it = s_assetLoadCallbacks.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+        }
+
+        for (auto& [callback, assetId] : ready)
+        {
+            if (!callback)
+            {
+                continue;
+            }
+            PyObject* result = PyObject_CallFunction(callback.get(), "i", assetId);
+            if (!result)
+            {
+                LogPythonError("Python: load_asset_async callback failed");
+            }
+            else
+            {
+                Py_DECREF(result);
+            }
+        }
     }
 
     bool StoreKeyCallback(PyObject* callback, PyObject*& target)
@@ -599,6 +647,317 @@ namespace
         Py_RETURN_TRUE;
     }
 
+    PyObject* py_set_audio_volume(PyObject*, PyObject* args)
+    {
+        unsigned long handle = 0;
+        float gain = 1.0f;
+        if (!PyArg_ParseTuple(args, "kf", &handle, &gain))
+        {
+            return nullptr;
+        }
+
+        if (!AudioManager::Instance().setHandleGain(static_cast<unsigned int>(handle), gain))
+        {
+            PyErr_SetString(PyExc_ValueError, "Audio handle not found.");
+            return nullptr;
+        }
+
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_get_audio_volume(PyObject*, PyObject* args)
+    {
+        unsigned long handle = 0;
+        if (!PyArg_ParseTuple(args, "k", &handle))
+        {
+            return nullptr;
+        }
+
+        auto gain = AudioManager::Instance().getHandleGain(static_cast<unsigned int>(handle));
+        if (!gain.has_value())
+        {
+            PyErr_SetString(PyExc_ValueError, "Audio handle not found.");
+            return nullptr;
+        }
+
+        return PyFloat_FromDouble(static_cast<double>(gain.value()));
+    }
+
+    PyObject* py_is_audio_playing(PyObject*, PyObject* args)
+    {
+        unsigned long handle = 0;
+        if (!PyArg_ParseTuple(args, "k", &handle))
+        {
+            return nullptr;
+        }
+
+        if (AudioManager::Instance().isSourcePlaying(static_cast<unsigned int>(handle)))
+        {
+            Py_RETURN_TRUE;
+        }
+        Py_RETURN_FALSE;
+    }
+
+    PyObject* py_create_audio(PyObject*, PyObject* args)
+    {
+        const char* path = nullptr;
+        int loop = 0;
+        float gain = 1.0f;
+        int keepLoaded = 0;
+        if (!PyArg_ParseTuple(args, "s|ifp", &path, &loop, &gain, &keepLoaded))
+        {
+            return nullptr;
+        }
+
+        const std::string absPath = AssetManager::Instance().getAbsoluteContentPath(path);
+        if (absPath.empty())
+        {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to resolve audio content path.");
+            return nullptr;
+        }
+
+        const unsigned int handle = AudioManager::Instance().createAudioPathAsync(absPath, loop != 0, gain);
+        if (handle == 0)
+        {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to create audio handle.");
+            return nullptr;
+        }
+
+        return PyLong_FromUnsignedLong(handle);
+    }
+
+    PyObject* py_create_audio_from_asset(PyObject*, PyObject* args)
+    {
+        unsigned long assetId = 0;
+        int loop = 0;
+        float gain = 1.0f;
+        if (!PyArg_ParseTuple(args, "k|if", &assetId, &loop, &gain))
+        {
+            return nullptr;
+        }
+
+        if (assetId == 0)
+        {
+            PyErr_SetString(PyExc_ValueError, "Asset id must be non-zero.");
+            return nullptr;
+        }
+
+        const unsigned int handle = AudioManager::Instance().createAudioHandle(static_cast<unsigned int>(assetId), loop != 0, gain);
+        if (handle == 0)
+        {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to create audio handle.");
+            return nullptr;
+        }
+
+        return PyLong_FromUnsignedLong(handle);
+    }
+
+    PyObject* py_create_audio_from_asset_async(PyObject*, PyObject* args)
+    {
+        unsigned long assetId = 0;
+        PyObject* callback = Py_None;
+        int loop = 0;
+        float gain = 1.0f;
+        if (!PyArg_ParseTuple(args, "kO|if", &assetId, &callback, &loop, &gain))
+        {
+            return nullptr;
+        }
+
+        if (assetId == 0)
+        {
+            PyErr_SetString(PyExc_ValueError, "Asset id must be non-zero.");
+            return nullptr;
+        }
+
+        if (callback != Py_None && !PyCallable_Check(callback))
+        {
+            PyErr_SetString(PyExc_TypeError, "callback must be callable");
+            return nullptr;
+        }
+
+        std::shared_ptr<PyObject> callbackRef;
+        if (callback != Py_None)
+        {
+            Py_INCREF(callback);
+            callbackRef = std::shared_ptr<PyObject>(callback, [](PyObject* obj)
+                {
+                    Py_DECREF(obj);
+                });
+        }
+
+        auto wrappedCallback = [callbackRef](unsigned int realHandle)
+            {
+                if (!callbackRef)
+                {
+                    return;
+                }
+                PyObject* result = PyObject_CallFunction(callbackRef.get(), "k", static_cast<unsigned long>(realHandle));
+                if (!result)
+                {
+                    LogPythonError("Python: create_audio_from_asset_async callback failed");
+                }
+                else
+                {
+                    Py_DECREF(result);
+                }
+            };
+
+        const unsigned int handle = AudioManager::Instance().createAudioHandleAsync(
+            static_cast<unsigned int>(assetId), std::move(wrappedCallback), loop != 0, gain);
+        if (handle == 0)
+        {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to create async audio handle.");
+            return nullptr;
+        }
+
+        return PyLong_FromUnsignedLong(handle);
+    }
+
+    PyObject* py_is_audio_playing_path(PyObject*, PyObject* args)
+    {
+        const char* path = nullptr;
+        if (!PyArg_ParseTuple(args, "s", &path))
+        {
+            return nullptr;
+        }
+
+        if (AssetManager::Instance().isAudioPlayingContentPath(path))
+        {
+            Py_RETURN_TRUE;
+        }
+        Py_RETURN_FALSE;
+    }
+
+    PyObject* py_play_audio(PyObject*, PyObject* args)
+    {
+        const char* path = nullptr;
+        int loop = 0;
+        float gain = 1.0f;
+        int keepLoaded = 0;
+        if (!PyArg_ParseTuple(args, "s|ifp", &path, &loop, &gain, &keepLoaded))
+        {
+            return nullptr;
+        }
+
+        const std::string absPath = AssetManager::Instance().getAbsoluteContentPath(path);
+        if (absPath.empty())
+        {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to resolve audio content path.");
+            return nullptr;
+        }
+
+        const unsigned int handle = AudioManager::Instance().playAudioPathAsync(absPath, loop != 0, gain);
+        if (handle == 0)
+        {
+            PyErr_SetString(PyExc_RuntimeError, "Failed to play audio asset.");
+            return nullptr;
+        }
+
+        return PyLong_FromUnsignedLong(handle);
+    }
+
+    PyObject* py_play_audio_handle(PyObject*, PyObject* args)
+    {
+        unsigned long handle = 0;
+        if (!PyArg_ParseTuple(args, "k", &handle))
+        {
+            return nullptr;
+        }
+
+        if (!AudioManager::Instance().playHandle(static_cast<unsigned int>(handle)))
+        {
+            PyErr_SetString(PyExc_ValueError, "Audio handle not found.");
+            return nullptr;
+        }
+
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_pause_audio(PyObject*, PyObject* args)
+    {
+        unsigned long handle = 0;
+        if (!PyArg_ParseTuple(args, "k", &handle))
+        {
+            return nullptr;
+        }
+
+        if (!AudioManager::Instance().pauseSource(static_cast<unsigned int>(handle)))
+        {
+            PyErr_SetString(PyExc_ValueError, "Audio handle not found.");
+            return nullptr;
+        }
+
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_pause_audio_handle(PyObject*, PyObject* args)
+    {
+        unsigned long handle = 0;
+        if (!PyArg_ParseTuple(args, "k", &handle))
+        {
+            return nullptr;
+        }
+
+        if (!AudioManager::Instance().pauseSource(static_cast<unsigned int>(handle)))
+        {
+            PyErr_SetString(PyExc_ValueError, "Audio handle not found.");
+            return nullptr;
+        }
+
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_stop_audio_handle(PyObject*, PyObject* args)
+    {
+        unsigned long handle = 0;
+        if (!PyArg_ParseTuple(args, "k", &handle))
+        {
+            return nullptr;
+        }
+
+        if (!AudioManager::Instance().stopSource(static_cast<unsigned int>(handle)))
+        {
+            PyErr_SetString(PyExc_ValueError, "Audio handle not found.");
+            return nullptr;
+        }
+
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_invalidate_audio_handle(PyObject*, PyObject* args)
+    {
+        unsigned long handle = 0;
+        if (!PyArg_ParseTuple(args, "k", &handle))
+        {
+            return nullptr;
+        }
+
+        if (!AudioManager::Instance().invalidateHandle(static_cast<unsigned int>(handle)))
+        {
+            PyErr_SetString(PyExc_ValueError, "Audio handle not found.");
+            return nullptr;
+        }
+
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_stop_audio(PyObject*, PyObject* args)
+    {
+        unsigned long handle = 0;
+        if (!PyArg_ParseTuple(args, "k", &handle))
+        {
+            return nullptr;
+        }
+
+        if (!AudioManager::Instance().stopSource(static_cast<unsigned int>(handle)))
+        {
+            PyErr_SetString(PyExc_ValueError, "Audio handle not found.");
+            return nullptr;
+        }
+
+        Py_RETURN_TRUE;
+    }
+
     PyObject* py_log(PyObject*, PyObject* args)
     {
         const char* message = nullptr;
@@ -856,6 +1215,21 @@ namespace
         Py_DECREF(rotation);
         Py_DECREF(scale);
         return result;
+    }
+
+    PyObject* py_is_asset_loaded(PyObject*, PyObject* args)
+    {
+        const char* path = nullptr;
+        if (!PyArg_ParseTuple(args, "s", &path))
+        {
+            return nullptr;
+        }
+
+        if (AssetManager::Instance().isAssetLoaded(path))
+        {
+            Py_RETURN_TRUE;
+        }
+        Py_RETURN_FALSE;
     }
 
     PyObject* py_set_position(PyObject*, PyObject* args)
@@ -1121,26 +1495,118 @@ namespace
     {
         const char* path = nullptr;
         int type = 0;
-        if (!PyArg_ParseTuple(args, "si", &path, &type))
+        int allowGc = 0;
+        if (!PyArg_ParseTuple(args, "si|p", &path, &type, &allowGc))
         {
             return nullptr;
         }
-        const int id = AssetManager::Instance().loadAsset(path, static_cast<AssetType>(type), AssetManager::Sync);
+
+        std::string resolvedPath = path;
+        const std::filesystem::path pathValue(resolvedPath);
+        std::string extension = pathValue.extension().string();
+        for (auto& c : extension)
+        {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        const bool isAudioWav = static_cast<AssetType>(type) == AssetType::Audio && extension == ".wav";
+        if (pathValue.is_relative())
+        {
+            const auto absPath = AssetManager::Instance().getAbsoluteContentPath(resolvedPath);
+            if (!absPath.empty())
+            {
+                resolvedPath = absPath;
+            }
+        }
+
+        const int id = isAudioWav
+            ? AssetManager::Instance().loadAudioFromContentPath(resolvedPath, false)
+            : AssetManager::Instance().loadAsset(resolvedPath, static_cast<AssetType>(type), AssetManager::Sync);
+        if (allowGc != 0 && id != 0)
+        {
+            AssetManager::Instance().markAssetGcEligible(static_cast<unsigned int>(id), true);
+        }
         return PyLong_FromLong(id);
+    }
+
+    PyObject* py_load_asset_async(PyObject*, PyObject* args)
+    {
+        const char* path = nullptr;
+        int type = 0;
+        PyObject* callback = Py_None;
+        int allowGc = 0;
+        if (!PyArg_ParseTuple(args, "si|Op", &path, &type, &callback, &allowGc))
+        {
+            return nullptr;
+        }
+
+        if (callback != Py_None && !PyCallable_Check(callback))
+        {
+            PyErr_SetString(PyExc_TypeError, "callback must be callable");
+            return nullptr;
+        }
+
+        std::shared_ptr<PyObject> callbackRef;
+        if (callback != Py_None)
+        {
+            Py_INCREF(callback);
+            callbackRef = std::shared_ptr<PyObject>(callback, [](PyObject* obj)
+                {
+                    Py_DECREF(obj);
+                });
+        }
+
+        std::string resolvedPath = path;
+        const std::filesystem::path pathValue(resolvedPath);
+        if (pathValue.is_relative())
+        {
+            const auto absPath = AssetManager::Instance().getAbsoluteContentPath(resolvedPath);
+            if (!absPath.empty())
+            {
+                resolvedPath = absPath;
+            }
+        }
+
+        const int jobId = AssetManager::Instance().loadAssetAsync(resolvedPath, static_cast<AssetType>(type), allowGc != 0);
+        if (jobId == 0)
+        {
+            if (callbackRef)
+            {
+                PyObject* result = PyObject_CallFunction(callbackRef.get(), "i", 0);
+                if (!result)
+                {
+                    LogPythonError("Python: load_asset_async callback failed");
+                }
+                else
+                {
+                    Py_DECREF(result);
+                }
+            }
+            return PyLong_FromLong(0);
+        }
+
+        if (callbackRef)
+        {
+            std::lock_guard<std::mutex> lock(s_assetLoadCallbacksMutex);
+            s_assetLoadCallbacks[jobId] = callbackRef;
+        }
+
+        return PyLong_FromLong(jobId);
     }
 
     PyObject* py_save_asset(PyObject*, PyObject* args)
     {
         unsigned long id = 0;
         int type = 0;
-        if (!PyArg_ParseTuple(args, "ki", &id, &type))
+        int sync = 1;
+        if (!PyArg_ParseTuple(args, "ki|p", &id, &type, &sync))
         {
             return nullptr;
         }
         Asset asset;
         asset.ID = static_cast<unsigned int>(id);
         asset.type = static_cast<AssetType>(type);
-        const bool result = AssetManager::Instance().saveAsset(asset, AssetManager::Sync);
+        const auto syncState = sync ? AssetManager::Sync : AssetManager::Async;
+        const bool result = AssetManager::Instance().saveAsset(asset, syncState);
         if (!result)
         {
             PyErr_SetString(PyExc_RuntimeError, "Failed to save asset.");
@@ -1165,7 +1631,7 @@ namespace
         Py_RETURN_TRUE;
     }
 
-    PyMethodDef EngineMethods[] = {
+    PyMethodDef EntityMethods[] = {
         { "create_entity", py_create_entity, METH_NOARGS, "Create an entity." },
         { "attach_component", py_attach_component, METH_VARARGS, "Attach a component by kind." },
         { "detach_component", py_detach_component, METH_VARARGS, "Detach a component by kind." },
@@ -1176,17 +1642,39 @@ namespace
         { "set_rotation", py_set_rotation, METH_VARARGS, "Set entity rotation." },
         { "rotate", py_rotate, METH_VARARGS, "Rotate entity." },
         { "set_scale", py_set_scale, METH_VARARGS, "Set entity scale." },
-        { "load_asset", py_load_asset, METH_VARARGS, "Load an asset by path and type." },
-        { "save_asset", py_save_asset, METH_VARARGS, "Save an asset by id and type." },
-        { "unload_asset", py_unload_asset, METH_VARARGS, "Unload an asset by id." },
         { "set_mesh", py_set_mesh, METH_VARARGS, "Set mesh asset for an entity." },
         { "get_mesh", py_get_mesh, METH_VARARGS, "Get mesh asset path for an entity." },
-        { "get_delta_time", py_get_delta_time, METH_NOARGS, "Get last frame delta time." },
-        { "get_state", py_get_state, METH_VARARGS, "Get engine state string." },
-        { "set_state", py_set_state, METH_VARARGS, "Set engine state string." },
-        { "show_modal_message", py_show_modal_message, METH_VARARGS, "Show a blocking modal message." },
-        { "close_modal_message", py_close_modal_message, METH_NOARGS, "Close the active modal message." },
-        { "show_toast_message", py_show_toast_message, METH_VARARGS, "Show a toast message." },
+        { nullptr, nullptr, 0, nullptr }
+    };
+
+    PyMethodDef AssetMethods[] = {
+        { "is_asset_loaded", py_is_asset_loaded, METH_VARARGS, "Check if an asset is loaded by path." },
+        { "load_asset", py_load_asset, METH_VARARGS, "Load an asset by path and type (sync)." },
+        { "load_asset_async", py_load_asset_async, METH_VARARGS, "Load an asset by path and type (async)." },
+        { "save_asset", py_save_asset, METH_VARARGS, "Save an asset by id and type." },
+        { "unload_asset", py_unload_asset, METH_VARARGS, "Unload an asset by id." },
+        { nullptr, nullptr, 0, nullptr }
+    };
+
+    PyMethodDef AudioMethods[] = {
+        { "create_audio", py_create_audio, METH_VARARGS, "Create an audio handle from a Content-relative path." },
+        { "create_audio_from_asset", py_create_audio_from_asset, METH_VARARGS, "Create an audio handle from an asset id." },
+        { "create_audio_from_asset_async", py_create_audio_from_asset_async, METH_VARARGS, "Create an audio handle asynchronously from an asset id with callback." },
+        { "play_audio", py_play_audio, METH_VARARGS, "Play an audio asset by Content-relative path." },
+        { "play_audio_handle", py_play_audio_handle, METH_VARARGS, "Play an audio handle." },
+        { "set_audio_volume", py_set_audio_volume, METH_VARARGS, "Set audio handle volume." },
+        { "get_audio_volume", py_get_audio_volume, METH_VARARGS, "Get audio handle volume." },
+        { "pause_audio", py_pause_audio, METH_VARARGS, "Pause a playing audio handle." },
+        { "pause_audio_handle", py_pause_audio_handle, METH_VARARGS, "Pause a playing audio handle." },
+        { "is_audio_playing", py_is_audio_playing, METH_VARARGS, "Check if an audio handle is playing." },
+        { "is_audio_playing_path", py_is_audio_playing_path, METH_VARARGS, "Check if an audio path is playing." },
+        { "stop_audio", py_stop_audio, METH_VARARGS, "Stop a playing audio handle." },
+        { "stop_audio_handle", py_stop_audio_handle, METH_VARARGS, "Stop a playing audio handle." },
+        { "invalidate_audio_handle", py_invalidate_audio_handle, METH_VARARGS, "Invalidate an audio handle." },
+        { nullptr, nullptr, 0, nullptr }
+    };
+
+    PyMethodDef InputMethods[] = {
         { "set_on_key_pressed", py_set_on_key_pressed, METH_VARARGS, "Set a global key pressed callback." },
         { "set_on_key_released", py_set_on_key_released, METH_VARARGS, "Set a global key released callback." },
         { "register_key_pressed", py_register_key_pressed, METH_VARARGS, "Register a key pressed callback for a key." },
@@ -1195,11 +1683,37 @@ namespace
         { "is_ctrl_pressed", py_is_ctrl_pressed, METH_NOARGS, "Check if ctrl is pressed." },
         { "is_alt_pressed", py_is_alt_pressed, METH_NOARGS, "Check if alt is pressed." },
         { "get_key", py_get_key, METH_VARARGS, "Resolve a keycode from a key name." },
+        { nullptr, nullptr, 0, nullptr }
+    };
+
+    PyMethodDef UiMethods[] = {
+        { "show_modal_message", py_show_modal_message, METH_VARARGS, "Show a blocking modal message." },
+        { "close_modal_message", py_close_modal_message, METH_NOARGS, "Close the active modal message." },
+        { "show_toast_message", py_show_toast_message, METH_VARARGS, "Show a toast message." },
+        { nullptr, nullptr, 0, nullptr }
+    };
+
+    PyMethodDef CameraMethods[] = {
         { "get_camera_position", py_get_camera_position, METH_NOARGS, "Get the camera position." },
         { "set_camera_position", py_set_camera_position, METH_VARARGS, "Set the camera position." },
         { "get_camera_rotation", py_get_camera_rotation, METH_NOARGS, "Get the camera rotation (yaw, pitch)." },
         { "set_camera_rotation", py_set_camera_rotation, METH_VARARGS, "Set the camera rotation (yaw, pitch)." },
+        { nullptr, nullptr, 0, nullptr }
+    };
+
+    PyMethodDef DiagnosticsMethods[] = {
+        { "get_delta_time", py_get_delta_time, METH_NOARGS, "Get last frame delta time." },
+        { "get_state", py_get_state, METH_VARARGS, "Get engine state string." },
+        { "set_state", py_set_state, METH_VARARGS, "Set engine state string." },
+        { nullptr, nullptr, 0, nullptr }
+    };
+
+    PyMethodDef LoggingMethods[] = {
         { "log", py_log, METH_VARARGS, "Log a message (level: 0=info,1=warn,2=error)." },
+        { nullptr, nullptr, 0, nullptr }
+    };
+
+    PyMethodDef EngineMethods[] = {
         { nullptr, nullptr, 0, nullptr }
     };
 
@@ -1210,6 +1724,117 @@ namespace
         -1,
         EngineMethods
     };
+
+    PyModuleDef EntityModule = {
+        PyModuleDef_HEAD_INIT,
+        "engine.entity",
+        "Entity scripting API",
+        -1,
+        EntityMethods
+    };
+
+    PyModuleDef AssetModule = {
+        PyModuleDef_HEAD_INIT,
+        "engine.assetmanagement",
+        "Asset management scripting API",
+        -1,
+        AssetMethods
+    };
+
+    PyModuleDef AudioModule = {
+        PyModuleDef_HEAD_INIT,
+        "engine.audio",
+        "Audio scripting API",
+        -1,
+        AudioMethods
+    };
+
+    PyModuleDef InputModule = {
+        PyModuleDef_HEAD_INIT,
+        "engine.input",
+        "Input scripting API",
+        -1,
+        InputMethods
+    };
+
+    PyModuleDef UiModule = {
+        PyModuleDef_HEAD_INIT,
+        "engine.ui",
+        "UI scripting API",
+        -1,
+        UiMethods
+    };
+
+    PyModuleDef CameraModule = {
+        PyModuleDef_HEAD_INIT,
+        "engine.camera",
+        "Camera scripting API",
+        -1,
+        CameraMethods
+    };
+
+    PyModuleDef DiagnosticsModule = {
+        PyModuleDef_HEAD_INIT,
+        "engine.diagnostics",
+        "Diagnostics scripting API",
+        -1,
+        DiagnosticsMethods
+    };
+
+    PyModuleDef LoggingModule = {
+        PyModuleDef_HEAD_INIT,
+        "engine.logging",
+        "Logging scripting API",
+        -1,
+        LoggingMethods
+    };
+
+    bool AddSubmodule(PyObject* parent, PyObject* submodule, const char* name)
+    {
+        if (!parent || !submodule || !name)
+        {
+            return false;
+        }
+
+        if (PyModule_AddObject(parent, name, submodule) < 0)
+        {
+            Py_DECREF(submodule);
+            return false;
+        }
+
+        std::string fullName = std::string("engine.") + name;
+        if (PyDict_SetItemString(PyImport_GetModuleDict(), fullName.c_str(), submodule) < 0)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    void PopulateKeyConstants(PyObject* module)
+    {
+        PyObject* keyDict = PyDict_New();
+        std::unordered_set<std::string> addedKeys;
+        for (int scancode = 0; scancode < SDL_SCANCODE_COUNT; ++scancode)
+        {
+            const char* name = SDL_GetScancodeName(static_cast<SDL_Scancode>(scancode));
+            if (!name || !*name)
+            {
+                continue;
+            }
+            const SDL_Keycode keycode = SDL_GetKeyFromScancode(static_cast<SDL_Scancode>(scancode), SDL_KMOD_NONE, false);
+            PyObject* keyValue = PyLong_FromLong(static_cast<long>(keycode));
+            PyDict_SetItemString(keyDict, name, keyValue);
+            Py_DECREF(keyValue);
+
+            const std::string constantName = NormalizeKeyConstantName(name);
+            if (!constantName.empty() && addedKeys.insert(constantName).second)
+            {
+                PyModule_AddIntConstant(module, constantName.c_str(), static_cast<int>(keycode));
+            }
+        }
+        PyModule_AddObject(module, "Keys", keyDict);
+    }
 
     PyObject* CreateEngineModule()
     {
@@ -1233,6 +1858,9 @@ namespace
         PyModule_AddIntConstant(module, "Asset_Model2D", static_cast<int>(AssetType::Model2D));
         PyModule_AddIntConstant(module, "Asset_Model3D", static_cast<int>(AssetType::Model3D));
         PyModule_AddIntConstant(module, "Asset_PointLight", static_cast<int>(AssetType::PointLight));
+        PyModule_AddIntConstant(module, "Asset_Audio", static_cast<int>(AssetType::Audio));
+        PyModule_AddIntConstant(module, "Asset_Script", static_cast<int>(AssetType::Script));
+        PyModule_AddIntConstant(module, "Asset_Shader", static_cast<int>(AssetType::Shader));
         PyModule_AddIntConstant(module, "Asset_Level", static_cast<int>(AssetType::Level));
         PyModule_AddIntConstant(module, "Asset_Widget", static_cast<int>(AssetType::Widget));
 
@@ -1240,27 +1868,54 @@ namespace
         PyModule_AddIntConstant(module, "Log_Warning", 1);
         PyModule_AddIntConstant(module, "Log_Error", 2);
 
-        PyObject* keyDict = PyDict_New();
-        std::unordered_set<std::string> addedKeys;
-        for (int scancode = 0; scancode < SDL_SCANCODE_COUNT; ++scancode)
-        {
-            const char* name = SDL_GetScancodeName(static_cast<SDL_Scancode>(scancode));
-            if (!name || !*name)
-            {
-                continue;
-            }
-            const SDL_Keycode keycode = SDL_GetKeyFromScancode(static_cast<SDL_Scancode>(scancode), SDL_KMOD_NONE, false);
-            PyObject* keyValue = PyLong_FromLong(static_cast<long>(keycode));
-            PyDict_SetItemString(keyDict, name, keyValue);
-            Py_DECREF(keyValue);
+        PyObject* entityModule = PyModule_Create(&EntityModule);
+        PyObject* assetModule = PyModule_Create(&AssetModule);
+        PyObject* audioModule = PyModule_Create(&AudioModule);
+        PyObject* inputModule = PyModule_Create(&InputModule);
+        PyObject* uiModule = PyModule_Create(&UiModule);
+        PyObject* cameraModule = PyModule_Create(&CameraModule);
+        PyObject* diagnosticsModule = PyModule_Create(&DiagnosticsModule);
+        PyObject* loggingModule = PyModule_Create(&LoggingModule);
 
-            const std::string constantName = NormalizeKeyConstantName(name);
-            if (!constantName.empty() && addedKeys.insert(constantName).second)
-            {
-                PyModule_AddIntConstant(module, constantName.c_str(), static_cast<int>(keycode));
-            }
+        if (!entityModule || !assetModule || !audioModule || !inputModule || !uiModule || !cameraModule || !diagnosticsModule || !loggingModule)
+        {
+            Py_XDECREF(entityModule);
+            Py_XDECREF(assetModule);
+            Py_XDECREF(audioModule);
+            Py_XDECREF(inputModule);
+            Py_XDECREF(uiModule);
+            Py_XDECREF(cameraModule);
+            Py_XDECREF(diagnosticsModule);
+            Py_XDECREF(loggingModule);
+            Py_DECREF(module);
+            return nullptr;
         }
-        PyModule_AddObject(module, "Keys", keyDict);
+
+        PyModule_AddIntConstant(assetModule, "Asset_Texture", static_cast<int>(AssetType::Texture));
+        PyModule_AddIntConstant(assetModule, "Asset_Material", static_cast<int>(AssetType::Material));
+        PyModule_AddIntConstant(assetModule, "Asset_Model2D", static_cast<int>(AssetType::Model2D));
+        PyModule_AddIntConstant(assetModule, "Asset_Model3D", static_cast<int>(AssetType::Model3D));
+        PyModule_AddIntConstant(assetModule, "Asset_PointLight", static_cast<int>(AssetType::PointLight));
+        PyModule_AddIntConstant(assetModule, "Asset_Audio", static_cast<int>(AssetType::Audio));
+        PyModule_AddIntConstant(assetModule, "Asset_Script", static_cast<int>(AssetType::Script));
+        PyModule_AddIntConstant(assetModule, "Asset_Shader", static_cast<int>(AssetType::Shader));
+        PyModule_AddIntConstant(assetModule, "Asset_Level", static_cast<int>(AssetType::Level));
+        PyModule_AddIntConstant(assetModule, "Asset_Widget", static_cast<int>(AssetType::Widget));
+
+        PopulateKeyConstants(inputModule);
+
+        if (!AddSubmodule(module, entityModule, "entity") ||
+            !AddSubmodule(module, assetModule, "assetmanagement") ||
+            !AddSubmodule(module, audioModule, "audio") ||
+            !AddSubmodule(module, inputModule, "input") ||
+            !AddSubmodule(module, uiModule, "ui") ||
+            !AddSubmodule(module, cameraModule, "camera") ||
+            !AddSubmodule(module, diagnosticsModule, "diagnostics") ||
+            !AddSubmodule(module, loggingModule, "logging"))
+        {
+            Py_DECREF(module);
+            return nullptr;
+        }
 
         return module;
     }
@@ -1307,6 +1962,7 @@ namespace Scripting
             s_scripts.clear();
             ReleaseLevelScriptState();
             ClearKeyCallbacks();
+            ClearAssetLoadCallbacks();
             s_lastLevel = nullptr;
             s_lastLevelScriptPath.clear();
             Py_Finalize();
@@ -1329,6 +1985,7 @@ namespace Scripting
         s_scripts.clear();
         ReleaseLevelScriptState();
         ClearKeyCallbacks();
+        ClearAssetLoadCallbacks();
         s_lastLevel = nullptr;
         s_lastLevelScriptPath.clear();
         PyGILState_Release(gilState);
@@ -1351,6 +2008,7 @@ namespace Scripting
         const bool levelChanged = level != s_lastLevel || levelScriptPath != s_lastLevelScriptPath;
 
         PyGILState_STATE gilState = PyGILState_Ensure();
+        ProcessAssetLoadCallbacks();
         if (levelChanged)
         {
             if (s_levelScript.onUnloadedFunc && s_levelScript.loadedCalled)

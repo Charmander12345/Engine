@@ -466,6 +466,18 @@ bool DiagnosticsManager::isScenePrepared() const
     return m_scenePrepared;
 }
 
+void DiagnosticsManager::setPIEActive(bool active)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_pieActive = active;
+}
+
+bool DiagnosticsManager::isPIEActive() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_pieActive;
+}
+
 void DiagnosticsManager::requestShutdown()
 {
     std::lock_guard<std::mutex> lock(m_mutex);

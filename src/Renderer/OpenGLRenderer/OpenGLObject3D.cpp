@@ -163,6 +163,11 @@ const glm::vec3& OpenGLObject3D::getLocalBoundsMax() const
     return m_localBoundsMax;
 }
 
+GLuint OpenGLObject3D::getProgram() const
+{
+    return m_material ? m_material->getProgram() : 0;
+}
+
 void OpenGLObject3D::ClearCache()
 {
     s_materialCache.clear();
@@ -326,6 +331,14 @@ void OpenGLObject3D::render()
     if (m_material)
     {
         m_material->render();
+    }
+}
+
+void OpenGLObject3D::renderBatchContinuation()
+{
+    if (m_material)
+    {
+        m_material->renderBatchContinuation();
     }
 }
 

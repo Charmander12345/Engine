@@ -20,7 +20,10 @@ enum class WidgetElementType
     StackPanel,
     Grid,
     ColorPicker,
-    EntryBar
+    EntryBar,
+    ProgressBar,
+    Slider,
+    Image
 };
 
 enum class TextAlignH
@@ -59,12 +62,16 @@ struct WidgetElement
     Vec2 to{ 1.0f, 1.0f };
     Vec4 color{ 1.0f, 1.0f, 1.0f, 1.0f };
     Vec4 hoverColor{ 1.0f, 1.0f, 1.0f, 1.0f };
+    Vec4 fillColor{ 1.0f, 1.0f, 1.0f, 1.0f };
     Vec4 textColor{ 1.0f, 1.0f, 1.0f, 1.0f };
     std::string text;
     std::string font;
     float fontSize{ 0.0f };
     Vec2 minSize{ 0.0f, 0.0f };
     std::string value;
+    float valueFloat{ 0.0f };
+    float minValue{ 0.0f };
+    float maxValue{ 1.0f };
     bool isPassword{ false };
     bool isCompact{ false };
     TextAlignH textAlignH{ TextAlignH::Left };
@@ -77,10 +84,14 @@ struct WidgetElement
     bool fillY{ false };
     bool sizeToContent{ false };
     StackOrientation orientation{ StackOrientation::Vertical };
+    std::string imagePath;
+    unsigned int textureId{ 0 };
     std::string shaderVertex;
     std::string shaderFragment;
     std::string clickEvent;
     std::vector<WidgetElement> children;
+    std::vector<WidgetElement> cachedChildren;
+    bool isCollapsed{ false };
     Vec2 computedSizePixels{};
     bool hasComputedSize{ false };
     Vec2 contentSizePixels{};

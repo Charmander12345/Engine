@@ -748,3 +748,101 @@ void EngineLevel::deleteGroup(const std::string& groupID)
 	}
 }
 
+void EngineLevel::snapshotEcsState()
+{
+	m_componentSnapshot.clear();
+	auto& ecs = m_ecs ? *m_ecs : ECS::ECSManager::Instance();
+
+	for (const auto entity : m_entities)
+	{
+		EntitySnapshot snap{};
+		if (const auto* c = ecs.getComponent<ECS::TransformComponent>(entity))
+		{
+			snap.transform = *c;
+			snap.mask.set(static_cast<size_t>(ECS::ComponentKind::Transform));
+		}
+		if (const auto* c = ecs.getComponent<ECS::MeshComponent>(entity))
+		{
+			snap.mesh = *c;
+			snap.mask.set(static_cast<size_t>(ECS::ComponentKind::Mesh));
+		}
+		if (const auto* c = ecs.getComponent<ECS::MaterialComponent>(entity))
+		{
+			snap.material = *c;
+			snap.mask.set(static_cast<size_t>(ECS::ComponentKind::Material));
+		}
+		if (const auto* c = ecs.getComponent<ECS::LightComponent>(entity))
+		{
+			snap.light = *c;
+			snap.mask.set(static_cast<size_t>(ECS::ComponentKind::Light));
+		}
+		if (const auto* c = ecs.getComponent<ECS::CameraComponent>(entity))
+		{
+			snap.camera = *c;
+			snap.mask.set(static_cast<size_t>(ECS::ComponentKind::Camera));
+		}
+		if (const auto* c = ecs.getComponent<ECS::PhysicsComponent>(entity))
+		{
+			snap.physics = *c;
+			snap.mask.set(static_cast<size_t>(ECS::ComponentKind::Physics));
+		}
+		if (const auto* c = ecs.getComponent<ECS::ScriptComponent>(entity))
+		{
+			snap.script = *c;
+			snap.mask.set(static_cast<size_t>(ECS::ComponentKind::Script));
+		}
+		if (const auto* c = ecs.getComponent<ECS::NameComponent>(entity))
+		{
+			snap.name = *c;
+			snap.mask.set(static_cast<size_t>(ECS::ComponentKind::Name));
+		}
+		m_componentSnapshot[entity] = std::move(snap);
+	}
+
+	Logger::Instance().log(Logger::Category::Engine,
+		"EngineLevel: ECS state snapshot saved (" + std::to_string(m_componentSnapshot.size()) + " entities)",
+		Logger::LogLevel::INFO);
+}
+
+bool EngineLevel::restoreEcsSnapshot()
+{
+	if (m_componentSnapshot.empty())
+	{
+		Logger::Instance().log(Logger::Category::Engine,
+			"EngineLevel: no ECS snapshot to restore",
+			Logger::LogLevel::WARNING);
+		return false;
+	}
+
+	auto& ecs = m_ecs ? *m_ecs : ECS::ECSManager::Instance();
+
+	for (const auto& [entity, snap] : m_componentSnapshot)
+	{
+		if (snap.mask.test(static_cast<size_t>(ECS::ComponentKind::Transform)))
+			ecs.setComponent<ECS::TransformComponent>(entity, snap.transform);
+		if (snap.mask.test(static_cast<size_t>(ECS::ComponentKind::Mesh)))
+			ecs.setComponent<ECS::MeshComponent>(entity, snap.mesh);
+		if (snap.mask.test(static_cast<size_t>(ECS::ComponentKind::Material)))
+			ecs.setComponent<ECS::MaterialComponent>(entity, snap.material);
+		if (snap.mask.test(static_cast<size_t>(ECS::ComponentKind::Light)))
+			ecs.setComponent<ECS::LightComponent>(entity, snap.light);
+		if (snap.mask.test(static_cast<size_t>(ECS::ComponentKind::Camera)))
+			ecs.setComponent<ECS::CameraComponent>(entity, snap.camera);
+		if (snap.mask.test(static_cast<size_t>(ECS::ComponentKind::Physics)))
+			ecs.setComponent<ECS::PhysicsComponent>(entity, snap.physics);
+		if (snap.mask.test(static_cast<size_t>(ECS::ComponentKind::Script)))
+			ecs.setComponent<ECS::ScriptComponent>(entity, snap.script);
+		if (snap.mask.test(static_cast<size_t>(ECS::ComponentKind::Name)))
+			ecs.setComponent<ECS::NameComponent>(entity, snap.name);
+	}
+
+	m_componentSnapshot.clear();
+	buildScriptEntityCache();
+
+	Logger::Instance().log(Logger::Category::Engine,
+		"EngineLevel: ECS components restored in-place",
+		Logger::LogLevel::INFO);
+
+	return true;
+}
+

@@ -3,6 +3,8 @@ add_library(Core SHARED
     EngineObject.h
     "EngineLevel.cpp"
     "EngineLevel.h"
+    "AudioManager.cpp"
+    "AudioManager.h"
     
     
     
@@ -28,10 +30,11 @@ target_include_directories(Core
         ${CMAKE_SOURCE_DIR}/src/AssetManager
         ${CMAKE_SOURCE_DIR}/src/Renderer
         ${CMAKE_SOURCE_DIR}/external
+        ${CMAKE_SOURCE_DIR}/external/SDL3/include
         ${CMAKE_SOURCE_DIR}/ECS
 )
 
-target_link_libraries(Core PRIVATE Logger)
+target_link_libraries(Core PRIVATE Logger OpenAL::OpenAL SDL3::SDL3)
 
 
 if (WIN32)

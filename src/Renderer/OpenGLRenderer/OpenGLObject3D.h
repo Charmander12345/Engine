@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <glm/glm.hpp>
+#include "glad/include/gl.h"
 
 #include "../../Core/EngineObject.h"
 
@@ -18,10 +19,12 @@ public:
     void setMatrices(const glm::mat4& model, const glm::mat4& view, const glm::mat4& projection);
     void setLightData(const glm::vec3& position, const glm::vec3& color, float intensity);
     void render();
+    void renderBatchContinuation();
     void setTextures(const std::vector<std::shared_ptr<Texture>>& textures);
     bool hasLocalBounds() const;
     const glm::vec3& getLocalBoundsMin() const;
     const glm::vec3& getLocalBoundsMax() const;
+    GLuint getProgram() const;
 
     static void ClearCache();
 
