@@ -15,6 +15,14 @@ namespace ecs
 	public:
 		static constexpr std::uint32_t kNpos = std::numeric_limits<std::uint32_t>::max();
 
+		// Reserve capacity for expected number of entities
+		void reserve(std::size_t entityCount)
+		{
+			m_sparse.reserve(entityCount);
+			m_dense.reserve(entityCount);
+			m_denseEntities.reserve(entityCount);
+		}
+
 		bool has(EntityId id) const
 		{
 			return id < m_sparse.size() && m_sparse[id] != kNpos;

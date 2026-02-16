@@ -9,6 +9,20 @@ namespace ecs
 		m_alive.resize(1);
 	}
 
+	void World::reserveEntityCapacity(std::size_t capacity)
+	{
+		m_generations.reserve(capacity + 1); // +1 for slot 0
+		m_alive.reserve(capacity + 1);
+		m_freeList.reserve(capacity / 4); // Reserve space for some freed entities
+		
+		// Reserve space in all component sparse sets
+		m_transforms.reserve(capacity);
+		m_names.reserve(capacity);
+		m_renders.reserve(capacity);
+		m_groups.reserve(capacity);
+		m_ids.reserve(capacity);
+	}
+
 	EntityHandle World::createEntity()
 	{
 		EntityId id = kInvalidEntityId;

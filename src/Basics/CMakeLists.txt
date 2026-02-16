@@ -3,6 +3,8 @@ add_library(Basics SHARED
     EngineObject.h
     "EngineLevel.cpp"
     "EngineLevel.h"
+    RenderableObject.cpp
+    RenderableObject.h
     Object3D.cpp
     Object3D.h
     Object2D.cpp

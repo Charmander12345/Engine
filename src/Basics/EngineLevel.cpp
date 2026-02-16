@@ -115,24 +115,23 @@ void EngineLevel::disableInstancing(const std::string& groupID)
 
 bool EngineLevel::enableInstancing(const std::string& groupID)
 {
-	std::vector<ObjectInstance> objectsToInstance;
-	objectsToInstance.reserve(Objects.size());
-
-	for (const auto& obj : Objects)
-	{
-		if (obj && obj->groupID == groupID)
-		{
-			objectsToInstance.push_back(*obj);
-		}
-	}
-
-	if (objectsToInstance.empty())
+	auto groupIt = std::find_if(m_groups.begin(), m_groups.end(), [&](const group& g) { return g.id == groupID; });
+	if (groupIt == m_groups.end())
 	{
 		return false;
 	}
 
-	auto groupIt = std::find_if(m_groups.begin(), m_groups.end(), [&](const group& g) { return g.id == groupID; });
-	if (groupIt == m_groups.end())
+	// Count how many objects match this groupID to reserve capacity
+	size_t count = 0;
+	for (const auto& obj : Objects)
+	{
+		if (obj && obj->groupID == groupID)
+		{
+			++count;
+		}
+	}
+
+	if (count == 0)
 	{
 		return false;
 	}
@@ -140,12 +139,17 @@ bool EngineLevel::enableInstancing(const std::string& groupID)
 	groupIt->isInstanced = true;
 	groupIt->objects.clear();
 	groupIt->transforms.clear();
+	groupIt->objects.reserve(count);
+	groupIt->transforms.reserve(count);
 
 	// Store per-instance objects and transforms (do NOT de-duplicate by asset path).
-	for (const auto& inst : objectsToInstance)
+	for (const auto& obj : Objects)
 	{
-		groupIt->objects.push_back(inst.object);
-		groupIt->transforms.push_back(inst.transform);
+		if (obj && obj->groupID == groupID)
+		{
+			groupIt->objects.push_back(obj->object);
+			groupIt->transforms.push_back(obj->transform);
+		}
 	}
 
 	Objects.erase(

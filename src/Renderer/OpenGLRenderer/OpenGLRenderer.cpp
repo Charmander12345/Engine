@@ -14,6 +14,7 @@
 
 #include "../../Basics/Object3D.h"
 #include "../../Basics/Object2D.h"
+#include "../../Basics/RenderableObject.h"
 #include "../../Basics/MathTypes.h"
 
 OpenGLRenderer::OpenGLRenderer()
@@ -54,17 +55,13 @@ void OpenGLRenderer::shutdown()
         size_t cleared = 0;
         for (auto& entry : objs)
         {
-            if (!entry)
+            if (!entry || !entry->object)
                 continue;
 
-            if (auto obj2d = (entry->object ? std::dynamic_pointer_cast<Object2D>(entry->object) : nullptr))
+            // Use RenderableObject base class to avoid dynamic_cast
+            if (auto renderableObj = std::dynamic_pointer_cast<RenderableObject>(entry->object))
             {
-                obj2d->setMaterial(nullptr);
-                ++cleared;
-            }
-            else if (auto obj3d = (entry->object ? std::dynamic_pointer_cast<Object3D>(entry->object) : nullptr))
-            {
-                obj3d->setMaterial(nullptr);
+                renderableObj->setMaterial(nullptr);
                 ++cleared;
             }
         }
@@ -221,50 +218,48 @@ void OpenGLRenderer::render()
     const auto& objs = level->getWorldObjects();
 	const auto& groups = level->getGroups();
 
+    // Helper lambda to render a single object
+    auto renderObject = [&](const std::shared_ptr<EngineObject>& obj, Transform* t, bool is3D) {
+        if (!obj || obj->getPath().empty())
+            return;
+
+        auto renderableObj = std::dynamic_pointer_cast<RenderableObject>(obj);
+        if (!renderableObj)
+            return;
+
+        auto material = renderableObj->getMaterial();
+        auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
+        if (glMaterial && t)
+        {
+            Mat4 engineMat = t->getMatrix4ColumnMajor();
+            glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
+
+            if (is3D)
+            {
+                modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 1.0f, 0.0f));
+            }
+            else
+            {
+                modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 0.0f, 1.0f));
+            }
+
+            glMaterial->setModelMatrix(modelMatrix);
+            glMaterial->setViewMatrix(view);
+            glMaterial->setProjectionMatrix(m_projectionMatrix);
+        }
+        renderableObj->render();
+    };
+
     if (!objs.empty())
     {
         for (const auto& entry : objs)
         {
-            if (!entry || entry->object->getPath().empty())
+            if (!entry)
                 continue;
 
             Transform* t = &entry->transform;
-
-            if (auto obj3d = std::dynamic_pointer_cast<Object3D>(entry->object))
-            {
-                auto material = obj3d->getMaterial();
-                auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
-                if (glMaterial && t)
-                {
-                    Mat4 engineMat = t->getMatrix4ColumnMajor();
-                    glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-
-                    modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 1.0f, 0.0f));
-
-                    glMaterial->setModelMatrix(modelMatrix);
-                    glMaterial->setViewMatrix(view);
-                    glMaterial->setProjectionMatrix(m_projectionMatrix);
-                }
-                obj3d->render();
-            }
-            else if (auto obj2d = std::dynamic_pointer_cast<Object2D>(entry->object))
-            {
-                auto material = obj2d->getMaterial();
-                auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
-                if (glMaterial && t)
-                {
-                    Mat4 engineMat = t->getMatrix4ColumnMajor();
-                    glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-
-                    modelMatrix = glm::rotate(modelMatrix, (float)SDL_GetTicks() / 1000.0f, glm::vec3(0.0f, 0.0f, 1.0f));
-
-
-                    glMaterial->setModelMatrix(modelMatrix);
-                    glMaterial->setViewMatrix(view);
-                    glMaterial->setProjectionMatrix(m_projectionMatrix);
-                }
-                obj2d->render();
-            }
+            bool is3D = std::dynamic_pointer_cast<Object3D>(entry->object) != nullptr;
+            renderObject(entry->object, t, is3D);
         }
     }
 	if (!groups.empty())
@@ -275,37 +270,9 @@ void OpenGLRenderer::render()
             for (size_t i = 0; i < groupObjects.size(); ++i)
             {
                 const auto& entry = groupObjects[i];
-                if (!entry || entry->getPath().empty())
-                    continue;
 				Transform* t = (i < groupEntry.transforms.size()) ? const_cast<Transform*>(&groupEntry.transforms[i]) : nullptr;
-                if (auto obj3d = std::dynamic_pointer_cast<Object3D>(entry))
-                {
-                    auto material = obj3d->getMaterial();
-                    auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
-                    if (glMaterial && t)
-                    {
-                        Mat4 engineMat = t->getMatrix4ColumnMajor();
-                        glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-                        glMaterial->setModelMatrix(modelMatrix);
-                        glMaterial->setViewMatrix(view);
-                        glMaterial->setProjectionMatrix(m_projectionMatrix);
-                    }
-                    obj3d->render();
-                }
-                else if (auto obj2d = std::dynamic_pointer_cast<Object2D>(entry))
-                {
-                    auto material = obj2d->getMaterial();
-                    auto glMaterial = std::dynamic_pointer_cast<OpenGLMaterial>(material);
-                    if (glMaterial && t)
-                    {
-                        Mat4 engineMat = t->getMatrix4ColumnMajor();
-                        glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
-                        glMaterial->setModelMatrix(modelMatrix);
-                        glMaterial->setViewMatrix(view);
-                        glMaterial->setProjectionMatrix(m_projectionMatrix);
-                    }
-                    obj2d->render();
-                }
+                bool is3D = std::dynamic_pointer_cast<Object3D>(entry) != nullptr;
+                renderObject(entry, t, is3D);
             }
         }
     }

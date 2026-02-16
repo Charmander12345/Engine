@@ -17,6 +17,9 @@ namespace ecs
 	public:
 		World();
 
+		// Reserve capacity for expected number of entities to reduce allocations
+		void reserveEntityCapacity(std::size_t capacity);
+
 		EntityHandle createEntity();
 		EntityHandle createEntityWithId(std::uint64_t guid);
 		bool destroyEntity(EntityHandle e);
