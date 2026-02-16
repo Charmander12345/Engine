@@ -41,6 +41,11 @@ void Logger::setMinimumLogLevel(LogLevel level)
     minimumLevel = level;
 }
 
+void Logger::setSuppressStdout(bool suppress)
+{
+    suppressStdout = suppress;
+}
+
 const char* Logger::toString(LogLevel level)
 {
     switch (level)
@@ -123,6 +128,8 @@ void Logger::log(Category category, const std::string& message, LogLevel level)
         return;
     }
 
+    std::lock_guard<std::mutex> lock(logMutex);
+
     if (level == LogLevel::ERROR)
     {
         loggedError = true;
@@ -138,10 +145,13 @@ void Logger::log(Category category, const std::string& message, LogLevel level)
 
     if (logFile.is_open())
     {
-        logFile << "[" << ts << "][" << catStr << "][" << levelStr << "] " << message << std::endl;
+        logFile << "[" << ts << "][" << catStr << "][" << levelStr << "] " << message << '\n';
     }
 
-    std::cout << "[" << ts << "][" << catStr << "][" << levelStr << "] " << message << std::endl;
+    if (!suppressStdout)
+    {
+        std::cout << "[" << ts << "][" << catStr << "][" << levelStr << "] " << message << '\n';
+    }
 }
 
 bool Logger::hasErrors() const

@@ -192,6 +192,17 @@ private:
     double m_cpuUiDrawMs{0.0};
     double m_cpuEcsMs{0.0};
 
+    struct DrawCmd
+    {
+        OpenGLObject3D* obj{nullptr};
+        glm::mat4 modelMatrix{1.0f};
+        GLuint program{0};
+        glm::vec3 boundsMin{};
+        glm::vec3 boundsMax{};
+        bool hasBounds{false};
+    };
+    std::vector<DrawCmd> m_drawList;
+
 public:
     void toggleUIDebug() { m_uiDebugEnabled = !m_uiDebugEnabled; }
     bool isUIDebugEnabled() const { return m_uiDebugEnabled; }

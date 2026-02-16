@@ -653,17 +653,8 @@ void OpenGLRenderer::renderWorld()
 	const auto& groups = level->getGroups();
 
 	// Collect all visible 3D objects into a unified draw list for batching
-	struct DrawCmd
-	{
-		OpenGLObject3D* obj{nullptr};
-		glm::mat4 modelMatrix{1.0f};
-		GLuint program{0};
-		glm::vec3 boundsMin{};
-		glm::vec3 boundsMax{};
-		bool hasBounds{false};
-	};
-	std::vector<DrawCmd> drawList;
-	drawList.reserve(m_renderEntries.size() + objs.size() + m_meshEntries.size() + 16);
+	m_drawList.clear();
+	m_drawList.reserve(m_renderEntries.size() + objs.size() + m_meshEntries.size() + 16);
 
 	const float timeRotation = static_cast<float>(SDL_GetTicks()) / 1000.0f;
 
@@ -693,7 +684,7 @@ void OpenGLRenderer::renderWorld()
 			}
 			cmd.program = entry.object3D->getProgram();
 			++m_lastVisibleCount;
-			drawList.push_back(std::move(cmd));
+			m_drawList.push_back(std::move(cmd));
 		}
 		else if (entry.object2D)
 		{
@@ -705,21 +696,22 @@ void OpenGLRenderer::renderWorld()
 	// Gather world objects
 	for (const auto& entry : objs)
 	{
-		if (!entry || entry->object->getPath().empty())
+		if (!entry || !entry->object || entry->object->getPath().empty())
 			continue;
 
-		auto asset = entry->object ? std::dynamic_pointer_cast<AssetData>(entry->object) : nullptr;
+		const AssetType objType = entry->object->getAssetType();
+		auto asset = std::static_pointer_cast<AssetData>(entry->object);
 		if (!asset)
 			continue;
 
-		if (asset->getAssetType() == AssetType::Model3D || asset->getAssetType() == AssetType::PointLight)
+		if (objType == AssetType::Model3D || objType == AssetType::PointLight)
 		{
 			auto glObj = m_resourceManager.getOrCreateObject3D(asset, {});
 			if (!glObj)
 				continue;
 
 			++m_lastTotalCount;
-			const bool skipOcclusion = (asset->getAssetType() == AssetType::PointLight);
+			const bool skipOcclusion = (objType == AssetType::PointLight);
 
 			DrawCmd cmd;
 			cmd.obj = glObj.get();
@@ -744,16 +736,16 @@ void OpenGLRenderer::renderWorld()
 			}
 
 			cmd.program = glObj->getProgram();
-			++m_lastVisibleCount;
-			drawList.push_back(std::move(cmd));
-		}
-		else if (asset->getAssetType() == AssetType::Model2D)
-		{
-			auto glObj = m_resourceManager.getOrCreateObject2D(asset, {});
-			if (!glObj)
-				continue;
+				++m_lastVisibleCount;
+				m_drawList.push_back(std::move(cmd));
+			}
+			else if (objType == AssetType::Model2D)
+			{
+				auto glObj = m_resourceManager.getOrCreateObject2D(asset, {});
+				if (!glObj)
+					continue;
 
-			Mat4 engineMat = entry->transform.getMatrix4ColumnMajor();
+				Mat4 engineMat = entry->transform.getMatrix4ColumnMajor();
 			glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
 			modelMatrix = glm::rotate(modelMatrix, timeRotation, glm::vec3(0.0f, 0.0f, 1.0f));
 			glObj->setMatrices(modelMatrix, view, m_projectionMatrix);
@@ -771,11 +763,12 @@ void OpenGLRenderer::renderWorld()
 			if (!entry || entry->getPath().empty())
 				continue;
 			Transform* t = (i < groupEntry.transforms.size()) ? const_cast<Transform*>(&groupEntry.transforms[i]) : nullptr;
-			auto asset = entry ? std::dynamic_pointer_cast<AssetData>(entry) : nullptr;
+			const AssetType groupObjType = entry->getAssetType();
+			auto asset = std::static_pointer_cast<AssetData>(entry);
 			if (!asset)
 				continue;
 
-			if (asset->getAssetType() == AssetType::Model3D)
+			if (groupObjType == AssetType::Model3D)
 			{
 				auto glObj = m_resourceManager.getOrCreateObject3D(asset, {});
 				if (!glObj || !t)
@@ -806,9 +799,9 @@ void OpenGLRenderer::renderWorld()
 
 				cmd.program = glObj->getProgram();
 				++m_lastVisibleCount;
-				drawList.push_back(std::move(cmd));
+				m_drawList.push_back(std::move(cmd));
 			}
-			else if (asset->getAssetType() == AssetType::Model2D)
+			else if (groupObjType == AssetType::Model2D)
 			{
 				auto glObj = m_resourceManager.getOrCreateObject2D(asset, {});
 				if (!glObj || !t)
@@ -848,7 +841,7 @@ void OpenGLRenderer::renderWorld()
 			}
 			cmd.program = entry.object3D->getProgram();
 			++m_lastVisibleCount;
-			drawList.push_back(std::move(cmd));
+			m_drawList.push_back(std::move(cmd));
 		}
 		else if (entry.object2D)
 		{
@@ -858,12 +851,12 @@ void OpenGLRenderer::renderWorld()
 	}
 
 	// Sort by shader program to minimize state changes
-	std::sort(drawList.begin(), drawList.end(),
+	std::sort(m_drawList.begin(), m_drawList.end(),
 		[](const DrawCmd& a, const DrawCmd& b) { return a.program < b.program; });
 
 	// Render sorted draw list
 	GLuint lastProgram = 0;
-	for (const auto& cmd : drawList)
+	for (const auto& cmd : m_drawList)
 	{
 		cmd.obj->setMatrices(cmd.modelMatrix, view, m_projectionMatrix);
 		if (cmd.program != lastProgram)

@@ -88,7 +88,9 @@ namespace
                         nullptr);
                     if (formatted)
                     {
-                        PyObject* joined = PyUnicode_Join(PyUnicode_FromString(""), formatted);
+                        PyObject* separator = PyUnicode_FromString("");
+                        PyObject* joined = separator ? PyUnicode_Join(separator, formatted) : nullptr;
+                        Py_XDECREF(separator);
                         if (joined)
                         {
                             const char* utf8 = PyUnicode_AsUTF8(joined);

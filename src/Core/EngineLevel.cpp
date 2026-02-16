@@ -490,28 +490,10 @@ void EngineLevel::buildScriptEntityCache()
 	for (const auto entity : m_entities)
 	{
 		const auto* script = m_ecs->getComponent<ECS::ScriptComponent>(entity);
-		const auto* name = m_ecs->getComponent<ECS::NameComponent>(entity);
-		const std::string displayName = name ? name->displayName : std::string("(unnamed)");
-		Logger::Instance().log(Logger::Category::Engine,
-			"EngineLevel: checking entity " + std::to_string(entity) + " name=" + displayName,
-			Logger::LogLevel::INFO);
-		if (!script)
+		if (!script || script->scriptPath.empty())
 		{
-			Logger::Instance().log(Logger::Category::Engine,
-				"EngineLevel: entity " + std::to_string(entity) + " has no ScriptComponent.",
-				Logger::LogLevel::INFO);
 			continue;
 		}
-		if (script->scriptPath.empty())
-		{
-			Logger::Instance().log(Logger::Category::Engine,
-				"EngineLevel: ScriptComponent missing scriptPath for entity " + std::to_string(entity) + " name=" + displayName,
-				Logger::LogLevel::WARNING);
-			continue;
-		}
-		Logger::Instance().log(Logger::Category::Engine,
-			"EngineLevel: entity " + std::to_string(entity) + " scriptPath=" + script->scriptPath,
-			Logger::LogLevel::INFO);
 		m_scriptEntities.push_back(entity);
 	}
 

@@ -148,6 +148,7 @@ int main()
 
 #if defined(_WIN32)
     FreeConsole();
+    logger.setSuppressStdout(true);
 #endif
 
     if (glRenderer)
