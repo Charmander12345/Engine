@@ -320,15 +320,19 @@ void DiagnosticsManager::registerKeyUpHandler(int key, KeyCallback callback)
 
 bool DiagnosticsManager::dispatchKeyDown(int key)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto it = m_keyDownHandlers.find(key);
-    if (it == m_keyDownHandlers.end())
+    std::vector<KeyCallback> handlers;
     {
-        return false;
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_keyDownHandlers.find(key);
+        if (it == m_keyDownHandlers.end() || it->second.empty())
+        {
+            return false;
+        }
+        // Copy to avoid holding lock during callback execution
+        handlers = it->second;
     }
 
-    // Iterate directly without copying the vector
-    for (auto& h : it->second)
+    for (auto& h : handlers)
     {
         if (h && h())
         {
@@ -341,15 +345,19 @@ bool DiagnosticsManager::dispatchKeyDown(int key)
 
 bool DiagnosticsManager::dispatchKeyUp(int key)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    auto it = m_keyUpHandlers.find(key);
-    if (it == m_keyUpHandlers.end())
+    std::vector<KeyCallback> handlers;
     {
-        return false;
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_keyUpHandlers.find(key);
+        if (it == m_keyUpHandlers.end() || it->second.empty())
+        {
+            return false;
+        }
+        // Copy to avoid holding lock during callback execution
+        handlers = it->second;
     }
 
-    // Iterate directly without copying the vector
-    for (auto& h : it->second)
+    for (auto& h : handlers)
     {
         if (h && h())
         {

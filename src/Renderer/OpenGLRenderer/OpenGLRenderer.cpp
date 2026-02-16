@@ -258,7 +258,8 @@ void OpenGLRenderer::render()
                 continue;
 
             const Transform* t = &entry->transform;
-            bool is3D = std::dynamic_pointer_cast<Object3D>(entry->object) != nullptr;
+            auto renderableObj = std::dynamic_pointer_cast<RenderableObject>(entry->object);
+            bool is3D = renderableObj ? renderableObj->is3D() : false;
             renderObject(entry->object, t, is3D);
         }
     }
@@ -271,7 +272,8 @@ void OpenGLRenderer::render()
             {
                 const auto& entry = groupObjects[i];
 				const Transform* t = (i < groupEntry.transforms.size()) ? &groupEntry.transforms[i] : nullptr;
-                bool is3D = std::dynamic_pointer_cast<Object3D>(entry) != nullptr;
+                auto renderableObj = std::dynamic_pointer_cast<RenderableObject>(entry);
+                bool is3D = renderableObj ? renderableObj->is3D() : false;
                 renderObject(entry, t, is3D);
             }
         }

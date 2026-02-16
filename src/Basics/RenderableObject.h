@@ -25,6 +25,9 @@ public:
 
     void render();
 
+    // Virtual method to determine dimensionality without dynamic_cast
+    virtual bool is3D() const { return false; }
+
 protected:
     std::shared_ptr<Material> m_material;
     std::vector<float> m_vertices;
