@@ -53,6 +53,9 @@ public:
     void registerClickEvent(const std::string& eventId, std::function<void()> callback);
     void markAllWidgetsDirty();
 
+    bool isRenderDirty() const;
+    void clearRenderDirty();
+
     void showModalMessage(const std::string& message, std::function<void()> onClosed = {});
     void closeModalMessage();
     void showToastMessage(const std::string& message, float durationSeconds);
@@ -88,6 +91,7 @@ private:
     mutable bool m_lastPointerOverUI{ false };
     mutable bool m_pointerCacheDirty{ true };
     WidgetElement* m_focusedEntry{ nullptr };
+    bool m_renderDirty{ true };
 
     std::shared_ptr<Widget> m_modalWidget;
     std::string m_modalMessage;

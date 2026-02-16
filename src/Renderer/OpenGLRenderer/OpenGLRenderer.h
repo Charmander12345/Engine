@@ -72,6 +72,9 @@ private:
     GLuint getUIQuadProgram(const std::string& vertexShaderPath, const std::string& fragmentShaderPath);
     void ensureUIShaderDefaults();
     const std::string& resolveUIShaderPath(const std::string& value, const std::string& fallback);
+    bool ensureUiFbo(int width, int height);
+    void releaseUiFbo();
+    void blitUiCache(int width, int height);
     bool ensureHzbResources(int width, int height);
     void releaseHzbResources();
     void buildHzb();
@@ -141,7 +144,14 @@ private:
     ECS::Schema m_lightSchema{};
     bool m_lightSchemaInitialized{false};
     bool m_uiDebugEnabled{false};
+    bool m_uiDebugEnabledPrev{false};
     WindowHitTestContext m_hitTestContext{};
+
+    GLuint m_uiFbo{0};
+    GLuint m_uiFboTexture{0};
+    int m_uiFboWidth{0};
+    int m_uiFboHeight{0};
+    bool m_uiFboCacheValid{false};
 
     struct HzbLevel
     {

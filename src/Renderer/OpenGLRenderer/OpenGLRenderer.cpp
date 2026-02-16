@@ -245,6 +245,7 @@ void OpenGLRenderer::shutdown()
     }
     releaseHzbResources();
     releaseBoundsDebugResources();
+    releaseUiFbo();
     auto& logger = Logger::Instance();
     logger.log(Logger::Category::Rendering, "OpenGLRenderer shutdown: releasing GPU resources...", Logger::LogLevel::INFO);
 
@@ -887,6 +888,78 @@ void OpenGLRenderer::renderWorld()
 	}
 }
 
+bool OpenGLRenderer::ensureUiFbo(int width, int height)
+{
+    if (m_uiFbo != 0 && m_uiFboWidth == width && m_uiFboHeight == height)
+    {
+        return true;
+    }
+
+    releaseUiFbo();
+
+    m_uiFboWidth = width;
+    m_uiFboHeight = height;
+
+    glGenFramebuffers(1, &m_uiFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_uiFbo);
+
+    glGenTextures(1, &m_uiFboTexture);
+    glBindTexture(GL_TEXTURE_2D, m_uiFboTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_uiFboTexture, 0);
+
+    const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    if (status != GL_FRAMEBUFFER_COMPLETE)
+    {
+        releaseUiFbo();
+        return false;
+    }
+
+    m_uiFboCacheValid = false;
+    return true;
+}
+
+void OpenGLRenderer::releaseUiFbo()
+{
+    if (m_uiFboTexture)
+    {
+        glDeleteTextures(1, &m_uiFboTexture);
+        m_uiFboTexture = 0;
+    }
+    if (m_uiFbo)
+    {
+        glDeleteFramebuffers(1, &m_uiFbo);
+        m_uiFbo = 0;
+    }
+    m_uiFboWidth = 0;
+    m_uiFboHeight = 0;
+    m_uiFboCacheValid = false;
+}
+
+void OpenGLRenderer::blitUiCache(int width, int height)
+{
+    if (m_uiFboTexture == 0)
+    {
+        return;
+    }
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    // Use standard Y-up projection so texture V=0 (bottom) maps to screen bottom
+    // and V=1 (top) maps to screen top, matching how the FBO stores the UI.
+    const glm::mat4 projection = glm::ortho(0.0f, static_cast<float>(width), 0.0f, static_cast<float>(height));
+    drawUIImage(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), m_uiFboTexture, projection);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_BLEND);
+}
+
 void OpenGLRenderer::renderUI()
 {
     const uint64_t freq = SDL_GetPerformanceFrequency();
@@ -911,7 +984,8 @@ void OpenGLRenderer::renderUI()
     m_textRenderer->setScreenSize(width, height);
     m_uiManager.setAvailableViewportSize(Vec2{ static_cast<float>(width), static_cast<float>(height) });
 
-    if (m_uiManager.needsLayoutUpdate())
+    const bool layoutDirty = m_uiManager.needsLayoutUpdate();
+    if (layoutDirty)
     {
         m_uiManager.updateLayouts([this](const std::string& text, float scale)
             {
@@ -919,9 +993,25 @@ void OpenGLRenderer::renderUI()
             });
     }
 
+    const bool debugToggled = (m_uiDebugEnabled != m_uiDebugEnabledPrev);
+    m_uiDebugEnabledPrev = m_uiDebugEnabled;
+
+    const bool sizeChanged = (width != m_uiFboWidth || height != m_uiFboHeight);
+    const bool needsRedraw = layoutDirty || m_uiManager.isRenderDirty() || debugToggled || sizeChanged || !m_uiFboCacheValid;
+
     const auto& ordered = m_uiManager.getWidgetsOrderedByZ();
-    if (!ordered.empty() && ensureUIQuadRenderer())
+    if (!ordered.empty() && ensureUIQuadRenderer() && ensureUiFbo(width, height))
     {
+        if (needsRedraw)
+        {
+            m_uiManager.clearRenderDirty();
+
+            glBindFramebuffer(GL_FRAMEBUFFER, m_uiFbo);
+            glViewport(0, 0, width, height);
+            glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+            glEnable(GL_BLEND);
+            glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
         ensureUIShaderDefaults();
         const glm::mat4 uiProjection = glm::ortho(0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f);
 
@@ -1527,8 +1617,21 @@ void OpenGLRenderer::renderUI()
                 renderElement(renderElement, element, widgetPosition.x, widgetPosition.y, widgetSize.x, widgetSize.y);
             }
         }
-        const uint64_t drawEnd = SDL_GetPerformanceCounter();
-        m_cpuUiDrawMs = (freq > 0) ? (static_cast<double>(drawEnd - drawStart) * 1000.0 / static_cast<double>(freq)) : 0.0;
+
+            glDisable(GL_BLEND);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glViewport(0, 0, width, height);
+            m_uiFboCacheValid = true;
+
+            const uint64_t drawEnd = SDL_GetPerformanceCounter();
+            m_cpuUiDrawMs = (freq > 0) ? (static_cast<double>(drawEnd - drawStart) * 1000.0 / static_cast<double>(freq)) : 0.0;
+        }
+        else
+        {
+            m_cpuUiDrawMs = 0.0;
+        }
+
+        blitUiCache(width, height);
     }
     else
     {

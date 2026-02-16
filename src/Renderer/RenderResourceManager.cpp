@@ -55,46 +55,48 @@ bool RenderResourceManager::prepareOpenGL(EngineLevel& level)
         "RenderResourceManager: OpenGL prepare begin. objectCount=" + std::to_string(objs.size()),
         Logger::LogLevel::INFO);
 
-    for (const auto& obj : objs)
-    {
-        if (!obj)
-            continue;
+	for (const auto& obj : objs)
+	{
+		if (!obj)
+			continue;
 
 		auto engineObj = obj->object;
 		if (!engineObj)
 			continue;
 
-		if (auto asset = std::dynamic_pointer_cast<AssetData>(engineObj))
-        {
-            const auto type = asset->getAssetType();
-            if (type == AssetType::Model2D)
-            {
-                logger.log(Logger::Category::Rendering, "RenderResourceManager: preparing Model2D '" + asset->getPath() + "'", Logger::LogLevel::INFO);
-                if (!prepareOpenGLObject2D(asset, {}))
-                {
-                    logger.log(Logger::Category::Rendering, "RenderResourceManager: failed to prepare OpenGL resources for Model2D: " + asset->getPath(), Logger::LogLevel::ERROR);
-                    ok = false;
-                }
-                else
-                {
-                    logger.log(Logger::Category::Rendering, "RenderResourceManager: prepared Model2D '" + asset->getPath() + "'", Logger::LogLevel::INFO);
-                }
-            }
-            else if (type == AssetType::Model3D || type == AssetType::PointLight)
-            {
-                logger.log(Logger::Category::Rendering, "RenderResourceManager: preparing Model3D '" + asset->getPath() + "'", Logger::LogLevel::INFO);
-                if (!prepareOpenGLObject3D(asset, {}))
-                {
-                    logger.log(Logger::Category::Rendering, "RenderResourceManager: failed to prepare OpenGL resources for Model3D: " + asset->getPath() + "", Logger::LogLevel::ERROR);
-                    ok = false;
-                }
-                else
-                {
-                    logger.log(Logger::Category::Rendering, "RenderResourceManager: prepared Model3D '" + asset->getPath() + "'", Logger::LogLevel::INFO);
-                }
-            }
-        }
-    }
+		const AssetType engineObjType = engineObj->getAssetType();
+		if (engineObjType == AssetType::Unknown)
+			continue;
+
+		auto asset = std::static_pointer_cast<AssetData>(engineObj);
+		const auto type = asset->getAssetType();
+		if (type == AssetType::Model2D)
+		{
+			logger.log(Logger::Category::Rendering, "RenderResourceManager: preparing Model2D '" + asset->getPath() + "'", Logger::LogLevel::INFO);
+			if (!prepareOpenGLObject2D(asset, {}))
+			{
+				logger.log(Logger::Category::Rendering, "RenderResourceManager: failed to prepare OpenGL resources for Model2D: " + asset->getPath(), Logger::LogLevel::ERROR);
+				ok = false;
+			}
+			else
+			{
+				logger.log(Logger::Category::Rendering, "RenderResourceManager: prepared Model2D '" + asset->getPath() + "'", Logger::LogLevel::INFO);
+			}
+		}
+		else if (type == AssetType::Model3D || type == AssetType::PointLight)
+		{
+			logger.log(Logger::Category::Rendering, "RenderResourceManager: preparing Model3D '" + asset->getPath() + "'", Logger::LogLevel::INFO);
+			if (!prepareOpenGLObject3D(asset, {}))
+			{
+				logger.log(Logger::Category::Rendering, "RenderResourceManager: failed to prepare OpenGL resources for Model3D: " + asset->getPath() + "", Logger::LogLevel::ERROR);
+				ok = false;
+			}
+			else
+			{
+				logger.log(Logger::Category::Rendering, "RenderResourceManager: prepared Model3D '" + asset->getPath() + "'", Logger::LogLevel::INFO);
+			}
+		}
+	}
 
     logger.log(Logger::Category::Rendering,
         std::string("RenderResourceManager: OpenGL prepare end. result=") + (ok ? "success" : "failure"),

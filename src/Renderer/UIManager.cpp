@@ -801,6 +801,7 @@ void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widg
     }
     m_widgetOrderDirty = true;
     m_pointerCacheDirty = true;
+    m_renderDirty = true;
 }
 
 void UIManager::showModalMessage(const std::string& message, std::function<void()> onClosed)
@@ -1313,6 +1314,7 @@ void UIManager::unregisterWidget(const std::string& id)
         m_widgets.end());
     m_widgetOrderDirty = true;
     m_pointerCacheDirty = true;
+    m_renderDirty = true;
 }
 
 WidgetElement* UIManager::findElementById(const std::string& elementId)
@@ -1722,6 +1724,7 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
         }
     }
 
+    m_renderDirty = true;
     return true;
 }
 
@@ -1831,6 +1834,7 @@ bool UIManager::handleScroll(const Vec2& screenPos, float delta)
                 }
                 target->scrollOffset = std::clamp(target->scrollOffset - delta * scrollStep, 0.0f, maxScroll);
                 entry.widget->markLayoutDirty();
+                m_renderDirty = true;
                 return true;
             }
         }
@@ -1880,6 +1884,17 @@ void UIManager::markAllWidgetsDirty()
             entry.widget->markLayoutDirty();
         }
     }
+    m_renderDirty = true;
+}
+
+bool UIManager::isRenderDirty() const
+{
+    return m_renderDirty;
+}
+
+void UIManager::clearRenderDirty()
+{
+    m_renderDirty = false;
 }
 
 void UIManager::ensureModalWidget()
@@ -2075,6 +2090,7 @@ void UIManager::updateHoverStates()
             if (element.isHovered != newHover)
             {
                 element.isHovered = newHover;
+                m_renderDirty = true;
                 if (newHover)
                 {
                     if (element.type == WidgetElementType::Button && !element.id.empty())
