@@ -13,7 +13,10 @@ namespace ecs
 	{
 		m_generations.reserve(capacity + 1); // +1 for slot 0
 		m_alive.reserve(capacity + 1);
-		m_freeList.reserve(capacity / 4); // Reserve space for some freed entities
+		// Reserve space for approximately 25% of entities to be freed and reused
+		// This is a heuristic based on typical entity churn in game engines
+		constexpr std::size_t freeListRatio = 4;
+		m_freeList.reserve(capacity / freeListRatio);
 		
 		// Reserve space in all component sparse sets
 		m_transforms.reserve(capacity);
