@@ -876,6 +876,7 @@ void OpenGLRenderer::renderWorld()
 			const glm::vec3 center = (cmd.boundsMin + cmd.boundsMax) * 0.5f;
 			const glm::vec3 extent = (cmd.boundsMax - cmd.boundsMin) * 0.5f;
 			drawBoundsDebugBox(center, extent, viewProj);
+			lastProgram = 0;
 		}
 	}
 
@@ -2071,6 +2072,7 @@ void OpenGLRenderer::drawBoundsDebugBox(const glm::vec3& center, const glm::vec3
         return;
     }
 
+    const GLboolean cullWasEnabled = glIsEnabled(GL_CULL_FACE);
     glDisable(GL_CULL_FACE);
 
     glUseProgram(m_boundsDebugProgram);
@@ -2100,6 +2102,10 @@ void OpenGLRenderer::drawBoundsDebugBox(const glm::vec3& center, const glm::vec3
 
     glBindVertexArray(0);
     glUseProgram(0);
+    if (cullWasEnabled)
+    {
+        glEnable(GL_CULL_FACE);
+    }
 }
 
 void OpenGLRenderer::buildHzb()

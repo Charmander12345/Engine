@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include <cstdio>
+#include <functional>
 #include <SDL3/SDL.h>
 
 #if defined(_WIN32)
@@ -151,10 +152,37 @@ int main()
     logger.setSuppressStdout(true);
 #endif
 
+    std::function<void()> stopPIE;
+
     if (glRenderer)
     {
         const GLuint playTexId = glRenderer->preloadUITexture("Play.tga");
         const GLuint stopTexId = glRenderer->preloadUITexture("Stop.tga");
+
+        stopPIE = [&glRenderer, playTexId]()
+            {
+                auto& diag = DiagnosticsManager::Instance();
+                if (!diag.isPIEActive())
+                {
+                    return;
+                }
+                diag.setPIEActive(false);
+                AudioManager::Instance().stopAll();
+                Scripting::ReloadScripts();
+                auto* level = diag.getActiveLevelSoft();
+                if (level)
+                {
+                    level->restoreEcsSnapshot();
+                }
+                auto& uiMgr = glRenderer->getUIManager();
+                if (auto* el = uiMgr.findElementById("Toolbar.PIE"))
+                {
+                    el->textureId = playTexId;
+                }
+                uiMgr.markAllWidgetsDirty();
+                uiMgr.refreshWorldOutliner();
+                Logger::Instance().log(Logger::Category::Engine, "PIE: stopped.", Logger::LogLevel::INFO);
+            };
 
         glRenderer->getUIManager().registerClickEvent("TitleBar.Close", []()
             {
@@ -162,11 +190,10 @@ int main()
                 DiagnosticsManager::Instance().requestShutdown();
             });
 
-        glRenderer->getUIManager().registerClickEvent("Toolbar.PIE", [&glRenderer, playTexId, stopTexId]()
+        glRenderer->getUIManager().registerClickEvent("Toolbar.PIE", [&glRenderer, playTexId, stopTexId, stopPIE]()
             {
                 auto& diag = DiagnosticsManager::Instance();
                 const bool wasActive = diag.isPIEActive();
-                auto& uiMgr = glRenderer->getUIManager();
 
                 if (!wasActive)
                 {
@@ -178,6 +205,7 @@ int main()
                     }
                     level->snapshotEcsState();
                     diag.setPIEActive(true);
+                    auto& uiMgr = glRenderer->getUIManager();
                     if (auto* el = uiMgr.findElementById("Toolbar.PIE"))
                     {
                         el->textureId = stopTexId;
@@ -187,21 +215,7 @@ int main()
                 }
                 else
                 {
-                    diag.setPIEActive(false);
-                    AudioManager::Instance().stopAll();
-                    Scripting::ReloadScripts();
-                    auto* level = diag.getActiveLevelSoft();
-                    if (level)
-                    {
-                        level->restoreEcsSnapshot();
-                    }
-                    if (auto* el = uiMgr.findElementById("Toolbar.PIE"))
-                    {
-                        el->textureId = playTexId;
-                    }
-                    uiMgr.markAllWidgetsDirty();
-                    uiMgr.refreshWorldOutliner();
-                    Logger::Instance().log(Logger::Category::Engine, "PIE: stopped.", Logger::LogLevel::INFO);
+                    stopPIE();
                 }
             });
 
@@ -702,6 +716,11 @@ int main()
                 if (event.key.key == SDLK_F9)
                 {
                     showOcclusionStats = !showOcclusionStats;
+                    continue;
+                }
+                if (event.key.key == SDLK_ESCAPE && diagnostics.isPIEActive() && stopPIE)
+                {
+                    stopPIE();
                     continue;
                 }
                 diagnostics.dispatchKeyUp(event.key.key);
