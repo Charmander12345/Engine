@@ -171,6 +171,7 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
     {
         std::vector<std::shared_ptr<Texture>> textures;
         std::string materialCacheKey;
+        float shininess = 32.0f;
         if (!match.material.materialAssetPath.empty())
         {
             std::string materialPath = match.material.materialAssetPath;
@@ -185,10 +186,11 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
             }
 
             materialCacheKey = materialPath;
-            auto cachedTextures = m_textureCache.find(materialCacheKey);
-            if (cachedTextures != m_textureCache.end())
+            auto cachedMat = m_materialDataCache.find(materialCacheKey);
+            if (cachedMat != m_materialDataCache.end())
             {
-                textures = cachedTextures->second;
+                textures = cachedMat->second.textures;
+                shininess = cachedMat->second.shininess;
             }
             else
             {
@@ -199,55 +201,62 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
                     if (auto matAsset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(matId)))
                     {
                         const auto& matData = matAsset->getData();
-                        if (matData.is_object() && matData.contains("m_textureAssetPaths"))
+                        if (matData.is_object())
                         {
-                            const auto& paths = matData.at("m_textureAssetPaths");
-                            if (paths.is_array())
+                            if (matData.contains("m_shininess"))
                             {
-                                for (const auto& pathValue : paths)
+                                shininess = matData.at("m_shininess").get<float>();
+                            }
+                            if (matData.contains("m_textureAssetPaths"))
+                            {
+                                const auto& paths = matData.at("m_textureAssetPaths");
+                                if (paths.is_array())
                                 {
-                                    if (!pathValue.is_string())
+                                    for (const auto& pathValue : paths)
                                     {
-                                        continue;
-                                    }
-                                    std::string texPath = pathValue.get<std::string>();
-                                    const std::filesystem::path texFs(texPath);
-                                    if (!texFs.is_absolute())
-                                    {
-                                        const auto absTex = assetManager.getAbsoluteContentPath(texPath);
-                                        if (!absTex.empty())
+                                        if (!pathValue.is_string())
                                         {
-                                            texPath = absTex;
+                                            continue;
                                         }
+                                        std::string texPath = pathValue.get<std::string>();
+                                        const std::filesystem::path texFs(texPath);
+                                        if (!texFs.is_absolute())
+                                        {
+                                            const auto absTex = assetManager.getAbsoluteContentPath(texPath);
+                                            if (!absTex.empty())
+                                            {
+                                                texPath = absTex;
+                                            }
+                                        }
+                                        int texId = assetManager.loadAsset(texPath, AssetType::Texture, AssetManager::Sync);
+                                        if (texId == 0)
+                                        {
+                                            logger.log(Logger::Category::Rendering, "RenderResourceManager: failed to load texture '" + texPath + "'", Logger::LogLevel::WARNING);
+                                            continue;
+                                        }
+                                        auto texAsset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(texId));
+                                        if (!texAsset)
+                                        {
+                                            logger.log(Logger::Category::Rendering, "RenderResourceManager: texture asset missing after load '" + texPath + "'", Logger::LogLevel::WARNING);
+                                            continue;
+                                        }
+                                        const auto& texData = texAsset->getData();
+                                        if (!texData.is_object())
+                                        {
+                                            continue;
+                                        }
+                                        if (!texData.contains("m_width") || !texData.contains("m_height") || !texData.contains("m_channels") || !texData.contains("m_data"))
+                                        {
+                                            continue;
+                                        }
+                                        auto texture = std::make_shared<Texture>();
+                                        texture->setWidth(texData.at("m_width").get<int>());
+                                        texture->setHeight(texData.at("m_height").get<int>());
+                                        texture->setChannels(texData.at("m_channels").get<int>());
+                                        texture->setData(texData.at("m_data").get<std::vector<unsigned char>>());
+                                        textures.push_back(std::move(texture));
+                                        logger.log(Logger::Category::Rendering, "RenderResourceManager: prepared texture '" + texPath + "'", Logger::LogLevel::INFO);
                                     }
-                                    int texId = assetManager.loadAsset(texPath, AssetType::Texture, AssetManager::Sync);
-                                    if (texId == 0)
-                                    {
-                                        logger.log(Logger::Category::Rendering, "RenderResourceManager: failed to load texture '" + texPath + "'", Logger::LogLevel::WARNING);
-                                        continue;
-                                    }
-                                    auto texAsset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(texId));
-                                    if (!texAsset)
-                                    {
-                                        logger.log(Logger::Category::Rendering, "RenderResourceManager: texture asset missing after load '" + texPath + "'", Logger::LogLevel::WARNING);
-                                        continue;
-                                    }
-                                    const auto& texData = texAsset->getData();
-                                    if (!texData.is_object())
-                                    {
-                                        continue;
-                                    }
-                                    if (!texData.contains("m_width") || !texData.contains("m_height") || !texData.contains("m_channels") || !texData.contains("m_data"))
-                                    {
-                                        continue;
-                                    }
-                                    auto texture = std::make_shared<Texture>();
-                                    texture->setWidth(texData.at("m_width").get<int>());
-                                    texture->setHeight(texData.at("m_height").get<int>());
-                                    texture->setChannels(texData.at("m_channels").get<int>());
-                                    texture->setData(texData.at("m_data").get<std::vector<unsigned char>>());
-                                    textures.push_back(std::move(texture));
-                                    logger.log(Logger::Category::Rendering, "RenderResourceManager: prepared texture '" + texPath + "'", Logger::LogLevel::INFO);
                                 }
                             }
                         }
@@ -256,7 +265,7 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
 
                 if (!materialCacheKey.empty())
                 {
-                    m_textureCache[materialCacheKey] = textures;
+                    m_materialDataCache[materialCacheKey] = { textures, shininess };
                 }
             }
         }
@@ -298,16 +307,18 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
         renderable.asset = asset;
         renderable.textures = textures;
         renderable.assetType = asset->getAssetType();
+        renderable.shininess = shininess;
         if (match.hasTransform)
         {
             renderable.transform = match.transform;
         }
 
-        const unsigned int cacheId = (asset->getId() != 0) ? asset->getId() : static_cast<unsigned int>(assetId);
+        const unsigned int meshCacheId = (asset->getId() != 0) ? asset->getId() : static_cast<unsigned int>(assetId);
+        const std::string obj3DCacheKey = std::to_string(meshCacheId) + "|" + materialCacheKey;
 
         if (renderable.assetType == AssetType::Model3D || renderable.assetType == AssetType::PointLight)
         {
-            auto it = m_object3DCache.find(cacheId);
+            auto it = m_object3DCache.find(obj3DCacheKey);
             if (it != m_object3DCache.end())
             {
                 renderable.object3D = it->second.lock();
@@ -319,21 +330,20 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
             if (!renderable.object3D)
             {
                 auto obj = std::make_shared<OpenGLObject3D>(asset);
+                obj->setMaterialCacheKeySuffix(materialCacheKey);
                 if (obj->prepare())
                 {
                     obj->setTextures(textures);
+                    obj->setShininess(shininess);
                     renderable.object3D = obj;
-                    if (cacheId != 0)
-                    {
-                        m_object3DCache[cacheId] = obj;
-                    }
+                    m_object3DCache[obj3DCacheKey] = obj;
                     AssetManager::Instance().registerRuntimeResource(obj);
                 }
             }
         }
         else if (renderable.assetType == AssetType::Model2D)
         {
-            auto it = m_object2DCache.find(cacheId);
+            auto it = m_object2DCache.find(meshCacheId);
             if (it != m_object2DCache.end())
             {
                 renderable.object2D = it->second.lock();
@@ -349,9 +359,9 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
                 {
                     obj->setTextures(textures);
                     renderable.object2D = obj;
-                    if (cacheId != 0)
+                    if (meshCacheId != 0)
                     {
-                        m_object2DCache[cacheId] = obj;
+                        m_object2DCache[meshCacheId] = obj;
                     }
                     AssetManager::Instance().registerRuntimeResource(obj);
                 }
@@ -408,10 +418,10 @@ std::shared_ptr<OpenGLObject3D> RenderResourceManager::getOrCreateObject3D(const
         return nullptr;
     }
 
-    const unsigned int cacheId = asset->getId();
-    if (cacheId != 0)
+    const std::string cacheKey = std::to_string(asset->getId()) + "|";
+    if (asset->getId() != 0)
     {
-        auto it = m_object3DCache.find(cacheId);
+        auto it = m_object3DCache.find(cacheKey);
         if (it != m_object3DCache.end())
         {
             if (auto existing = it->second.lock())
@@ -429,9 +439,9 @@ std::shared_ptr<OpenGLObject3D> RenderResourceManager::getOrCreateObject3D(const
         return nullptr;
     }
     obj->setTextures(textures);
-    if (cacheId != 0)
+    if (asset->getId() != 0)
     {
-        m_object3DCache[cacheId] = obj;
+        m_object3DCache[cacheKey] = obj;
     }
     AssetManager::Instance().registerRuntimeResource(obj);
     return obj;
@@ -441,7 +451,7 @@ void RenderResourceManager::clearCaches()
 {
     m_object2DCache.clear();
     m_object3DCache.clear();
-    m_textureCache.clear();
+    m_materialDataCache.clear();
     m_textRenderer.reset();
 }
 

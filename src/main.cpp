@@ -604,6 +604,10 @@ int main()
                     {
                         continue;
                     }
+                    if (!isOverUI)
+                    {
+                        glRenderer->requestPick(static_cast<int>(event.button.x), static_cast<int>(event.button.y));
+                    }
                 }
             }
 

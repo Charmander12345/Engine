@@ -245,6 +245,8 @@ void OpenGLRenderer::shutdown()
     }
     releaseHzbResources();
     releaseBoundsDebugResources();
+    releasePickFbo();
+    releaseOutlineResources();
     releaseUiFbo();
     auto& logger = Logger::Instance();
     logger.log(Logger::Category::Rendering, "OpenGLRenderer shutdown: releasing GPU resources...", Logger::LogLevel::INFO);
@@ -303,6 +305,7 @@ bool OpenGLRenderer::initialize()
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 6);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 
     logger.log(Logger::Category::Rendering, "Creating Window...", Logger::LogLevel::INFO);
 
@@ -601,19 +604,58 @@ void OpenGLRenderer::renderWorld()
 		m_lightSchema.require<ECS::LightComponent>().require<ECS::TransformComponent>();
 		m_lightSchemaInitialized = true;
 	}
+
+	std::vector<OpenGLMaterial::LightData> sceneLights;
 	const auto lightEntities = ecs.getEntitiesMatchingSchema(m_lightSchema);
-	if (!lightEntities.empty())
+	for (const auto lightEntity : lightEntities)
 	{
-		const auto lightEntity = lightEntities.front();
-		if (const auto* transform = ecs.getComponent<ECS::TransformComponent>(lightEntity))
+		const auto* transform = ecs.getComponent<ECS::TransformComponent>(lightEntity);
+		const auto* light = ecs.getComponent<ECS::LightComponent>(lightEntity);
+		if (!transform || !light)
+			continue;
+
+		OpenGLMaterial::LightData ld;
+		ld.position = glm::vec3(transform->position[0], transform->position[1], transform->position[2]);
+		ld.color = glm::vec3(light->color[0], light->color[1], light->color[2]);
+		ld.intensity = light->intensity;
+		ld.range = light->range;
+
+		// Compute forward direction from rotation (pitch=X, yaw=Y)
+		const float pitch = glm::radians(transform->rotation[0]);
+		const float yaw = glm::radians(transform->rotation[1]);
+		ld.direction = glm::normalize(glm::vec3(
+			std::cos(pitch) * std::sin(yaw),
+			-std::sin(pitch),
+			std::cos(pitch) * std::cos(yaw)
+		));
+
+		switch (light->type)
 		{
-			lightPosition = glm::vec3(transform->position[0], transform->position[1], transform->position[2]);
+		case ECS::LightComponent::LightType::Point:
+			ld.type = 0;
+			break;
+		case ECS::LightComponent::LightType::Directional:
+			ld.type = 1;
+			break;
+		case ECS::LightComponent::LightType::Spot:
+			ld.type = 2;
+			ld.spotCutoff = std::cos(glm::radians(light->spotAngle));
+			ld.spotOuterCutoff = std::cos(glm::radians(light->spotAngle + 5.0f));
+			break;
 		}
-		if (const auto* light = ecs.getComponent<ECS::LightComponent>(lightEntity))
-		{
-			lightColor = glm::vec3(light->color[0], light->color[1], light->color[2]);
-			lightIntensity = light->intensity;
-		}
+
+		sceneLights.push_back(ld);
+
+		if (sceneLights.size() >= OpenGLMaterial::kMaxLights)
+			break;
+	}
+
+	// Legacy fallback: use first point light position
+	if (!sceneLights.empty())
+	{
+		lightPosition = sceneLights[0].position;
+		lightColor = sceneLights[0].color;
+		lightIntensity = sceneLights[0].intensity;
 	}
 	const uint64_t ecsEndCounter = SDL_GetPerformanceCounter();
 	const uint64_t freq = SDL_GetPerformanceFrequency();
@@ -653,6 +695,12 @@ void OpenGLRenderer::renderWorld()
 	const auto& objs = level->getWorldObjects();
 	const auto& groups = level->getGroups();
 
+	// Sync selection state with UIManager (outliner may have changed it)
+	if (m_uiManager.getSelectedEntity() != m_selectedEntity && !m_pickRequested)
+	{
+		m_selectedEntity = m_uiManager.getSelectedEntity();
+	}
+
 	// Collect all visible 3D objects into a unified draw list for batching
 	m_drawList.clear();
 	m_drawList.reserve(m_renderEntries.size() + objs.size() + m_meshEntries.size() + 16);
@@ -668,6 +716,15 @@ void OpenGLRenderer::renderWorld()
 			DrawCmd cmd;
 			cmd.obj = entry.object3D.get();
 			cmd.modelMatrix = entry.cachedModelMatrix;
+			cmd.entityId = static_cast<unsigned int>(entry.entity);
+			if (entry.entity != 0)
+			{
+				if (const auto* light = ecs.getComponent<ECS::LightComponent>(entry.entity))
+				{
+					cmd.emissionColor = glm::vec3(light->color[0], light->color[1], light->color[2]);
+					cmd.hasEmission = true;
+				}
+			}
 			if (entry.object3D->hasLocalBounds())
 			{
 				ComputeWorldAabb(entry.object3D->getLocalBoundsMin(), entry.object3D->getLocalBoundsMax(), cmd.modelMatrix, cmd.boundsMin, cmd.boundsMax);
@@ -825,6 +882,15 @@ void OpenGLRenderer::renderWorld()
 			DrawCmd cmd;
 			cmd.obj = entry.object3D.get();
 			cmd.modelMatrix = entry.cachedModelMatrix;
+			cmd.entityId = static_cast<unsigned int>(entry.entity);
+			if (entry.entity != 0)
+			{
+				if (const auto* light = ecs.getComponent<ECS::LightComponent>(entry.entity))
+				{
+					cmd.emissionColor = glm::vec3(light->color[0], light->color[1], light->color[2]);
+					cmd.hasEmission = true;
+				}
+			}
 			if (entry.object3D->hasLocalBounds())
 			{
 				ComputeWorldAabb(entry.object3D->getLocalBoundsMin(), entry.object3D->getLocalBoundsMax(), cmd.modelMatrix, cmd.boundsMin, cmd.boundsMax);
@@ -860,9 +926,17 @@ void OpenGLRenderer::renderWorld()
 	for (const auto& cmd : m_drawList)
 	{
 		cmd.obj->setMatrices(cmd.modelMatrix, view, m_projectionMatrix);
-		if (cmd.program != lastProgram)
+		if (cmd.hasEmission)
+		{
+			cmd.obj->setLightData(lightPosition, cmd.emissionColor, lightIntensity);
+			cmd.obj->setLights(sceneLights);
+			cmd.obj->render();
+			lastProgram = 0;
+		}
+		else if (cmd.program != lastProgram)
 		{
 			cmd.obj->setLightData(lightPosition, lightColor, lightIntensity);
+			cmd.obj->setLights(sceneLights);
 			cmd.obj->render();
 			lastProgram = cmd.program;
 		}
@@ -886,6 +960,33 @@ void OpenGLRenderer::renderWorld()
 	if (m_occlusionEnabled && m_lastTotalCount >= kHzbMinObjects)
 	{
 		buildHzb();
+	}
+
+	// Pick pass: render entity IDs into pick FBO
+	{
+		int vpWidth = 0, vpHeight = 0;
+		SDL_GetWindowSizeInPixels(m_window, &vpWidth, &vpHeight);
+		if (ensurePickFbo(vpWidth, vpHeight))
+		{
+			renderPickBuffer(view, m_projectionMatrix);
+		}
+
+		if (m_pickRequested)
+		{
+			m_pickRequested = false;
+			if (!diagnostics.isPIEActive())
+			{
+				const unsigned int picked = pickEntityAt(m_pickX, m_pickY);
+				m_selectedEntity = picked;
+				m_uiManager.selectEntity(picked);
+			}
+		}
+	}
+
+	// Draw selection outline for selected entity (edit mode only)
+	if (m_selectedEntity != 0 && m_pickColorTex != 0 && !diagnostics.isPIEActive())
+	{
+		drawSelectionOutline();
 	}
 }
 
@@ -2790,4 +2891,255 @@ const std::string& OpenGLRenderer::name() const
 SDL_Window* OpenGLRenderer::window() const
 {
     return m_window;
+}
+
+// ─── Entity pick FBO ────────────────────────────────────────────────────────
+bool OpenGLRenderer::ensurePickFbo(int width, int height)
+{
+    if (m_pickFbo != 0 && m_pickWidth == width && m_pickHeight == height)
+    {
+        return true;
+    }
+    releasePickFbo();
+    m_pickWidth = width;
+    m_pickHeight = height;
+
+    glGenFramebuffers(1, &m_pickFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_pickFbo);
+
+    glGenTextures(1, &m_pickColorTex);
+    glBindTexture(GL_TEXTURE_2D, m_pickColorTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, width, height, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_pickColorTex, 0);
+
+    glGenRenderbuffers(1, &m_pickDepthRbo);
+    glBindRenderbuffer(GL_RENDERBUFFER, m_pickDepthRbo);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, m_pickDepthRbo);
+
+    const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (status != GL_FRAMEBUFFER_COMPLETE)
+    {
+        releasePickFbo();
+        return false;
+    }
+
+    // Build pick shader if needed
+    if (m_pickProgram == 0)
+    {
+        const std::string vs =
+            "#version 460 core\n"
+            "layout(location = 0) in vec3 aPos;\n"
+            "layout(location = 1) in vec3 aNormal;\n"
+            "layout(location = 2) in vec2 aTexCoord;\n"
+            "uniform mat4 uModel;\n"
+            "uniform mat4 uView;\n"
+            "uniform mat4 uProjection;\n"
+            "void main() {\n"
+            "    gl_Position = uProjection * uView * uModel * vec4(aPos, 1.0);\n"
+            "}\n";
+        const std::string fs =
+            "#version 460 core\n"
+            "layout(location = 0) out uint oEntityId;\n"
+            "uniform uint uEntityId;\n"
+            "void main() {\n"
+            "    oEntityId = uEntityId;\n"
+            "}\n";
+
+        auto vShader = std::make_shared<OpenGLShader>();
+        auto fShader = std::make_shared<OpenGLShader>();
+        if (!vShader->loadFromSource(Shader::Type::Vertex, vs) ||
+            !fShader->loadFromSource(Shader::Type::Fragment, fs))
+        {
+            return false;
+        }
+        GLuint prog = glCreateProgram();
+        glAttachShader(prog, vShader->id());
+        glAttachShader(prog, fShader->id());
+        glLinkProgram(prog);
+        GLint linked = 0;
+        glGetProgramiv(prog, GL_LINK_STATUS, &linked);
+        if (!linked)
+        {
+            glDeleteProgram(prog);
+            return false;
+        }
+        m_pickProgram = prog;
+        m_pickLocModel = glGetUniformLocation(prog, "uModel");
+        m_pickLocView = glGetUniformLocation(prog, "uView");
+        m_pickLocProjection = glGetUniformLocation(prog, "uProjection");
+        m_pickLocEntityId = glGetUniformLocation(prog, "uEntityId");
+    }
+    return true;
+}
+
+void OpenGLRenderer::releasePickFbo()
+{
+    if (m_pickColorTex) { glDeleteTextures(1, &m_pickColorTex); m_pickColorTex = 0; }
+    if (m_pickDepthRbo) { glDeleteRenderbuffers(1, &m_pickDepthRbo); m_pickDepthRbo = 0; }
+    if (m_pickFbo) { glDeleteFramebuffers(1, &m_pickFbo); m_pickFbo = 0; }
+    if (m_pickProgram) { glDeleteProgram(m_pickProgram); m_pickProgram = 0; }
+    m_pickWidth = 0;
+    m_pickHeight = 0;
+}
+
+void OpenGLRenderer::renderPickBuffer(const glm::mat4& view, const glm::mat4& projection)
+{
+    if (m_pickFbo == 0 || m_pickProgram == 0)
+        return;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_pickFbo);
+    const GLuint clearId = 0;
+    glClearBufferuiv(GL_COLOR, 0, &clearId);
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    glUseProgram(m_pickProgram);
+    if (m_pickLocView >= 0)
+        glUniformMatrix4fv(m_pickLocView, 1, GL_FALSE, &view[0][0]);
+    if (m_pickLocProjection >= 0)
+        glUniformMatrix4fv(m_pickLocProjection, 1, GL_FALSE, &projection[0][0]);
+
+    for (const auto& cmd : m_drawList)
+    {
+        if (cmd.entityId == 0 || !cmd.obj)
+            continue;
+
+        if (m_pickLocModel >= 0)
+            glUniformMatrix4fv(m_pickLocModel, 1, GL_FALSE, &cmd.modelMatrix[0][0]);
+        if (m_pickLocEntityId >= 0)
+            glUniform1ui(m_pickLocEntityId, cmd.entityId);
+
+        const GLuint vao = cmd.obj->getVao();
+        const GLsizei indexCount = cmd.obj->getIndexCount();
+        const GLsizei vertexCount = cmd.obj->getVertexCount();
+        glBindVertexArray(vao);
+        if (indexCount > 0)
+            glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, nullptr);
+        else
+            glDrawArrays(GL_TRIANGLES, 0, vertexCount);
+    }
+
+    glBindVertexArray(0);
+    glUseProgram(0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
+unsigned int OpenGLRenderer::pickEntityAt(int x, int y)
+{
+    if (m_pickFbo == 0)
+        return 0;
+
+    // Flip Y (SDL top-left → GL bottom-left)
+    const int glY = m_pickHeight - 1 - y;
+    if (x < 0 || x >= m_pickWidth || glY < 0 || glY >= m_pickHeight)
+        return 0;
+
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, m_pickFbo);
+    unsigned int entityId = 0;
+    glReadPixels(x, glY, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, &entityId);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    return entityId;
+}
+
+// ─── Selection outline (post-process edge detection on pick buffer) ─────────
+bool OpenGLRenderer::ensureOutlineResources()
+{
+    if (m_outlineProgram != 0)
+        return true;
+
+    const std::string vs =
+        "#version 460 core\n"
+        "out vec2 vTexCoord;\n"
+        "void main() {\n"
+        "    vec2 pos = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);\n"
+        "    vTexCoord = pos;\n"
+        "    gl_Position = vec4(pos * 2.0 - 1.0, 0.0, 1.0);\n"
+        "}\n";
+
+    const std::string fs =
+        "#version 460 core\n"
+        "out vec4 FragColor;\n"
+        "in vec2 vTexCoord;\n"
+        "uniform usampler2D uPickTex;\n"
+        "uniform uint uSelectedId;\n"
+        "uniform vec4 uOutlineColor;\n"
+        "uniform float uThickness;\n"
+        "void main() {\n"
+        "    ivec2 coord = ivec2(gl_FragCoord.xy);\n"
+        "    uint center = texelFetch(uPickTex, coord, 0).r;\n"
+        "    bool centerIsSelected = (center == uSelectedId);\n"
+        "    int r = int(uThickness);\n"
+        "    bool foundEdge = false;\n"
+        "    for (int dy = -r; dy <= r && !foundEdge; ++dy) {\n"
+        "        for (int dx = -r; dx <= r && !foundEdge; ++dx) {\n"
+        "            if (dx == 0 && dy == 0) continue;\n"
+        "            uint neighbor = texelFetch(uPickTex, coord + ivec2(dx, dy), 0).r;\n"
+        "            bool neighborIsSelected = (neighbor == uSelectedId);\n"
+        "            if (centerIsSelected != neighborIsSelected) {\n"
+        "                foundEdge = true;\n"
+        "            }\n"
+        "        }\n"
+        "    }\n"
+        "    if (foundEdge) {\n"
+        "        FragColor = uOutlineColor;\n"
+        "    } else {\n"
+        "        discard;\n"
+        "    }\n"
+        "}\n";
+
+    auto vShader = std::make_shared<OpenGLShader>();
+    auto fShader = std::make_shared<OpenGLShader>();
+    if (!vShader->loadFromSource(Shader::Type::Vertex, vs) ||
+        !fShader->loadFromSource(Shader::Type::Fragment, fs))
+        return false;
+
+    GLuint prog = glCreateProgram();
+    glAttachShader(prog, vShader->id());
+    glAttachShader(prog, fShader->id());
+    glLinkProgram(prog);
+    GLint linked = 0;
+    glGetProgramiv(prog, GL_LINK_STATUS, &linked);
+    if (!linked) { glDeleteProgram(prog); return false; }
+
+    m_outlineProgram = prog;
+
+    glGenVertexArrays(1, &m_outlineVao);
+
+    return true;
+}
+
+void OpenGLRenderer::releaseOutlineResources()
+{
+    if (m_outlineProgram) { glDeleteProgram(m_outlineProgram); m_outlineProgram = 0; }
+    if (m_outlineVao) { glDeleteVertexArrays(1, &m_outlineVao); m_outlineVao = 0; }
+}
+
+void OpenGLRenderer::drawSelectionOutline()
+{
+    if (!ensureOutlineResources() || m_pickColorTex == 0 || m_selectedEntity == 0)
+        return;
+
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glUseProgram(m_outlineProgram);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_pickColorTex);
+    glUniform1i(glGetUniformLocation(m_outlineProgram, "uPickTex"), 0);
+    glUniform1ui(glGetUniformLocation(m_outlineProgram, "uSelectedId"), m_selectedEntity);
+    glUniform4f(glGetUniformLocation(m_outlineProgram, "uOutlineColor"), 1.0f, 0.6f, 0.0f, 1.0f);
+    glUniform1f(glGetUniformLocation(m_outlineProgram, "uThickness"), 3.0f);
+
+    glBindVertexArray(m_outlineVao);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glUseProgram(0);
+    glDisable(GL_BLEND);
+    glEnable(GL_DEPTH_TEST);
 }

@@ -82,6 +82,12 @@ private:
     bool ensureBoundsDebugResources();
     void releaseBoundsDebugResources();
     void drawBoundsDebugBox(const glm::vec3& center, const glm::vec3& extent, const glm::mat4& viewProj);
+    bool ensurePickFbo(int width, int height);
+    void releasePickFbo();
+    void renderPickBuffer(const glm::mat4& view, const glm::mat4& projection);
+    unsigned int pickEntityAt(int x, int y);
+    bool ensureOutlineResources();
+    void releaseOutlineResources();
     void drawUIPanel(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program,
         const Vec4& hoverColor = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f }, bool isHovered = false);
     void drawUIImage(float x0, float y0, float x1, float y1, GLuint textureId, const glm::mat4& projection);
@@ -209,9 +215,35 @@ private:
         GLuint program{0};
         glm::vec3 boundsMin{};
         glm::vec3 boundsMax{};
+        glm::vec3 emissionColor{-1.0f};
+        unsigned int entityId{0};
         bool hasBounds{false};
+        bool hasEmission{false};
     };
     std::vector<DrawCmd> m_drawList;
+
+    // Entity picking FBO
+    GLuint m_pickFbo{0};
+    GLuint m_pickColorTex{0};
+    GLuint m_pickDepthRbo{0};
+    GLuint m_pickProgram{0};
+    GLint m_pickLocModel{-1};
+    GLint m_pickLocView{-1};
+    GLint m_pickLocProjection{-1};
+    GLint m_pickLocEntityId{-1};
+    int m_pickWidth{0};
+    int m_pickHeight{0};
+    bool m_pickDirty{true};
+
+    // Selection outline (post-process edge detection on pick buffer)
+    GLuint m_outlineProgram{0};
+    GLuint m_outlineVao{0};
+    unsigned int m_selectedEntity{0};
+    bool m_pickRequested{false};
+    int m_pickX{0};
+    int m_pickY{0};
+
+    void drawSelectionOutline();
 
 public:
     void toggleUIDebug() { m_uiDebugEnabled = !m_uiDebugEnabled; }
@@ -221,5 +253,8 @@ public:
     uint32_t getLastTotalCount() const { return m_lastTotalCount; }
     void toggleBoundsDebug() { m_boundsDebugEnabled = !m_boundsDebugEnabled; }
     bool isBoundsDebugEnabled() const { return m_boundsDebugEnabled; }
+    void requestPick(int screenX, int screenY) { m_pickRequested = true; m_pickX = screenX; m_pickY = screenY; }
+    unsigned int getSelectedEntity() const { return m_selectedEntity; }
+    void setSelectedEntity(unsigned int entity) { m_selectedEntity = entity; }
     
 };

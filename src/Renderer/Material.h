@@ -27,8 +27,12 @@ public:
     void setTextureAssetPaths(std::vector<std::string> paths) { m_textureAssetPaths = std::move(paths); }
     const std::vector<std::string>& getTextureAssetPaths() const { return m_textureAssetPaths; }
 
+    void setShininess(float shininess) { m_shininess = shininess; }
+    float getShininess() const { return m_shininess; }
+
 private:
 protected:
     std::vector<std::string> m_textureAssetPaths;
     std::vector<std::shared_ptr<Texture>> m_textures;
+    float m_shininess{32.0f};
 };

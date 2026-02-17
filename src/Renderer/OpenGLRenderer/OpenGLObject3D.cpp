@@ -168,6 +168,21 @@ GLuint OpenGLObject3D::getProgram() const
     return m_material ? m_material->getProgram() : 0;
 }
 
+GLuint OpenGLObject3D::getVao() const
+{
+    return m_material ? m_material->getVao() : 0;
+}
+
+GLsizei OpenGLObject3D::getVertexCount() const
+{
+    return m_material ? m_material->getVertexCount() : 0;
+}
+
+GLsizei OpenGLObject3D::getIndexCount() const
+{
+    return m_material ? m_material->getIndexCount() : 0;
+}
+
 void OpenGLObject3D::ClearCache()
 {
     s_materialCache.clear();
@@ -183,9 +198,10 @@ bool OpenGLObject3D::prepare()
         return true;
 
     const std::string path = m_asset->getPath();
-    if (!path.empty())
+    const std::string cacheKey = m_materialCacheKeySuffix.empty() ? path : (path + "|" + m_materialCacheKeySuffix);
+    if (!cacheKey.empty())
     {
-        auto it = s_materialCache.find(path);
+        auto it = s_materialCache.find(cacheKey);
         if (it != s_materialCache.end())
         {
             m_material = it->second;
@@ -300,9 +316,9 @@ bool OpenGLObject3D::prepare()
     }
 
     m_material = mat;
-    if (!path.empty())
+    if (!cacheKey.empty())
     {
-        s_materialCache[path] = m_material;
+        s_materialCache[cacheKey] = m_material;
     }
     return true;
 }
@@ -314,6 +330,15 @@ void OpenGLObject3D::setLightData(const glm::vec3& position, const glm::vec3& co
         return;
     }
     m_material->setLightData(position, color, intensity);
+}
+
+void OpenGLObject3D::setLights(const std::vector<OpenGLMaterial::LightData>& lights)
+{
+    if (!m_material)
+    {
+        return;
+    }
+    m_material->setLights(lights);
 }
 
 void OpenGLObject3D::setMatrices(const glm::mat4& model, const glm::mat4& view, const glm::mat4& projection)
@@ -347,5 +372,13 @@ void OpenGLObject3D::setTextures(const std::vector<std::shared_ptr<Texture>>& te
     if (m_material)
     {
         m_material->setTextures(textures);
+    }
+}
+
+void OpenGLObject3D::setShininess(float shininess)
+{
+    if (m_material)
+    {
+        m_material->setShininess(shininess);
     }
 }

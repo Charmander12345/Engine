@@ -121,4 +121,6 @@ private:
 
 public:
 	void refreshWorldOutliner();
+	void selectEntity(unsigned int entity);
+	unsigned int getSelectedEntity() const { return m_outlinerSelectedEntity; }
 };

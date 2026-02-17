@@ -1388,16 +1388,86 @@ void AssetManager::ensureDefaultAssetsCreated()
         ensureOnDisk(wallTexRel, AssetType::Texture, tex, forceOverwrite);
     }
 
-    // 2) wall material
-    const std::string wallMatRel = (fs::path("Materials") / "wall.asset").generic_string();
-    {
+	// 2) wall material
+	const std::string wallMatRel = (fs::path("Materials") / "wall.asset").generic_string();
+	{
 		auto mat = std::make_shared<AssetData>();
-        mat->setName("DefaultDebugMaterial");
-        json matData = json::object();
-        matData["m_textureAssetPaths"] = std::vector<std::string>{ wallTexRel };
-        mat->setData(std::move(matData));
-        ensureOnDisk(wallMatRel, AssetType::Material, mat);
-    }
+		mat->setName("DefaultDebugMaterial");
+		json matData = json::object();
+		matData["m_textureAssetPaths"] = std::vector<std::string>{ wallTexRel };
+		mat->setData(std::move(matData));
+		ensureOnDisk(wallMatRel, AssetType::Material, mat);
+	}
+
+	// 2b) container2 textures + material (diffuse + specular)
+	const std::string container2TexRel = (fs::path("Textures") / "container2.asset").generic_string();
+	{
+		auto tex = std::make_shared<AssetData>();
+		tex->setName("container2");
+		json texData = json::object();
+		const fs::path container2PngPath = fs::current_path() / "Content" / "Textures" / "container2.png";
+		if (fs::exists(container2PngPath))
+		{
+			texData["m_sourcePath"] = (fs::path("Content") / "Textures" / "container2.png").generic_string();
+		}
+		else
+		{
+			int width = 2;
+			int height = 2;
+			int channels = 4;
+			std::vector<unsigned char> pixels{
+				200, 150, 100, 255, 180, 130,  80, 255,
+				160, 110,  60, 255, 140,  90,  40, 255
+			};
+			texData["m_width"] = width;
+			texData["m_height"] = height;
+			texData["m_channels"] = channels;
+			texData["m_data"] = std::move(pixels);
+		}
+		tex->setData(std::move(texData));
+		const bool forceOverwrite = fs::exists(container2PngPath);
+		ensureOnDisk(container2TexRel, AssetType::Texture, tex, forceOverwrite);
+	}
+
+	const std::string container2SpecTexRel = (fs::path("Textures") / "container2_specular.asset").generic_string();
+	{
+		auto tex = std::make_shared<AssetData>();
+		tex->setName("container2_specular");
+		json texData = json::object();
+		const fs::path container2SpecPath = fs::current_path() / "Content" / "Textures" / "container2_specular.png";
+		if (fs::exists(container2SpecPath))
+		{
+			texData["m_sourcePath"] = (fs::path("Content") / "Textures" / "container2_specular.png").generic_string();
+		}
+		else
+		{
+			int width = 2;
+			int height = 2;
+			int channels = 4;
+			std::vector<unsigned char> pixels{
+				128, 128, 128, 255, 200, 200, 200, 255,
+				200, 200, 200, 255, 128, 128, 128, 255
+			};
+			texData["m_width"] = width;
+			texData["m_height"] = height;
+			texData["m_channels"] = channels;
+			texData["m_data"] = std::move(pixels);
+		}
+		tex->setData(std::move(texData));
+		const bool forceOverwrite = fs::exists(fs::current_path() / "Content" / "Textures" / "container2_specular.png");
+		ensureOnDisk(container2SpecTexRel, AssetType::Texture, tex, forceOverwrite);
+	}
+
+	const std::string containerMatRel = (fs::path("Materials") / "container.asset").generic_string();
+	{
+		auto mat = std::make_shared<AssetData>();
+		mat->setName("ContainerMaterial");
+		json matData = json::object();
+		matData["m_textureAssetPaths"] = std::vector<std::string>{ container2TexRel, container2SpecTexRel };
+		matData["m_shininess"] = 64.0f;
+		mat->setData(std::move(matData));
+		ensureOnDisk(containerMatRel, AssetType::Material, mat);
+	}
 
     const std::string defaultCubeScripts[] =
     {
@@ -1420,8 +1490,10 @@ void AssetManager::ensureDefaultAssetsCreated()
         if (out.is_open())
         {
             out << "import engine\n\n";
+            out << "def onloaded(entity):\n";
+            out << "    pass\n\n";
             out << "def tick(entity, dt):\n";
-            out << "    engine.rotate(entity, 0.0, 45.0 * dt, 0.0)\n";
+            out << "    pass\n";
             if (!out.good())
             {
                 logger.log(Logger::Category::AssetManagement, "Failed to write default cube script.", Logger::LogLevel::ERROR);
@@ -1626,7 +1698,7 @@ void AssetManager::ensureDefaultAssetsCreated()
             {"scale", json::array({ 1.0f, 1.0f, 1.0f })}
         };
         components4["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
-        components4["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        components4["Material"] = json{ {"materialAssetPath", containerMatRel} };
         components4["Script"] = json{ {"scriptPath", defaultCubeScripts[3]} };
         components4["Name"] = json{ {"displayName", "Cube D"} };
         entity4["components"] = components4;
@@ -1642,7 +1714,7 @@ void AssetManager::ensureDefaultAssetsCreated()
             {"scale", json::array({ 1.0f, 1.0f, 1.0f })}
         };
         components5["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
-        components5["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        components5["Material"] = json{ {"materialAssetPath", containerMatRel} };
         components5["Script"] = json{ {"scriptPath", defaultCubeScripts[4]} };
         components5["Name"] = json{ {"displayName", "Cube E"} };
         entity5["components"] = components5;
@@ -1669,6 +1741,50 @@ void AssetManager::ensureDefaultAssetsCreated()
         };
         lightEntity["components"] = lightComponents;
         entities.push_back(lightEntity);
+
+        json dirLightEntity = json::object();
+        dirLightEntity["id"] = 7;
+
+        json dirLightComponents = json::object();
+        dirLightComponents["Transform"] = json{
+            {"position", json::array({ 0.0f, 5.0f, 0.0f })},
+            {"rotation", json::array({ 50.0f, -30.0f, 0.0f })},
+            {"scale", json::array({ 0.15f, 0.15f, 0.15f })}
+        };
+        dirLightComponents["Mesh"] = json{ {"meshAssetPath", pointLightRel} };
+        dirLightComponents["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        dirLightComponents["Name"] = json{ {"displayName", "Directional Light"} };
+        dirLightComponents["Light"] = json{
+            {"type", static_cast<int>(ECS::LightComponent::LightType::Directional)},
+            {"color", json::array({ 0.9f, 0.85f, 0.7f })},
+            {"intensity", 0.4f},
+            {"range", 0.0f},
+            {"spotAngle", 0.0f}
+        };
+        dirLightEntity["components"] = dirLightComponents;
+        entities.push_back(dirLightEntity);
+
+        json spotLightEntity = json::object();
+        spotLightEntity["id"] = 8;
+
+        json spotLightComponents = json::object();
+        spotLightComponents["Transform"] = json{
+            {"position", json::array({ 2.0f, 2.5f, 0.0f })},
+            {"rotation", json::array({ 60.0f, 0.0f, 0.0f })},
+            {"scale", json::array({ 0.15f, 0.15f, 0.15f })}
+        };
+        spotLightComponents["Mesh"] = json{ {"meshAssetPath", pointLightRel} };
+        spotLightComponents["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        spotLightComponents["Name"] = json{ {"displayName", "Spot Light"} };
+        spotLightComponents["Light"] = json{
+            {"type", static_cast<int>(ECS::LightComponent::LightType::Spot)},
+            {"color", json::array({ 0.2f, 0.8f, 1.0f })},
+            {"intensity", 2.0f},
+            {"range", 15.0f},
+            {"spotAngle", 25.0f}
+        };
+        spotLightEntity["components"] = spotLightComponents;
+        entities.push_back(spotLightEntity);
 
         levelJson["Entities"] = entities;
 

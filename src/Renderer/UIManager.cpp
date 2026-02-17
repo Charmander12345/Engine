@@ -1024,6 +1024,14 @@ void UIManager::populateOutlinerWidget(const std::shared_ptr<Widget>& widget)
     widget->markLayoutDirty();
 }
 
+void UIManager::selectEntity(unsigned int entity)
+{
+    if (entity == m_outlinerSelectedEntity)
+        return;
+    m_outlinerSelectedEntity = entity;
+    populateOutlinerDetails(entity);
+}
+
 void UIManager::populateOutlinerDetails(unsigned int entity)
 {
     auto* detailsEntry = findWidgetEntry("EntityDetails");

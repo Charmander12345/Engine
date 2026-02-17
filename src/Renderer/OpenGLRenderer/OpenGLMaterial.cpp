@@ -152,13 +152,41 @@ bool OpenGLMaterial::build()
     m_locLightPos = glGetUniformLocation(m_program, "uLightPos");
     m_locLightColor = glGetUniformLocation(m_program, "uLightColor");
     m_locLightIntensity = glGetUniformLocation(m_program, "uLightIntensity");
+    m_locViewPos = glGetUniformLocation(m_program, "uViewPos");
+    m_locMaterialShininess = glGetUniformLocation(m_program, "material.shininess");
+    m_locHasSpecularMap = glGetUniformLocation(m_program, "uHasSpecularMap");
+    m_locLightCount = glGetUniformLocation(m_program, "uLightCount");
+    for (int i = 0; i < kMaxLights; ++i)
+    {
+        const std::string prefix = "uLights[" + std::to_string(i) + "].";
+        m_lightLocs[i].position       = glGetUniformLocation(m_program, (prefix + "position").c_str());
+        m_lightLocs[i].direction      = glGetUniformLocation(m_program, (prefix + "direction").c_str());
+        m_lightLocs[i].color          = glGetUniformLocation(m_program, (prefix + "color").c_str());
+        m_lightLocs[i].intensity      = glGetUniformLocation(m_program, (prefix + "intensity").c_str());
+        m_lightLocs[i].range          = glGetUniformLocation(m_program, (prefix + "range").c_str());
+        m_lightLocs[i].spotCutoff     = glGetUniformLocation(m_program, (prefix + "spotCutoff").c_str());
+        m_lightLocs[i].spotOuterCutoff = glGetUniformLocation(m_program, (prefix + "spotOuterCutoff").c_str());
+        m_lightLocs[i].type           = glGetUniformLocation(m_program, (prefix + "type").c_str());
+    }
 
-    // Cache texture sampler locations (texture0, texture1, ...)
+    // Cache texture sampler locations.
+    // Try material struct names first (material.diffuse, material.specular),
+    // then fall back to textureN for backward compatibility.
     m_texUniformLocs.clear();
+    static const char* kMaterialSamplerNames[] = { "material.diffuse", "material.specular" };
+    static constexpr int kMaterialSamplerCount = 2;
     for (int i = 0; i < 16; ++i)
     {
-        const std::string name = "texture" + std::to_string(i);
-        GLint loc = glGetUniformLocation(m_program, name.c_str());
+        GLint loc = -1;
+        if (i < kMaterialSamplerCount)
+        {
+            loc = glGetUniformLocation(m_program, kMaterialSamplerNames[i]);
+        }
+        if (loc < 0)
+        {
+            const std::string name = "texture" + std::to_string(i);
+            loc = glGetUniformLocation(m_program, name.c_str());
+        }
         if (loc < 0)
         {
             break;
@@ -240,6 +268,39 @@ void OpenGLMaterial::bind()
     if (m_locLightIntensity >= 0)
     {
         glUniform1f(m_locLightIntensity, m_lightIntensity);
+    }
+    if (m_locViewPos >= 0)
+    {
+        const glm::mat4 invView = glm::inverse(m_viewMatrix);
+        glUniform3f(m_locViewPos, invView[3][0], invView[3][1], invView[3][2]);
+    }
+    if (m_locMaterialShininess >= 0)
+    {
+        glUniform1f(m_locMaterialShininess, m_shininess);
+    }
+    if (m_locHasSpecularMap >= 0)
+    {
+        glUniform1i(m_locHasSpecularMap, (m_textures.size() >= 2) ? 1 : 0);
+    }
+
+    // Multi-light uniforms
+    const int lightCount = static_cast<int>(std::min(m_lights.size(), static_cast<size_t>(kMaxLights)));
+    if (m_locLightCount >= 0)
+    {
+        glUniform1i(m_locLightCount, lightCount);
+    }
+    for (int i = 0; i < lightCount; ++i)
+    {
+        const auto& l = m_lights[i];
+        const auto& loc = m_lightLocs[i];
+        if (loc.position >= 0)       glUniform3fv(loc.position, 1, glm::value_ptr(l.position));
+        if (loc.direction >= 0)      glUniform3fv(loc.direction, 1, glm::value_ptr(l.direction));
+        if (loc.color >= 0)          glUniform3fv(loc.color, 1, glm::value_ptr(l.color));
+        if (loc.intensity >= 0)      glUniform1f(loc.intensity, l.intensity);
+        if (loc.range >= 0)          glUniform1f(loc.range, l.range);
+        if (loc.spotCutoff >= 0)     glUniform1f(loc.spotCutoff, l.spotCutoff);
+        if (loc.spotOuterCutoff >= 0) glUniform1f(loc.spotOuterCutoff, l.spotOuterCutoff);
+        if (loc.type >= 0)           glUniform1i(loc.type, l.type);
     }
 
     bindTextures();

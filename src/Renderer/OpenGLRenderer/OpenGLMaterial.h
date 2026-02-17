@@ -15,6 +15,20 @@ class OpenGLTexture;
 class OpenGLMaterial : public Material
 {
 public:
+    static constexpr int kMaxLights = 8;
+
+    struct LightData
+    {
+        glm::vec3 position{0.0f};
+        glm::vec3 direction{0.0f, -1.0f, 0.0f};
+        glm::vec3 color{1.0f};
+        float intensity{1.0f};
+        float range{10.0f};
+        float spotCutoff{0.0f};
+        float spotOuterCutoff{0.0f};
+        int type{0}; // 0=point, 1=directional, 2=spot
+    };
+
     struct LayoutElement
     {
         GLuint index;
@@ -45,6 +59,8 @@ public:
 
     GLuint getProgram() const { return m_program; }
     GLuint getVao() const { return m_vao; }
+    GLsizei getVertexCount() const { return m_vertexCount; }
+    GLsizei getIndexCount() const { return m_indexCount; }
 
     // Matrix uniform setters
     void setModelMatrix(const glm::mat4& matrix) { m_modelMatrix = matrix; }
@@ -56,6 +72,8 @@ public:
         m_lightColor = color;
         m_lightIntensity = intensity;
     }
+    void setLights(const std::vector<LightData>& lights) { m_lights = lights; }
+    void setShininess(float shininess) { m_shininess = shininess; }
 
 private:
     void bindTextures();
@@ -81,6 +99,8 @@ private:
     glm::vec3 m_lightPosition{0.0f, 1.0f, 0.0f};
     glm::vec3 m_lightColor{1.0f, 1.0f, 1.0f};
     float m_lightIntensity{1.0f};
+    float m_shininess{32.0f};
+    std::vector<LightData> m_lights;
 
     // Cached uniform locations (queried once at build time)
     GLint m_locModel{-1};
@@ -89,5 +109,21 @@ private:
     GLint m_locLightPos{-1};
     GLint m_locLightColor{-1};
     GLint m_locLightIntensity{-1};
+    GLint m_locViewPos{-1};
+    GLint m_locMaterialShininess{-1};
+    GLint m_locHasSpecularMap{-1};
+    GLint m_locLightCount{-1};
+    struct LightUniformLocs
+    {
+        GLint position{-1};
+        GLint direction{-1};
+        GLint color{-1};
+        GLint intensity{-1};
+        GLint range{-1};
+        GLint spotCutoff{-1};
+        GLint spotOuterCutoff{-1};
+        GLint type{-1};
+    };
+    LightUniformLocs m_lightLocs[kMaxLights]{};
     std::vector<GLint> m_texUniformLocs;
 };
