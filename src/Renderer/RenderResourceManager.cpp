@@ -216,6 +216,7 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
                                     {
                                         if (!pathValue.is_string())
                                         {
+                                            textures.push_back(nullptr);
                                             continue;
                                         }
                                         std::string texPath = pathValue.get<std::string>();
@@ -232,21 +233,25 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
                                         if (texId == 0)
                                         {
                                             logger.log(Logger::Category::Rendering, "RenderResourceManager: failed to load texture '" + texPath + "'", Logger::LogLevel::WARNING);
+                                            textures.push_back(nullptr);
                                             continue;
                                         }
                                         auto texAsset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(texId));
                                         if (!texAsset)
                                         {
                                             logger.log(Logger::Category::Rendering, "RenderResourceManager: texture asset missing after load '" + texPath + "'", Logger::LogLevel::WARNING);
+                                            textures.push_back(nullptr);
                                             continue;
                                         }
                                         const auto& texData = texAsset->getData();
                                         if (!texData.is_object())
                                         {
+                                            textures.push_back(nullptr);
                                             continue;
                                         }
                                         if (!texData.contains("m_width") || !texData.contains("m_height") || !texData.contains("m_channels") || !texData.contains("m_data"))
                                         {
+                                            textures.push_back(nullptr);
                                             continue;
                                         }
                                         auto texture = std::make_shared<Texture>();

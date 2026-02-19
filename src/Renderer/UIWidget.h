@@ -23,7 +23,11 @@ enum class WidgetElementType
     EntryBar,
     ProgressBar,
     Slider,
-    Image
+    Image,
+    CheckBox,
+    DropDown,
+    TreeView,
+    TabView
 };
 
 enum class TextAlignH
@@ -112,6 +116,14 @@ struct WidgetElement
     std::function<void(const std::string&)> onValueChanged;
     std::function<void()> onHovered;
     std::function<void()> onUnhovered;
+    bool isChecked{ false };
+    std::vector<std::string> items;
+    int selectedIndex{ -1 };
+    bool isExpanded{ false };
+    int activeTab{ 0 };
+    std::function<void(bool)> onCheckedChanged;
+    std::function<void(int)> onSelectionChanged;
+    std::function<void(int)> onTabChanged;
 };
 
 class Widget : public EngineObject

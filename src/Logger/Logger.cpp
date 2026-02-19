@@ -4,6 +4,8 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <algorithm>
+#include <vector>
 
 namespace
 {
@@ -103,6 +105,33 @@ void Logger::initialize()
     else
     {
         initialized = true;
+    }
+
+    if (initialized)
+    {
+        std::vector<std::filesystem::directory_entry> logFiles;
+        for (const auto& entry : std::filesystem::directory_iterator(logDir, ec))
+        {
+            if (!entry.is_regular_file())
+            {
+                continue;
+            }
+            const auto& path = entry.path();
+            if (path.extension() == ".log")
+            {
+                logFiles.push_back(entry);
+            }
+        }
+
+        std::sort(logFiles.begin(), logFiles.end(), [](const auto& a, const auto& b)
+            {
+                return a.last_write_time() > b.last_write_time();
+            });
+
+        for (size_t i = 5; i < logFiles.size(); ++i)
+        {
+            std::filesystem::remove(logFiles[i].path(), ec);
+        }
     }
 
     log(Category::Engine, std::string("Logger initialised. Output file: ") + filename, LogLevel::INFO);

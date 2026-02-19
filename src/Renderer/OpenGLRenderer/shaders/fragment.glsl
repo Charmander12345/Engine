@@ -119,5 +119,5 @@ void main()
         result += diffuse + specular;
     }
 
-    FragColor = vec4(result, diffTex.a);
+    FragColor = vec4(result, diffTex.a > 0.0 ? diffTex.a : 1.0);
 }

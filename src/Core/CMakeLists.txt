@@ -5,10 +5,6 @@ add_library(Core SHARED
     "EngineLevel.h"
     "AudioManager.cpp"
     "AudioManager.h"
-    
-    
-    
-    
     "../Renderer/Texture.cpp"
     "../Renderer/Texture.h"
     "../Renderer/Material.h"
@@ -34,8 +30,11 @@ target_include_directories(Core
         ${CMAKE_SOURCE_DIR}/ECS
 )
 
-target_link_libraries(Core PRIVATE Logger OpenAL::OpenAL SDL3::SDL3)
-
+target_link_libraries(Core PRIVATE
+    Logger
+    OpenAL::OpenAL
+    SDL3::SDL3
+)
 
 if (WIN32)
     set_target_properties(Core PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)

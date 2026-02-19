@@ -280,7 +280,7 @@ void OpenGLMaterial::bind()
     }
     if (m_locHasSpecularMap >= 0)
     {
-        glUniform1i(m_locHasSpecularMap, (m_textures.size() >= 2) ? 1 : 0);
+        glUniform1i(m_locHasSpecularMap, (m_textures.size() >= 2 && m_textures[1]) ? 1 : 0);
     }
 
     // Multi-light uniforms
@@ -331,6 +331,14 @@ void OpenGLMaterial::renderBatchContinuation()
     if (m_locModel >= 0)
     {
         glUniformMatrix4fv(m_locModel, 1, GL_FALSE, glm::value_ptr(m_modelMatrix));
+    }
+    if (m_locHasSpecularMap >= 0)
+    {
+        glUniform1i(m_locHasSpecularMap, (m_textures.size() >= 2 && m_textures[1]) ? 1 : 0);
+    }
+    if (m_locMaterialShininess >= 0)
+    {
+        glUniform1f(m_locMaterialShininess, m_shininess);
     }
 
     bindTextures();

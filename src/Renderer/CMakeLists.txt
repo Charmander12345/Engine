@@ -42,6 +42,14 @@ add_library(Renderer SHARED
     UIWidgets/ProgressBarWidget.h
     UIWidgets/SliderWidget.cpp
     UIWidgets/SliderWidget.h
+    UIWidgets/CheckBoxWidget.cpp
+    UIWidgets/CheckBoxWidget.h
+    UIWidgets/DropDownWidget.cpp
+    UIWidgets/DropDownWidget.h
+    UIWidgets/TreeViewWidget.cpp
+    UIWidgets/TreeViewWidget.h
+    UIWidgets/TabViewWidget.cpp
+    UIWidgets/TabViewWidget.h
 )
 set_target_properties(Renderer PROPERTIES
     CXX_STANDARD 20
@@ -57,6 +65,7 @@ target_include_directories(Renderer
         ${CMAKE_CURRENT_SOURCE_DIR}/OpenGLRenderer/glad/include
         ${CMAKE_SOURCE_DIR}/src/Core
         ${CMAKE_SOURCE_DIR}/src/AssetManager
+        ${CMAKE_SOURCE_DIR}/external/SDL3/include
 )
 
 target_link_libraries(Renderer
@@ -66,6 +75,7 @@ target_link_libraries(Renderer
         Logger
         Core
         AssetManager
+        ${Python3_LIBRARY_RELEASE}
 )
 
 if (WIN32)

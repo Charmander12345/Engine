@@ -6,6 +6,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 project ("Engine" LANGUAGES C CXX)
 
+# Prefer shared libraries for subprojects by default.
+set(BUILD_SHARED_LIBS ON CACHE BOOL "Prefer shared libraries for subprojects" FORCE)
+
 set(Python3_USE_DEBUG_LIBS OFF CACHE BOOL "" FORCE)
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 if (Python3_LIBRARY_RELEASE)
@@ -30,6 +33,9 @@ endif()
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# Build SDL as a shared library.
+set(SDL_SHARED ON CACHE BOOL "Build SDL as shared library" FORCE)
+set(SDL_STATIC OFF CACHE BOOL "Build SDL as static library" FORCE)
 add_subdirectory(external/SDL3 EXCLUDE_FROM_ALL)
 add_subdirectory(external/freetype)
 set(ALSOFT_UTILS OFF CACHE BOOL "" FORCE)
@@ -39,9 +45,11 @@ set(ALSOFT_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory(external/openal-soft EXCLUDE_FROM_ALL)
 add_subdirectory(src/AssetManager)
 add_subdirectory(src/Diagnostics)
+add_subdirectory(src/Logger)
 add_subdirectory(src/Core)
 add_subdirectory(src/Renderer)
-add_subdirectory(src/Logger)
+add_subdirectory(src/Scripting)
+add_subdirectory(src/Scripting)
 
 if (NOT TARGET OpenAL::OpenAL)
     message(FATAL_ERROR "OpenAL target not available from external/openal-soft.")
@@ -49,9 +57,7 @@ endif()
 
 add_executable(Engine
     src/main.cpp
- "src/Core/Asset.h"
- "src/Scripting/PythonScripting.h"
- "src/Scripting/PythonScripting.cpp")
+    "src/Core/Asset.h")
 
 # Engine is a console executable
 set_target_properties(Engine PROPERTIES WIN32_EXECUTABLE OFF)
@@ -75,6 +81,7 @@ target_link_libraries(Engine
         AssetManager
         Diagnostics
         Core
+        Scripting
         ${Python3_LIBRARY_RELEASE}
 )
 

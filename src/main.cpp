@@ -152,6 +152,12 @@ int main()
     logger.setSuppressStdout(true);
 #endif
 
+    // Show the engine window now that the console is gone.
+    if (auto* w = renderer->window())
+    {
+        SDL_ShowWindow(w);
+    }
+
     std::function<void()> stopPIE;
 
     if (glRenderer)
@@ -175,7 +181,7 @@ int main()
                     level->restoreEcsSnapshot();
                 }
                 auto& uiMgr = glRenderer->getUIManager();
-                if (auto* el = uiMgr.findElementById("Toolbar.PIE"))
+                if (auto* el = uiMgr.findElementById("ViewportOverlay.PIE"))
                 {
                     el->textureId = playTexId;
                 }
@@ -190,7 +196,87 @@ int main()
                 DiagnosticsManager::Instance().requestShutdown();
             });
 
-        glRenderer->getUIManager().registerClickEvent("Toolbar.PIE", [&glRenderer, playTexId, stopTexId, stopPIE]()
+        glRenderer->getUIManager().registerClickEvent("TitleBar.Minimize", [&renderer]()
+            {
+                Logger::Instance().log(Logger::Category::Input, "TitleBar minimize button clicked.", Logger::LogLevel::INFO);
+                if (auto* w = renderer->window())
+                {
+                    SDL_MinimizeWindow(w);
+                }
+            });
+
+        glRenderer->getUIManager().registerClickEvent("TitleBar.Maximize", [&renderer]()
+            {
+                Logger::Instance().log(Logger::Category::Input, "TitleBar maximize button clicked.", Logger::LogLevel::INFO);
+                if (auto* w = renderer->window())
+                {
+                    if (SDL_GetWindowFlags(w) & SDL_WINDOW_MAXIMIZED)
+                    {
+                        SDL_RestoreWindow(w);
+                    }
+                    else
+                    {
+                        SDL_MaximizeWindow(w);
+                    }
+                }
+            });
+
+        glRenderer->getUIManager().registerClickEvent("TitleBar.Menu.File", []()
+            {
+                Logger::Instance().log(Logger::Category::Input, "Menu: File clicked.", Logger::LogLevel::INFO);
+            });
+
+        glRenderer->getUIManager().registerClickEvent("TitleBar.Menu.Edit", []()
+            {
+                Logger::Instance().log(Logger::Category::Input, "Menu: Edit clicked.", Logger::LogLevel::INFO);
+            });
+
+        glRenderer->getUIManager().registerClickEvent("TitleBar.Menu.Window", []()
+            {
+                Logger::Instance().log(Logger::Category::Input, "Menu: Window clicked.", Logger::LogLevel::INFO);
+            });
+
+        glRenderer->getUIManager().registerClickEvent("TitleBar.Menu.Tools", []()
+            {
+                Logger::Instance().log(Logger::Category::Input, "Menu: Tools clicked.", Logger::LogLevel::INFO);
+            });
+
+        glRenderer->getUIManager().registerClickEvent("TitleBar.Menu.Build", []()
+            {
+                Logger::Instance().log(Logger::Category::Input, "Menu: Build clicked.", Logger::LogLevel::INFO);
+            });
+
+        glRenderer->getUIManager().registerClickEvent("TitleBar.Menu.Help", []()
+            {
+                Logger::Instance().log(Logger::Category::Input, "Menu: Help clicked.", Logger::LogLevel::INFO);
+            });
+
+        glRenderer->getUIManager().registerClickEvent("ViewportOverlay.Select", []()
+            {
+                Logger::Instance().log(Logger::Category::Input, "Toolbar: Select mode.", Logger::LogLevel::INFO);
+            });
+
+        glRenderer->getUIManager().registerClickEvent("ViewportOverlay.Move", []()
+            {
+                Logger::Instance().log(Logger::Category::Input, "Toolbar: Move mode.", Logger::LogLevel::INFO);
+            });
+
+        glRenderer->getUIManager().registerClickEvent("ViewportOverlay.Rotate", []()
+            {
+                Logger::Instance().log(Logger::Category::Input, "Toolbar: Rotate mode.", Logger::LogLevel::INFO);
+            });
+
+        glRenderer->getUIManager().registerClickEvent("ViewportOverlay.Scale", []()
+            {
+                Logger::Instance().log(Logger::Category::Input, "Toolbar: Scale mode.", Logger::LogLevel::INFO);
+            });
+
+        glRenderer->getUIManager().registerClickEvent("ViewportOverlay.Settings", []()
+            {
+                Logger::Instance().log(Logger::Category::Input, "Toolbar: Settings clicked.", Logger::LogLevel::INFO);
+            });
+
+        glRenderer->getUIManager().registerClickEvent("ViewportOverlay.PIE", [&glRenderer, playTexId, stopTexId, stopPIE]()
             {
                 auto& diag = DiagnosticsManager::Instance();
                 const bool wasActive = diag.isPIEActive();
@@ -206,7 +292,7 @@ int main()
                     level->snapshotEcsState();
                     diag.setPIEActive(true);
                     auto& uiMgr = glRenderer->getUIManager();
-                    if (auto* el = uiMgr.findElementById("Toolbar.PIE"))
+                    if (auto* el = uiMgr.findElementById("ViewportOverlay.PIE"))
                     {
                         el->textureId = stopTexId;
                     }
@@ -229,13 +315,21 @@ int main()
                 {
                     if (auto widget = glRenderer->createWidgetFromAsset(asset))
                     {
-                        glRenderer->getUIManager().registerWidget("TitleBar", widget);
-                    }
-                }
-            }
-        }
+                                    glRenderer->getUIManager().registerWidget("TitleBar", widget);
+                                    }
+                                }
+                            }
+                        }
 
-        const std::string toolbarPath = assetManager.getEditorWidgetPath("Toolbar.asset");
+                        glRenderer->addTab("Viewport", "Viewport", false);
+
+                        glRenderer->getUIManager().registerClickEvent("TitleBar.Tab.Viewport", [&glRenderer]()
+                            {
+                                glRenderer->setActiveTab("Viewport");
+                                glRenderer->getUIManager().markAllWidgetsDirty();
+                            });
+
+                        const std::string toolbarPath = assetManager.getEditorWidgetPath("ViewportOverlay.asset");
         if (!toolbarPath.empty())
         {
             const int widgetId = assetManager.loadAsset(toolbarPath, AssetType::Widget, AssetManager::Sync);
@@ -245,7 +339,7 @@ int main()
                 {
                     if (auto widget = glRenderer->createWidgetFromAsset(asset))
                     {
-                        glRenderer->getUIManager().registerWidget("Toolbar", widget);
+                        glRenderer->getUIManager().registerWidget("ViewportOverlay", widget);
                     }
                 }
             }
@@ -798,7 +892,6 @@ int main()
         }
 
         const uint64_t renderStartCounter = SDL_GetPerformanceCounter();
-        renderer->clear();
         renderer->render();
         renderer->present();
         const uint64_t renderEndCounter = SDL_GetPerformanceCounter();

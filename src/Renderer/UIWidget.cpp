@@ -16,6 +16,10 @@ namespace
         case WidgetElementType::ProgressBar: return "ProgressBar";
         case WidgetElementType::Slider: return "Slider";
         case WidgetElementType::Image: return "Image";
+        case WidgetElementType::CheckBox: return "CheckBox";
+        case WidgetElementType::DropDown: return "DropDown";
+        case WidgetElementType::TreeView: return "TreeView";
+        case WidgetElementType::TabView: return "TabView";
         default: return "Unknown";
         }
     }
@@ -32,6 +36,10 @@ namespace
         if (value == "ProgressBar") return WidgetElementType::ProgressBar;
         if (value == "Slider") return WidgetElementType::Slider;
         if (value == "Image") return WidgetElementType::Image;
+        if (value == "CheckBox") return WidgetElementType::CheckBox;
+        if (value == "DropDown") return WidgetElementType::DropDown;
+        if (value == "TreeView") return WidgetElementType::TreeView;
+        if (value == "TabView") return WidgetElementType::TabView;
         return WidgetElementType::Unknown;
     }
 
@@ -278,7 +286,9 @@ namespace
             element.isHitTestable = (element.type == WidgetElementType::Button ||
                 element.type == WidgetElementType::ColorPicker ||
                 element.type == WidgetElementType::EntryBar ||
-                element.type == WidgetElementType::Slider);
+                element.type == WidgetElementType::Slider ||
+                element.type == WidgetElementType::CheckBox ||
+                element.type == WidgetElementType::DropDown);
         }
         if (entry.contains("fillX"))
         {
@@ -322,6 +332,28 @@ namespace
         if (entry.contains("clickEvent"))
         {
             element.clickEvent = entry.at("clickEvent").get<std::string>();
+        }
+        if (entry.contains("isChecked"))
+        {
+            element.isChecked = entry.at("isChecked").get<bool>();
+        }
+        if (entry.contains("items") && entry.at("items").is_array())
+        {
+            for (const auto& item : entry.at("items"))
+            {
+                if (item.is_string())
+                {
+                    element.items.push_back(item.get<std::string>());
+                }
+            }
+        }
+        if (entry.contains("selectedIndex"))
+        {
+            element.selectedIndex = entry.at("selectedIndex").get<int>();
+        }
+        if (entry.contains("activeTab"))
+        {
+            element.activeTab = entry.at("activeTab").get<int>();
         }
         if (entry.contains("imagePath"))
         {
@@ -448,6 +480,31 @@ namespace
             {
                 entry["compact"] = element.isCompact;
             }
+        }
+        else if (element.type == WidgetElementType::CheckBox)
+        {
+            entry["isChecked"] = element.isChecked;
+        }
+        else if (element.type == WidgetElementType::DropDown)
+        {
+            if (!element.items.empty())
+            {
+                entry["items"] = element.items;
+            }
+            entry["selectedIndex"] = element.selectedIndex;
+        }
+        else if (element.type == WidgetElementType::TreeView)
+        {
+            entry["sizeToContent"] = element.sizeToContent;
+            if (element.scrollable)
+            {
+                entry["scrollable"] = element.scrollable;
+            }
+        }
+        else if (element.type == WidgetElementType::TabView)
+        {
+            entry["activeTab"] = element.activeTab;
+            entry["sizeToContent"] = element.sizeToContent;
         }
         if (!element.shaderVertex.empty())
         {

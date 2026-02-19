@@ -1,4 +1,4 @@
-#include "OpenGLRenderer.h"
+﻿#include "OpenGLRenderer.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <array>
@@ -186,9 +186,17 @@ namespace
         const int x = area->x;
         const int y = area->y;
 
-        if (y < ctx->buttonStripHeight && x >= width - ctx->buttonStripWidth)
+        // Exclude button strip area from draggable region
+        if (y < ctx->buttonStripHeight)
         {
-            return SDL_HITTEST_NORMAL;
+            if (ctx->buttonsOnLeft && x < ctx->buttonStripWidth)
+            {
+                return SDL_HITTEST_NORMAL;
+            }
+            if (!ctx->buttonsOnLeft && x >= width - ctx->buttonStripWidth)
+            {
+                return SDL_HITTEST_NORMAL;
+            }
         }
 
         const bool left = x < ctx->resizeBorder;
@@ -248,6 +256,7 @@ void OpenGLRenderer::shutdown()
     releasePickFbo();
     releaseOutlineResources();
     releaseUiFbo();
+    releaseAllTabFbos();
     auto& logger = Logger::Instance();
     logger.log(Logger::Category::Rendering, "OpenGLRenderer shutdown: releasing GPU resources...", Logger::LogLevel::INFO);
 
@@ -315,8 +324,8 @@ bool OpenGLRenderer::initialize()
 	int height = static_cast<int>(windowSize.y);
 	DiagnosticsManager::WindowState windowState = diagnostics.getWindowState();
 
-    m_window = SDL_CreateWindow("Engine Project", width, height,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS | SDL_WINDOW_RESIZABLE);
+    m_window = SDL_CreateWindow("HorizonEngine", width, height,
+        SDL_WINDOW_OPENGL | SDL_WINDOW_BORDERLESS | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN);
     if (!m_window) {
         logger.log(Logger::Category::Rendering, std::string("Failed to create window: ") + SDL_GetError(), Logger::LogLevel::ERROR);
         SDL_Quit();
@@ -391,7 +400,7 @@ bool OpenGLRenderer::initialize()
         m_cachedLevel = DiagnosticsManager::Instance().getActiveLevelSoft();
     }
 
-    SDL_ShowWindow(m_window);
+    // Window stays hidden until main.cpp shows it after freeing the console.
     switch (windowState)
     {
     case DiagnosticsManager::WindowState::Fullscreen:
@@ -466,10 +475,42 @@ void OpenGLRenderer::render()
         glBeginQuery(GL_TIME_ELAPSED, m_gpuTimerQueries[m_gpuQueryIndex]);
     }
 
+    int width = 0, height = 0;
+    SDL_GetWindowSizeInPixels(m_window, &width, &height);
+    m_cachedWindowWidth = width;
+    m_cachedWindowHeight = height;
+
+    // Ensure active tab has a valid FBO
+    EditorTab* activeTab = nullptr;
+    for (auto& tab : m_editorTabs)
+    {
+        if (tab.active)
+        {
+            ensureTabFbo(tab, width, height);
+            activeTab = &tab;
+            break;
+        }
+    }
+
+    // Only render world for the active tab
     const uint64_t worldStart = SDL_GetPerformanceCounter();
-    renderWorld();
+    if (activeTab)
+    {
+        renderWorld();
+    }
     const uint64_t worldEnd = SDL_GetPerformanceCounter();
     m_cpuRenderWorldMs = (freq > 0) ? (static_cast<double>(worldEnd - worldStart) * 1000.0 / static_cast<double>(freq)) : 0.0;
+
+    // Composite: hardware-blit active tab FBO to default framebuffer (no shader overhead)
+    if (activeTab && activeTab->fbo != 0)
+    {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, activeTab->fbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, width, height);
 
     renderUI();
 
@@ -508,7 +549,25 @@ void OpenGLRenderer::renderWorld()
     const Vec2 viewportSize = getViewportSize();
     const int width = static_cast<int>(viewportSize.x);
     const int height = static_cast<int>(viewportSize.y);
+
+    // Render into the active tab's FBO if available
+    EditorTab* activeTab = nullptr;
+    for (auto& tab : m_editorTabs)
+    {
+        if (tab.active)
+        {
+            activeTab = &tab;
+            break;
+        }
+    }
+    if (activeTab && activeTab->fbo != 0)
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, activeTab->fbo);
+    }
+
     glViewport(0, 0, width, height);
+    glClearColor(m_clearColor.x, m_clearColor.y, m_clearColor.z, m_clearColor.w);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     // Update projection matrix with current aspect ratio
     if (height > 0)
@@ -605,7 +664,7 @@ void OpenGLRenderer::renderWorld()
 		m_lightSchemaInitialized = true;
 	}
 
-	std::vector<OpenGLMaterial::LightData> sceneLights;
+	m_sceneLights.clear();
 	const auto lightEntities = ecs.getEntitiesMatchingSchema(m_lightSchema);
 	for (const auto lightEntity : lightEntities)
 	{
@@ -644,18 +703,18 @@ void OpenGLRenderer::renderWorld()
 			break;
 		}
 
-		sceneLights.push_back(ld);
+		m_sceneLights.push_back(ld);
 
-		if (sceneLights.size() >= OpenGLMaterial::kMaxLights)
+		if (m_sceneLights.size() >= OpenGLMaterial::kMaxLights)
 			break;
 	}
 
 	// Legacy fallback: use first point light position
-	if (!sceneLights.empty())
+	if (!m_sceneLights.empty())
 	{
-		lightPosition = sceneLights[0].position;
-		lightColor = sceneLights[0].color;
-		lightIntensity = sceneLights[0].intensity;
+		lightPosition = m_sceneLights[0].position;
+		lightColor = m_sceneLights[0].color;
+		lightIntensity = m_sceneLights[0].intensity;
 	}
 	const uint64_t ecsEndCounter = SDL_GetPerformanceCounter();
 	const uint64_t freq = SDL_GetPerformanceFrequency();
@@ -929,14 +988,14 @@ void OpenGLRenderer::renderWorld()
 		if (cmd.hasEmission)
 		{
 			cmd.obj->setLightData(lightPosition, cmd.emissionColor, lightIntensity);
-			cmd.obj->setLights(sceneLights);
+			cmd.obj->setLights(m_sceneLights);
 			cmd.obj->render();
 			lastProgram = 0;
 		}
 		else if (cmd.program != lastProgram)
 		{
 			cmd.obj->setLightData(lightPosition, lightColor, lightIntensity);
-			cmd.obj->setLights(sceneLights);
+			cmd.obj->setLights(m_sceneLights);
 			cmd.obj->render();
 			lastProgram = cmd.program;
 		}
@@ -962,31 +1021,33 @@ void OpenGLRenderer::renderWorld()
 		buildHzb();
 	}
 
-	// Pick pass: render entity IDs into pick FBO
+	// Pick pass: full scene render only on actual click; single-entity for outline
+	if (m_pickRequested)
 	{
-		int vpWidth = 0, vpHeight = 0;
-		SDL_GetWindowSizeInPixels(m_window, &vpWidth, &vpHeight);
-		if (ensurePickFbo(vpWidth, vpHeight))
+		if (ensurePickFbo(width, height))
 		{
 			renderPickBuffer(view, m_projectionMatrix);
 		}
-
-		if (m_pickRequested)
+		m_pickRequested = false;
+		if (!diagnostics.isPIEActive())
 		{
-			m_pickRequested = false;
-			if (!diagnostics.isPIEActive())
-			{
-				const unsigned int picked = pickEntityAt(m_pickX, m_pickY);
-				m_selectedEntity = picked;
-				m_uiManager.selectEntity(picked);
-			}
+			const unsigned int picked = pickEntityAt(m_pickX, m_pickY);
+			m_selectedEntity = picked;
+			m_uiManager.selectEntity(picked);
 		}
 	}
 
-	// Draw selection outline for selected entity (edit mode only)
-	if (m_selectedEntity != 0 && m_pickColorTex != 0 && !diagnostics.isPIEActive())
+	// Draw selection outline: render only the selected entity into pick buffer (1 draw call)
+	if (m_selectedEntity != 0 && !diagnostics.isPIEActive())
 	{
-		drawSelectionOutline();
+		if (ensurePickFbo(width, height))
+		{
+			renderPickBufferSingleEntity(view, m_projectionMatrix, m_selectedEntity);
+		}
+		if (m_pickColorTex != 0)
+		{
+			drawSelectionOutline();
+		}
 	}
 }
 
@@ -1080,9 +1141,12 @@ void OpenGLRenderer::renderUI()
         return;
     }
 
-    int width = 0;
-    int height = 0;
-    SDL_GetWindowSizeInPixels(m_window, &width, &height);
+    int width = m_cachedWindowWidth;
+    int height = m_cachedWindowHeight;
+    if (width <= 0 || height <= 0)
+    {
+        SDL_GetWindowSizeInPixels(m_window, &width, &height);
+    }
     m_textRenderer->setScreenSize(width, height);
     m_uiManager.setAvailableViewportSize(Vec2{ static_cast<float>(width), static_cast<float>(height) });
 
@@ -1513,54 +1577,6 @@ void OpenGLRenderer::renderUI()
                 }
                 return;
             }
-            if (element.type == WidgetElementType::EntryBar)
-            {
-                const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
-                const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
-                const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
-                drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.hoverColor, element.isHovered);
-
-                const float fontSize = (element.fontSize > 0.0f) ? element.fontSize : 14.0f;
-                const float scale = fontSize / 48.0f;
-                std::string display = element.value;
-                if (element.isPassword)
-                {
-                    display.assign(element.value.size(), '*');
-                }
-
-                const float contentX0 = x0 + element.padding.x;
-                const float contentY0 = y0 + element.padding.y;
-                const float contentX1 = x1 - element.padding.x;
-                const float contentY1 = y1 - element.padding.y;
-                const float contentW = std::max(0.0f, contentX1 - contentX0);
-                const float contentH = std::max(0.0f, contentY1 - contentY0);
-
-                Vec2 textSize{};
-                if (!display.empty())
-                {
-                    textSize = m_textRenderer->measureText(display, scale);
-                    const float textX = contentX0;
-                    const float textY = contentY0 + std::max(0.0f, (contentH - textSize.y) * 0.5f);
-                    m_textRenderer->drawText(display, Vec2{ textX, textY }, scale, element.textColor);
-                }
-
-                if (element.isFocused)
-                {
-                    const float caretHeight = std::max(0.0f, contentH - 2.0f);
-                    const float caretX = contentX0 + textSize.x + 1.0f;
-                    if (caretX < contentX1)
-                    {
-                        drawUIPanel(caretX, contentY0 + 1.0f, caretX + 2.0f, contentY0 + 1.0f + caretHeight,
-                            element.textColor, uiProjection, program, element.textColor, false);
-                    }
-                }
-
-                if (m_uiDebugEnabled)
-                {
-                    drawUIOutline(x0, y0, x1, y1, Vec4{ 0.5f, 0.8f, 1.0f, 1.0f }, uiProjection, program);
-                }
-                return;
-            }
             if (element.type == WidgetElementType::Button)
             {
                 const float bx0 = x0;
@@ -1666,6 +1682,124 @@ void OpenGLRenderer::renderUI()
                 }
                 return;
             }
+            if (element.type == WidgetElementType::CheckBox)
+            {
+                const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+                const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+                const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
+
+                const float boxSize = std::min(heightPx - 2.0f, 16.0f);
+                const float boxX0 = x0 + element.padding.x;
+                const float boxY0 = y0 + (heightPx - boxSize) * 0.5f;
+                const float boxX1 = boxX0 + boxSize;
+                const float boxY1 = boxY0 + boxSize;
+
+                drawUIPanel(boxX0, boxY0, boxX1, boxY1, element.color, uiProjection, program, element.hoverColor, element.isHovered);
+                drawUIOutline(boxX0, boxY0, boxX1, boxY1, Vec4{ 0.4f, 0.4f, 0.45f, 0.9f }, uiProjection, program);
+
+                if (element.isChecked)
+                {
+                    const float inset = 3.0f;
+                    drawUIPanel(boxX0 + inset, boxY0 + inset, boxX1 - inset, boxY1 - inset,
+                        element.fillColor, uiProjection, program, element.fillColor, false);
+                }
+
+                if (!element.text.empty())
+                {
+                    const float fontSize = (element.fontSize > 0.0f) ? element.fontSize : 14.0f;
+                    const float scale = fontSize / 48.0f;
+                    const float textX = boxX1 + 6.0f;
+                    const Vec2 textSize = m_textRenderer->measureText(element.text, scale);
+                    const float textY = y0 + (heightPx - textSize.y) * 0.5f;
+                    m_textRenderer->drawText(element.text, Vec2{ textX, textY }, scale, element.textColor);
+                }
+
+                if (m_uiDebugEnabled)
+                {
+                    drawUIOutline(x0, y0, x1, y1, Vec4{ 0.9f, 0.5f, 0.2f, 1.0f }, uiProjection, program);
+                }
+                return;
+            }
+            if (element.type == WidgetElementType::DropDown)
+            {
+                const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+                const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+                const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
+
+                drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.hoverColor, element.isHovered);
+
+                const float fontSize = (element.fontSize > 0.0f) ? element.fontSize : 14.0f;
+                const float scale = fontSize / 48.0f;
+                const float contentX0 = x0 + element.padding.x;
+                const float contentY0 = y0 + element.padding.y;
+                const float contentX1 = x1 - element.padding.x;
+                const float contentY1 = y1 - element.padding.y;
+                const float contentH = std::max(0.0f, contentY1 - contentY0);
+
+                std::string display = element.text;
+                if (display.empty() && element.selectedIndex >= 0 &&
+                    element.selectedIndex < static_cast<int>(element.items.size()))
+                {
+                    display = element.items[static_cast<size_t>(element.selectedIndex)];
+                }
+                if (!display.empty())
+                {
+                    const Vec2 textSize = m_textRenderer->measureText(display, scale);
+                    const float textY = contentY0 + std::max(0.0f, (contentH - textSize.y) * 0.5f);
+                    m_textRenderer->drawText(display, Vec2{ contentX0, textY }, scale, element.textColor);
+                }
+
+                const float arrowSize = std::min(heightPx * 0.4f, 8.0f);
+                const float arrowX = contentX1 - arrowSize;
+                const float arrowY = y0 + (heightPx - arrowSize) * 0.5f;
+                drawUIPanel(arrowX, arrowY, arrowX + arrowSize, arrowY + arrowSize,
+                    element.textColor, uiProjection, program, element.textColor, false);
+
+                if (element.isExpanded && !element.items.empty())
+                {
+                    const float itemHeight = std::max(20.0f, heightPx);
+                    const float dropY0 = y1;
+                    for (size_t i = 0; i < element.items.size(); ++i)
+                    {
+                        const float iy0 = dropY0 + static_cast<float>(i) * itemHeight;
+                        const float iy1 = iy0 + itemHeight;
+                        const bool isSelected = (static_cast<int>(i) == element.selectedIndex);
+                        const Vec4 itemColor = isSelected
+                            ? Vec4{ 0.22f, 0.22f, 0.28f, 0.98f }
+                            : Vec4{ 0.14f, 0.14f, 0.18f, 0.98f };
+                        drawUIPanel(x0, iy0, x1, iy1, itemColor, uiProjection, program, element.hoverColor, false);
+                        const Vec2 itemTextSize = m_textRenderer->measureText(element.items[i], scale);
+                        const float itemTextY = iy0 + (itemHeight - itemTextSize.y) * 0.5f;
+                        m_textRenderer->drawText(element.items[i], Vec2{ contentX0, itemTextY }, scale, element.textColor);
+                    }
+                }
+
+                if (m_uiDebugEnabled)
+                {
+                    drawUIOutline(x0, y0, x1, y1, Vec4{ 0.9f, 0.6f, 0.1f, 1.0f }, uiProjection, program);
+                }
+                return;
+            }
+            if (element.type == WidgetElementType::TreeView || element.type == WidgetElementType::TabView)
+            {
+                if (element.color.w > 0.0f)
+                {
+                    const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+                    const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+                    const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
+                    drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.color, false);
+                }
+                for (const auto& child : element.children)
+                {
+                    self(self, child, x0, y0, widthPx, heightPx);
+                }
+                if (m_uiDebugEnabled)
+                {
+                    const GLuint program = getUIQuadProgram(m_defaultPanelVertex, m_defaultPanelFragment);
+                    drawUIOutline(x0, y0, x1, y1, Vec4{ 0.4f, 0.9f, 0.6f, 1.0f }, uiProjection, program);
+                }
+                return;
+            }
             if (element.type == WidgetElementType::StackPanel || element.type == WidgetElementType::Grid)
             {
                 if (element.color.w > 0.0f)
@@ -1740,70 +1874,69 @@ void OpenGLRenderer::renderUI()
         m_cpuUiDrawMs = 0.0;
     }
 
-    Vec2 viewportSize = m_uiManager.getAvailableViewportSize();
-    if (viewportSize.x <= 0.0f || viewportSize.y <= 0.0f)
-    {
-        viewportSize = Vec2{ static_cast<float>(width), static_cast<float>(height) };
-    }
-
-    float contentLeft = 0.0f;
-    float contentTop = 0.0f;
-    float contentRight = viewportSize.x;
-    float contentBottom = viewportSize.y;
-
-    const auto& uiWidgets = m_uiManager.getRegisteredWidgets();
-    for (const auto& entry : uiWidgets)
-    {
-        if (!entry.widget)
-        {
-            continue;
-        }
-
-        if (!entry.widget->hasComputedSize() || !entry.widget->hasComputedPosition())
-        {
-            continue;
-        }
-
-        const Vec2 widgetPos = entry.widget->getComputedPositionPixels();
-        const Vec2 widgetSize = entry.widget->getComputedSizePixels();
-        const bool spansWidth = widgetSize.x >= viewportSize.x * 0.8f;
-        const bool spansHeight = widgetSize.y >= viewportSize.y * 0.5f;
-
-        if (widgetPos.y <= 0.0f && spansWidth)
-        {
-            contentTop = std::max(contentTop, widgetPos.y + widgetSize.y);
-        }
-        if (widgetPos.x <= 0.0f && spansHeight)
-        {
-            contentLeft = std::max(contentLeft, widgetPos.x + widgetSize.x);
-        }
-        if (widgetPos.y + widgetSize.y >= viewportSize.y * 0.98f && spansWidth)
-        {
-            contentBottom = std::min(contentBottom, widgetPos.y);
-        }
-        if (widgetPos.x + widgetSize.x >= viewportSize.x * 0.98f && spansHeight)
-        {
-            contentRight = std::min(contentRight, widgetPos.x);
-        }
-    }
-
-    const float contentWidth = std::max(0.0f, contentRight - contentLeft);
-    const float contentHeight = std::max(0.0f, contentBottom - contentTop);
-
     if (!m_textQueue.empty())
     {
+        Vec2 viewportSize = m_uiManager.getAvailableViewportSize();
+        if (viewportSize.x <= 0.0f || viewportSize.y <= 0.0f)
+        {
+            viewportSize = Vec2{ static_cast<float>(width), static_cast<float>(height) };
+        }
+
+        float contentLeft = 0.0f;
+        float contentTop = 0.0f;
+        float contentRight = viewportSize.x;
+        float contentBottom = viewportSize.y;
+
+        const auto& uiWidgets = m_uiManager.getRegisteredWidgets();
+        for (const auto& entry : uiWidgets)
+        {
+            if (!entry.widget)
+            {
+                continue;
+            }
+
+            if (!entry.widget->hasComputedSize() || !entry.widget->hasComputedPosition())
+            {
+                continue;
+            }
+
+            const Vec2 widgetPos = entry.widget->getComputedPositionPixels();
+            const Vec2 widgetSize = entry.widget->getComputedSizePixels();
+            const bool spansWidth = widgetSize.x >= viewportSize.x * 0.8f;
+            const bool spansHeight = widgetSize.y >= viewportSize.y * 0.5f;
+
+            if (widgetPos.y <= 0.0f && spansWidth)
+            {
+                contentTop = std::max(contentTop, widgetPos.y + widgetSize.y);
+            }
+            if (widgetPos.x <= 0.0f && spansHeight)
+            {
+                contentLeft = std::max(contentLeft, widgetPos.x + widgetSize.x);
+            }
+            if (widgetPos.y + widgetSize.y >= viewportSize.y * 0.98f && spansWidth)
+            {
+                contentBottom = std::min(contentBottom, widgetPos.y);
+            }
+            if (widgetPos.x + widgetSize.x >= viewportSize.x * 0.98f && spansHeight)
+            {
+                contentRight = std::min(contentRight, widgetPos.x);
+            }
+        }
+
+        const float contentWidth = std::max(0.0f, contentRight - contentLeft);
+        const float contentHeight = std::max(0.0f, contentBottom - contentTop);
+
         m_textRenderer->setScreenSize(static_cast<int>(viewportSize.x), static_cast<int>(viewportSize.y));
-    }
 
-    for (const auto& command : m_textQueue)
-    {
-        Vec2 pixelPos{
-            contentLeft + command.screenPos.x * contentWidth,
-            contentTop + command.screenPos.y * contentHeight
-        };
-        m_textRenderer->drawText(command.text, pixelPos, command.scale, command.color);
+        for (const auto& command : m_textQueue)
+        {
+            Vec2 pixelPos{
+                contentLeft + command.screenPos.x * contentWidth,
+                contentTop + command.screenPos.y * contentHeight
+            };
+            m_textRenderer->drawText(command.text, pixelPos, command.scale, command.color);
+        }
     }
-
     m_textQueue.clear();
 
     glEnable(GL_DEPTH_TEST);
@@ -2257,8 +2390,17 @@ void OpenGLRenderer::buildHzb()
         glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
     }
 
-    // Copy default framebuffer depth into the depth texture via blit
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    // Copy viewport tab FBO depth into the depth texture via blit
+    GLuint viewportFbo = 0;
+    for (const auto& tab : m_editorTabs)
+    {
+        if (tab.id == "Viewport")
+        {
+            viewportFbo = tab.fbo;
+            break;
+        }
+    }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, viewportFbo);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_hzbDepthCopyFbo);
     glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -2328,7 +2470,8 @@ void OpenGLRenderer::buildHzb()
         m_hzbPboReady = true;
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    // Restore viewport tab FBO so subsequent passes (pick, outline) draw into it
+    glBindFramebuffer(GL_FRAMEBUFFER, viewportFbo);
     glBindVertexArray(0);
     glUseProgram(0);
 
@@ -2766,6 +2909,10 @@ void main() {
 
 Vec2 OpenGLRenderer::getViewportSize() const
 {
+    if (m_cachedWindowWidth > 0 && m_cachedWindowHeight > 0)
+    {
+        return Vec2{ static_cast<float>(m_cachedWindowWidth), static_cast<float>(m_cachedWindowHeight) };
+    }
     int width = 0;
     int height = 0;
     if (m_window)
@@ -2893,7 +3040,7 @@ SDL_Window* OpenGLRenderer::window() const
     return m_window;
 }
 
-// ─── Entity pick FBO ────────────────────────────────────────────────────────
+// â”€â”€â”€ Entity pick FBO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 bool OpenGLRenderer::ensurePickFbo(int width, int height)
 {
     if (m_pickFbo != 0 && m_pickWidth == width && m_pickHeight == height)
@@ -3024,7 +3171,68 @@ void OpenGLRenderer::renderPickBuffer(const glm::mat4& view, const glm::mat4& pr
 
     glBindVertexArray(0);
     glUseProgram(0);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    // Restore viewport tab FBO so selection outline draws into the tab
+    GLuint vpFbo = 0;
+    for (const auto& tab : m_editorTabs)
+    {
+        if (tab.active)
+        {
+            vpFbo = tab.fbo;
+            break;
+        }
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, vpFbo);
+}
+
+void OpenGLRenderer::renderPickBufferSingleEntity(const glm::mat4& view, const glm::mat4& projection, unsigned int entityId)
+{
+    if (m_pickFbo == 0 || m_pickProgram == 0 || entityId == 0)
+        return;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_pickFbo);
+    const GLuint clearId = 0;
+    glClearBufferuiv(GL_COLOR, 0, &clearId);
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    glUseProgram(m_pickProgram);
+    if (m_pickLocView >= 0)
+        glUniformMatrix4fv(m_pickLocView, 1, GL_FALSE, &view[0][0]);
+    if (m_pickLocProjection >= 0)
+        glUniformMatrix4fv(m_pickLocProjection, 1, GL_FALSE, &projection[0][0]);
+
+    for (const auto& cmd : m_drawList)
+    {
+        if (cmd.entityId != entityId || !cmd.obj)
+            continue;
+
+        if (m_pickLocModel >= 0)
+            glUniformMatrix4fv(m_pickLocModel, 1, GL_FALSE, &cmd.modelMatrix[0][0]);
+        if (m_pickLocEntityId >= 0)
+            glUniform1ui(m_pickLocEntityId, cmd.entityId);
+
+        const GLuint vao = cmd.obj->getVao();
+        const GLsizei indexCount = cmd.obj->getIndexCount();
+        const GLsizei vertexCount = cmd.obj->getVertexCount();
+        glBindVertexArray(vao);
+        if (indexCount > 0)
+            glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, nullptr);
+        else
+            glDrawArrays(GL_TRIANGLES, 0, vertexCount);
+        break;
+    }
+
+    glBindVertexArray(0);
+    glUseProgram(0);
+    GLuint vpFbo = 0;
+    for (const auto& tab : m_editorTabs)
+    {
+        if (tab.active)
+        {
+            vpFbo = tab.fbo;
+            break;
+        }
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, vpFbo);
 }
 
 unsigned int OpenGLRenderer::pickEntityAt(int x, int y)
@@ -3032,7 +3240,7 @@ unsigned int OpenGLRenderer::pickEntityAt(int x, int y)
     if (m_pickFbo == 0)
         return 0;
 
-    // Flip Y (SDL top-left → GL bottom-left)
+    // Flip Y (SDL top-left â†’ GL bottom-left)
     const int glY = m_pickHeight - 1 - y;
     if (x < 0 || x >= m_pickWidth || glY < 0 || glY >= m_pickHeight)
         return 0;
@@ -3044,7 +3252,7 @@ unsigned int OpenGLRenderer::pickEntityAt(int x, int y)
     return entityId;
 }
 
-// ─── Selection outline (post-process edge detection on pick buffer) ─────────
+// â”€â”€â”€ Selection outline (post-process edge detection on pick buffer) â”€â”€â”€â”€â”€â”€â”€â”€â”€
 bool OpenGLRenderer::ensureOutlineResources()
 {
     if (m_outlineProgram != 0)
@@ -3105,6 +3313,10 @@ bool OpenGLRenderer::ensureOutlineResources()
     if (!linked) { glDeleteProgram(prog); return false; }
 
     m_outlineProgram = prog;
+    m_outlineLocPickTex = glGetUniformLocation(prog, "uPickTex");
+    m_outlineLocSelectedId = glGetUniformLocation(prog, "uSelectedId");
+    m_outlineLocOutlineColor = glGetUniformLocation(prog, "uOutlineColor");
+    m_outlineLocThickness = glGetUniformLocation(prog, "uThickness");
 
     glGenVertexArrays(1, &m_outlineVao);
 
@@ -3129,10 +3341,14 @@ void OpenGLRenderer::drawSelectionOutline()
     glUseProgram(m_outlineProgram);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, m_pickColorTex);
-    glUniform1i(glGetUniformLocation(m_outlineProgram, "uPickTex"), 0);
-    glUniform1ui(glGetUniformLocation(m_outlineProgram, "uSelectedId"), m_selectedEntity);
-    glUniform4f(glGetUniformLocation(m_outlineProgram, "uOutlineColor"), 1.0f, 0.6f, 0.0f, 1.0f);
-    glUniform1f(glGetUniformLocation(m_outlineProgram, "uThickness"), 3.0f);
+    if (m_outlineLocPickTex >= 0)
+        glUniform1i(m_outlineLocPickTex, 0);
+    if (m_outlineLocSelectedId >= 0)
+        glUniform1ui(m_outlineLocSelectedId, m_selectedEntity);
+    if (m_outlineLocOutlineColor >= 0)
+        glUniform4f(m_outlineLocOutlineColor, 1.0f, 0.6f, 0.0f, 1.0f);
+    if (m_outlineLocThickness >= 0)
+        glUniform1f(m_outlineLocThickness, 2.0f);
 
     glBindVertexArray(m_outlineVao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
@@ -3142,4 +3358,189 @@ void OpenGLRenderer::drawSelectionOutline()
     glUseProgram(0);
     glDisable(GL_BLEND);
     glEnable(GL_DEPTH_TEST);
+}
+
+// â”€â”€â”€ Editor tab system â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+void OpenGLRenderer::addTab(const std::string& id, const std::string& tabName, bool closable)
+{
+    for (const auto& tab : m_editorTabs)
+    {
+        if (tab.id == id)
+        {
+            return;
+        }
+    }
+    EditorTab tab;
+    tab.id = id;
+    tab.name = tabName;
+    tab.closable = closable;
+    tab.active = m_editorTabs.empty();
+    if (tab.active)
+    {
+        m_activeTabId = id;
+    }
+    m_editorTabs.push_back(std::move(tab));
+}
+
+void OpenGLRenderer::removeTab(const std::string& id)
+{
+    auto it = std::find_if(m_editorTabs.begin(), m_editorTabs.end(),
+        [&](const EditorTab& tab) { return tab.id == id; });
+    if (it == m_editorTabs.end() || !it->closable)
+    {
+        return;
+    }
+    const bool wasActive = it->active;
+    releaseTabFbo(*it);
+    m_editorTabs.erase(it);
+    if (wasActive && !m_editorTabs.empty())
+    {
+        m_editorTabs.front().active = true;
+        m_activeTabId = m_editorTabs.front().id;
+    }
+}
+
+void OpenGLRenderer::setActiveTab(const std::string& id)
+{
+    // Block tab switching during PIE
+    if (DiagnosticsManager::Instance().isPIEActive())
+    {
+        return;
+    }
+
+    if (m_activeTabId == id)
+    {
+        return;
+    }
+
+    // Snapshot the current active tab so it can be displayed as a cached image later
+    for (auto& tab : m_editorTabs)
+    {
+        if (tab.active && tab.colorTex != 0)
+        {
+            snapshotTabBeforeSwitch(tab);
+        }
+        tab.active = (tab.id == id);
+        if (tab.active)
+        {
+            m_activeTabId = id;
+        }
+    }
+}
+
+const std::string& OpenGLRenderer::getActiveTabId() const
+{
+    return m_activeTabId;
+}
+
+const std::vector<EditorTab>& OpenGLRenderer::getTabs() const
+{
+    return m_editorTabs;
+}
+
+bool OpenGLRenderer::ensureTabFbo(EditorTab& tab, int width, int height)
+{
+    if (tab.fbo != 0 && tab.fboWidth == width && tab.fboHeight == height)
+    {
+        return true;
+    }
+    releaseTabFbo(tab);
+    tab.fboWidth = width;
+    tab.fboHeight = height;
+
+    glGenFramebuffers(1, &tab.fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, tab.fbo);
+
+    glGenTextures(1, &tab.colorTex);
+    glBindTexture(GL_TEXTURE_2D, tab.colorTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tab.colorTex, 0);
+
+    glGenRenderbuffers(1, &tab.depthRbo);
+    glBindRenderbuffer(GL_RENDERBUFFER, tab.depthRbo);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, tab.depthRbo);
+
+    const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+    if (status != GL_FRAMEBUFFER_COMPLETE)
+    {
+        releaseTabFbo(tab);
+        return false;
+    }
+    return true;
+}
+
+void OpenGLRenderer::releaseTabFbo(EditorTab& tab)
+{
+    if (tab.colorTex) { glDeleteTextures(1, &tab.colorTex); tab.colorTex = 0; }
+    if (tab.depthRbo) { glDeleteRenderbuffers(1, &tab.depthRbo); tab.depthRbo = 0; }
+    if (tab.fbo) { glDeleteFramebuffers(1, &tab.fbo); tab.fbo = 0; }
+    if (tab.snapshotTex) { glDeleteTextures(1, &tab.snapshotTex); tab.snapshotTex = 0; }
+    tab.fboWidth = 0;
+    tab.fboHeight = 0;
+    tab.hasSnapshot = false;
+}
+
+void OpenGLRenderer::releaseAllTabFbos()
+{
+    for (auto& tab : m_editorTabs)
+    {
+        releaseTabFbo(tab);
+    }
+}
+
+void OpenGLRenderer::snapshotTabBeforeSwitch(EditorTab& tab)
+{
+    if (tab.colorTex == 0 || tab.fboWidth <= 0 || tab.fboHeight <= 0)
+    {
+        return;
+    }
+
+    // Create or resize snapshot texture
+    if (tab.snapshotTex == 0)
+    {
+        glGenTextures(1, &tab.snapshotTex);
+        glBindTexture(GL_TEXTURE_2D, tab.snapshotTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, tab.fboWidth, tab.fboHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+    else
+    {
+        glBindTexture(GL_TEXTURE_2D, tab.snapshotTex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, tab.fboWidth, tab.fboHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // Copy colorTex -> snapshotTex via FBO blit
+    GLuint srcFbo = 0, dstFbo = 0;
+    glGenFramebuffers(1, &srcFbo);
+    glGenFramebuffers(1, &dstFbo);
+
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, srcFbo);
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tab.colorTex, 0);
+
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dstFbo);
+    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tab.snapshotTex, 0);
+
+    glBlitFramebuffer(0, 0, tab.fboWidth, tab.fboHeight,
+        0, 0, tab.fboWidth, tab.fboHeight,
+        GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &srcFbo);
+    glDeleteFramebuffers(1, &dstFbo);
+
+    tab.hasSnapshot = true;
 }

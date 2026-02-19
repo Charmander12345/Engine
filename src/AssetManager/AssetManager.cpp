@@ -592,43 +592,80 @@ void AssetManager::ensureEditorWidgetsCreated()
     const std::string defaultWidgetRel = "TitleBar.asset";
     {
         json widgetJson = json::object();
-        widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 40.0f} };
+        widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 100.0f} };
         widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
         widgetJson["m_anchor"] = "TopLeft";
         widgetJson["m_fillX"] = true;
         widgetJson["m_zOrder"] = 0;
 
         json elements = json::array();
-        json panel = json::object();
-        panel["id"] = "TitleBar.Background";
-        panel["type"] = "Panel";
-        panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
-        panel["fillX"] = true;
-        panel["color"] = json{ {"x", 0.1f}, {"y", 0.1f}, {"z", 0.1f}, {"w", 1.0f} };
-        panel["shaderVertex"] = "panel_vertex.glsl";
-        panel["shaderFragment"] = "panel_fragment.glsl";
-        elements.push_back(panel);
 
+        // Full-area dark background
+        json bgPanel = json::object();
+        bgPanel["id"] = "TitleBar.Background";
+        bgPanel["type"] = "Panel";
+        bgPanel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        bgPanel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        bgPanel["fillX"] = true;
+        bgPanel["color"] = json{ {"x", 0.1f}, {"y", 0.1f}, {"z", 0.1f}, {"w", 1.0f} };
+        bgPanel["shaderVertex"] = "panel_vertex.glsl";
+        bgPanel["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(bgPanel);
+
+        // Slightly darker strip behind tab row (bottom 50%)
+        json tabRowBg = json::object();
+        tabRowBg["id"] = "TitleBar.TabRowBg";
+        tabRowBg["type"] = "Panel";
+        tabRowBg["from"] = json{ {"x", 0.0f}, {"y", 0.5f} };
+        tabRowBg["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        tabRowBg["fillX"] = true;
+        tabRowBg["color"] = json{ {"x", 0.08f}, {"y", 0.08f}, {"z", 0.08f}, {"w", 1.0f} };
+        tabRowBg["shaderVertex"] = "panel_vertex.glsl";
+        tabRowBg["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(tabRowBg);
+
+        // ---- Row 1: Title row (top portion, y=0..0.5, 50px) ----
+
+        // App title "HorizonEngine" on the left
         json label = json::object();
         label["id"] = "TitleBar.Label";
         label["type"] = "Text";
-        label["from"] = json{ {"x", 0.01f}, {"y", 0.15f} };
-        label["to"] = json{ {"x", 0.4f}, {"y", 0.85f} };
-        label["color"] = json{ {"x", 0.75f}, {"y", 0.75f}, {"z", 0.75f}, {"w", 1.0f} };
-        label["text"] = "Engine";
+        label["from"] = json{ {"x", 0.01f}, {"y", 0.0f} };
+        label["to"] = json{ {"x", 0.2f}, {"y", 0.5f} };
+        label["color"] = json{ {"x", 0.85f}, {"y", 0.85f}, {"z", 0.85f}, {"w", 1.0f} };
+        label["text"] = "HorizonEngine";
         label["font"] = "default.ttf";
         label["fontSize"] = 14.0f;
+        label["textAlignH"] = "Left";
+        label["textAlignV"] = "Center";
         label["sizeToContent"] = true;
         label["shaderVertex"] = "text_vertex.glsl";
         label["shaderFragment"] = "text_fragment.glsl";
         elements.push_back(label);
 
+        // Project name in the center
+        json projectLabel = json::object();
+        projectLabel["id"] = "TitleBar.ProjectName";
+        projectLabel["type"] = "Text";
+        projectLabel["from"] = json{ {"x", 0.3f}, {"y", 0.0f} };
+        projectLabel["to"] = json{ {"x", 0.7f}, {"y", 0.5f} };
+        projectLabel["color"] = json{ {"x", 0.6f}, {"y", 0.6f}, {"z", 0.6f}, {"w", 1.0f} };
+        projectLabel["text"] = "Project";
+        projectLabel["font"] = "default.ttf";
+        projectLabel["fontSize"] = 12.0f;
+        projectLabel["textAlignH"] = "Center";
+        projectLabel["textAlignV"] = "Center";
+        projectLabel["sizeToContent"] = true;
+        projectLabel["shaderVertex"] = "text_vertex.glsl";
+        projectLabel["shaderFragment"] = "text_fragment.glsl";
+        elements.push_back(projectLabel);
+
+        // Window controls (Minimize, Maximize, Close) on the far right
         json buttonStack = json::object();
         buttonStack["id"] = "TitleBar.Buttons";
         buttonStack["type"] = "StackPanel";
-        buttonStack["from"] = json{ {"x", 0.85f}, {"y", 0.0f} };
-        buttonStack["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        buttonStack["from"] = json{ {"x", 0.88f}, {"y", 0.0f} };
+        buttonStack["to"] = json{ {"x", 1.0f}, {"y", 0.5f} };
         buttonStack["orientation"] = "Horizontal";
         buttonStack["padding"] = json{ {"x", 0.0f}, {"y", 0.0f} };
         buttonStack["sizeToContent"] = true;
@@ -636,8 +673,7 @@ void AssetManager::ensureEditorWidgetsCreated()
         json btnMin = json::object();
         btnMin["id"] = "TitleBar.Minimize";
         btnMin["type"] = "Button";
-        btnMin["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        btnMin["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        btnMin["clickEvent"] = "TitleBar.Minimize";
         btnMin["fillX"] = true;
         btnMin["fillY"] = true;
         btnMin["color"] = json{ {"x", 0.1f}, {"y", 0.1f}, {"z", 0.1f}, {"w", 1.0f} };
@@ -645,10 +681,10 @@ void AssetManager::ensureEditorWidgetsCreated()
         btnMin["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
         btnMin["text"] = "_";
         btnMin["font"] = "default.ttf";
-        btnMin["fontSize"] = 16.0f;
+        btnMin["fontSize"] = 14.0f;
         btnMin["textAlignH"] = "Center";
         btnMin["textAlignV"] = "Center";
-        btnMin["minSize"] = json{ {"x", 40.0f}, {"y", 0.0f} };
+        btnMin["minSize"] = json{ {"x", 46.0f}, {"y", 0.0f} };
         btnMin["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
         btnMin["shaderVertex"] = "button_vertex.glsl";
         btnMin["shaderFragment"] = "button_fragment.glsl";
@@ -656,8 +692,7 @@ void AssetManager::ensureEditorWidgetsCreated()
         json btnMax = json::object();
         btnMax["id"] = "TitleBar.Maximize";
         btnMax["type"] = "Button";
-        btnMax["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        btnMax["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        btnMax["clickEvent"] = "TitleBar.Maximize";
         btnMax["fillX"] = true;
         btnMax["fillY"] = true;
         btnMax["color"] = json{ {"x", 0.1f}, {"y", 0.1f}, {"z", 0.1f}, {"w", 1.0f} };
@@ -665,10 +700,10 @@ void AssetManager::ensureEditorWidgetsCreated()
         btnMax["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
         btnMax["text"] = "[ ]";
         btnMax["font"] = "default.ttf";
-        btnMax["fontSize"] = 16.0f;
+        btnMax["fontSize"] = 14.0f;
         btnMax["textAlignH"] = "Center";
         btnMax["textAlignV"] = "Center";
-        btnMax["minSize"] = json{ {"x", 40.0f}, {"y", 0.0f} };
+        btnMax["minSize"] = json{ {"x", 46.0f}, {"y", 0.0f} };
         btnMax["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
         btnMax["shaderVertex"] = "button_vertex.glsl";
         btnMax["shaderFragment"] = "button_fragment.glsl";
@@ -677,8 +712,6 @@ void AssetManager::ensureEditorWidgetsCreated()
         btnClose["id"] = "TitleBar.Close";
         btnClose["type"] = "Button";
         btnClose["clickEvent"] = "TitleBar.Close";
-        btnClose["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        btnClose["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
         btnClose["fillX"] = true;
         btnClose["fillY"] = true;
         btnClose["color"] = json{ {"x", 0.1f}, {"y", 0.1f}, {"z", 0.1f}, {"w", 1.0f} };
@@ -686,16 +719,50 @@ void AssetManager::ensureEditorWidgetsCreated()
         btnClose["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
         btnClose["text"] = "X";
         btnClose["font"] = "default.ttf";
-        btnClose["fontSize"] = 16.0f;
+        btnClose["fontSize"] = 14.0f;
         btnClose["textAlignH"] = "Center";
         btnClose["textAlignV"] = "Center";
-        btnClose["minSize"] = json{ {"x", 40.0f}, {"y", 0.0f} };
+        btnClose["minSize"] = json{ {"x", 46.0f}, {"y", 0.0f} };
         btnClose["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
         btnClose["shaderVertex"] = "button_vertex.glsl";
         btnClose["shaderFragment"] = "button_fragment.glsl";
 
         buttonStack["children"] = json::array({ btnMin, btnMax, btnClose });
         elements.push_back(buttonStack);
+
+        // ---- Row 2: Tab strip (bottom portion, y=0.5..1.0, 50px) ----
+
+        json tabBar = json::object();
+        tabBar["id"] = "TitleBar.Tabs";
+        tabBar["type"] = "StackPanel";
+        tabBar["from"] = json{ {"x", 0.0f}, {"y", 0.5f} };
+        tabBar["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        tabBar["orientation"] = "Horizontal";
+        tabBar["fillX"] = true;
+        tabBar["fillY"] = true;
+        tabBar["padding"] = json{ {"x", 4.0f}, {"y", 0.0f} };
+        tabBar["sizeToContent"] = true;
+
+        json tabViewport = json::object();
+        tabViewport["id"] = "TitleBar.Tab.Viewport";
+        tabViewport["type"] = "Button";
+        tabViewport["clickEvent"] = "TitleBar.Tab.Viewport";
+        tabViewport["fillY"] = true;
+        tabViewport["color"] = json{ {"x", 0.14f}, {"y", 0.14f}, {"z", 0.14f}, {"w", 1.0f} };
+        tabViewport["hoverColor"] = json{ {"x", 0.2f}, {"y", 0.2f}, {"z", 0.2f}, {"w", 1.0f} };
+        tabViewport["textColor"] = json{ {"x", 0.9f}, {"y", 0.9f}, {"z", 0.9f}, {"w", 1.0f} };
+        tabViewport["text"] = "Viewport";
+        tabViewport["font"] = "default.ttf";
+        tabViewport["fontSize"] = 12.0f;
+        tabViewport["textAlignH"] = "Center";
+        tabViewport["textAlignV"] = "Center";
+        tabViewport["minSize"] = json{ {"x", 90.0f}, {"y", 0.0f} };
+        tabViewport["padding"] = json{ {"x", 10.0f}, {"y", 0.0f} };
+        tabViewport["shaderVertex"] = "button_vertex.glsl";
+        tabViewport["shaderFragment"] = "button_fragment.glsl";
+
+        tabBar["children"] = json::array({ tabViewport });
+        elements.push_back(tabBar);
 
         widgetJson["m_elements"] = elements;
 
@@ -718,7 +785,8 @@ void AssetManager::ensureEditorWidgetsCreated()
                 if (check.is_open())
                 {
                     const std::string content((std::istreambuf_iterator<char>(check)), std::istreambuf_iterator<char>());
-                    if (content.find("TitleBar.PIE") != std::string::npos)
+                    if (content.find("HorizonEngine") == std::string::npos
+                        || content.find("\"y\": 100.0") == std::string::npos)
                     {
                         existsAndOk = false;
                     }
@@ -749,29 +817,32 @@ void AssetManager::ensureEditorWidgetsCreated()
         }
     }
 
-    const std::string toolbarWidgetRel = "Toolbar.asset";
+    const std::string toolbarWidgetRel = "ViewportOverlay.asset";
     {
         json widgetJson = json::object();
-        widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 32.0f} };
+        widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 34.0f} };
         widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
         widgetJson["m_anchor"] = "TopLeft";
         widgetJson["m_fillX"] = true;
         widgetJson["m_zOrder"] = 0;
 
         json elements = json::array();
+
+        // Dark toolbar background
         json bg = json::object();
-        bg["id"] = "Toolbar.Background";
+        bg["id"] = "ViewportOverlay.Background";
         bg["type"] = "Panel";
         bg["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
         bg["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
         bg["fillX"] = true;
-        bg["color"] = json{ {"x", 0.13f}, {"y", 0.13f}, {"z", 0.13f}, {"w", 1.0f} };
+        bg["color"] = json{ {"x", 0.12f}, {"y", 0.12f}, {"z", 0.12f}, {"w", 1.0f} };
         bg["shaderVertex"] = "panel_vertex.glsl";
         bg["shaderFragment"] = "panel_fragment.glsl";
         elements.push_back(bg);
 
+        // Center section: PIE controls (spacer + play + spacer)
         json centerStack = json::object();
-        centerStack["id"] = "Toolbar.Center";
+        centerStack["id"] = "ViewportOverlay.Center";
         centerStack["type"] = "StackPanel";
         centerStack["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
         centerStack["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
@@ -781,18 +852,18 @@ void AssetManager::ensureEditorWidgetsCreated()
         centerStack["padding"] = json{ {"x", 0.0f}, {"y", 0.0f} };
 
         json spacerLeft = json::object();
-        spacerLeft["id"] = "Toolbar.SpacerL";
+        spacerLeft["id"] = "ViewportOverlay.SpacerL";
         spacerLeft["type"] = "Panel";
         spacerLeft["fillX"] = true;
         spacerLeft["fillY"] = true;
         spacerLeft["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
 
         json btnPIE = json::object();
-        btnPIE["id"] = "Toolbar.PIE";
+        btnPIE["id"] = "ViewportOverlay.PIE";
         btnPIE["type"] = "Button";
-        btnPIE["clickEvent"] = "Toolbar.PIE";
-        btnPIE["color"] = json{ {"x", 0.18f}, {"y", 0.18f}, {"z", 0.18f}, {"w", 1.0f} };
-        btnPIE["hoverColor"] = json{ {"x", 0.25f}, {"y", 0.25f}, {"z", 0.25f}, {"w", 1.0f} };
+        btnPIE["clickEvent"] = "ViewportOverlay.PIE";
+        btnPIE["color"] = json{ {"x", 0.12f}, {"y", 0.12f}, {"z", 0.12f}, {"w", 1.0f} };
+        btnPIE["hoverColor"] = json{ {"x", 0.22f}, {"y", 0.22f}, {"z", 0.22f}, {"w", 1.0f} };
         btnPIE["imagePath"] = "Play.tga";
         btnPIE["minSize"] = json{ {"x", 32.0f}, {"y", 24.0f} };
         btnPIE["sizeToContent"] = true;
@@ -801,7 +872,7 @@ void AssetManager::ensureEditorWidgetsCreated()
         btnPIE["shaderFragment"] = "button_fragment.glsl";
 
         json spacerRight = json::object();
-        spacerRight["id"] = "Toolbar.SpacerR";
+        spacerRight["id"] = "ViewportOverlay.SpacerR";
         spacerRight["type"] = "Panel";
         spacerRight["fillX"] = true;
         spacerRight["fillY"] = true;
@@ -810,10 +881,40 @@ void AssetManager::ensureEditorWidgetsCreated()
         centerStack["children"] = json::array({ spacerLeft, btnPIE, spacerRight });
         elements.push_back(centerStack);
 
+        // Right section: Settings button
+        json rightStack = json::object();
+        rightStack["id"] = "ViewportOverlay.Right";
+        rightStack["type"] = "StackPanel";
+        rightStack["from"] = json{ {"x", 0.88f}, {"y", 0.0f} };
+        rightStack["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        rightStack["orientation"] = "Horizontal";
+        rightStack["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
+        rightStack["sizeToContent"] = true;
+
+        json btnSettings = json::object();
+        btnSettings["id"] = "ViewportOverlay.Settings";
+        btnSettings["type"] = "Button";
+        btnSettings["clickEvent"] = "ViewportOverlay.Settings";
+        btnSettings["color"] = json{ {"x", 0.12f}, {"y", 0.12f}, {"z", 0.12f}, {"w", 1.0f} };
+        btnSettings["hoverColor"] = json{ {"x", 0.22f}, {"y", 0.22f}, {"z", 0.22f}, {"w", 1.0f} };
+        btnSettings["textColor"] = json{ {"x", 0.85f}, {"y", 0.85f}, {"z", 0.85f}, {"w", 1.0f} };
+        btnSettings["text"] = "Settings";
+        btnSettings["font"] = "default.ttf";
+        btnSettings["fontSize"] = 12.0f;
+        btnSettings["textAlignH"] = "Center";
+        btnSettings["textAlignV"] = "Center";
+        btnSettings["minSize"] = json{ {"x", 70.0f}, {"y", 0.0f} };
+        btnSettings["padding"] = json{ {"x", 8.0f}, {"y", 2.0f} };
+        btnSettings["shaderVertex"] = "button_vertex.glsl";
+        btnSettings["shaderFragment"] = "button_fragment.glsl";
+
+        rightStack["children"] = json::array({ btnSettings });
+        elements.push_back(rightStack);
+
         widgetJson["m_elements"] = elements;
 
         auto widget = std::make_shared<AssetData>();
-        widget->setName("Toolbar");
+        widget->setName("ViewportOverlay");
         widget->setData(std::move(widgetJson));
 
         const fs::path widgetsRoot = getEditorWidgetsRootPath();
@@ -831,7 +932,8 @@ void AssetManager::ensureEditorWidgetsCreated()
                 if (check.is_open())
                 {
                     const std::string content((std::istreambuf_iterator<char>(check)), std::istreambuf_iterator<char>());
-                    if (content.find("Toolbar.Center") == std::string::npos)
+                    if (content.find("ViewportOverlay.Center") == std::string::npos
+                        || content.find("ViewportOverlay.Left") != std::string::npos)
                     {
                         existsAndOk = false;
                     }
@@ -1725,7 +1827,7 @@ void AssetManager::ensureDefaultAssetsCreated()
 
         json lightComponents = json::object();
         lightComponents["Transform"] = json{
-            {"position", json::array({ 0.0f, 1.2f, 0.0f })},
+            {"position", json::array({ 1.0f, 1.2f, 2.5f })},
             {"rotation", json::array({ 0.0f, 0.0f, 0.0f })},
             {"scale", json::array({ 0.25f, 0.25f, 0.25f })}
         };
@@ -1779,8 +1881,8 @@ void AssetManager::ensureDefaultAssetsCreated()
         spotLightComponents["Light"] = json{
             {"type", static_cast<int>(ECS::LightComponent::LightType::Spot)},
             {"color", json::array({ 0.2f, 0.8f, 1.0f })},
-            {"intensity", 2.0f},
-            {"range", 15.0f},
+            {"intensity", 3.5f},
+            {"range", 25.0f},
             {"spotAngle", 25.0f}
         };
         spotLightEntity["components"] = spotLightComponents;
@@ -3094,7 +3196,13 @@ AssetManager::LoadResult AssetManager::loadTextureAsset(const std::string& path)
 				fs::path sourcePath = sourceValue.get<std::string>();
 				if (!sourcePath.is_absolute())
 				{
-					sourcePath = fs::current_path() / sourcePath;
+					const auto& projPath = DiagnosticsManager::Instance().getProjectInfo().projectPath;
+					fs::path resolved;
+					if (!projPath.empty())
+						resolved = fs::path(projPath) / sourcePath;
+					if (resolved.empty() || !fs::exists(resolved))
+						resolved = fs::current_path() / sourcePath;
+					sourcePath = resolved;
 				}
 				if (fs::exists(sourcePath))
 				{
@@ -3223,7 +3331,13 @@ AssetManager::LoadResult AssetManager::loadAudioAsset(const std::string& path)
 				fs::path sourcePath = sourceValue.get<std::string>();
 				if (!sourcePath.is_absolute())
 				{
-					sourcePath = fs::current_path() / sourcePath;
+					const auto& projPath = DiagnosticsManager::Instance().getProjectInfo().projectPath;
+					fs::path resolved;
+					if (!projPath.empty())
+						resolved = fs::path(projPath) / sourcePath;
+					if (resolved.empty() || !fs::exists(resolved))
+						resolved = fs::current_path() / sourcePath;
+					sourcePath = resolved;
 				}
 				if (fs::exists(sourcePath))
 				{

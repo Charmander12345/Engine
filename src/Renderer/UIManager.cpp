@@ -265,6 +265,71 @@ namespace
             element.hasContentSize = true;
             return size;
         }
+        case WidgetElementType::CheckBox:
+        {
+            const float boxSize = 16.0f;
+            const float fontSize = (element.fontSize > 0.0f) ? element.fontSize : 14.0f;
+            const float scale = fontSize / 48.0f;
+            const Vec2 textSize = (!element.text.empty() && measureText) ? measureText(element.text, scale) : Vec2{};
+            size.x = element.padding.x + boxSize + 6.0f + textSize.x + element.padding.x;
+            size.y = std::max(boxSize, textSize.y) + element.padding.y * 2.0f;
+            size.x = std::max(size.x, element.minSize.x);
+            size.y = std::max(size.y, element.minSize.y);
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
+        case WidgetElementType::DropDown:
+        {
+            const float fontSize = (element.fontSize > 0.0f) ? element.fontSize : 14.0f;
+            const float scale = fontSize / 48.0f;
+            std::string display = element.text;
+            if (display.empty() && element.selectedIndex >= 0 &&
+                element.selectedIndex < static_cast<int>(element.items.size()))
+            {
+                display = element.items[static_cast<size_t>(element.selectedIndex)];
+            }
+            const Vec2 textSize = (!display.empty() && measureText) ? measureText(display, scale) : Vec2{};
+            size.x = textSize.x + element.padding.x * 2.0f + 16.0f;
+            size.y = textSize.y + element.padding.y * 2.0f;
+            size.x = std::max(size.x, element.minSize.x);
+            size.y = std::max(size.y, element.minSize.y);
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
+        case WidgetElementType::TreeView:
+        case WidgetElementType::TabView:
+        {
+            childSizes.reserve(element.children.size());
+            for (auto& child : element.children)
+            {
+                const Vec2 childSize = measureElementSize(child, measureText);
+                Vec2 withMargin{
+                    childSize.x + child.margin.x * 2.0f,
+                    childSize.y + child.margin.y * 2.0f
+                };
+                childSizes.push_back(withMargin);
+            }
+            float heightSum = 0.0f;
+            float maxWidth = 0.0f;
+            for (const auto& childSize : childSizes)
+            {
+                heightSum += childSize.y;
+                maxWidth = std::max(maxWidth, childSize.x);
+            }
+            if (!childSizes.empty())
+            {
+                heightSum += element.padding.y * 2.0f + element.padding.y * static_cast<float>(childSizes.size() - 1);
+                maxWidth += element.padding.x * 2.0f;
+            }
+            size = Vec2{ maxWidth, heightSum };
+            size.x = std::max(size.x, element.minSize.x);
+            size.y = std::max(size.y, element.minSize.y);
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
         case WidgetElementType::StackPanel:
         case WidgetElementType::Grid:
         {
@@ -661,6 +726,73 @@ namespace
                 const float childW = std::max(0.0f, cellW - child.margin.x * 2.0f);
                 const float childH = std::max(0.0f, cellH - child.margin.y * 2.0f);
                 layoutElement(child, childX, childY, childW, childH, measureText);
+            }
+        }
+        else if (element.type == WidgetElementType::TreeView || element.type == WidgetElementType::TabView)
+        {
+            float spacing = element.padding.y;
+            float totalSpacing = spacing * static_cast<float>(element.children.size() > 0 ? (element.children.size() - 1) : 0);
+            float fixedHeight = 0.0f;
+            size_t fillCount = 0;
+            std::vector<float> fixedSlots;
+            fixedSlots.reserve(element.children.size());
+            for (auto& child : element.children)
+            {
+                if (child.fillY)
+                {
+                    fixedSlots.push_back(0.0f);
+                    ++fillCount;
+                    continue;
+                }
+                float childMinH = child.minSize.y;
+                if (child.hasContentSize)
+                {
+                    childMinH = std::max(childMinH, child.contentSizePixels.y);
+                }
+                float slotH = childMinH + child.margin.y * 2.0f;
+                fixedSlots.push_back(slotH);
+                fixedHeight += slotH;
+            }
+
+            float availableH = std::max(0.0f, contentH - totalSpacing - fixedHeight);
+            float fillSlotH = (fillCount > 0) ? (availableH / static_cast<float>(fillCount)) : 0.0f;
+            float totalHeight = 0.0f;
+            for (size_t index = 0; index < element.children.size(); ++index)
+            {
+                auto& child = element.children[index];
+                float slotH = fixedSlots[index];
+                if (child.fillY)
+                {
+                    slotH = fillSlotH;
+                }
+                totalHeight += slotH;
+                fixedSlots[index] = slotH;
+            }
+            if (!element.children.empty())
+            {
+                totalHeight += totalSpacing;
+            }
+
+            if (element.scrollable)
+            {
+                const float maxScroll = std::max(0.0f, totalHeight - contentH);
+                element.scrollOffset = std::clamp(element.scrollOffset, 0.0f, maxScroll);
+                contentY -= element.scrollOffset;
+            }
+
+            float cursorY = contentY;
+
+            for (size_t index = 0; index < element.children.size(); ++index)
+            {
+                auto& child = element.children[index];
+                float slotH = fixedSlots[index];
+                float slotW = child.fillX ? contentW : ((child.hasContentSize ? std::max(child.minSize.x, child.contentSizePixels.x) : child.minSize.x) + child.margin.x * 2.0f);
+                const float childX = contentX + child.margin.x;
+                const float childY = cursorY + child.margin.y;
+                const float childW = std::max(0.0f, slotW - child.margin.x * 2.0f);
+                const float childH = std::max(0.0f, slotH - child.margin.y * 2.0f);
+                layoutElement(child, childX, childY, childW, childH, measureText);
+                cursorY += slotH + spacing;
             }
         }
     }
@@ -1710,6 +1842,44 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
             target->onColorChanged(target->color);
         }
     }
+    if (target->type == WidgetElementType::CheckBox)
+    {
+        target->isChecked = !target->isChecked;
+        if (target->onCheckedChanged)
+        {
+            target->onCheckedChanged(target->isChecked);
+        }
+        markAllWidgetsDirty();
+    }
+    if (target->type == WidgetElementType::DropDown)
+    {
+        if (target->isExpanded)
+        {
+            const float itemHeight = std::max(20.0f, target->computedSizePixels.y);
+            const float dropY0 = target->computedPositionPixels.y + target->computedSizePixels.y;
+            const float relY = screenPos.y - dropY0;
+            if (relY >= 0.0f && screenPos.x >= target->computedPositionPixels.x &&
+                screenPos.x <= target->computedPositionPixels.x + target->computedSizePixels.x)
+            {
+                const int clickedIndex = static_cast<int>(relY / itemHeight);
+                if (clickedIndex >= 0 && clickedIndex < static_cast<int>(target->items.size()))
+                {
+                    target->selectedIndex = clickedIndex;
+                    target->text = target->items[static_cast<size_t>(clickedIndex)];
+                    if (target->onSelectionChanged)
+                    {
+                        target->onSelectionChanged(clickedIndex);
+                    }
+                }
+            }
+            target->isExpanded = false;
+        }
+        else
+        {
+            target->isExpanded = true;
+        }
+        markAllWidgetsDirty();
+    }
     if (target->onClicked)
     {
         target->onClicked();
@@ -1809,7 +1979,7 @@ bool UIManager::handleScroll(const Vec2& screenPos, float delta)
             {
                 return nullptr;
             }
-            if (!element.scrollable || (element.type != WidgetElementType::StackPanel && element.type != WidgetElementType::Grid))
+            if (!element.scrollable || (element.type != WidgetElementType::StackPanel && element.type != WidgetElementType::Grid && element.type != WidgetElementType::TreeView))
             {
                 return nullptr;
             }
@@ -2289,6 +2459,19 @@ WidgetElement* UIManager::hitTest(const Vec2& screenPos, bool logDetails) const
             }
 
             const bool inside = pointInRect(element.computedPositionPixels, element.computedSizePixels, screenPos);
+
+            if (!inside && element.type == WidgetElementType::DropDown && element.isExpanded && !element.items.empty())
+            {
+                const float itemHeight = std::max(20.0f, element.computedSizePixels.y);
+                const float dropHeight = itemHeight * static_cast<float>(element.items.size());
+                const Vec2 dropPos{ element.computedPositionPixels.x, element.computedPositionPixels.y + element.computedSizePixels.y };
+                const Vec2 dropSize{ element.computedSizePixels.x, dropHeight };
+                if (pointInRect(dropPos, dropSize, screenPos))
+                {
+                    return const_cast<WidgetElement*>(&element);
+                }
+            }
+
             if (logDetails)
             {
                 const std::string idStr = element.id.empty() ? std::string("<no-id>") : element.id;

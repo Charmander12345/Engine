@@ -14,16 +14,33 @@
 #include <glm/glm.hpp>
 
 #include "../../Core/ECS/Components.h"
+#include "OpenGLMaterial.h"
 
 class OpenGLObject2D;
 class OpenGLObject3D;
 
 struct WindowHitTestContext
 {
-    int titlebarHeight{ 40 };
+    int titlebarHeight{ 50 };
     int resizeBorder{ 6 };
-    int buttonStripWidth{ 120 };
-    int buttonStripHeight{ 40 };
+    int buttonStripWidth{ 140 };
+    int buttonStripHeight{ 50 };
+    bool buttonsOnLeft{ false };
+};
+
+struct EditorTab
+{
+    std::string id;
+    std::string name;
+    bool closable{ true };
+    bool active{ false };
+    GLuint fbo{ 0 };
+    GLuint colorTex{ 0 };
+    GLuint depthRbo{ 0 };
+    GLuint snapshotTex{ 0 };
+    int fboWidth{ 0 };
+    int fboHeight{ 0 };
+    bool hasSnapshot{ false };
 };
 
 class OpenGLRenderer : public Renderer
@@ -65,6 +82,12 @@ public:
     std::shared_ptr<Widget> createWidgetFromAsset(const std::shared_ptr<AssetData>& asset);
     GLuint preloadUITexture(const std::string& path);
 
+    void addTab(const std::string& id, const std::string& name, bool closable);
+    void removeTab(const std::string& id);
+    void setActiveTab(const std::string& id);
+    const std::string& getActiveTabId() const;
+    const std::vector<EditorTab>& getTabs() const;
+
 private:
     void renderWorld();
     void renderUI();
@@ -85,6 +108,7 @@ private:
     bool ensurePickFbo(int width, int height);
     void releasePickFbo();
     void renderPickBuffer(const glm::mat4& view, const glm::mat4& projection);
+    void renderPickBufferSingleEntity(const glm::mat4& view, const glm::mat4& projection, unsigned int entityId);
     unsigned int pickEntityAt(int x, int y);
     bool ensureOutlineResources();
     void releaseOutlineResources();
@@ -149,6 +173,9 @@ private:
     std::unordered_map<std::string, GLuint> m_uiTextureCache;
     ECS::Schema m_lightSchema{};
     bool m_lightSchemaInitialized{false};
+    std::vector<OpenGLMaterial::LightData> m_sceneLights;
+    int m_cachedWindowWidth{0};
+    int m_cachedWindowHeight{0};
     bool m_uiDebugEnabled{false};
     bool m_uiDebugEnabledPrev{false};
     WindowHitTestContext m_hitTestContext{};
@@ -238,12 +265,24 @@ private:
     // Selection outline (post-process edge detection on pick buffer)
     GLuint m_outlineProgram{0};
     GLuint m_outlineVao{0};
+    GLint m_outlineLocPickTex{-1};
+    GLint m_outlineLocSelectedId{-1};
+    GLint m_outlineLocOutlineColor{-1};
+    GLint m_outlineLocThickness{-1};
     unsigned int m_selectedEntity{0};
     bool m_pickRequested{false};
     int m_pickX{0};
     int m_pickY{0};
 
     void drawSelectionOutline();
+
+    // Editor tab system
+    bool ensureTabFbo(EditorTab& tab, int width, int height);
+    void releaseTabFbo(EditorTab& tab);
+    void releaseAllTabFbos();
+    void snapshotTabBeforeSwitch(EditorTab& tab);
+    std::vector<EditorTab> m_editorTabs;
+    std::string m_activeTabId{ "Viewport" };
 
 public:
     void toggleUIDebug() { m_uiDebugEnabled = !m_uiDebugEnabled; }
