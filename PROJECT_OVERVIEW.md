@@ -21,6 +21,7 @@
    - 8.4 [EngineLevel](#84-enginelevel)
    - 8.5 [ECS (Entity Component System)](#85-ecs-entity-component-system)
    - 8.6 [AudioManager](#86-audiomanager)
+   - 8.7 [UndoRedoManager](#87-undoredomanager)
 9. [Renderer](#9-renderer)
    - 9.1 [Renderer (abstrakt)](#91-renderer-abstrakt)
    - 9.2 [OpenGLRenderer](#92-openglrenderer)
@@ -558,6 +559,19 @@ std::vector<SchemaAssetMatch> getAssetsMatchingSchema(schema);
 - Source-ID ↔ Asset-ID Mapping in `m_sourceAssetIds`
 - Buffer-Caching: Ein Buffer pro Asset-ID
 
+### 8.7 UndoRedoManager
+**Datei:** `src/Core/UndoRedoManager.h/.cpp`
+
+- **Singleton**: `UndoRedoManager::Instance()`
+- **Command-Pattern**: Jede Aktion besteht aus `execute`- und `undo`-Callbacks + `description`
+- **pushCommand()**: Für Aktionen die bereits angewendet wurden (Gizmo-Drag: old/new Transform in Lambdas gespeichert)
+- **executeCommand()**: Legacy-Helper – ruft erst execute(), dann push
+- **Stack-basiert**: Separater Undo- und Redo-Stack (max. 100 Einträge)
+- **onChanged-Callback**: Feuert nach push/undo/redo/clear → markiert aktives Level dirty + refresht StatusBar
+- **Gizmo-Integration**: `beginGizmoDrag` snapshoted `TransformComponent`, `endGizmoDrag` pusht Undo-Command
+- **Tastenkürzel**: Ctrl+Z = Undo, Ctrl+Y = Redo, Ctrl+S = Save All (in main.cpp registriert)
+- **Speichern**: Undo-History wird nach erfolgreichem Save gecleared
+
 ---
 
 ## 9. Renderer
@@ -840,6 +854,19 @@ registerClickEvent("TitleBar.Close", []() { ... });
 refreshWorldOutliner()          → Aktualisiert Entitäten-Liste
 selectEntity(entityId)          → Wählt Entität aus, zeigt Details
 ```
+
+#### StatusBar-Integration:
+```cpp
+refreshStatusBar()              → Aktualisiert Dirty-Zähler + Undo/Redo-Text
+showSaveProgressModal(total)    → Öffnet Modal mit ProgressBar
+updateSaveProgress(saved,total) → Aktualisiert Fortschrittsanzeige
+closeSaveProgressModal(success) → Schließt Modal, zeigt Toast
+```
+- **StatusBar** ist ein horizontal gedocktes Widget am unteren Rand (z-order=3, BottomLeft, fillX, 32px hoch)
+- Enthält: Undo-Button, Redo-Button, Spacer, Dirty-Label (zeigt Anzahl ungespeicherter Assets), Save-All-Button
+- **Save-Button**: Startet async Speichern über `AssetManager::saveAllAssetsAsync()` mit Progress-Callback
+- **Save-Progress-Modal**: Overlay (z-order=10001) mit ProgressBar + Zähler, wird per Callback aktualisiert
+- **Tastenkürzel**: Ctrl+Z (Undo), Ctrl+Y (Redo), Ctrl+S (Save All)
 
 ---
 

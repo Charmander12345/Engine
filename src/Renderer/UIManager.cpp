@@ -14,6 +14,7 @@
 #include "../Diagnostics/DiagnosticsManager.h"
 #include "../Core/EngineLevel.h"
 #include "../Core/ECS/ECS.h"
+#include "../Core/UndoRedoManager.h"
 #include "UIWidgets/SeparatorWidget.h"
 #include "../AssetManager/AssetManager.h"
 #include "../AssetManager/AssetTypes.h"
@@ -935,6 +936,10 @@ void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widg
         {
             populateContentBrowserWidget(entry->widget);
         }
+        else if (id == "StatusBar")
+        {
+            refreshStatusBar();
+        }
         entry->widget->markLayoutDirty();
     }
     m_widgetOrderDirty = true;
@@ -1093,10 +1098,8 @@ void UIManager::populateOutlinerWidget(const std::shared_ptr<Widget>& widget)
     {
         listPanel->from.y = 0.12f;
     }
-    if (listPanel->to.y <= listPanel->from.y)
-    {
-        listPanel->to.y = 0.98f;
-    }
+    // Limit list to the top portion; EntityDetails occupies the bottom half (splitRatio = 0.45)
+    listPanel->to.y = 0.44f;
     listPanel->scrollable = true;
     listPanel->fillX = true;
     listPanel->fillY = false;
@@ -2538,13 +2541,36 @@ bool UIManager::handleScroll(const Vec2& screenPos, float delta)
             return &element;
         };
 
+    // Iterate widgets in descending z-order (front-to-back) so that
+    // overlapping higher-z widgets receive scroll events first.
+    std::vector<WidgetEntry*> zOrdered;
+    zOrdered.reserve(m_widgets.size());
     for (auto& entry : m_widgets)
     {
-        if (!entry.widget)
+        if (entry.widget)
         {
-            continue;
+            zOrdered.push_back(&entry);
         }
-        for (auto it = entry.widget->getElementsMutable().rbegin(); it != entry.widget->getElementsMutable().rend(); ++it)
+    }
+    std::sort(zOrdered.begin(), zOrdered.end(), [](const WidgetEntry* a, const WidgetEntry* b)
+    {
+        return a->widget->getZOrder() > b->widget->getZOrder();
+    });
+
+    for (auto* entryPtr : zOrdered)
+    {
+        // Skip widgets whose computed bounds do not contain the pointer
+        if (entryPtr->widget->hasComputedPosition() && entryPtr->widget->hasComputedSize())
+        {
+            const Vec2 wPos = entryPtr->widget->getComputedPositionPixels();
+            const Vec2 wSize = entryPtr->widget->getComputedSizePixels();
+            if (!pointInRect(wPos, wSize, screenPos))
+            {
+                continue;
+            }
+        }
+
+        for (auto it = entryPtr->widget->getElementsMutable().rbegin(); it != entryPtr->widget->getElementsMutable().rend(); ++it)
         {
             if (auto* target = findScrollable(*it))
             {
@@ -2559,7 +2585,7 @@ bool UIManager::handleScroll(const Vec2& screenPos, float delta)
                         : std::max(0.0f, target->contentSizePixels.y - target->computedSizePixels.y);
                 }
                 target->scrollOffset = std::clamp(target->scrollOffset - delta * scrollStep, 0.0f, maxScroll);
-                entry.widget->markLayoutDirty();
+                entryPtr->widget->markLayoutDirty();
                 m_renderDirty = true;
                 return true;
             }
@@ -3044,4 +3070,196 @@ void UIManager::bindClickEventsForElement(WidgetElement& element)
     {
         bindClickEventsForElement(child);
     }
+}
+
+void UIManager::refreshStatusBar()
+{
+    auto* entry = findWidgetEntry("StatusBar");
+    if (!entry || !entry->widget)
+    {
+        return;
+    }
+
+    auto& elements = entry->widget->getElementsMutable();
+    WidgetElement* dirtyLabel = FindElementById(elements, "StatusBar.DirtyLabel");
+    if (dirtyLabel)
+    {
+        const size_t count = AssetManager::Instance().getUnsavedAssetCount();
+        if (count == 0)
+        {
+            dirtyLabel->text = "No unsaved changes";
+            dirtyLabel->textColor = Vec4{ 0.6f, 0.6f, 0.65f, 1.0f };
+        }
+        else
+        {
+            dirtyLabel->text = std::to_string(count) + " unsaved change" + (count > 1 ? "s" : "");
+            dirtyLabel->textColor = Vec4{ 1.0f, 0.85f, 0.3f, 1.0f };
+        }
+    }
+
+    WidgetElement* undoBtn = FindElementById(elements, "StatusBar.Undo");
+    if (undoBtn)
+    {
+        auto& undo = UndoRedoManager::Instance();
+        const bool canUndo = undo.canUndo();
+        undoBtn->textColor = canUndo
+            ? Vec4{ 0.95f, 0.95f, 0.95f, 1.0f }
+            : Vec4{ 0.45f, 0.45f, 0.5f, 1.0f };
+        undoBtn->text = canUndo
+            ? ("Undo: " + undo.lastUndoDescription())
+            : "Undo";
+        if (undoBtn->text.size() > 20)
+        {
+            undoBtn->text = undoBtn->text.substr(0, 17) + "...";
+        }
+    }
+
+    WidgetElement* redoBtn = FindElementById(elements, "StatusBar.Redo");
+    if (redoBtn)
+    {
+        auto& undo = UndoRedoManager::Instance();
+        const bool canRedo = undo.canRedo();
+        redoBtn->textColor = canRedo
+            ? Vec4{ 0.95f, 0.95f, 0.95f, 1.0f }
+            : Vec4{ 0.45f, 0.45f, 0.5f, 1.0f };
+        redoBtn->text = canRedo
+            ? ("Redo: " + undo.lastRedoDescription())
+            : "Redo";
+        if (redoBtn->text.size() > 20)
+        {
+            redoBtn->text = redoBtn->text.substr(0, 17) + "...";
+        }
+    }
+
+    entry->widget->markLayoutDirty();
+    m_renderDirty = true;
+}
+
+void UIManager::showSaveProgressModal(size_t total)
+{
+    m_saveProgressTotal = total;
+    m_saveProgressSaved = 0;
+    m_saveProgressVisible = true;
+
+    if (!m_saveProgressWidget)
+    {
+        m_saveProgressWidget = std::make_shared<Widget>();
+        m_saveProgressWidget->setName("SaveProgress");
+        m_saveProgressWidget->setAnchor(WidgetAnchor::TopLeft);
+        m_saveProgressWidget->setFillX(true);
+        m_saveProgressWidget->setFillY(true);
+        m_saveProgressWidget->setZOrder(10001);
+    }
+
+    WidgetElement overlay{};
+    overlay.id = "SaveProgress.Overlay";
+    overlay.type = WidgetElementType::Panel;
+    overlay.from = Vec2{ 0.0f, 0.0f };
+    overlay.to = Vec2{ 1.0f, 1.0f };
+    overlay.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.4f };
+    overlay.isHitTestable = true;
+    overlay.runtimeOnly = true;
+
+    WidgetElement panel{};
+    panel.id = "SaveProgress.Panel";
+    panel.type = WidgetElementType::StackPanel;
+    panel.from = Vec2{ 0.3f, 0.38f };
+    panel.to = Vec2{ 0.7f, 0.62f };
+    panel.padding = Vec2{ 20.0f, 14.0f };
+    panel.orientation = StackOrientation::Vertical;
+    panel.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.96f };
+    panel.runtimeOnly = true;
+
+    WidgetElement title{};
+    title.id = "SaveProgress.Title";
+    title.type = WidgetElementType::Text;
+    title.text = "Saving...";
+    title.font = "default.ttf";
+    title.fontSize = 18.0f;
+    title.textAlignH = TextAlignH::Center;
+    title.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+    title.fillX = true;
+    title.minSize = Vec2{ 0.0f, 24.0f };
+    title.runtimeOnly = true;
+
+    WidgetElement counter{};
+    counter.id = "SaveProgress.Counter";
+    counter.type = WidgetElementType::Text;
+    counter.text = "0 / " + std::to_string(total);
+    counter.font = "default.ttf";
+    counter.fontSize = 14.0f;
+    counter.textAlignH = TextAlignH::Center;
+    counter.textColor = Vec4{ 0.8f, 0.85f, 0.9f, 1.0f };
+    counter.fillX = true;
+    counter.minSize = Vec2{ 0.0f, 20.0f };
+    counter.runtimeOnly = true;
+
+    WidgetElement progress{};
+    progress.id = "SaveProgress.Bar";
+    progress.type = WidgetElementType::ProgressBar;
+    progress.fillX = true;
+    progress.minSize = Vec2{ 0.0f, 18.0f };
+    progress.minValue = 0.0f;
+    progress.maxValue = static_cast<float>(total);
+    progress.valueFloat = 0.0f;
+    progress.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.9f };
+    progress.fillColor = Vec4{ 0.2f, 0.55f, 0.2f, 0.95f };
+    progress.runtimeOnly = true;
+
+    panel.children.push_back(std::move(title));
+    panel.children.push_back(std::move(counter));
+    panel.children.push_back(std::move(progress));
+
+    std::vector<WidgetElement> elements;
+    elements.push_back(std::move(overlay));
+    elements.push_back(std::move(panel));
+    m_saveProgressWidget->setElements(std::move(elements));
+    m_saveProgressWidget->markLayoutDirty();
+
+    registerWidget("SaveProgress", m_saveProgressWidget);
+}
+
+void UIManager::updateSaveProgress(size_t saved, size_t total)
+{
+    m_saveProgressSaved = saved;
+    m_saveProgressTotal = total;
+
+    if (!m_saveProgressWidget)
+    {
+        return;
+    }
+
+    auto& elements = m_saveProgressWidget->getElementsMutable();
+    WidgetElement* counter = FindElementById(elements, "SaveProgress.Counter");
+    if (counter)
+    {
+        counter->text = std::to_string(saved) + " / " + std::to_string(total);
+    }
+
+    WidgetElement* bar = FindElementById(elements, "SaveProgress.Bar");
+    if (bar)
+    {
+        bar->maxValue = static_cast<float>(total);
+        bar->valueFloat = static_cast<float>(saved);
+    }
+
+    m_saveProgressWidget->markLayoutDirty();
+    m_renderDirty = true;
+}
+
+void UIManager::closeSaveProgressModal(bool success)
+{
+    m_saveProgressVisible = false;
+    unregisterWidget("SaveProgress");
+
+    if (success)
+    {
+        showToastMessage("All assets saved successfully.", 3.0f);
+    }
+    else
+    {
+        showToastMessage("Some assets failed to save.", 4.0f);
+    }
+
+    refreshStatusBar();
 }

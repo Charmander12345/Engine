@@ -91,10 +91,14 @@ public:
 	void freeRawImageData(unsigned char* data);
 
 	// Asset Registry
-    bool doesAssetExist(const std::string& pathOrName) const;
+	bool doesAssetExist(const std::string& pathOrName) const;
 	std::vector<std::shared_ptr<AssetData>> getAssetsByType(AssetType type) const;
 	std::shared_ptr<AssetData> getLoadedAssetByID(unsigned int id) const;
 	bool isAssetLoaded(const std::string& path) const;
+	size_t getUnsavedAssetCount() const;
+
+	// Async save with per-asset progress callback (called from worker thread).
+	void saveAllAssetsAsync(std::function<void(size_t saved, size_t total)> onProgress = {}, std::function<void(bool success)> onFinished = {});
 
 	//Project management
 	bool loadProject(const std::string& projectPath, SyncState syncState = Sync);
@@ -134,6 +138,7 @@ private:
 	SaveResult saveObject2DAsset(const std::shared_ptr<AssetData>& object2D);
 	SaveResult saveObject3DAsset(const std::shared_ptr<AssetData>& object3D);
 	SaveResult saveLevelAsset(const std::unique_ptr<EngineLevel>& level);
+	SaveResult saveLevelAsset(EngineLevel* level);
 	SaveResult saveWidgetAsset(const std::shared_ptr<AssetData>& widget);
 
 	//Loading specific assettypes

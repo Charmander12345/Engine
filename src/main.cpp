@@ -20,6 +20,7 @@
 #include "Core/ECS/ECS.h"
 #include "Core/MathTypes.h"
 #include "Core/AudioManager.h"
+#include "Core/UndoRedoManager.h"
 #include "Scripting/PythonScripting.h"
 
 using namespace std;
@@ -499,6 +500,24 @@ int main()
             }
         }
 
+        // StatusBar must be registered BEFORE ContentBrowser so it docks at the
+        // very bottom (first BottomLeft entry consumes the lowest strip).
+        const std::string statusBarPath = assetManager.getEditorWidgetPath("StatusBar.asset");
+        if (!statusBarPath.empty())
+        {
+            const int widgetId = assetManager.loadAsset(statusBarPath, AssetType::Widget, AssetManager::Sync);
+            if (widgetId != 0)
+            {
+                if (auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(widgetId)))
+                {
+                    if (auto widget = glRenderer->createWidgetFromAsset(asset))
+                    {
+                        glRenderer->getUIManager().registerWidget("StatusBar", widget);
+                    }
+                }
+            }
+        }
+
         const std::string contentBrowserPath = assetManager.getEditorWidgetPath("ContentBrowser.asset");
         logTimed(Logger::Category::UI, "[ContentBrowser] main: resolved path='" + contentBrowserPath + "'", Logger::LogLevel::INFO);
         if (!contentBrowserPath.empty())
@@ -535,6 +554,64 @@ int main()
         {
             logTimed(Logger::Category::UI, "[ContentBrowser] main: getEditorWidgetPath returned empty path", Logger::LogLevel::WARNING);
         }
+
+        // --- UndoRedo onChange → mark level dirty + refresh StatusBar ---
+        UndoRedoManager::Instance().setOnChanged([&glRenderer]()
+            {
+                auto& diag = DiagnosticsManager::Instance();
+                auto* level = diag.getActiveLevelSoft();
+                if (level)
+                {
+                    level->setIsSaved(false);
+                }
+                if (glRenderer)
+                {
+                    glRenderer->getUIManager().refreshStatusBar();
+                }
+            });
+
+        glRenderer->getUIManager().registerClickEvent("StatusBar.Undo", [&glRenderer]()
+            {
+                auto& undo = UndoRedoManager::Instance();
+                if (undo.canUndo())
+                {
+                    undo.undo();
+                    glRenderer->getUIManager().markAllWidgetsDirty();
+                }
+            });
+
+        glRenderer->getUIManager().registerClickEvent("StatusBar.Redo", [&glRenderer]()
+            {
+                auto& undo = UndoRedoManager::Instance();
+                if (undo.canRedo())
+                {
+                    undo.redo();
+                    glRenderer->getUIManager().markAllWidgetsDirty();
+                }
+            });
+
+        glRenderer->getUIManager().registerClickEvent("StatusBar.Save", [&glRenderer]()
+            {
+                auto& am = AssetManager::Instance();
+                const size_t total = am.getUnsavedAssetCount();
+                if (total == 0)
+                {
+                    glRenderer->getUIManager().showToastMessage("Nothing to save.", 2.0f);
+                    return;
+                }
+                auto& uiMgr = glRenderer->getUIManager();
+                uiMgr.showSaveProgressModal(total);
+                am.saveAllAssetsAsync(
+                    [&uiMgr](size_t saved, size_t total)
+                    {
+                        uiMgr.updateSaveProgress(saved, total);
+                    },
+                    [&uiMgr](bool success)
+                    {
+                        UndoRedoManager::Instance().clear();
+                        uiMgr.closeSaveProgressModal(success);
+                    });
+            });
 
     }
 
@@ -891,6 +968,51 @@ int main()
             }
             else if (event.type == SDL_EVENT_KEY_DOWN)
             {
+                // Ctrl+Z = Undo, Ctrl+Y = Redo
+                if (glRenderer && !diagnostics.isPIEActive() && (event.key.mod & SDL_KMOD_CTRL))
+                {
+                    if (event.key.key == SDLK_Z)
+                    {
+                        auto& undo = UndoRedoManager::Instance();
+                        if (undo.canUndo())
+                        {
+                            undo.undo();
+                            glRenderer->getUIManager().markAllWidgetsDirty();
+                        }
+                        continue;
+                    }
+                    if (event.key.key == SDLK_Y)
+                    {
+                        auto& undo = UndoRedoManager::Instance();
+                        if (undo.canRedo())
+                        {
+                            undo.redo();
+                            glRenderer->getUIManager().markAllWidgetsDirty();
+                        }
+                        continue;
+                    }
+                    if (event.key.key == SDLK_S)
+                    {
+                        auto& am = AssetManager::Instance();
+                        const size_t total = am.getUnsavedAssetCount();
+                        if (total > 0)
+                        {
+                            auto& uiMgr = glRenderer->getUIManager();
+                            uiMgr.showSaveProgressModal(total);
+                            am.saveAllAssetsAsync(
+                                [&uiMgr = glRenderer->getUIManager()](size_t saved, size_t t) { uiMgr.updateSaveProgress(saved, t); },
+                                [&uiMgr = glRenderer->getUIManager()](bool ok) {
+                                    UndoRedoManager::Instance().clear();
+                                    uiMgr.closeSaveProgressModal(ok);
+                                });
+                        }
+                        else
+                        {
+                            glRenderer->getUIManager().showToastMessage("Nothing to save.", 2.0f);
+                        }
+                        continue;
+                    }
+                }
                 if (glRenderer)
                 {
                     auto& uiManager = glRenderer->getUIManager();

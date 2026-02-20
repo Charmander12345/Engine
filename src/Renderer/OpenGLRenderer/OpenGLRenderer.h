@@ -325,6 +325,7 @@ private:
     float m_gizmoDragRotStart{ 0.0f };
     float m_gizmoDragScaleStart{ 1.0f };
     glm::vec2 m_gizmoDragStartScreen{ 0.0f };   // screen position at drag start
+    ECS::TransformComponent m_gizmoDragOldTransform{};  // full transform snapshot for undo
 
     // Editor tab system
     bool ensureTabFbo(EditorTab& tab, int width, int height);

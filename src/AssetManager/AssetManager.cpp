@@ -1057,7 +1057,7 @@ void AssetManager::ensureEditorWidgetsCreated()
         listPanel["id"] = "Outliner.EntityList";
         listPanel["type"] = "StackPanel";
         listPanel["from"] = json{ {"x", 0.05f}, {"y", 0.12f} };
-        listPanel["to"] = json{ {"x", 0.95f}, {"y", 0.98f} };
+        listPanel["to"] = json{ {"x", 0.95f}, {"y", 0.44f} };
         listPanel["orientation"] = "Vertical";
         listPanel["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
         listPanel["fillX"] = true;
@@ -1379,6 +1379,159 @@ void AssetManager::ensureEditorWidgetsCreated()
             else
             {
                 logger.log(Logger::Category::AssetManagement, "[ContentBrowser] Failed to open editor widget asset for writing: " + abs.string(), Logger::LogLevel::ERROR);
+            }
+        }
+    }
+
+    const std::string statusBarWidgetRel = "StatusBar.asset";
+    {
+        json widgetJson = json::object();
+        widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 32.0f} };
+        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        widgetJson["m_anchor"] = "BottomLeft";
+        widgetJson["m_fillX"] = true;
+        widgetJson["m_zOrder"] = 3;
+
+        json elements = json::array();
+
+        json bg = json::object();
+        bg["id"] = "StatusBar.Background";
+        bg["type"] = "Panel";
+        bg["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        bg["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        bg["fillX"] = true;
+        bg["fillY"] = true;
+        bg["color"] = json{ {"x", 0.1f}, {"y", 0.1f}, {"z", 0.13f}, {"w", 0.95f} };
+        bg["shaderVertex"] = "panel_vertex.glsl";
+        bg["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(bg);
+
+        json row = json::object();
+        row["id"] = "StatusBar.Row";
+        row["type"] = "StackPanel";
+        row["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        row["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        row["orientation"] = "Horizontal";
+        row["fillX"] = true;
+        row["fillY"] = true;
+        row["padding"] = json{ {"x", 4.0f}, {"y", 2.0f} };
+        row["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+
+        json undoBtn = json::object();
+        undoBtn["id"] = "StatusBar.Undo";
+        undoBtn["type"] = "Button";
+        undoBtn["text"] = "Undo";
+        undoBtn["font"] = "default.ttf";
+        undoBtn["fontSize"] = 12.0f;
+        undoBtn["textAlignH"] = "Center";
+        undoBtn["textAlignV"] = "Center";
+        undoBtn["padding"] = json{ {"x", 8.0f}, {"y", 4.0f} };
+        undoBtn["minSize"] = json{ {"x", 60.0f}, {"y", 26.0f} };
+        undoBtn["color"] = json{ {"x", 0.16f}, {"y", 0.16f}, {"z", 0.2f}, {"w", 0.95f} };
+        undoBtn["hoverColor"] = json{ {"x", 0.24f}, {"y", 0.24f}, {"z", 0.3f}, {"w", 0.98f} };
+        undoBtn["textColor"] = json{ {"x", 0.7f}, {"y", 0.7f}, {"z", 0.75f}, {"w", 1.0f} };
+        undoBtn["shaderVertex"] = "button_vertex.glsl";
+        undoBtn["shaderFragment"] = "button_fragment.glsl";
+        undoBtn["isHitTestable"] = true;
+        undoBtn["clickEvent"] = "StatusBar.Undo";
+
+        json redoBtn = json::object();
+        redoBtn["id"] = "StatusBar.Redo";
+        redoBtn["type"] = "Button";
+        redoBtn["text"] = "Redo";
+        redoBtn["font"] = "default.ttf";
+        redoBtn["fontSize"] = 12.0f;
+        redoBtn["textAlignH"] = "Center";
+        redoBtn["textAlignV"] = "Center";
+        redoBtn["padding"] = json{ {"x", 8.0f}, {"y", 4.0f} };
+        redoBtn["minSize"] = json{ {"x", 60.0f}, {"y", 26.0f} };
+        redoBtn["color"] = json{ {"x", 0.16f}, {"y", 0.16f}, {"z", 0.2f}, {"w", 0.95f} };
+        redoBtn["hoverColor"] = json{ {"x", 0.24f}, {"y", 0.24f}, {"z", 0.3f}, {"w", 0.98f} };
+        redoBtn["textColor"] = json{ {"x", 0.7f}, {"y", 0.7f}, {"z", 0.75f}, {"w", 1.0f} };
+        redoBtn["shaderVertex"] = "button_vertex.glsl";
+        redoBtn["shaderFragment"] = "button_fragment.glsl";
+        redoBtn["isHitTestable"] = true;
+        redoBtn["clickEvent"] = "StatusBar.Redo";
+
+        json spacer = json::object();
+        spacer["id"] = "StatusBar.Spacer";
+        spacer["type"] = "Panel";
+        spacer["fillX"] = true;
+        spacer["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+
+        json dirtyLabel = json::object();
+        dirtyLabel["id"] = "StatusBar.DirtyLabel";
+        dirtyLabel["type"] = "Text";
+        dirtyLabel["text"] = "No unsaved changes";
+        dirtyLabel["font"] = "default.ttf";
+        dirtyLabel["fontSize"] = 12.0f;
+        dirtyLabel["textAlignH"] = "Center";
+        dirtyLabel["textAlignV"] = "Center";
+        dirtyLabel["textColor"] = json{ {"x", 0.6f}, {"y", 0.6f}, {"z", 0.65f}, {"w", 1.0f} };
+        dirtyLabel["minSize"] = json{ {"x", 0.0f}, {"y", 26.0f} };
+        dirtyLabel["padding"] = json{ {"x", 8.0f}, {"y", 0.0f} };
+
+        json saveBtn = json::object();
+        saveBtn["id"] = "StatusBar.Save";
+        saveBtn["type"] = "Button";
+        saveBtn["text"] = "Save All";
+        saveBtn["font"] = "default.ttf";
+        saveBtn["fontSize"] = 12.0f;
+        saveBtn["textAlignH"] = "Center";
+        saveBtn["textAlignV"] = "Center";
+        saveBtn["padding"] = json{ {"x", 10.0f}, {"y", 4.0f} };
+        saveBtn["minSize"] = json{ {"x", 80.0f}, {"y", 26.0f} };
+        saveBtn["color"] = json{ {"x", 0.15f}, {"y", 0.35f}, {"z", 0.15f}, {"w", 0.95f} };
+        saveBtn["hoverColor"] = json{ {"x", 0.2f}, {"y", 0.5f}, {"z", 0.2f}, {"w", 0.98f} };
+        saveBtn["textColor"] = json{ {"x", 0.95f}, {"y", 0.95f}, {"z", 0.95f}, {"w", 1.0f} };
+        saveBtn["shaderVertex"] = "button_vertex.glsl";
+        saveBtn["shaderFragment"] = "button_fragment.glsl";
+        saveBtn["isHitTestable"] = true;
+        saveBtn["clickEvent"] = "StatusBar.Save";
+
+        row["children"] = json::array({ undoBtn, redoBtn, spacer, dirtyLabel, saveBtn });
+        elements.push_back(row);
+
+        widgetJson["m_elements"] = elements;
+
+        auto widget = std::make_shared<AssetData>();
+        widget->setName("StatusBar");
+        widget->setData(std::move(widgetJson));
+
+        const fs::path widgetsRoot = getEditorWidgetsRootPath();
+        const fs::path abs = widgetsRoot / fs::path(statusBarWidgetRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+            if (existsAndOk)
+            {
+                std::ifstream in(abs, std::ios::in | std::ios::binary);
+                if (in.is_open())
+                {
+                    json fileJson = json::parse(in, nullptr, false);
+                    existsAndOk = !fileJson.is_discarded() && fileJson.is_object() && fileJson.contains("data");
+                    if (existsAndOk)
+                    {
+                        const auto& data = fileJson.at("data");
+                        existsAndOk = data.is_object() && data.contains("m_elements");
+                    }
+                }
+            }
+        }
+        if (!existsAndOk)
+        {
+            std::ofstream out(abs, std::ios::out | std::ios::trunc);
+            if (out.is_open())
+            {
+                json fileJson = json::object();
+                fileJson["magic"] = 0x41535453;
+                fileJson["version"] = 2;
+                fileJson["type"] = static_cast<int>(AssetType::Widget);
+                fileJson["name"] = widget->getName();
+                fileJson["data"] = widget->getData();
+                out << fileJson.dump(4);
             }
         }
     }
@@ -2009,13 +2162,18 @@ void AssetManager::ensureDefaultAssetsCreated()
             {
                 logger.log(Logger::Category::AssetManagement, "Failed to save default level asset.", Logger::LogLevel::ERROR);
             }
+            diagnostics.setActiveLevel(std::move(defaultLevel));
         }
         else
         {
-            logger.log(Logger::Category::AssetManagement, "Default level OK: " + defaultLevelRel, Logger::LogLevel::INFO);
+            logger.log(Logger::Category::AssetManagement, "Default level OK, loading from disk: " + defaultLevelRel, Logger::LogLevel::INFO);
+            auto loadResult = loadLevelAsset(abs.string());
+            if (!loadResult.success)
+            {
+                logger.log(Logger::Category::AssetManagement, "Failed to load existing level from disk, falling back to defaults: " + loadResult.errorMessage, Logger::LogLevel::WARNING);
+                diagnostics.setActiveLevel(std::move(defaultLevel));
+            }
         }
-
-        diagnostics.setActiveLevel(std::move(defaultLevel));
         diagnostics.setScenePrepared(false);
     }
 
@@ -2326,11 +2484,10 @@ bool AssetManager::saveAllAssets(SyncState syncState)
         ++savedCount;
     }
 
-	auto level = diagnostics.getActiveLevel();
+	auto* level = diagnostics.getActiveLevelSoft();
 	if (level)
 	{
 		logger.log(Logger::Category::AssetManagement, "Saving active level...", Logger::LogLevel::INFO);
-        Asset asset;
 
 		if (!saveLevelAsset(level).success)
 		{
@@ -2348,6 +2505,102 @@ bool AssetManager::saveAllAssets(SyncState syncState)
     diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingAsset, false);
     logger.log(Logger::Category::AssetManagement, "saveAllAssets(): end", Logger::LogLevel::INFO);
     return true;
+}
+
+size_t AssetManager::getUnsavedAssetCount() const
+{
+    std::lock_guard<std::mutex> lock(m_stateMutex);
+    size_t count = 0;
+    for (const auto& res : m_loadedAssets)
+    {
+        if (res.first != 0 && res.second && !res.second->getIsSaved())
+        {
+            ++count;
+        }
+    }
+    auto& diagnostics = DiagnosticsManager::Instance();
+    auto* level = diagnostics.getActiveLevelSoft();
+    if (level && !level->getIsSaved())
+    {
+        ++count;
+    }
+    return count;
+}
+
+void AssetManager::saveAllAssetsAsync(std::function<void(size_t saved, size_t total)> onProgress, std::function<void(bool success)> onFinished)
+{
+    enqueueJob([this, onProgress = std::move(onProgress), onFinished = std::move(onFinished)]()
+    {
+        auto& logger = Logger::Instance();
+        auto& diagnostics = DiagnosticsManager::Instance();
+        diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingAsset, true);
+
+        std::vector<std::pair<unsigned int, AssetType>> toSave;
+        {
+            std::lock_guard<std::mutex> lock(m_stateMutex);
+            for (const auto& res : m_loadedAssets)
+            {
+                if (res.first != 0 && res.second && !res.second->getIsSaved())
+                {
+                    toSave.push_back({ res.first, res.second->getAssetType() });
+                }
+            }
+        }
+
+        bool hasLevel = false;
+        {
+            auto* level = diagnostics.getActiveLevelSoft();
+            if (level && !level->getIsSaved())
+            {
+                hasLevel = true;
+            }
+        }
+
+        const size_t total = toSave.size() + (hasLevel ? 1 : 0);
+        size_t saved = 0;
+        bool allOk = true;
+
+        for (const auto& [id, type] : toSave)
+        {
+            Asset asset;
+            asset.ID = id;
+            asset.type = type;
+            if (!saveAsset(asset))
+            {
+                logger.log(Logger::Category::AssetManagement, "saveAllAssetsAsync: failed asset ID=" + std::to_string(id), Logger::LogLevel::ERROR);
+                allOk = false;
+            }
+            ++saved;
+            if (onProgress)
+            {
+                onProgress(saved, total);
+            }
+        }
+
+        if (hasLevel)
+        {
+            auto* level = diagnostics.getActiveLevelSoft();
+            if (level)
+            {
+                if (!saveLevelAsset(level).success)
+                {
+                    logger.log(Logger::Category::AssetManagement, "saveAllAssetsAsync: failed to save active level", Logger::LogLevel::ERROR);
+                    allOk = false;
+                }
+            }
+            ++saved;
+            if (onProgress)
+            {
+                onProgress(saved, total);
+            }
+        }
+
+        diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingAsset, false);
+        if (onFinished)
+        {
+            onFinished(allOk);
+        }
+    });
 }
 
 std::string AssetManager::getAbsoluteContentPath(const std::string& relativeToContent) const
@@ -3754,12 +4007,26 @@ AssetManager::LoadResult AssetManager::loadLevelAsset(const std::string& path)
 
 	auto level = std::make_unique<EngineLevel>();
 	level->setName(name);
-	level->setPath(path);
 	level->setAssetType(headerType);
 	level->setIsSaved(true);
 	level->setLevelData(result.j);
 
+	// Store a Content-relative path so saveLevelAsset can reconstruct the
+	// absolute path from projectPath / "Content" / relPath.
 	auto& diagnostics = DiagnosticsManager::Instance();
+	const fs::path contentRoot = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+	fs::path absLevel = fs::absolute(fs::path(path));
+	std::error_code relEc;
+	fs::path relPath = fs::relative(absLevel, contentRoot, relEc);
+	if (relEc || relPath.empty() || relPath.string().find("..") == 0)
+	{
+		level->setPath(path);
+	}
+	else
+	{
+		level->setPath(relPath.generic_string());
+	}
+
 	diagnostics.setActiveLevel(std::move(level));
 	diagnostics.setScenePrepared(false);
 	result.success = true;
@@ -4148,6 +4415,11 @@ AssetManager::SaveResult AssetManager::saveObject3DAsset(const std::shared_ptr<A
 
 AssetManager::SaveResult AssetManager::saveLevelAsset(const std::unique_ptr<EngineLevel>& level)
 {
+	return saveLevelAsset(level.get());
+}
+
+AssetManager::SaveResult AssetManager::saveLevelAsset(EngineLevel* level)
+{
 	SaveResult result;
 	if (!level)
 	{
@@ -4180,14 +4452,14 @@ AssetManager::SaveResult AssetManager::saveLevelAsset(const std::unique_ptr<Engi
 	std::error_code ec;
 	fs::create_directories(absPath.parent_path(), ec);
 
-    std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+	std::ofstream out(absPath, std::ios::out | std::ios::trunc);
 	if (!out.is_open())
 	{
 		result.errorMessage = "Failed to open level asset file for writing.";
 		return result;
 	}
 
-    json levelJson;
+	json levelJson;
 	std::vector<std::string> objectPaths;
 	for (const auto& objInstance : level->getWorldObjects())
 	{
@@ -4217,25 +4489,25 @@ AssetManager::SaveResult AssetManager::saveLevelAsset(const std::unique_ptr<Engi
 
 	levelJson["Objects"] = objectPaths;
 	levelJson["Groups"] = groupsJson;
-    levelJson["Entities"] = level->serializeEcsEntities();
-    if (!level->getLevelScriptPath().empty())
-    {
-        levelJson["Script"] = level->getLevelScriptPath();
-    }
+	levelJson["Entities"] = level->serializeEcsEntities();
+	if (!level->getLevelScriptPath().empty())
+	{
+		levelJson["Script"] = level->getLevelScriptPath();
+	}
 
-    json fileJson = json::object();
-    fileJson["magic"] = 0x41535453;
-    fileJson["version"] = 2;
-    fileJson["type"] = static_cast<int>(AssetType::Level);
-    fileJson["name"] = name;
-    fileJson["data"] = levelJson;
+	json fileJson = json::object();
+	fileJson["magic"] = 0x41535453;
+	fileJson["version"] = 2;
+	fileJson["type"] = static_cast<int>(AssetType::Level);
+	fileJson["name"] = name;
+	fileJson["data"] = levelJson;
 
-    out << fileJson.dump(4);
-    if (!out.good())
-    {
-        result.errorMessage = "Failed to write level asset data.";
-        return result;
-    }
+	out << fileJson.dump(4);
+	if (!out.good())
+	{
+		result.errorMessage = "Failed to write level asset data.";
+		return result;
+	}
 
 	level->setIsSaved(true);
 	result.success = true;

@@ -49,6 +49,7 @@ public:
     bool handleTextInput(const std::string& text);
     bool handleKeyDown(int key);
     void setMousePosition(const Vec2& screenPos);
+    const Vec2& getMousePosition() const { return m_mousePosition; }
     bool isPointerOverUI(const Vec2& screenPos) const;
     bool hasClickEvent(const std::string& eventId) const;
     void registerClickEvent(const std::string& eventId, std::function<void()> callback);
@@ -130,9 +131,20 @@ private:
 	// Hover tracking (avoids full tree walk per mouse move)
 	WidgetElement* m_lastHoveredElement{ nullptr };
 
+	// Save progress modal state
+	std::shared_ptr<Widget> m_saveProgressWidget;
+	bool m_saveProgressVisible{ false };
+	size_t m_saveProgressTotal{ 0 };
+	size_t m_saveProgressSaved{ 0 };
+
 public:
 	void refreshWorldOutliner();
 	void refreshContentBrowser(const std::string& subfolder = "");
 	void selectEntity(unsigned int entity);
 	unsigned int getSelectedEntity() const { return m_outlinerSelectedEntity; }
+
+	void refreshStatusBar();
+	void showSaveProgressModal(size_t total);
+	void updateSaveProgress(size_t saved, size_t total);
+	void closeSaveProgressModal(bool success);
 };

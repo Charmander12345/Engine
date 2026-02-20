@@ -498,6 +498,7 @@
 | WorldOutliner   | ✅     |
 | EntityDetails   | ✅     |
 | ContentBrowser  | ✅     |
+| StatusBar (Undo/Redo + Dirty-Zähler + Save All + Progress-Modal) | ✅ |
 | Material-Editor | ❌     |
 | Shader-Editor   | ❌     |
 | Console / Log-Viewer | ❌ |
@@ -565,6 +566,28 @@
   - Gizmo-Drag hat Vorrang vor Entity-Picking (Klick auf Achse startet Drag, nicht neuen Pick)
   - Eigener GLSL-Shader (Vertex + Fragment) mit dynamischem VBO für Linien-Geometrie
 - Weitere Editor-Tabs für zusätzliche Editoren noch nicht implementiert
+- **StatusBar (Fußleiste):**
+  - Horizontales Widget am unteren Fensterrand (32px, z-order=3, BottomLeft, fillX)
+  - Undo-Button + Redo-Button links, Dirty-Asset-Zähler Mitte, Save-All-Button rechts
+  - Dirty-Label zeigt Anzahl ungespeicherter Assets (gelb wenn >0, grau wenn 0)
+  - Undo/Redo-Buttons zeigen Beschreibung der letzten Aktion, ausgegraut wenn nicht verfügbar
+  - Save-All-Button startet asynchrones Speichern über `AssetManager::saveAllAssetsAsync()`
+  - Save-Progress-Modal (z-order=10001): Overlay mit Titel, Zähler, ProgressBar – wird per Callback aktualisiert
+  - Nach Abschluss: Toast-Nachricht ("All assets saved successfully." / "Some assets failed to save.")
+- **Undo/Redo-System:**
+  - `UndoRedoManager`-Singleton (`src/Core/UndoRedoManager.h/.cpp`)
+  - Command-Pattern: Jeder Command hat `execute()`, `undo()`, `description`
+  - `pushCommand()` für bereits angewendete Aktionen (old/new State in Lambdas), `executeCommand()` als Legacy-Helper
+  - Separater Undo-Stack und Redo-Stack (max. 100 Einträge)
+  - `onChanged`-Callback: Feuert nach jedem push/undo/redo → markiert aktives Level als dirty, refresht StatusBar
+  - `clear()` feuert NICHT `onChanged` (nach Speichern soll Level nicht erneut dirty werden)
+  - Gizmo-Integration: `beginGizmoDrag` snapshoted die alte TransformComponent, `endGizmoDrag` pusht Command mit old/new Transform
+  - Tastenkürzel: Ctrl+Z (Undo), Ctrl+Y (Redo), Ctrl+S (Save All)
+  - StatusBar-Buttons rufen `undo()` / `redo()` auf
+  - Undo-History wird beim Speichern gecleared (`UndoRedoManager::clear()`)
+  - Level-Save: `saveLevelAsset()` hat Raw-Pointer-Überladung (`EngineLevel*`), speichert das echte Level-Objekt (keine Kopie)
+  - Level-Load: `ensureDefaultAssetsCreated` lädt bei vorhandener Level-Datei die gespeicherten Daten von Disk (via `loadLevelAsset`), statt immer die hartkodierten Defaults zu verwenden
+  - `loadLevelAsset` speichert Content-relativen Pfad, damit `saveLevelAsset` den korrekten absoluten Pfad rekonstruieren kann
 
 ---
 
@@ -652,7 +675,7 @@ Große Feature-Blöcke, die noch nicht existieren:
 | **Post-Processing**              | Mittel    | Bloom, SSAO, HDR, Tonemapping, Anti-Aliasing                                |
 | **Skeletal Animation**           | Mittel    | Bone-System, Skinning, Animation-Blending                                    |
 | **Drag & Drop (Editor)**        | Mittel    | Assets in Szene ziehen, Panels verschieben                                    |
-| **Undo/Redo**                    | Mittel    | Command-Pattern für Editor-Aktionen                                           |
+| **Undo/Redo**                    | ✅     | Command-Pattern für Editor-Aktionen (UndoRedoManager-Singleton, Ctrl+Z/Y, StatusBar-Buttons) |
 | **Editor-Gizmos**               | ✅     | Translate/Rotate/Scale-Gizmos für Entity-Manipulation (W/E/R Shortcuts)      |
 | **Cubemap / Skybox**            | Mittel    | Umgebungstexturen für Himmel                                                  |
 | **Audio-Formate (OGG/MP3)**     | Niedrig   | Weitere Audio-Formate unterstützen                                           |

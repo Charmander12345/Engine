@@ -5,6 +5,8 @@ add_library(Core SHARED
     "EngineLevel.h"
     "AudioManager.cpp"
     "AudioManager.h"
+    "UndoRedoManager.cpp"
+    "UndoRedoManager.h"
     "../Renderer/Texture.cpp"
     "../Renderer/Texture.h"
     "../Renderer/Material.h"
