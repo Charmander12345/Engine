@@ -702,6 +702,12 @@ int main()
                     auto& uiManager = glRenderer->getUIManager();
                     uiManager.setMousePosition(mousePosPixels);
                     isOverUI = uiManager.isPointerOverUI(mousePosPixels);
+
+                    // Update gizmo drag if active
+                    if (glRenderer->isGizmoDragging())
+                    {
+                        glRenderer->updateGizmoDrag(static_cast<int>(event.motion.x), static_cast<int>(event.motion.y));
+                    }
                 }
             }
 
@@ -721,8 +727,20 @@ int main()
                     }
                     if (!isOverUI)
                     {
-                        glRenderer->requestPick(static_cast<int>(event.button.x), static_cast<int>(event.button.y));
+                        // Try gizmo interaction first; only pick entity if gizmo not hit
+                        if (!glRenderer->beginGizmoDrag(static_cast<int>(event.button.x), static_cast<int>(event.button.y)))
+                        {
+                            glRenderer->requestPick(static_cast<int>(event.button.x), static_cast<int>(event.button.y));
+                        }
                     }
+                }
+            }
+
+            if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT)
+            {
+                if (glRenderer && glRenderer->isGizmoDragging())
+                {
+                    glRenderer->endGizmoDrag();
                 }
             }
 
@@ -841,6 +859,25 @@ int main()
                 {
                     stopPIE();
                     continue;
+                }
+                // Gizmo mode shortcuts (W/E/R) – only in editor mode
+                if (!diagnostics.isPIEActive() && glRenderer)
+                {
+                    if (event.key.key == SDLK_W)
+                    {
+                        glRenderer->setGizmoMode(OpenGLRenderer::GizmoMode::Translate);
+                        continue;
+                    }
+                    if (event.key.key == SDLK_E)
+                    {
+                        glRenderer->setGizmoMode(OpenGLRenderer::GizmoMode::Rotate);
+                        continue;
+                    }
+                    if (event.key.key == SDLK_R)
+                    {
+                        glRenderer->setGizmoMode(OpenGLRenderer::GizmoMode::Scale);
+                        continue;
+                    }
                 }
                 diagnostics.dispatchKeyUp(event.key.key);
                 if (diagnostics.isPIEActive())

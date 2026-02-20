@@ -552,6 +552,18 @@
   - `hitTest`: Keine temporäre Vektor-Allokation mehr, iteriert gecachte Liste direkt rückwärts
   - `drawUIPanel`/`drawUIImage`: Uniform-Locations pro Shader-Programm gecacht (eliminiert ~13 `glGetUniformLocation`-Aufrufe pro Draw)
   - Verbose INFO-Logging aus allen Per-Frame-Hotpaths entfernt (Hover, HitTest, ContentBrowser-Builder, RegisterWidget)
+- **Editor-Gizmos (Translate/Rotate/Scale):**
+  - 3D-Gizmo-Rendering im Viewport für die ausgewählte Entity (immer im Vordergrund, keine Tiefenverdeckung)
+  - Translate-Modus: 3 Achsenpfeile (Rot=X, Grün=Y, Blau=Z) mit Pfeilspitzen
+  - Rotate-Modus: 3 Achsenkreise (Rot=X, Grün=Y, Blau=Z)
+  - Scale-Modus: 3 Achsenlinien mit Würfel-Enden
+  - Gizmo skaliert mit Kamera-Entfernung (konstante Bildschirmgröße)
+  - Achsen-Highlighting: aktive/gehoverte Achse wird gelb hervorgehoben
+  - Achsen-Picking: Screen-Space Projektion der Achsenlinien, nächste Achse innerhalb 12px Schwellenwert
+  - Maus-Drag: Pixel-Bewegung wird auf die Screen-Space-Achsenrichtung projiziert, dann in Welt-Einheiten / Grad / Skalierung umgerechnet
+  - Tastatur-Shortcuts: W=Translate, E=Rotate, R=Scale (nur im Editor-Modus, nicht während PIE)
+  - Gizmo-Drag hat Vorrang vor Entity-Picking (Klick auf Achse startet Drag, nicht neuen Pick)
+  - Eigener GLSL-Shader (Vertex + Fragment) mit dynamischem VBO für Linien-Geometrie
 - Weitere Editor-Tabs für zusätzliche Editoren noch nicht implementiert
 
 ---
@@ -641,7 +653,7 @@ Große Feature-Blöcke, die noch nicht existieren:
 | **Skeletal Animation**           | Mittel    | Bone-System, Skinning, Animation-Blending                                    |
 | **Drag & Drop (Editor)**        | Mittel    | Assets in Szene ziehen, Panels verschieben                                    |
 | **Undo/Redo**                    | Mittel    | Command-Pattern für Editor-Aktionen                                           |
-| **Editor-Gizmos**               | Mittel    | Translate/Rotate/Scale-Gizmos für Entity-Manipulation                        |
+| **Editor-Gizmos**               | ✅     | Translate/Rotate/Scale-Gizmos für Entity-Manipulation (W/E/R Shortcuts)      |
 | **Cubemap / Skybox**            | Mittel    | Umgebungstexturen für Himmel                                                  |
 | **Audio-Formate (OGG/MP3)**     | Niedrig   | Weitere Audio-Formate unterstützen                                           |
 | **3D-Audio (Positional)**       | Niedrig   | OpenAL-Listener-/Source-Positionierung nutzen                                |

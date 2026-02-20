@@ -643,7 +643,16 @@ present()
 - Selection-Outline via Edge-Detection-Shader auf Pick-Buffer
 - **Pick-Buffer wird nur bei Bedarf gerendert** (wenn Pick angefragt oder Entity selektiert)
 
-#### 9.2.6 UI-FBO-Caching
+#### 9.2.6 Editor-Gizmos
+- 3D-Gizmo-Overlay für die selektierte Entity (Translate/Rotate/Scale)
+- Eigener GLSL-Shader (`m_gizmoProgram`) + dynamisches Line-VBO (`m_gizmoVao`/`m_gizmoVbo`)
+- Gizmo-Größe skaliert mit Kamera-Entfernung (konstante Bildschirmgröße)
+- Achsen-Picking: Screen-Space-Projektion, Nearest-Distance < 12px
+- Drag-Handling: Pixel-Delta wird auf Screen-Space-Achsenrichtung projiziert → Welt-Einheiten / Grad / Skalierung
+- Tastatur: W=Translate, E=Rotate, R=Scale (nur im Editor, nicht PIE)
+- Achsen-Farben: Rot=X, Grün=Y, Blau=Z; aktive Achse gelb hervorgehoben
+
+#### 9.2.7 UI-FBO-Caching
 - UI wird in eigenes FBO gerendert
 - Nur bei `isRenderDirty()` wird das FBO neu gezeichnet
 - Sonst wird der Cache per `blitUiCache()` ins Backbuffer geblittet

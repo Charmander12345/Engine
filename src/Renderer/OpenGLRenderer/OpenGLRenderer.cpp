@@ -1048,6 +1048,9 @@ void OpenGLRenderer::renderWorld()
 		{
 			drawSelectionOutline();
 		}
+
+		// Draw gizmo overlay on top of the scene
+		renderGizmo(view, m_projectionMatrix);
 	}
 }
 
@@ -3577,4 +3580,458 @@ void OpenGLRenderer::snapshotTabBeforeSwitch(EditorTab& tab)
     glDeleteFramebuffers(1, &dstFbo);
 
     tab.hasSnapshot = true;
+}
+
+// ============================================================================
+// Editor Gizmos
+// ============================================================================
+
+bool OpenGLRenderer::ensureGizmoResources()
+{
+    if (m_gizmoProgram != 0)
+        return true;
+
+    const char* vs = R"(
+#version 330 core
+layout(location = 0) in vec3 aPos;
+uniform mat4 uMVP;
+void main() {
+    gl_Position = uMVP * vec4(aPos, 1.0);
+}
+)";
+    const char* fs = R"(
+#version 330 core
+uniform vec3 uColor;
+out vec4 FragColor;
+void main() {
+    FragColor = vec4(uColor, 1.0);
+}
+)";
+
+    GLuint vsh = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vsh, 1, &vs, nullptr);
+    glCompileShader(vsh);
+    GLuint fsh = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fsh, 1, &fs, nullptr);
+    glCompileShader(fsh);
+    m_gizmoProgram = glCreateProgram();
+    glAttachShader(m_gizmoProgram, vsh);
+    glAttachShader(m_gizmoProgram, fsh);
+    glLinkProgram(m_gizmoProgram);
+    glDeleteShader(vsh);
+    glDeleteShader(fsh);
+
+    m_gizmoLocMVP = glGetUniformLocation(m_gizmoProgram, "uMVP");
+    m_gizmoLocColor = glGetUniformLocation(m_gizmoProgram, "uColor");
+
+    glGenVertexArrays(1, &m_gizmoVao);
+    glGenBuffers(1, &m_gizmoVbo);
+    glBindVertexArray(m_gizmoVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+    glBufferData(GL_ARRAY_BUFFER, 4096 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
+    glBindVertexArray(0);
+
+    return true;
+}
+
+void OpenGLRenderer::releaseGizmoResources()
+{
+    if (m_gizmoProgram) { glDeleteProgram(m_gizmoProgram); m_gizmoProgram = 0; }
+    if (m_gizmoVbo) { glDeleteBuffers(1, &m_gizmoVbo); m_gizmoVbo = 0; }
+    if (m_gizmoVao) { glDeleteVertexArrays(1, &m_gizmoVao); m_gizmoVao = 0; }
+}
+
+static void buildCircleVerts(std::vector<float>& verts, int segments, float radius, int axis)
+{
+    for (int i = 0; i <= segments; ++i)
+    {
+        const float angle = 2.0f * 3.14159265f * static_cast<float>(i) / static_cast<float>(segments);
+        const float c = std::cos(angle) * radius;
+        const float s = std::sin(angle) * radius;
+        switch (axis)
+        {
+        case 0: verts.push_back(0.0f); verts.push_back(c);    verts.push_back(s);    break;
+        case 1: verts.push_back(c);    verts.push_back(0.0f); verts.push_back(s);    break;
+        case 2: verts.push_back(c);    verts.push_back(s);    verts.push_back(0.0f); break;
+        }
+    }
+}
+
+glm::mat3 OpenGLRenderer::getEntityRotationMatrix(const ECS::TransformComponent& tc) const
+{
+    const float rx = glm::radians(tc.rotation[0]);
+    const float ry = glm::radians(tc.rotation[1]);
+    const float rz = glm::radians(tc.rotation[2]);
+    const glm::mat4 rotMat =
+        glm::rotate(glm::mat4(1.0f), ry, glm::vec3(0, 1, 0)) *
+        glm::rotate(glm::mat4(1.0f), rx, glm::vec3(1, 0, 0)) *
+        glm::rotate(glm::mat4(1.0f), rz, glm::vec3(0, 0, 1));
+    return glm::mat3(rotMat);
+}
+
+glm::vec3 OpenGLRenderer::getGizmoWorldAxis(const ECS::TransformComponent& tc, int axisIdx) const
+{
+    const glm::mat3 rot = getEntityRotationMatrix(tc);
+    return glm::normalize(rot[axisIdx]);
+}
+
+void OpenGLRenderer::renderGizmo(const glm::mat4& view, const glm::mat4& projection)
+{
+    if (m_selectedEntity == 0 || m_gizmoMode == GizmoMode::None)
+        return;
+
+    auto& ecs = ECS::ECSManager::Instance();
+    const auto* tc = ecs.getComponent<ECS::TransformComponent>(m_selectedEntity);
+    if (!tc)
+        return;
+
+    if (!ensureGizmoResources())
+        return;
+
+    const glm::vec3 entityPos{ tc->position[0], tc->position[1], tc->position[2] };
+
+    const glm::vec4 viewPos = view * glm::vec4(entityPos, 1.0f);
+    const float dist = std::abs(viewPos.z);
+    const float gizmoScale = dist * 0.12f;
+
+    // Build model matrix: translate to entity, apply entity rotation, then scale
+    const glm::mat3 rotMat = getEntityRotationMatrix(*tc);
+    glm::mat4 model = glm::translate(glm::mat4(1.0f), entityPos);
+    model *= glm::mat4(rotMat);
+    model = model * glm::scale(glm::mat4(1.0f), glm::vec3(gizmoScale));
+    const glm::mat4 mvp = projection * view * model;
+
+    glUseProgram(m_gizmoProgram);
+    glUniformMatrix4fv(m_gizmoLocMVP, 1, GL_FALSE, &mvp[0][0]);
+    glBindVertexArray(m_gizmoVao);
+
+    glDisable(GL_DEPTH_TEST);
+    glLineWidth(2.5f);
+
+    const glm::vec3 axisColors[3] = {
+        { 1.0f, 0.2f, 0.2f },
+        { 0.2f, 1.0f, 0.2f },
+        { 0.3f, 0.3f, 1.0f }
+    };
+
+    if (m_gizmoMode == GizmoMode::Translate)
+    {
+        for (int a = 0; a < 3; ++a)
+        {
+            const bool hovered = (static_cast<int>(m_gizmoHoveredAxis) - 1 == a) ||
+                                 (static_cast<int>(m_gizmoActiveAxis) - 1 == a);
+            glm::vec3 col = hovered ? glm::vec3(1.0f, 1.0f, 0.3f) : axisColors[a];
+            glUniform3fv(m_gizmoLocColor, 1, &col[0]);
+
+            // In local space, axes are simply (1,0,0), (0,1,0), (0,0,1)
+            glm::vec3 dir(0.0f); dir[a] = 1.0f;
+            glm::vec3 up(0.0f); up[(a + 1) % 3] = 1.0f;
+            const float arrowLen = 0.15f;
+            const glm::vec3 tip = dir;
+            const glm::vec3 back = dir * (1.0f - arrowLen);
+
+            float verts[] = {
+                0.0f, 0.0f, 0.0f, dir.x, dir.y, dir.z,
+                tip.x, tip.y, tip.z, back.x + up.x * arrowLen * 0.3f, back.y + up.y * arrowLen * 0.3f, back.z + up.z * arrowLen * 0.3f,
+                tip.x, tip.y, tip.z, back.x - up.x * arrowLen * 0.3f, back.y - up.y * arrowLen * 0.3f, back.z - up.z * arrowLen * 0.3f
+            };
+
+            glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
+            glDrawArrays(GL_LINES, 0, 6);
+        }
+    }
+    else if (m_gizmoMode == GizmoMode::Rotate)
+    {
+        constexpr int segments = 48;
+        for (int a = 0; a < 3; ++a)
+        {
+            const bool hovered = (static_cast<int>(m_gizmoHoveredAxis) - 1 == a) ||
+                                 (static_cast<int>(m_gizmoActiveAxis) - 1 == a);
+            glm::vec3 col = hovered ? glm::vec3(1.0f, 1.0f, 0.3f) : axisColors[a];
+            glUniform3fv(m_gizmoLocColor, 1, &col[0]);
+
+            std::vector<float> circleVerts;
+            circleVerts.reserve((segments + 1) * 3);
+            buildCircleVerts(circleVerts, segments, 1.0f, a);
+
+            glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, circleVerts.size() * sizeof(float), circleVerts.data());
+            glDrawArrays(GL_LINE_STRIP, 0, segments + 1);
+        }
+    }
+    else if (m_gizmoMode == GizmoMode::Scale)
+    {
+        for (int a = 0; a < 3; ++a)
+        {
+            const bool hovered = (static_cast<int>(m_gizmoHoveredAxis) - 1 == a) ||
+                                 (static_cast<int>(m_gizmoActiveAxis) - 1 == a);
+            glm::vec3 col = hovered ? glm::vec3(1.0f, 1.0f, 0.3f) : axisColors[a];
+            glUniform3fv(m_gizmoLocColor, 1, &col[0]);
+
+            glm::vec3 dir(0.0f); dir[a] = 1.0f;
+            const float cubeSize = 0.06f;
+            const glm::vec3 tip = dir;
+
+            float shaft[] = { 0.0f, 0.0f, 0.0f, tip.x, tip.y, tip.z };
+            glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(shaft), shaft);
+            glDrawArrays(GL_LINES, 0, 2);
+
+            glm::vec3 u(0.0f), v(0.0f);
+            u[(a + 1) % 3] = cubeSize;
+            v[(a + 2) % 3] = cubeSize;
+            float cube[] = {
+                tip.x - u.x, tip.y - u.y, tip.z - u.z, tip.x + u.x, tip.y + u.y, tip.z + u.z,
+                tip.x - v.x, tip.y - v.y, tip.z - v.z, tip.x + v.x, tip.y + v.y, tip.z + v.z,
+            };
+            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(cube), cube);
+            glDrawArrays(GL_LINES, 0, 4);
+        }
+    }
+
+    glEnable(GL_DEPTH_TEST);
+    glLineWidth(1.0f);
+    glBindVertexArray(0);
+}
+
+// Pick gizmo axis using rotated (local-space) axes projected to screen
+OpenGLRenderer::GizmoAxis OpenGLRenderer::pickGizmoAxis(const glm::mat4& view, const glm::mat4& projection, int screenX, int screenY) const
+{
+    if (m_selectedEntity == 0 || m_gizmoMode == GizmoMode::None)
+        return GizmoAxis::None;
+
+    auto& ecs = ECS::ECSManager::Instance();
+    const auto* tc = ecs.getComponent<ECS::TransformComponent>(m_selectedEntity);
+    if (!tc)
+        return GizmoAxis::None;
+
+    const glm::vec3 entityPos{ tc->position[0], tc->position[1], tc->position[2] };
+    const glm::vec4 viewPos = view * glm::vec4(entityPos, 1.0f);
+    const float dist = std::abs(viewPos.z);
+    const float gizmoScale = dist * 0.12f;
+
+    const int w = m_cachedWindowWidth > 0 ? m_cachedWindowWidth : 1;
+    const int h = m_cachedWindowHeight > 0 ? m_cachedWindowHeight : 1;
+
+    const auto project = [&](const glm::vec3& worldPos) -> glm::vec2
+    {
+        const glm::vec4 clip = projection * view * glm::vec4(worldPos, 1.0f);
+        if (clip.w <= 0.0001f) return { -9999.0f, -9999.0f };
+        const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+        return {
+            (ndc.x * 0.5f + 0.5f) * static_cast<float>(w),
+            (1.0f - (ndc.y * 0.5f + 0.5f)) * static_cast<float>(h)
+        };
+    };
+
+    const auto distToSegment = [](glm::vec2 p, glm::vec2 a, glm::vec2 b) -> float
+    {
+        const glm::vec2 ab = b - a;
+        const float lenSq = glm::dot(ab, ab);
+        if (lenSq < 0.0001f) return glm::length(p - a);
+        const float t = glm::clamp(glm::dot(p - a, ab) / lenSq, 0.0f, 1.0f);
+        return glm::length(p - (a + ab * t));
+    };
+
+    const glm::vec2 mousePos{ static_cast<float>(screenX), static_cast<float>(screenY) };
+    const glm::vec2 origin = project(entityPos);
+
+    // Skip if entity center is behind camera
+    if (origin.x < -9000.0f) return GizmoAxis::None;
+
+    GizmoAxis best = GizmoAxis::None;
+    float bestDist = 16.0f; // pixel threshold
+
+    for (int a = 0; a < 3; ++a)
+    {
+        // Use local-space axis direction (rotated by entity rotation)
+        const glm::vec3 worldAxis = getGizmoWorldAxis(*tc, a);
+        const glm::vec2 tip = project(entityPos + worldAxis * gizmoScale);
+        if (tip.x < -9000.0f) continue;
+
+        const float d = distToSegment(mousePos, origin, tip);
+        if (d < bestDist)
+        {
+            bestDist = d;
+            best = static_cast<GizmoAxis>(a + 1);
+        }
+    }
+
+    return best;
+}
+
+// Helper: unproject screen coords to a world ray
+static void screenToRay(int screenX, int screenY, int w, int h,
+    const glm::mat4& invVP, glm::vec3& rayOrigin, glm::vec3& rayDir)
+{
+    const float nx = (2.0f * static_cast<float>(screenX) / static_cast<float>(w)) - 1.0f;
+    const float ny = 1.0f - (2.0f * static_cast<float>(screenY) / static_cast<float>(h));
+
+    glm::vec4 nearClip = invVP * glm::vec4(nx, ny, -1.0f, 1.0f);
+    glm::vec4 farClip  = invVP * glm::vec4(nx, ny, 1.0f, 1.0f);
+    nearClip /= nearClip.w;
+    farClip  /= farClip.w;
+
+    rayOrigin = glm::vec3(nearClip);
+    rayDir = glm::normalize(glm::vec3(farClip) - glm::vec3(nearClip));
+}
+
+// Project a point onto the closest point on a ray (parameterized by t)
+static float closestTOnAxis(const glm::vec3& rayOrigin, const glm::vec3& rayDir,
+    const glm::vec3& axisOrigin, const glm::vec3& axisDir)
+{
+    // Find the parameter along axisDir where the two rays are closest
+    // Using the standard closest-approach formula for two lines
+    const glm::vec3 w0 = axisOrigin - rayOrigin;
+    const float a = glm::dot(axisDir, axisDir);
+    const float b = glm::dot(axisDir, rayDir);
+    const float c = glm::dot(rayDir, rayDir);
+    const float d = glm::dot(axisDir, w0);
+    const float e = glm::dot(rayDir, w0);
+    const float denom = a * c - b * b;
+    if (std::abs(denom) < 1e-8f) return 0.0f;
+    return (b * e - c * d) / denom;
+}
+
+bool OpenGLRenderer::beginGizmoDrag(int screenX, int screenY)
+{
+    if (m_selectedEntity == 0 || m_gizmoMode == GizmoMode::None || !m_camera)
+        return false;
+
+    const Mat4 engineView = m_camera->getViewMatrixColumnMajor();
+    const glm::mat4 view = glm::make_mat4(engineView.m);
+
+    const GizmoAxis axis = pickGizmoAxis(view, m_projectionMatrix, screenX, screenY);
+    if (axis == GizmoAxis::None)
+        return false;
+
+    auto& ecs = ECS::ECSManager::Instance();
+    const auto* tc = ecs.getComponent<ECS::TransformComponent>(m_selectedEntity);
+    if (!tc)
+        return false;
+
+    const int axisIdx = static_cast<int>(axis) - 1;
+    const glm::vec3 entityPos{ tc->position[0], tc->position[1], tc->position[2] };
+    const glm::vec3 worldAxis = getGizmoWorldAxis(*tc, axisIdx);
+
+    m_gizmoActiveAxis = axis;
+    m_gizmoDragging = true;
+    m_gizmoDragEntityStart = entityPos;
+    m_gizmoDragWorldAxis = worldAxis;
+    m_gizmoDragRotStart = tc->rotation[axisIdx];
+    m_gizmoDragScaleStart = tc->scale[axisIdx];
+    m_gizmoDragStartScreen = glm::vec2{ static_cast<float>(screenX), static_cast<float>(screenY) };
+
+    // Compute the initial parameter along the axis ray
+    const int w = m_cachedWindowWidth > 0 ? m_cachedWindowWidth : 1;
+    const int h = m_cachedWindowHeight > 0 ? m_cachedWindowHeight : 1;
+    const glm::mat4 invVP = glm::inverse(m_projectionMatrix * view);
+    glm::vec3 rayO, rayD;
+    screenToRay(screenX, screenY, w, h, invVP, rayO, rayD);
+    m_gizmoDragStartT = closestTOnAxis(rayO, rayD, entityPos, worldAxis);
+
+    return true;
+}
+
+void OpenGLRenderer::updateGizmoDrag(int screenX, int screenY)
+{
+    if (!m_gizmoDragging || m_gizmoActiveAxis == GizmoAxis::None || m_selectedEntity == 0 || !m_camera)
+        return;
+
+    auto& ecs = ECS::ECSManager::Instance();
+    auto* tc = ecs.getComponent<ECS::TransformComponent>(m_selectedEntity);
+    if (!tc)
+        return;
+
+    const int axisIdx = static_cast<int>(m_gizmoActiveAxis) - 1;
+    const Mat4 engineView = m_camera->getViewMatrixColumnMajor();
+    const glm::mat4 view = glm::make_mat4(engineView.m);
+
+    const int w = m_cachedWindowWidth > 0 ? m_cachedWindowWidth : 1;
+    const int h = m_cachedWindowHeight > 0 ? m_cachedWindowHeight : 1;
+
+    if (m_gizmoMode == GizmoMode::Translate)
+    {
+        // Ray-plane intersection for 1:1 movement
+        const glm::mat4 invVP = glm::inverse(m_projectionMatrix * view);
+        glm::vec3 rayO, rayD;
+        screenToRay(screenX, screenY, w, h, invVP, rayO, rayD);
+
+        const float currentT = closestTOnAxis(rayO, rayD, m_gizmoDragEntityStart, m_gizmoDragWorldAxis);
+        const float deltaT = currentT - m_gizmoDragStartT;
+
+        // Move entity along the world-space axis
+        const glm::vec3 newPos = m_gizmoDragEntityStart + m_gizmoDragWorldAxis * deltaT;
+        tc->position[0] = newPos.x;
+        tc->position[1] = newPos.y;
+        tc->position[2] = newPos.z;
+    }
+    else if (m_gizmoMode == GizmoMode::Rotate)
+    {
+        // Use screen-space pixel delta projected onto the screen-space axis direction
+        const auto project = [&](const glm::vec3& worldPos) -> glm::vec2
+        {
+            const glm::vec4 clip = m_projectionMatrix * view * glm::vec4(worldPos, 1.0f);
+            if (clip.w <= 0.0001f) return { 0.0f, 0.0f };
+            const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+            return {
+                (ndc.x * 0.5f + 0.5f) * static_cast<float>(w),
+                (1.0f - (ndc.y * 0.5f + 0.5f)) * static_cast<float>(h)
+            };
+        };
+
+        const glm::vec2 originScreen = project(m_gizmoDragEntityStart);
+        const glm::vec2 axisTipScreen = project(m_gizmoDragEntityStart + m_gizmoDragWorldAxis);
+        glm::vec2 axisScreenDir = axisTipScreen - originScreen;
+        const float axisScreenLen = glm::length(axisScreenDir);
+        if (axisScreenLen < 1.0f) return;
+
+        // Use perpendicular to axis for rotation (dragging across the axis rotates)
+        const glm::vec2 axisPerp{ -axisScreenDir.y / axisScreenLen, axisScreenDir.x / axisScreenLen };
+        const glm::vec2 mouseDelta{
+            static_cast<float>(screenX) - m_gizmoDragStartScreen.x,
+            static_cast<float>(screenY) - m_gizmoDragStartScreen.y
+        };
+        const float projectedPixels = glm::dot(mouseDelta, axisPerp);
+        tc->rotation[axisIdx] = m_gizmoDragRotStart + projectedPixels * 0.5f;
+    }
+    else if (m_gizmoMode == GizmoMode::Scale)
+    {
+        // Use screen-space pixel delta projected onto the screen-space axis direction
+        const auto project = [&](const glm::vec3& worldPos) -> glm::vec2
+        {
+            const glm::vec4 clip = m_projectionMatrix * view * glm::vec4(worldPos, 1.0f);
+            if (clip.w <= 0.0001f) return { 0.0f, 0.0f };
+            const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+            return {
+                (ndc.x * 0.5f + 0.5f) * static_cast<float>(w),
+                (1.0f - (ndc.y * 0.5f + 0.5f)) * static_cast<float>(h)
+            };
+        };
+
+        const glm::vec2 originScreen = project(m_gizmoDragEntityStart);
+        const glm::vec2 axisTipScreen = project(m_gizmoDragEntityStart + m_gizmoDragWorldAxis);
+        const glm::vec2 axisScreenDir = axisTipScreen - originScreen;
+        const float axisScreenLen = glm::length(axisScreenDir);
+        if (axisScreenLen < 1.0f) return;
+
+        const glm::vec2 axisNorm = axisScreenDir / axisScreenLen;
+        const glm::vec2 mouseDelta{
+            static_cast<float>(screenX) - m_gizmoDragStartScreen.x,
+            static_cast<float>(screenY) - m_gizmoDragStartScreen.y
+        };
+        const float projectedPixels = glm::dot(mouseDelta, axisNorm);
+        tc->scale[axisIdx] = std::max(0.01f, m_gizmoDragScaleStart + projectedPixels * 0.01f);
+    }
+
+    ecs.setComponent<ECS::TransformComponent>(m_selectedEntity, *tc);
+}
+
+void OpenGLRenderer::endGizmoDrag()
+{
+    m_gizmoDragging = false;
+    m_gizmoActiveAxis = GizmoAxis::None;
 }

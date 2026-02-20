@@ -46,6 +46,9 @@ struct EditorTab
 class OpenGLRenderer : public Renderer
 {
 public:
+    enum class GizmoMode { None, Translate, Rotate, Scale };
+    enum class GizmoAxis { None, X, Y, Z };
+
     OpenGLRenderer();
     ~OpenGLRenderer() override;
 
@@ -298,6 +301,31 @@ private:
 
     void drawSelectionOutline();
 
+    // ---- Editor Gizmos ----
+
+    bool ensureGizmoResources();
+    void releaseGizmoResources();
+    void renderGizmo(const glm::mat4& view, const glm::mat4& projection);
+    GizmoAxis pickGizmoAxis(const glm::mat4& view, const glm::mat4& projection, int screenX, int screenY) const;
+    glm::mat3 getEntityRotationMatrix(const ECS::TransformComponent& tc) const;
+    glm::vec3 getGizmoWorldAxis(const ECS::TransformComponent& tc, int axisIdx) const;
+
+    GLuint m_gizmoProgram{ 0 };
+    GLuint m_gizmoVao{ 0 };
+    GLuint m_gizmoVbo{ 0 };
+    GLint m_gizmoLocMVP{ -1 };
+    GLint m_gizmoLocColor{ -1 };
+    GizmoMode m_gizmoMode{ GizmoMode::Translate };
+    GizmoAxis m_gizmoActiveAxis{ GizmoAxis::None };
+    GizmoAxis m_gizmoHoveredAxis{ GizmoAxis::None };
+    bool m_gizmoDragging{ false };
+    glm::vec3 m_gizmoDragEntityStart{ 0.0f };  // entity position at drag start
+    glm::vec3 m_gizmoDragWorldAxis{ 0.0f };     // world-space axis direction during drag
+    float m_gizmoDragStartT{ 0.0f };            // initial projection of mouse onto axis ray
+    float m_gizmoDragRotStart{ 0.0f };
+    float m_gizmoDragScaleStart{ 1.0f };
+    glm::vec2 m_gizmoDragStartScreen{ 0.0f };   // screen position at drag start
+
     // Editor tab system
     bool ensureTabFbo(EditorTab& tab, int width, int height);
     void releaseTabFbo(EditorTab& tab);
@@ -317,5 +345,13 @@ public:
     void requestPick(int screenX, int screenY) { m_pickRequested = true; m_pickX = screenX; m_pickY = screenY; }
     unsigned int getSelectedEntity() const { return m_selectedEntity; }
     void setSelectedEntity(unsigned int entity) { m_selectedEntity = entity; }
-    
+
+    // Gizmo public API
+    void setGizmoMode(GizmoMode mode) { m_gizmoMode = mode; }
+    GizmoMode getGizmoMode() const { return m_gizmoMode; }
+    bool beginGizmoDrag(int screenX, int screenY);
+    void updateGizmoDrag(int screenX, int screenY);
+    void endGizmoDrag();
+    bool isGizmoDragging() const { return m_gizmoDragging; }
+
 };
