@@ -161,15 +161,15 @@ set(CMAKE_CXX_STANDARD 20)
 | `Logger`        | SHARED  | *(keine)*                                   |
 | `Core`          | SHARED  | Logger, OpenAL::OpenAL, SDL3::SDL3          |
 | `Diagnostics`   | SHARED  | Core, Logger                                |
-| `AssetManager`  | SHARED  | Diagnostics, Logger, Core, SDL3::SDL3       |
-| `Renderer`      | SHARED  | SDL3::SDL3, freetype, Logger, Core, AssetManager |
+| `AssetManager`  | SHARED  | Diagnostics, Logger, Core, SDL3::SDL3, assimp (static) |
+| `Renderer`      | SHARED  | SDL3::SDL3, freetype (static), Logger, Core, AssetManager |
 | `Scripting`     | SHARED  | SDL3::SDL3, Renderer, Logger, AssetManager, Diagnostics, Core, Python3 |
 | `Engine` (exe)  | EXE     | SDL3, Renderer, Logger, AssetManager, Diagnostics, Core, Scripting, Python3 |
 
 ### 2.4 Build-Schritte
 1. CMake konfigurieren: `cmake -B build -G "Visual Studio 18 2026" -A x64`
 2. Bauen: `cmake --build build --config RelWithDebInfo`
-3. Ausgabe: Alle DLLs + `Engine.exe` landen in `CMAKE_RUNTIME_OUTPUT_DIRECTORY`
+3. Ausgabe: Alle DLLs + `Engine.exe` landen in `CMAKE_RUNTIME_OUTPUT_DIRECTORY` (kein Debug-Postfix)
 
 ### 2.5 Python-Debug-Workaround
 - Im Debug-Modus wird die Release-Python-Lib als `_d.lib` kopiert (vermeidet Debug-Python-Abhängigkeit)
@@ -226,7 +226,7 @@ Beim Start werden sechs Editor-Widgets geladen:
 | WorldSettings     | `WorldSettings.asset`    | Clear-Color-Picker (RGB-Einträge)           |
 | WorldOutliner     | `WorldOutliner.asset`    | Entitäten-Liste des aktiven Levels          |
 | EntityDetails     | `EntityDetails.asset`    | Komponenten-Details der ausgewählten Entität|
-| ContentBrowser    | `ContentBrowser.asset`   | Projekt-Dateistruktur                       |
+| ContentBrowser    | `ContentBrowser.asset`   | TreeView (Ordner-Hierarchie, Highlight) + Grid (Kacheln mit Icons), Doppelklick-Navigation, farbcodierte PNGs |
 
 ### 4.3 Editor-Tab-System
 Die Engine unterstützt ein Tab-basiertes Editor-Layout:

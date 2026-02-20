@@ -114,7 +114,7 @@ private:
     void releaseOutlineResources();
     void drawUIPanel(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program,
         const Vec4& hoverColor = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f }, bool isHovered = false);
-    void drawUIImage(float x0, float y0, float x1, float y1, GLuint textureId, const glm::mat4& projection);
+    void drawUIImage(float x0, float y0, float x1, float y1, GLuint textureId, const glm::mat4& projection, const Vec4& tintColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }, bool invertRGB = false);
     GLuint getOrLoadUITexture(const std::string& path);
     void drawUIOutline(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program);
 
@@ -170,6 +170,28 @@ private:
     std::string m_defaultTextFragment;
     bool m_uiShaderDefaultsInitialized{false};
     GLuint m_uiImageProgram{0};
+    // Cached uniform locations per shader program
+    struct UIPanelUniforms
+    {
+        GLint projection{ -1 };
+        GLint color{ -1 };
+        GLint borderColor{ -1 };
+        GLint borderSize{ -1 };
+        GLint rect{ -1 };
+        GLint viewportSize{ -1 };
+        GLint hoverColor{ -1 };
+        GLint isHovered{ -1 };
+    };
+    struct UIImageUniforms
+    {
+        GLint projection{ -1 };
+        GLint rect{ -1 };
+        GLint tintColor{ -1 };
+        GLint invertRGB{ -1 };
+        GLint texture{ -1 };
+    };
+    std::unordered_map<GLuint, UIPanelUniforms> m_uiPanelUniformCache;
+    UIImageUniforms m_uiImageUniforms{};
     std::unordered_map<std::string, GLuint> m_uiTextureCache;
     ECS::Schema m_lightSchema{};
     bool m_lightSchemaInitialized{false};

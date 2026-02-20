@@ -5,6 +5,7 @@
 #include <memory>
 #include <functional>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "../Core/MathTypes.h"
 #include "UIWidget.h"
@@ -118,9 +119,20 @@ private:
 	void bindClickEventsForElement(WidgetElement& element);
 	EngineLevel* m_outlinerLevel{ nullptr };
 	unsigned int m_outlinerSelectedEntity{ 0 };
+	std::string m_contentBrowserPath;  // current subfolder relative to Content (empty = root)
+	std::string m_selectedBrowserFolder; // folder highlighted in tree (shown in grid)
+	std::unordered_set<std::string> m_expandedFolders; // set of expanded folder paths
+
+	// Double-click detection
+	std::string m_lastClickedElementId;
+	uint64_t m_lastClickTimeMs{ 0 };
+
+	// Hover tracking (avoids full tree walk per mouse move)
+	WidgetElement* m_lastHoveredElement{ nullptr };
 
 public:
 	void refreshWorldOutliner();
+	void refreshContentBrowser(const std::string& subfolder = "");
 	void selectEntity(unsigned int entity);
 	unsigned int getSelectedEntity() const { return m_outlinerSelectedEntity; }
 };

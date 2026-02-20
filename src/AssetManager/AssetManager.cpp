@@ -418,6 +418,9 @@ void AssetManager::registerAssetInRegistry(const AssetRegistryEntry& entry)
 
 bool AssetManager::discoverAssetsAndBuildRegistry(const std::string& projectRoot)
 {
+    auto& log = Logger::Instance();
+    log.log(Logger::Category::AssetManagement, "[Registry] discoverAssetsAndBuildRegistry projectRoot='" + projectRoot + "'", Logger::LogLevel::INFO);
+
     m_registry.clear();
     m_registryByPath.clear();
     m_registryByName.clear();
@@ -425,23 +428,69 @@ bool AssetManager::discoverAssetsAndBuildRegistry(const std::string& projectRoot
     fs::path contentRoot = fs::path(projectRoot) / "Content";
     if (!fs::exists(contentRoot))
     {
+        log.log(Logger::Category::AssetManagement, "[Registry] ABORT: Content directory does not exist: " + contentRoot.string(), Logger::LogLevel::WARNING);
         return false;
     }
+    log.log(Logger::Category::AssetManagement, "[Registry] scanning contentRoot='" + contentRoot.string() + "'", Logger::LogLevel::INFO);
+
+    int filesScanned = 0;
+    int filesSkippedNotRegular = 0;
+    int filesSkippedExtension = 0;
+    int filesSkippedHeaderType = 0;
+    int filesRegistered = 0;
 
     for (const auto& entry : fs::recursive_directory_iterator(contentRoot))
     {
         if (!entry.is_regular_file())
+        {
+            ++filesSkippedNotRegular;
             continue;
+        }
 
+        ++filesScanned;
         const fs::path p = entry.path();
-        if (p.extension() != ".asset" && p.extension() != ".map")
+        const std::string ext = p.extension().string();
+
+        // Standalone script/audio files: register by extension without reading asset header
+        if (ext == ".py")
+        {
+            AssetRegistryEntry e;
+            e.name = p.stem().string();
+            e.type = AssetType::Script;
+            e.path = fs::relative(p, contentRoot).generic_string();
+            log.log(Logger::Category::AssetManagement, "[Registry]   + registered (script) name='" + e.name + "' path='" + e.path + "'", Logger::LogLevel::INFO);
+            registerAssetInRegistry(e);
+            ++filesRegistered;
             continue;
+        }
+        if (ext == ".wav" || ext == ".mp3" || ext == ".ogg" || ext == ".flac")
+        {
+            AssetRegistryEntry e;
+            e.name = p.stem().string();
+            e.type = AssetType::Audio;
+            e.path = fs::relative(p, contentRoot).generic_string();
+            log.log(Logger::Category::AssetManagement, "[Registry]   + registered (audio) name='" + e.name + "' path='" + e.path + "'", Logger::LogLevel::INFO);
+            registerAssetInRegistry(e);
+            ++filesRegistered;
+            continue;
+        }
+
+        if (ext != ".asset" && ext != ".map")
+        {
+            ++filesSkippedExtension;
+            log.log(Logger::Category::AssetManagement, "[Registry]   skip (extension): " + p.string(), Logger::LogLevel::INFO);
+            continue;
+        }
 
         AssetType type = AssetType::Unknown;
         std::string name;
 
         if (!readAssetHeaderType(p, type))
+        {
+            ++filesSkippedHeaderType;
+            log.log(Logger::Category::AssetManagement, "[Registry]   skip (header type failed): " + p.string(), Logger::LogLevel::WARNING);
             continue;
+        }
         if (!readAssetHeaderName(p, name))
             name = p.stem().string();
 
@@ -453,8 +502,18 @@ bool AssetManager::discoverAssetsAndBuildRegistry(const std::string& projectRoot
         fs::path rel = fs::relative(p, contentRoot);
         e.path = rel.generic_string();
 
+        log.log(Logger::Category::AssetManagement, "[Registry]   + registered name='" + e.name + "' path='" + e.path + "' type=" + std::to_string(static_cast<int>(e.type)), Logger::LogLevel::INFO);
         registerAssetInRegistry(e);
+        ++filesRegistered;
     }
+
+    log.log(Logger::Category::AssetManagement, "[Registry] discovery complete: scanned=" + std::to_string(filesScanned)
+        + " registered=" + std::to_string(filesRegistered)
+        + " skippedExtension=" + std::to_string(filesSkippedExtension)
+        + " skippedHeaderType=" + std::to_string(filesSkippedHeaderType)
+        + " skippedNotRegular=" + std::to_string(filesSkippedNotRegular)
+        + " totalRegistry=" + std::to_string(m_registry.size()),
+        Logger::LogLevel::INFO);
 
     return true;
 }
@@ -1189,6 +1248,8 @@ void AssetManager::ensureEditorWidgetsCreated()
 
     const std::string contentBrowserWidgetRel = "ContentBrowser.asset";
     {
+        logger.log(Logger::Category::AssetManagement, "[ContentBrowser] ensureEditorWidgetsCreated: building ContentBrowser widget asset definition", Logger::LogLevel::INFO);
+
         json widgetJson = json::object();
         widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 220.0f} };
         widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
@@ -1223,27 +1284,44 @@ void AssetManager::ensureEditorWidgetsCreated()
         label["shaderFragment"] = "text_fragment.glsl";
         elements.push_back(label);
 
+        // Path bar (breadcrumb) between title row and grid
+        json pathBar = json::object();
+        pathBar["id"] = "ContentBrowser.PathBar";
+        pathBar["type"] = "StackPanel";
+        pathBar["from"] = json{ {"x", 0.25f}, {"y", 0.01f} };
+        pathBar["to"] = json{ {"x", 0.98f}, {"y", 0.14f} };
+        pathBar["orientation"] = "Horizontal";
+        pathBar["padding"] = json{ {"x", 2.0f}, {"y", 0.0f} };
+        pathBar["color"] = json{ {"x", 0.09f}, {"y", 0.10f}, {"z", 0.13f}, {"w", 0.9f} };
+        pathBar["shaderVertex"] = "panel_vertex.glsl";
+        pathBar["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(pathBar);
+
         json treePanel = json::object();
         treePanel["id"] = "ContentBrowser.Tree";
-        treePanel["type"] = "StackPanel";
-        treePanel["from"] = json{ {"x", 0.02f}, {"y", 0.22f} };
+        treePanel["type"] = "TreeView";
+        treePanel["from"] = json{ {"x", 0.0f}, {"y", 0.22f} };
         treePanel["to"] = json{ {"x", 0.22f}, {"y", 0.95f} };
-        treePanel["orientation"] = "Vertical";
-        treePanel["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
+        treePanel["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
         treePanel["fillY"] = false;
         treePanel["sizeToContent"] = false;
         treePanel["scrollable"] = true;
+        treePanel["color"] = json{ {"x", 0.07f}, {"y", 0.08f}, {"z", 0.10f}, {"w", 0.95f} };
         elements.push_back(treePanel);
 
         json grid = json::object();
         grid["id"] = "ContentBrowser.Grid";
         grid["type"] = "Grid";
-        grid["from"] = json{ {"x", 0.25f}, {"y", 0.05f} };
+        grid["from"] = json{ {"x", 0.25f}, {"y", 0.16f} };
         grid["to"] = json{ {"x", 0.98f}, {"y", 0.95f} };
         grid["padding"] = json{ {"x", 8.0f}, {"y", 8.0f} };
+        grid["scrollable"] = true;
+        grid["color"] = json{ {"x", 0.06f}, {"y", 0.07f}, {"z", 0.09f}, {"w", 0.0f} };
         elements.push_back(grid);
 
         widgetJson["m_elements"] = elements;
+
+        logger.log(Logger::Category::AssetManagement, "[ContentBrowser] widget JSON has " + std::to_string(elements.size()) + " top-level elements (Background, Title, Tree, Grid)", Logger::LogLevel::INFO);
 
         auto widget = std::make_shared<AssetData>();
         widget->setName("ContentBrowser");
@@ -1253,11 +1331,29 @@ void AssetManager::ensureEditorWidgetsCreated()
         std::error_code ec;
         fs::create_directories(widgetsRoot, ec);
         const fs::path abs = widgetsRoot / fs::path(contentBrowserWidgetRel);
+        logger.log(Logger::Category::AssetManagement, "[ContentBrowser] widget asset path: " + abs.string(), Logger::LogLevel::INFO);
+
         bool existsAndOk = false;
         if (fs::exists(abs))
         {
             AssetType headerType{ AssetType::Unknown };
-            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+            if (readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget)
+            {
+                // Verify the file contains the expected TreeView tree panel
+                std::ifstream check(abs, std::ios::in);
+                if (check.is_open())
+                {
+                    const std::string content((std::istreambuf_iterator<char>(check)),
+                                              std::istreambuf_iterator<char>());
+                    existsAndOk = content.find("ContentBrowser.Tree") != std::string::npos
+                               && content.find("TreeView") != std::string::npos;
+                }
+            }
+            logger.log(Logger::Category::AssetManagement, "[ContentBrowser] existing file validated: existsAndOk=" + std::to_string(existsAndOk), Logger::LogLevel::INFO);
+        }
+        else
+        {
+            logger.log(Logger::Category::AssetManagement, "[ContentBrowser] widget asset file does not exist yet, will create", Logger::LogLevel::INFO);
         }
         if (!existsAndOk)
         {
@@ -1273,12 +1369,16 @@ void AssetManager::ensureEditorWidgetsCreated()
                 out << fileJson.dump(4);
                 if (!out.good())
                 {
-                    logger.log(Logger::Category::AssetManagement, "Failed to write editor widget asset.", Logger::LogLevel::ERROR);
+                    logger.log(Logger::Category::AssetManagement, "[ContentBrowser] Failed to write editor widget asset.", Logger::LogLevel::ERROR);
+                }
+                else
+                {
+                    logger.log(Logger::Category::AssetManagement, "[ContentBrowser] widget asset written successfully", Logger::LogLevel::INFO);
                 }
             }
             else
             {
-                logger.log(Logger::Category::AssetManagement, "Failed to open editor widget asset for writing.", Logger::LogLevel::ERROR);
+                logger.log(Logger::Category::AssetManagement, "[ContentBrowser] Failed to open editor widget asset for writing: " + abs.string(), Logger::LogLevel::ERROR);
             }
         }
     }

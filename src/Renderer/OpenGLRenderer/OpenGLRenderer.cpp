@@ -1672,7 +1672,7 @@ void OpenGLRenderer::renderUI()
                     const GLuint tex = (element.textureId != 0) ? static_cast<GLuint>(element.textureId) : getOrLoadUITexture(element.imagePath);
                     if (tex != 0)
                     {
-                        drawUIImage(x0, y0, x1, y1, tex, uiProjection);
+                        drawUIImage(x0, y0, x1, y1, tex, uiProjection, element.color, true);
                     }
                 }
                 if (m_uiDebugEnabled)
@@ -1789,10 +1789,23 @@ void OpenGLRenderer::renderUI()
                     const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
                     drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.color, false);
                 }
+
+                // Clip children to the TreeView/TabView bounds
+                const GLint clipX = static_cast<GLint>(x0);
+                const GLint clipY = static_cast<GLint>(static_cast<float>(height) - y1); // GL scissor is bottom-left
+                const GLsizei clipW = static_cast<GLsizei>(std::max(0.0f, widthPx));
+                const GLsizei clipH = static_cast<GLsizei>(std::max(0.0f, heightPx));
+
+                glEnable(GL_SCISSOR_TEST);
+                glScissor(clipX, clipY, clipW, clipH);
+
                 for (const auto& child : element.children)
                 {
                     self(self, child, x0, y0, widthPx, heightPx);
                 }
+
+                glDisable(GL_SCISSOR_TEST);
+
                 if (m_uiDebugEnabled)
                 {
                     const GLuint program = getUIQuadProgram(m_defaultPanelVertex, m_defaultPanelFragment);
@@ -1809,10 +1822,28 @@ void OpenGLRenderer::renderUI()
                     const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
                     drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.color, false);
                 }
+
+                const bool needsClip = element.scrollable;
+                if (needsClip)
+                {
+                    const GLint clipX = static_cast<GLint>(x0);
+                    const GLint clipY = static_cast<GLint>(static_cast<float>(height) - y1);
+                    const GLsizei clipW = static_cast<GLsizei>(std::max(0.0f, widthPx));
+                    const GLsizei clipH = static_cast<GLsizei>(std::max(0.0f, heightPx));
+                    glEnable(GL_SCISSOR_TEST);
+                    glScissor(clipX, clipY, clipW, clipH);
+                }
+
                 for (const auto& child : element.children)
                 {
                     self(self, child, x0, y0, widthPx, heightPx);
                 }
+
+                if (needsClip)
+                {
+                    glDisable(GL_SCISSOR_TEST);
+                }
+
                 if (m_uiDebugEnabled)
                 {
                     const GLuint program = getUIQuadProgram(m_defaultPanelVertex, m_defaultPanelFragment);
@@ -2688,6 +2719,23 @@ void OpenGLRenderer::drawUIPanel(float x0, float y0, float x1, float y1, const V
         return;
     }
 
+    // Cache uniform locations per program
+    auto it = m_uiPanelUniformCache.find(program);
+    if (it == m_uiPanelUniformCache.end())
+    {
+        UIPanelUniforms u{};
+        u.projection  = glGetUniformLocation(program, "uProjection");
+        u.color       = glGetUniformLocation(program, "uColor");
+        u.borderColor = glGetUniformLocation(program, "uBorderColor");
+        u.borderSize  = glGetUniformLocation(program, "uBorderSize");
+        u.rect        = glGetUniformLocation(program, "uRect");
+        u.viewportSize = glGetUniformLocation(program, "uViewportSize");
+        u.hoverColor  = glGetUniformLocation(program, "uHoverColor");
+        u.isHovered   = glGetUniformLocation(program, "uIsHovered");
+        it = m_uiPanelUniformCache.emplace(program, u).first;
+    }
+    const auto& u = it->second;
+
     const glm::vec4 glColor{ color.x, color.y, color.z, color.w };
     const glm::vec4 glHoverColor{ hoverColor.x, hoverColor.y, hoverColor.z, hoverColor.w };
     const Vec4 baseColor = isHovered ? hoverColor : color;
@@ -2711,41 +2759,14 @@ void OpenGLRenderer::drawUIPanel(float x0, float y0, float x1, float y1, const V
     };
 
     glUseProgram(program);
-    glUniformMatrix4fv(glGetUniformLocation(program, "uProjection"), 1, GL_FALSE, &projection[0][0]);
-    glUniform4fv(glGetUniformLocation(program, "uColor"), 1, &glColor[0]);
-
-    const GLint borderColorLoc = glGetUniformLocation(program, "uBorderColor");
-    if (borderColorLoc >= 0)
-    {
-        glUniform4fv(borderColorLoc, 1, &glBorderColor[0]);
-    }
-    const GLint borderSizeLoc = glGetUniformLocation(program, "uBorderSize");
-    if (borderSizeLoc >= 0)
-    {
-        glUniform1f(borderSizeLoc, 1.0f);
-    }
-    const GLint rectLoc = glGetUniformLocation(program, "uRect");
-    if (rectLoc >= 0)
-    {
-        glUniform4f(rectLoc, x0, y0, x1, y1);
-    }
-    const GLint viewportLoc = glGetUniformLocation(program, "uViewportSize");
-    if (viewportLoc >= 0)
-    {
-        glUniform2f(viewportLoc, viewportSize.x, viewportSize.y);
-    }
-
-    const GLint hoverColorLoc = glGetUniformLocation(program, "uHoverColor");
-    if (hoverColorLoc >= 0)
-    {
-        glUniform4fv(hoverColorLoc, 1, &glHoverColor[0]);
-    }
-
-    const GLint hoverFlagLoc = glGetUniformLocation(program, "uIsHovered");
-    if (hoverFlagLoc >= 0)
-    {
-        glUniform1f(hoverFlagLoc, isHovered ? 1.0f : 0.0f);
-    }
+    glUniformMatrix4fv(u.projection, 1, GL_FALSE, &projection[0][0]);
+    glUniform4fv(u.color, 1, &glColor[0]);
+    if (u.borderColor >= 0) glUniform4fv(u.borderColor, 1, &glBorderColor[0]);
+    if (u.borderSize >= 0)  glUniform1f(u.borderSize, 1.0f);
+    if (u.rect >= 0)        glUniform4f(u.rect, x0, y0, x1, y1);
+    if (u.viewportSize >= 0) glUniform2f(u.viewportSize, viewportSize.x, viewportSize.y);
+    if (u.hoverColor >= 0)  glUniform4fv(u.hoverColor, 1, &glHoverColor[0]);
+    if (u.isHovered >= 0)   glUniform1f(u.isHovered, isHovered ? 1.0f : 0.0f);
 
     glBindVertexArray(m_uiQuadVao);
     glBindBuffer(GL_ARRAY_BUFFER, m_uiQuadVbo);
@@ -2838,7 +2859,7 @@ GLuint OpenGLRenderer::preloadUITexture(const std::string& path)
     return getOrLoadUITexture(path);
 }
 
-void OpenGLRenderer::drawUIImage(float x0, float y0, float x1, float y1, GLuint textureId, const glm::mat4& projection)
+void OpenGLRenderer::drawUIImage(float x0, float y0, float x1, float y1, GLuint textureId, const glm::mat4& projection, const Vec4& tintColor, bool invertRGB)
 {
     if (textureId == 0 || m_uiQuadVao == 0)
     {
@@ -2864,8 +2885,12 @@ void main() {
 in vec2 vTexCoord;
 out vec4 FragColor;
 uniform sampler2D uTexture;
+uniform vec4 uTintColor;
+uniform float uInvertRGB;
 void main() {
-    FragColor = texture(uTexture, vTexCoord);
+    vec4 texel = texture(uTexture, vTexCoord);
+    texel.rgb = mix(texel.rgb, vec3(1.0) - texel.rgb, uInvertRGB);
+    FragColor = texel * uTintColor;
 }
 )";
         GLuint vs = glCreateShader(GL_VERTEX_SHADER);
@@ -2880,6 +2905,13 @@ void main() {
         glLinkProgram(m_uiImageProgram);
         glDeleteShader(vs);
         glDeleteShader(fs);
+
+        // Cache uniform locations once
+        m_uiImageUniforms.projection = glGetUniformLocation(m_uiImageProgram, "uProjection");
+        m_uiImageUniforms.rect       = glGetUniformLocation(m_uiImageProgram, "uRect");
+        m_uiImageUniforms.tintColor  = glGetUniformLocation(m_uiImageProgram, "uTintColor");
+        m_uiImageUniforms.invertRGB  = glGetUniformLocation(m_uiImageProgram, "uInvertRGB");
+        m_uiImageUniforms.texture    = glGetUniformLocation(m_uiImageProgram, "uTexture");
     }
 
     float vertices[6][2] = {
@@ -2892,11 +2924,13 @@ void main() {
     };
 
     glUseProgram(m_uiImageProgram);
-    glUniformMatrix4fv(glGetUniformLocation(m_uiImageProgram, "uProjection"), 1, GL_FALSE, &projection[0][0]);
-    glUniform4f(glGetUniformLocation(m_uiImageProgram, "uRect"), x0, y0, x1, y1);
+    glUniformMatrix4fv(m_uiImageUniforms.projection, 1, GL_FALSE, &projection[0][0]);
+    glUniform4f(m_uiImageUniforms.rect, x0, y0, x1, y1);
+    glUniform4f(m_uiImageUniforms.tintColor, tintColor.x, tintColor.y, tintColor.z, tintColor.w);
+    glUniform1f(m_uiImageUniforms.invertRGB, invertRGB ? 1.0f : 0.0f);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, textureId);
-    glUniform1i(glGetUniformLocation(m_uiImageProgram, "uTexture"), 0);
+    glUniform1i(m_uiImageUniforms.texture, 0);
 
     glBindVertexArray(m_uiQuadVao);
     glBindBuffer(GL_ARRAY_BUFFER, m_uiQuadVbo);

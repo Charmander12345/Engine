@@ -15,6 +15,8 @@
 #include "../Core/EngineLevel.h"
 #include "../Core/ECS/ECS.h"
 #include "UIWidgets/SeparatorWidget.h"
+#include "../AssetManager/AssetManager.h"
+#include "../AssetManager/AssetTypes.h"
 
 namespace
 {
@@ -531,7 +533,7 @@ namespace
         }
 
         element.computedPositionPixels = { x0, y0 };
-        element.computedSizePixels = { width, height };
+        element.computedSizePixels = { std::max(width, element.minSize.x), std::max(height, element.minSize.y) };
         element.hasComputedPosition = true;
         element.hasComputedSize = true;
 
@@ -689,25 +691,29 @@ namespace
         }
         else if (element.type == WidgetElementType::Grid)
         {
-            int columns = 0;
-            int rows = 0;
-            computeGridDimensions(element.children.size(), columns, rows);
-
-            if (columns <= 0 || rows <= 0)
+            if (element.children.empty())
             {
                 return;
             }
 
             const float spacingX = element.padding.x;
             const float spacingY = element.padding.y;
-            const float totalSpacingX = spacingX * static_cast<float>(columns > 0 ? (columns - 1) : 0);
-            const float totalSpacingY = spacingY * static_cast<float>(rows > 0 ? (rows - 1) : 0);
-            const float cellW = (columns > 0) ? std::max(0.0f, (contentW - totalSpacingX) / static_cast<float>(columns)) : 0.0f;
-            const float cellH = (rows > 0) ? std::max(0.0f, (contentH - totalSpacingY) / static_cast<float>(rows)) : 0.0f;
+
+            // Determine tile size from the first child's minSize, or default to 80px
+            const float tileSize = (element.children.front().minSize.x > 0.0f)
+                ? std::max(element.children.front().minSize.x, element.children.front().minSize.y)
+                : 80.0f;
+
+            // Compute columns from available width
+            int columns = std::max(1, static_cast<int>((contentW + spacingX) / (tileSize + spacingX)));
+            int rows = static_cast<int>((element.children.size() + static_cast<size_t>(columns) - 1) / static_cast<size_t>(columns));
+
+            // Square cell size, capped at tileSize
+            const float cellSize = std::min(tileSize, std::max(0.0f, (contentW - spacingX * static_cast<float>(columns - 1)) / static_cast<float>(columns)));
 
             if (element.scrollable)
             {
-                const float totalHeight = cellH * static_cast<float>(rows) + totalSpacingY;
+                const float totalHeight = cellSize * static_cast<float>(rows) + spacingY * static_cast<float>(std::max(0, rows - 1));
                 const float maxScroll = std::max(0.0f, totalHeight - contentH);
                 element.scrollOffset = std::clamp(element.scrollOffset, 0.0f, maxScroll);
                 contentY -= element.scrollOffset;
@@ -719,12 +725,12 @@ namespace
                 const int col = static_cast<int>(index % static_cast<size_t>(columns));
                 const int row = static_cast<int>(index / static_cast<size_t>(columns));
 
-                const float slotX = contentX + static_cast<float>(col) * (cellW + spacingX);
-                const float slotY = contentY + static_cast<float>(row) * (cellH + spacingY);
+                const float slotX = contentX + static_cast<float>(col) * (cellSize + spacingX);
+                const float slotY = contentY + static_cast<float>(row) * (cellSize + spacingY);
                 const float childX = slotX + child.margin.x;
                 const float childY = slotY + child.margin.y;
-                const float childW = std::max(0.0f, cellW - child.margin.x * 2.0f);
-                const float childH = std::max(0.0f, cellH - child.margin.y * 2.0f);
+                const float childW = std::max(0.0f, cellSize - child.margin.x * 2.0f);
+                const float childH = std::max(0.0f, cellSize - child.margin.y * 2.0f);
                 layoutElement(child, childX, childY, childW, childH, measureText);
             }
         }
@@ -793,6 +799,14 @@ namespace
                 const float childH = std::max(0.0f, slotH - child.margin.y * 2.0f);
                 layoutElement(child, childX, childY, childW, childH, measureText);
                 cursorY += slotH + spacing;
+            }
+        }
+        else
+        {
+            // Default: lay out children with relative from/to positioning
+            for (auto& child : element.children)
+            {
+                layoutElement(child, contentX, contentY, contentW, contentH, measureText);
             }
         }
     }
@@ -909,10 +923,6 @@ void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widg
 
     if (entry->widget)
     {
-        Logger::Instance().log(Logger::Category::UI,
-            "UIManager registerWidget id=" + id + " runtimeId=" + std::to_string(entry->runtimeId) +
-            " elements=" + std::to_string(entry->widget->getElements().size()),
-            Logger::LogLevel::INFO);
         if (id == "WorldOutliner")
         {
             populateOutlinerWidget(entry->widget);
@@ -924,10 +934,6 @@ void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widg
         else if (id == "ContentBrowser")
         {
             populateContentBrowserWidget(entry->widget);
-        }
-        for (const auto& element : entry->widget->getElements())
-        {
-            LogWidgetElementIds(element, id);
         }
         entry->widget->markLayoutDirty();
     }
@@ -1349,10 +1355,200 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
     detailsEntry->widget->markLayoutDirty();
 }
 
+void UIManager::refreshContentBrowser(const std::string& subfolder)
+{
+    auto& log = Logger::Instance();
+    log.log(Logger::Category::UI, "[ContentBrowser] refreshContentBrowser called, subfolder='" + subfolder + "' current m_contentBrowserPath='" + m_contentBrowserPath + "'", Logger::LogLevel::INFO);
+    if (!subfolder.empty())
+    {
+        m_contentBrowserPath = subfolder;
+    }
+    bool found = false;
+    for (auto& entry : m_widgets)
+    {
+        if (entry.id == "ContentBrowser" && entry.widget)
+        {
+            log.log(Logger::Category::UI, "[ContentBrowser] refreshContentBrowser: found widget entry, calling populateContentBrowserWidget", Logger::LogLevel::INFO);
+            populateContentBrowserWidget(entry.widget);
+            markAllWidgetsDirty();
+            found = true;
+            return;
+        }
+    }
+    if (!found)
+    {
+        log.log(Logger::Category::UI, "[ContentBrowser] refreshContentBrowser: no 'ContentBrowser' widget found in m_widgets (count=" + std::to_string(m_widgets.size()) + ")", Logger::LogLevel::WARNING);
+    }
+}
+
+// Returns the icon filename (inside Editor/Textures/) for a given AssetType.
+static const char* iconForAssetType(AssetType type)
+{
+    switch (type)
+    {
+    case AssetType::Texture:  return "texture.png";
+    case AssetType::Material: return "material.png";
+    case AssetType::Model2D:  return "model2d.png";
+    case AssetType::Model3D:  return "model3d.png";
+    case AssetType::Audio:    return "sound.png";
+    case AssetType::Script:   return "script.png";
+    case AssetType::Shader:   return "shader.png";
+    default:                  return "texture.png";
+    }
+}
+
+// Returns a tint color for each asset type icon.
+static Vec4 iconTintForAssetType(AssetType type)
+{
+    switch (type)
+    {
+    case AssetType::Texture:  return Vec4{ 0.45f, 0.65f, 1.00f, 1.0f }; // blue
+    case AssetType::Material: return Vec4{ 1.00f, 0.60f, 0.25f, 1.0f }; // orange
+    case AssetType::Audio:    return Vec4{ 1.00f, 0.35f, 0.35f, 1.0f }; // red
+    case AssetType::Script:   return Vec4{ 0.40f, 0.90f, 0.40f, 1.0f }; // green
+    case AssetType::Model2D:  return Vec4{ 0.55f, 0.85f, 0.95f, 1.0f }; // light cyan
+    case AssetType::Model3D:  return Vec4{ 0.50f, 0.80f, 0.90f, 1.0f }; // cyan
+    case AssetType::Shader:   return Vec4{ 0.75f, 0.50f, 1.00f, 1.0f }; // purple
+    case AssetType::Level:    return Vec4{ 0.95f, 0.85f, 0.40f, 1.0f }; // gold
+    case AssetType::Widget:   return Vec4{ 0.70f, 0.70f, 0.90f, 1.0f }; // lavender
+    default:                  return Vec4{ 0.85f, 0.85f, 0.85f, 1.0f }; // light grey
+    }
+}
+
+// Build a Button row for the tree panel.
+// Icon is rendered as a child Image on the left, label as a child Text on the right.
+// Both use from/to coordinates relative to the button; no layout pass needed.
+static WidgetElement makeTreeRow(const std::string& id,
+                                 const std::string& label,
+                                 const std::string& iconPath,
+                                 bool isFolder,
+                                 int indentLevel = 0,
+                                 const Vec4& iconTint = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f })
+{
+    WidgetElement btn{};
+    btn.id = id;
+    btn.type = WidgetElementType::Button;
+    btn.fillX = true;
+    btn.minSize = Vec2{ 0.0f, 22.0f };
+    btn.color = Vec4{ 0.10f, 0.11f, 0.14f, 0.0f };   // transparent default
+    btn.hoverColor = Vec4{ 0.22f, 0.24f, 0.30f, 0.95f };
+    btn.shaderVertex = "button_vertex.glsl";
+    btn.shaderFragment = "button_fragment.glsl";
+    btn.isHitTestable = true;
+    btn.runtimeOnly = true;
+    // No own text/image — children handle rendering
+    btn.text = "";
+
+    const float indentFrac = static_cast<float>(indentLevel) * 0.04f; // 4% per level
+
+    const float rowHeight = 22.0f;
+    const float iconPad  = 0.1f;                                     // 10% vertical padding
+    const float iconSize = rowHeight * (1.0f - 2.0f * iconPad);      // square icon in pixels
+
+    // Icon child (left side, square — pixel-sized so it stays 1:1 regardless of button width)
+    if (!iconPath.empty())
+    {
+        WidgetElement icon{};
+        icon.id = id + ".Icon";
+        icon.type = WidgetElementType::Image;
+        icon.imagePath = iconPath;
+        icon.color = iconTint;
+        icon.minSize = Vec2{ iconSize, iconSize };
+        icon.sizeToContent = true;
+        icon.from = Vec2{ indentFrac + 0.01f, iconPad };
+        icon.to   = Vec2{ indentFrac + 0.01f, 1.0f - iconPad };     // width comes from minSize
+        icon.runtimeOnly = true;
+        btn.children.push_back(std::move(icon));
+    }
+
+    // Label child (rest of the button)
+    {
+        const float textFrom = iconPath.empty() ? (indentFrac + 0.01f) : (indentFrac + 0.08f);
+        WidgetElement lbl{};
+        lbl.id = id + ".Label";
+        lbl.type = WidgetElementType::Text;
+        lbl.text = label;
+        lbl.font = "default.ttf";
+        lbl.fontSize = 13.0f;
+        lbl.textAlignH = TextAlignH::Left;
+        lbl.textAlignV = TextAlignV::Center;
+        lbl.textColor = isFolder
+            ? Vec4{ 0.90f, 0.85f, 0.55f, 1.0f }
+            : Vec4{ 0.92f, 0.92f, 0.92f, 1.0f };
+        lbl.from = Vec2{ textFrom, 0.0f };
+        lbl.to   = Vec2{ 1.0f, 1.0f };
+        lbl.padding = Vec2{ 3.0f, 2.0f };
+        lbl.runtimeOnly = true;
+        btn.children.push_back(std::move(lbl));
+    }
+
+    return btn;
+}
+
+// Build a grid tile for the Content Browser grid view.
+// A tile is a small Button with an icon on top and a label below.
+static WidgetElement makeGridTile(const std::string& id,
+                                  const std::string& label,
+                                  const std::string& iconPath,
+                                  const Vec4& iconTint,
+                                  bool isFolder)
+{
+    WidgetElement tile{};
+    tile.id = id;
+    tile.type = WidgetElementType::Button;
+    tile.minSize = Vec2{ 80.0f, 80.0f };
+    tile.color = Vec4{ 0.12f, 0.13f, 0.16f, 0.0f };
+    tile.hoverColor = Vec4{ 0.22f, 0.24f, 0.30f, 0.85f };
+    tile.shaderVertex = "button_vertex.glsl";
+    tile.shaderFragment = "button_fragment.glsl";
+    tile.isHitTestable = true;
+    tile.runtimeOnly = true;
+    tile.text = "";
+
+    // Icon (top portion)
+    if (!iconPath.empty())
+    {
+        WidgetElement icon{};
+        icon.id = id + ".Icon";
+        icon.type = WidgetElementType::Image;
+        icon.imagePath = iconPath;
+        icon.color = iconTint;
+        icon.from = Vec2{ 0.15f, 0.05f };
+        icon.to   = Vec2{ 0.85f, 0.62f };
+        icon.runtimeOnly = true;
+        tile.children.push_back(std::move(icon));
+    }
+
+    // Label (bottom portion)
+    {
+        WidgetElement lbl{};
+        lbl.id = id + ".Label";
+        lbl.type = WidgetElementType::Text;
+        lbl.text = label;
+        lbl.font = "default.ttf";
+        lbl.fontSize = 11.0f;
+        lbl.textAlignH = TextAlignH::Center;
+        lbl.textAlignV = TextAlignV::Top;
+        lbl.textColor = isFolder
+            ? Vec4{ 0.90f, 0.85f, 0.55f, 1.0f }
+            : Vec4{ 0.88f, 0.88f, 0.88f, 1.0f };
+        lbl.from = Vec2{ 0.0f, 0.65f };
+        lbl.to   = Vec2{ 1.0f, 1.0f };
+        lbl.padding = Vec2{ 2.0f, 1.0f };
+        lbl.runtimeOnly = true;
+        tile.children.push_back(std::move(lbl));
+    }
+
+    return tile;
+}
+
 void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widget)
 {
+    auto& log = Logger::Instance();
+
     if (!widget)
     {
+        log.log(Logger::Category::UI, "[ContentBrowser] ABORT: widget is null", Logger::LogLevel::WARNING);
         return;
     }
 
@@ -1360,12 +1556,15 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
     const auto& projectInfo = diagnostics.getProjectInfo();
     if (projectInfo.projectPath.empty())
     {
+        log.log(Logger::Category::UI, "[ContentBrowser] ABORT: projectInfo.projectPath is empty", Logger::LogLevel::WARNING);
         return;
     }
 
-    const std::filesystem::path contentRoot = std::filesystem::path(projectInfo.projectPath) / "Content";
+    const std::filesystem::path contentRoot =
+        std::filesystem::path(projectInfo.projectPath) / "Content";
     if (!std::filesystem::exists(contentRoot))
     {
+        log.log(Logger::Category::UI, "[ContentBrowser] ABORT: contentRoot does not exist: " + contentRoot.string(), Logger::LogLevel::WARNING);
         return;
     }
 
@@ -1373,45 +1572,358 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
     WidgetElement* treePanel = FindElementById(elements, "ContentBrowser.Tree");
     if (!treePanel)
     {
+        log.log(Logger::Category::UI, "[ContentBrowser] ABORT: 'ContentBrowser.Tree' element not found in widget", Logger::LogLevel::WARNING);
         return;
     }
 
     treePanel->children.clear();
     treePanel->scrollable = true;
 
-    std::vector<std::string> folderNames;
-    for (const auto& entry : std::filesystem::directory_iterator(contentRoot))
-    {
-        if (!entry.is_directory())
-        {
-            continue;
-        }
-        folderNames.push_back(entry.path().filename().string());
-    }
-    std::sort(folderNames.begin(), folderNames.end());
+    const auto& registry = AssetManager::Instance().getAssetRegistry();
 
-    for (const auto& name : folderNames)
+    // Recursive helper: add folders + assets for a given subpath
+    struct Builder
     {
-        WidgetElement row{};
-        row.id = "ContentBrowser.Dir." + name;
-        row.type = WidgetElementType::Button;
-        row.from = Vec2{ 0.0f, 0.0f };
-        row.to = Vec2{ 1.0f, 1.0f };
-        row.fillX = true;
-        row.text = name;
-        row.font = "default.ttf";
-        row.fontSize = 14.0f;
-        row.textAlignH = TextAlignH::Left;
-        row.textAlignV = TextAlignV::Center;
-        row.padding = Vec2{ 6.0f, 4.0f };
-        row.minSize = Vec2{ 0.0f, 22.0f };
-        row.color = Vec4{ 0.13f, 0.14f, 0.17f, 0.9f };
-        row.hoverColor = Vec4{ 0.2f, 0.22f, 0.27f, 0.95f };
-        row.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
-        row.shaderVertex = "button_vertex.glsl";
-        row.shaderFragment = "button_fragment.glsl";
-        row.runtimeOnly = true;
-        treePanel->children.push_back(std::move(row));
+        UIManager* self;
+        const std::filesystem::path& contentRoot;
+        const std::vector<AssetRegistryEntry>& registry;
+        WidgetElement* treePanel;
+
+        void build(const std::string& subPath, int depth)
+        {
+            const std::filesystem::path browseDir = subPath.empty()
+                ? contentRoot
+                : contentRoot / subPath;
+
+            // Subfolders
+            std::vector<std::string> subFolders;
+            {
+                std::error_code ec;
+                if (std::filesystem::exists(browseDir, ec))
+                {
+                    for (const auto& fsEntry : std::filesystem::directory_iterator(browseDir, ec))
+                    {
+                        if (fsEntry.is_directory())
+                        {
+                            subFolders.push_back(fsEntry.path().filename().string());
+                        }
+                    }
+                    if (ec)
+                    {
+                        Logger::Instance().log(Logger::Category::UI, "[ContentBrowser] directory_iterator error: " + ec.message(), Logger::LogLevel::WARNING);
+                    }
+                }
+                else
+                {
+                    Logger::Instance().log(Logger::Category::UI, "[ContentBrowser] browseDir does not exist: " + browseDir.string() + (ec ? " ec=" + ec.message() : ""), Logger::LogLevel::WARNING);
+                }
+            }
+            std::sort(subFolders.begin(), subFolders.end());
+
+            for (const auto& folderName : subFolders)
+            {
+                const std::string newSub = subPath.empty()
+                    ? folderName
+                    : (subPath + "/" + folderName);
+
+                const std::string rowId = "ContentBrowser.Dir." + newSub;
+                const bool expanded = self->m_expandedFolders.count(newSub) > 0;
+
+                WidgetElement row = makeTreeRow(rowId, folderName, "folder.png", true, depth, Vec4{ 0.95f, 0.85f, 0.35f, 1.0f });
+                row.isExpanded = expanded;
+
+                // Highlight if this is the currently viewed folder
+                if (newSub == self->m_selectedBrowserFolder)
+                {
+                    row.color = Vec4{ 0.20f, 0.25f, 0.35f, 0.9f };
+                }
+
+                row.onClicked = [uiMgr = self, newSub]()
+                {
+                    // Toggle expand/collapse
+                    if (uiMgr->m_expandedFolders.count(newSub))
+                    {
+                        // Collapse only if already selected; otherwise just select
+                        if (uiMgr->m_selectedBrowserFolder == newSub)
+                        {
+                            uiMgr->m_expandedFolders.erase(newSub);
+                        }
+                    }
+                    else
+                    {
+                        uiMgr->m_expandedFolders.insert(newSub);
+                    }
+                    uiMgr->m_selectedBrowserFolder = newSub;
+                    uiMgr->refreshContentBrowser();
+                };
+                treePanel->children.push_back(std::move(row));
+
+                // If expanded, recurse
+                if (expanded)
+                {
+                    build(newSub, depth + 1);
+                }
+            }
+
+            // Assets directly inside subPath
+            struct AssetItem { std::string name; std::string relPath; AssetType type; };
+            std::vector<AssetItem> assetItems;
+            for (const auto& e : registry)
+            {
+                const std::filesystem::path regPath(e.path);
+                const std::string parentStr = regPath.parent_path().generic_string();
+                if (parentStr == subPath)
+                {
+                    assetItems.push_back({ e.name, e.path, e.type });
+                }
+            }
+            std::sort(assetItems.begin(), assetItems.end(),
+                [](const AssetItem& a, const AssetItem& b) { return a.name < b.name; });
+
+            for (const auto& item : assetItems)
+            {
+                const std::string iconFile = iconForAssetType(item.type);
+                const std::string relPath  = item.relPath;
+                const AssetType   itemType = item.type;
+
+                WidgetElement row = makeTreeRow(
+                    "ContentBrowser.Asset." + relPath,
+                    item.name, iconFile, false, depth, iconTintForAssetType(itemType));
+
+                row.onClicked = [uiMgr = self, relPath, itemType]()
+                {
+                    uiMgr->showToastMessage("Asset: " + relPath, 2.5f);
+                };
+                treePanel->children.push_back(std::move(row));
+                }
+        }
+    };
+
+    Builder builder{ this, contentRoot, registry, treePanel };
+
+    // "Content" root node
+    {
+        const std::string rootId = "ContentBrowser.Dir.Root";
+        WidgetElement rootRow = makeTreeRow(rootId, "Content", "folder.png", true, 0, Vec4{ 0.95f, 0.85f, 0.35f, 1.0f });
+        rootRow.isExpanded = true;
+        if (m_selectedBrowserFolder.empty())
+        {
+            rootRow.color = Vec4{ 0.20f, 0.25f, 0.35f, 0.9f };
+        }
+        rootRow.onClicked = [this]()
+        {
+            m_selectedBrowserFolder.clear();
+            refreshContentBrowser();
+        };
+        treePanel->children.push_back(std::move(rootRow));
+    }
+
+    builder.build(m_contentBrowserPath, 1);
+
+    // ---- Populate Path Bar with breadcrumb buttons ----
+    WidgetElement* pathBar = FindElementById(elements, "ContentBrowser.PathBar");
+    if (pathBar)
+    {
+        pathBar->children.clear();
+
+        // Back button (navigate up one level)
+        {
+            WidgetElement backBtn{};
+            backBtn.id = "ContentBrowser.PathBar.Back";
+            backBtn.type = WidgetElementType::Button;
+            backBtn.text = "<";
+            backBtn.font = "default.ttf";
+            backBtn.fontSize = 13.0f;
+            backBtn.textColor = Vec4{ 0.9f, 0.9f, 0.9f, 1.0f };
+            backBtn.textAlignH = TextAlignH::Center;
+            backBtn.textAlignV = TextAlignV::Center;
+            backBtn.minSize = Vec2{ 24.0f, 20.0f };
+            backBtn.color = Vec4{ 0.14f, 0.15f, 0.19f, 0.9f };
+            backBtn.hoverColor = Vec4{ 0.25f, 0.27f, 0.33f, 0.95f };
+            backBtn.shaderVertex = "button_vertex.glsl";
+            backBtn.shaderFragment = "button_fragment.glsl";
+            backBtn.isHitTestable = true;
+            backBtn.runtimeOnly = true;
+            backBtn.onClicked = [this]()
+            {
+                if (!m_selectedBrowserFolder.empty())
+                {
+                    const auto slashPos = m_selectedBrowserFolder.rfind('/');
+                    if (slashPos != std::string::npos)
+                    {
+                        m_selectedBrowserFolder = m_selectedBrowserFolder.substr(0, slashPos);
+                    }
+                    else
+                    {
+                        m_selectedBrowserFolder.clear();
+                    }
+                    refreshContentBrowser();
+                }
+            };
+            pathBar->children.push_back(std::move(backBtn));
+        }
+
+        // Breadcrumb segments: Content > Folder > SubFolder > ...
+        std::vector<std::pair<std::string, std::string>> crumbs; // (label, path)
+        crumbs.push_back({ "Content", "" });
+
+        if (!m_selectedBrowserFolder.empty())
+        {
+            std::string accumulated;
+            std::istringstream stream(m_selectedBrowserFolder);
+            std::string segment;
+            while (std::getline(stream, segment, '/'))
+            {
+                if (segment.empty()) continue;
+                accumulated = accumulated.empty() ? segment : (accumulated + "/" + segment);
+                crumbs.push_back({ segment, accumulated });
+            }
+        }
+
+        for (size_t i = 0; i < crumbs.size(); ++i)
+        {
+            // Separator ">"
+            if (i > 0)
+            {
+                WidgetElement sep{};
+                sep.id = "ContentBrowser.PathBar.Sep." + std::to_string(i);
+                sep.type = WidgetElementType::Text;
+                sep.text = ">";
+                sep.font = "default.ttf";
+                sep.fontSize = 12.0f;
+                sep.textColor = Vec4{ 0.5f, 0.5f, 0.5f, 1.0f };
+                sep.textAlignH = TextAlignH::Center;
+                sep.textAlignV = TextAlignV::Center;
+                sep.minSize = Vec2{ 14.0f, 20.0f };
+                sep.runtimeOnly = true;
+                pathBar->children.push_back(std::move(sep));
+            }
+
+            const bool isActive = (crumbs[i].second == m_selectedBrowserFolder);
+            WidgetElement crumbBtn{};
+            crumbBtn.id = "ContentBrowser.PathBar.Crumb." + std::to_string(i);
+            crumbBtn.type = WidgetElementType::Button;
+            crumbBtn.text = crumbs[i].first;
+            crumbBtn.font = "default.ttf";
+            crumbBtn.fontSize = 12.0f;
+            crumbBtn.textColor = isActive
+                ? Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }
+                : Vec4{ 0.7f, 0.7f, 0.7f, 1.0f };
+            crumbBtn.textAlignH = TextAlignH::Center;
+            crumbBtn.textAlignV = TextAlignV::Center;
+            crumbBtn.minSize = Vec2{ 0.0f, 20.0f };
+            crumbBtn.sizeToContent = true;
+            crumbBtn.padding = Vec2{ 6.0f, 2.0f };
+            crumbBtn.color = isActive
+                ? Vec4{ 0.18f, 0.22f, 0.30f, 0.9f }
+                : Vec4{ 0.12f, 0.13f, 0.17f, 0.0f };
+            crumbBtn.hoverColor = Vec4{ 0.22f, 0.25f, 0.33f, 0.95f };
+            crumbBtn.shaderVertex = "button_vertex.glsl";
+            crumbBtn.shaderFragment = "button_fragment.glsl";
+            crumbBtn.isHitTestable = true;
+            crumbBtn.runtimeOnly = true;
+
+            const std::string crumbPath = crumbs[i].second;
+            crumbBtn.onClicked = [this, crumbPath]()
+            {
+                m_selectedBrowserFolder = crumbPath;
+                if (!crumbPath.empty() && !m_expandedFolders.count(crumbPath))
+                {
+                    m_expandedFolders.insert(crumbPath);
+                }
+                refreshContentBrowser();
+            };
+            pathBar->children.push_back(std::move(crumbBtn));
+        }
+    }
+
+    // ---- Populate Grid panel with contents of selected folder ----
+    WidgetElement* gridPanel = FindElementById(elements, "ContentBrowser.Grid");
+    if (gridPanel)
+    {
+        gridPanel->children.clear();
+        gridPanel->scrollable = true;
+
+        const std::string& gridFolder = m_selectedBrowserFolder;
+        const std::filesystem::path gridDir = gridFolder.empty()
+            ? contentRoot
+            : contentRoot / gridFolder;
+
+        // Subfolders as grid tiles
+        if (std::filesystem::exists(gridDir))
+        {
+            std::vector<std::string> subFolders;
+            std::error_code ec;
+            for (const auto& fsEntry : std::filesystem::directory_iterator(gridDir, ec))
+            {
+                if (fsEntry.is_directory())
+                {
+                    subFolders.push_back(fsEntry.path().filename().string());
+                }
+            }
+            std::sort(subFolders.begin(), subFolders.end());
+
+            for (const auto& folderName : subFolders)
+            {
+                const std::string folderSub = gridFolder.empty()
+                    ? folderName
+                    : (gridFolder + "/" + folderName);
+
+                WidgetElement tile = makeGridTile(
+                    "ContentBrowser.GridDir." + folderSub,
+                    folderName, "folder.png",
+                    Vec4{ 0.95f, 0.85f, 0.35f, 1.0f }, true);
+
+                // Double-click opens the folder
+                tile.onDoubleClicked = [uiMgr = this, folderSub]()
+                {
+                    uiMgr->m_selectedBrowserFolder = folderSub;
+                    if (!uiMgr->m_expandedFolders.count(folderSub))
+                    {
+                        uiMgr->m_expandedFolders.insert(folderSub);
+                    }
+                    uiMgr->refreshContentBrowser();
+                };
+
+                gridPanel->children.push_back(std::move(tile));
+            }
+        }
+
+        // Assets in the selected folder
+        struct GridAssetItem { std::string name; std::string relPath; AssetType type; };
+        std::vector<GridAssetItem> gridAssets;
+        for (const auto& e : registry)
+        {
+            const std::filesystem::path regPath(e.path);
+            const std::string parentStr = regPath.parent_path().generic_string();
+            if (parentStr == gridFolder)
+            {
+                gridAssets.push_back({ e.name, e.path, e.type });
+            }
+        }
+        std::sort(gridAssets.begin(), gridAssets.end(),
+            [](const GridAssetItem& a, const GridAssetItem& b) { return a.name < b.name; });
+
+        for (const auto& item : gridAssets)
+        {
+            const std::string iconFile = iconForAssetType(item.type);
+            const std::string relPath = item.relPath;
+
+            WidgetElement tile = makeGridTile(
+                "ContentBrowser.GridAsset." + relPath,
+                item.name, iconFile,
+                iconTintForAssetType(item.type), false);
+
+            tile.onDoubleClicked = [uiMgr = this, relPath]()
+            {
+                Logger::Instance().log(Logger::Category::UI,
+                    "Content Browser: open asset '" + relPath + "'",
+                    Logger::LogLevel::INFO);
+                uiMgr->showToastMessage("Open: " + relPath, 2.5f);
+            };
+
+            gridPanel->children.push_back(std::move(tile));
+        }
     }
 
     widget->markLayoutDirty();
@@ -1702,15 +2214,25 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
     {
         const auto* outlinerEntry = findWidgetEntry("WorldOutliner");
         auto* detailsEntry = findWidgetEntry("EntityDetails");
+        const auto* contentBrowserEntry = findWidgetEntry("ContentBrowser");
         if (outlinerEntry && outlinerEntry->widget && outlinerEntry->widget->hasComputedPosition() &&
             detailsEntry && detailsEntry->widget)
         {
             const Vec2 outlinerPos = outlinerEntry->widget->getComputedPositionPixels();
             const Vec2 outlinerSize = outlinerEntry->widget->getComputedSizePixels();
 
+            // Bottom limit: top edge of the ContentBrowser, or the bottom of the outliner
+            float bottomLimit = outlinerPos.y + outlinerSize.y;
+            if (contentBrowserEntry && contentBrowserEntry->widget && contentBrowserEntry->widget->hasComputedPosition())
+            {
+                bottomLimit = contentBrowserEntry->widget->getComputedPositionPixels().y;
+            }
+
             const float splitRatio = 0.45f;
-            const Vec2 detailsPos{ outlinerPos.x, outlinerPos.y + outlinerSize.y * splitRatio };
-            const Vec2 detailsSize{ outlinerSize.x, outlinerSize.y * (1.0f - splitRatio) };
+            const float detailsTop = outlinerPos.y + outlinerSize.y * splitRatio;
+            const float detailsHeight = std::max(0.0f, bottomLimit - detailsTop);
+            const Vec2 detailsPos{ outlinerPos.x, detailsTop };
+            const Vec2 detailsSize{ outlinerSize.x, detailsHeight };
 
             detailsEntry->widget->setComputedPositionPixels(detailsPos, true);
             detailsEntry->widget->setComputedSizePixels(detailsSize, true);
@@ -1880,16 +2402,42 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
         }
         markAllWidgetsDirty();
     }
-    if (target->onClicked)
+    // Copy target data before callbacks — onClicked/onDoubleClicked may rebuild
+    // the widget tree (e.g. refreshContentBrowser), invalidating the target pointer.
+    const std::string targetId = target->id;
+    const std::string targetClickEvent = target->clickEvent;
+    const auto targetOnClicked = target->onClicked;
+    const auto targetOnDoubleClicked = target->onDoubleClicked;
+
+    if (targetOnClicked)
     {
-        target->onClicked();
+        targetOnClicked();
     }
-    else
+
+    // Double-click detection (uses local copies only)
     {
-        std::string eventId = target->clickEvent;
+        const uint64_t now = SDL_GetTicks();
+        const bool sameElement = (!targetId.empty() && targetId == m_lastClickedElementId);
+        const bool withinTime = (now - m_lastClickTimeMs) < 400;
+        if (sameElement && withinTime && targetOnDoubleClicked)
+        {
+            targetOnDoubleClicked();
+            m_lastClickedElementId.clear();
+            m_lastClickTimeMs = 0;
+        }
+        else
+        {
+            m_lastClickedElementId = targetId;
+            m_lastClickTimeMs = now;
+        }
+    }
+
+    if (!targetOnClicked)
+    {
+        std::string eventId = targetClickEvent;
         if (eventId.empty())
         {
-            eventId = target->id;
+            eventId = targetId;
         }
 
         if (!eventId.empty())
@@ -2062,6 +2610,7 @@ void UIManager::markAllWidgetsDirty()
             entry.widget->markLayoutDirty();
         }
     }
+    m_lastHoveredElement = nullptr;
     m_renderDirty = true;
 }
 
@@ -2259,57 +2808,31 @@ void UIManager::updateHoverStates()
         return;
     }
 
-    WidgetElement* hovered = hitTest(m_mousePosition, false);
+    WidgetElement* newHovered = hitTest(m_mousePosition, false);
 
-    const std::function<void(WidgetElement&)> applyHover =
-        [&](WidgetElement& element)
-        {
-            const bool newHover = (&element == hovered) && element.isHitTestable;
-            if (element.isHovered != newHover)
-            {
-                element.isHovered = newHover;
-                m_renderDirty = true;
-                if (newHover)
-                {
-                    if (element.type == WidgetElementType::Button && !element.id.empty())
-                    {
-                        Logger::Instance().log(Logger::Category::UI, "Hover enter: " + element.id, Logger::LogLevel::INFO);
-                    }
-                    if (element.onHovered)
-                    {
-                        element.onHovered();
-                    }
-                }
-                else
-                {
-                    if (element.type == WidgetElementType::Button && !element.id.empty())
-                    {
-                        Logger::Instance().log(Logger::Category::UI, "Hover leave: " + element.id, Logger::LogLevel::INFO);
-                    }
-                    if (element.onUnhovered)
-                    {
-                        element.onUnhovered();
-                    }
-                }
-            }
-
-            for (auto& child : element.children)
-            {
-                applyHover(child);
-            }
-        };
-
-    for (auto& entry : m_widgets)
+    // Unhover previous element if it changed
+    if (m_lastHoveredElement && m_lastHoveredElement != newHovered)
     {
-        if (!entry.widget)
+        m_lastHoveredElement->isHovered = false;
+        if (m_lastHoveredElement->onUnhovered)
         {
-            continue;
+            m_lastHoveredElement->onUnhovered();
         }
-        for (auto& element : entry.widget->getElementsMutable())
-        {
-            applyHover(element);
-        }
+        m_renderDirty = true;
     }
+
+    // Hover new element
+    if (newHovered && newHovered->isHitTestable && newHovered != m_lastHoveredElement)
+    {
+        newHovered->isHovered = true;
+        if (newHovered->onHovered)
+        {
+            newHovered->onHovered();
+        }
+        m_renderDirty = true;
+    }
+
+    m_lastHoveredElement = (newHovered && newHovered->isHitTestable) ? newHovered : nullptr;
 }
 
 void UIManager::registerClickEvent(const std::string& eventId, std::function<void()> callback)
@@ -2404,18 +2927,8 @@ bool UIManager::isPointerOverUI(const Vec2& screenPos) const
     return false;
 }
 
-WidgetElement* UIManager::hitTest(const Vec2& screenPos, bool logDetails) const
+WidgetElement* UIManager::hitTest(const Vec2& screenPos, bool /*logDetails*/) const
 {
-    if (logDetails)
-    {
-        Logger::Instance().log(Logger::Category::UI,
-            "hitTest start at (" + std::to_string(screenPos.x) + ", " + std::to_string(screenPos.y) + ")",
-            Logger::LogLevel::INFO);
-    }
-
-    std::vector<const WidgetEntry*> ordered;
-    const auto& orderedAsc = getWidgetsOrderedByZ();
-    ordered.assign(orderedAsc.rbegin(), orderedAsc.rend());
 
     const auto pointInRect = [](const Vec2& pos, const Vec2& size, const Vec2& point)
         {
@@ -2439,7 +2952,6 @@ WidgetElement* UIManager::hitTest(const Vec2& screenPos, bool logDetails) const
             {
                 return nullptr;
             }
-            // Children rendered in insertion order; check from back to front for hit priority
             for (auto it = element.children.rbegin(); it != element.children.rend(); ++it)
             {
                 if (auto* hitChild = testElement(*it))
@@ -2472,18 +2984,6 @@ WidgetElement* UIManager::hitTest(const Vec2& screenPos, bool logDetails) const
                 }
             }
 
-            if (logDetails)
-            {
-                const std::string idStr = element.id.empty() ? std::string("<no-id>") : element.id;
-                Logger::Instance().log(Logger::Category::UI,
-                    "hitTest element id='" + idStr + "' pos=(" +
-                    std::to_string(element.computedPositionPixels.x) + ", " +
-                    std::to_string(element.computedPositionPixels.y) + ") size=(" +
-                    std::to_string(element.computedSizePixels.x) + ", " +
-                    std::to_string(element.computedSizePixels.y) + ") inside=" + (inside ? "true" : "false"),
-                    Logger::LogLevel::INFO);
-            }
-
             if (inside)
             {
                 return const_cast<WidgetElement*>(&element);
@@ -2492,17 +2992,20 @@ WidgetElement* UIManager::hitTest(const Vec2& screenPos, bool logDetails) const
             return nullptr;
         };
 
-    for (const auto* entry : ordered)
+    const auto& orderedAsc = getWidgetsOrderedByZ();
+
+    for (auto it = orderedAsc.rbegin(); it != orderedAsc.rend(); ++it)
     {
+        const auto* entry = *it;
         if (!entry || !entry->widget)
         {
             continue;
         }
 
         const auto& elements = entry->widget->getElements();
-        for (auto it = elements.rbegin(); it != elements.rend(); ++it)
+        for (auto eit = elements.rbegin(); eit != elements.rend(); ++eit)
         {
-            if (auto* hit = testElement(*it))
+            if (auto* hit = testElement(*eit))
             {
                 return hit;
             }

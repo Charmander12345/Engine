@@ -158,6 +158,10 @@ namespace
     WidgetElement readElement(const json& entry)
     {
         WidgetElement element{};
+        if (entry.contains("id"))
+        {
+            element.id = entry.at("id").get<std::string>();
+        }
         if (entry.contains("type"))
         {
             element.type = fromString(entry.at("type").get<std::string>());

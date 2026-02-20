@@ -9,6 +9,9 @@ project ("Engine" LANGUAGES C CXX)
 # Prefer shared libraries for subprojects by default.
 set(BUILD_SHARED_LIBS ON CACHE BOOL "Prefer shared libraries for subprojects" FORCE)
 
+# Remove the default debug postfix ("d") from DLL names.
+set(CMAKE_DEBUG_POSTFIX "" CACHE STRING "" FORCE)
+
 set(Python3_USE_DEBUG_LIBS OFF CACHE BOOL "" FORCE)
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 if (Python3_LIBRARY_RELEASE)
@@ -37,7 +40,16 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 set(SDL_SHARED ON CACHE BOOL "Build SDL as shared library" FORCE)
 set(SDL_STATIC OFF CACHE BOOL "Build SDL as static library" FORCE)
 add_subdirectory(external/SDL3 EXCLUDE_FROM_ALL)
+set(ASSIMP_BUILD_SHARED_LIBS OFF CACHE BOOL "Build assimp as shared library" FORCE)
+set(ASSIMP_INJECT_DEBUG_POSTFIX OFF CACHE BOOL "No debug postfix for assimp" FORCE)
+set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "Disable assimp tests" FORCE)
+
+# Build Assimp and freetype as static libraries so they are embedded in their consumers.
+set(ASSIMP_BUILD_SHARED_LIBS OFF CACHE BOOL "Build assimp as shared" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Prefer static for assimp/freetype" FORCE)
+add_subdirectory(external/assimp EXCLUDE_FROM_ALL)
 add_subdirectory(external/freetype)
+set(BUILD_SHARED_LIBS ON CACHE BOOL "Prefer shared libraries for subprojects" FORCE)
 set(ALSOFT_UTILS OFF CACHE BOOL "" FORCE)
 set(ALSOFT_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(ALSOFT_TESTS OFF CACHE BOOL "" FORCE)
@@ -49,7 +61,6 @@ add_subdirectory(src/Logger)
 add_subdirectory(src/Core)
 add_subdirectory(src/Renderer)
 add_subdirectory(src/Scripting)
-add_subdirectory(src/Scripting)
 
 if (NOT TARGET OpenAL::OpenAL)
     message(FATAL_ERROR "OpenAL target not available from external/openal-soft.")
@@ -57,7 +68,7 @@ endif()
 
 add_executable(Engine
     src/main.cpp
-    "src/Core/Asset.h")
+    )
 
 # Engine is a console executable
 set_target_properties(Engine PROPERTIES WIN32_EXECUTABLE OFF)

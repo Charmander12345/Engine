@@ -500,19 +500,40 @@ int main()
         }
 
         const std::string contentBrowserPath = assetManager.getEditorWidgetPath("ContentBrowser.asset");
+        logTimed(Logger::Category::UI, "[ContentBrowser] main: resolved path='" + contentBrowserPath + "'", Logger::LogLevel::INFO);
         if (!contentBrowserPath.empty())
         {
             const int widgetId = assetManager.loadAsset(contentBrowserPath, AssetType::Widget, AssetManager::Sync);
+            logTimed(Logger::Category::UI, "[ContentBrowser] main: loadAsset returned widgetId=" + std::to_string(widgetId), Logger::LogLevel::INFO);
             if (widgetId != 0)
             {
                 if (auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(widgetId)))
                 {
+                    logTimed(Logger::Category::UI, "[ContentBrowser] main: asset loaded name='" + asset->getName() + "' type=" + std::to_string(static_cast<int>(asset->getAssetType())), Logger::LogLevel::INFO);
                     if (auto widget = glRenderer->createWidgetFromAsset(asset))
                     {
+                        logTimed(Logger::Category::UI, "[ContentBrowser] main: widget created name='" + widget->getName() + "' elements=" + std::to_string(widget->getElements().size()), Logger::LogLevel::INFO);
                         glRenderer->getUIManager().registerWidget("ContentBrowser", widget);
+                        logTimed(Logger::Category::UI, "[ContentBrowser] main: registerWidget('ContentBrowser') completed", Logger::LogLevel::INFO);
+                    }
+                    else
+                    {
+                        logTimed(Logger::Category::UI, "[ContentBrowser] main: createWidgetFromAsset returned nullptr", Logger::LogLevel::WARNING);
                     }
                 }
+                else
+                {
+                    logTimed(Logger::Category::UI, "[ContentBrowser] main: getLoadedAssetByID returned nullptr for id=" + std::to_string(widgetId), Logger::LogLevel::WARNING);
+                }
             }
+            else
+            {
+                logTimed(Logger::Category::UI, "[ContentBrowser] main: loadAsset failed (returned 0)", Logger::LogLevel::WARNING);
+            }
+        }
+        else
+        {
+            logTimed(Logger::Category::UI, "[ContentBrowser] main: getEditorWidgetPath returned empty path", Logger::LogLevel::WARNING);
         }
 
     }

@@ -112,6 +112,7 @@ struct WidgetElement
     bool scrollable{ false };
     float scrollOffset{ 0.0f };
     std::function<void()> onClicked;
+    std::function<void()> onDoubleClicked;
     std::function<void(const Vec4&)> onColorChanged;
     std::function<void(const std::string&)> onValueChanged;
     std::function<void()> onHovered;

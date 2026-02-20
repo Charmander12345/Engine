@@ -27,6 +27,7 @@ target_link_libraries(AssetManager
         Logger
         Core
         SDL3::SDL3
+        assimp
 )
 
 if (WIN32)

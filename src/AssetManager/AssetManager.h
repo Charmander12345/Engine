@@ -97,10 +97,13 @@ public:
 	bool isAssetLoaded(const std::string& path) const;
 
 	//Project management
-    bool loadProject(const std::string& projectPath, SyncState syncState = Sync);
-    bool saveProject(const std::string& projectPath, SyncState syncState = Sync);
-    bool createProject(const std::string& parentDir, const std::string& projectName, const DiagnosticsManager::ProjectInfo& info, SyncState syncState = Sync);
+	bool loadProject(const std::string& projectPath, SyncState syncState = Sync);
+	bool saveProject(const std::string& projectPath, SyncState syncState = Sync);
+	bool createProject(const std::string& parentDir, const std::string& projectName, const DiagnosticsManager::ProjectInfo& info, SyncState syncState = Sync);
 	void unloadAllAssets();
+
+	// Returns the full flat asset registry (all discovered .asset files with type + relative path).
+	const std::vector<AssetRegistryEntry>& getAssetRegistry() const;
 
 private:
     // Worker lifecycle
@@ -110,11 +113,10 @@ private:
 
     void createWorldSettingsWidgetAsset();
 
-    bool loadAssetRegistry(const std::string& projectRoot);
-    bool saveAssetRegistry(const std::string& projectRoot) const;
-    bool discoverAssetsAndBuildRegistry(const std::string& projectRoot);
-    void registerAssetInRegistry(const AssetRegistryEntry& entry);
-    const std::vector<AssetRegistryEntry>& getAssetRegistry() const;
+	bool loadAssetRegistry(const std::string& projectRoot);
+	bool saveAssetRegistry(const std::string& projectRoot) const;
+	bool discoverAssetsAndBuildRegistry(const std::string& projectRoot);
+	void registerAssetInRegistry(const AssetRegistryEntry& entry);
 
 	// Default assets
     void ensureDefaultAssetsCreated();

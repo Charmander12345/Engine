@@ -91,6 +91,8 @@
 | Worker-Thread (Job-Queue)                | ✅     |
 | Asset-Registry (binär, schnelle Suche)   | ✅     |
 | Discovery (Content-Verzeichnis scannen)  | ✅     |
+| Discovery: Script-Dateien (.py)          | ✅     |
+| Discovery: Audio-Dateien (.wav/.mp3/.ogg/.flac) | ✅     |
 | Laden: Textur (PNG, TGA, JPG, BMP)      | ✅     |
 | Laden: Audio (WAV)                       | ✅     |
 | Laden: Material                          | ✅     |
@@ -104,6 +106,7 @@
 | Import: Texturen                         | ✅     |
 | Import: Audio (WAV)                      | ✅     |
 | Import: 3D-Modelle (OBJ, FBX)           | ❌     |
+| Assimp-Integration (static in AssetManager) | ✅ |
 | Import: Shader-Dateien                   | ❌     |
 | Speichern (Typ-spezifisch)              | ✅     |
 | Asset-Header (binär v2 + JSON-Fallback) | ✅     |
@@ -524,6 +527,31 @@
 - Kein Theming / Style-System
 - Fehlende Widget-Typen: ScrollBar (eigenständig)
 - Fehlende Editor-Panels: Material-Editor, Shader-Editor, Log-Viewer, erweiterte Viewport-Einstellungen
+- Content Browser: Ordnernavigation + Asset-Icons per Registry implementiert (Asset-Editor noch Dummy)
+- Content Browser: Ausführliches Diagnose-Logging (Prefixed `[ContentBrowser]` / `[Registry]`) über die gesamte Pipeline
+- Content Browser: Crash beim Klick auf Ordner behoben (dangling `this`-Capture in Builder-Lambdas → `self` direkt captured)
+- Content Browser: Icons werden als PNG vom User bereitgestellt in `Editor/Textures/` (stb_image-Laden)
+- Content Browser: Icons werden per Tint-Color eingefärbt (Ordner gelb, Scripte grün, Texturen blau, Materials orange, Audio rot, Shader lila, etc.)
+- Content Browser: TreeView-Inhalte per `glScissor` auf den Zeichenbereich begrenzt (kein Überlauf beim Scrollen)
+- Content Browser: Grid-View zeigt Ordner + Assets des ausgewählten Ordners als quadratische Kacheln (80×80px, Icon + Name)
+- Content Browser: Doppelklick auf Grid-Ordner navigiert hinein, Doppelklick auf Asset öffnet es
+- Content Browser: Ausgewählter Ordner im TreeView visuell hervorgehoben
+- Content Browser: Einfachklick auf TreeView-Ordner wählt ihn aus und aktualisiert Grid
+- Content Browser: Zweiter Klick auf bereits ausgewählten Ordner klappt ihn wieder zu
+- Content Browser: "Content" Root-Knoten im TreeView, klickbar zum Zurücknavigieren zur Wurzel
+- Content Browser: Pfadleiste (Breadcrumbs) über der Grid: Zurück-Button + klickbare Pfadsegmente (Content > Ordner > UnterOrdner)
+- Content Browser: Crash beim Ordnerwechsel nach Grid-Interaktion behoben (Use-After-Free: Target-Daten vor Callback-Aufruf kopiert)
+- Widget-System: `readElement` parst jetzt das `id`-Feld aus JSON (fehlte zuvor, wodurch alle Element-IDs nach Laden leer waren)
+- Widget-System: `layoutElement` hat jetzt Default-Pfad für Kinder aller Element-Typen (Button-Kinder werden korrekt gelayoutet)
+- Widget-System: Grid-Layout berechnet Spalten aus verfügbarer Breite / Kachelgröße für quadratische Zellen
+- Widget-System: `onDoubleClicked`-Callback auf `WidgetElement` mit Doppelklick-Erkennung (400ms, SDL_GetTicks)
+- EntityDetails-Panel endet über dem ContentBrowser (Layout berücksichtigt die Oberkante des ContentBrowsers als Unterlimit)
+- Scrollbare StackPanels/Grids werden per `glScissor` auf ihren Zeichenbereich begrenzt (kein Überlauf beim Scrollen)
+- **Performance-Optimierungen:**
+  - `updateHoverStates`: O(1) Tracked-Pointer statt O(N) Full-Tree-Walk pro Mausbewegung
+  - `hitTest`: Keine temporäre Vektor-Allokation mehr, iteriert gecachte Liste direkt rückwärts
+  - `drawUIPanel`/`drawUIImage`: Uniform-Locations pro Shader-Programm gecacht (eliminiert ~13 `glGetUniformLocation`-Aufrufe pro Draw)
+  - Verbose INFO-Logging aus allen Per-Frame-Hotpaths entfernt (Hover, HitTest, ContentBrowser-Builder, RegisterWidget)
 - Weitere Editor-Tabs für zusätzliche Editoren noch nicht implementiert
 
 ---
@@ -580,6 +608,7 @@
 | MSVC-Unterstützung (VS 18 2026)    | ✅     |
 | x64-Plattform                       | ✅     |
 | SHARED/DLL-Bibliotheken             | ✅     |
+| Debug-Postfix entfernt (kein "d")  | ✅     |
 | Debug-Python-Workaround             | ✅     |
 | Profiling-Flag (/PROFILE)           | ✅     |
 | GCC/Clang-Unterstützung             | ❌     |
