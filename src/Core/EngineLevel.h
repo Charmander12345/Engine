@@ -62,6 +62,13 @@ public:
 	const std::vector<ECS::Entity>& getScriptEntities() const;
 	void registerEntityListChangedCallback(std::function<void()> callback);
 
+	void setEditorCameraPosition(const Vec3& pos) { m_editorCameraPosition = pos; }
+	const Vec3& getEditorCameraPosition() const { return m_editorCameraPosition; }
+	void setEditorCameraRotation(const Vec2& rot) { m_editorCameraRotation = rot; }
+	const Vec2& getEditorCameraRotation() const { return m_editorCameraRotation; }
+	bool hasEditorCamera() const { return m_hasEditorCamera; }
+	void setHasEditorCamera(bool has) { m_hasEditorCamera = has; }
+
 	struct EntitySnapshot
 	{
 		ECS::TransformComponent transform{};
@@ -91,4 +98,7 @@ private:
 	bool m_ecsPreparing{ false };
 	json m_ecsSnapshot;
 	std::unordered_map<ECS::Entity, EntitySnapshot> m_componentSnapshot;
+	Vec3 m_editorCameraPosition{};
+	Vec2 m_editorCameraRotation{};
+	bool m_hasEditorCamera{ false };
 };

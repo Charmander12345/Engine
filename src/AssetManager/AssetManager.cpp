@@ -17,6 +17,12 @@
 #include "../Renderer/Material.h"
 #include "../Core/AudioManager.h"
 
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+
+#include "../Core/ECS/ECS.h"
+
 namespace fs = std::filesystem;
 
 int AssetManager::s_nextAssetID = 1;
@@ -38,16 +44,25 @@ namespace
             if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
         }
         // Textures
-        if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga")
+        if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga" || ext == ".hdr")
             return AssetType::Texture;
 
         if (ext == ".wav")
             return AssetType::Audio;
 
-        // Future: models/audio/shaders/scripts...
-        // if (ext == ".obj" || ext == ".fbx" ... ) return AssetType::Model3D;
-        // if (ext == ".wav" || ext == ".ogg" ... ) return AssetType::Audio;
-        // if (ext == ".glsl" || ext == ".vert" || ext == ".frag") return AssetType::Shader;
+        // 3D Models (Assimp-supported)
+        if (ext == ".obj" || ext == ".fbx" || ext == ".gltf" || ext == ".glb" ||
+            ext == ".dae" || ext == ".3ds" || ext == ".blend" || ext == ".stl" ||
+            ext == ".ply" || ext == ".x3d")
+            return AssetType::Model3D;
+
+        // Shaders
+        if (ext == ".glsl" || ext == ".vert" || ext == ".frag" || ext == ".geom" || ext == ".comp")
+            return AssetType::Shader;
+
+        // Scripts
+        if (ext == ".py")
+            return AssetType::Script;
 
         return AssetType::Unknown;
     }
@@ -2507,6 +2522,16 @@ bool AssetManager::saveAllAssets(SyncState syncState)
     return true;
 }
 
+bool AssetManager::saveActiveLevel()
+{
+    auto* level = DiagnosticsManager::Instance().getActiveLevelSoft();
+    if (!level)
+    {
+        return false;
+    }
+    return saveLevelAsset(level).success;
+}
+
 size_t AssetManager::getUnsavedAssetCount() const
 {
     std::lock_guard<std::mutex> lock(m_stateMutex);
@@ -3016,8 +3041,13 @@ bool AssetManager::OpenImportDialog(SDL_Window* parentWindow /* = nullptr */, As
 
         // SDL3: Filter als SDL_DialogFileFilter-Array
         SDL_DialogFileFilter filters[] = {
-            { "All Files", "*" },
-            { "Image Files", "png;jpg;jpeg;bmp;tga" }
+            { "All Supported", "png;jpg;jpeg;bmp;tga;hdr;wav;obj;fbx;gltf;glb;dae;3ds;blend;stl;ply;x3d;glsl;vert;frag;geom;comp;py" },
+            { "Image Files", "png;jpg;jpeg;bmp;tga;hdr" },
+            { "3D Models", "obj;fbx;gltf;glb;dae;3ds;blend;stl;ply;x3d" },
+            { "Audio Files", "wav" },
+            { "Shaders", "glsl;vert;frag;geom;comp" },
+            { "Scripts", "py" },
+            { "All Files", "*" }
         };
 
         logger.log(Logger::Category::AssetManagement, "Opening import asset dialog with SDL...", Logger::LogLevel::INFO);
@@ -3040,23 +3070,466 @@ bool AssetManager::OpenImportDialog(SDL_Window* parentWindow /* = nullptr */, As
 
 void AssetManager::importAssetFromPath(std::string path, AssetType preferredType, unsigned int ActionID)
 {
-    auto& logger = Logger::Instance();
-    auto& diagnostics = DiagnosticsManager::Instance();
-    logger.log(Logger::Category::AssetManagement, "Importing asset from path: " + path, Logger::LogLevel::INFO);
-    if (!fs::exists(path))
-    {
-        logger.log(Logger::Category::AssetManagement, "Import asset failed: file does not exist: " + path, Logger::LogLevel::ERROR);
+	auto& logger = Logger::Instance();
+	auto& diagnostics = DiagnosticsManager::Instance();
+	logger.log(Logger::Category::AssetManagement, "Importing asset from path: " + path, Logger::LogLevel::INFO);
+
+	if (!diagnostics.isProjectLoaded())
+	{
+		logger.log(Logger::Category::AssetManagement, "Import failed: no project loaded.", Logger::LogLevel::ERROR);
 		diagnostics.updateActionProgress(ActionID, false);
 		return;
-    }
-    std::ifstream inFile;
-	inFile.open(path);
-    if (!inFile.is_open())
-    {
-        logger.log(Logger::Category::AssetManagement, "Import asset failed: could not open file: " + path, Logger::LogLevel::ERROR);
-        diagnostics.updateActionProgress(ActionID, false);
-        return;
-    }
+	}
+
+	if (!fs::exists(path))
+	{
+		logger.log(Logger::Category::AssetManagement, "Import asset failed: file does not exist: " + path, Logger::LogLevel::ERROR);
+		diagnostics.updateActionProgress(ActionID, false);
+		return;
+	}
+
+	const fs::path sourcePath(path);
+	const AssetType detectedType = (preferredType != AssetType::Unknown)
+		? preferredType
+		: DetectAssetTypeFromPath(sourcePath);
+
+	if (detectedType == AssetType::Unknown)
+	{
+		logger.log(Logger::Category::AssetManagement, "Import failed: unsupported file format: " + sourcePath.extension().string(), Logger::LogLevel::ERROR);
+		diagnostics.updateActionProgress(ActionID, false);
+		return;
+	}
+
+	const std::string assetName = sanitizeName(sourcePath.stem().string());
+	const fs::path contentDir = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+	const fs::path destAssetPath = contentDir / (assetName + ".asset");
+	const std::string relPath = fs::relative(destAssetPath, contentDir).generic_string();
+
+	json data = json::object();
+	bool success = false;
+
+	switch (detectedType)
+	{
+	case AssetType::Texture:
+	{
+		int width = 0, height = 0, channels = 0;
+		unsigned char* imgData = stbi_load(path.c_str(), &width, &height, &channels, 4);
+		if (!imgData)
+		{
+			logger.log(Logger::Category::AssetManagement, "Import failed: stb_image could not load: " + path, Logger::LogLevel::ERROR);
+			break;
+		}
+		channels = 4;
+
+		// Copy source file to Content folder
+		const fs::path destSourcePath = contentDir / sourcePath.filename();
+		std::error_code ec;
+		fs::copy_file(sourcePath, destSourcePath, fs::copy_options::overwrite_existing, ec);
+
+		const std::string relSourcePath = fs::relative(destSourcePath, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
+		data["m_sourcePath"] = relSourcePath;
+		data["m_width"] = width;
+		data["m_height"] = height;
+		data["m_channels"] = channels;
+
+		stbi_image_free(imgData);
+		success = true;
+		break;
+	}
+
+	case AssetType::Audio:
+	{
+		// Copy source .wav to Content folder
+		const fs::path destSourcePath = contentDir / sourcePath.filename();
+		std::error_code ec;
+		fs::copy_file(sourcePath, destSourcePath, fs::copy_options::overwrite_existing, ec);
+
+		const std::string relSourcePath = fs::relative(destSourcePath, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
+		data["m_sourcePath"] = relSourcePath;
+		data["m_format"] = "wav";
+		success = true;
+		break;
+	}
+
+	case AssetType::Model3D:
+	{
+		Assimp::Importer importer;
+		const aiScene* scene = importer.ReadFile(path,
+			aiProcess_Triangulate |
+			aiProcess_GenNormals |
+			aiProcess_FlipUVs |
+			aiProcess_JoinIdenticalVertices |
+			aiProcess_OptimizeMeshes);
+
+		if (!scene || !scene->mRootNode || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE))
+		{
+			logger.log(Logger::Category::AssetManagement, "Import failed: Assimp error: " + std::string(importer.GetErrorString()), Logger::LogLevel::ERROR);
+			break;
+		}
+
+		// Collect all meshes into a single vertex/index buffer (pos3 + uv2 layout)
+		std::vector<float> vertices;
+		std::vector<uint32_t> indices;
+		uint32_t indexOffset = 0;
+
+		for (unsigned int m = 0; m < scene->mNumMeshes; ++m)
+		{
+			const aiMesh* mesh = scene->mMeshes[m];
+			for (unsigned int v = 0; v < mesh->mNumVertices; ++v)
+			{
+				vertices.push_back(mesh->mVertices[v].x);
+				vertices.push_back(mesh->mVertices[v].y);
+				vertices.push_back(mesh->mVertices[v].z);
+
+				if (mesh->mTextureCoords[0])
+				{
+					vertices.push_back(mesh->mTextureCoords[0][v].x);
+					vertices.push_back(mesh->mTextureCoords[0][v].y);
+				}
+				else
+				{
+					vertices.push_back(0.0f);
+					vertices.push_back(0.0f);
+				}
+			}
+
+			for (unsigned int f = 0; f < mesh->mNumFaces; ++f)
+			{
+				const aiFace& face = mesh->mFaces[f];
+				for (unsigned int i = 0; i < face.mNumIndices; ++i)
+				{
+					indices.push_back(indexOffset + face.mIndices[i]);
+				}
+			}
+
+			indexOffset += mesh->mNumVertices;
+		}
+
+		data["m_vertices"] = vertices;
+		data["m_indices"] = indices;
+
+		logger.log(Logger::Category::AssetManagement,
+			"Import 3D model: " + std::to_string(vertices.size() / 5) + " vertices, " + std::to_string(indices.size()) + " indices",
+			Logger::LogLevel::INFO);
+
+		success = true;
+		break;
+	}
+
+	case AssetType::Shader:
+	{
+		// Copy shader source to Content folder
+		const fs::path destSourcePath = contentDir / sourcePath.filename();
+		std::error_code ec;
+		fs::copy_file(sourcePath, destSourcePath, fs::copy_options::overwrite_existing, ec);
+
+		const std::string relSourcePath = fs::relative(destSourcePath, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
+		data["m_sourcePath"] = relSourcePath;
+		data["m_shaderType"] = sourcePath.extension().string();
+		success = true;
+		break;
+	}
+
+	case AssetType::Script:
+	{
+		// Copy script to Content folder
+		const fs::path destSourcePath = contentDir / sourcePath.filename();
+		std::error_code ec;
+		fs::copy_file(sourcePath, destSourcePath, fs::copy_options::overwrite_existing, ec);
+
+		const std::string relSourcePath = fs::relative(destSourcePath, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
+		data["m_sourcePath"] = relSourcePath;
+		data["m_scriptPath"] = relSourcePath;
+		success = true;
+		break;
+	}
+
+	default:
+		logger.log(Logger::Category::AssetManagement, "Import: unhandled asset type for: " + path, Logger::LogLevel::WARNING);
+		break;
+	}
+
+	if (!success)
+	{
+		diagnostics.updateActionProgress(ActionID, false);
+		return;
+	}
+
+	// Write the .asset file
+	std::error_code ec;
+	fs::create_directories(destAssetPath.parent_path(), ec);
+
+	std::ofstream out(destAssetPath, std::ios::out | std::ios::trunc);
+	if (!out.is_open())
+	{
+		logger.log(Logger::Category::AssetManagement, "Import failed: could not create .asset file: " + destAssetPath.string(), Logger::LogLevel::ERROR);
+		diagnostics.updateActionProgress(ActionID, false);
+		return;
+	}
+
+	json fileJson = json::object();
+	fileJson["magic"] = 0x41535453;
+	fileJson["version"] = 2;
+	fileJson["type"] = static_cast<int>(detectedType);
+	fileJson["name"] = assetName;
+	fileJson["data"] = data;
+
+	out << fileJson.dump(4);
+	out.close();
+
+	// Register in asset registry
+	AssetRegistryEntry regEntry;
+	regEntry.name = assetName;
+	regEntry.path = relPath;
+	regEntry.type = detectedType;
+	registerAssetInRegistry(regEntry);
+
+	diagnostics.updateActionProgress(ActionID, false);
+	logger.log(Logger::Category::AssetManagement,
+		"Import successful: " + assetName + " (" + relPath + ")",
+		Logger::LogLevel::INFO);
+	diagnostics.enqueueToastNotification("Imported: " + assetName, 3.0f);
+
+	if (m_onImportCompleted)
+	{
+		m_onImportCompleted();
+	}
+}
+
+bool AssetManager::moveAsset(const std::string& oldRelPath, const std::string& newRelPath)
+{
+	auto& logger = Logger::Instance();
+	auto& diagnostics = DiagnosticsManager::Instance();
+
+	if (!diagnostics.isProjectLoaded())
+	{
+		logger.log(Logger::Category::AssetManagement, "moveAsset: no project loaded.", Logger::LogLevel::ERROR);
+		return false;
+	}
+
+	if (oldRelPath == newRelPath)
+	{
+		return true;
+	}
+
+	const fs::path contentDir = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+	const fs::path srcAbs = contentDir / oldRelPath;
+	const fs::path destAbs = contentDir / newRelPath;
+
+	// Move the file
+	std::error_code ec;
+	fs::create_directories(destAbs.parent_path(), ec);
+	fs::rename(srcAbs, destAbs, ec);
+	if (ec)
+	{
+		logger.log(Logger::Category::AssetManagement, "moveAsset: rename failed: " + ec.message(), Logger::LogLevel::ERROR);
+		return false;
+	}
+
+	// Also move the source file if it was copied alongside the .asset (e.g. textures, scripts)
+	// Read the .asset and check for m_sourcePath
+	{
+		std::ifstream in(destAbs);
+		if (in.is_open())
+		{
+			try
+			{
+				json fileJson = json::parse(in);
+				in.close();
+				if (fileJson.contains("data") && fileJson["data"].is_object() && fileJson["data"].contains("m_sourcePath"))
+				{
+					const std::string oldSourceRel = fileJson["data"]["m_sourcePath"].get<std::string>();
+					// The m_sourcePath is relative to the project root (e.g. "Content/Textures/wall.jpg")
+					// Update it to match the new location's folder
+					const fs::path oldSourceAbs = fs::path(diagnostics.getProjectInfo().projectPath) / oldSourceRel;
+					if (fs::exists(oldSourceAbs))
+					{
+						const fs::path newSourceAbs = destAbs.parent_path() / fs::path(oldSourceRel).filename();
+						if (oldSourceAbs != newSourceAbs)
+						{
+							fs::rename(oldSourceAbs, newSourceAbs, ec);
+						}
+						const std::string newSourceRel = fs::relative(newSourceAbs, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
+						fileJson["data"]["m_sourcePath"] = newSourceRel;
+
+						// Write updated .asset
+						std::ofstream out(destAbs, std::ios::out | std::ios::trunc);
+						if (out.is_open())
+						{
+							out << fileJson.dump(4);
+						}
+					}
+				}
+			}
+			catch (...)
+			{
+				// Not valid JSON, skip
+			}
+		}
+	}
+
+	// Update registry entry
+	{
+		std::lock_guard<std::mutex> lock(m_stateMutex);
+		auto it = m_registryByPath.find(oldRelPath);
+		if (it != m_registryByPath.end())
+		{
+			const size_t idx = it->second;
+			m_registry[idx].path = newRelPath;
+			m_registryByPath.erase(it);
+			m_registryByPath[newRelPath] = idx;
+		}
+	}
+
+	// Update loaded asset paths
+	for (auto& [id, asset] : m_loadedAssets)
+	{
+		if (asset && asset->getPath() == oldRelPath)
+		{
+			asset->setPath(newRelPath);
+		}
+	}
+
+	// Update ECS component references
+	auto& ecs = ECS::ECSManager::Instance();
+	{
+		ECS::Schema meshSchema;
+		meshSchema.require<ECS::MeshComponent>();
+		for (const auto e : ecs.getEntitiesMatchingSchema(meshSchema))
+		{
+			if (auto* mesh = ecs.getComponent<ECS::MeshComponent>(e))
+			{
+				if (mesh->meshAssetPath == oldRelPath)
+					mesh->meshAssetPath = newRelPath;
+			}
+		}
+	}
+	{
+		ECS::Schema matSchema;
+		matSchema.require<ECS::MaterialComponent>();
+		for (const auto e : ecs.getEntitiesMatchingSchema(matSchema))
+		{
+			if (auto* mat = ecs.getComponent<ECS::MaterialComponent>(e))
+			{
+				if (mat->materialAssetPath == oldRelPath)
+					mat->materialAssetPath = newRelPath;
+			}
+		}
+	}
+	{
+		ECS::Schema scriptSchema;
+		scriptSchema.require<ECS::ScriptComponent>();
+		for (const auto e : ecs.getEntitiesMatchingSchema(scriptSchema))
+		{
+			if (auto* script = ecs.getComponent<ECS::ScriptComponent>(e))
+			{
+				if (script->scriptPath == oldRelPath)
+					script->scriptPath = newRelPath;
+			}
+		}
+	}
+
+	logger.log(Logger::Category::AssetManagement,
+		"moveAsset: " + oldRelPath + " → " + newRelPath + " (references updated)",
+		Logger::LogLevel::INFO);
+
+	// Scan all .asset files on disk for references to the old path and update them.
+	// This catches cross-asset dependencies (e.g. Material → Texture, Level → Entity components).
+	updateAssetFileReferences(contentDir, oldRelPath, newRelPath);
+
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Recursively walk a JSON value and replace any string that equals oldVal with newVal.
+// Returns true if at least one replacement was made.
+// ---------------------------------------------------------------------------
+static bool replaceJsonStringValues(json& node, const std::string& oldVal, const std::string& newVal)
+{
+	bool changed = false;
+	if (node.is_string())
+	{
+		if (node.get<std::string>() == oldVal)
+		{
+			node = newVal;
+			changed = true;
+		}
+	}
+	else if (node.is_array())
+	{
+		for (auto& element : node)
+		{
+			changed |= replaceJsonStringValues(element, oldVal, newVal);
+		}
+	}
+	else if (node.is_object())
+	{
+		for (auto& [key, value] : node.items())
+		{
+			changed |= replaceJsonStringValues(value, oldVal, newVal);
+		}
+	}
+	return changed;
+}
+
+void AssetManager::updateAssetFileReferences(const std::filesystem::path& contentDir,
+	const std::string& oldRelPath, const std::string& newRelPath)
+{
+	auto& logger = Logger::Instance();
+	std::error_code ec;
+
+	for (auto it = fs::recursive_directory_iterator(contentDir, fs::directory_options::skip_permission_denied, ec);
+		it != fs::recursive_directory_iterator(); ++it)
+	{
+		if (it->is_directory()) continue;
+		if (it->path().extension() != ".asset") continue;
+
+		// Skip the moved file itself (already at newRelPath)
+		const std::string fileRelPath = fs::relative(it->path(), contentDir).generic_string();
+		if (fileRelPath == newRelPath) continue;
+
+		std::ifstream in(it->path(), std::ios::in | std::ios::binary);
+		if (!in.is_open()) continue;
+
+		json fileJson;
+		try
+		{
+			fileJson = json::parse(in);
+		}
+		catch (...)
+		{
+			continue;
+		}
+		in.close();
+
+		if (!fileJson.is_object()) continue;
+
+		bool changed = false;
+
+		// Scan "data" block (Material textures, source paths, etc.)
+		if (fileJson.contains("data"))
+		{
+			changed |= replaceJsonStringValues(fileJson["data"], oldRelPath, newRelPath);
+		}
+
+		// Scan "Entities" array (Level files with Entity component paths)
+		if (fileJson.contains("Entities"))
+		{
+			changed |= replaceJsonStringValues(fileJson["Entities"], oldRelPath, newRelPath);
+		}
+
+		if (changed)
+		{
+			std::ofstream out(it->path(), std::ios::out | std::ios::trunc);
+			if (out.is_open())
+			{
+				out << fileJson.dump(4);
+				logger.log(Logger::Category::AssetManagement,
+					"moveAsset: updated references in " + fileRelPath,
+					Logger::LogLevel::INFO);
+			}
+		}
+	}
 }
 
 bool AssetManager::loadProject(const std::string& projectPath, SyncState syncState)
@@ -4493,6 +4966,15 @@ AssetManager::SaveResult AssetManager::saveLevelAsset(EngineLevel* level)
 	if (!level->getLevelScriptPath().empty())
 	{
 		levelJson["Script"] = level->getLevelScriptPath();
+	}
+	if (level->hasEditorCamera())
+	{
+		json camJson = json::object();
+		const auto& pos = level->getEditorCameraPosition();
+		camJson["position"] = json::array({ pos.x, pos.y, pos.z });
+		const auto& rot = level->getEditorCameraRotation();
+		camJson["rotation"] = json::array({ rot.x, rot.y });
+		levelJson["EditorCamera"] = camJson;
 	}
 
 	json fileJson = json::object();

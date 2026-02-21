@@ -20,6 +20,8 @@ public:
     void setMatrices(const glm::mat4& model, const glm::mat4& view, const glm::mat4& projection);
     void setLightData(const glm::vec3& position, const glm::vec3& color, float intensity);
     void setLights(const std::vector<OpenGLMaterial::LightData>& lights);
+    void setShadowData(GLuint shadowMapArray, const glm::mat4* matrices, const int* lightIndices, int count);
+    void setPointShadowData(GLuint cubeArray, const glm::vec3* positions, const float* farPlanes, const int* lightIndices, int count);
     void render();
     void renderBatchContinuation();
     void setTextures(const std::vector<std::shared_ptr<Texture>>& textures);
@@ -31,6 +33,7 @@ public:
     GLuint getVao() const;
     GLsizei getVertexCount() const;
     GLsizei getIndexCount() const;
+    OpenGLMaterial* getMaterial() const { return m_material.get(); }
 
     static void ClearCache();
 

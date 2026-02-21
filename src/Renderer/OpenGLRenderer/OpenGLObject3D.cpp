@@ -341,6 +341,24 @@ void OpenGLObject3D::setLights(const std::vector<OpenGLMaterial::LightData>& lig
     m_material->setLights(lights);
 }
 
+void OpenGLObject3D::setShadowData(GLuint shadowMapArray, const glm::mat4* matrices, const int* lightIndices, int count)
+{
+    if (!m_material)
+    {
+        return;
+    }
+    m_material->setShadowData(shadowMapArray, matrices, lightIndices, count);
+}
+
+void OpenGLObject3D::setPointShadowData(GLuint cubeArray, const glm::vec3* positions, const float* farPlanes, const int* lightIndices, int count)
+{
+    if (!m_material)
+    {
+        return;
+    }
+    m_material->setPointShadowData(cubeArray, positions, farPlanes, lightIndices, count);
+}
+
 void OpenGLObject3D::setMatrices(const glm::mat4& model, const glm::mat4& view, const glm::mat4& projection)
 {
     if (!m_material)

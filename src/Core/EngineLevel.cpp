@@ -23,6 +23,25 @@ void EngineLevel::setLevelData(const json& data)
 	{
 		m_levelScriptPath = m_levelData.at("Script").get<std::string>();
 	}
+	m_hasEditorCamera = false;
+	if (m_levelData.is_object() && m_levelData.contains("EditorCamera"))
+	{
+		const auto& cam = m_levelData.at("EditorCamera");
+		if (cam.is_object())
+		{
+			if (cam.contains("position") && cam.at("position").is_array() && cam.at("position").size() >= 3)
+			{
+				const auto& p = cam.at("position");
+				m_editorCameraPosition = Vec3{ p[0].get<float>(), p[1].get<float>(), p[2].get<float>() };
+			}
+			if (cam.contains("rotation") && cam.at("rotation").is_array() && cam.at("rotation").size() >= 2)
+			{
+				const auto& r = cam.at("rotation");
+				m_editorCameraRotation = Vec2{ r[0].get<float>(), r[1].get<float>() };
+			}
+			m_hasEditorCamera = true;
+		}
+	}
 	m_ecsPrepared = false;
 }
 

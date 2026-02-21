@@ -109,6 +109,15 @@ public:
 	// Returns the full flat asset registry (all discovered .asset files with type + relative path).
 	const std::vector<AssetRegistryEntry>& getAssetRegistry() const;
 
+	// Move an asset to a new folder, updating all references (registry, ECS components, .asset files).
+	bool moveAsset(const std::string& oldRelPath, const std::string& newRelPath);
+
+	// Save only the active level (e.g. to persist editor camera on shutdown).
+	bool saveActiveLevel();
+
+	// Called after a successful asset import
+	void setOnImportCompleted(std::function<void()> callback) { m_onImportCompleted = std::move(callback); }
+
 private:
     // Worker lifecycle
     void startWorker();
@@ -121,6 +130,9 @@ private:
 	bool saveAssetRegistry(const std::string& projectRoot) const;
 	bool discoverAssetsAndBuildRegistry(const std::string& projectRoot);
 	void registerAssetInRegistry(const AssetRegistryEntry& entry);
+
+	// Scan all .asset files under contentDir for string references to oldRelPath and replace with newRelPath.
+	void updateAssetFileReferences(const std::filesystem::path& contentDir, const std::string& oldRelPath, const std::string& newRelPath);
 
 	// Default assets
     void ensureDefaultAssetsCreated();
@@ -179,6 +191,7 @@ private:
     AssetManager(const AssetManager&) = delete;
     AssetManager& operator=(const AssetManager&) = delete;
 	GarbageCollector m_garbageCollector;
+	std::function<void()> m_onImportCompleted;
 
     std::vector<AssetRegistryEntry> m_registry;
     std::unordered_map<std::string, size_t> m_registryByPath;

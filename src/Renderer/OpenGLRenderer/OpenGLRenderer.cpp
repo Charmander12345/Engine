@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cctype>
 #include <cstring>
+#include <unordered_set>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -254,6 +255,8 @@ void OpenGLRenderer::shutdown()
     }
     releaseHzbResources();
     releaseBoundsDebugResources();
+    releaseShadowResources();
+    releasePointShadowResources();
     releasePickFbo();
     releaseOutlineResources();
     releaseUiFbo();
@@ -399,6 +402,14 @@ bool OpenGLRenderer::initialize()
             m_renderEntries.push_back(std::move(entry));
         }
         m_cachedLevel = DiagnosticsManager::Instance().getActiveLevelSoft();
+
+        // Restore editor camera from the level if available
+        if (m_cachedLevel && m_cachedLevel->hasEditorCamera() && m_camera)
+        {
+            m_camera->setPosition(m_cachedLevel->getEditorCameraPosition());
+            const Vec2& rot = m_cachedLevel->getEditorCameraRotation();
+            m_camera->setRotationDegrees(rot.x, rot.y);
+        }
     }
 
     // Window stays hidden until main.cpp shows it after freeing the console.
@@ -570,15 +581,18 @@ void OpenGLRenderer::renderWorld()
     glClearColor(m_clearColor.x, m_clearColor.y, m_clearColor.z, m_clearColor.w);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // Update projection matrix with current aspect ratio
+    // Update projection matrix with current aspect ratio (default, may be overridden by entity camera)
+    float activeFov = 45.0f;
+    float activeNear = 0.1f;
+    float activeFar = 100.0f;
     if (height > 0)
     {
         float aspectRatio = static_cast<float>(width) / static_cast<float>(height);
         m_projectionMatrix = glm::perspective(
-            glm::radians(45.0f),
+            glm::radians(activeFov),
             aspectRatio,
-            0.1f,
-            100.0f
+            activeNear,
+            activeFar
         );
     }
 
@@ -597,6 +611,7 @@ void OpenGLRenderer::renderWorld()
         diagnostics.setScenePrepared(false);
         m_cachedLevel = level;
         m_textRenderer.reset();
+        m_restoreCameraOnPrepare = true;
     }
 
     if (!diagnostics.isScenePrepared())
@@ -627,10 +642,25 @@ void OpenGLRenderer::renderWorld()
         ECS::Schema meshSchema;
         meshSchema.require<ECS::MeshComponent>().require<ECS::TransformComponent>();
         m_meshEntries.clear();
+
+        // Collect entities already covered by the render schema to avoid duplicates
+        std::unordered_set<ECS::Entity> renderEntitySet;
+        renderEntitySet.reserve(m_renderEntries.size());
+        for (const auto& re : m_renderEntries)
+        {
+            if (re.entity != 0)
+                renderEntitySet.insert(re.entity);
+        }
+
         const auto meshRenderables = m_resourceManager.buildRenderablesForSchema(meshSchema);
         m_meshEntries.reserve(meshRenderables.size());
         for (const auto& renderable : meshRenderables)
         {
+            // Skip entities already in m_renderEntries (Mesh+Material)
+            if (renderable.entity != 0 && renderEntitySet.count(renderable.entity))
+            {
+                continue;
+            }
             RenderEntry entry;
             entry.entity = renderable.entity;
             entry.transform = renderable.transform;
@@ -642,19 +672,68 @@ void OpenGLRenderer::renderWorld()
             }
             m_meshEntries.push_back(std::move(entry));
         }
+
+        // Restore editor camera from the level only on level change (not on every re-prepare)
+        if (m_restoreCameraOnPrepare && level && level->hasEditorCamera() && m_camera)
+        {
+            m_camera->setPosition(level->getEditorCameraPosition());
+            const Vec2& rot = level->getEditorCameraRotation();
+            m_camera->setRotationDegrees(rot.x, rot.y);
+        }
+        m_restoreCameraOnPrepare = false;
     }
 
-    glm::mat4 view(1.0f);
-    if (m_camera)
-    {
-        Mat4 engineView = m_camera->getViewMatrixColumnMajor();
-        view = glm::make_mat4(engineView.m);
-    }
-    const glm::mat4 viewProj = m_projectionMatrix * view;
-    const auto frustumPlanes = ExtractFrustumPlanes(viewProj);
+	glm::mat4 view(1.0f);
+	bool usedEntityCamera = false;
+
+	// Entity camera is only used during PIE (Play In Editor)
+	auto& ecs = ECS::ECSManager::Instance();
+	const bool pieActive = diagnostics.isPIEActive();
+	if (pieActive && m_activeCameraEntity != 0)
+	{
+		const auto* camComp = ecs.getComponent<ECS::CameraComponent>(static_cast<ECS::Entity>(m_activeCameraEntity));
+		const auto* camTransform = ecs.getComponent<ECS::TransformComponent>(static_cast<ECS::Entity>(m_activeCameraEntity));
+		if (camComp && camTransform)
+		{
+			const glm::vec3 pos(camTransform->position[0], camTransform->position[1], camTransform->position[2]);
+			const float pitch = glm::radians(camTransform->rotation[0]);
+			const float yaw   = glm::radians(camTransform->rotation[1]);
+			const glm::vec3 front = glm::normalize(glm::vec3(
+				cosf(yaw) * cosf(pitch),
+				sinf(pitch),
+				sinf(yaw) * cosf(pitch)
+			));
+			const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+			const glm::vec3 right = glm::normalize(glm::cross(front, worldUp));
+			const glm::vec3 up = glm::normalize(glm::cross(right, front));
+			view = glm::lookAt(pos, pos + front, up);
+
+			// Override projection with entity camera parameters
+			if (height > 0)
+			{
+				const float aspectRatio = static_cast<float>(width) / static_cast<float>(height);
+				m_projectionMatrix = glm::perspective(
+					glm::radians(camComp->fov),
+					aspectRatio,
+					camComp->nearClip,
+					camComp->farClip
+				);
+			}
+			usedEntityCamera = true;
+		}
+	}
+
+	// Editor camera (always used outside PIE, or as fallback)
+	if (!usedEntityCamera && m_camera)
+	{
+		Mat4 engineView = m_camera->getViewMatrixColumnMajor();
+		view = glm::make_mat4(engineView.m);
+	}
+	const glm::mat4 viewProj = m_projectionMatrix * view;
+	m_lastViewMatrix = view;
+	const auto frustumPlanes = ExtractFrustumPlanes(viewProj);
 
 	const uint64_t ecsStartCounter = SDL_GetPerformanceCounter();
-	auto& ecs = ECS::ECSManager::Instance();
 	glm::vec3 lightPosition{ 0.0f, 1.2f, 0.0f };
 	glm::vec3 lightColor{ 1.0f, 1.0f, 1.0f };
 	float lightIntensity = 1.0f;
@@ -763,7 +842,9 @@ void OpenGLRenderer::renderWorld()
 
 	// Collect all visible 3D objects into a unified draw list for batching
 	m_drawList.clear();
+	m_shadowCasterList.clear();
 	m_drawList.reserve(m_renderEntries.size() + objs.size() + m_meshEntries.size() + 16);
+	m_shadowCasterList.reserve(m_renderEntries.size() + objs.size() + m_meshEntries.size() + 16);
 
 	const float timeRotation = static_cast<float>(SDL_GetTicks()) / 1000.0f;
 
@@ -777,13 +858,20 @@ void OpenGLRenderer::renderWorld()
 			cmd.obj = entry.object3D.get();
 			cmd.modelMatrix = entry.cachedModelMatrix;
 			cmd.entityId = static_cast<unsigned int>(entry.entity);
+			bool isLight = false;
 			if (entry.entity != 0)
 			{
 				if (const auto* light = ecs.getComponent<ECS::LightComponent>(entry.entity))
 				{
 					cmd.emissionColor = glm::vec3(light->color[0], light->color[1], light->color[2]);
 					cmd.hasEmission = true;
+					isLight = true;
 				}
+			}
+			// Shadow caster: include all non-light objects regardless of camera frustum
+			if (!isLight)
+			{
+				m_shadowCasterList.push_back(cmd);
 			}
 			if (entry.object3D->hasLocalBounds())
 			{
@@ -836,6 +924,12 @@ void OpenGLRenderer::renderWorld()
 			Mat4 engineMat = entry->transform.getMatrix4ColumnMajor();
 			cmd.modelMatrix = glm::make_mat4(engineMat.m);
 			cmd.modelMatrix = glm::rotate(cmd.modelMatrix, timeRotation, glm::vec3(0.0f, 1.0f, 0.0f));
+
+			// Shadow caster: include non-light objects regardless of camera frustum
+			if (objType != AssetType::PointLight)
+			{
+				m_shadowCasterList.push_back(cmd);
+			}
 
 			if (glObj->hasLocalBounds())
 			{
@@ -899,6 +993,8 @@ void OpenGLRenderer::renderWorld()
 				Mat4 engineMat = t->getMatrix4ColumnMajor();
 				cmd.modelMatrix = glm::make_mat4(engineMat.m);
 
+				m_shadowCasterList.push_back(cmd);
+
 				if (glObj->hasLocalBounds())
 				{
 					ComputeWorldAabb(glObj->getLocalBoundsMin(), glObj->getLocalBoundsMax(), cmd.modelMatrix, cmd.boundsMin, cmd.boundsMax);
@@ -943,13 +1039,20 @@ void OpenGLRenderer::renderWorld()
 			cmd.obj = entry.object3D.get();
 			cmd.modelMatrix = entry.cachedModelMatrix;
 			cmd.entityId = static_cast<unsigned int>(entry.entity);
+			bool isLight = false;
 			if (entry.entity != 0)
 			{
 				if (const auto* light = ecs.getComponent<ECS::LightComponent>(entry.entity))
 				{
 					cmd.emissionColor = glm::vec3(light->color[0], light->color[1], light->color[2]);
 					cmd.hasEmission = true;
+					isLight = true;
 				}
+			}
+			// Shadow caster: include all non-light objects regardless of camera frustum
+			if (!isLight)
+			{
+				m_shadowCasterList.push_back(cmd);
 			}
 			if (entry.object3D->hasLocalBounds())
 			{
@@ -981,11 +1084,45 @@ void OpenGLRenderer::renderWorld()
 	std::sort(m_drawList.begin(), m_drawList.end(),
 		[](const DrawCmd& a, const DrawCmd& b) { return a.program < b.program; });
 
+	// ---- Shadow map pass (multi-light) ----
+	m_shadowCount = 0;
+	if (m_shadowEnabled && ensureShadowResources())
+	{
+		findShadowLightIndices();
+		for (int s = 0; s < m_shadowCount; ++s)
+		{
+			m_shadowLightSpaceMatrices[s] = computeLightSpaceMatrix(m_sceneLights[m_shadowLightIndices[s]]);
+		}
+		if (m_shadowCount > 0)
+		{
+			renderShadowMap(m_shadowCasterList);
+
+			// Restore main viewport
+			glViewport(0, 0, width, height);
+		}
+	}
+
+	// ---- Point light shadow map pass (cube maps) ----
+	m_pointShadowCount = 0;
+	if (m_shadowEnabled && ensurePointShadowResources())
+	{
+		findPointShadowLightIndices();
+		if (m_pointShadowCount > 0)
+		{
+			renderPointShadowMaps(m_shadowCasterList);
+
+			// Restore main viewport
+			glViewport(0, 0, width, height);
+		}
+	}
+
 	// Render sorted draw list
 	GLuint lastProgram = 0;
 	for (const auto& cmd : m_drawList)
 	{
 		cmd.obj->setMatrices(cmd.modelMatrix, view, m_projectionMatrix);
+		cmd.obj->setShadowData(m_shadowDepthArray, m_shadowLightSpaceMatrices, m_shadowLightIndices, m_shadowCount);
+		cmd.obj->setPointShadowData(m_pointShadowCubeArray, m_pointShadowPositions, m_pointShadowFarPlanes, m_pointShadowLightIndices, m_pointShadowCount);
 		if (cmd.hasEmission)
 		{
 			cmd.obj->setLightData(lightPosition, cmd.emissionColor, lightIntensity);
@@ -1982,6 +2119,29 @@ void OpenGLRenderer::renderUI()
     }
     m_textQueue.clear();
 
+    // Render drag indicator when the user is dragging a content browser asset
+    if (m_textRenderer && m_uiManager.isDragging())
+    {
+        const Vec2 mousePos = m_uiManager.getMousePosition();
+        const std::string& payload = m_uiManager.getDragPayload();
+        // Extract the label from payload ("typeInt|relPath" → stem of relPath)
+        std::string dragLabel = "Dragging...";
+        const auto sep = payload.find('|');
+        if (sep != std::string::npos)
+        {
+            const std::string relPath = payload.substr(sep + 1);
+            const auto lastSlash = relPath.find_last_of('/');
+            const auto dot = relPath.find_last_of('.');
+            if (dot != std::string::npos)
+            {
+                const size_t nameStart = (lastSlash != std::string::npos) ? lastSlash + 1 : 0;
+                dragLabel = relPath.substr(nameStart, dot - nameStart);
+            }
+        }
+        const Vec2 labelPos{ mousePos.x + 16.0f, mousePos.y - 8.0f };
+        m_textRenderer->drawText(dragLabel, labelPos, 0.42f, Vec4{ 1.0f, 1.0f, 1.0f, 0.9f });
+    }
+
     glEnable(GL_DEPTH_TEST);
 
     const uint64_t uiEnd = SDL_GetPerformanceCounter();
@@ -2336,6 +2496,360 @@ void OpenGLRenderer::releaseBoundsDebugResources()
         m_boundsDebugVao = 0;
     }
     m_boundsDebugVertexCount = 0;
+}
+
+// ---- Shadow Mapping ----
+
+bool OpenGLRenderer::ensureShadowResources()
+{
+    if (m_shadowProgram != 0)
+        return true;
+
+    // Compile shadow depth shader
+    const char* vs = R"(
+#version 460 core
+layout(location = 0) in vec3 aPos;
+uniform mat4 uLightSpaceMatrix;
+uniform mat4 uModel;
+void main() {
+    gl_Position = uLightSpaceMatrix * uModel * vec4(aPos, 1.0);
+}
+)";
+    const char* fs = R"(
+#version 460 core
+void main() {}
+)";
+
+    GLuint vsh = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vsh, 1, &vs, nullptr);
+    glCompileShader(vsh);
+    GLuint fsh = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fsh, 1, &fs, nullptr);
+    glCompileShader(fsh);
+    m_shadowProgram = glCreateProgram();
+    glAttachShader(m_shadowProgram, vsh);
+    glAttachShader(m_shadowProgram, fsh);
+    glLinkProgram(m_shadowProgram);
+    glDeleteShader(vsh);
+    glDeleteShader(fsh);
+
+    m_shadowLocModel = glGetUniformLocation(m_shadowProgram, "uModel");
+    m_shadowLocLightSpace = glGetUniformLocation(m_shadowProgram, "uLightSpaceMatrix");
+
+    // Create shadow FBO + depth texture array (one layer per shadow-casting light)
+    glGenTextures(1, &m_shadowDepthArray);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_shadowDepthArray);
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24,
+                 kShadowMapSize, kShadowMapSize, kMaxShadowLights,
+                 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    float borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    glTexParameterfv(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BORDER_COLOR, borderColor);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+
+    glGenFramebuffers(1, &m_shadowFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_shadowFbo);
+    glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_shadowDepthArray, 0, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    return true;
+}
+
+void OpenGLRenderer::releaseShadowResources()
+{
+    if (m_shadowProgram)    { glDeleteProgram(m_shadowProgram); m_shadowProgram = 0; }
+    if (m_shadowDepthArray) { glDeleteTextures(1, &m_shadowDepthArray); m_shadowDepthArray = 0; }
+    if (m_shadowFbo)        { glDeleteFramebuffers(1, &m_shadowFbo); m_shadowFbo = 0; }
+}
+
+void OpenGLRenderer::findShadowLightIndices()
+{
+    m_shadowCount = 0;
+    for (int i = 0; i < static_cast<int>(m_sceneLights.size()) && m_shadowCount < kMaxShadowLights; ++i)
+    {
+        const int type = m_sceneLights[i].type;
+        if (type == 1 || type == 2) // directional or spot
+        {
+            m_shadowLightIndices[m_shadowCount] = i;
+            ++m_shadowCount;
+        }
+    }
+}
+
+glm::mat4 OpenGLRenderer::computeLightSpaceMatrix(const OpenGLMaterial::LightData& light) const
+{
+    const glm::vec3 lightDir = glm::normalize(light.direction);
+
+    // Choose a stable up vector that isn't parallel to lightDir
+    glm::vec3 up(0.0f, 1.0f, 0.0f);
+    if (std::abs(glm::dot(lightDir, up)) > 0.99f)
+    {
+        up = glm::vec3(0.0f, 0.0f, 1.0f);
+    }
+
+    if (light.type == 2) // LIGHT_SPOT
+    {
+        float fov = 2.0f * std::acos(light.spotOuterCutoff);
+        if (fov <= 0.0f || fov > glm::radians(179.0f))
+            fov = glm::radians(90.0f);
+
+        const float farPlane = light.range > 0.0f ? light.range : 50.0f;
+        const glm::mat4 lightView = glm::lookAt(light.position, light.position + lightDir, up);
+        const glm::mat4 lightProj = glm::perspective(fov, 1.0f, 0.1f, farPlane);
+        return lightProj * lightView;
+    }
+
+    // Directional light: orthographic projection centered on the camera
+    glm::vec3 center(0.0f);
+    if (m_camera)
+    {
+        const Vec3& camPos = m_camera->getPosition();
+        center = glm::vec3(camPos.x, camPos.y, camPos.z);
+    }
+
+    const float shadowRange = 15.0f;
+    const float shadowDepth = 60.0f;
+    const glm::vec3 lightPos = center - lightDir * (shadowDepth * 0.5f);
+    const glm::mat4 lightView = glm::lookAt(lightPos, center, up);
+    const glm::mat4 lightProj = glm::ortho(-shadowRange, shadowRange, -shadowRange, shadowRange,
+                                            0.1f, shadowDepth);
+    return lightProj * lightView;
+}
+
+void OpenGLRenderer::renderShadowMap(const std::vector<DrawCmd>& drawList)
+{
+    GLint prevFbo = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
+
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_FRONT);
+    glUseProgram(m_shadowProgram);
+
+    for (int s = 0; s < m_shadowCount; ++s)
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, m_shadowFbo);
+        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_shadowDepthArray, 0, s);
+        glViewport(0, 0, kShadowMapSize, kShadowMapSize);
+        glClear(GL_DEPTH_BUFFER_BIT);
+
+        glUniformMatrix4fv(m_shadowLocLightSpace, 1, GL_FALSE, &m_shadowLightSpaceMatrices[s][0][0]);
+
+        for (const auto& cmd : drawList)
+        {
+            glUniformMatrix4fv(m_shadowLocModel, 1, GL_FALSE, &cmd.modelMatrix[0][0]);
+
+            auto* mat = cmd.obj->getMaterial();
+            if (!mat)
+                continue;
+            glBindVertexArray(mat->getVao());
+            if (mat->getIndexCount() > 0)
+            {
+                glDrawElements(GL_TRIANGLES, mat->getIndexCount(), GL_UNSIGNED_INT, nullptr);
+            }
+            else
+            {
+                glDrawArrays(GL_TRIANGLES, 0, mat->getVertexCount());
+            }
+        }
+    }
+
+    glCullFace(GL_BACK);
+    glDisable(GL_CULL_FACE);
+    glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFbo));
+}
+
+// ---- Point Light Shadow Mapping (Cube Maps) ----
+
+bool OpenGLRenderer::ensurePointShadowResources()
+{
+    if (m_pointShadowProgram != 0)
+        return true;
+
+    // Vertex shader: transform to world space
+    const char* vs = R"(
+#version 460 core
+layout(location = 0) in vec3 aPos;
+uniform mat4 uModel;
+void main() {
+    gl_Position = uModel * vec4(aPos, 1.0);
+}
+)";
+
+    // Geometry shader: render to all 6 cube faces in one pass using layered rendering
+    const char* gs = R"(
+#version 460 core
+layout(triangles) in;
+layout(triangle_strip, max_vertices = 18) out;
+
+uniform mat4 uShadowMatrices[6];
+uniform int uLayerOffset;
+
+out vec4 FragPos;
+
+void main() {
+    for (int face = 0; face < 6; ++face) {
+        gl_Layer = uLayerOffset + face;
+        for (int i = 0; i < 3; ++i) {
+            FragPos = gl_in[i].gl_Position;
+            gl_Position = uShadowMatrices[face] * FragPos;
+            EmitVertex();
+        }
+        EndPrimitive();
+    }
+}
+)";
+
+    // Fragment shader: write linear depth
+    const char* fs = R"(
+#version 460 core
+in vec4 FragPos;
+uniform vec3 uLightPos;
+uniform float uFarPlane;
+void main() {
+    float dist = length(FragPos.xyz - uLightPos);
+    gl_FragDepth = dist / uFarPlane;
+}
+)";
+
+    GLuint vsh = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vsh, 1, &vs, nullptr);
+    glCompileShader(vsh);
+    GLuint gsh = glCreateShader(GL_GEOMETRY_SHADER);
+    glShaderSource(gsh, 1, &gs, nullptr);
+    glCompileShader(gsh);
+    GLuint fsh = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fsh, 1, &fs, nullptr);
+    glCompileShader(fsh);
+
+    m_pointShadowProgram = glCreateProgram();
+    glAttachShader(m_pointShadowProgram, vsh);
+    glAttachShader(m_pointShadowProgram, gsh);
+    glAttachShader(m_pointShadowProgram, fsh);
+    glLinkProgram(m_pointShadowProgram);
+    glDeleteShader(vsh);
+    glDeleteShader(gsh);
+    glDeleteShader(fsh);
+
+    m_pointShadowLocModel = glGetUniformLocation(m_pointShadowProgram, "uModel");
+    m_pointShadowLocLightPos = glGetUniformLocation(m_pointShadowProgram, "uLightPos");
+    m_pointShadowLocFarPlane = glGetUniformLocation(m_pointShadowProgram, "uFarPlane");
+    m_pointShadowLocShadowMatrices = glGetUniformLocation(m_pointShadowProgram, "uShadowMatrices[0]");
+
+    // Create cube map array texture
+    glGenTextures(1, &m_pointShadowCubeArray);
+    glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, m_pointShadowCubeArray);
+    glTexImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, 0, GL_DEPTH_COMPONENT24,
+                 kPointShadowMapSize, kPointShadowMapSize, kMaxPointShadowLights * 6,
+                 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+
+    // Create FBO (layered attachment – geometry shader selects the layer)
+    glGenFramebuffers(1, &m_pointShadowFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_pointShadowFbo);
+    glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_pointShadowCubeArray, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    return true;
+}
+
+void OpenGLRenderer::releasePointShadowResources()
+{
+    if (m_pointShadowProgram)   { glDeleteProgram(m_pointShadowProgram); m_pointShadowProgram = 0; }
+    if (m_pointShadowCubeArray) { glDeleteTextures(1, &m_pointShadowCubeArray); m_pointShadowCubeArray = 0; }
+    if (m_pointShadowFbo)       { glDeleteFramebuffers(1, &m_pointShadowFbo); m_pointShadowFbo = 0; }
+}
+
+void OpenGLRenderer::findPointShadowLightIndices()
+{
+    m_pointShadowCount = 0;
+    for (int i = 0; i < static_cast<int>(m_sceneLights.size()) && m_pointShadowCount < kMaxPointShadowLights; ++i)
+    {
+        if (m_sceneLights[i].type == 0) // point light
+        {
+            m_pointShadowLightIndices[m_pointShadowCount] = i;
+            m_pointShadowPositions[m_pointShadowCount] = m_sceneLights[i].position;
+            m_pointShadowFarPlanes[m_pointShadowCount] = m_sceneLights[i].range > 0.0f ? m_sceneLights[i].range : 25.0f;
+            ++m_pointShadowCount;
+        }
+    }
+}
+
+void OpenGLRenderer::renderPointShadowMaps(const std::vector<DrawCmd>& drawList)
+{
+    GLint prevFbo = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
+
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_FRONT);
+    glUseProgram(m_pointShadowProgram);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_pointShadowFbo);
+    glViewport(0, 0, kPointShadowMapSize, kPointShadowMapSize);
+
+    // Clear all layers once
+    glClear(GL_DEPTH_BUFFER_BIT);
+
+    const GLint locLayerOffset = glGetUniformLocation(m_pointShadowProgram, "uLayerOffset");
+
+    for (int s = 0; s < m_pointShadowCount; ++s)
+    {
+        const glm::vec3& lightPos = m_pointShadowPositions[s];
+        const float farPlane = m_pointShadowFarPlanes[s];
+        const float nearPlane = 0.1f;
+
+        const glm::mat4 shadowProj = glm::perspective(glm::radians(90.0f), 1.0f, nearPlane, farPlane);
+        glm::mat4 shadowViews[6] = {
+            shadowProj * glm::lookAt(lightPos, lightPos + glm::vec3( 1, 0, 0), glm::vec3(0,-1, 0)),
+            shadowProj * glm::lookAt(lightPos, lightPos + glm::vec3(-1, 0, 0), glm::vec3(0,-1, 0)),
+            shadowProj * glm::lookAt(lightPos, lightPos + glm::vec3( 0, 1, 0), glm::vec3(0, 0, 1)),
+            shadowProj * glm::lookAt(lightPos, lightPos + glm::vec3( 0,-1, 0), glm::vec3(0, 0,-1)),
+            shadowProj * glm::lookAt(lightPos, lightPos + glm::vec3( 0, 0, 1), glm::vec3(0,-1, 0)),
+            shadowProj * glm::lookAt(lightPos, lightPos + glm::vec3( 0, 0,-1), glm::vec3(0,-1, 0)),
+        };
+
+        // Upload per-light uniforms
+        if (m_pointShadowLocLightPos >= 0)
+            glUniform3fv(m_pointShadowLocLightPos, 1, &lightPos[0]);
+        if (m_pointShadowLocFarPlane >= 0)
+            glUniform1f(m_pointShadowLocFarPlane, farPlane);
+        if (m_pointShadowLocShadowMatrices >= 0)
+            glUniformMatrix4fv(m_pointShadowLocShadowMatrices, 6, GL_FALSE, &shadowViews[0][0][0]);
+        if (locLayerOffset >= 0)
+            glUniform1i(locLayerOffset, s * 6);
+
+        for (const auto& cmd : drawList)
+        {
+            if (m_pointShadowLocModel >= 0)
+                glUniformMatrix4fv(m_pointShadowLocModel, 1, GL_FALSE, &cmd.modelMatrix[0][0]);
+
+            auto* mat = cmd.obj->getMaterial();
+            if (!mat)
+                continue;
+            glBindVertexArray(mat->getVao());
+            if (mat->getIndexCount() > 0)
+                glDrawElements(GL_TRIANGLES, mat->getIndexCount(), GL_UNSIGNED_INT, nullptr);
+            else
+                glDrawArrays(GL_TRIANGLES, 0, mat->getVertexCount());
+        }
+    }
+
+    glCullFace(GL_BACK);
+    glDisable(GL_CULL_FACE);
+    glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFbo));
 }
 
 void OpenGLRenderer::drawBoundsDebugBox(const glm::vec3& center, const glm::vec3& extent, const glm::mat4& viewProj)
@@ -3076,6 +3590,21 @@ void OpenGLRenderer::setCameraRotationDegrees(float yawDegrees, float pitchDegre
     }
 }
 
+void OpenGLRenderer::setActiveCameraEntity(unsigned int entity)
+{
+    m_activeCameraEntity = entity;
+}
+
+unsigned int OpenGLRenderer::getActiveCameraEntity() const
+{
+    return m_activeCameraEntity;
+}
+
+void OpenGLRenderer::clearActiveCameraEntity()
+{
+    m_activeCameraEntity = 0;
+}
+
 const std::string& OpenGLRenderer::name() const
 {
     return m_name;
@@ -3296,6 +3825,78 @@ unsigned int OpenGLRenderer::pickEntityAt(int x, int y)
     glReadPixels(x, glY, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, &entityId);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     return entityId;
+}
+
+unsigned int OpenGLRenderer::pickEntityAtImmediate(int x, int y)
+{
+    const Vec2 vs = getViewportSize();
+    const int w = static_cast<int>(vs.x);
+    const int h = static_cast<int>(vs.y);
+    if (w <= 0 || h <= 0)
+        return 0;
+
+    if (!ensurePickFbo(w, h))
+        return 0;
+
+    renderPickBuffer(m_lastViewMatrix, m_projectionMatrix);
+    return pickEntityAt(x, y);
+}
+
+bool OpenGLRenderer::screenToWorldPos(int screenX, int screenY, Vec3& outWorldPos) const
+{
+    // Find the active tab FBO to read depth from
+    GLuint fbo = 0;
+    int fboW = 0, fboH = 0;
+    for (const auto& tab : m_editorTabs)
+    {
+        if (tab.active && tab.fbo != 0)
+        {
+            fbo = tab.fbo;
+            fboW = tab.fboWidth;
+            fboH = tab.fboHeight;
+            break;
+        }
+    }
+
+    if (fbo == 0)
+    {
+        const Vec2 vs = getViewportSize();
+        fboW = static_cast<int>(vs.x);
+        fboH = static_cast<int>(vs.y);
+    }
+
+    if (fboW <= 0 || fboH <= 0)
+        return false;
+
+    const int glY = fboH - 1 - screenY;
+    if (screenX < 0 || screenX >= fboW || glY < 0 || glY >= fboH)
+        return false;
+
+    // Read depth at pixel
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+    float depth = 1.0f;
+    glReadPixels(screenX, glY, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &depth);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+
+    // depth == 1.0 means far plane (no geometry)
+    if (depth >= 1.0f)
+        return false;
+
+    // Unproject: NDC -> world
+    const float ndcX = (2.0f * static_cast<float>(screenX) / static_cast<float>(fboW)) - 1.0f;
+    const float ndcY = (2.0f * static_cast<float>(glY) / static_cast<float>(fboH)) - 1.0f;
+    const float ndcZ = 2.0f * depth - 1.0f;
+
+    const glm::mat4 invViewProj = glm::inverse(m_projectionMatrix * m_lastViewMatrix);
+    const glm::vec4 clipPos(ndcX, ndcY, ndcZ, 1.0f);
+    glm::vec4 worldPos = invViewProj * clipPos;
+
+    if (std::abs(worldPos.w) < 1e-7f)
+        return false;
+
+    worldPos /= worldPos.w;
+    outWorldPos = Vec3{ worldPos.x, worldPos.y, worldPos.z };
+    return true;
 }
 
 // â”€â”€â”€ Selection outline (post-process edge detection on pick buffer) â”€â”€â”€â”€â”€â”€â”€â”€â”€

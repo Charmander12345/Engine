@@ -25,4 +25,12 @@ public:
     virtual void setCameraPosition(const Vec3& position) = 0;
     virtual Vec2 getCameraRotationDegrees() const = 0;
     virtual void setCameraRotationDegrees(float yawDegrees, float pitchDegrees) = 0;
+
+    // Active entity camera (used at runtime / PIE)
+    virtual void setActiveCameraEntity(unsigned int entity) = 0;
+    virtual unsigned int getActiveCameraEntity() const = 0;
+    virtual void clearActiveCameraEntity() = 0;
+
+    // Screen-to-world unprojection using depth buffer
+    virtual bool screenToWorldPos(int screenX, int screenY, Vec3& outWorldPos) const = 0;
 };

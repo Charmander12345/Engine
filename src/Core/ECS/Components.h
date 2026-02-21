@@ -42,6 +42,7 @@ namespace ECS
 		float fov{ 60.0f }; // Field of view in degrees
 		float nearClip{ 0.1f };
 		float farClip{ 1000.0f };
+		bool isActive{ false }; // Mark as the primary runtime camera
 	};
 
 	struct PhysicsComponent

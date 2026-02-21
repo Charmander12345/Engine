@@ -35,6 +35,29 @@ void OpenGLMaterial::addShader(const std::shared_ptr<OpenGLShader>& shader)
     m_shaders.push_back(shader);
 }
 
+void OpenGLMaterial::setShadowData(GLuint texArray, const glm::mat4* matrices, const int* lightIndices, int count)
+{
+    m_shadowMapArray = texArray;
+    m_shadowCount = std::min(count, kMaxShadowLights);
+    for (int i = 0; i < m_shadowCount; ++i)
+    {
+        m_shadowMatrices[i] = matrices[i];
+        m_shadowLightIndices[i] = lightIndices[i];
+    }
+}
+
+void OpenGLMaterial::setPointShadowData(GLuint cubeArray, const glm::vec3* positions, const float* farPlanes, const int* lightIndices, int count)
+{
+    m_pointShadowCubeArray = cubeArray;
+    m_pointShadowCount = std::min(count, kMaxPointShadowLights);
+    for (int i = 0; i < m_pointShadowCount; ++i)
+    {
+        m_pointShadowPositions[i] = positions[i];
+        m_pointShadowFarPlanes[i] = farPlanes[i];
+        m_pointShadowLightIndices[i] = lightIndices[i];
+    }
+}
+
 bool OpenGLMaterial::build()
 {
     if (m_shaders.empty())
@@ -156,6 +179,24 @@ bool OpenGLMaterial::build()
     m_locMaterialShininess = glGetUniformLocation(m_program, "material.shininess");
     m_locHasSpecularMap = glGetUniformLocation(m_program, "uHasSpecularMap");
     m_locLightCount = glGetUniformLocation(m_program, "uLightCount");
+    m_locShadowMaps = glGetUniformLocation(m_program, "uShadowMaps");
+    m_locShadowCount = glGetUniformLocation(m_program, "uShadowCount");
+    for (int i = 0; i < kMaxShadowLights; ++i)
+    {
+        const std::string idx = "[" + std::to_string(i) + "]";
+        m_shadowLocs[i].lightSpaceMatrix = glGetUniformLocation(m_program, ("uLightSpaceMatrices" + idx).c_str());
+        m_shadowLocs[i].lightIndex       = glGetUniformLocation(m_program, ("uShadowLightIndices" + idx).c_str());
+    }
+    // Point shadow uniform locations
+    m_locPointShadowMaps = glGetUniformLocation(m_program, "uPointShadowMaps");
+    m_locPointShadowCount = glGetUniformLocation(m_program, "uPointShadowCount");
+    for (int i = 0; i < kMaxPointShadowLights; ++i)
+    {
+        const std::string idx = "[" + std::to_string(i) + "]";
+        m_pointShadowLocs[i].position  = glGetUniformLocation(m_program, ("uPointShadowPositions" + idx).c_str());
+        m_pointShadowLocs[i].farPlane  = glGetUniformLocation(m_program, ("uPointShadowFarPlanes" + idx).c_str());
+        m_pointShadowLocs[i].lightIndex = glGetUniformLocation(m_program, ("uPointShadowLightIndices" + idx).c_str());
+    }
     for (int i = 0; i < kMaxLights; ++i)
     {
         const std::string prefix = "uLights[" + std::to_string(i) + "].";
@@ -301,6 +342,48 @@ void OpenGLMaterial::bind()
         if (loc.spotCutoff >= 0)     glUniform1f(loc.spotCutoff, l.spotCutoff);
         if (loc.spotOuterCutoff >= 0) glUniform1f(loc.spotOuterCutoff, l.spotOuterCutoff);
         if (loc.type >= 0)           glUniform1i(loc.type, l.type);
+    }
+
+    // Multi-light shadow uniforms
+    if (m_locShadowCount >= 0)
+    {
+        glUniform1i(m_locShadowCount, m_shadowCount);
+    }
+    for (int i = 0; i < m_shadowCount; ++i)
+    {
+        if (m_shadowLocs[i].lightSpaceMatrix >= 0)
+            glUniformMatrix4fv(m_shadowLocs[i].lightSpaceMatrix, 1, GL_FALSE, glm::value_ptr(m_shadowMatrices[i]));
+        if (m_shadowLocs[i].lightIndex >= 0)
+            glUniform1i(m_shadowLocs[i].lightIndex, m_shadowLightIndices[i]);
+    }
+    if (m_locShadowMaps >= 0 && m_shadowMapArray != 0)
+    {
+        constexpr int kShadowTexUnit = 4;
+        glActiveTexture(GL_TEXTURE0 + kShadowTexUnit);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, m_shadowMapArray);
+        glUniform1i(m_locShadowMaps, kShadowTexUnit);
+    }
+
+    // Point shadow uniforms
+    if (m_locPointShadowCount >= 0)
+    {
+        glUniform1i(m_locPointShadowCount, m_pointShadowCount);
+    }
+    for (int i = 0; i < m_pointShadowCount; ++i)
+    {
+        if (m_pointShadowLocs[i].position >= 0)
+            glUniform3fv(m_pointShadowLocs[i].position, 1, glm::value_ptr(m_pointShadowPositions[i]));
+        if (m_pointShadowLocs[i].farPlane >= 0)
+            glUniform1f(m_pointShadowLocs[i].farPlane, m_pointShadowFarPlanes[i]);
+        if (m_pointShadowLocs[i].lightIndex >= 0)
+            glUniform1i(m_pointShadowLocs[i].lightIndex, m_pointShadowLightIndices[i]);
+    }
+    if (m_locPointShadowMaps >= 0 && m_pointShadowCubeArray != 0)
+    {
+        constexpr int kPointShadowTexUnit = 5;
+        glActiveTexture(GL_TEXTURE0 + kPointShadowTexUnit);
+        glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, m_pointShadowCubeArray);
+        glUniform1i(m_locPointShadowMaps, kPointShadowTexUnit);
     }
 
     bindTextures();

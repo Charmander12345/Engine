@@ -45,6 +45,7 @@ public:
     void updateLayouts(const std::function<Vec2(const std::string&, float)>& measureText);
     bool needsLayoutUpdate() const;
     bool handleMouseDown(const Vec2& screenPos, int button);
+    bool handleMouseUp(const Vec2& screenPos, int button);
     bool handleScroll(const Vec2& screenPos, float delta);
     bool handleTextInput(const std::string& text);
     bool handleKeyDown(int key);
@@ -147,4 +148,34 @@ public:
 	void showSaveProgressModal(size_t total);
 	void updateSaveProgress(size_t saved, size_t total);
 	void closeSaveProgressModal(bool success);
+
+	// Drag & Drop
+	bool isDragging() const { return m_dragging; }
+	const std::string& getDragPayload() const { return m_dragPayload; }
+	const std::string& getDragSourceId() const { return m_dragSourceId; }
+	void cancelDrag();
+
+	// Callback invoked when an asset is dropped on the viewport (not over UI)
+	using DropOnViewportCallback = std::function<void(const std::string& payload, const Vec2& screenPos)>;
+	void setOnDropOnViewport(DropOnViewportCallback callback) { m_onDropOnViewport = std::move(callback); }
+
+	// Callback invoked when an asset is dropped on a content browser folder
+	using DropOnFolderCallback = std::function<void(const std::string& payload, const std::string& folderPath)>;
+	void setOnDropOnFolder(DropOnFolderCallback callback) { m_onDropOnFolder = std::move(callback); }
+
+	// Callback invoked when an asset is dropped on an entity in the Outliner
+	using DropOnEntityCallback = std::function<void(const std::string& payload, unsigned int entity)>;
+	void setOnDropOnEntity(DropOnEntityCallback callback) { m_onDropOnEntity = std::move(callback); }
+
+private:
+	// Drag & Drop state
+	bool m_dragging{ false };
+	bool m_dragPending{ false };
+	Vec2 m_dragStartPos{};
+	std::string m_dragPayload;
+	std::string m_dragSourceId;
+	std::string m_dragLabel;
+	DropOnViewportCallback m_onDropOnViewport;
+	DropOnFolderCallback m_onDropOnFolder;
+	DropOnEntityCallback m_onDropOnEntity;
 };

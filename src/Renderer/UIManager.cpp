@@ -1693,6 +1693,10 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
                     "ContentBrowser.Asset." + relPath,
                     item.name, iconFile, false, depth, iconTintForAssetType(itemType));
 
+                // Make asset tree rows draggable
+                row.isDraggable = true;
+                row.dragPayload = std::to_string(static_cast<int>(itemType)) + "|" + relPath;
+
                 row.onClicked = [uiMgr = self, relPath, itemType]()
                 {
                     uiMgr->showToastMessage("Asset: " + relPath, 2.5f);
@@ -1764,6 +1768,27 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
                 }
             };
             pathBar->children.push_back(std::move(backBtn));
+        }
+
+        // Import button
+        {
+            WidgetElement importBtn{};
+            importBtn.id = "ContentBrowser.PathBar.Import";
+            importBtn.type = WidgetElementType::Button;
+            importBtn.text = "+ Import";
+            importBtn.font = "default.ttf";
+            importBtn.fontSize = 13.0f;
+            importBtn.textColor = Vec4{ 0.9f, 0.95f, 1.0f, 1.0f };
+            importBtn.textAlignH = TextAlignH::Center;
+            importBtn.textAlignV = TextAlignV::Center;
+            importBtn.minSize = Vec2{ 64.0f, 20.0f };
+            importBtn.color = Vec4{ 0.15f, 0.35f, 0.55f, 0.95f };
+            importBtn.hoverColor = Vec4{ 0.20f, 0.45f, 0.70f, 1.0f };
+            importBtn.shaderVertex = "button_vertex.glsl";
+            importBtn.shaderFragment = "button_fragment.glsl";
+            importBtn.isHitTestable = true;
+            importBtn.runtimeOnly = true;
+            pathBar->children.push_back(std::move(importBtn));
         }
 
         // Breadcrumb segments: Content > Folder > SubFolder > ...
@@ -1916,6 +1941,10 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
                 "ContentBrowser.GridAsset." + relPath,
                 item.name, iconFile,
                 iconTintForAssetType(item.type), false);
+
+            // Make asset tiles draggable
+            tile.isDraggable = true;
+            tile.dragPayload = std::to_string(static_cast<int>(item.type)) + "|" + relPath;
 
             tile.onDoubleClicked = [uiMgr = this, relPath]()
             {
@@ -2279,11 +2308,32 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
         return false;
     }
 
+    // Cancel any active drag on fresh mouse down
+    if (m_dragging)
+    {
+        cancelDrag();
+    }
+
     Logger::Instance().log(Logger::Category::UI,
         "MouseDown at (" + std::to_string(screenPos.x) + ", " + std::to_string(screenPos.y) + ")",
         Logger::LogLevel::INFO);
 
     WidgetElement* target = hitTest(screenPos, true);
+
+    // Check if this element is draggable — set up pending drag
+    if (target && target->isDraggable && !target->dragPayload.empty())
+    {
+        m_dragPending = true;
+        m_dragStartPos = screenPos;
+        m_dragPayload = target->dragPayload;
+        m_dragSourceId = target->id;
+        m_dragLabel = target->text;
+    }
+    else
+    {
+        m_dragPending = false;
+    }
+
     if (!target)
     {
         Logger::Instance().log(Logger::Category::UI, "Click miss at (" + std::to_string(screenPos.x) + ", " + std::to_string(screenPos.y) + ")", Logger::LogLevel::INFO);
@@ -2411,44 +2461,49 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
     const std::string targetClickEvent = target->clickEvent;
     const auto targetOnClicked = target->onClicked;
     const auto targetOnDoubleClicked = target->onDoubleClicked;
+    const bool targetIsDraggable = target->isDraggable;
 
-    if (targetOnClicked)
+    // Suppress click for draggable elements — click will fire on mouse-up if no drag occurred
+    if (!targetIsDraggable)
     {
-        targetOnClicked();
-    }
-
-    // Double-click detection (uses local copies only)
-    {
-        const uint64_t now = SDL_GetTicks();
-        const bool sameElement = (!targetId.empty() && targetId == m_lastClickedElementId);
-        const bool withinTime = (now - m_lastClickTimeMs) < 400;
-        if (sameElement && withinTime && targetOnDoubleClicked)
+        if (targetOnClicked)
         {
-            targetOnDoubleClicked();
-            m_lastClickedElementId.clear();
-            m_lastClickTimeMs = 0;
-        }
-        else
-        {
-            m_lastClickedElementId = targetId;
-            m_lastClickTimeMs = now;
-        }
-    }
-
-    if (!targetOnClicked)
-    {
-        std::string eventId = targetClickEvent;
-        if (eventId.empty())
-        {
-            eventId = targetId;
+            targetOnClicked();
         }
 
-        if (!eventId.empty())
+        // Double-click detection (uses local copies only)
         {
-            auto it = m_clickEvents.find(eventId);
-            if (it != m_clickEvents.end() && it->second)
+            const uint64_t now = SDL_GetTicks();
+            const bool sameElement = (!targetId.empty() && targetId == m_lastClickedElementId);
+            const bool withinTime = (now - m_lastClickTimeMs) < 400;
+            if (sameElement && withinTime && targetOnDoubleClicked)
             {
-                it->second();
+                targetOnDoubleClicked();
+                m_lastClickedElementId.clear();
+                m_lastClickTimeMs = 0;
+            }
+            else
+            {
+                m_lastClickedElementId = targetId;
+                m_lastClickTimeMs = now;
+            }
+        }
+
+        if (!targetOnClicked)
+        {
+            std::string eventId = targetClickEvent;
+            if (eventId.empty())
+            {
+                eventId = targetId;
+            }
+
+            if (!eventId.empty())
+            {
+                auto it = m_clickEvents.find(eventId);
+                if (it != m_clickEvents.end() && it->second)
+                {
+                    it->second();
+                }
             }
         }
     }
@@ -2603,7 +2658,148 @@ void UIManager::setMousePosition(const Vec2& screenPos)
     }
     m_mousePosition = screenPos;
     m_hasMousePosition = true;
+
+    // Drag threshold detection: start actual drag after 5px movement
+    if (m_dragPending && !m_dragging)
+    {
+        const float dx = screenPos.x - m_dragStartPos.x;
+        const float dy = screenPos.y - m_dragStartPos.y;
+        if ((dx * dx + dy * dy) > 25.0f) // 5px threshold
+        {
+            m_dragging = true;
+            m_dragPending = false;
+            Logger::Instance().log(Logger::Category::UI,
+                "Drag started: " + m_dragPayload, Logger::LogLevel::INFO);
+        }
+    }
+
     updateHoverStates();
+}
+
+void UIManager::cancelDrag()
+{
+    m_dragging = false;
+    m_dragPending = false;
+    m_dragPayload.clear();
+    m_dragSourceId.clear();
+    m_dragLabel.clear();
+}
+
+bool UIManager::handleMouseUp(const Vec2& screenPos, int button)
+{
+    if (button != SDL_BUTTON_LEFT)
+    {
+        return false;
+    }
+
+    // If we had a pending drag that never started, fire the deferred click
+    if (m_dragPending && !m_dragging)
+    {
+        const std::string sourceId = m_dragSourceId;
+        m_dragPending = false;
+        m_dragPayload.clear();
+        m_dragSourceId.clear();
+        m_dragLabel.clear();
+
+        // Fire the deferred click on the original element
+        WidgetElement* target = hitTest(screenPos, false);
+        if (target && target->id == sourceId)
+        {
+            if (target->onClicked)
+            {
+                const auto cb = target->onClicked;
+                const auto dblCb = target->onDoubleClicked;
+                const std::string targetId = target->id;
+                cb();
+
+                // Double-click detection
+                const uint64_t now = SDL_GetTicks();
+                const bool sameElement = (!targetId.empty() && targetId == m_lastClickedElementId);
+                const bool withinTime = (now - m_lastClickTimeMs) < 400;
+                if (sameElement && withinTime && dblCb)
+                {
+                    dblCb();
+                    m_lastClickedElementId.clear();
+                    m_lastClickTimeMs = 0;
+                }
+                else
+                {
+                    m_lastClickedElementId = targetId;
+                    m_lastClickTimeMs = now;
+                }
+            }
+        }
+        return false;
+    }
+
+    if (!m_dragging)
+    {
+        return false;
+    }
+
+    // We are dropping — figure out where
+    const std::string payload = m_dragPayload;
+    const std::string sourceId = m_dragSourceId;
+    cancelDrag();
+
+    Logger::Instance().log(Logger::Category::UI,
+        "Drop at (" + std::to_string(screenPos.x) + ", " + std::to_string(screenPos.y) + ") payload=" + payload,
+        Logger::LogLevel::INFO);
+
+    // Check if dropped on a content browser folder (grid folder tile)
+    WidgetElement* dropTarget = hitTest(screenPos, false);
+    if (dropTarget)
+    {
+        const std::string gridDirPrefix = "ContentBrowser.GridDir.";
+        const std::string treeDirPrefix = "ContentBrowser.Dir.";
+        const std::string outlinerPrefix = "Outliner.Entity.";
+        if (dropTarget->id.rfind(gridDirPrefix, 0) == 0)
+        {
+            const std::string folderPath = dropTarget->id.substr(gridDirPrefix.size());
+            if (m_onDropOnFolder)
+            {
+                m_onDropOnFolder(payload, folderPath);
+            }
+            return true;
+        }
+        if (dropTarget->id.rfind(treeDirPrefix, 0) == 0)
+        {
+            std::string folderPath;
+            if (dropTarget->id != "ContentBrowser.Dir.Root")
+            {
+                folderPath = dropTarget->id.substr(treeDirPrefix.size());
+            }
+            if (m_onDropOnFolder)
+            {
+                m_onDropOnFolder(payload, folderPath);
+            }
+            return true;
+        }
+        // Drop on Outliner entity row → apply asset to entity
+        if (dropTarget->id.rfind(outlinerPrefix, 0) == 0)
+        {
+            const char* start = dropTarget->id.c_str() + outlinerPrefix.size();
+            char* end = nullptr;
+            const unsigned long entityValue = std::strtoul(start, &end, 10);
+            if (end && end != start && entityValue != 0 && m_onDropOnEntity)
+            {
+                m_onDropOnEntity(payload, static_cast<unsigned int>(entityValue));
+            }
+            return true;
+        }
+    }
+
+    // If not dropped on UI at all, it's a viewport drop
+    if (!isPointerOverUI(screenPos))
+    {
+        if (m_onDropOnViewport)
+        {
+            m_onDropOnViewport(payload, screenPos);
+        }
+        return true;
+    }
+
+    return false;
 }
 
 void UIManager::setFocusedEntry(WidgetElement* element)

@@ -105,9 +105,10 @@
 | Import-Dialog (SDL_ShowOpenFileDialog)   | ✅     |
 | Import: Texturen                         | ✅     |
 | Import: Audio (WAV)                      | ✅     |
-| Import: 3D-Modelle (OBJ, FBX)           | ❌     |
+| Import: 3D-Modelle (Assimp: OBJ, FBX, glTF, DAE, etc.) | ✅ |
 | Assimp-Integration (static in AssetManager) | ✅ |
-| Import: Shader-Dateien                   | ❌     |
+| Import: Shader-Dateien (.glsl)             | ✅     |
+| Import: Scripts (.py)                      | ✅     |
 | Speichern (Typ-spezifisch)              | ✅     |
 | Asset-Header (binär v2 + JSON-Fallback) | ✅     |
 | Garbage Collector (weak_ptr Tracking)    | ✅     |
@@ -120,8 +121,6 @@
 | Hot-Reload (Dateiänderung erkennen)     | ❌     |
 
 **Offene Punkte:**
-- 3D-Modell-Import (OBJ, FBX etc.) nur vorbereitet (Kommentar: `// Future: models/audio/shaders/scripts...`), noch nicht implementiert
-- Kein Shader-Datei-Import über Dialog
 - Keine Thumbnail-Generierung für Asset-Browser
 - Kein Hot-Reload bei externer Dateiänderung
 
@@ -199,7 +198,7 @@
 | MeshComponent                           | ✅     |
 | MaterialComponent                       | ✅     |
 | LightComponent (Point/Dir/Spot)        | ✅     |
-| CameraComponent                         | 🟡     |
+| CameraComponent                         | ✅     |
 | PhysicsComponent (Datenstruktur)        | 🟡     |
 | ScriptComponent                         | ✅     |
 | NameComponent                           | ✅     |
@@ -210,7 +209,7 @@
 
 **Offene Punkte:**
 - **PhysicsComponent**: Datenstruktur (ColliderType, isStatic, mass) existiert und wird serialisiert, aber es gibt **keine Physik-Engine** – keine Kollisionserkennung, keine Rigid-Body-Dynamik, keine Gravity
-- **CameraComponent**: Daten (FOV, Near/Far-Clip) werden gespeichert, aber zur Laufzeit wird ausschließlich die Editor-Kamera (OpenGLCamera) genutzt – die Entity-Kamera wird nicht als aktive View-Kamera verwendet
+- **CameraComponent**: FOV, Near/Far-Clip und `isActive`-Flag. Wird als aktive View-Kamera genutzt wenn eine Entity-Kamera im Renderer gesetzt ist (`setActiveCameraEntity`). View- und Projection-Matrix werden aus TransformComponent + CameraComponent berechnet.
 - Keine Parent-Child-Entity-Hierarchie (alle Entities sind flach)
 - Kein Entity-Recycling (gelöschte IDs werden nicht wiederverwendet)
 - Keine parallele/multi-threaded ECS-Iteration
@@ -263,6 +262,8 @@
 | HZB Occlusion Culling (Mip-Pyramid)      | ✅     |
 | PBO-basierter Async-Readback              | ✅     |
 | Entity-Picking (Pick-FBO + Farbcodierung) | ✅     |
+| Entity-Löschen (Entf-Taste)               | ✅     |
+| Screen-to-World (Depth-Buffer Unproject)  | ✅     |
 | Selection-Outline (Edge-Detection)        | ✅     |
 | GPU Timer Queries (Triple-Buffered)       | ✅     |
 | CPU-Metriken (Welt/UI/Layout/Draw/ECS)   | ✅     |
@@ -275,7 +276,8 @@
 | Fenster erst nach Konsolen-Schließung sichtbar (Hidden → FreeConsole → ShowWindow) | ✅     |
 | Beleuchtung (bis 8 Lichtquellen)          | ✅     |
 | Sortierung + Batch-Rendering              | ✅     |
-| Shadow Mapping                             | ❌     |
+| Shadow Mapping (Multi-Light, Directional/Spot) | ✅     |
+| Shadow Mapping (Point Light Cube Maps)      | ✅     |
 | Post-Processing (Bloom, SSAO, HDR)       | ❌     |
 | Anti-Aliasing (MSAA, FXAA)               | ❌     |
 | Transparenz / Alpha-Sorting               | 🟡     |
@@ -287,7 +289,6 @@
 | Vulkan Backend                            | ❌     |
 
 **Offene Punkte:**
-- Kein Shadow Mapping – Szene hat keine Schatten
 - Kein Post-Processing (Bloom, SSAO, HDR, Tonemapping)
 - Kein Anti-Aliasing
 - Transparenz nur eingeschränkt (kein korrektes Order-Independent-Transparency)
@@ -308,12 +309,12 @@
 | Pitch-Clamp (±89°)                  | ✅     |
 | Orbit-Kamera                        | ❌     |
 | Cinematic-Kamera / Pfad-Follow      | ❌     |
-| Entity-Kamera (CameraComponent)     | ❌     |
+| Entity-Kamera (CameraComponent)     | ✅     |
 | Kamera-Überblendung                 | ❌     |
 
 **Offene Punkte:**
 - Nur Editor-FPS-Kamera – keine Orbit-Kamera für Objekt-Inspektion
-- CameraComponent wird serialisiert, aber die Entity-Kamera wird zur Laufzeit nicht als View-Kamera genutzt (auch nicht im PIE-Modus)
+- Entity-Kamera via `setActiveCameraEntity()` / `clearActiveCameraEntity()` – überschreibt View + Projection aus CameraComponent + TransformComponent
 - Keine Kamera-Überblendung / Cinematic-Pfade
 
 ---
@@ -395,13 +396,12 @@
 | Batch-Rendering                      | ✅     |
 | Statischer Cache                    | ✅     |
 | OBJ-Laden (Basis-Meshes)           | ✅     |
-| FBX-Import                          | ❌     |
-| glTF-Import                         | ❌     |
+| FBX-Import (via Assimp)             | ✅     |
+| glTF-Import (via Assimp)            | ✅     |
 | LOD-System (Level of Detail)        | ❌     |
 | Skeletal Meshes / Animation         | ❌     |
 
 **Offene Punkte:**
-- Nur Basis-Mesh-Formate – kein FBX, kein glTF
 - Kein LOD-System
 - Keine Skeletal-Animation
 
@@ -462,7 +462,7 @@
 | Toast-Nachrichten (Stapel-Layout)   | ✅     |
 | World-Outliner Integration          | ✅     |
 | Entity-Auswahl + Details            | ✅     |
-| Drag & Drop                         | ❌     |
+| Drag & Drop (CB → Viewport/Folder/Entity) | ✅ |
 | Docking-System (Panels verschieben) | ❌     |
 | Theming / Style-System             | ❌     |
 | Multi-Monitor-Unterstützung        | ❌     |
@@ -502,7 +502,7 @@
 | Material-Editor | ❌     |
 | Shader-Editor   | ❌     |
 | Console / Log-Viewer | ❌ |
-| Asset-Import-Dialog (erweitert) | ❌ |
+| Asset-Import-Dialog (erweitert) | ✅ |
 | Viewport-Einstellungen | ❌ |
 
 ### 17.4 Editor-Tab-System
@@ -523,7 +523,6 @@
 | Weitere Tabs (z.B. Material-Editor) | ❌     |
 
 **Offene Punkte:**
-- Kein Drag & Drop (z.B. Assets in die Szene ziehen)
 - Kein Docking-System (Panels sind fest positioniert)
 - Kein Theming / Style-System
 - Fehlende Widget-Typen: ScrollBar (eigenständig)
@@ -588,6 +587,35 @@
   - Level-Save: `saveLevelAsset()` hat Raw-Pointer-Überladung (`EngineLevel*`), speichert das echte Level-Objekt (keine Kopie)
   - Level-Load: `ensureDefaultAssetsCreated` lädt bei vorhandener Level-Datei die gespeicherten Daten von Disk (via `loadLevelAsset`), statt immer die hartkodierten Defaults zu verwenden
   - `loadLevelAsset` speichert Content-relativen Pfad, damit `saveLevelAsset` den korrekten absoluten Pfad rekonstruieren kann
+  - Editor-Kamera wird pro Level gespeichert (Position + Rotation in `EditorCamera` JSON-Block), beim Laden wiederhergestellt und bei jedem Save/Shutdown automatisch geschrieben
+- **Shadow Mapping (Multi-Light):**
+  - Bis zu 4 gleichzeitige Shadow-Maps für Directional und Spot Lights (GL_TEXTURE_2D_ARRAY, eine Schicht pro Licht)
+  - 4096×4096 Depth-Texture pro Schicht
+  - Shadow-Depth-Pass rendert die gesamte Szene pro Shadow-Licht aus dessen Perspektive
+  - Directional Lights: orthographische Projektion (±15 Einheiten, kamerazentriert)
+  - Spot Lights: perspektivische Projektion (FOV aus Outer-Cutoff-Winkel, Range als Far-Plane)
+  - 5×5 PCF (Percentage Closer Filtering) im Fragment-Shader für weiche Schatten
+  - Light-Space-Position wird im Fragment-Shader berechnet (kein Varying-Limit-Problem bei Multi-Light)
+  - Front-Face Culling während des Shadow-Pass zur Reduzierung von Shadow Acne
+  - Slope-basierter Depth Bias im Shader (`max(0.005 * (1 - NdotL), 0.001)`)
+  - Shadow Maps auf Texture Unit 4 gebunden (sampler2DArray), Clamp-to-Border mit weißem Rand
+  - Shadow-Zuordnung: `findShadowLightIndices()` sammelt bis zu 4 Directional/Spot Lights
+  - Separate `m_shadowCasterList` ohne Kamera-Frustum-Culling: Objekte werfen Schatten auch wenn sie außerhalb des Kamerasichtfelds liegen
+  - Lichtquellen-Geometry (Entities mit `LightComponent`, `AssetType::PointLight`) wird automatisch vom Shadow-Casting ausgeschlossen
+  - Shader-Dateien: `shadow_vertex.glsl`, `shadow_fragment.glsl` (Inline im Renderer kompiliert)
+  - `OpenGLMaterial`: Uniforms `uShadowMaps` (sampler2DArray), `uShadowCount`, `uLightSpaceMatrices[4]`, `uShadowLightIndices[4]`
+  - `OpenGLObject3D::setShadowData()` delegiert Shadow-Parameter an das Material
+  - `OpenGLRenderer`: `ensureShadowResources()`, `releaseShadowResources()`, `renderShadowMap()`, `computeLightSpaceMatrix()`, `findShadowLightIndices()`
+  - **Point Light Shadow Mapping (Cube Maps):**
+    - Omnidirektionale Schatten für Point Lights über GL_TEXTURE_CUBE_MAP_ARRAY
+    - Bis zu 4 Point Lights gleichzeitig mit Shadow Mapping
+    - Geometry-Shader-basierter Single-Pass Cube-Rendering (6 Faces pro Draw Call)
+    - Lineare Tiefenwerte (Distanz / Far Plane) für korrekte omnidirektionale Schattenberechnung
+    - Fragment-Shader sampelt `samplerCubeArray` mit Richtungsvektor Fragment→Licht
+    - `findPointShadowLightIndices()` sammelt Point Lights, `renderPointShadowMaps()` rendert Cube Maps
+    - `ensurePointShadowResources()` / `releasePointShadowResources()` verwalten GPU-Ressourcen
+    - `OpenGLMaterial`: Uniforms `uPointShadowMaps`, `uPointShadowCount`, `uPointShadowPositions[4]`, `uPointShadowFarPlanes[4]`, `uPointShadowLightIndices[4]`
+    - Point Shadow Maps auf Texture Unit 5 gebunden
 
 ---
 
@@ -666,28 +694,35 @@ Große Feature-Blöcke, die noch nicht existieren:
 
 | System                            | Priorität | Beschreibung                                                                   |
 |-----------------------------------|-----------|--------------------------------------------------------------------------------|
-| **Physik-Engine**                | Hoch      | Kollisionserkennung, Rigid Body, Gravity – PhysicsComponent-Daten existieren bereits |
-| **Shadow Mapping**               | Hoch      | Schatten für Point-/Directional-/Spotlights                                   |
-| **3D-Modell-Import (OBJ/FBX/glTF)** | Hoch  | Erweiterte Modell-Formate über Basis-OBJ hinaus                              |
-| **Entity-Hierarchie**            | Mittel    | Parent-Child-Beziehungen für Entities                                         |
-| **Entity-Kamera (Runtime)**      | Mittel    | CameraComponent als aktive View-Kamera im PIE-Modus nutzen                  |
-| **PBR-Material + Normal Mapping**| Mittel    | Physically Based Rendering, Normal/Roughness/Metallic-Maps                   |
+| **Physik-Engine**                | Hoch      | Kollisionserkennung, Rigid Body, Gravity – PhysicsComponent-Daten existieren bereits, aber keine Simulation |
+| **3D-Modell-Import (Assimp)**    | ✅     | Import von OBJ, FBX, glTF, GLB, DAE, 3DS, STL, PLY, X3D via Assimp            |
+| **Entity-Hierarchie**            | Mittel    | Parent-Child-Beziehungen für Entities (kein ParentComponent im ECS)           |
+| **Entity-Kamera (Runtime)**      | ✅     | Entity-Kamera via `setActiveCameraEntity()` mit FOV/NearClip/FarClip aus CameraComponent |
+| **PBR-Material + Normal Mapping**| Mittel    | Physically Based Rendering, Normal/Roughness/Metallic-Maps (aktuell nur Blinn-Phong) |
 | **Post-Processing**              | Mittel    | Bloom, SSAO, HDR, Tonemapping, Anti-Aliasing                                |
+| **Cascaded Shadow Maps**         | Mittel    | CSM für Directional Lights (aktuell feste ortho-Projektion, kein Cascading)  |
 | **Skeletal Animation**           | Mittel    | Bone-System, Skinning, Animation-Blending                                    |
-| **Drag & Drop (Editor)**        | Mittel    | Assets in Szene ziehen, Panels verschieben                                    |
-| **Undo/Redo**                    | ✅     | Command-Pattern für Editor-Aktionen (UndoRedoManager-Singleton, Ctrl+Z/Y, StatusBar-Buttons) |
-| **Editor-Gizmos**               | ✅     | Translate/Rotate/Scale-Gizmos für Entity-Manipulation (W/E/R Shortcuts)      |
 | **Cubemap / Skybox**            | Mittel    | Umgebungstexturen für Himmel                                                  |
-| **Audio-Formate (OGG/MP3)**     | Niedrig   | Weitere Audio-Formate unterstützen                                           |
+| **Drag & Drop (Editor)**        | ✅     | Model3D→Spawn (Depth-Raycast), Material/Script→Apply (pickEntityAtImmediate), Asset-Move mit tiefem Referenz-Scan aller .asset-Dateien, Entf zum Löschen |
+| **Audio-Formate (OGG/MP3)**     | Niedrig   | Weitere Audio-Formate unterstützen (aktuell nur WAV)                         |
 | **3D-Audio (Positional)**       | Niedrig   | OpenAL-Listener-/Source-Positionierung nutzen                                |
 | **Particle-System**             | Niedrig   | GPU-/CPU-Partikel für Effekte                                                |
 | **Netzwerk / Multiplayer**      | Niedrig   | Netzwerk-Synchronisation, Server/Client                                      |
-| **DirectX 11/12 Backend**       | Niedrig   | Alternative Rendering-Backends                                                |
+| **DirectX 11/12 Backend**       | Niedrig   | Alternative Rendering-Backends (aktuell nur OpenGL 4.6)                      |
 | **Cross-Platform (Linux/macOS)**| Niedrig   | GCC/Clang-Support, Plattform-Abstraktion                                    |
 | **CI/CD + Tests**               | Niedrig   | Automatisierte Builds, Unit-Tests, Integrationstests                         |
 | **Script-Debugger**             | Niedrig   | Python-Breakpoints, Step-Through im Editor                                   |
 | **Hot-Reload (Assets/Scripts)** | Niedrig   | Dateiänderungen erkennen und automatisch neu laden                           |
 
+### Bereits abgeschlossene Systeme (aus früheren Iterationen)
+
+| System                            | Status | Beschreibung                                                                   |
+|-----------------------------------|--------|--------------------------------------------------------------------------------|
+| **Undo/Redo**                    | ✅     | Command-Pattern für Editor-Aktionen (UndoRedoManager-Singleton, Ctrl+Z/Y, StatusBar-Buttons) |
+| **Editor-Gizmos**               | ✅     | Translate/Rotate/Scale-Gizmos für Entity-Manipulation (W/E/R Shortcuts)      |
+| **Shadow Mapping (Dir/Spot)**    | ✅     | Multi-Light Shadow Maps für bis zu 4 Directional/Spot Lights, 5×5 PCF       |
+| **Shadow Mapping (Point Lights)**| ✅     | Omnidirektionale Cube-Map Shadows für bis zu 4 Point Lights via Geometry-Shader |
+
 ---
 
-*Generiert aus Analyse des Quellcodes. Stand: aktueller Branch `Json_and_ecs`.*
+*Generiert aus Analyse des Quellcodes. Stand: aktueller Branch `AssetManager_Json`.*

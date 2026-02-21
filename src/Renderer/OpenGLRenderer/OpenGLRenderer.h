@@ -75,6 +75,10 @@ public:
     Vec2 getCameraRotationDegrees() const override;
     void setCameraRotationDegrees(float yawDegrees, float pitchDegrees) override;
 
+    void setActiveCameraEntity(unsigned int entity) override;
+    unsigned int getActiveCameraEntity() const override;
+    void clearActiveCameraEntity() override;
+
     void setClearColor(const Vec4& color);
     const Vec4& getClearColor() const;
 
@@ -90,6 +94,15 @@ public:
     void setActiveTab(const std::string& id);
     const std::string& getActiveTabId() const;
     const std::vector<EditorTab>& getTabs() const;
+
+    unsigned int pickEntityAt(int x, int y);
+
+    // Re-renders the pick buffer with the latest view/projection, then picks.
+    unsigned int pickEntityAtImmediate(int x, int y);
+
+    // Unproject a screen pixel to world space using the depth buffer.
+    // Returns false if the depth at that pixel is at the far plane (no geometry hit).
+    bool screenToWorldPos(int screenX, int screenY, Vec3& outWorldPos) const;
 
 private:
     void renderWorld();
@@ -112,7 +125,6 @@ private:
     void releasePickFbo();
     void renderPickBuffer(const glm::mat4& view, const glm::mat4& projection);
     void renderPickBufferSingleEntity(const glm::mat4& view, const glm::mat4& projection, unsigned int entityId);
-    unsigned int pickEntityAt(int x, int y);
     bool ensureOutlineResources();
     void releaseOutlineResources();
     void drawUIPanel(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program,
@@ -146,11 +158,14 @@ private:
     SDL_GLContext m_glContext;
 
     std::unique_ptr<Camera> m_camera;
+    unsigned int m_activeCameraEntity{ 0 };
     glm::mat4 m_projectionMatrix;
+    glm::mat4 m_lastViewMatrix{ 1.0f };
     std::vector<RenderEntry> m_renderEntries;
     std::vector<RenderEntry> m_meshEntries;
     RenderResourceManager m_resourceManager;
     EngineLevel* m_cachedLevel{ nullptr };
+    bool m_restoreCameraOnPrepare{ false };
     Vec4 m_clearColor{ 0.5f, 0.5f, 0.5f, 1.0f };
 
     UIManager m_uiManager;
@@ -273,6 +288,46 @@ private:
         bool hasEmission{false};
     };
     std::vector<DrawCmd> m_drawList;
+    std::vector<DrawCmd> m_shadowCasterList;
+
+    // Shadow mapping
+    bool ensureShadowResources();
+    void releaseShadowResources();
+    void renderShadowMap(const std::vector<DrawCmd>& drawList);
+    void findShadowLightIndices();
+    glm::mat4 computeLightSpaceMatrix(const OpenGLMaterial::LightData& light) const;
+
+    static constexpr int kShadowMapSize = 4096;
+    static constexpr int kMaxShadowLights = OpenGLMaterial::kMaxShadowLights;
+    GLuint m_shadowFbo{0};
+    GLuint m_shadowDepthArray{0};
+    GLuint m_shadowProgram{0};
+    GLint m_shadowLocModel{-1};
+    GLint m_shadowLocLightSpace{-1};
+    glm::mat4 m_shadowLightSpaceMatrices[kMaxShadowLights]{};
+    int m_shadowLightIndices[kMaxShadowLights]{};
+    int m_shadowCount{0};
+    bool m_shadowEnabled{true};
+
+    // Point light shadow mapping (cube maps)
+    bool ensurePointShadowResources();
+    void releasePointShadowResources();
+    void renderPointShadowMaps(const std::vector<DrawCmd>& drawList);
+    void findPointShadowLightIndices();
+
+    static constexpr int kMaxPointShadowLights = OpenGLMaterial::kMaxPointShadowLights;
+    static constexpr int kPointShadowMapSize = 1024;
+    GLuint m_pointShadowFbo{0};
+    GLuint m_pointShadowCubeArray{0};
+    GLuint m_pointShadowProgram{0};
+    GLint m_pointShadowLocModel{-1};
+    GLint m_pointShadowLocLightPos{-1};
+    GLint m_pointShadowLocFarPlane{-1};
+    GLint m_pointShadowLocShadowMatrices{-1};
+    glm::vec3 m_pointShadowPositions[kMaxPointShadowLights]{};
+    float m_pointShadowFarPlanes[kMaxPointShadowLights]{};
+    int m_pointShadowLightIndices[kMaxPointShadowLights]{};
+    int m_pointShadowCount{0};
 
     // Entity picking FBO
     GLuint m_pickFbo{0};

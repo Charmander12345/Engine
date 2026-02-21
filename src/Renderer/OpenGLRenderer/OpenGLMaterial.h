@@ -75,6 +75,14 @@ public:
     void setLights(const std::vector<LightData>& lights) { m_lights = lights; }
     void setShininess(float shininess) { m_shininess = shininess; }
 
+    // Shadow mapping (multi-light)
+    static constexpr int kMaxShadowLights = 4;
+    void setShadowData(GLuint texArray, const glm::mat4* matrices, const int* lightIndices, int count);
+
+    // Point light shadow mapping (cube maps)
+    static constexpr int kMaxPointShadowLights = 4;
+    void setPointShadowData(GLuint cubeArray, const glm::vec3* positions, const float* farPlanes, const int* lightIndices, int count);
+
 private:
     void bindTextures();
 
@@ -102,6 +110,12 @@ private:
     float m_shininess{32.0f};
     std::vector<LightData> m_lights;
 
+    // Shadow mapping (multi-light)
+    GLuint m_shadowMapArray{0};
+    int m_shadowCount{0};
+    glm::mat4 m_shadowMatrices[kMaxShadowLights]{};
+    int m_shadowLightIndices[kMaxShadowLights]{};
+
     // Cached uniform locations (queried once at build time)
     GLint m_locModel{-1};
     GLint m_locView{-1};
@@ -126,4 +140,32 @@ private:
     };
     LightUniformLocs m_lightLocs[kMaxLights]{};
     std::vector<GLint> m_texUniformLocs;
+
+    // Point light shadow data
+    GLuint m_pointShadowCubeArray{0};
+    int m_pointShadowCount{0};
+    glm::vec3 m_pointShadowPositions[kMaxPointShadowLights]{};
+    float m_pointShadowFarPlanes[kMaxPointShadowLights]{};
+    int m_pointShadowLightIndices[kMaxPointShadowLights]{};
+
+    // Shadow uniform locations
+    GLint m_locShadowMaps{-1};
+    GLint m_locShadowCount{-1};
+    struct ShadowUniformLocs
+    {
+        GLint lightSpaceMatrix{-1};
+        GLint lightIndex{-1};
+    };
+    ShadowUniformLocs m_shadowLocs[kMaxShadowLights]{};
+
+    // Point shadow uniform locations
+    GLint m_locPointShadowMaps{-1};
+    GLint m_locPointShadowCount{-1};
+    struct PointShadowUniformLocs
+    {
+        GLint position{-1};
+        GLint farPlane{-1};
+        GLint lightIndex{-1};
+    };
+    PointShadowUniformLocs m_pointShadowLocs[kMaxPointShadowLights]{};
 };

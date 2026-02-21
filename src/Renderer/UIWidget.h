@@ -125,6 +125,10 @@ struct WidgetElement
     std::function<void(bool)> onCheckedChanged;
     std::function<void(int)> onSelectionChanged;
     std::function<void(int)> onTabChanged;
+
+    // Drag & Drop
+    bool isDraggable{ false };
+    std::string dragPayload;    // e.g. "Texture|MyTexture.asset" or "Model3D|Mesh.asset"
 };
 
 class Widget : public EngineObject

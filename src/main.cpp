@@ -174,6 +174,7 @@ int main()
                     return;
                 }
                 diag.setPIEActive(false);
+                glRenderer->clearActiveCameraEntity();
                 AudioManager::Instance().stopAll();
                 Scripting::ReloadScripts();
                 auto* level = diag.getActiveLevelSoft();
@@ -292,6 +293,35 @@ int main()
                     }
                     level->snapshotEcsState();
                     diag.setPIEActive(true);
+
+                    // Find the first entity with an active CameraComponent
+                    {
+                        ECS::Schema camSchema;
+                        camSchema.require<ECS::CameraComponent>().require<ECS::TransformComponent>();
+                        auto& ecs = ECS::ECSManager::Instance();
+                        const auto camEntities = ecs.getEntitiesMatchingSchema(camSchema);
+                        unsigned int activeCamEntity = 0;
+                        for (const auto e : camEntities)
+                        {
+                            const auto* cam = ecs.getComponent<ECS::CameraComponent>(e);
+                            if (cam && cam->isActive)
+                            {
+                                activeCamEntity = static_cast<unsigned int>(e);
+                                break;
+                            }
+                        }
+                        // Fallback: use the first camera entity if none is marked active
+                        if (activeCamEntity == 0 && !camEntities.empty())
+                        {
+                            activeCamEntity = static_cast<unsigned int>(camEntities.front());
+                        }
+                        if (activeCamEntity != 0)
+                        {
+                            glRenderer->setActiveCameraEntity(activeCamEntity);
+                            Logger::Instance().log(Logger::Category::Engine, "PIE: using entity camera " + std::to_string(activeCamEntity), Logger::LogLevel::INFO);
+                        }
+                    }
+
                     auto& uiMgr = glRenderer->getUIManager();
                     if (auto* el = uiMgr.findElementById("ViewportOverlay.PIE"))
                     {
@@ -534,6 +564,266 @@ int main()
                         logTimed(Logger::Category::UI, "[ContentBrowser] main: widget created name='" + widget->getName() + "' elements=" + std::to_string(widget->getElements().size()), Logger::LogLevel::INFO);
                         glRenderer->getUIManager().registerWidget("ContentBrowser", widget);
                         logTimed(Logger::Category::UI, "[ContentBrowser] main: registerWidget('ContentBrowser') completed", Logger::LogLevel::INFO);
+
+                        glRenderer->getUIManager().registerClickEvent("ContentBrowser.PathBar.Import", [&renderer]()
+                            {
+                                Logger::Instance().log(Logger::Category::AssetManagement, "Import button clicked.", Logger::LogLevel::INFO);
+                                auto* window = renderer ? renderer->window() : nullptr;
+                                AssetManager::Instance().OpenImportDialog(window, AssetType::Unknown, AssetManager::Async);
+                            });
+
+                        assetManager.setOnImportCompleted([&glRenderer]()
+                            {
+                                if (glRenderer)
+                                {
+                                    glRenderer->getUIManager().refreshContentBrowser();
+                                }
+                            });
+
+                        // --- Drag & Drop: asset dropped on viewport → spawn entity ---
+                        glRenderer->getUIManager().setOnDropOnViewport([&glRenderer](const std::string& payload, const Vec2& screenPos)
+                            {
+                                const auto sep = payload.find('|');
+                                if (sep == std::string::npos) return;
+
+                                const int typeInt = std::atoi(payload.substr(0, sep).c_str());
+                                const std::string relPath = payload.substr(sep + 1);
+                                const AssetType assetType = static_cast<AssetType>(typeInt);
+                                const std::string assetName = std::filesystem::path(relPath).stem().string();
+                                auto& ecs = ECS::ECSManager::Instance();
+                                auto& diagnostics = DiagnosticsManager::Instance();
+
+                                // Pick the entity under the cursor (fresh pick buffer render)
+                                const unsigned int targetEntity = glRenderer->pickEntityAtImmediate(
+                                    static_cast<int>(screenPos.x), static_cast<int>(screenPos.y));
+                                const auto target = static_cast<ECS::Entity>(targetEntity);
+
+                                // --- Non-Model3D types: apply to existing entity, or abort if none ---
+                                // Materials/Textures can only be applied to existing entities, never spawned alone.
+                                // Scripts likewise attach to existing entities.
+                                if (assetType != AssetType::Model3D)
+                                {
+                                    if (targetEntity != 0)
+                                    {
+                                        switch (assetType)
+                                        {
+                                        case AssetType::Material:
+                                        case AssetType::Texture:
+                                        {
+                                            auto* mat = ecs.getComponent<ECS::MaterialComponent>(target);
+                                            if (mat)
+                                                mat->materialAssetPath = relPath;
+                                            else
+                                            {
+                                                ECS::MaterialComponent m;
+                                                m.materialAssetPath = relPath;
+                                                ecs.addComponent<ECS::MaterialComponent>(target, m);
+                                            }
+                                            break;
+                                        }
+                                        case AssetType::Script:
+                                        {
+                                            auto* sc = ecs.getComponent<ECS::ScriptComponent>(target);
+                                            if (sc)
+                                                sc->scriptPath = relPath;
+                                            else
+                                            {
+                                                ECS::ScriptComponent s;
+                                                s.scriptPath = relPath;
+                                                ecs.addComponent<ECS::ScriptComponent>(target, s);
+                                            }
+                                            break;
+                                        }
+                                        default:
+                                            break;
+                                        }
+
+                                        diagnostics.setScenePrepared(false);
+                                        auto* level = diagnostics.getActiveLevelSoft();
+                                        if (level) level->setIsSaved(false);
+                                        Logger::Instance().log(Logger::Category::Engine,
+                                            "Applied '" + assetName + "' to entity " + std::to_string(targetEntity),
+                                            Logger::LogLevel::INFO);
+                                        if (glRenderer)
+                                        {
+                                            glRenderer->getUIManager().refreshWorldOutliner();
+                                            glRenderer->getUIManager().selectEntity(targetEntity);
+                                            glRenderer->getUIManager().showToastMessage(
+                                                "Applied " + assetName + " → Entity " + std::to_string(targetEntity), 2.5f);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // No entity under cursor — cannot apply, show hint
+                                        if (glRenderer)
+                                        {
+                                            glRenderer->getUIManager().showToastMessage(
+                                                "No entity under cursor to apply " + assetName, 2.5f);
+                                        }
+                                    }
+                                    return;
+                                }
+
+                                // --- Model3D: always spawn a new entity ---
+                                Vec3 spawnPos{ 0.0f, 0.0f, 0.0f };
+                                if (!glRenderer->screenToWorldPos(static_cast<int>(screenPos.x), static_cast<int>(screenPos.y), spawnPos))
+                                {
+                                    const Vec3 camPos = glRenderer->getCameraPosition();
+                                    const Vec2 camRot = glRenderer->getCameraRotationDegrees();
+                                    const float yaw = camRot.x * 3.14159265f / 180.0f;
+                                    const float pitch = camRot.y * 3.14159265f / 180.0f;
+                                    spawnPos.x = camPos.x + cosf(yaw) * cosf(pitch) * 5.0f;
+                                    spawnPos.y = camPos.y + sinf(pitch) * 5.0f;
+                                    spawnPos.z = camPos.z + sinf(yaw) * cosf(pitch) * 5.0f;
+                                }
+
+                                const ECS::Entity entity = ecs.createEntity();
+
+                                ECS::TransformComponent transform{};
+                                transform.position[0] = spawnPos.x;
+                                transform.position[1] = spawnPos.y;
+                                transform.position[2] = spawnPos.z;
+                                ecs.addComponent<ECS::TransformComponent>(entity, transform);
+
+                                ECS::NameComponent nameComp;
+                                nameComp.displayName = assetName;
+                                ecs.addComponent<ECS::NameComponent>(entity, nameComp);
+
+                                ECS::MeshComponent mesh;
+                                mesh.meshAssetPath = relPath;
+                                ecs.addComponent<ECS::MeshComponent>(entity, mesh);
+
+                                auto* level = diagnostics.getActiveLevelSoft();
+                                if (level)
+                                {
+                                    level->onEntityAdded(entity);
+                                    level->setIsSaved(false);
+                                }
+
+                                Logger::Instance().log(Logger::Category::Engine,
+                                    "Spawned entity " + std::to_string(entity) + " (" + assetName + ") at ("
+                                    + std::to_string(spawnPos.x) + ", " + std::to_string(spawnPos.y) + ", " + std::to_string(spawnPos.z) + ")",
+                                    Logger::LogLevel::INFO);
+
+                                diagnostics.setScenePrepared(false);
+                                if (glRenderer)
+                                {
+                                    glRenderer->getUIManager().refreshWorldOutliner();
+                                    glRenderer->getUIManager().selectEntity(static_cast<unsigned int>(entity));
+                                    glRenderer->getUIManager().showToastMessage("Spawned: " + assetName, 2.5f);
+                                }
+                            });
+
+                        // --- Drag & Drop: asset dropped on content browser folder → move asset ---
+                        glRenderer->getUIManager().setOnDropOnFolder([&glRenderer](const std::string& payload, const std::string& folderPath)
+                            {
+                                const auto sep = payload.find('|');
+                                if (sep == std::string::npos) return;
+
+                                const std::string relPath = payload.substr(sep + 1);
+                                const std::string fileName = std::filesystem::path(relPath).filename().string();
+                                const std::string newRelPath = folderPath.empty()
+                                    ? fileName
+                                    : (folderPath + "/" + fileName);
+
+                                if (relPath == newRelPath) return;
+
+                                if (!AssetManager::Instance().moveAsset(relPath, newRelPath))
+                                {
+                                    Logger::Instance().log(Logger::Category::AssetManagement,
+                                        "Failed to move asset: " + relPath, Logger::LogLevel::ERROR);
+                                    return;
+                                }
+
+                                DiagnosticsManager::Instance().setScenePrepared(false);
+                                if (glRenderer)
+                                {
+                                    glRenderer->getUIManager().refreshContentBrowser();
+                                    glRenderer->getUIManager().showToastMessage("Moved: " + fileName, 2.5f);
+                                }
+                            });
+
+                        // --- Drag & Drop: asset dropped on Outliner entity → apply to entity ---
+                        glRenderer->getUIManager().setOnDropOnEntity([&glRenderer](const std::string& payload, unsigned int entityId)
+                            {
+                                const auto sep = payload.find('|');
+                                if (sep == std::string::npos) return;
+
+                                const int typeInt = std::atoi(payload.substr(0, sep).c_str());
+                                const std::string relPath = payload.substr(sep + 1);
+                                const AssetType assetType = static_cast<AssetType>(typeInt);
+                                const std::string assetName = std::filesystem::path(relPath).stem().string();
+                                auto& ecs = ECS::ECSManager::Instance();
+                                const auto entity = static_cast<ECS::Entity>(entityId);
+
+                                switch (assetType)
+                                {
+                                case AssetType::Material:
+                                case AssetType::Texture:
+                                {
+                                    auto* mat = ecs.getComponent<ECS::MaterialComponent>(entity);
+                                    if (mat)
+                                    {
+                                        mat->materialAssetPath = relPath;
+                                    }
+                                    else
+                                    {
+                                        ECS::MaterialComponent newMat;
+                                        newMat.materialAssetPath = relPath;
+                                        ecs.addComponent<ECS::MaterialComponent>(entity, newMat);
+                                    }
+                                    break;
+                                }
+                                case AssetType::Model3D:
+                                {
+                                    auto* mesh = ecs.getComponent<ECS::MeshComponent>(entity);
+                                    if (mesh)
+                                    {
+                                        mesh->meshAssetPath = relPath;
+                                    }
+                                    else
+                                    {
+                                        ECS::MeshComponent newMesh;
+                                        newMesh.meshAssetPath = relPath;
+                                        ecs.addComponent<ECS::MeshComponent>(entity, newMesh);
+                                    }
+                                    break;
+                                }
+                                case AssetType::Script:
+                                {
+                                    auto* script = ecs.getComponent<ECS::ScriptComponent>(entity);
+                                    if (script)
+                                    {
+                                        script->scriptPath = relPath;
+                                    }
+                                    else
+                                    {
+                                        ECS::ScriptComponent newScript;
+                                        newScript.scriptPath = relPath;
+                                        ecs.addComponent<ECS::ScriptComponent>(entity, newScript);
+                                    }
+                                    break;
+                                }
+                                default:
+                                    break;
+                                }
+
+                                DiagnosticsManager::Instance().setScenePrepared(false);
+                                auto* level = DiagnosticsManager::Instance().getActiveLevelSoft();
+                                if (level)
+                                {
+                                    level->setIsSaved(false);
+                                }
+                                Logger::Instance().log(Logger::Category::Engine,
+                                    "Applied '" + assetName + "' to entity " + std::to_string(entityId),
+                                    Logger::LogLevel::INFO);
+                                if (glRenderer)
+                                {
+                                    glRenderer->getUIManager().refreshWorldOutliner();
+                                    glRenderer->getUIManager().showToastMessage(
+                                        "Applied " + assetName + " → Entity " + std::to_string(entityId), 2.5f);
+                                }
+                            });
                     }
                     else
                     {
@@ -590,8 +880,17 @@ int main()
                 }
             });
 
-        glRenderer->getUIManager().registerClickEvent("StatusBar.Save", [&glRenderer]()
+        glRenderer->getUIManager().registerClickEvent("StatusBar.Save", [&glRenderer, &renderer]()
             {
+                // Capture editor camera into the active level before saving
+                auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
+                if (lvl)
+                {
+                    lvl->setEditorCameraPosition(renderer->getCameraPosition());
+                    lvl->setEditorCameraRotation(renderer->getCameraRotationDegrees());
+                    lvl->setHasEditorCamera(true);
+                }
+
                 auto& am = AssetManager::Instance();
                 const size_t total = am.getUnsavedAssetCount();
                 if (total == 0)
@@ -627,7 +926,48 @@ int main()
 
     diagnostics.registerKeyUpHandler(SDLK_F2, [&]() {
         logTimed(Logger::Category::Input, "F2 pressed - opening import dialog.", Logger::LogLevel::INFO);
-        //assetManager.importAssetWithDialog(nullptr, AssetType::Unknown);
+        assetManager.OpenImportDialog(renderer ? renderer->window() : nullptr, AssetType::Unknown, AssetManager::Async);
+        return true;
+        });
+
+    diagnostics.registerKeyUpHandler(SDLK_DELETE, [&]() {
+        if (!glRenderer) return false;
+        auto& uiManager = glRenderer->getUIManager();
+        const unsigned int selected = uiManager.getSelectedEntity();
+        if (selected == 0) return false;
+
+        auto& ecs = ECS::ECSManager::Instance();
+        auto* level = diagnostics.getActiveLevelSoft();
+
+        // Get entity name for feedback
+        std::string entityName = "Entity " + std::to_string(selected);
+        if (const auto* nameComp = ecs.getComponent<ECS::NameComponent>(static_cast<ECS::Entity>(selected)))
+        {
+            if (!nameComp->displayName.empty())
+                entityName = nameComp->displayName;
+        }
+
+        // Remove from level tracking first
+        if (level)
+        {
+            level->onEntityRemoved(static_cast<ECS::Entity>(selected));
+            level->setIsSaved(false);
+        }
+
+        // Remove from ECS
+        ecs.removeEntity(static_cast<ECS::Entity>(selected));
+
+        // Clear selection and deselect in renderer
+        uiManager.selectEntity(0);
+        glRenderer->setSelectedEntity(0);
+
+        diagnostics.setScenePrepared(false);
+        uiManager.refreshWorldOutliner();
+        uiManager.showToastMessage("Deleted: " + entityName, 2.5f);
+
+        Logger::Instance().log(Logger::Category::Engine,
+            "Deleted entity " + std::to_string(selected) + " (" + entityName + ")",
+            Logger::LogLevel::INFO);
         return true;
         });
 
@@ -815,9 +1155,23 @@ int main()
 
             if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT)
             {
-                if (glRenderer && glRenderer->isGizmoDragging())
+                if (glRenderer)
                 {
-                    glRenderer->endGizmoDrag();
+                    const Vec2 mousePos{ static_cast<float>(event.button.x), static_cast<float>(event.button.y) };
+                    auto& uiManager = glRenderer->getUIManager();
+                    if (uiManager.isDragging())
+                    {
+                        uiManager.handleMouseUp(mousePos, event.button.button);
+                    }
+                    else
+                    {
+                        // Always forward mouse-up so deferred clicks on draggable elements fire
+                        uiManager.handleMouseUp(mousePos, event.button.button);
+                        if (glRenderer->isGizmoDragging())
+                        {
+                            glRenderer->endGizmoDrag();
+                        }
+                    }
                 }
             }
 
@@ -993,6 +1347,15 @@ int main()
                     }
                     if (event.key.key == SDLK_S)
                     {
+                        // Capture editor camera into the active level before saving
+                        auto* lvl = diagnostics.getActiveLevelSoft();
+                        if (lvl)
+                        {
+                            lvl->setEditorCameraPosition(renderer->getCameraPosition());
+                            lvl->setEditorCameraRotation(renderer->getCameraRotationDegrees());
+                            lvl->setHasEditorCamera(true);
+                        }
+
                         auto& am = AssetManager::Instance();
                         const size_t total = am.getUnsavedAssetCount();
                         if (total > 0)
@@ -1209,6 +1572,19 @@ int main()
         }
         diagnostics.setWindowState(state);
     }
+
+    // Capture editor camera into the level so it persists across sessions
+    {
+        auto* lvl = diagnostics.getActiveLevelSoft();
+        if (lvl)
+        {
+            lvl->setEditorCameraPosition(renderer->getCameraPosition());
+            lvl->setEditorCameraRotation(renderer->getCameraRotationDegrees());
+            lvl->setHasEditorCamera(true);
+            assetManager.saveActiveLevel();
+        }
+    }
+
     diagnostics.saveProjectConfig();
     diagnostics.saveConfig();
 
