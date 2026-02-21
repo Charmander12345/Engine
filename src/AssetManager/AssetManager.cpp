@@ -1103,29 +1103,37 @@ void AssetManager::ensureEditorWidgetsCreated()
                     json fileJson = json::parse(in, nullptr, false);
                     bool hasList = false;
                     bool hasNoDetails = true;
+                    bool hasFillY = false;
                     if (!fileJson.is_discarded() && fileJson.is_object() && fileJson.contains("data"))
                     {
                         const auto& data = fileJson.at("data");
-                        if (data.is_object() && data.contains("m_elements"))
+                        if (data.is_object())
                         {
-                            const auto& elems = data.at("m_elements");
-                            if (elems.is_array())
+                            if (data.contains("m_fillY") && data.at("m_fillY").is_boolean() && data.at("m_fillY").get<bool>())
                             {
-                                for (const auto& elem : elems)
+                                hasFillY = true;
+                            }
+                            if (data.contains("m_elements"))
+                            {
+                                const auto& elems = data.at("m_elements");
+                                if (elems.is_array())
                                 {
-                                    if (elem.is_object() && elem.value("id", "") == "Outliner.EntityList")
+                                    for (const auto& elem : elems)
                                     {
-                                        hasList = true;
-                                    }
-                                    if (elem.is_object() && elem.value("id", "") == "Outliner.Details")
-                                    {
-                                        hasNoDetails = false;
+                                        if (elem.is_object() && elem.value("id", "") == "Outliner.EntityList")
+                                        {
+                                            hasList = true;
+                                        }
+                                        if (elem.is_object() && elem.value("id", "") == "Outliner.Details")
+                                        {
+                                            hasNoDetails = false;
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                    existsAndOk = existsAndOk && hasList && hasNoDetails;
+                    existsAndOk = existsAndOk && hasList && hasNoDetails && hasFillY;
                 }
             }
         }
@@ -1223,6 +1231,7 @@ void AssetManager::ensureEditorWidgetsCreated()
                 {
                     json fileJson = json::parse(in, nullptr, false);
                     bool hasContent = false;
+                    bool contentScrollable = false;
                     if (!fileJson.is_discarded() && fileJson.is_object() && fileJson.contains("data"))
                     {
                         const auto& data = fileJson.at("data");
@@ -1236,12 +1245,16 @@ void AssetManager::ensureEditorWidgetsCreated()
                                     if (elem.is_object() && elem.value("id", "") == "Details.Content")
                                     {
                                         hasContent = true;
+                                        if (elem.contains("scrollable") && elem.at("scrollable").is_boolean() && elem.at("scrollable").get<bool>())
+                                        {
+                                            contentScrollable = true;
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                    existsAndOk = existsAndOk && hasContent;
+                    existsAndOk = existsAndOk && hasContent && contentScrollable;
                 }
             }
         }
@@ -1621,7 +1634,44 @@ void AssetManager::createWorldSettingsWidgetAsset()
     colorPicker["compact"] = false;
     colorPicker["minSize"] = json{ {"x", 200.0f}, {"y", 80.0f} };
 
-    stack["children"] = json::array({ title, clearLabel, colorPicker });
+    json separator = json::object();
+    separator["id"] = "WorldSettings.Tools.Sep";
+    separator["type"] = "Panel";
+    separator["color"] = json{ {"x", 0.2f}, {"y", 0.2f}, {"z", 0.22f}, {"w", 1.0f} };
+    separator["minSize"] = json{ {"x", 0.0f}, {"y", 1.0f} };
+    separator["padding"] = json{ {"x", 0.0f}, {"y", 12.0f} };
+
+    json toolsLabel = json::object();
+    toolsLabel["id"] = "WorldSettings.Tools.Label";
+    toolsLabel["type"] = "Text";
+    toolsLabel["text"] = "Tools";
+    toolsLabel["font"] = "default.ttf";
+    toolsLabel["fontSize"] = 16.0f;
+    toolsLabel["textAlignH"] = "Left";
+    toolsLabel["textAlignV"] = "Center";
+    toolsLabel["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
+    toolsLabel["textColor"] = json{ {"x", 0.9f}, {"y", 0.9f}, {"z", 0.92f}, {"w", 1.0f} };
+    toolsLabel["minSize"] = json{ {"x", 0.0f}, {"y", 24.0f} };
+
+    json landscapeBtn = json::object();
+    landscapeBtn["id"] = "WorldSettings.Tools.Landscape";
+    landscapeBtn["type"] = "Button";
+    landscapeBtn["text"] = "Landscape Manager...";
+    landscapeBtn["font"] = "default.ttf";
+    landscapeBtn["fontSize"] = 13.0f;
+    landscapeBtn["textAlignH"] = "Center";
+    landscapeBtn["textAlignV"] = "Center";
+    landscapeBtn["padding"] = json{ {"x", 8.0f}, {"y", 4.0f} };
+    landscapeBtn["minSize"] = json{ {"x", 0.0f}, {"y", 28.0f} };
+    landscapeBtn["color"] = json{ {"x", 0.15f}, {"y", 0.15f}, {"z", 0.18f}, {"w", 1.0f} };
+    landscapeBtn["hoverColor"] = json{ {"x", 0.2f}, {"y", 0.2f}, {"z", 0.24f}, {"w", 1.0f} };
+    landscapeBtn["textColor"] = json{ {"x", 0.8f}, {"y", 0.8f}, {"z", 0.85f}, {"w", 1.0f} };
+    landscapeBtn["shaderVertex"] = "button_vertex.glsl";
+    landscapeBtn["shaderFragment"] = "button_fragment.glsl";
+    landscapeBtn["isHitTestable"] = true;
+    landscapeBtn["clickEvent"] = "WorldSettings.Tools.Landscape";
+
+    stack["children"] = json::array({ title, clearLabel, colorPicker, separator, toolsLabel, landscapeBtn });
 
     elements.push_back(stack);
     widgetJson["m_elements"] = elements;
@@ -1639,6 +1689,25 @@ void AssetManager::createWorldSettingsWidgetAsset()
     {
         AssetType headerType{ AssetType::Unknown };
         existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+        if (existsAndOk)
+        {
+            std::ifstream in(abs, std::ios::in | std::ios::binary);
+            if (in.is_open())
+            {
+                json fileJson = json::parse(in, nullptr, false);
+                bool hasFillY = false;
+                if (!fileJson.is_discarded() && fileJson.is_object() && fileJson.contains("data"))
+                {
+                    const auto& data = fileJson.at("data");
+                    if (data.is_object() && data.contains("m_fillY") &&
+                        data.at("m_fillY").is_boolean() && data.at("m_fillY").get<bool>())
+                    {
+                        hasFillY = true;
+                    }
+                }
+                existsAndOk = existsAndOk && hasFillY;
+            }
+        }
     }
     if (!existsAndOk)
     {

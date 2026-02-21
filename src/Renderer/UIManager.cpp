@@ -2172,7 +2172,8 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
         }
         if (widgetSize.y <= 0.0f)
         {
-            widgetSize.y = hasComputedWidgetSize ? computedWidgetSize.y : available.h;
+            const float maxH = std::max(0.0f, available.h);
+            widgetSize.y = hasComputedWidgetSize ? std::min(computedWidgetSize.y, maxH) : maxH;
         }
 
         Vec2 widgetPosition = widgetOffset;
@@ -2374,6 +2375,9 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
     {
         const std::string separatorId = target->id.substr(separatorPrefix.size());
         const std::string contentId = "Separator.Content." + separatorId;
+        // UTF-8: ▾ = \xe2\x96\xbe, ▸ = \xe2\x96\xb8
+        const std::string expandedPrefix = std::string("\xe2\x96\xbe") + "  ";
+        const std::string collapsedPrefix = std::string("\xe2\x96\xb8") + "  ";
         for (auto& entry : m_widgets)
         {
             if (!entry.widget)
@@ -2385,9 +2389,13 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
                 {
                     content->children = content->cachedChildren;
                     content->isCollapsed = false;
-                    if (target->text.size() >= 2 && target->text[0] == '>' && target->text[1] == ' ')
+                    if (target->text.rfind(collapsedPrefix, 0) == 0)
                     {
-                        target->text = "v " + target->text.substr(2);
+                        target->text = expandedPrefix + target->text.substr(collapsedPrefix.size());
+                    }
+                    else if (target->text.size() >= 2 && target->text[0] == '>' && target->text[1] == ' ')
+                    {
+                        target->text = expandedPrefix + target->text.substr(2);
                     }
                 }
                 else
@@ -2395,9 +2403,13 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
                     content->cachedChildren = content->children;
                     content->children.clear();
                     content->isCollapsed = true;
-                    if (target->text.size() >= 2 && target->text[0] == 'v' && target->text[1] == ' ')
+                    if (target->text.rfind(expandedPrefix, 0) == 0)
                     {
-                        target->text = "> " + target->text.substr(2);
+                        target->text = collapsedPrefix + target->text.substr(expandedPrefix.size());
+                    }
+                    else if (target->text.size() >= 2 && target->text[0] == 'v' && target->text[1] == ' ')
+                    {
+                        target->text = collapsedPrefix + target->text.substr(2);
                     }
                 }
                 entry.widget->markLayoutDirty();

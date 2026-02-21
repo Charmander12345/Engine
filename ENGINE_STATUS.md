@@ -37,6 +37,8 @@
 18. [Scripting (Python)](#18-scripting-python)
 19. [Build-System](#19-build-system)
 20. [Gesamtübersicht fehlender Systeme](#20-gesamtübersicht-fehlender-systeme)
+21. [Multi-Window / Popup-System](#21-multi-window--popup-system)
+22. [Landscape-System](#22-landscape-system)
 
 ---
 
@@ -546,7 +548,10 @@
 - Widget-System: Grid-Layout berechnet Spalten aus verfügbarer Breite / Kachelgröße für quadratische Zellen
 - Widget-System: `onDoubleClicked`-Callback auf `WidgetElement` mit Doppelklick-Erkennung (400ms, SDL_GetTicks)
 - EntityDetails-Panel endet über dem ContentBrowser (Layout berücksichtigt die Oberkante des ContentBrowsers als Unterlimit)
+- Side-Panels (WorldOutliner, WorldSettings) werden jetzt korrekt auf die verfügbare Höhe begrenzt – kein Überzeichnen hinter ContentBrowser/StatusBar mehr (Fallback-Höhe aus Content-Messung auf `available.h` geclampt; Asset-Validierung prüft `m_fillY`)
 - Scrollbare StackPanels/Grids werden per `glScissor` auf ihren Zeichenbereich begrenzt (kein Überlauf beim Scrollen)
+- EntityDetails: Asset-Validierung prüft jetzt `scrollable`-Flag auf Details.Content – veraltete Cache-Dateien ohne Scrolling werden automatisch neu generiert
+- SeparatorWidget (Collapsible Sections): Redesign als flache Sektions-Header mit ▾/▸ Chevrons, dünner Trennlinie, subtilen Farben und 14px Content-Einrückung (statt prominenter Buttons mit v/>)
 - **Performance-Optimierungen:**
   - `updateHoverStates`: O(1) Tracked-Pointer statt O(N) Full-Tree-Walk pro Mausbewegung
   - `hitTest`: Keine temporäre Vektor-Allokation mehr, iteriert gecachte Liste direkt rückwärts
@@ -616,6 +621,60 @@
     - `ensurePointShadowResources()` / `releasePointShadowResources()` verwalten GPU-Ressourcen
     - `OpenGLMaterial`: Uniforms `uPointShadowMaps`, `uPointShadowCount`, `uPointShadowPositions[4]`, `uPointShadowFarPlanes[4]`, `uPointShadowLightIndices[4]`
     - Point Shadow Maps auf Texture Unit 5 gebunden
+
+---
+
+## 21. Multi-Window / Popup-System
+
+| Feature                                          | Status |
+|--------------------------------------------------|--------|
+| `PopupWindow`-Klasse (`src/Renderer/PopupWindow.h/.cpp`) | ✅ |
+| Shared OpenGL-Context (SDL3 SHARE_WITH_CURRENT_CONTEXT) | ✅ |
+| Eigener `UIManager` pro Popup                    | ✅ |
+| `OpenGLRenderer::openPopupWindow(id, title, w, h)` | ✅ |
+| `OpenGLRenderer::closePopupWindow(id)`           | ✅ |
+| `OpenGLRenderer::getPopupWindow(id)`             | ✅ |
+| `OpenGLRenderer::routeEventToPopup(SDL_Event&)`  | ✅ |
+| `renderPopupWindows()` im Render-Loop            | ✅ |
+| `drawUIWidgetsToFramebuffer(UIManager&, w, h)`   | ✅ |
+| `ensurePopupUIVao()` – kontext-lokaler VAO mit gesharetem VBO | ✅ |
+| SDL-Event-Routing (Mouse, Key, Text, Close)      | ✅ |
+| Popup schließen per `SDL_EVENT_WINDOW_CLOSE_REQUESTED` | ✅ |
+| Popup fokussieren wenn bereits offen             | ✅ |
+| Fenstergröße dynamisch (refreshSize)             | ✅ |
+| Docking / Snapping                               | ❌ |
+| Mehrere Popups gleichzeitig                      | ✅ |
+
+**Offene Punkte:**
+- Kein Docking/Snapping zwischen Fenstern
+- Popup-VAO wird erst beim ersten Render-Frame erstellt (einmaliger Overhead)
+
+---
+
+## 22. Landscape-System
+
+| Feature                                           | Status |
+|---------------------------------------------------|--------|
+| `LandscapeManager` (`src/Landscape/LandscapeManager.h/.cpp`) | ✅ |
+| `LandscapeParams` (name, width, depth, subdX, subdZ) | ✅ |
+| Flaches Grid-Mesh (N×M Kacheln, XZ-Ebene)        | ✅ |
+| Vertex-Format: x, y, z, u, v (5 Floats)          | ✅ |
+| Mesh als `.asset`-JSON in `Content/Landscape/` speichern | ✅ |
+| Asset über `AssetManager::loadAsset()` registrieren | ✅ |
+| ECS-Entity mit Transform + Mesh + Name           | ✅ |
+| Level-Dirty-Flag + Outliner-Refresh nach Spawn   | ✅ |
+| Landscape Manager Popup (via `TitleBar.Menu.Tools`) | ✅ |
+| Popup-UI: Name, Width, Depth, Subdiv X, Subdiv Z, Create/Cancel | ✅ |
+| Höhenkarte (Heightmap)                            | ❌ |
+| Landscape-Material / Textur-Blending             | ❌ |
+| LOD-System für Landscape                         | ❌ |
+| Kollision für Landscape                          | ❌ |
+| Terrain-Sculpting im Editor                      | ❌ |
+
+**Offene Punkte:**
+- Aktuell nur flache Ebene – keine Höhenkarte
+- Kein spezifisches Landscape-Material
+- Für große Terrains empfiehlt sich später LOD + Streaming
 
 ---
 

@@ -2,6 +2,8 @@ add_library(Renderer SHARED
 
     Renderer.h
     Shader.h
+    PopupWindow.h
+    PopupWindow.cpp
     
     OpenGLRenderer/OpenGLRenderer.cpp
     OpenGLRenderer/OpenGLRenderer.h

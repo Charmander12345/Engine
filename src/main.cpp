@@ -13,6 +13,7 @@
 #include "Renderer/Renderer.h"
 #include "Renderer/OpenGLRenderer/OpenGLRenderer.h"
 #include "Renderer/UIWidget.h"
+#include "Renderer/PopupWindow.h"
 #include "Logger/Logger.h"
 #include "Diagnostics/DiagnosticsManager.h"
 #include "AssetManager/AssetManager.h"
@@ -22,6 +23,7 @@
 #include "Core/AudioManager.h"
 #include "Core/UndoRedoManager.h"
 #include "Scripting/PythonScripting.h"
+#include "LandscapeManager.h"
 
 using namespace std;
 
@@ -238,9 +240,240 @@ int main()
                 Logger::Instance().log(Logger::Category::Input, "Menu: Window clicked.", Logger::LogLevel::INFO);
             });
 
-        glRenderer->getUIManager().registerClickEvent("TitleBar.Menu.Tools", []()
+        glRenderer->getUIManager().registerClickEvent("WorldSettings.Tools.Landscape", [&glRenderer]()
             {
-                Logger::Instance().log(Logger::Category::Input, "Menu: Tools clicked.", Logger::LogLevel::INFO);
+                Logger::Instance().log(Logger::Category::Input, "WorldSettings: Tools -> Landscape Manager.", Logger::LogLevel::INFO);
+
+                // ---- Open or focus the popup --------------------------------
+                constexpr int kPopupW = 420;
+                constexpr int kPopupH = 340;
+                PopupWindow* popup = glRenderer->openPopupWindow(
+                    "LandscapeManager", "Landscape Manager", kPopupW, kPopupH);
+                if (!popup) return;
+
+                // Don't rebuild the UI if it already has widgets.
+                if (!popup->uiManager().getRegisteredWidgets().empty()) return;
+
+                // ---- Shared mutable state for the form ----------------------
+                struct LandscapeFormState
+                {
+                    std::string name        = "Landscape";
+                    std::string widthStr    = "100";
+                    std::string depthStr    = "100";
+                    std::string subdivXStr  = "32";
+                    std::string subdivZStr  = "32";
+                };
+                auto state = std::make_shared<LandscapeFormState>();
+
+                // ---- Build Widget with explicit normalized coordinates -------
+                // Popup size: 420 x 340
+                const float W = static_cast<float>(kPopupW);
+                const float H = static_cast<float>(kPopupH);
+
+                // Helper lambdas for normalized coords
+                auto nx = [&](float px) { return px / W; };
+                auto ny = [&](float py) { return py / H; };
+
+                const auto makeLabel = [&](const std::string& id, const std::string& text,
+                    float x0, float y0, float x1, float y1) -> WidgetElement
+                {
+                    WidgetElement e;
+                    e.type      = WidgetElementType::Text;
+                    e.id        = id;
+                    e.from      = Vec2{ nx(x0), ny(y0) };
+                    e.to        = Vec2{ nx(x1), ny(y1) };
+                    e.text      = text;
+                    e.fontSize  = 13.0f;
+                    e.textColor = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
+                    e.textAlignV = TextAlignV::Center;
+                    e.padding   = Vec2{ 6.0f, 0.0f };
+                    return e;
+                };
+
+                const auto makeEntry = [&](const std::string& id, const std::string& val,
+                    float x0, float y0, float x1, float y1) -> WidgetElement
+                {
+                    WidgetElement e;
+                    e.type         = WidgetElementType::EntryBar;
+                    e.id           = id;
+                    e.from         = Vec2{ nx(x0), ny(y0) };
+                    e.to           = Vec2{ nx(x1), ny(y1) };
+                    e.value        = val;
+                    e.fontSize     = 13.0f;
+                    e.color        = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
+                    e.hoverColor   = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
+                    e.textColor    = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+                    e.padding      = Vec2{ 6.0f, 4.0f };
+                    e.isHitTestable = true;
+                    return e;
+                };
+
+                std::vector<WidgetElement> elements;
+
+                // Background
+                {
+                    WidgetElement bg;
+                    bg.type  = WidgetElementType::Panel;
+                    bg.id    = "LM.Bg";
+                    bg.from  = Vec2{ 0.0f, 0.0f };
+                    bg.to    = Vec2{ 1.0f, 1.0f };
+                    bg.color = Vec4{ 0.13f, 0.13f, 0.16f, 1.0f };
+                    elements.push_back(bg);
+                }
+
+                // Title bar
+                {
+                    WidgetElement title;
+                    title.type  = WidgetElementType::Panel;
+                    title.id    = "LM.TitleBg";
+                    title.from  = Vec2{ 0.0f, 0.0f };
+                    title.to    = Vec2{ 1.0f, ny(44.0f) };
+                    title.color = Vec4{ 0.09f, 0.09f, 0.13f, 1.0f };
+                    elements.push_back(title);
+
+                    elements.push_back(makeLabel("LM.TitleText", "Landscape Manager",
+                        8.0f, 0.0f, W - 8.0f, 44.0f));
+                }
+
+                // Form rows – each 28px tall, starting at y=56, gap=8px
+                constexpr float kRowH = 28.0f;
+                constexpr float kRowGap = 8.0f;
+                constexpr float kFormY0 = 54.0f;
+                constexpr float kLabelX1 = 130.0f;
+                constexpr float kEntryX0 = 138.0f;
+                constexpr float kEntryX1 = W - 12.0f;
+
+                const auto rowY0 = [&](int row) { return kFormY0 + row * (kRowH + kRowGap); };
+                const auto rowY1 = [&](int row) { return rowY0(row) + kRowH; };
+
+                // Row 0: Name
+                elements.push_back(makeLabel("LM.NameLabel", "Name:", 12.0f, rowY0(0), kLabelX1, rowY1(0)));
+                {
+                    auto e = makeEntry("LM.NameEntry", state->name, kEntryX0, rowY0(0), kEntryX1, rowY1(0));
+                    e.onValueChanged = [state](const std::string& v) { state->name = v; };
+                    elements.push_back(e);
+                }
+
+                // Row 1: Width
+                elements.push_back(makeLabel("LM.WidthLabel", "Width:", 12.0f, rowY0(1), kLabelX1, rowY1(1)));
+                {
+                    auto e = makeEntry("LM.WidthEntry", state->widthStr, kEntryX0, rowY0(1), kEntryX1, rowY1(1));
+                    e.onValueChanged = [state](const std::string& v) { state->widthStr = v; };
+                    elements.push_back(e);
+                }
+
+                // Row 2: Depth
+                elements.push_back(makeLabel("LM.DepthLabel", "Depth:", 12.0f, rowY0(2), kLabelX1, rowY1(2)));
+                {
+                    auto e = makeEntry("LM.DepthEntry", state->depthStr, kEntryX0, rowY0(2), kEntryX1, rowY1(2));
+                    e.onValueChanged = [state](const std::string& v) { state->depthStr = v; };
+                    elements.push_back(e);
+                }
+
+                // Row 3: Subdivisions X
+                elements.push_back(makeLabel("LM.SubXLabel", "Subdiv X:", 12.0f, rowY0(3), kLabelX1, rowY1(3)));
+                {
+                    auto e = makeEntry("LM.SubXEntry", state->subdivXStr, kEntryX0, rowY0(3), kEntryX1, rowY1(3));
+                    e.onValueChanged = [state](const std::string& v) { state->subdivXStr = v; };
+                    elements.push_back(e);
+                }
+
+                // Row 4: Subdivisions Z
+                elements.push_back(makeLabel("LM.SubZLabel", "Subdiv Z:", 12.0f, rowY0(4), kLabelX1, rowY1(4)));
+                {
+                    auto e = makeEntry("LM.SubZEntry", state->subdivZStr, kEntryX0, rowY0(4), kEntryX1, rowY1(4));
+                    e.onValueChanged = [state](const std::string& v) { state->subdivZStr = v; };
+                    elements.push_back(e);
+                }
+
+                // Divider
+                {
+                    WidgetElement sep;
+                    sep.type  = WidgetElementType::Panel;
+                    sep.id    = "LM.Sep";
+                    sep.from  = Vec2{ nx(8.0f), ny(rowY1(4) + 12.0f) };
+                    sep.to    = Vec2{ nx(W - 8.0f), ny(rowY1(4) + 14.0f) };
+                    sep.color = Vec4{ 0.28f, 0.28f, 0.32f, 1.0f };
+                    elements.push_back(sep);
+                }
+
+                // Button row
+                const float btnY0 = rowY1(4) + 20.0f;
+                const float btnY1 = btnY0 + 34.0f;
+
+                // Create button
+                {
+                    WidgetElement btn;
+                    btn.type          = WidgetElementType::Button;
+                    btn.id            = "LM.CreateBtn";
+                    btn.from          = Vec2{ nx(W - 220.0f), ny(btnY0) };
+                    btn.to            = Vec2{ nx(W - 114.0f), ny(btnY1) };
+                    btn.text          = "Create";
+                    btn.fontSize      = 13.0f;
+                    btn.color         = Vec4{ 0.12f, 0.32f, 0.12f, 1.0f };
+                    btn.hoverColor    = Vec4{ 0.18f, 0.46f, 0.18f, 1.0f };
+                    btn.textColor     = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+                    btn.textAlignH    = TextAlignH::Center;
+                    btn.textAlignV    = TextAlignV::Center;
+                    btn.padding       = Vec2{ 8.0f, 4.0f };
+                    btn.isHitTestable = true;
+                    btn.onClicked     = [state, &glRenderer]()
+                    {
+                        LandscapeParams p;
+                        p.name   = state->name.empty() ? "Landscape" : state->name;
+                        try { p.width  = std::stof(state->widthStr); }  catch(...) { p.width  = 100.0f; }
+                        try { p.depth  = std::stof(state->depthStr); }  catch(...) { p.depth  = 100.0f; }
+                        try { p.subdivisionsX = std::stoi(state->subdivXStr); } catch(...) { p.subdivisionsX = 32; }
+                        try { p.subdivisionsZ = std::stoi(state->subdivZStr); } catch(...) { p.subdivisionsZ = 32; }
+
+                        const ECS::Entity entity = LandscapeManager::spawnLandscape(p);
+                        if (entity != 0)
+                        {
+                            glRenderer->getUIManager().refreshWorldOutliner();
+                            glRenderer->getUIManager().selectEntity(entity);
+                            glRenderer->getUIManager().showToastMessage(
+                                "Landscape created: " + p.name, 3.0f);
+                        }
+                        else
+                        {
+                            glRenderer->getUIManager().showToastMessage(
+                                "Failed to create landscape.", 3.0f);
+                        }
+                        glRenderer->closePopupWindow("LandscapeManager");
+                    };
+                    elements.push_back(btn);
+                }
+
+                // Cancel button
+                {
+                    WidgetElement btn;
+                    btn.type          = WidgetElementType::Button;
+                    btn.id            = "LM.CancelBtn";
+                    btn.from          = Vec2{ nx(W - 104.0f), ny(btnY0) };
+                    btn.to            = Vec2{ nx(W - 12.0f),  ny(btnY1) };
+                    btn.text          = "Cancel";
+                    btn.fontSize      = 13.0f;
+                    btn.color         = Vec4{ 0.22f, 0.22f, 0.25f, 1.0f };
+                    btn.hoverColor    = Vec4{ 0.32f, 0.32f, 0.36f, 1.0f };
+                    btn.textColor     = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
+                    btn.textAlignH    = TextAlignH::Center;
+                    btn.textAlignV    = TextAlignV::Center;
+                    btn.padding       = Vec2{ 8.0f, 4.0f };
+                    btn.isHitTestable = true;
+                    btn.onClicked     = [&glRenderer]()
+                    {
+                        glRenderer->closePopupWindow("LandscapeManager");
+                    };
+                    elements.push_back(btn);
+                }
+
+                // Assemble widget and register it in the popup UIManager
+                auto widget = std::make_shared<Widget>();
+                widget->setName("LandscapeManagerWidget");
+                widget->setFillX(true);
+                widget->setFillY(true);
+                widget->setElements(std::move(elements));
+                popup->uiManager().registerWidget("LandscapeManager.Main", widget);
             });
 
         glRenderer->getUIManager().registerClickEvent("TitleBar.Menu.Build", []()
@@ -1101,14 +1334,20 @@ int main()
         }
 
         const uint64_t eventStartCounter = SDL_GetPerformanceCounter();
-        SDL_Event event;
-        while (SDL_PollEvent(&event))
-        {
-            if (event.type == SDL_EVENT_QUIT)
-            {
+		SDL_Event event;
+		while (SDL_PollEvent(&event))
+		{
+			// Route events belonging to popup windows first.
+			if (glRenderer && glRenderer->routeEventToPopup(event))
+			{
+				continue;
+			}
+
+			if (event.type == SDL_EVENT_QUIT)
+			{
 				logTimed(Logger::Category::Input, "SDL_EVENT_QUIT received.", Logger::LogLevel::INFO);
-                running = false;
-            }
+				running = false;
+			}
 
             if (event.type == SDL_EVENT_MOUSE_MOTION)
             {

@@ -261,6 +261,10 @@ void OpenGLRenderer::shutdown()
     releaseOutlineResources();
     releaseUiFbo();
     releaseAllTabFbos();
+
+    // Destroy all popup windows before releasing main GL resources.
+    m_popupWindows.clear();
+
     auto& logger = Logger::Instance();
     logger.log(Logger::Category::Rendering, "OpenGLRenderer shutdown: releasing GPU resources...", Logger::LogLevel::INFO);
 
@@ -273,6 +277,11 @@ void OpenGLRenderer::shutdown()
     OpenGLObject2D::ClearCache();
     OpenGLObject3D::ClearCache();
 
+    if (m_popupUiVao)
+    {
+        glDeleteVertexArrays(1, &m_popupUiVao);
+        m_popupUiVao = 0;
+    }
     if (m_uiQuadVbo)
     {
         glDeleteBuffers(1, &m_uiQuadVbo);
@@ -525,6 +534,7 @@ void OpenGLRenderer::render()
     glViewport(0, 0, width, height);
 
     renderUI();
+    renderPopupWindows();
 
     if (m_gpuQueriesInitialized)
     {
@@ -1270,6 +1280,593 @@ void OpenGLRenderer::blitUiCache(int width, int height)
     drawUIImage(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height), m_uiFboTexture, projection);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDisable(GL_BLEND);
+}
+
+// ---------------------------------------------------------------------------
+// drawUIWidgetsToFramebuffer
+// Renders all widgets of 'mgr' into the currently-bound framebuffer.
+// Caller is responsible for binding the target FBO and setting glViewport.
+// ---------------------------------------------------------------------------
+void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int height)
+{
+    if (!m_textRenderer || !ensureUIQuadRenderer()) return;
+
+    m_textRenderer->setScreenSize(width, height);
+    mgr.setAvailableViewportSize(Vec2{ static_cast<float>(width), static_cast<float>(height) });
+
+    if (mgr.needsLayoutUpdate())
+    {
+        mgr.updateLayouts([this](const std::string& text, float scale)
+            { return m_textRenderer ? m_textRenderer->measureText(text, scale) : Vec2{}; });
+    }
+
+    ensureUIShaderDefaults();
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+    const glm::mat4 uiProjection = glm::ortho(0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f);
+
+    const auto renderElement = [&](const auto& self, const WidgetElement& element,
+        float parentX, float parentY, float parentW, float parentH) -> void
+    {
+        float x0 = element.hasComputedPosition ? element.computedPositionPixels.x : (parentX + element.from.x * parentW);
+        float y0 = element.hasComputedPosition ? element.computedPositionPixels.y : (parentY + element.from.y * parentH);
+        float widthPx = element.hasComputedSize ? element.computedSizePixels.x : (parentW * (element.to.x - element.from.x));
+        float heightPx = element.hasComputedSize ? element.computedSizePixels.y : (parentH * (element.to.y - element.from.y));
+        const float x1 = x0 + widthPx;
+        const float y1 = y0 + heightPx;
+
+        if (element.type == WidgetElementType::Panel)
+        {
+            const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+            const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+            const GLuint prog = getUIQuadProgram(vp, fp);
+            drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, prog, element.color, false);
+            if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{1.0f,0.9f,0.1f,1.0f}, uiProjection, prog);
+            return;
+        }
+        if (element.type == WidgetElementType::ColorPicker)
+        {
+            const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+            const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+            const GLuint prog = getUIQuadProgram(vp, fp);
+            if (element.isCompact)
+            {
+                if (element.color.w > 0.0f) drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, prog, element.color, false);
+                for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx);
+                if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{0.6f,0.9f,0.2f,1.0f}, uiProjection, prog);
+                return;
+            }
+            const int columns = 24; const int rows = 6;
+            const float cellW = widthPx / static_cast<float>(columns);
+            const float cellH = heightPx / static_cast<float>(rows);
+            for (int row = 0; row < rows; ++row)
+            {
+                const float value = 1.0f - (static_cast<float>(row) / std::max(1.0f, static_cast<float>(rows-1)));
+                for (int col = 0; col < columns; ++col)
+                {
+                    const float hue = static_cast<float>(col) / std::max(1.0f, static_cast<float>(columns-1));
+                    const Vec4 c = HsvToRgb(hue, 1.0f, value);
+                    drawUIPanel(x0+cellW*col, y0+cellH*row, x0+cellW*(col+1), y0+cellH*(row+1), c, uiProjection, prog, c, false);
+                }
+            }
+            const float sw = std::min(heightPx, 18.0f);
+            if (sw > 0.0f)
+            {
+                const float sx = x1 - sw - 4.0f, sy = y0 + 4.0f;
+                drawUIPanel(sx, sy, sx+sw, sy+sw, element.color, uiProjection, prog, element.color, false);
+                drawUIOutline(sx, sy, sx+sw, sy+sw, Vec4{0.1f,0.1f,0.1f,0.9f}, uiProjection, prog);
+            }
+            if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{0.6f,0.9f,0.2f,1.0f}, uiProjection, prog);
+            return;
+        }
+        if (element.type == WidgetElementType::Text)
+        {
+            const float wPx = std::max(0.0f, x1-x0), hPx = std::max(0.0f, y1-y0);
+            const float cx0 = x0+element.padding.x, cy0 = y0+element.padding.y;
+            const float cx1 = x1-element.padding.x, cy1 = y1-element.padding.y;
+            const float cw = std::max(0.0f, cx1-cx0), ch = std::max(0.0f, cy1-cy0);
+            float scale = (element.fontSize > 0.0f) ? (element.fontSize/48.0f) : 1.0f;
+            if (element.fontSize <= 0.0f)
+            {
+                const Vec2 ts = m_textRenderer->measureText(element.text, 1.0f);
+                if (ts.x > 0.0f && ts.y > 0.0f) scale = std::min(wPx/ts.x, hPx/ts.y)*0.9f;
+                else if (hPx > 0.0f) scale = hPx/48.0f;
+            }
+            const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultTextVertex);
+            const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultTextFragment);
+            const auto drawLine = [&](const std::string& line, const Vec2& pos)
+            {
+                if (!element.shaderVertex.empty() || !element.shaderFragment.empty())
+                    m_textRenderer->drawTextWithShader(line, pos, scale, element.textColor, vp, fp);
+                else
+                    m_textRenderer->drawText(line, pos, scale, element.textColor);
+            };
+            if (element.wrapText && cw > 0.0f)
+            {
+                std::vector<std::string> lines;
+                std::vector<std::string> paragraphs;
+                std::string para;
+                for (char c : element.text) { if (c=='\n'){paragraphs.push_back(para);para.clear();}else para.push_back(c); }
+                paragraphs.push_back(para);
+                const auto wrapWord = [&](const std::string& word, std::string& cur)
+                {
+                    const Vec2 ws = m_textRenderer->measureText(word, scale);
+                    if (cur.empty() && ws.x > cw)
+                    {
+                        std::string chunk;
+                        for (char wc : word)
+                        {
+                            std::string cand = chunk; cand.push_back(wc);
+                            if (m_textRenderer->measureText(cand, scale).x > cw && !chunk.empty()) { lines.push_back(chunk); chunk.clear(); chunk.push_back(wc); }
+                            else chunk = cand;
+                        }
+                        cur = chunk; return;
+                    }
+                    const std::string cand = cur.empty() ? word : (cur+" "+word);
+                    if (m_textRenderer->measureText(cand, scale).x <= cw || cur.empty()) cur = cand;
+                    else { lines.push_back(cur); cur = word; }
+                };
+                for (const auto& p : paragraphs)
+                {
+                    std::string cur, wrd;
+                    for (char c : p) { if (std::isspace(static_cast<unsigned char>(c))) { if (!wrd.empty()){ wrapWord(wrd,cur); wrd.clear(); } } else wrd.push_back(c); }
+                    if (!wrd.empty()) wrapWord(wrd, cur);
+                    if (!cur.empty()) lines.push_back(cur);
+                }
+                const float lh = m_textRenderer->getLineHeight(scale);
+                const float th = lh * static_cast<float>(lines.size());
+                float sy = cy0;
+                if (element.textAlignV==TextAlignV::Center) sy = cy0+(ch-th)*0.5f;
+                else if (element.textAlignV==TextAlignV::Bottom) sy = cy1-th;
+                for (size_t i=0;i<lines.size();++i)
+                {
+                    const Vec2 ls = m_textRenderer->measureText(lines[i], scale);
+                    float tx = cx0;
+                    if (element.textAlignH==TextAlignH::Center) tx = cx0+(cw-ls.x)*0.5f;
+                    else if (element.textAlignH==TextAlignH::Right) tx = cx1-ls.x;
+                    drawLine(lines[i], Vec2{tx, sy+lh*static_cast<float>(i)});
+                }
+            }
+            else
+            {
+                Vec2 ts = m_textRenderer->measureText(element.text, scale);
+                float tx = cx0, ty = cy0;
+                if (element.textAlignH==TextAlignH::Center) tx = cx0+(cw-ts.x)*0.5f;
+                else if (element.textAlignH==TextAlignH::Right) tx = cx1-ts.x;
+                if (element.textAlignV==TextAlignV::Center) ty = cy0+(ch-ts.y)*0.5f;
+                else if (element.textAlignV==TextAlignV::Bottom) ty = cy1-ts.y;
+                drawLine(element.text, Vec2{tx, ty});
+            }
+            if (m_uiDebugEnabled)
+            {
+                const GLuint prog = getUIQuadProgram(m_defaultPanelVertex, m_defaultPanelFragment);
+                drawUIOutline(x0, y0, x1, y1, Vec4{0.1f,0.8f,1.0f,1.0f}, uiProjection, prog);
+            }
+            return;
+        }
+        if (element.type == WidgetElementType::ProgressBar)
+        {
+            const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+            const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+            const GLuint prog = getUIQuadProgram(vp, fp);
+            drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, prog, element.color, false);
+            const float range = element.maxValue - element.minValue;
+            const float ratio = (range>0.0f) ? std::clamp((element.valueFloat-element.minValue)/range, 0.0f, 1.0f) : 0.0f;
+            if (ratio > 0.0f) drawUIPanel(x0, y0, x0+widthPx*ratio, y1, element.fillColor, uiProjection, prog, element.fillColor, false);
+            if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{0.2f,0.9f,0.6f,1.0f}, uiProjection, prog);
+            return;
+        }
+        if (element.type == WidgetElementType::Slider)
+        {
+            const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+            const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+            const GLuint prog = getUIQuadProgram(vp, fp);
+            const float range = element.maxValue - element.minValue;
+            const float ratio = (range>0.0f) ? std::clamp((element.valueFloat-element.minValue)/range, 0.0f, 1.0f) : 0.0f;
+            const float th = std::min(heightPx, 6.0f);
+            const float ty0 = y0+(heightPx-th)*0.5f, ty1 = ty0+th;
+            drawUIPanel(x0, ty0, x1, ty1, element.color, uiProjection, prog, element.color, false);
+            if (ratio > 0.0f) drawUIPanel(x0, ty0, x0+widthPx*ratio, ty1, element.fillColor, uiProjection, prog, element.fillColor, false);
+            const float hs = std::max(10.0f, heightPx);
+            float hx = std::clamp(x0+widthPx*ratio-hs*0.5f, x0, x1-hs);
+            drawUIPanel(hx, y0, hx+hs, y1, element.textColor, uiProjection, prog, element.textColor, false);
+            if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{0.2f,0.7f,1.0f,1.0f}, uiProjection, prog);
+            return;
+        }
+        if (element.type == WidgetElementType::EntryBar)
+        {
+            const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+            const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+            const GLuint prog = getUIQuadProgram(vp, fp);
+            drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, prog, element.hoverColor, element.isHovered);
+            const float fs = (element.fontSize>0.0f)?element.fontSize:14.0f, sc = fs/48.0f;
+            std::string disp = element.value;
+            if (element.isPassword) disp.assign(element.value.size(), '*');
+            const float cx0e = x0+element.padding.x, cy0e = y0+element.padding.y;
+            const float cx1e = x1-element.padding.x, cy1e = y1-element.padding.y;
+            const float chE = std::max(0.0f, cy1e-cy0e);
+            Vec2 ts{};
+            if (!disp.empty())
+            {
+                ts = m_textRenderer->measureText(disp, sc);
+                m_textRenderer->drawText(disp, Vec2{cx0e, cy0e+std::max(0.0f,(chE-ts.y)*0.5f)}, sc, element.textColor);
+            }
+            if (element.isFocused)
+            {
+                const float ch2 = std::max(0.0f, chE-2.0f);
+                const float cx = cx0e+ts.x+1.0f;
+                if (cx < cx1e) drawUIPanel(cx, cy0e+1.0f, cx+2.0f, cy0e+1.0f+ch2, element.textColor, uiProjection, prog, element.textColor, false);
+            }
+            if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{0.5f,0.8f,1.0f,1.0f}, uiProjection, prog);
+            return;
+        }
+        if (element.type == WidgetElementType::Button)
+        {
+            const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
+            const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);
+            const GLuint prog = getUIQuadProgram(vp, fp);
+            drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, prog, element.hoverColor, element.isHovered);
+            if (!element.text.empty())
+            {
+                const float cx0b=x0+element.padding.x, cy0b=y0+element.padding.y;
+                const float cx1b=x1-element.padding.x, cy1b=y1-element.padding.y;
+                const float cwB=std::max(0.0f,cx1b-cx0b), chB=std::max(0.0f,cy1b-cy0b);
+                float sc = (element.fontSize>0.0f) ? element.fontSize/48.0f : 1.0f;
+                if (element.fontSize<=0.0f)
+                {
+                    const Vec2 ts=m_textRenderer->measureText(element.text,1.0f);
+                    if (ts.x>0.0f&&ts.y>0.0f) sc=std::min(cwB/ts.x,chB/ts.y)*0.9f;
+                }
+                Vec2 ts=m_textRenderer->measureText(element.text,sc);
+                float tx=cx0b, ty=cy0b;
+                if (element.textAlignH==TextAlignH::Center) tx=cx0b+(cwB-ts.x)*0.5f;
+                else if (element.textAlignH==TextAlignH::Right) tx=cx1b-ts.x;
+                if (element.textAlignV==TextAlignV::Center) ty=cy0b+(chB-ts.y)*0.5f;
+                else if (element.textAlignV==TextAlignV::Bottom) ty=cy1b-ts.y;
+                m_textRenderer->drawText(element.text, Vec2{tx,ty}, sc, element.textColor);
+            }
+            else if (element.textureId!=0 || !element.imagePath.empty())
+            {
+                const GLuint tex=(element.textureId!=0)?static_cast<GLuint>(element.textureId):getOrLoadUITexture(element.imagePath);
+                if (tex!=0) drawUIImage(x0+4.0f, y0+4.0f, x1-4.0f, y1-4.0f, tex, uiProjection);
+            }
+            for (const auto& child : element.children) self(self, child, x0, y0, x1-x0, y1-y0);
+            if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{0.7f,1.0f,0.3f,1.0f}, uiProjection, prog);
+            return;
+        }
+        if (element.type == WidgetElementType::Image)
+        {
+            if (element.textureId!=0 || !element.imagePath.empty())
+            {
+                const GLuint tex=(element.textureId!=0)?static_cast<GLuint>(element.textureId):getOrLoadUITexture(element.imagePath);
+                if (tex!=0) drawUIImage(x0, y0, x1, y1, tex, uiProjection, element.color, true);
+            }
+            if (m_uiDebugEnabled)
+            {
+                const GLuint prog=getUIQuadProgram(m_defaultPanelVertex,m_defaultPanelFragment);
+                drawUIOutline(x0, y0, x1, y1, Vec4{0.2f,1.0f,1.0f,1.0f}, uiProjection, prog);
+            }
+            return;
+        }
+        if (element.type == WidgetElementType::CheckBox)
+        {
+            const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+            const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+            const GLuint prog = getUIQuadProgram(vp, fp);
+            const float bs=std::min(heightPx-2.0f,16.0f);
+            const float bx0=x0+element.padding.x, by0=y0+(heightPx-bs)*0.5f, bx1=bx0+bs, by1=by0+bs;
+            drawUIPanel(bx0,by0,bx1,by1,element.color,uiProjection,prog,element.hoverColor,element.isHovered);
+            drawUIOutline(bx0,by0,bx1,by1,Vec4{0.4f,0.4f,0.45f,0.9f},uiProjection,prog);
+            if (element.isChecked)
+            {
+                const float inset=3.0f;
+                drawUIPanel(bx0+inset,by0+inset,bx1-inset,by1-inset,element.fillColor,uiProjection,prog,element.fillColor,false);
+            }
+            if (!element.text.empty())
+            {
+                const float sc=(element.fontSize>0.0f)?element.fontSize/48.0f:14.0f/48.0f;
+                const Vec2 ts=m_textRenderer->measureText(element.text,sc);
+                m_textRenderer->drawText(element.text,Vec2{bx1+6.0f,y0+(heightPx-ts.y)*0.5f},sc,element.textColor);
+            }
+            if (m_uiDebugEnabled) drawUIOutline(x0,y0,x1,y1,Vec4{0.9f,0.5f,0.2f,1.0f},uiProjection,prog);
+            return;
+        }
+        if (element.type == WidgetElementType::DropDown)
+        {
+            const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+            const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+            const GLuint prog = getUIQuadProgram(vp, fp);
+            drawUIPanel(x0,y0,x1,y1,element.color,uiProjection,prog,element.hoverColor,element.isHovered);
+            const float sc=(element.fontSize>0.0f)?element.fontSize/48.0f:14.0f/48.0f;
+            const float cx0d=x0+element.padding.x, cy0d=y0+element.padding.y, cy1d=y1-element.padding.y;
+            const float chD=std::max(0.0f,cy1d-cy0d);
+            std::string disp=element.text;
+            if (disp.empty()&&element.selectedIndex>=0&&element.selectedIndex<static_cast<int>(element.items.size()))
+                disp=element.items[static_cast<size_t>(element.selectedIndex)];
+            if (!disp.empty())
+            {
+                const Vec2 ts=m_textRenderer->measureText(disp,sc);
+                m_textRenderer->drawText(disp,Vec2{cx0d,cy0d+std::max(0.0f,(chD-ts.y)*0.5f)},sc,element.textColor);
+            }
+            const float as=std::min(heightPx*0.4f,8.0f);
+            drawUIPanel(x1-element.padding.x-as, y0+(heightPx-as)*0.5f, x1-element.padding.x, y0+(heightPx-as)*0.5f+as, element.textColor,uiProjection,prog,element.textColor,false);
+            if (element.isExpanded && !element.items.empty())
+            {
+                const float ih=std::max(20.0f,heightPx);
+                for (size_t i=0;i<element.items.size();++i)
+                {
+                    const float iy0=y1+static_cast<float>(i)*ih, iy1=iy0+ih;
+                    const bool sel=(static_cast<int>(i)==element.selectedIndex);
+                    const Vec4 ic=sel?Vec4{0.22f,0.22f,0.28f,0.98f}:Vec4{0.14f,0.14f,0.18f,0.98f};
+                    drawUIPanel(x0,iy0,x1,iy1,ic,uiProjection,prog,element.hoverColor,false);
+                    const Vec2 its=m_textRenderer->measureText(element.items[i],sc);
+                    m_textRenderer->drawText(element.items[i],Vec2{cx0d,iy0+(ih-its.y)*0.5f},sc,element.textColor);
+                }
+            }
+            if (m_uiDebugEnabled) drawUIOutline(x0,y0,x1,y1,Vec4{0.9f,0.6f,0.1f,1.0f},uiProjection,prog);
+            return;
+        }
+        if (element.type == WidgetElementType::TreeView || element.type == WidgetElementType::TabView)
+        {
+            if (element.color.w > 0.0f)
+            {
+                const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+                const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+                drawUIPanel(x0,y0,x1,y1,element.color,uiProjection,getUIQuadProgram(vp,fp),element.color,false);
+            }
+            const GLint cx=static_cast<GLint>(x0);
+            const GLint cy=static_cast<GLint>(static_cast<float>(height)-y1);
+            const GLsizei cw=static_cast<GLsizei>(std::max(0.0f,widthPx));
+            const GLsizei ch=static_cast<GLsizei>(std::max(0.0f,heightPx));
+            glEnable(GL_SCISSOR_TEST); glScissor(cx,cy,cw,ch);
+            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx);
+            glDisable(GL_SCISSOR_TEST);
+            if (m_uiDebugEnabled)
+            {
+                const GLuint prog=getUIQuadProgram(m_defaultPanelVertex,m_defaultPanelFragment);
+                drawUIOutline(x0,y0,x1,y1,Vec4{0.4f,0.9f,0.6f,1.0f},uiProjection,prog);
+            }
+            return;
+        }
+        if (element.type == WidgetElementType::StackPanel || element.type == WidgetElementType::Grid)
+        {
+            if (element.color.w > 0.0f)
+            {
+                const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+                const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+                drawUIPanel(x0,y0,x1,y1,element.color,uiProjection,getUIQuadProgram(vp,fp),element.color,false);
+            }
+            if (element.scrollable)
+            {
+                const GLint cx=static_cast<GLint>(x0);
+                const GLint cy=static_cast<GLint>(static_cast<float>(height)-y1);
+                const GLsizei cw=static_cast<GLsizei>(std::max(0.0f,widthPx));
+                const GLsizei ch=static_cast<GLsizei>(std::max(0.0f,heightPx));
+                glEnable(GL_SCISSOR_TEST); glScissor(cx,cy,cw,ch);
+                for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx);
+                glDisable(GL_SCISSOR_TEST);
+            }
+            else
+            {
+                for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx);
+            }
+            if (m_uiDebugEnabled)
+            {
+                const GLuint prog=getUIQuadProgram(m_defaultPanelVertex,m_defaultPanelFragment);
+                drawUIOutline(x0,y0,x1,y1,Vec4{1.0f,0.4f,0.8f,1.0f},uiProjection,prog);
+            }
+        }
+    };
+
+    const auto& ordered = mgr.getWidgetsOrderedByZ();
+    for (const auto* entry : ordered)
+    {
+        if (!entry || !entry->widget) continue;
+        const auto& widget = entry->widget;
+        Vec2 widgetSize = widget->getSizePixels();
+        Vec2 widgetPosition{};
+        if (widget->hasComputedSize())    widgetSize    = widget->getComputedSizePixels();
+        if (widget->hasComputedPosition()) widgetPosition = widget->getComputedPositionPixels();
+        if (widgetSize.x <= 0.0f) widgetSize.x = static_cast<float>(width);
+        if (widgetSize.y <= 0.0f) widgetSize.y = static_cast<float>(height);
+        for (const auto& element : widget->getElements())
+            renderElement(renderElement, element, widgetPosition.x, widgetPosition.y, widgetSize.x, widgetSize.y);
+    }
+
+    mgr.clearRenderDirty();
+    glDisable(GL_BLEND);
+}
+
+// ---------------------------------------------------------------------------
+// ensurePopupUIVao – creates a context-local VAO in the currently-current
+// popup GL context that reuses the shared m_uiQuadVbo.
+// ---------------------------------------------------------------------------
+void OpenGLRenderer::ensurePopupUIVao()
+{
+    if (m_popupUiVao != 0) return;
+    if (m_uiQuadVbo == 0) return; // main VBO must exist first
+
+    glGenVertexArrays(1, &m_popupUiVao);
+    glBindVertexArray(m_popupUiVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_uiQuadVbo); // shared VBO is accessible
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+}
+
+// ---------------------------------------------------------------------------
+// renderPopupWindows – renders every open popup window.
+// ---------------------------------------------------------------------------
+void OpenGLRenderer::renderPopupWindows()
+{
+    if (m_popupWindows.empty()) return;
+    if (!m_textRenderer) return;
+
+    // Ensure main context resources are ready before we switch contexts.
+    ensureUIQuadRenderer();
+    ensureUIShaderDefaults();
+
+    for (auto& [id, popup] : m_popupWindows)
+    {
+        if (!popup || !popup->isOpen()) continue;
+        if (!popup->sdlWindow() || !popup->glContext()) continue;
+
+        SDL_GL_MakeCurrent(popup->sdlWindow(), popup->glContext());
+
+        // Create the popup-context VAO on first use.
+        ensurePopupUIVao();
+
+        popup->refreshSize();
+        const int pw = popup->width();
+        const int ph = popup->height();
+        if (pw <= 0 || ph <= 0)
+        {
+            SDL_GL_MakeCurrent(m_window, m_glContext);
+            continue;
+        }
+
+        glViewport(0, 0, pw, ph);
+        glDisable(GL_DEPTH_TEST);
+        glClearColor(0.13f, 0.13f, 0.16f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        // Temporarily swap in the popup VAO so drawUIPanel/drawUIImage use it.
+        const GLuint savedVao = m_uiQuadVao;
+        m_uiQuadVao = m_popupUiVao;
+
+        drawUIWidgetsToFramebuffer(popup->uiManager(), pw, ph);
+
+        m_uiQuadVao = savedVao;
+
+        SDL_GL_SwapWindow(popup->sdlWindow());
+    }
+
+    // Restore main context.
+    SDL_GL_MakeCurrent(m_window, m_glContext);
+}
+
+// ---------------------------------------------------------------------------
+// Popup window management
+// ---------------------------------------------------------------------------
+PopupWindow* OpenGLRenderer::openPopupWindow(const std::string& id, const std::string& title, int width, int height)
+{
+    auto it = m_popupWindows.find(id);
+    if (it != m_popupWindows.end())
+    {
+        if (it->second && it->second->isOpen())
+        {
+            SDL_RaiseWindow(it->second->sdlWindow());
+            return it->second.get();
+        }
+        m_popupWindows.erase(it);
+    }
+
+    // Main context must be current when creating the shared child context.
+    SDL_GL_MakeCurrent(m_window, m_glContext);
+
+    auto popup = std::make_unique<PopupWindow>();
+    if (!popup->create(title, width, height))
+        return nullptr;
+
+    // Restore main context after popup creation.
+    SDL_GL_MakeCurrent(m_window, m_glContext);
+
+    PopupWindow* ptr = popup.get();
+    m_popupWindows[id] = std::move(popup);
+    Logger::Instance().log(Logger::Category::Rendering,
+        "Popup window opened: " + id, Logger::LogLevel::INFO);
+    return ptr;
+}
+
+void OpenGLRenderer::closePopupWindow(const std::string& id)
+{
+    auto it = m_popupWindows.find(id);
+    if (it != m_popupWindows.end())
+    {
+        it->second->destroy();
+        m_popupWindows.erase(it);
+        Logger::Instance().log(Logger::Category::Rendering,
+            "Popup window closed: " + id, Logger::LogLevel::INFO);
+    }
+}
+
+PopupWindow* OpenGLRenderer::getPopupWindow(const std::string& id)
+{
+    auto it = m_popupWindows.find(id);
+    return (it != m_popupWindows.end() && it->second && it->second->isOpen())
+        ? it->second.get() : nullptr;
+}
+
+bool OpenGLRenderer::routeEventToPopup(SDL_Event& event)
+{
+    if (m_popupWindows.empty()) return false;
+
+    SDL_WindowID eventWindowId = 0;
+    switch (event.type)
+    {
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP:   eventWindowId = event.button.windowID; break;
+    case SDL_EVENT_MOUSE_MOTION:      eventWindowId = event.motion.windowID; break;
+    case SDL_EVENT_MOUSE_WHEEL:       eventWindowId = event.wheel.windowID;  break;
+    case SDL_EVENT_TEXT_INPUT:        eventWindowId = event.text.windowID;   break;
+    case SDL_EVENT_KEY_DOWN:
+    case SDL_EVENT_KEY_UP:            eventWindowId = event.key.windowID;    break;
+    case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+        for (auto& [id, popup] : m_popupWindows)
+        {
+            if (popup && popup->sdlWindow() &&
+                SDL_GetWindowID(popup->sdlWindow()) == event.window.windowID)
+            {
+                popup->close();
+                return true;
+            }
+        }
+        return false;
+    default: return false;
+    }
+
+    for (auto& [id, popup] : m_popupWindows)
+    {
+        if (!popup || !popup->isOpen() || !popup->sdlWindow()) continue;
+        if (SDL_GetWindowID(popup->sdlWindow()) != eventWindowId) continue;
+
+        UIManager& uiMgr = popup->uiManager();
+        switch (event.type)
+        {
+        case SDL_EVENT_MOUSE_MOTION:
+        {
+            const Vec2 pos{ event.motion.x, event.motion.y };
+            uiMgr.setMousePosition(pos);
+            return true;
+        }
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        {
+            const Vec2 pos{ event.button.x, event.button.y };
+            uiMgr.setMousePosition(pos);
+            uiMgr.handleMouseDown(pos, event.button.button);
+            return true;
+        }
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+        {
+            const Vec2 pos{ event.button.x, event.button.y };
+            uiMgr.handleMouseUp(pos, event.button.button);
+            return true;
+        }
+        case SDL_EVENT_MOUSE_WHEEL:
+            uiMgr.handleScroll(uiMgr.getMousePosition(), event.wheel.y);
+            return true;
+        case SDL_EVENT_TEXT_INPUT:
+            uiMgr.handleTextInput(event.text.text);
+            return true;
+        case SDL_EVENT_KEY_DOWN:
+            uiMgr.handleKeyDown(event.key.key);
+            return true;
+        default: break;
+        }
+    }
+    return false;
 }
 
 void OpenGLRenderer::renderUI()

@@ -53,15 +53,25 @@ public:
         container.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
         container.runtimeOnly = true;
 
+        // Thin divider line above the section
+        WidgetElement divider{};
+        divider.type = WidgetElementType::Panel;
+        divider.fillX = true;
+        divider.minSize = Vec2{ 0.0f, 1.0f };
+        divider.color = Vec4{ 0.25f, 0.26f, 0.3f, 0.6f };
+        divider.runtimeOnly = true;
+
+        // Flat section header (styled as subtle bar, not a prominent button)
         WidgetElement header{};
         header.type = WidgetElementType::Button;
         header.id = "Separator.Toggle." + m_id;
-        header.text = "v " + m_title;
+        // UTF-8 for ▾ (U+25BE small down-pointing triangle)
+        header.text = std::string("\xe2\x96\xbe") + "  " + m_title;
         header.font = m_font;
         header.fontSize = m_fontSize;
         header.textAlignH = TextAlignH::Left;
         header.textAlignV = TextAlignV::Center;
-        header.padding = Vec2{ 6.0f, 4.0f };
+        header.padding = Vec2{ 8.0f, 3.0f };
         header.minSize = Vec2{ 0.0f, 22.0f };
         header.color = m_headerColor;
         header.hoverColor = m_headerHoverColor;
@@ -69,6 +79,7 @@ public:
         header.shaderVertex = "button_vertex.glsl";
         header.shaderFragment = "button_fragment.glsl";
         header.isHitTestable = true;
+        header.fillX = true;
         header.runtimeOnly = true;
 
         WidgetElement content{};
@@ -83,6 +94,7 @@ public:
         content.cachedChildren = m_children;
         content.runtimeOnly = true;
 
+        container.children.push_back(std::move(divider));
         container.children.push_back(std::move(header));
         container.children.push_back(std::move(content));
         return container;
@@ -92,11 +104,11 @@ private:
     std::string m_id{ "Section" };
     std::string m_title{ "Section" };
     std::string m_font{ "default.ttf" };
-    float m_fontSize{ 14.0f };
-    Vec4 m_headerColor{ 0.18f, 0.18f, 0.22f, 0.95f };
-    Vec4 m_headerHoverColor{ 0.24f, 0.24f, 0.28f, 0.98f };
-    Vec4 m_titleColor{ 0.95f, 0.95f, 0.95f, 1.0f };
-    Vec2 m_contentPadding{ 4.0f, 4.0f };
+    float m_fontSize{ 13.0f };
+    Vec4 m_headerColor{ 0.13f, 0.14f, 0.17f, 1.0f };
+    Vec4 m_headerHoverColor{ 0.18f, 0.19f, 0.23f, 1.0f };
+    Vec4 m_titleColor{ 0.78f, 0.79f, 0.84f, 1.0f };
+    Vec2 m_contentPadding{ 14.0f, 4.0f };
     Vec4 m_contentColor{ 0.0f, 0.0f, 0.0f, 0.0f };
     std::vector<WidgetElement> m_children;
 };

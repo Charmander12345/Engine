@@ -21,7 +21,6 @@
    - 8.4 [EngineLevel](#84-enginelevel)
    - 8.5 [ECS (Entity Component System)](#85-ecs-entity-component-system)
    - 8.6 [AudioManager](#86-audiomanager)
-   - 8.7 [UndoRedoManager](#87-undoredomanager)
 9. [Renderer](#9-renderer)
    - 9.1 [Renderer (abstrakt)](#91-renderer-abstrakt)
    - 9.2 [OpenGLRenderer](#92-openglrenderer)
@@ -227,7 +226,7 @@ Beim Start werden sechs Editor-Widgets geladen:
 | WorldSettings     | `WorldSettings.asset`    | Clear-Color-Picker (RGB-Einträge)           |
 | WorldOutliner     | `WorldOutliner.asset`    | Entitäten-Liste des aktiven Levels          |
 | EntityDetails     | `EntityDetails.asset`    | Komponenten-Details der ausgewählten Entität|
-| ContentBrowser    | `ContentBrowser.asset`   | TreeView + Grid, Drag & Drop (Viewport-Spawn, Entity-Apply, Ordner-Move mit Referenz-Update), Import-Button |
+| ContentBrowser    | `ContentBrowser.asset`   | TreeView (Ordner-Hierarchie, Highlight) + Grid (Kacheln mit Icons), Doppelklick-Navigation, farbcodierte PNGs |
 
 ### 4.3 Editor-Tab-System
 Die Engine unterstützt ein Tab-basiertes Editor-Layout:
@@ -321,14 +320,14 @@ Zentrales Asset-Management (Singleton). Verwaltet das Laden, Speichern, Erstelle
 
 | AssetType    | Beschreibung              |
 |--------------|---------------------------|
-| `Texture`    | Bilder (PNG, JPG, BMP, TGA, HDR) via stb_image |
+| `Texture`    | Bilder (PNG, TGA, JPG)    |
 | `Material`   | Materialien + Shader-Refs |
 | `Model2D`    | 2D-Sprite-Modelle         |
-| `Model3D`    | 3D-Mesh-Modelle (OBJ, FBX, glTF, GLB, DAE, 3DS, STL, PLY, X3D) via Assimp |
+| `Model3D`    | 3D-Mesh-Modelle (OBJ etc.)|
 | `PointLight`  | Punkt-Lichtquellen        |
-| `Audio`      | Audiodateien (WAV) via SDL |
-| `Script`     | Python-Skripte (.py)      |
-| `Shader`     | GLSL-Shader (.glsl, .vert, .frag, .geom, .comp) |
+| `Audio`      | Audiodateien (WAV etc.)   |
+| `Script`     | Python-Skripte            |
+| `Shader`     | GLSL-Shader               |
 | `Level`      | Level-Definitionen        |
 | `Widget`     | UI-Widget-Definitionen    |
 
@@ -367,20 +366,7 @@ Zentrales Asset-Management (Singleton). Verwaltet das Laden, Speichern, Erstelle
 - Job-Queue mit Mutex + Condition-Variable
 - `enqueueJob(std::function<void()>)` → Worker führt aus
 
-### 7.8 Asset-Import
-- **Import-Dialog**: `OpenImportDialog()` öffnet nativen Datei-Dialog via `SDL_ShowOpenFileDialog`
-- **Format-Erkennung**: `DetectAssetTypeFromPath()` erkennt Typ anhand Dateiendung
-- **Import-Pipeline** (`importAssetFromPath()`):
-  - **Texturen**: stb_image lädt Pixel-Daten, Quelldatei wird in Content kopiert, .asset speichert `m_sourcePath`
-  - **Audio (.wav)**: Quelldatei wird in Content kopiert, .asset speichert `m_sourcePath`
-  - **3D-Modelle**: Assimp importiert (Triangulate + GenNormals + FlipUVs), extrahiert Vertices (pos3+uv2) + Indices, speichert als `m_vertices`/`m_indices` in .asset
-  - **Shader**: Quelldatei wird in Content kopiert, .asset speichert `m_sourcePath` + `m_shaderType`
-  - **Scripts**: Quelldatei wird in Content kopiert, .asset speichert `m_sourcePath` + `m_scriptPath`
-- **Callback**: `setOnImportCompleted()` ermöglicht UI-Refresh nach Import
-- **Content Browser**: „+ Import“-Button in der PathBar, F2-Shortcut
-- **Unterstützte Dateiformate im Dialog**: PNG, JPG, BMP, TGA, HDR, WAV, OBJ, FBX, glTF, GLB, DAE, 3DS, BLEND, STL, PLY, X3D, GLSL, VERT, FRAG, GEOM, COMP, PY
-
-### 7.9 Projekt-Verwaltung
+### 7.8 Projekt-Verwaltung
 ```cpp
 loadProject(projectPath)    // Lädt Projekt + Registry + Config
 saveProject(projectPath)    // Speichert Projektdaten
@@ -500,7 +486,7 @@ struct EntitySnapshot {
 | `Mesh`        | `MeshComponent`      | meshAssetPath, meshAssetId                       |
 | `Material`    | `MaterialComponent`  | materialAssetPath, materialAssetId               |
 | `Light`       | `LightComponent`     | type (Point/Dir/Spot), color, intensity, range, spotAngle |
-| `Camera`      | `CameraComponent`    | fov, nearClip, farClip, isActive                 |
+| `Camera`      | `CameraComponent`    | fov, nearClip, farClip                           |
 | `Physics`     | `PhysicsComponent`   | colliderType (Box/Sphere/Mesh), isStatic, mass   |
 | `Script`      | `ScriptComponent`    | scriptPath, scriptAssetId                        |
 | `Name`        | `NameComponent`      | displayName                                      |
@@ -571,22 +557,6 @@ std::vector<SchemaAssetMatch> getAssetsMatchingSchema(schema);
 - Interne Handles beginnen bei `0xF0000000` (Pending), `0xE0000000` (Internal Assets)
 - Source-ID ↔ Asset-ID Mapping in `m_sourceAssetIds`
 - Buffer-Caching: Ein Buffer pro Asset-ID
-
-### 8.7 UndoRedoManager
-**Datei:** `src/Core/UndoRedoManager.h/.cpp`
-
-- **Singleton**: `UndoRedoManager::Instance()`
-- **Command-Pattern**: Jede Aktion besteht aus `execute`- und `undo`-Callbacks + `description`
-- **pushCommand()**: Für Aktionen die bereits angewendet wurden (Gizmo-Drag: old/new Transform in Lambdas gespeichert)
-- **executeCommand()**: Legacy-Helper – ruft erst execute(), dann push
-- **Stack-basiert**: Separater Undo- und Redo-Stack (max. 100 Einträge)
-- **onChanged-Callback**: Feuert nach push/undo/redo/clear → markiert aktives Level dirty + refresht StatusBar
-- **Gizmo-Integration**: `beginGizmoDrag` snapshoted `TransformComponent`, `endGizmoDrag` pusht Undo-Command
-- **Tastenkürzel**: Ctrl+Z = Undo, Ctrl+Y = Redo, Ctrl+S = Save All (in main.cpp registriert)
-- **Speichern**: Undo-History wird nach erfolgreichem Save gecleared
-- **Editor-Kamera**: Position + Rotation werden pro Level als `EditorCamera`-Block in der Level-Datei gespeichert und beim Laden wiederhergestellt
-- **Shadow Mapping**: Multi-Light Shadow Mapping für bis zu 4 Directional/Spot Lights gleichzeitig, 4096² Depth-Map (GL_TEXTURE_2D_ARRAY mit je einer Schicht pro Licht), 5×5 PCF, kamerazentrierter orthographischer Projektion für Directional Lights und perspektivischer Projektion für Spot Lights, separate Shadow-Caster-Liste ohne Kamera-Frustum-Culling (Schatten bleiben auch wenn das Objekt außerhalb der Kamera liegt), Lichtquellen-Geometry wird automatisch vom Shadow-Casting ausgeschlossen
-- **Point Light Shadow Mapping**: Omnidirektionale Schatten für bis zu 4 Point Lights über GL_TEXTURE_CUBE_MAP_ARRAY, Geometry-Shader-basierter Single-Pass Cube-Rendering (6 Faces pro Draw Call), lineare Tiefenwerte im Fragment-Shader, samplerCubeArray im Main-Fragment-Shader für Schattenberechnung, Texture Unit 5
 
 ---
 
@@ -718,13 +688,6 @@ virtual Mat4 getViewMatrixColumnMajor() const = 0;
 - Pitch-Clamp: ±89°
 - `updateVectors()` berechnet Front/Up aus Euler-Winkeln
 
-#### Entity-Kamera (Runtime):
-- `setActiveCameraEntity(entityId)` setzt eine ECS-Entity als aktive Kamera
-- View-Matrix wird aus `TransformComponent` (Position + Rotation) berechnet
-- Projection-Matrix verwendet FOV, nearClip, farClip aus `CameraComponent`
-- `clearActiveCameraEntity()` wechselt zurück zur Editor-Kamera
-- Fallback: wenn Entity keine `CameraComponent`/`TransformComponent` hat → Editor-Kamera
-
 ---
 
 ### 9.4 Shader-System
@@ -815,8 +778,6 @@ Verwaltet das Caching und die Erstellung von Render-Ressourcen:
 
 - `prepareActiveLevel()` → Lädt alle Assets des aktiven Levels in GPU-Ressourcen
 - `buildRenderablesForSchema(schema)` → Erstellt `RenderableAsset`-Liste für ein ECS-Schema
-  - **Render-Schema** (Mesh+Material): → `m_renderEntries`
-  - **Mesh-Schema** (Mesh+Transform): → `m_meshEntries` (exklusiv: Entities die bereits in `m_renderEntries` sind werden übersprungen, um doppeltes Rendering zu vermeiden)
 - `getOrCreateObject2D/3D()` → Cache-basierte Objekt-Erstellung
 - `prepareTextRenderer()` → Lazy-Init des Text-Renderers
 - `buildWidgetAsset(asset)` → Erstellt Widget aus Asset-Daten
@@ -849,38 +810,23 @@ unregisterWidget("TitleBar");
 
 #### Input-Handling:
 ```cpp
-handleMouseDown(screenPos, button)  → Hit-Test → onClick/Focus (draggable: deferred)
-handleMouseUp(screenPos, button)    → Drop-Handling oder deferred Click
+handleMouseDown(screenPos, button)  → Hit-Test → onClick/Focus
 handleScroll(screenPos, delta)       → Scroll auf scrollable-Elementen
 handleTextInput(text)                → Aktives Entry-Bar füllen
 handleKeyDown(key)                   → Backspace/Enter für Entry-Bars
-setMousePosition(screenPos)          → Hover-States + Drag-Threshold (5px)
+setMousePosition(screenPos)          → Hover-States aktualisieren
 isPointerOverUI(screenPos)           → Prüft ob Maus über UI
 ```
-
-#### Drag & Drop:
-- Elemente mit `isDraggable = true` und `dragPayload` können gezogen werden
-- **Drag-Start**: Mouse-Down auf draggables speichert Pending-State, Drag startet nach 5px Bewegung
-- **Drop-Ziele**:
-  - **Viewport** (nicht über UI): `onDropOnViewport`-Callback
-    - **Model3D**: Immer neue Entity spawnen an Cursor-Position (`screenToWorldPos` Depth-Raycast, Fallback: 5 Units vor Kamera)
-    - **Material/Texture/Script**: `pickEntityAtImmediate` (frischer Pick-Buffer) → Entity unter Cursor: Component ersetzen/hinzufügen. Keine Entity: Toast-Hinweis, keine Aktion (Materials werden nie als eigenständige Entity gespawnt)
-    - Entity wird im Level registriert (`onEntityAdded`) und als dirty markiert
-  - **Entf-Taste**: Ausgewählte Entity aus ECS + Level entfernen, Selection clearen, Outliner refreshen
-  - **Outliner Entity-Zeile**: `onDropOnEntity`-Callback → Asset als Component auf bestehende Entity anwenden (Material, Mesh, Script)
-  - **Content Browser Ordner** (Grid- oder Tree-Folder): `onDropOnFolder`-Callback → `AssetManager::moveAsset()` mit vollständigem Referenz-Update:
-    - Registry (`m_registryByPath`) + geladene Assets (`m_loadedAssets`)
-    - ECS-Components (`meshAssetPath`, `materialAssetPath`, `scriptPath`)
-    - Source-Datei verschieben + `m_sourcePath` aktualisieren
-    - **Deep-Scan aller .asset-Dateien** (`updateAssetFileReferences`): rekursiver JSON-Walk über `data` und `Entities`-Blöcke, ersetzt alle String-Werte die den alten Pfad enthalten (z.B. Material→Texture-Referenzen, Level→Entity-Components)
-- **Visuelles Feedback**: Asset-Name wird als Overlay neben dem Cursor gerendert
-- **Click-Kompatibilität**: Draggable-Elemente feuern Click/Double-Click erst bei Mouse-Up wenn kein Drag stattfand
 
 #### Layout:
 ```cpp
 updateLayouts(measureTextFn)  → Berechnet Positionen/Größen aller Elemente
 needsLayoutUpdate()           → Prüft dirty-Flag
 ```
+
+- **Dock-Reihenfolge:** Top → Bottom → Left → Right → Other
+- Side-Panels (Left/Right) werden in der Höhe auf den verbleibenden Platz (`available.h`) begrenzt, sodass sie nicht hinter ContentBrowser/Footer ragen
+- Asset-Validierung stellt sicher, dass gecachte Widget-Dateien `m_fillY` enthalten; fehlende Eigenschaft löst Neugenerierung aus
 
 #### Click-Events:
 ```cpp
@@ -898,19 +844,6 @@ registerClickEvent("TitleBar.Close", []() { ... });
 refreshWorldOutliner()          → Aktualisiert Entitäten-Liste
 selectEntity(entityId)          → Wählt Entität aus, zeigt Details
 ```
-
-#### StatusBar-Integration:
-```cpp
-refreshStatusBar()              → Aktualisiert Dirty-Zähler + Undo/Redo-Text
-showSaveProgressModal(total)    → Öffnet Modal mit ProgressBar
-updateSaveProgress(saved,total) → Aktualisiert Fortschrittsanzeige
-closeSaveProgressModal(success) → Schließt Modal, zeigt Toast
-```
-- **StatusBar** ist ein horizontal gedocktes Widget am unteren Rand (z-order=3, BottomLeft, fillX, 32px hoch)
-- Enthält: Undo-Button, Redo-Button, Spacer, Dirty-Label (zeigt Anzahl ungespeicherter Assets), Save-All-Button
-- **Save-Button**: Startet async Speichern über `AssetManager::saveAllAssetsAsync()` mit Progress-Callback
-- **Save-Progress-Modal**: Overlay (z-order=10001) mit ProgressBar + Zähler, wird per Callback aktualisiert
-- **Tastenkürzel**: Ctrl+Z (Undo), Ctrl+Y (Redo), Ctrl+S (Save All)
 
 ---
 
@@ -956,10 +889,6 @@ struct WidgetElement {
     bool scrollable;
     float scrollOffset;
 
-    // Drag & Drop:
-    bool isDraggable;
-    std::string dragPayload;    // z.B. "5|MyModel.asset" (TypeInt|RelPath)
-
     // Callbacks:
     std::function<void()> onClicked;
     std::function<void(const Vec4&)> onColorChanged;
@@ -997,7 +926,7 @@ Jedes Widget ist als eigene Klasse implementiert (gemäß Projekt-Richtlinien):
 | `GridWidget`         | `GridWidget.h/.cpp`      | Raster-Layout mit Padding                  |
 | `ColorPickerWidget`  | `ColorPickerWidget.h/.cpp`| Farbauswahl, `onColorChanged`-Callback    |
 | `EntryBarWidget`     | `EntryBarWidget.h`       | Text-Eingabe, Passwort-Modus, Validierung  |
-| `SeparatorWidget`    | `SeparatorWidget.h/.cpp` | Aufklappbarer Abschnitt mit Header         |
+| `SeparatorWidget`    | `SeparatorWidget.h/.cpp` | Aufklappbarer Abschnitt mit flachem Sektions-Header (▾/▸ Chevron, Trennlinie, indentierter Inhalt) |
 | `ProgressBarWidget`  | `ProgressBarWidget.h/.cpp`| Wertebalken mit Min/Max und Farben        |
 | `SliderWidget`       | `SliderWidget.h/.cpp`    | Schieberegler, `onValueChanged`-Callback   |
 | `CheckBoxWidget`     | `CheckBoxWidget.h/.cpp`  | Boolean-Toggle mit Label, `onCheckedChanged`-Callback |

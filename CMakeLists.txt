@@ -61,6 +61,7 @@ add_subdirectory(src/Logger)
 add_subdirectory(src/Core)
 add_subdirectory(src/Renderer)
 add_subdirectory(src/Scripting)
+add_subdirectory(src/Landscape)
 
 if (NOT TARGET OpenAL::OpenAL)
     message(FATAL_ERROR "OpenAL target not available from external/openal-soft.")
@@ -81,6 +82,7 @@ target_include_directories(Engine
         ${CMAKE_SOURCE_DIR}/src/AssetManager
         ${CMAKE_SOURCE_DIR}/src/Diagnostics
         ${CMAKE_SOURCE_DIR}/src/Core
+        ${CMAKE_SOURCE_DIR}/src/Landscape
         ${Python3_INCLUDE_DIRS}
 )
 
@@ -93,6 +95,7 @@ target_link_libraries(Engine
         Diagnostics
         Core
         Scripting
+        Landscape
         ${Python3_LIBRARY_RELEASE}
 )
 

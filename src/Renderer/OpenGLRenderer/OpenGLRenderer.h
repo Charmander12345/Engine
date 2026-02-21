@@ -4,6 +4,7 @@
 #include "../Camera.h"
 #include "../RenderResourceManager.h"
 #include "../UIManager.h"
+#include "../PopupWindow.h"
 
 #include "../../Core/MathTypes.h"
 #include "glad/include/gl.h"
@@ -390,6 +391,13 @@ private:
     std::vector<EditorTab> m_editorTabs;
     std::string m_activeTabId{ "Viewport" };
 
+    // Popup window management (multi-window)
+    void drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int height);
+    void ensurePopupUIVao();
+    void renderPopupWindows();
+    std::unordered_map<std::string, std::unique_ptr<PopupWindow>> m_popupWindows;
+    GLuint m_popupUiVao{ 0 };
+
 public:
     void toggleUIDebug() { m_uiDebugEnabled = !m_uiDebugEnabled; }
     bool isUIDebugEnabled() const { return m_uiDebugEnabled; }
@@ -409,5 +417,13 @@ public:
     void updateGizmoDrag(int screenX, int screenY);
     void endGizmoDrag();
     bool isGizmoDragging() const { return m_gizmoDragging; }
+
+    // Multi-window / popup management
+    // Opens (or returns existing) a popup window with shared GL context.
+    PopupWindow* openPopupWindow(const std::string& id, const std::string& title, int width, int height);
+    void          closePopupWindow(const std::string& id);
+    PopupWindow*  getPopupWindow(const std::string& id);
+    // Route an SDL event to the focused popup. Returns true if the event was consumed.
+    bool          routeEventToPopup(SDL_Event& event);
 
 };
