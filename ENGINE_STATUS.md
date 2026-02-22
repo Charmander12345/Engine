@@ -39,6 +39,7 @@
 20. [Gesamtübersicht fehlender Systeme](#20-gesamtübersicht-fehlender-systeme)
 21. [Multi-Window / Popup-System](#21-multi-window--popup-system)
 22. [Landscape-System](#22-landscape-system)
+23. [Skybox-System](#23-skybox-system)
 
 ---
 
@@ -90,7 +91,7 @@
 |-------------------------------------------|--------|
 | Singleton-Architektur                     | ✅     |
 | Sync- und Async-Laden                    | ✅     |
-| Worker-Thread (Job-Queue)                | ✅     |
+| Thread-Pool (hardware_concurrency Threads, globale Job-Queue) | ✅ |
 | Asset-Registry (binär, schnelle Suche)   | ✅     |
 | Discovery (Content-Verzeichnis scannen)  | ✅     |
 | Discovery: Script-Dateien (.py)          | ✅     |
@@ -118,6 +119,10 @@
 | Editor-Widgets automatisch erzeugen     | ✅     |
 | stb_image Integration                    | ✅     |
 | Pfad-Auflösung (Content + Editor)       | ✅     |
+| O(1)-Asset-Lookup (m_loadedAssetsByPath Hash-Index) | ✅ |
+| Paralleles Batch-Laden (readAssetFromDisk + std::async) | ✅ |
+| Disk-I/O / CPU-Processing von Shared-State getrennt | ✅ |
+| Level-Preload (preloadLevelAssets: Mesh+Material+Textur parallel) | ✅ |
 | Asset-Thumbnails / Vorschaubilder       | ❌     |
 | Asset-Versionierung                      | ❌     |
 | Hot-Reload (Dateiänderung erkennen)     | ❌     |
@@ -278,6 +283,8 @@
 | Fenster erst nach Konsolen-Schließung sichtbar (Hidden → FreeConsole → ShowWindow) | ✅     |
 | Beleuchtung (bis 8 Lichtquellen)          | ✅     |
 | Sortierung + Batch-Rendering              | ✅     |
+| Shader-Pfad-Cache (statisch, kein FS-Check pro prepare) | ✅ |
+| Model-Matrix-Berechnung dedupliziert (shared Lambda) | ✅ |
 | Shadow Mapping (Multi-Light, Directional/Spot) | ✅     |
 | Shadow Mapping (Point Light Cube Maps)      | ✅     |
 | Post-Processing (Bloom, SSAO, HDR)       | ❌     |
@@ -354,6 +361,8 @@
 | Multi-Textur-Unterstützung          | ✅     |
 | Beleuchtung (8 Lichtquellen, 3 Typen)| ✅    |
 | Batch-Rendering (renderBatchCont.)  | ✅     |
+| Default World-Grid-Material (eigener Shader + .asset) | ✅ |
+| Material-Shader-Override (m_shaderFragment in .asset) | ✅ |
 | PBR-Material (Metallic/Roughness)   | ❌     |
 | Normal Mapping                      | ❌     |
 | Material-Editor (UI)                | ❌     |
@@ -363,6 +372,10 @@
 - Nur Blinn-Phong-ähnliche Beleuchtung – kein PBR (Physically Based Rendering)
 - Kein Normal Mapping / Displacement
 - Kein Material-Editor in der Editor-UI
+- Default-Grid-Material (`Content/Materials/WorldGrid.asset`) liegt im Engine-Verzeichnis (neben der Executable, wie Editor-Widgets) und nutzt eigenen Shader (`grid_fragment.glsl`) mit World-Space XZ-Koordinaten, Major/Minor-Grid (1.0 / 0.25 Einheiten)
+- Grid-Shader unterstützt vollständige Lichtberechnung (Multi-Light, Schatten, Blinn-Phong) wie `fragment.glsl` — Landscape wird von allen Lichtquellen beeinflusst
+- Landscape-Entities erhalten automatisch das WorldGrid-Material via MaterialComponent
+- Material-Pfad-Auflösung: Projekt-Content → Engine-Content (Fallback für Built-in-Materialien)
 
 ---
 
@@ -465,6 +478,8 @@
 | World-Outliner Integration          | ✅     |
 | Entity-Auswahl + Details            | ✅     |
 | Drag & Drop (CB → Viewport/Folder/Entity) | ✅ |
+| Popup-Builder: Landscape Manager (`openLandscapeManagerPopup`) | ✅ |
+| Popup-Builder: Engine Settings (`openEngineSettingsPopup`) | ✅ |
 | Docking-System (Panels verschieben) | ❌     |
 | Theming / Style-System             | ❌     |
 | Multi-Monitor-Unterstützung        | ❌     |
@@ -485,6 +500,7 @@
 | Image          | ✅     |
 | Separator      | ✅     |
 | DropDown / ComboBox | ✅ |
+| DropdownButton      | ✅ |
 | CheckBox       | ✅     |
 | TreeView       | ✅     |
 | TabView        | ✅     |
@@ -496,6 +512,9 @@
 |-----------------|--------|
 | TitleBar (100px: HorizonEngine-Titel + Projektname + Min/Max/Close rechts, Tab-Leiste unten) | ✅ |
 | Toolbar / ViewportOverlay (Select/Move/Rotate/Scale + PIE + Settings) | ✅ |
+| Settings-Button → Dropdown-Menü → "Engine Settings" | ✅ |
+| Engine Settings Popup (Sidebar + Content, Kategorien: Rendering, Debug) | ✅ |
+| Dropdown-Menü-System (`showDropdownMenu` / `closeDropdownMenu`) | ✅ |
 | WorldSettings   | ✅     |
 | WorldOutliner   | ✅     |
 | EntityDetails   | ✅     |
@@ -543,6 +562,17 @@
 - Content Browser: "Content" Root-Knoten im TreeView, klickbar zum Zurücknavigieren zur Wurzel
 - Content Browser: Pfadleiste (Breadcrumbs) über der Grid: Zurück-Button + klickbare Pfadsegmente (Content > Ordner > UnterOrdner)
 - Content Browser: Crash beim Ordnerwechsel nach Grid-Interaktion behoben (Use-After-Free: Target-Daten vor Callback-Aufruf kopiert)
+- Content Browser: Rechtsklick-Kontextmenü auf Grid zum Erstellen neuer Assets (Script, Level, Material)
+- Content Browser: Shaders-Ordner des Projekts wird als eigener Root-Knoten im TreeView angezeigt (lila Icon, separate Ansicht)
+- Content Browser: "New Script" erstellt `.py`-Datei mit `import engine` und `onloaded`/`tick`-Boilerplate
+- Content Browser: "New Level" erstellt leeres Level-Asset (`.map`)
+- Content Browser: "New Material" öffnet Popup mit Eingabefeldern für Name, Vertex/Fragment-Shader, Texturen, Shininess
+- Content Browser: Einfachklick auf Grid-Asset selektiert es (blaue Hervorhebung), Doppelklick öffnet wie zuvor
+- Content Browser: Entf-Taste auf selektiertem Grid-Asset zeigt Bestätigungsdialog ("Delete" / "Cancel")
+- Content Browser: Bestätigungsdialog (`showConfirmDialog`) mit Yes/No-Buttons als wiederverwendbare UIManager-API
+- Content Browser: `AssetManager::deleteAsset()` entfernt Asset aus Registry + löscht Datei von Disk
+- Content Browser: Drag & Drop von Skybox-Asset auf Viewport setzt die Level-Skybox direkt (keine Entity-Prüfung)
+- Content Browser: Selektion wird bei Ordnernavigation automatisch zurückgesetzt
 - Widget-System: `readElement` parst jetzt das `id`-Feld aus JSON (fehlte zuvor, wodurch alle Element-IDs nach Laden leer waren)
 - Widget-System: `layoutElement` hat jetzt Default-Pfad für Kinder aller Element-Typen (Button-Kinder werden korrekt gelayoutet)
 - Widget-System: Grid-Layout berechnet Spalten aus verfügbarer Breite / Kachelgröße für quadratische Zellen
@@ -638,12 +668,21 @@
 | `renderPopupWindows()` im Render-Loop            | ✅ |
 | `drawUIWidgetsToFramebuffer(UIManager&, w, h)`   | ✅ |
 | `ensurePopupUIVao()` – kontext-lokaler VAO mit gesharetem VBO | ✅ |
-| SDL-Event-Routing (Mouse, Key, Text, Close)      | ✅ |
+| `ensurePopupVao()` für TextRenderer – kontext-lokaler VAO | ✅ |
+| SDL-Event-Routing (Mouse, Key, KeyUp, Text, Close) | ✅ |
+| `SDL_StartTextInput` für Popup-Fenster           | ✅ |
 | Popup schließen per `SDL_EVENT_WINDOW_CLOSE_REQUESTED` | ✅ |
+| Deferred Popup-Destruction (sichere Lebenszeit)  | ✅ |
 | Popup fokussieren wenn bereits offen             | ✅ |
 | Fenstergröße dynamisch (refreshSize)             | ✅ |
 | Docking / Snapping                               | ❌ |
 | Mehrere Popups gleichzeitig                      | ✅ |
+| Engine Settings Popup (Sidebar-Layout, Kategorien, Rendering+Debug) | ✅ |
+| Dropdown-Menü als Overlay-Widget (z-Order 9000, Click-Outside-Dismiss) | ✅ |
+| Engine Settings Persistenz via `config.ini` (Shadows, Occlusion, Debug, VSync, Wireframe) | ✅ |
+| VSync Toggle (Engine Settings → Rendering → Display) | ✅ |
+| Wireframe Mode (Engine Settings → Rendering → Display) | ✅ |
+| Absolute Widget-Positionierung (`setAbsolutePosition`) | ✅ |
 
 **Offene Punkte:**
 - Kein Docking/Snapping zwischen Fenstern
@@ -663,8 +702,10 @@
 | Asset über `AssetManager::loadAsset()` registrieren | ✅ |
 | ECS-Entity mit Transform + Mesh + Name           | ✅ |
 | Level-Dirty-Flag + Outliner-Refresh nach Spawn   | ✅ |
+| Grid-Shader mit vollem Lighting (Multi-Light, Schatten) | ✅ |
 | Landscape Manager Popup (via `TitleBar.Menu.Tools`) | ✅ |
 | Popup-UI: Name, Width, Depth, Subdiv X, Subdiv Z, Create/Cancel | ✅ |
+| Nur ein Landscape pro Szene (Popup blockiert bei existierendem) | ✅ |
 | Höhenkarte (Heightmap)                            | ❌ |
 | Landscape-Material / Textur-Blending             | ❌ |
 | LOD-System für Landscape                         | ❌ |
@@ -673,8 +714,44 @@
 
 **Offene Punkte:**
 - Aktuell nur flache Ebene – keine Höhenkarte
-- Kein spezifisches Landscape-Material
 - Für große Terrains empfiehlt sich später LOD + Streaming
+
+---
+
+## 23. Skybox-System
+
+| Feature                                           | Status |
+|---------------------------------------------------|--------|
+| Cubemap-Skybox Rendering (6 Faces: right/left/top/bottom/front/back) | ✅ |
+| Skybox-Shader (eigener Vertex+Fragment, depth=1.0 trick) | ✅ |
+| Skybox-Pfad pro Level (JSON-Feld `"Skybox"`)     | ✅ |
+| Level-Serialisierung / Deserialisierung           | ✅ |
+| Automatisches Laden beim Levelwechsel             | ✅ |
+| Skybox-(Re-)Load bei Scene-Prepare                | ✅ |
+| `setSkyboxPath()` / `getSkyboxPath()` API         | ✅ |
+| Face-Formate: JPG, PNG, BMP                       | ✅ |
+| **Skybox Asset-Typ (`AssetType::Skybox`)**        | ✅ |
+| Skybox `.asset`-Datei (JSON mit 6 Face-Pfaden + folderPath) | ✅ |
+| Skybox Load / Save / Create im AssetManager       | ✅ |
+| Content Browser Icon + Tint (sky blue)            | ✅ |
+| WorldSettings UI: Skybox-Pfad-Eingabe             | ✅ |
+| Dirty-Tracking bei Skybox-Änderung + StatusBar-Refresh | ✅ |
+| Diagnose-Logging bei Skybox-Ladefehlern           | ✅ |
+| Auflösung von `.asset`-Pfaden im Renderer         | ✅ |
+| Content-relativer Ordnerpfad-Fallback (`getAbsoluteContentPath`) | ✅ |
+| Korrekte OpenGL-Cubemap-Face-Zuordnung (front→-Z, back→+Z) | ✅ |
+| Default-Skybox-Assets (Sunrise, Daytime) Auto-Generierung | ✅ |
+| Engine Content-Ordner `Content/Textures/SkyBoxes/` | ✅ |
+| HDR / Equirectangular Skybox                      | ❌ |
+| Skybox-Rotation                                   | ❌ |
+| Skybox-Tinting / Blending                         | ❌ |
+
+**Offene Punkte:**
+- Cubemap-Faces aus einem Ordner (right/left/top/bottom/front/back.jpg/.png/.bmp)
+- Kein HDR/equirectangular Support – nur LDR-Cubemaps
+- Im WorldSettings-Panel kann der Skybox-Pfad als Content-relativer `.asset`-Pfad oder Ordnerpfad eingegeben werden
+- Default-Skyboxen (Sunrise, Daytime) werden automatisch beim Projektladen erstellt, wenn die Face-Bilder im Engine-Content unter `Content/Textures/SkyBoxes/` vorhanden sind
+- Face-Zuordnung: `right`→`+X`, `left`→`-X`, `top`→`+Y`, `bottom`→`-Y`, `front`→`-Z` (Blickrichtung), `back`→`+Z`
 
 ---
 
@@ -781,6 +858,9 @@ Große Feature-Blöcke, die noch nicht existieren:
 | **Editor-Gizmos**               | ✅     | Translate/Rotate/Scale-Gizmos für Entity-Manipulation (W/E/R Shortcuts)      |
 | **Shadow Mapping (Dir/Spot)**    | ✅     | Multi-Light Shadow Maps für bis zu 4 Directional/Spot Lights, 5×5 PCF       |
 | **Shadow Mapping (Point Lights)**| ✅     | Omnidirektionale Cube-Map Shadows für bis zu 4 Point Lights via Geometry-Shader |
+| **Popup-UI Refactoring**         | ✅     | Landscape-Manager- und Engine-Settings-Popup-Erstellung aus `main.cpp` in `UIManager` verschoben (`openLandscapeManagerPopup`, `openEngineSettingsPopup`). UIManager hält jetzt einen Back-Pointer auf `OpenGLRenderer`. |
+| **Performance-Optimierungen**    | ✅     | O(1)-Asset-Lookup via `m_loadedAssetsByPath`-Index (statt O(n)-Scan), Shader-Pfad-Cache in `OpenGLObject3D`, deduplizierte Model-Matrix-Berechnung in `renderWorld()`. |
+| **Paralleles Asset-Laden**       | ✅     | Dreiphasen-Architektur: `readAssetFromDisk()` (thread-safe Disk-I/O + CPU), `finalizeAssetLoad()` (Registration), GPU-Upload. Thread-Pool mit `hardware_concurrency()` Threads + globaler Job-Queue. `loadBatchParallel()` dispatched in den Pool mit Batch-Wait (atomic counter + CV). `preloadLevelAssets()` warmed den Cache beim Scene-Prepare mit allen Mesh-, Material- und Textur-Assets. |
 
 ---
 

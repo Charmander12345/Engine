@@ -17,13 +17,21 @@ namespace
 {
     std::string ResolveShaderPath(const std::string& filename)
     {
+        static std::unordered_map<std::string, std::string> s_shaderPathCache;
+        auto it = s_shaderPathCache.find(filename);
+        if (it != s_shaderPathCache.end())
+        {
+            return it->second;
+        }
         std::filesystem::path base = std::filesystem::current_path();
         std::filesystem::path shadersfolder = base / "shaders" / filename;
+        std::string result;
         if (std::filesystem::exists(shadersfolder))
         {
-            return shadersfolder.string();
+            result = shadersfolder.string();
         }
-        return {};
+        s_shaderPathCache[filename] = result;
+        return result;
     }
 
     std::vector<float> ReadFloatArray(const json& data, const char* key)
@@ -198,7 +206,13 @@ bool OpenGLObject3D::prepare()
         return true;
 
     const std::string path = m_asset->getPath();
-    const std::string cacheKey = m_materialCacheKeySuffix.empty() ? path : (path + "|" + m_materialCacheKeySuffix);
+    std::string cacheKeySuffix = m_materialCacheKeySuffix;
+    if (!m_fragmentShaderOverride.empty())
+    {
+        if (!cacheKeySuffix.empty()) cacheKeySuffix += "|";
+        cacheKeySuffix += m_fragmentShaderOverride;
+    }
+    const std::string cacheKey = cacheKeySuffix.empty() ? path : (path + "|" + cacheKeySuffix);
     if (!cacheKey.empty())
     {
         auto it = s_materialCache.find(cacheKey);
@@ -225,7 +239,10 @@ bool OpenGLObject3D::prepare()
     }
 
     const std::string vertexPath = ResolveShaderPath(vertexOverride.empty() ? "vertex.glsl" : vertexOverride);
-    const std::string fragmentPath = ResolveShaderPath(fragmentOverride.empty() ? "fragment.glsl" : fragmentOverride);
+    const std::string fragmentName = !m_fragmentShaderOverride.empty() ? m_fragmentShaderOverride
+                                   : !fragmentOverride.empty()       ? fragmentOverride
+                                   :                                   "fragment.glsl";
+    const std::string fragmentPath = ResolveShaderPath(fragmentName);
     if (vertexPath.empty() || fragmentPath.empty())
     {
         logger.log(Logger::Category::Rendering, "OpenGLObject3D: Couldn't locate vertex.glsl and/or fragment.glsl.", Logger::LogLevel::ERROR);

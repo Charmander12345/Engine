@@ -20,4 +20,7 @@ public:
     // project's Content/Landscape folder, creates an ECS entity and returns
     // its ID.  Returns 0 on failure.
     static ECS::Entity spawnLandscape(const LandscapeParams& params);
+
+    // Returns true if an ECS entity with a Landscape mesh already exists.
+    static bool hasExistingLandscape();
 };

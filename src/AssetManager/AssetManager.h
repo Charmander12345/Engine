@@ -10,6 +10,7 @@
 #include <condition_variable>
 #include <queue>
 #include <functional>
+#include <atomic>
 #include "../Diagnostics/DiagnosticsManager.h"
 #include "../Logger/Logger.h"
 #include "GarbageCollector.h"
@@ -34,6 +35,18 @@ struct Asset
 };
 
 class Material;
+
+// Intermediate result of reading an asset from disk without touching any shared state.
+// Thread-safe to produce from any thread; must be finalized on the owning thread.
+struct RawAssetData
+{
+	json data;
+	std::string name;
+	std::string path;
+	AssetType type{ AssetType::Unknown };
+	bool success{ false };
+	std::string errorMessage;
+};
 
 class AssetManager
 {
@@ -75,9 +88,11 @@ public:
 	bool registerRuntimeResource(const std::shared_ptr<EngineObject>& resource);
 
 	// Resolve <project>/Content/<relative> if a project is loaded. Returns empty string if no project is loaded.
-    std::string getAbsoluteContentPath(const std::string& relativeToContent) const;
-    // Resolve <engine>/Editor/Widgets/<relative>.
-    std::string getEditorWidgetPath(const std::string& relativeToEditorWidgets) const;
+	std::string getAbsoluteContentPath(const std::string& relativeToContent) const;
+	// Resolve <engine_exe>/Content/<relative> (built-in engine assets).
+	std::string getAbsoluteEngineContentPath(const std::string& relativeToContent) const;
+	// Resolve <engine>/Editor/Widgets/<relative>.
+	std::string getEditorWidgetPath(const std::string& relativeToEditorWidgets) const;
 
 	// Load an audio asset by content-relative path (.asset or .wav). Returns asset ID or 0 on failure.
 	int loadAudioFromContentPath(const std::string& relativeToContent, bool allowGc = false);
@@ -94,6 +109,7 @@ public:
 	bool doesAssetExist(const std::string& pathOrName) const;
 	std::vector<std::shared_ptr<AssetData>> getAssetsByType(AssetType type) const;
 	std::shared_ptr<AssetData> getLoadedAssetByID(unsigned int id) const;
+	std::shared_ptr<AssetData> getLoadedAssetByPath(const std::string& path) const;
 	bool isAssetLoaded(const std::string& path) const;
 	size_t getUnsavedAssetCount() const;
 
@@ -118,18 +134,35 @@ public:
 	// Called after a successful asset import
 	void setOnImportCompleted(std::function<void()> callback) { m_onImportCompleted = std::move(callback); }
 
+	// Register an asset entry in the registry (public for external create flows)
+	void registerAssetInRegistry(const AssetRegistryEntry& entry);
+	// Remove an asset from the registry and optionally delete from disk. Returns true on success.
+	bool deleteAsset(const std::string& relPath, bool deleteFromDisk = true);
+	// Register a loaded asset object and return its runtime ID (public for external create flows)
+	unsigned int registerLoadedAsset(const std::shared_ptr<AssetData>& object);
+
+	// Save a level asset to disk (public wrapper). Returns true on success.
+	bool saveNewLevelAsset(EngineLevel* level);
+
+	// --- Parallel loading API ---
+	// Read an asset from disk without touching any shared state (thread-safe).
+	static RawAssetData readAssetFromDisk(const std::string& path, AssetType expectedType);
+	// Finalize a disk-loaded asset: create AssetData, register with GC. Returns asset ID (0 on failure).
+	unsigned int finalizeAssetLoad(RawAssetData&& raw);
+	// Load multiple assets in parallel. Returns map of path → asset ID for successfully loaded assets.
+	std::unordered_map<std::string, int> loadBatchParallel(const std::vector<std::pair<std::string, AssetType>>& requests);
+
 private:
-    // Worker lifecycle
-    void startWorker();
-    void stopWorker();
-    void enqueueJob(std::function<void()> job);
+	// Worker pool lifecycle
+	void startWorkerPool();
+	void stopWorkerPool();
+	void enqueueJob(std::function<void()> job);
 
     void createWorldSettingsWidgetAsset();
 
 	bool loadAssetRegistry(const std::string& projectRoot);
 	bool saveAssetRegistry(const std::string& projectRoot) const;
 	bool discoverAssetsAndBuildRegistry(const std::string& projectRoot);
-	void registerAssetInRegistry(const AssetRegistryEntry& entry);
 
 	// Scan all .asset files under contentDir for string references to oldRelPath and replace with newRelPath.
 	void updateAssetFileReferences(const std::filesystem::path& contentDir, const std::string& oldRelPath, const std::string& newRelPath);
@@ -152,6 +185,7 @@ private:
 	SaveResult saveLevelAsset(const std::unique_ptr<EngineLevel>& level);
 	SaveResult saveLevelAsset(EngineLevel* level);
 	SaveResult saveWidgetAsset(const std::shared_ptr<AssetData>& widget);
+	SaveResult saveSkyboxAsset(const std::shared_ptr<AssetData>& skybox);
 
 	//Loading specific assettypes
     struct LoadResult
@@ -169,6 +203,7 @@ private:
 	LoadResult loadObject3DAsset(const std::string& path);
 	LoadResult loadLevelAsset(const std::string& path);
 	LoadResult loadWidgetAsset(const std::string& path);
+	LoadResult loadSkyboxAsset(const std::string& path);
 
 	// Creating specific assettypes
     struct CreateResult
@@ -183,8 +218,7 @@ private:
 	CreateResult createObject2DAsset(const std::string& path, const std::string& name, const std::string& sourcePath);
 	CreateResult createObject3DAsset(const std::string& path, const std::string& name, const std::string& sourcePath);
 	CreateResult createLevelAsset(const std::string& path, const std::string& name, const std::string& sourcePath);
-
-	unsigned int registerLoadedAsset(const std::shared_ptr<AssetData>& object);
+	CreateResult createSkyboxAsset(const std::string& path, const std::string& name, const std::string& sourcePath);
 
     AssetManager() = default;
     ~AssetManager();
@@ -197,18 +231,25 @@ private:
     std::unordered_map<std::string, size_t> m_registryByPath;
     std::unordered_map<std::string, size_t> m_registryByName;
 
-    // Registry + GC / internal state protection
-    mutable std::mutex m_stateMutex;
+	// Registry + GC / internal state protection
+	mutable std::mutex m_stateMutex;
 
-    // Async job queue
-    std::thread m_worker;
-    std::mutex m_jobMutex;
-    std::condition_variable m_jobCv;
-    std::queue<std::function<void()>> m_jobs;
-    bool m_workerRunning{ false };
-    bool m_workerStopRequested{ false };
+	// Thread pool (sized to hardware_concurrency)
+	std::vector<std::thread> m_workerPool;
+	std::mutex m_jobMutex;
+	std::condition_variable m_jobCv;
+	std::queue<std::function<void()>> m_jobs;
+	bool m_poolRunning{ false };
+	bool m_poolStopRequested{ false };
+	unsigned int m_poolSize{ 0 };
+
+	// Batch-wait support: callers can wait until a batch of jobs finishes
+	std::atomic<int> m_batchPending{ 0 };
+	std::mutex m_batchMutex;
+	std::condition_variable m_batchCv;
 
 	std::unordered_map<unsigned int, std::shared_ptr<AssetData>> m_loadedAssets;
+	std::unordered_map<std::string, unsigned int> m_loadedAssetsByPath;
 	std::unordered_set<unsigned int> m_gcEligibleAssets;
 	mutable std::mutex m_asyncJobMutex;
 	int m_nextAsyncJobId{ 1 };

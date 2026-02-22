@@ -105,7 +105,8 @@ Engine/
 │   │   │   ├── glad/               # OpenGL-Loader (GLAD)
 │   │   │   ├── glm/                # OpenGL Mathematics (Header-only)
 │   │   │   └── shaders/            # GLSL-Shader-Dateien
-│   │   │       ├── vertex.glsl / fragment.glsl       # 3D-Welt
+│   │   │       ├── vertex.glsl / fragment.glsl       # 3D-Welt (Beleuchtung, Texturen)
+│   │   │       ├── grid_fragment.glsl                # Prozedurales Grid-Material (Multi-Light, Schatten, Blinn-Phong)
 │   │   │       ├── light_fragment.glsl               # Beleuchtung
 │   │   │       ├── panel_vertex/fragment.glsl        # UI-Panels
 │   │   │       ├── button_vertex/fragment.glsl       # UI-Buttons
@@ -226,7 +227,7 @@ Beim Start werden sechs Editor-Widgets geladen:
 | WorldSettings     | `WorldSettings.asset`    | Clear-Color-Picker (RGB-Einträge)           |
 | WorldOutliner     | `WorldOutliner.asset`    | Entitäten-Liste des aktiven Levels          |
 | EntityDetails     | `EntityDetails.asset`    | Komponenten-Details der ausgewählten Entität|
-| ContentBrowser    | `ContentBrowser.asset`   | TreeView (Ordner-Hierarchie, Highlight) + Grid (Kacheln mit Icons), Doppelklick-Navigation, farbcodierte PNGs |
+| ContentBrowser    | `ContentBrowser.asset`   | TreeView (Ordner-Hierarchie + Shaders-Root, Highlight) + Grid (Kacheln mit Icons, Selektion + Delete), Doppelklick-Navigation, farbcodierte PNGs, Rechtsklick-Kontextmenü (New Script/Level/Material) |
 
 ### 4.3 Editor-Tab-System
 Die Engine unterstützt ein Tab-basiertes Editor-Layout:
@@ -338,35 +339,63 @@ Zentrales Asset-Management (Singleton). Verwaltet das Laden, Speichern, Erstelle
 ### 7.4 Asset-Lebenszyklus
 ```
 1. loadAsset(path, type, syncState)
-   → ReadAssetHeader() → Typ-spezifische Load-Funktion
-   → registerLoadedAsset() → Rückgabe: Asset-ID
+   → O(1)-Prüfung via m_loadedAssetsByPath-Index
+   → readAssetFromDisk() (thread-safe, kein shared state)
+   → finalizeAssetLoad() (Registration + GC)
+   → Rückgabe: Asset-ID
 
-2. getLoadedAssetByID(id) → std::shared_ptr<AssetData>
+2. loadBatchParallel(requests)
+   → Dedupliziert gegen m_loadedAssetsByPath
+   → std::async pro Asset: readAssetFromDisk() parallel
+   → Sequentielle Finalisierung auf Caller-Thread
+   → Rückgabe: map<path, assetId>
 
-3. saveAsset(asset, syncState) → Typ-spezifische Save-Funktion
+3. getLoadedAssetByID(id) → std::shared_ptr<AssetData>
 
-4. unloadAsset(id) → Entfernt aus m_loadedAssets
+4. saveAsset(asset, syncState) → Typ-spezifische Save-Funktion
 
-5. collectGarbage() → GC prüft weak_ptr-Tracking
+5. unloadAsset(id) → Entfernt aus m_loadedAssets + m_loadedAssetsByPath
+
+6. collectGarbage() → GC prüft weak_ptr-Tracking
 ```
 
-### 7.5 Asset-Registry
+### 7.5 Paralleles Laden (Architektur)
+Die Asset-Pipeline ist in drei Phasen aufgeteilt:
+1. **Phase 1+2: Disk I/O + CPU** (`readAssetFromDisk`, statisch, thread-safe): Datei lesen, JSON parsen, stbi_load für Texturen, WAV-Decode für Audio. Kein Zugriff auf shared state.
+2. **Phase 3a: Finalisierung** (`finalizeAssetLoad`): AssetData erstellen, `registerLoadedAsset()` + GC-Registration unter Mutex.
+3. **Phase 3b: GPU-Upload** (`OpenGLObject3D::prepare()`, `OpenGLMaterial::build()`): Shader-Kompilierung, VBO/VAO-Erstellung — muss auf GL-Thread.
+
+**Thread-Pool:** `m_workerPool` wird beim `initialize()` mit `std::thread::hardware_concurrency()` Threads (min. 2) gestartet. Alle teilen sich eine globale `m_jobs`-Queue (Mutex + CV). `loadBatchParallel()` nutzt einen atomaren Batch-Counter (`m_batchPending`) + `m_batchCv` um auf Abschluss aller Jobs zu warten.
+
+`buildRenderablesForSchema()` nutzt intern eine Collect-then-Batch-Strategie:
+- Pass 1: Alle Mesh- + Material-Pfade aus ECS-Matches sammeln → `loadBatchParallel()`
+- Pass 2: Textur-Pfade aus geladenen Materialien extrahieren → `loadBatchParallel()`
+- Pass 3: Renderables bauen — alle `loadAsset()`-Aufrufe treffen den Cache (O(1), kein Disk-I/O)
+
+### 7.6 Performance-Optimierungen
+- **O(1)-Asset-Lookup**: `m_loadedAssetsByPath` (Hash-Map path→ID) eliminiert lineare Scans in `loadAsset()`, `isAssetLoaded()` und `loadAssetAsync()`.
+- **Shader-Pfad-Cache**: `ResolveShaderPath()` in `OpenGLObject3D` cached aufgelöste Dateipfade statisch, vermeidet wiederholte `std::filesystem::exists()`-Aufrufe.
+- **Material-Daten-Cache**: `RenderResourceManager::m_materialDataCache` cached geparste Material-Daten (Texturen, Shininess, Shader) nach Pfad.
+- **Deduplizierte Model-Matrix-Berechnung**: Render- und Mesh-Entries nutzen eine gemeinsame Lambda-Funktion für die Matrixberechnung.
+
+### 7.7 Asset-Registry
 - Beim Projektladen wird ein Asset-Register aufgebaut (`discoverAssetsAndBuildRegistry`)
 - Index nach Pfad und Name (`m_registryByPath`, `m_registryByName`)
 - Erlaubt schnelle Existenzprüfungen (`doesAssetExist`)
 
-### 7.6 Garbage Collector
+### 7.8 Garbage Collector
 **Dateien:** `src/AssetManager/GarbageCollector.h/.cpp`
 - Tracked `weak_ptr<EngineObject>` über `registerResource()`
 - `collect()` entfernt abgelaufene Einträge
 - Wird alle 60 Sekunden aus der Main-Loop aufgerufen
 
-### 7.7 Worker-Thread
-- Einzelner Background-Thread für asynchrone Operationen
-- Job-Queue mit Mutex + Condition-Variable
-- `enqueueJob(std::function<void()>)` → Worker führt aus
+### 7.9 Thread-Pool
+- Thread-Pool mit `hardware_concurrency()` Threads (min. 2)
+- Globale Job-Queue mit Mutex + Condition-Variable
+- `enqueueJob(std::function<void()>)` → nächster freier Thread führt aus
+- Batch-Wait via `m_batchPending` (atomic) + `m_batchCv`
 
-### 7.8 Projekt-Verwaltung
+### 7.10 Projekt-Verwaltung
 ```cpp
 loadProject(projectPath)    // Lädt Projekt + Registry + Config
 saveProject(projectPath)    // Speichert Projektdaten
@@ -728,6 +757,7 @@ virtual Mat4 getViewMatrixColumnMajor() const = 0;
 - Hält Shader-Liste, Vertex-Daten, Index-Daten, Layout
 - `build()` → Erstellt VAO, VBO, EBO, linkt Shader-Programm
 - `bind()` → Setzt Uniformen (Model/View/Projection, Lights, Shininess) und bindet Texturen
+- **Default World-Grid-Material**: Objekte ohne Diffuse-Textur zeigen automatisch ein World-Space-Grid-Muster (`uHasDiffuseMap` Uniform, `worldGrid()` in `fragment.glsl`). Das Grid nutzt XZ-Weltkoordinaten mit Major-Linien (1.0 Einheit) und Minor-Linien (0.25 Einheit).
 - **Beleuchtung**: Bis zu 8 Lichtquellen (`kMaxLights = 8`)
   - Typen: Point (0), Directional (1), Spot (2)
   - Uniforms: Position, Direction, Color, Intensity, Range, Cutoff
@@ -768,6 +798,7 @@ virtual Mat4 getViewMatrixColumnMajor() const = 0;
 - `measureText(text, scale)` → Gibt Textgröße zurück (für Layout)
 - `getLineHeight(scale)` → Zeilenhöhe
 - Shader-Cache: `getProgramForShaders()` cacht verknüpfte Programme
+- Popup-Unterstützung: `ensurePopupVao()` / `swapVao()` erzeugen und wechseln ein kontext-lokales VAO für sekundäre GL-Kontexte (VAOs werden zwischen Kontexten nicht geteilt)
 
 ---
 
@@ -838,6 +869,11 @@ registerClickEvent("TitleBar.Close", []() { ... });
 - **Modal**: `showModalMessage(message, onClosed)` – blockierendes Popup
 - **Toast**: `showToastMessage(message, duration)` – temporäre Meldung
 - Toast-Stack-Layout: Automatisches Stapeln bei mehreren Toasts
+
+#### Popup-Fenster:
+- `openLandscapeManagerPopup()` — öffnet das Landscape-Manager-Popup mit Formular-UI (vormals in `main.cpp`).
+- `openEngineSettingsPopup()` — öffnet das Engine-Settings-Popup mit Sidebar-Navigation (vormals in `main.cpp`).
+- Beide Methoden nutzen den `m_renderer`-Back-Pointer (`setRenderer()`) um `OpenGLRenderer::openPopupWindow()` / `closePopupWindow()` aufzurufen.
 
 #### World-Outliner-Integration:
 ```cpp
@@ -910,6 +946,7 @@ struct WidgetElement {
 | `ProgressBar`     | Fortschrittsanzeige                   |
 | `Slider`          | Schieberegler mit Min/Max             |
 | `Image`           | Bild/Textur-Anzeige                   |
+| `DropdownButton`  | Button der ein Dropdown-Menü öffnet   |
 
 ---
 
@@ -931,6 +968,7 @@ Jedes Widget ist als eigene Klasse implementiert (gemäß Projekt-Richtlinien):
 | `SliderWidget`       | `SliderWidget.h/.cpp`    | Schieberegler, `onValueChanged`-Callback   |
 | `CheckBoxWidget`     | `CheckBoxWidget.h/.cpp`  | Boolean-Toggle mit Label, `onCheckedChanged`-Callback |
 | `DropDownWidget`     | `DropDownWidget.h/.cpp`  | Auswahlliste mit Expand/Collapse, `onSelectionChanged`-Callback |
+| `DropdownButtonWidget` | `DropdownButtonWidget.h/.cpp` | Button der beim Klick ein Dropdown-Menü öffnet, `dropdownItems` oder `items`+`onSelectionChanged` |
 | `TreeViewWidget`     | `TreeViewWidget.h/.cpp`  | Hierarchische Baumansicht mit aufklappbaren Knoten |
 | `TabViewWidget`      | `TabViewWidget.h/.cpp`   | Tab-Leiste mit umschaltbaren Inhaltsbereichen, `onTabChanged`-Callback |
 
@@ -1010,6 +1048,37 @@ Das `engine`-Modul wird Python-Skripten automatisch zur Verfügung gestellt und 
 | `show_modal_message(msg, cb)`      | Modales Popup anzeigen          |
 | `close_modal_message()`            | Modal schließen                 |
 | `show_toast_message(msg, dur)`     | Toast-Nachricht anzeigen        |
+
+---
+
+## 15. Landscape-System
+
+**Dateien:** `src/Landscape/LandscapeManager.h/.cpp`
+
+- `LandscapeManager::spawnLandscape(params)` – Generiert ein flaches Grid-Mesh (XZ-Ebene), speichert es als `.asset` in `Content/Landscape/`, erstellt ein ECS-Entity mit Transform + Mesh + Name + Material (WorldGrid).
+- `LandscapeManager::hasExistingLandscape()` – Prüft ob bereits ein Landscape-Entity existiert (MeshComponent-Pfad beginnt mit `Landscape/`).
+- **Nur ein Landscape pro Szene**: Das Landscape Manager Popup wird blockiert, wenn bereits ein Landscape existiert; stattdessen wird eine Toast-Nachricht angezeigt.
+- `LandscapeParams`: name, width, depth, subdivisionsX, subdivisionsZ.
+- Popup-UI über `UIManager::openLandscapeManagerPopup()` mit Formular (Name, Width, Depth, SubdivX, SubdivZ, Create/Cancel). Die Widget-Erstellung wurde aus `main.cpp` in den UIManager verschoben.
+- **Dropdown-Menü-System**: `UIManager::showDropdownMenu(anchor, items)` / `closeDropdownMenu()` — zeigt ein Overlay-Widget (z-Order 9000) mit klickbaren Menüeinträgen an einer Pixelposition. Click-Outside schließt das Menü automatisch.
+- **Engine Settings Popup** über `UIManager::openEngineSettingsPopup()` (aufgerufen aus `ViewportOverlay.Settings` → Dropdown-Menü → "Engine Settings"): Links Sidebar mit Kategorie-Buttons (Rendering, Debug), rechts scrollbarer Content-Bereich mit Checkboxen. Rendering-Kategorie enthält: Shadows, VSync, Wireframe Mode, Occlusion Culling. Debug-Kategorie enthält: UI Debug Outlines, Bounding Box Debug. Kategoriewechsel baut den Content-Bereich dynamisch um. Alle Änderungen werden in `config.ini` via `DiagnosticsManager::setState()` persistiert und beim nächsten Start über `loadConfig()` → Renderer-Flags wiederhergestellt. Die Widget-Erstellung wurde aus `main.cpp` in den UIManager verschoben.
+- Grid-Shader (`grid_fragment.glsl`) nutzt vollständige Lichtberechnung (Multi-Light, Schatten, Blinn-Phong) — Landscape wird von allen Lichtquellen der Szene beeinflusst.
+- `EngineLevel::onEntityAdded()` / `onEntityRemoved()` setzen automatisch das Level-Dirty-Flag (`setIsSaved(false)`) und `setScenePrepared(false)` via Callback, sodass alle Aufrufer (Spawn, Delete, Landscape) einheitlich behandelt werden.
+
+#### Skybox
+- **Cubemap-Skybox**: Pro Level kann ein Skybox-Ordnerpfad oder ein `.asset`-Pfad gesetzt werden (`EngineLevel::setSkyboxPath()`). Der Ordner muss 6 Face-Bilder enthalten: `right`, `left`, `top`, `bottom`, `front`, `back` (als `.jpg`, `.png` oder `.bmp`).
+- **Cubemap-Face-Zuordnung**: Die Faces werden gemäß der OpenGL-Cubemap-Konvention geladen: `right`→`+X`, `left`→`-X`, `top`→`+Y`, `bottom`→`-Y`, `front`→`-Z`, `back`→`+Z`. Die Standardkamera blickt entlang `-Z`, weshalb `front` auf `GL_TEXTURE_CUBE_MAP_NEGATIVE_Z` abgebildet wird.
+- **Skybox Asset-Typ** (`AssetType::Skybox`): Eigener Asset-Typ mit JSON-Struktur `{ "faces": { "right": "...", "left": "...", ... }, "folderPath": "..." }`. Wird über `AssetManager::loadSkyboxAsset()` / `saveSkyboxAsset()` / `createSkyboxAsset()` verwaltet.
+- **Level-JSON**: Der Pfad wird im Level-JSON als `"Skybox": "Skyboxes/MySkybox.asset"` (oder Ordnerpfad) gespeichert und beim Laden automatisch wiederhergestellt.
+- **Rendering**: Die Skybox wird als erster 3D-Pass gerendert (nach glClear, vor Scene), mit `glDepthFunc(GL_LEQUAL)` und `glDepthMask(GL_FALSE)`. Die View-Matrix wird von der Translation befreit (`mat4(mat3(view))`), sodass die Skybox der Kamera folgt.
+- **Scene-Prepare**: Beim Level-Prepare (`!isScenePrepared()`-Block) wird geprüft, ob das Level einen Skybox-Pfad hat aber die Cubemap noch nicht geladen ist (z.B. nach Fehlschlag oder Levelwechsel). In diesem Fall wird `setSkyboxPath` erneut aufgerufen, sodass die Skybox zuverlässig zusammen mit dem restlichen Level geladen wird.
+- **Renderer-API**: `OpenGLRenderer::setSkyboxPath(path)` / `getSkyboxPath()` — akzeptiert sowohl Ordnerpfade als auch `.asset`-Pfade (Content-relativ). Bei `.asset`-Pfaden wird die Datei geparst und der `folderPath` oder die Face-Pfade aufgelöst. Direkte Ordnerpfade werden zuerst absolut versucht und dann als Content-relativer Pfad über `AssetManager::getAbsoluteContentPath()` aufgelöst (Fallback).
+- **Shader**: `skybox_vertex.glsl` / `skybox_fragment.glsl` mit `gl_Position = pos.xyww` (depth=1.0 Trick).
+- **WorldSettings UI**: Skybox-Pfad kann im WorldSettings-Panel eingegeben werden (EntryBar `WorldSettings.SkyboxPath`). Änderungen werden direkt auf den Renderer und das Level angewandt; die StatusBar wird sofort aktualisiert (`refreshStatusBar`), damit der Dirty-Status sichtbar ist.
+- **Dirty-Tracking**: Jede Skybox-Änderung (Drag & Drop, UI-Eingabe, Clear) markiert das Level als `unsaved` und aktualisiert die StatusBar.
+- **Diagnose-Logging**: `setSkyboxPath` loggt Warnungen bei fehlgeschlagener Pfadauflösung, nicht lesbaren `.asset`-Dateien und fehlenden Cubemap-Faces.
+- **Content Browser**: Skybox-Assets erscheinen mit eigenem Icon (sky-blue Tint).
+- **Default-Skyboxen**: Die Engine liefert zwei Beispiel-Skybox-Textursets unter `Content/Textures/SkyBoxes/Sunrise/` und `Content/Textures/SkyBoxes/Daytime/` (je 6 Faces: right/left/top/bottom/front/back). Beim Projektladen (`ensureDefaultAssetsCreated`) werden automatisch `.asset`-Dateien unter `Content/Skyboxes/Sunrise.asset` und `Content/Skyboxes/Daytime.asset` generiert, sofern die Face-Bilder im Engine-Content vorhanden sind. Die Bilder werden dabei ins Projekt-Content kopiert.
 
 #### engine.camera
 | Funktion                       | Beschreibung                       |

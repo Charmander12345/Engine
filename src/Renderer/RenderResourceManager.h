@@ -37,9 +37,10 @@ public:
         std::shared_ptr<OpenGLObject3D> object3D;
         AssetType assetType{ AssetType::Unknown };
         float shininess{32.0f};
+        std::string fragmentShaderOverride;
     };
 
-    std::vector<RenderableAsset> buildRenderablesForSchema(const ECS::Schema& schema);
+    std::vector<RenderableAsset> buildRenderablesForSchema(const ECS::Schema& schema, const std::string& defaultFragmentShader = "");
     std::shared_ptr<OpenGLObject2D> getOrCreateObject2D(const std::shared_ptr<AssetData>& asset,
         const std::vector<std::shared_ptr<Texture>>& textures);
     std::shared_ptr<OpenGLObject3D> getOrCreateObject3D(const std::shared_ptr<AssetData>& asset,
@@ -61,6 +62,7 @@ private:
     {
         std::vector<std::shared_ptr<Texture>> textures;
         float shininess{32.0f};
+        std::string shaderFragment;
     };
     std::unordered_map<std::string, CachedMaterialData> m_materialDataCache;
     std::weak_ptr<OpenGLTextRenderer> m_textRenderer;

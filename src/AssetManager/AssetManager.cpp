@@ -429,6 +429,85 @@ void AssetManager::registerAssetInRegistry(const AssetRegistryEntry& entry)
     {
         m_registryByName[entry.name] = idx;
     }
+
+    // Persist the updated registry to disk
+    auto& diagnostics = DiagnosticsManager::Instance();
+    if (diagnostics.isProjectLoaded() && !diagnostics.getProjectInfo().projectPath.empty())
+    {
+        saveAssetRegistry(diagnostics.getProjectInfo().projectPath);
+    }
+}
+
+bool AssetManager::deleteAsset(const std::string& relPath, bool deleteFromDisk)
+{
+    auto& logger = Logger::Instance();
+    auto& diagnostics = DiagnosticsManager::Instance();
+
+    if (relPath.empty())
+    {
+        return false;
+    }
+
+    // Remove from registry
+    bool found = false;
+    for (auto it = m_registry.begin(); it != m_registry.end(); ++it)
+    {
+        if (it->path == relPath)
+        {
+            logger.log(Logger::Category::AssetManagement,
+                "Deleting asset from registry: " + relPath, Logger::LogLevel::INFO);
+            m_registryByPath.erase(it->path);
+            m_registryByName.erase(it->name);
+            m_registry.erase(it);
+            found = true;
+            break;
+        }
+    }
+
+    if (found)
+    {
+        // Rebuild index maps since indices shifted
+        m_registryByPath.clear();
+        m_registryByName.clear();
+        for (size_t i = 0; i < m_registry.size(); ++i)
+        {
+            if (!m_registry[i].path.empty())
+                m_registryByPath[m_registry[i].path] = i;
+            if (!m_registry[i].name.empty())
+                m_registryByName[m_registry[i].name] = i;
+        }
+
+        // Persist
+        if (diagnostics.isProjectLoaded() && !diagnostics.getProjectInfo().projectPath.empty())
+        {
+            saveAssetRegistry(diagnostics.getProjectInfo().projectPath);
+        }
+    }
+
+    // Delete file from disk
+    if (deleteFromDisk && diagnostics.isProjectLoaded())
+    {
+        const fs::path contentDir = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+        const fs::path absPath = contentDir / fs::path(relPath);
+        std::error_code ec;
+        if (fs::exists(absPath, ec))
+        {
+            if (fs::remove(absPath, ec))
+            {
+                logger.log(Logger::Category::AssetManagement,
+                    "Deleted asset file: " + absPath.string(), Logger::LogLevel::INFO);
+            }
+            else
+            {
+                logger.log(Logger::Category::AssetManagement,
+                    "Failed to delete asset file: " + absPath.string() + " ec=" + ec.message(),
+                    Logger::LogLevel::WARNING);
+                return false;
+            }
+        }
+    }
+
+    return found;
 }
 
 bool AssetManager::discoverAssetsAndBuildRegistry(const std::string& projectRoot)
@@ -554,7 +633,7 @@ const std::vector<AssetRegistryEntry>& AssetManager::getAssetRegistry() const
 
 bool AssetManager::initialize()
 {
-    startWorker();
+    startWorkerPool();
 	s_nextAssetID = 1;
     AudioManager::Instance().setAudioResolver([](unsigned int assetId) -> std::optional<AudioManager::AudioBufferData>
     {
@@ -1559,13 +1638,44 @@ void AssetManager::ensureEditorWidgetsCreated()
                 fileJson["type"] = static_cast<int>(AssetType::Widget);
                 fileJson["name"] = widget->getName();
                 fileJson["data"] = widget->getData();
-                out << fileJson.dump(4);
-            }
-        }
-    }
-}
+                            out << fileJson.dump(4);
+                            }
+                        }
+                    }
 
-void AssetManager::createWorldSettingsWidgetAsset()
+                    // WorldGrid material – stored in engine Content/Materials (not project Content)
+                    {
+                        const fs::path materialsDir = fs::current_path() / "Content" / "Materials";
+                        std::error_code ec;
+                        fs::create_directories(materialsDir, ec);
+                        const fs::path abs = materialsDir / "WorldGrid.asset";
+                        bool existsAndOk = false;
+                        if (fs::exists(abs))
+                        {
+                            AssetType headerType{ AssetType::Unknown };
+                            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Material;
+                        }
+                        if (!existsAndOk)
+                        {
+                            std::ofstream out(abs, std::ios::out | std::ios::trunc);
+                            if (out.is_open())
+                            {
+                                json matData = json::object();
+                                matData["m_shaderFragment"] = "grid_fragment.glsl";
+
+                                json fileJson = json::object();
+                                fileJson["magic"] = 0x41535453;
+                                fileJson["version"] = 2;
+                                fileJson["type"] = static_cast<int>(AssetType::Material);
+                                fileJson["name"] = "WorldGrid";
+                                fileJson["data"] = matData;
+                                out << fileJson.dump(4);
+                            }
+                        }
+                    }
+                }
+
+                void AssetManager::createWorldSettingsWidgetAsset()
 {
     auto& logger = Logger::Instance();
     const std::string worldSettingsWidgetRel = "WorldSettings.asset";
@@ -1908,7 +2018,7 @@ void AssetManager::ensureDefaultAssetsCreated()
 		ensureOnDisk(containerMatRel, AssetType::Material, mat);
 	}
 
-    const std::string defaultCubeScripts[] =
+	const std::string defaultCubeScripts[] =
     {
         (fs::path("Scripts") / "DefaultCube1.py").generic_string(),
         (fs::path("Scripts") / "DefaultCube2.py").generic_string(),
@@ -2258,66 +2368,163 @@ void AssetManager::ensureDefaultAssetsCreated()
                 diagnostics.setActiveLevel(std::move(defaultLevel));
             }
         }
-        diagnostics.setScenePrepared(false);
-    }
+		diagnostics.setScenePrepared(false);
+	}
+
+	// Default Skybox assets — generate from engine-bundled skybox texture sets
+	{
+		const fs::path engineSkyboxRoot = fs::current_path() / "Content" / "Textures" / "SkyBoxes";
+		const std::string skyboxNames[] = { "Sunrise", "Daytime" };
+		// Each canonical face name maps to alternative file names (e.g. top/up, bottom/down)
+		struct FaceAlias { std::string canonical; std::vector<std::string> names; };
+		const FaceAlias faceAliases[] = {
+			{ "right",  { "right" } },
+			{ "left",   { "left" } },
+			{ "top",    { "top", "up" } },
+			{ "bottom", { "bottom", "down" } },
+			{ "front",  { "front" } },
+			{ "back",   { "back" } }
+		};
+		const std::string faceExts[] = { ".jpg", ".png", ".bmp" };
+
+		for (const auto& skyboxName : skyboxNames)
+		{
+			const fs::path engineSkyboxDir = engineSkyboxRoot / skyboxName;
+			if (!fs::exists(engineSkyboxDir) || !fs::is_directory(engineSkyboxDir))
+			{
+				continue;
+			}
+
+			// Check that at least one face image exists
+			bool hasAnyFace = false;
+			for (const auto& fa : faceAliases)
+			{
+				for (const auto& name : fa.names)
+				{
+					for (const auto& ext : faceExts)
+					{
+						if (fs::exists(engineSkyboxDir / (name + ext)))
+						{
+							hasAnyFace = true;
+							break;
+						}
+					}
+					if (hasAnyFace) break;
+				}
+				if (hasAnyFace) break;
+			}
+			if (!hasAnyFace)
+			{
+				logger.log(Logger::Category::AssetManagement,
+					"Skybox '" + skyboxName + "' folder exists but contains no face images, skipping.",
+					Logger::LogLevel::WARNING);
+				continue;
+			}
+
+			// Copy face images to project Content/Skyboxes/<name>/
+			const fs::path projectSkyboxDir = contentRoot / "Skyboxes" / skyboxName;
+			std::error_code ec;
+			fs::create_directories(projectSkyboxDir, ec);
+
+			json facesJson = json::object();
+			for (const auto& fa : faceAliases)
+			{
+				bool found = false;
+				for (const auto& name : fa.names)
+				{
+					for (const auto& ext : faceExts)
+					{
+						const fs::path srcFace = engineSkyboxDir / (name + ext);
+						if (fs::exists(srcFace))
+						{
+							// Copy with the original filename so the renderer can find it
+							const fs::path destFace = projectSkyboxDir / (name + ext);
+							fs::copy_file(srcFace, destFace, fs::copy_options::skip_existing, ec);
+							facesJson[fa.canonical] = fs::relative(destFace, contentRoot).generic_string();
+							found = true;
+							break;
+						}
+					}
+					if (found) break;
+				}
+			}
+
+			// Create the .asset file
+			const std::string skyboxAssetRel = (fs::path("Skyboxes") / (skyboxName + ".asset")).generic_string();
+			auto skybox = std::make_shared<AssetData>();
+			skybox->setName(skyboxName);
+			json skyboxData = json::object();
+			skyboxData["faces"] = facesJson;
+			skyboxData["folderPath"] = fs::relative(projectSkyboxDir, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
+			skybox->setData(std::move(skyboxData));
+			ensureOnDisk(skyboxAssetRel, AssetType::Skybox, skybox);
+		}
+	}
 
 	logger.log(Logger::Category::AssetManagement, "Default assets ensured.", Logger::LogLevel::INFO);
 }
 
-void AssetManager::startWorker()
+void AssetManager::startWorkerPool()
 {
-    if (m_workerRunning)
+    if (m_poolRunning)
         return;
 
-    m_workerStopRequested = false;
-    m_workerRunning = true;
+    m_poolStopRequested = false;
+    m_poolRunning = true;
 
-    m_worker = std::thread([this]()
+    m_poolSize = std::max(2u, std::thread::hardware_concurrency());
+
+    auto& logger = Logger::Instance();
+    logger.log(Logger::Category::AssetManagement,
+        "Starting asset thread pool with " + std::to_string(m_poolSize) + " threads (hardware_concurrency=" + std::to_string(std::thread::hardware_concurrency()) + ")",
+        Logger::LogLevel::INFO);
+
+    m_workerPool.reserve(m_poolSize);
+    for (unsigned int i = 0; i < m_poolSize; ++i)
     {
-        auto& logger = Logger::Instance();
-        logger.log(Logger::Category::AssetManagement, "Asset worker thread started.", Logger::LogLevel::INFO);
-
-        for (;;)
+        m_workerPool.emplace_back([this, i]()
         {
-            std::function<void()> job;
+            for (;;)
             {
-                std::unique_lock<std::mutex> lock(m_jobMutex);
-                m_jobCv.wait(lock, [this]() { return m_workerStopRequested || !m_jobs.empty(); });
+                std::function<void()> job;
+                {
+                    std::unique_lock<std::mutex> lock(m_jobMutex);
+                    m_jobCv.wait(lock, [this]() { return m_poolStopRequested || !m_jobs.empty(); });
 
-                if (m_workerStopRequested && m_jobs.empty())
-                    break;
+                    if (m_poolStopRequested && m_jobs.empty())
+                        break;
 
-                job = std::move(m_jobs.front());
-                m_jobs.pop();
+                    job = std::move(m_jobs.front());
+                    m_jobs.pop();
+                }
+
+                if (job)
+                {
+                    job();
+                }
             }
-
-            if (job)
-            {
-                job();
-            }
-        }
-
-        logger.log(Logger::Category::AssetManagement, "Asset worker thread exiting.", Logger::LogLevel::INFO);
-    });
+        });
+    }
 }
 
-void AssetManager::stopWorker()
+void AssetManager::stopWorkerPool()
 {
-    if (!m_workerRunning)
+    if (!m_poolRunning)
         return;
 
     {
         std::lock_guard<std::mutex> lock(m_jobMutex);
-        m_workerStopRequested = true;
+        m_poolStopRequested = true;
     }
     m_jobCv.notify_all();
 
-    if (m_worker.joinable())
+    for (auto& t : m_workerPool)
     {
-        m_worker.join();
+        if (t.joinable())
+            t.join();
     }
-
-    m_workerRunning = false;
+    m_workerPool.clear();
+    m_poolRunning = false;
 }
 
 void AssetManager::enqueueJob(std::function<void()> job)
@@ -2377,6 +2584,10 @@ bool AssetManager::unloadAsset(unsigned int assetId)
     {
         return false;
     }
+    if (it->second && !it->second->getPath().empty())
+    {
+        m_loadedAssetsByPath.erase(it->second->getPath());
+    }
     m_loadedAssets.erase(it);
     m_gcEligibleAssets.erase(assetId);
     m_garbageCollector.collect();
@@ -2391,21 +2602,25 @@ bool AssetManager::registerRuntimeResource(const std::shared_ptr<EngineObject>& 
 
 AssetManager::~AssetManager()
 {
-    stopWorker();
+    stopWorkerPool();
 }
 
 unsigned int AssetManager::registerLoadedAsset(const std::shared_ptr<AssetData>& object)
 {
 	std::lock_guard<std::mutex> lock(m_stateMutex);
-    for (const auto& [id, obj] : m_loadedAssets)
-    {
-        if (obj == object)
-        {
-            return 0;
+	for (const auto& [id, obj] : m_loadedAssets)
+	{
+		if (obj == object)
+		{
+			return 0;
 		}
 	}
 	auto id = s_nextAssetID;
 	m_loadedAssets[id] = object;
+	if (object && !object->getPath().empty())
+	{
+		m_loadedAssetsByPath[object->getPath()] = id;
+	}
 	s_nextAssetID++;
 	return id;
 }
@@ -2422,16 +2637,17 @@ int AssetManager::loadAssetAsync(const std::string& path, AssetType type, bool a
 	int existingId = 0;
 	{
 		std::lock_guard<std::mutex> lock(m_stateMutex);
-		for (const auto& [id, obj] : m_loadedAssets)
+		auto pathIt = m_loadedAssetsByPath.find(path);
+		if (pathIt == m_loadedAssetsByPath.end())
 		{
-			if (obj && fs::path(obj->getPath()).lexically_normal().string() == normalizedPath)
+			pathIt = m_loadedAssetsByPath.find(normalizedPath);
+		}
+		if (pathIt != m_loadedAssetsByPath.end())
+		{
+			existingId = static_cast<int>(pathIt->second);
+			if (allowGc)
 			{
-				existingId = static_cast<int>(id);
-				if (allowGc)
-				{
-					m_gcEligibleAssets.insert(id);
-				}
-				break;
+				m_gcEligibleAssets.insert(pathIt->second);
 			}
 		}
 	}
@@ -2489,9 +2705,24 @@ std::shared_ptr<AssetData> AssetManager::getLoadedAssetByID(unsigned int id) con
 	auto it = m_loadedAssets.find(id);
 	if (it == m_loadedAssets.end())
 	{
-        return nullptr;
+		return nullptr;
 	}
-    return it->second;
+	return it->second;
+}
+
+std::shared_ptr<AssetData> AssetManager::getLoadedAssetByPath(const std::string& path) const
+{
+	if (path.empty())
+		return nullptr;
+	std::lock_guard<std::mutex> lock(m_stateMutex);
+	auto pathIt = m_loadedAssetsByPath.find(path);
+	if (pathIt != m_loadedAssetsByPath.end())
+	{
+		auto assetIt = m_loadedAssets.find(pathIt->second);
+		if (assetIt != m_loadedAssets.end())
+			return assetIt->second;
+	}
+	return nullptr;
 }
 
 bool AssetManager::isAssetLoaded(const std::string& path) const
@@ -2501,22 +2732,20 @@ bool AssetManager::isAssetLoaded(const std::string& path) const
 		return false;
 	}
 
-	fs::path relPath = fs::path(path).lexically_normal();
-	const std::string relPathString = relPath.generic_string();
-	const std::string absPath = getAbsoluteContentPath(path);
-
 	std::lock_guard<std::mutex> lock(m_stateMutex);
-	for (const auto& [id, asset] : m_loadedAssets)
+	if (m_loadedAssetsByPath.count(path))
 	{
-		if (!asset)
-		{
-			continue;
-		}
-		const std::string& assetPath = asset->getPath();
-		if (assetPath == path || assetPath == relPathString || (!absPath.empty() && assetPath == absPath))
-		{
-			return true;
-		}
+		return true;
+	}
+	const std::string relPathString = fs::path(path).lexically_normal().generic_string();
+	if (m_loadedAssetsByPath.count(relPathString))
+	{
+		return true;
+	}
+	const std::string absPath = getAbsoluteContentPath(path);
+	if (!absPath.empty() && m_loadedAssetsByPath.count(absPath))
+	{
+		return true;
 	}
 	return false;
 }
@@ -2724,6 +2953,16 @@ std::string AssetManager::getAbsoluteContentPath(const std::string& relativeToCo
     return (projectRoot / "Content" / inputPath).lexically_normal().string();
 }
 
+std::string AssetManager::getAbsoluteEngineContentPath(const std::string& relativeToContent) const
+{
+    fs::path inputPath(relativeToContent);
+    if (inputPath.is_absolute())
+    {
+        return inputPath.lexically_normal().string();
+    }
+    return (fs::current_path() / "Content" / inputPath).lexically_normal().string();
+}
+
 std::string AssetManager::getEditorWidgetPath(const std::string& relativeToEditorWidgets) const
 {
     fs::path p = getEditorWidgetsRootPath() / fs::path(relativeToEditorWidgets);
@@ -2875,19 +3114,17 @@ bool AssetManager::isAudioPlayingContentPath(const std::string& relativeToConten
 
 int AssetManager::loadAsset(const std::string& path, AssetType type, SyncState syncState)
 {
-    if (path.empty())
+	if (path.empty())
 	{
 		return 0;
 	}
 
 	{
 		std::lock_guard<std::mutex> lock(m_stateMutex);
-		for (const auto& [id, obj] : m_loadedAssets)
+		auto pathIt = m_loadedAssetsByPath.find(path);
+		if (pathIt != m_loadedAssetsByPath.end())
 		{
-			if (obj && obj->getPath() == path)
-			{
-				return static_cast<int>(id);
-			}
+			return static_cast<int>(pathIt->second);
 		}
 	}
 
@@ -2913,15 +3150,18 @@ int AssetManager::loadAsset(const std::string& path, AssetType type, SyncState s
 				case AssetType::Material:
 					loadMaterialAsset(path);
 					break;
-				case AssetType::Level:
-					loadLevelAsset(path);
-					break;
-				default:
-					break;
+						case AssetType::Level:
+								loadLevelAsset(path);
+								break;
+							case AssetType::Skybox:
+								loadSkyboxAsset(path);
+								break;
+							default:
+								break;
+							}
+						});
+					return 0;
 				}
-			});
-		return 0;
-	}
 
 	LoadResult result;
 	switch (type)
@@ -2948,6 +3188,9 @@ int AssetManager::loadAsset(const std::string& path, AssetType type, SyncState s
 	case AssetType::Widget:
 		result = loadWidgetAsset(path);
 		break;
+	case AssetType::Skybox:
+		result = loadSkyboxAsset(path);
+		break;
 	default:
 		return 0;
 	}
@@ -2958,12 +3201,10 @@ int AssetManager::loadAsset(const std::string& path, AssetType type, SyncState s
 	}
 	{
 		std::lock_guard<std::mutex> lock(m_stateMutex);
-		for (const auto& [id, obj] : m_loadedAssets)
+		auto pathIt = m_loadedAssetsByPath.find(path);
+		if (pathIt != m_loadedAssetsByPath.end())
 		{
-			if (obj && obj->getPath() == path)
-			{
-				return static_cast<int>(id);
-			}
+			return static_cast<int>(pathIt->second);
 		}
 	}
 
@@ -3036,7 +3277,10 @@ bool AssetManager::saveAsset(const Asset& asset, SyncState syncState, Diagnostic
 	case AssetType::Audio:
 		result = saveAudioAsset(assetData);
 		break;
-        case AssetType::Script:
+	case AssetType::Skybox:
+		result = saveSkyboxAsset(assetData);
+		break;
+		case AssetType::Script:
         case AssetType::Shader:
         case AssetType::Unknown:
         default:
@@ -3828,6 +4072,7 @@ void AssetManager::unloadAllAssets()
 	{
 		std::lock_guard<std::mutex> lock(m_stateMutex);
 		m_loadedAssets.clear();
+		m_loadedAssetsByPath.clear();
 		m_gcEligibleAssets.clear();
 		s_nextAssetID = 1;
 	}
@@ -4053,462 +4298,114 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
 AssetManager::LoadResult AssetManager::loadTextureAsset(const std::string& path)
 {
 	LoadResult result;
-	std::ifstream in(path, std::ios::binary);
-	if (!in.is_open())
+	auto raw = readAssetFromDisk(path, AssetType::Texture);
+	if (!raw.success)
 	{
-		result.errorMessage = "Failed to open texture asset file.";
+		result.errorMessage = raw.errorMessage;
 		return result;
 	}
-
-    AssetType headerType{ AssetType::Unknown };
-    std::string name;
-    bool isJson = false;
-    if (!readAssetHeader(in, headerType, name, isJson))
+	result.j = raw.data;
+	auto id = finalizeAssetLoad(std::move(raw));
+	result.success = (id != 0);
+	if (!result.success)
 	{
-		result.errorMessage = "Invalid texture asset header.";
-		return result;
+		result.errorMessage = "Failed to register texture asset.";
 	}
-
-	if (headerType != AssetType::Texture)
-	{
-		result.errorMessage = "Asset type mismatch for texture.";
-		return result;
-	}
-
-    if (!readAssetJson(in, result.j, result.errorMessage, isJson))
-	{
-		return result;
-	}
-
-	auto texture = std::make_shared<AssetData>();
-	if (result.j.is_object())
-	{
-		if (result.j.contains("m_sourcePath"))
-		{
-			const auto& sourceValue = result.j.at("m_sourcePath");
-			if (sourceValue.is_string())
-			{
-				fs::path sourcePath = sourceValue.get<std::string>();
-				if (!sourcePath.is_absolute())
-				{
-					const auto& projPath = DiagnosticsManager::Instance().getProjectInfo().projectPath;
-					fs::path resolved;
-					if (!projPath.empty())
-						resolved = fs::path(projPath) / sourcePath;
-					if (resolved.empty() || !fs::exists(resolved))
-						resolved = fs::current_path() / sourcePath;
-					sourcePath = resolved;
-				}
-				if (fs::exists(sourcePath))
-				{
-					int width = 0;
-					int height = 0;
-					int channels = 0;
-					unsigned char* data = stbi_load(sourcePath.string().c_str(), &width, &height, &channels, 4);
-					if (data)
-					{
-						channels = 4;
-						result.j["m_width"] = width;
-						result.j["m_height"] = height;
-						result.j["m_channels"] = channels;
-						result.j["m_data"] = std::vector<unsigned char>(data, data + (width * height * channels));
-						stbi_image_free(data);
-					}
-				}
-			}
-		}
-		texture->setData(result.j);
-	}
-
-	if (name.empty())
-	{
-		name = fs::path(path).stem().string();
-	}
-
-	texture->setName(name);
-	texture->setPath(path);
-	texture->setAssetType(headerType);
-	texture->setType(headerType);
-	texture->setIsSaved(true);
-
-	auto id = registerLoadedAsset(texture);
-	if (id != 0)
-	{
-		texture->setId(id);
-	}
-	m_garbageCollector.registerResource(texture);
-
-	result.success = true;
 	return result;
 }
 
 AssetManager::LoadResult AssetManager::loadAudioAsset(const std::string& path)
 {
 	LoadResult result;
-	const fs::path inputPath(path);
-	std::string extension = inputPath.extension().string();
-	for (auto& c : extension)
+	auto raw = readAssetFromDisk(path, AssetType::Audio);
+	if (!raw.success)
 	{
-		c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-	}
-	if (extension == ".wav")
-	{
-		SDL_AudioSpec spec{};
-		Uint8* buffer = nullptr;
-		Uint32 length = 0;
-		if (!SDL_LoadWAV(path.c_str(), &spec, &buffer, &length))
-		{
-			result.errorMessage = "Failed to load WAV data.";
-			return result;
-		}
-
-		auto audio = std::make_shared<AssetData>();
-		json audioData = json::object();
-		audioData["m_channels"] = static_cast<int>(spec.channels);
-		audioData["m_sampleRate"] = static_cast<int>(spec.freq);
-		audioData["m_format"] = static_cast<int>(spec.format);
-		audioData["m_data"] = std::vector<unsigned char>(buffer, buffer + length);
-		SDL_free(buffer);
-
-		audio->setName(inputPath.stem().string());
-		audio->setPath(path);
-		audio->setAssetType(AssetType::Audio);
-		audio->setType(AssetType::Audio);
-		audio->setData(std::move(audioData));
-		audio->setIsSaved(true);
-
-		auto id = registerLoadedAsset(audio);
-		if (id != 0)
-		{
-			audio->setId(id);
-		}
-		m_garbageCollector.registerResource(audio);
-
-		result.success = true;
+		result.errorMessage = raw.errorMessage;
 		return result;
 	}
-
-	std::ifstream in(path, std::ios::binary);
-	if (!in.is_open())
+	result.j = raw.data;
+	auto id = finalizeAssetLoad(std::move(raw));
+	result.success = (id != 0);
+	if (!result.success)
 	{
-		result.errorMessage = "Failed to open audio asset file.";
-		return result;
+		result.errorMessage = "Failed to register audio asset.";
 	}
-
-	AssetType headerType{ AssetType::Unknown };
-	std::string name;
-	bool isJson = false;
-	if (!readAssetHeader(in, headerType, name, isJson))
-	{
-		result.errorMessage = "Invalid audio asset header.";
-		return result;
-	}
-
-	if (headerType != AssetType::Audio)
-	{
-		result.errorMessage = "Asset type mismatch for audio.";
-		return result;
-	}
-
-	if (!readAssetJson(in, result.j, result.errorMessage, isJson))
-	{
-		return result;
-	}
-
-	auto audio = std::make_shared<AssetData>();
-	if (result.j.is_object())
-	{
-		if (result.j.contains("m_sourcePath"))
-		{
-			const auto& sourceValue = result.j.at("m_sourcePath");
-			if (sourceValue.is_string())
-			{
-				fs::path sourcePath = sourceValue.get<std::string>();
-				if (!sourcePath.is_absolute())
-				{
-					const auto& projPath = DiagnosticsManager::Instance().getProjectInfo().projectPath;
-					fs::path resolved;
-					if (!projPath.empty())
-						resolved = fs::path(projPath) / sourcePath;
-					if (resolved.empty() || !fs::exists(resolved))
-						resolved = fs::current_path() / sourcePath;
-					sourcePath = resolved;
-				}
-				if (fs::exists(sourcePath))
-				{
-					SDL_AudioSpec spec{};
-					Uint8* buffer = nullptr;
-					Uint32 length = 0;
-					if (SDL_LoadWAV(sourcePath.string().c_str(), &spec, &buffer, &length))
-					{
-						result.j["m_channels"] = static_cast<int>(spec.channels);
-						result.j["m_sampleRate"] = static_cast<int>(spec.freq);
-						result.j["m_format"] = static_cast<int>(spec.format);
-						result.j["m_data"] = std::vector<unsigned char>(buffer, buffer + length);
-						SDL_free(buffer);
-					}
-					else
-					{
-						Logger::Instance().log(Logger::Category::AssetManagement,
-							"Failed to load WAV data: " + sourcePath.string(), Logger::LogLevel::ERROR);
-					}
-				}
-			}
-		}
-		audio->setData(result.j);
-	}
-
-	if (name.empty())
-	{
-		name = fs::path(path).stem().string();
-	}
-
-	audio->setName(name);
-	audio->setPath(path);
-	audio->setAssetType(headerType);
-	audio->setType(headerType);
-	audio->setIsSaved(true);
-
-	auto id = registerLoadedAsset(audio);
-	if (id != 0)
-	{
-		audio->setId(id);
-	}
-	m_garbageCollector.registerResource(audio);
-
-	result.success = true;
 	return result;
 }
 
 AssetManager::LoadResult AssetManager::loadWidgetAsset(const std::string& path)
 {
 	LoadResult result;
-	std::ifstream in(path, std::ios::binary);
-	if (!in.is_open())
+	auto raw = readAssetFromDisk(path, AssetType::Widget);
+	if (!raw.success)
 	{
-		result.errorMessage = "Failed to open widget asset file.";
+		result.errorMessage = raw.errorMessage;
 		return result;
 	}
-
-    AssetType headerType{ AssetType::Unknown };
-    std::string name;
-    bool isJson = false;
-    if (!readAssetHeader(in, headerType, name, isJson))
+	result.j = raw.data;
+	auto id = finalizeAssetLoad(std::move(raw));
+	result.success = (id != 0);
+	if (!result.success)
 	{
-		result.errorMessage = "Invalid widget asset header.";
-		return result;
+		result.errorMessage = "Failed to register widget asset.";
 	}
-
-	if (headerType != AssetType::Widget)
-	{
-		result.errorMessage = "Asset type mismatch for widget.";
-		return result;
-	}
-
-    if (!readAssetJson(in, result.j, result.errorMessage, isJson))
-	{
-		return result;
-	}
-
-	auto widget = std::make_shared<AssetData>();
-	if (result.j.is_object())
-	{
-		widget->setData(result.j);
-	}
-
-	if (name.empty())
-	{
-		name = fs::path(path).stem().string();
-	}
-
-	widget->setName(name);
-	widget->setPath(path);
-	widget->setAssetType(headerType);
-	widget->setType(headerType);
-	widget->setIsSaved(true);
-
-	auto id = registerLoadedAsset(widget);
-	if (id != 0)
-	{
-		widget->setId(id);
-	}
-	m_garbageCollector.registerResource(widget);
-
-	result.success = true;
 	return result;
 }
 
 AssetManager::LoadResult AssetManager::loadMaterialAsset(const std::string& path)
 {
 	LoadResult result;
-	std::ifstream in(path, std::ios::binary);
-	if (!in.is_open())
+	auto raw = readAssetFromDisk(path, AssetType::Material);
+	if (!raw.success)
 	{
-		result.errorMessage = "Failed to open material asset file.";
+		result.errorMessage = raw.errorMessage;
 		return result;
 	}
-
-    AssetType headerType{ AssetType::Unknown };
-    std::string name;
-    bool isJson = false;
-    if (!readAssetHeader(in, headerType, name, isJson))
+	result.j = raw.data;
+	auto id = finalizeAssetLoad(std::move(raw));
+	result.success = (id != 0);
+	if (!result.success)
 	{
-		result.errorMessage = "Invalid material asset header.";
-		return result;
+		result.errorMessage = "Failed to register material asset.";
 	}
-
-	if (headerType != AssetType::Material)
-	{
-		result.errorMessage = "Asset type mismatch for material.";
-		return result;
-	}
-
-    if (!readAssetJson(in, result.j, result.errorMessage, isJson))
-	{
-		return result;
-	}
-
-	auto material = std::make_shared<AssetData>();
-	if (result.j.is_object())
-	{
-		material->setData(result.j);
-	}
-
-	if (name.empty())
-	{
-		name = fs::path(path).stem().string();
-	}
-
-	material->setName(name);
-	material->setPath(path);
-	material->setAssetType(headerType);
-	material->setType(headerType);
-	material->setIsSaved(true);
-
-	auto id = registerLoadedAsset(material);
-	if (id != 0)
-	{
-		material->setId(id);
-	}
-	m_garbageCollector.registerResource(material);
-
-	result.success = true;
 	return result;
 }
 
 AssetManager::LoadResult AssetManager::loadObject2DAsset(const std::string& path)
 {
 	LoadResult result;
-	std::ifstream in(path, std::ios::binary);
-	if (!in.is_open())
+	auto raw = readAssetFromDisk(path, AssetType::Model2D);
+	if (!raw.success)
 	{
-		result.errorMessage = "Failed to open Object2D asset file.";
+		result.errorMessage = raw.errorMessage;
 		return result;
 	}
-
-    AssetType headerType{ AssetType::Unknown };
-    std::string name;
-    bool isJson = false;
-    if (!readAssetHeader(in, headerType, name, isJson))
+	result.j = raw.data;
+	auto id = finalizeAssetLoad(std::move(raw));
+	result.success = (id != 0);
+	if (!result.success)
 	{
-		result.errorMessage = "Invalid Object2D asset header.";
-		return result;
+		result.errorMessage = "Failed to register Object2D asset.";
 	}
-
-	if (headerType != AssetType::Model2D)
-	{
-		result.errorMessage = "Asset type mismatch for Object2D.";
-		return result;
-	}
-
-    if (!readAssetJson(in, result.j, result.errorMessage, isJson))
-	{
-		return result;
-	}
-
-	auto object2D = std::make_shared<AssetData>();
-	if (result.j.is_object())
-	{
-		object2D->setData(result.j);
-	}
-
-	if (name.empty())
-	{
-		name = fs::path(path).stem().string();
-	}
-
-	object2D->setName(name);
-	object2D->setPath(path);
-	object2D->setAssetType(headerType);
-	object2D->setType(headerType);
-	object2D->setIsSaved(true);
-
-	auto id = registerLoadedAsset(object2D);
-	if (id != 0)
-	{
-		object2D->setId(id);
-	}
-	m_garbageCollector.registerResource(object2D);
-
-	result.success = true;
 	return result;
 }
 
 AssetManager::LoadResult AssetManager::loadObject3DAsset(const std::string& path)
 {
 	LoadResult result;
-	std::ifstream in(path, std::ios::binary);
-	if (!in.is_open())
+	auto raw = readAssetFromDisk(path, AssetType::Model3D);
+	if (!raw.success)
 	{
-		result.errorMessage = "Failed to open Object3D asset file.";
+		result.errorMessage = raw.errorMessage;
 		return result;
 	}
-
-    AssetType headerType{ AssetType::Unknown };
-    std::string name;
-    bool isJson = false;
-    if (!readAssetHeader(in, headerType, name, isJson))
+	result.j = raw.data;
+	auto id = finalizeAssetLoad(std::move(raw));
+	result.success = (id != 0);
+	if (!result.success)
 	{
-		result.errorMessage = "Invalid Object3D asset header.";
-		return result;
+		result.errorMessage = "Failed to register Object3D asset.";
 	}
-
-							if (headerType != AssetType::Model3D && headerType != AssetType::PointLight)
-	{
-		result.errorMessage = "Asset type mismatch for Object3D.";
-		return result;
-	}
-
-    if (!readAssetJson(in, result.j, result.errorMessage, isJson))
-	{
-		return result;
-	}
-
-	auto object3D = std::make_shared<AssetData>();
-	if (result.j.is_object())
-	{
-		object3D->setData(result.j);
-	}
-
-	if (name.empty())
-	{
-		name = fs::path(path).stem().string();
-	}
-
-	object3D->setName(name);
-	object3D->setPath(path);
-	object3D->setAssetType(headerType);
-	object3D->setType(headerType);
-	object3D->setIsSaved(true);
-
-	auto id = registerLoadedAsset(object3D);
-	if (id != 0)
-	{
-		object3D->setId(id);
-	}
-	m_garbageCollector.registerResource(object3D);
-
-	result.success = true;
 	return result;
 }
 
@@ -5045,6 +4942,10 @@ AssetManager::SaveResult AssetManager::saveLevelAsset(EngineLevel* level)
 		camJson["rotation"] = json::array({ rot.x, rot.y });
 		levelJson["EditorCamera"] = camJson;
 	}
+	if (!level->getSkyboxPath().empty())
+	{
+		levelJson["Skybox"] = level->getSkyboxPath();
+	}
 
 	json fileJson = json::object();
 	fileJson["magic"] = 0x41535453;
@@ -5139,16 +5040,207 @@ AssetManager::SaveResult AssetManager::saveWidgetAsset(const std::shared_ptr<Ass
     return result;
 }
 
+AssetManager::SaveResult AssetManager::saveSkyboxAsset(const std::shared_ptr<AssetData>& skybox)
+{
+    SaveResult result;
+    if (!skybox)
+    {
+        result.errorMessage = "Skybox asset is null.";
+        return result;
+    }
+
+    auto& diagnostics = DiagnosticsManager::Instance();
+    if (!diagnostics.isProjectLoaded())
+    {
+        result.errorMessage = "No project loaded for skybox save.";
+        return result;
+    }
+
+    std::string name = skybox->getName();
+    if (name.empty())
+    {
+        name = "Skybox";
+        skybox->setName(name);
+    }
+
+    std::string relPath = skybox->getPath();
+    if (relPath.empty())
+    {
+        relPath = "Skyboxes/" + name + ".asset";
+        skybox->setPath(relPath);
+    }
+
+    fs::path rel = fs::path(relPath);
+    if (rel.extension().empty())
+    {
+        rel.replace_extension(".asset");
+        relPath = rel.generic_string();
+        skybox->setPath(relPath);
+    }
+
+    const fs::path absPath = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relPath);
+    std::error_code ec;
+    fs::create_directories(absPath.parent_path(), ec);
+
+    std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+    if (!out.is_open())
+    {
+        result.errorMessage = "Failed to open skybox asset file for writing.";
+        return result;
+    }
+
+    json data = skybox->getData();
+    if (data.is_null())
+    {
+        data = json::object();
+    }
+
+    json fileJson = json::object();
+    fileJson["magic"] = 0x41535453;
+    fileJson["version"] = 2;
+    fileJson["type"] = static_cast<int>(AssetType::Skybox);
+    fileJson["name"] = name;
+    fileJson["data"] = data;
+
+    out << fileJson.dump(4);
+    if (!out.good())
+    {
+        result.errorMessage = "Failed to write skybox asset data.";
+        return result;
+    }
+
+    skybox->setIsSaved(true);
+    result.success = true;
+    return result;
+}
+
+AssetManager::LoadResult AssetManager::loadSkyboxAsset(const std::string& path)
+{
+    LoadResult result;
+    auto raw = readAssetFromDisk(path, AssetType::Skybox);
+    if (!raw.success)
+    {
+        result.errorMessage = raw.errorMessage;
+        return result;
+    }
+    result.j = raw.data;
+    auto id = finalizeAssetLoad(std::move(raw));
+    result.success = (id != 0);
+    if (!result.success)
+    {
+        result.errorMessage = "Failed to register skybox asset.";
+    }
+    return result;
+}
+
+AssetManager::CreateResult AssetManager::createSkyboxAsset(const std::string& path, const std::string& name, const std::string& sourcePath)
+{
+    CreateResult result;
+    auto& diagnostics = DiagnosticsManager::Instance();
+    if (!diagnostics.isProjectLoaded())
+    {
+        result.errorMessage = "No project loaded.";
+        return result;
+    }
+
+    auto skybox = std::make_shared<AssetData>();
+    skybox->setName(name);
+    skybox->setAssetType(AssetType::Skybox);
+    skybox->setType(AssetType::Skybox);
+
+    json data = json::object();
+    data["faces"] = json::object();
+    data["faces"]["right"]  = "";
+    data["faces"]["left"]   = "";
+    data["faces"]["top"]    = "";
+    data["faces"]["bottom"] = "";
+    data["faces"]["front"]  = "";
+    data["faces"]["back"]   = "";
+
+    if (!sourcePath.empty())
+    {
+        // sourcePath is a directory containing face images
+        const fs::path srcDir(sourcePath);
+        const fs::path contentDir = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+        const fs::path skyboxDir = contentDir / "Skyboxes" / name;
+        std::error_code ec;
+        fs::create_directories(skyboxDir, ec);
+
+        struct FaceAlias { std::string canonical; std::vector<std::string> names; };
+        const FaceAlias faceAliases[6] = {
+            { "right",  { "right" } },
+            { "left",   { "left" } },
+            { "top",    { "top", "up" } },
+            { "bottom", { "bottom", "down" } },
+            { "front",  { "front" } },
+            { "back",   { "back" } }
+        };
+        const std::string extensions[3] = { ".jpg", ".png", ".bmp" };
+
+        for (const auto& fa : faceAliases)
+        {
+            bool found = false;
+            for (const auto& name : fa.names)
+            {
+                for (const auto& ext : extensions)
+                {
+                    const fs::path srcFile = srcDir / (name + ext);
+                    if (fs::exists(srcFile))
+                    {
+                        const fs::path destFile = skyboxDir / (name + ext);
+                        fs::copy_file(srcFile, destFile, fs::copy_options::overwrite_existing, ec);
+                        const std::string relFace = fs::relative(destFile, contentDir).generic_string();
+                        data["faces"][fa.canonical] = relFace;
+                        found = true;
+                        break;
+                    }
+                }
+                if (found) break;
+            }
+        }
+
+        // Store the folder path relative to Content for the renderer
+        data["folderPath"] = fs::relative(skyboxDir, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
+    }
+
+    skybox->setData(data);
+    skybox->setPath(path);
+    skybox->setIsSaved(false);
+
+    auto saveResult = saveSkyboxAsset(skybox);
+    if (!saveResult.success)
+    {
+        result.errorMessage = saveResult.errorMessage;
+        return result;
+    }
+
+    auto id = registerLoadedAsset(skybox);
+    if (id != 0)
+    {
+        skybox->setId(id);
+    }
+    m_garbageCollector.registerResource(skybox);
+
+    result.object = skybox;
+    result.success = true;
+    return result;
+}
+
 unsigned char* AssetManager::loadRawImageData(const std::string& path, int& width, int& height, int& channels)
 {
     width = 0;
     height = 0;
     channels = 0;
-    unsigned char* data = stbi_load(path.c_str(), &width, &height, &channels, 0);
+
+    // Normalize the path to use consistent separators
+    std::filesystem::path normalized = std::filesystem::path(path).lexically_normal();
+    std::string normalizedStr = normalized.string();
+
+    unsigned char* data = stbi_load(normalizedStr.c_str(), &width, &height, &channels, 0);
     if (!data)
     {
         Logger::Instance().log(Logger::Category::AssetManagement,
-            "Failed to load raw image: " + path, Logger::LogLevel::ERROR);
+            "Failed to load raw image: " + normalizedStr, Logger::LogLevel::ERROR);
     }
     return data;
 }
@@ -5159,4 +5251,298 @@ void AssetManager::freeRawImageData(unsigned char* data)
     {
         stbi_image_free(data);
     }
+}
+
+bool AssetManager::saveNewLevelAsset(EngineLevel* level)
+{
+    return saveLevelAsset(level).success;
+}
+
+// ---------------------------------------------------------------------------
+// Parallel loading: disk-only read (no shared state), finalize, batch API
+// ---------------------------------------------------------------------------
+
+RawAssetData AssetManager::readAssetFromDisk(const std::string& path, AssetType expectedType)
+{
+    RawAssetData raw;
+    raw.path = path;
+
+    // Special case: raw WAV files loaded directly via SDL
+    if (expectedType == AssetType::Audio)
+    {
+        const fs::path inputPath(path);
+        std::string ext = inputPath.extension().string();
+        for (auto& c : ext)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+        if (ext == ".wav")
+        {
+            SDL_AudioSpec spec{};
+            Uint8* buffer = nullptr;
+            Uint32 length = 0;
+            if (!SDL_LoadWAV(path.c_str(), &spec, &buffer, &length))
+            {
+                raw.errorMessage = "Failed to load WAV data.";
+                return raw;
+            }
+            json audioData = json::object();
+            audioData["m_channels"] = static_cast<int>(spec.channels);
+            audioData["m_sampleRate"] = static_cast<int>(spec.freq);
+            audioData["m_format"] = static_cast<int>(spec.format);
+            audioData["m_data"] = std::vector<unsigned char>(buffer, buffer + length);
+            SDL_free(buffer);
+
+            raw.data = std::move(audioData);
+            raw.name = inputPath.stem().string();
+            raw.type = AssetType::Audio;
+            raw.success = true;
+            return raw;
+        }
+    }
+
+    std::ifstream in(path, std::ios::binary);
+    if (!in.is_open())
+    {
+        raw.errorMessage = "Failed to open asset file: " + path;
+        return raw;
+    }
+
+    AssetType headerType{ AssetType::Unknown };
+    std::string name;
+    bool isJson = false;
+    if (!readAssetHeader(in, headerType, name, isJson))
+    {
+        raw.errorMessage = "Invalid asset header: " + path;
+        return raw;
+    }
+
+    // Type validation (Model3D assets may also be PointLight)
+    bool typeOk = false;
+    if (expectedType == AssetType::Model3D || expectedType == AssetType::PointLight)
+    {
+        typeOk = (headerType == AssetType::Model3D || headerType == AssetType::PointLight);
+    }
+    else
+    {
+        typeOk = (headerType == expectedType);
+    }
+    if (!typeOk)
+    {
+        raw.errorMessage = "Asset type mismatch for: " + path;
+        return raw;
+    }
+
+    json j;
+    if (!readAssetJson(in, j, raw.errorMessage, isJson))
+    {
+        return raw;
+    }
+    in.close();
+
+    // For textures: decode source image on this thread (CPU-intensive)
+    if (headerType == AssetType::Texture && j.is_object() && j.contains("m_sourcePath"))
+    {
+        const auto& sourceValue = j.at("m_sourcePath");
+        if (sourceValue.is_string())
+        {
+            fs::path sourcePath = sourceValue.get<std::string>();
+            if (!sourcePath.is_absolute())
+            {
+                const auto& projPath = DiagnosticsManager::Instance().getProjectInfo().projectPath;
+                fs::path resolved;
+                if (!projPath.empty())
+                    resolved = fs::path(projPath) / sourcePath;
+                if (resolved.empty() || !fs::exists(resolved))
+                    resolved = fs::current_path() / sourcePath;
+                sourcePath = resolved;
+            }
+            if (fs::exists(sourcePath))
+            {
+                int width = 0, height = 0, channels = 0;
+                unsigned char* data = stbi_load(sourcePath.string().c_str(), &width, &height, &channels, 4);
+                if (data)
+                {
+                    channels = 4;
+                    j["m_width"] = width;
+                    j["m_height"] = height;
+                    j["m_channels"] = channels;
+                    j["m_data"] = std::vector<unsigned char>(data, data + (static_cast<size_t>(width) * height * channels));
+                    stbi_image_free(data);
+                }
+            }
+        }
+    }
+
+    // For audio .asset files with m_sourcePath: decode WAV source
+    if (headerType == AssetType::Audio && j.is_object() && j.contains("m_sourcePath"))
+    {
+        const auto& sourceValue = j.at("m_sourcePath");
+        if (sourceValue.is_string())
+        {
+            fs::path sourcePath = sourceValue.get<std::string>();
+            if (!sourcePath.is_absolute())
+            {
+                const auto& projPath = DiagnosticsManager::Instance().getProjectInfo().projectPath;
+                fs::path resolved;
+                if (!projPath.empty())
+                    resolved = fs::path(projPath) / sourcePath;
+                if (resolved.empty() || !fs::exists(resolved))
+                    resolved = fs::current_path() / sourcePath;
+                sourcePath = resolved;
+            }
+            if (fs::exists(sourcePath))
+            {
+                SDL_AudioSpec spec{};
+                Uint8* buffer = nullptr;
+                Uint32 length = 0;
+                if (SDL_LoadWAV(sourcePath.string().c_str(), &spec, &buffer, &length))
+                {
+                    j["m_channels"] = static_cast<int>(spec.channels);
+                    j["m_sampleRate"] = static_cast<int>(spec.freq);
+                    j["m_format"] = static_cast<int>(spec.format);
+                    j["m_data"] = std::vector<unsigned char>(buffer, buffer + length);
+                    SDL_free(buffer);
+                }
+            }
+        }
+    }
+
+    if (name.empty())
+    {
+        name = fs::path(path).stem().string();
+    }
+
+    raw.data = std::move(j);
+    raw.name = std::move(name);
+    raw.type = headerType;
+    raw.success = true;
+    return raw;
+}
+
+unsigned int AssetManager::finalizeAssetLoad(RawAssetData&& raw)
+{
+    if (!raw.success)
+    {
+        return 0;
+    }
+
+    auto asset = std::make_shared<AssetData>();
+    asset->setData(std::move(raw.data));
+    asset->setName(raw.name);
+    asset->setPath(raw.path);
+    asset->setAssetType(raw.type);
+    asset->setType(raw.type);
+    asset->setIsSaved(true);
+
+    auto id = registerLoadedAsset(asset);
+    if (id != 0)
+    {
+        asset->setId(id);
+    }
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        m_garbageCollector.registerResource(asset);
+    }
+    return id;
+}
+
+std::unordered_map<std::string, int> AssetManager::loadBatchParallel(
+    const std::vector<std::pair<std::string, AssetType>>& requests)
+{
+    std::unordered_map<std::string, int> results;
+    if (requests.empty())
+    {
+        return results;
+    }
+
+    auto& logger = Logger::Instance();
+
+    // Deduplicate and skip already-loaded assets
+    struct PendingLoad
+    {
+        std::string path;
+        AssetType type;
+    };
+    std::vector<PendingLoad> pending;
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        for (const auto& [path, type] : requests)
+        {
+            if (path.empty())
+                continue;
+            if (results.count(path))
+                continue;
+
+            auto pathIt = m_loadedAssetsByPath.find(path);
+            if (pathIt != m_loadedAssetsByPath.end())
+            {
+                results[path] = static_cast<int>(pathIt->second);
+                continue;
+            }
+            pending.push_back({ path, type });
+        }
+    }
+
+    if (pending.empty())
+    {
+        return results;
+    }
+
+    const size_t count = pending.size();
+    logger.log(Logger::Category::AssetManagement,
+        "loadBatchParallel: dispatching " + std::to_string(count) + " jobs to pool (" + std::to_string(m_poolSize) + " threads)",
+        Logger::LogLevel::INFO);
+
+    // Shared results vector for the batch; each slot written by exactly one thread
+    std::vector<RawAssetData> rawResults(count);
+    m_batchPending.store(static_cast<int>(count), std::memory_order_relaxed);
+
+    // Enqueue all jobs into the global pool
+    for (size_t i = 0; i < count; ++i)
+    {
+        enqueueJob([this, i, path = pending[i].path, type = pending[i].type, &rawResults]()
+        {
+            rawResults[i] = AssetManager::readAssetFromDisk(path, type);
+
+            // Decrement batch counter and notify waiter
+            if (m_batchPending.fetch_sub(1, std::memory_order_acq_rel) == 1)
+            {
+                std::lock_guard<std::mutex> lk(m_batchMutex);
+                m_batchCv.notify_one();
+            }
+        });
+    }
+
+    // Wait for the entire batch to finish
+    {
+        std::unique_lock<std::mutex> lk(m_batchMutex);
+        m_batchCv.wait(lk, [this]() { return m_batchPending.load(std::memory_order_acquire) <= 0; });
+    }
+
+    // Finalize sequentially on the calling thread
+    for (size_t i = 0; i < count; ++i)
+    {
+        auto& raw = rawResults[i];
+        if (!raw.success)
+        {
+            if (!raw.errorMessage.empty())
+            {
+                logger.log(Logger::Category::AssetManagement,
+                    "loadBatchParallel: " + raw.errorMessage, Logger::LogLevel::WARNING);
+            }
+            continue;
+        }
+        const std::string loadedPath = raw.path;
+        unsigned int id = finalizeAssetLoad(std::move(raw));
+        if (id != 0)
+        {
+            results[loadedPath] = static_cast<int>(id);
+        }
+    }
+
+    logger.log(Logger::Category::AssetManagement,
+        "loadBatchParallel: completed. loaded=" + std::to_string(results.size()),
+        Logger::LogLevel::INFO);
+
+    return results;
 }

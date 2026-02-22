@@ -61,6 +61,7 @@ public:
 	const std::vector<ECS::Entity>& getEntities() const;
 	const std::vector<ECS::Entity>& getScriptEntities() const;
 	void registerEntityListChangedCallback(std::function<void()> callback);
+	void setOnDirtyCallback(std::function<void()> callback) { m_onDirtyCallback = std::move(callback); }
 
 	void setEditorCameraPosition(const Vec3& pos) { m_editorCameraPosition = pos; }
 	const Vec3& getEditorCameraPosition() const { return m_editorCameraPosition; }
@@ -68,6 +69,15 @@ public:
 	const Vec2& getEditorCameraRotation() const { return m_editorCameraRotation; }
 	bool hasEditorCamera() const { return m_hasEditorCamera; }
 	void setHasEditorCamera(bool has) { m_hasEditorCamera = has; }
+
+	void setSkyboxPath(const std::string& path)
+	{
+		if (m_skyboxPath == path) return;
+		m_skyboxPath = path;
+		setIsSaved(false);
+		if (m_onDirtyCallback) m_onDirtyCallback();
+	}
+	const std::string& getSkyboxPath() const { return m_skyboxPath; }
 
 	struct EntitySnapshot
 	{
@@ -90,6 +100,7 @@ private:
 	std::vector<ECS::Entity> m_scriptEntities;
 	bool m_scriptEntitiesPrepared{ false };
 	std::vector<std::function<void()>> m_entityListChangedCallbacks;
+	std::function<void()> m_onDirtyCallback;
 	bool m_suppressEntityListNotifications{ false };
 	json m_levelData;
 	std::string m_levelScriptPath;
@@ -101,4 +112,5 @@ private:
 	Vec3 m_editorCameraPosition{};
 	Vec2 m_editorCameraRotation{};
 	bool m_hasEditorCamera{ false };
+	std::string m_skyboxPath;
 };

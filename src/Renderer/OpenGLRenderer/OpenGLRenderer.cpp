@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstring>
 #include <unordered_set>
+#include <fstream>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
@@ -20,6 +21,7 @@
 
 #include "../../Diagnostics/DiagnosticsManager.h"
 #include "../../Core/EngineLevel.h"
+#include "../../AssetManager/AssetManager.h"
 
 #include "../RenderResourceManager.h"
 
@@ -255,6 +257,7 @@ void OpenGLRenderer::shutdown()
     }
     releaseHzbResources();
     releaseBoundsDebugResources();
+    releaseSkyboxResources();
     releaseShadowResources();
     releasePointShadowResources();
     releasePickFbo();
@@ -380,6 +383,7 @@ bool OpenGLRenderer::initialize()
     glEnable(GL_DEPTH_TEST);
 
     m_initialized = true;
+    m_uiManager.setRenderer(this);
     logger.log(Logger::Category::Rendering, "Initialisation of the OpenGL renderer complete.", Logger::LogLevel::INFO);
 
     glGenQueries(static_cast<GLsizei>(m_gpuTimerQueries.size()), m_gpuTimerQueries.data());
@@ -622,6 +626,9 @@ void OpenGLRenderer::renderWorld()
         m_cachedLevel = level;
         m_textRenderer.reset();
         m_restoreCameraOnPrepare = true;
+        // Reset cached skybox path so setSkyboxPath re-loads for the new level
+        m_skyboxLoadedPath.clear();
+        setSkyboxPath(level->getSkyboxPath());
     }
 
     if (!diagnostics.isScenePrepared())
@@ -629,6 +636,14 @@ void OpenGLRenderer::renderWorld()
         if (m_resourceManager.prepareActiveLevel())
         {
             diagnostics.setScenePrepared(true);
+        }
+
+        // (Re-)load skybox if the level has one but it is not loaded yet
+        const std::string& levelSkybox = level->getSkyboxPath();
+        if (!levelSkybox.empty() && (m_skyboxCubemap == 0 || m_skyboxLoadedPath != levelSkybox))
+        {
+            m_skyboxLoadedPath.clear();
+            setSkyboxPath(levelSkybox);
         }
 
         auto& ecs = ECS::ECSManager::Instance();
@@ -662,7 +677,7 @@ void OpenGLRenderer::renderWorld()
                 renderEntitySet.insert(re.entity);
         }
 
-        const auto meshRenderables = m_resourceManager.buildRenderablesForSchema(meshSchema);
+        const auto meshRenderables = m_resourceManager.buildRenderablesForSchema(meshSchema, "grid_fragment.glsl");
         m_meshEntries.reserve(meshRenderables.size());
         for (const auto& renderable : meshRenderables)
         {
@@ -743,6 +758,10 @@ void OpenGLRenderer::renderWorld()
 	m_lastViewMatrix = view;
 	const auto frustumPlanes = ExtractFrustumPlanes(viewProj);
 
+	// Render skybox before scene (depth write disabled, drawn at depth=1)
+	glEnable(GL_DEPTH_TEST);
+	renderSkybox(view, m_projectionMatrix);
+
 	const uint64_t ecsStartCounter = SDL_GetPerformanceCounter();
 	glm::vec3 lightPosition{ 0.0f, 1.2f, 0.0f };
 	glm::vec3 lightColor{ 1.0f, 1.0f, 1.0f };
@@ -810,36 +829,29 @@ void OpenGLRenderer::renderWorld()
 	const uint64_t freq = SDL_GetPerformanceFrequency();
 	m_cpuEcsMs = (freq > 0) ? (static_cast<double>(ecsEndCounter - ecsStartCounter) * 1000.0 / static_cast<double>(freq)) : 0.0;
 
-	// Pre-compute model matrices for ECS render entries
-	for (auto& entry : m_renderEntries)
+	// Pre-compute model matrices for all entry lists
+	const auto updateModelMatrices = [&ecs](std::vector<RenderEntry>& entries)
 	{
-		if (entry.entity != 0)
+		for (auto& entry : entries)
 		{
-			if (const auto* transform = ecs.getComponent<ECS::TransformComponent>(entry.entity))
+			if (entry.entity != 0)
 			{
-				entry.transform = *transform;
+				if (const auto* transform = ecs.getComponent<ECS::TransformComponent>(entry.entity))
+				{
+					entry.transform = *transform;
+				}
 			}
+			auto& m = entry.cachedModelMatrix;
+			m = glm::mat4(1.0f);
+			m = glm::translate(m, glm::vec3(entry.transform.position[0], entry.transform.position[1], entry.transform.position[2]));
+			m = glm::rotate(m, glm::radians(entry.transform.rotation[0]), glm::vec3(1.0f, 0.0f, 0.0f));
+			m = glm::rotate(m, glm::radians(entry.transform.rotation[1]), glm::vec3(0.0f, 1.0f, 0.0f));
+			m = glm::rotate(m, glm::radians(entry.transform.rotation[2]), glm::vec3(0.0f, 0.0f, 1.0f));
+			m = glm::scale(m, glm::vec3(entry.transform.scale[0], entry.transform.scale[1], entry.transform.scale[2]));
 		}
-		auto& modelMatrix = entry.cachedModelMatrix;
-		modelMatrix = glm::mat4(1.0f);
-		modelMatrix = glm::translate(modelMatrix, glm::vec3(entry.transform.position[0], entry.transform.position[1], entry.transform.position[2]));
-		modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[0]), glm::vec3(1.0f, 0.0f, 0.0f));
-		modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[1]), glm::vec3(0.0f, 1.0f, 0.0f));
-		modelMatrix = glm::rotate(modelMatrix, glm::radians(entry.transform.rotation[2]), glm::vec3(0.0f, 0.0f, 1.0f));
-		modelMatrix = glm::scale(modelMatrix, glm::vec3(entry.transform.scale[0], entry.transform.scale[1], entry.transform.scale[2]));
-	}
-
-	// Pre-compute model matrices for mesh entries
-	for (auto& entry : m_meshEntries)
-	{
-		auto& m = entry.cachedModelMatrix;
-		m = glm::mat4(1.0f);
-		m = glm::translate(m, glm::vec3(entry.transform.position[0], entry.transform.position[1], entry.transform.position[2]));
-		m = glm::rotate(m, glm::radians(entry.transform.rotation[0]), glm::vec3(1.0f, 0.0f, 0.0f));
-		m = glm::rotate(m, glm::radians(entry.transform.rotation[1]), glm::vec3(0.0f, 1.0f, 0.0f));
-		m = glm::rotate(m, glm::radians(entry.transform.rotation[2]), glm::vec3(0.0f, 0.0f, 1.0f));
-		m = glm::scale(m, glm::vec3(entry.transform.scale[0], entry.transform.scale[1], entry.transform.scale[2]));
-	}
+	};
+	updateModelMatrices(m_renderEntries);
+	updateModelMatrices(m_meshEntries);
 
 	const auto& objs = level->getWorldObjects();
 	const auto& groups = level->getGroups();
@@ -1127,6 +1139,10 @@ void OpenGLRenderer::renderWorld()
 	}
 
 	// Render sorted draw list
+	if (m_wireframeEnabled)
+	{
+		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	}
 	GLuint lastProgram = 0;
 	for (const auto& cmd : m_drawList)
 	{
@@ -1159,6 +1175,11 @@ void OpenGLRenderer::renderWorld()
 			drawBoundsDebugBox(center, extent, viewProj);
 			lastProgram = 0;
 		}
+	}
+
+	if (m_wireframeEnabled)
+	{
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 	}
 
 	// Build HZB from current frame's depth buffer for next frame's occlusion tests
@@ -1572,6 +1593,48 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             if (m_uiDebugEnabled) drawUIOutline(x0,y0,x1,y1,Vec4{0.9f,0.5f,0.2f,1.0f},uiProjection,prog);
             return;
         }
+        if (element.type == WidgetElementType::DropdownButton)
+        {
+            const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+            const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+            const GLuint prog = getUIQuadProgram(vp, fp);
+            drawUIPanel(x0,y0,x1,y1,element.color,uiProjection,prog,element.hoverColor,element.isHovered);
+            const float sc=(element.fontSize>0.0f)?element.fontSize/48.0f:14.0f/48.0f;
+
+            // Draw image icon (if set, like a Button)
+            if (!element.imagePath.empty() && element.textureId != 0)
+            {
+                const float imgSize=std::min(widthPx-element.padding.x*2.0f-12.0f,heightPx-element.padding.y*2.0f);
+                if (imgSize>0.0f)
+                {
+                    const float ix0=x0+element.padding.x, iy0=y0+(heightPx-imgSize)*0.5f;
+                    drawUIImage(ix0,iy0,ix0+imgSize,iy0+imgSize,element.textureId,uiProjection,element.textColor);
+                }
+            }
+
+            // Draw text
+            if (!element.text.empty())
+            {
+                const Vec2 ts=m_textRenderer->measureText(element.text,sc);
+                float tx=x0+element.padding.x;
+                if (!element.imagePath.empty() && element.textureId!=0)
+                {
+                    const float imgSize=std::min(widthPx-element.padding.x*2.0f-12.0f,heightPx-element.padding.y*2.0f);
+                    tx+=imgSize+4.0f;
+                }
+                const float ty=y0+(heightPx-ts.y)*0.5f;
+                m_textRenderer->drawText(element.text,Vec2{tx,ty},sc,element.textColor);
+            }
+
+            // Draw small down-arrow indicator on the right
+            const float arrowSize=std::min(heightPx*0.3f,6.0f);
+            const float arrowX=x1-element.padding.x-arrowSize;
+            const float arrowY=y0+(heightPx-arrowSize)*0.5f;
+            drawUIPanel(arrowX,arrowY,arrowX+arrowSize,arrowY+arrowSize,element.textColor,uiProjection,prog,element.textColor,false);
+
+            if (m_uiDebugEnabled) drawUIOutline(x0,y0,x1,y1,Vec4{0.9f,0.7f,0.1f,1.0f},uiProjection,prog);
+            return;
+        }
         if (element.type == WidgetElementType::DropDown)
         {
             const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
@@ -1702,6 +1765,30 @@ void OpenGLRenderer::ensurePopupUIVao()
 void OpenGLRenderer::renderPopupWindows()
 {
     if (m_popupWindows.empty()) return;
+
+    // Clean up popups that have been marked as closed (deferred destruction).
+    for (auto it = m_popupWindows.begin(); it != m_popupWindows.end(); )
+    {
+        if (it->second && !it->second->isOpen())
+        {
+            it->second->destroy();
+            it = m_popupWindows.erase(it);
+
+            // The popup's GL context was destroyed, invalidating context-local VAOs.
+            // Reset handles so they get recreated for the next popup.
+            m_popupUiVao = 0;
+            if (m_textRenderer)
+            {
+                m_textRenderer->resetPopupVao();
+            }
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
+    if (m_popupWindows.empty()) return;
     if (!m_textRenderer) return;
 
     // Ensure main context resources are ready before we switch contexts.
@@ -1715,8 +1802,9 @@ void OpenGLRenderer::renderPopupWindows()
 
         SDL_GL_MakeCurrent(popup->sdlWindow(), popup->glContext());
 
-        // Create the popup-context VAO on first use.
+        // Create context-local VAOs on first use (VAOs are not shared between GL contexts).
         ensurePopupUIVao();
+        m_textRenderer->ensurePopupVao();
 
         popup->refreshSize();
         const int pw = popup->width();
@@ -1732,13 +1820,15 @@ void OpenGLRenderer::renderPopupWindows()
         glClearColor(0.13f, 0.13f, 0.16f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        // Temporarily swap in the popup VAO so drawUIPanel/drawUIImage use it.
+        // Temporarily swap in the popup VAOs so drawUIPanel/drawUIImage/drawText use them.
         const GLuint savedVao = m_uiQuadVao;
         m_uiQuadVao = m_popupUiVao;
+        const GLuint savedTextVao = m_textRenderer->swapVao(m_textRenderer->getPopupVao());
 
         drawUIWidgetsToFramebuffer(popup->uiManager(), pw, ph);
 
         m_uiQuadVao = savedVao;
+        m_textRenderer->swapVao(savedTextVao);
 
         SDL_GL_SwapWindow(popup->sdlWindow());
     }
@@ -1785,10 +1875,15 @@ void OpenGLRenderer::closePopupWindow(const std::string& id)
     auto it = m_popupWindows.find(id);
     if (it != m_popupWindows.end())
     {
-        it->second->destroy();
-        m_popupWindows.erase(it);
+        // Mark for deferred destruction in renderPopupWindows().
+        // Immediate destruction is unsafe when called from within event routing
+        // (the popup's UIManager and SDL window may still be referenced on the stack).
+        if (it->second)
+        {
+            it->second->close();
+        }
         Logger::Instance().log(Logger::Category::Rendering,
-            "Popup window closed: " + id, Logger::LogLevel::INFO);
+            "Popup window closing: " + id, Logger::LogLevel::INFO);
     }
 }
 
@@ -1862,6 +1957,8 @@ bool OpenGLRenderer::routeEventToPopup(SDL_Event& event)
             return true;
         case SDL_EVENT_KEY_DOWN:
             uiMgr.handleKeyDown(event.key.key);
+            return true;
+        case SDL_EVENT_KEY_UP:
             return true;
         default: break;
         }
@@ -3095,6 +3192,308 @@ void OpenGLRenderer::releaseBoundsDebugResources()
     m_boundsDebugVertexCount = 0;
 }
 
+// ---- Skybox ----
+
+static const float kSkyboxVertices[] = {
+    -1, 1,-1, -1,-1,-1, 1,-1,-1,  1,-1,-1,  1, 1,-1, -1, 1,-1,
+    -1,-1, 1, -1,-1,-1, -1, 1,-1, -1, 1,-1, -1, 1, 1, -1,-1, 1,
+     1,-1,-1,  1,-1, 1,  1, 1, 1,  1, 1, 1,  1, 1,-1,  1,-1,-1,
+    -1,-1, 1, -1, 1, 1,  1, 1, 1,  1, 1, 1,  1,-1, 1, -1,-1, 1,
+    -1, 1,-1,  1, 1,-1,  1, 1, 1,  1, 1, 1, -1, 1, 1, -1, 1,-1,
+    -1,-1,-1, -1,-1, 1,  1,-1,-1,  1,-1,-1, -1,-1, 1,  1,-1, 1
+};
+
+bool OpenGLRenderer::ensureSkyboxResources()
+{
+    if (m_skyboxProgram != 0)
+        return true;
+
+    const char* vs = R"(
+#version 460 core
+layout(location=0) in vec3 aPos;
+out vec3 vTexCoord;
+uniform mat4 uProjection;
+uniform mat4 uView;
+void main(){
+    vTexCoord = aPos;
+    vec4 pos = uProjection * uView * vec4(aPos, 1.0);
+    gl_Position = pos.xyww;
+})";
+    const char* fs = R"(
+#version 460 core
+in vec3 vTexCoord;
+out vec4 FragColor;
+uniform samplerCube uSkybox;
+void main(){
+    FragColor = texture(uSkybox, vTexCoord);
+})";
+
+    GLuint vsh = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vsh, 1, &vs, nullptr);
+    glCompileShader(vsh);
+    GLuint fsh = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fsh, 1, &fs, nullptr);
+    glCompileShader(fsh);
+    m_skyboxProgram = glCreateProgram();
+    glAttachShader(m_skyboxProgram, vsh);
+    glAttachShader(m_skyboxProgram, fsh);
+    glLinkProgram(m_skyboxProgram);
+    glDeleteShader(vsh);
+    glDeleteShader(fsh);
+
+    m_skyboxLocProjection = glGetUniformLocation(m_skyboxProgram, "uProjection");
+    m_skyboxLocView = glGetUniformLocation(m_skyboxProgram, "uView");
+    m_skyboxLocSampler = glGetUniformLocation(m_skyboxProgram, "uSkybox");
+
+    glGenVertexArrays(1, &m_skyboxVao);
+    glGenBuffers(1, &m_skyboxVbo);
+    glBindVertexArray(m_skyboxVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_skyboxVbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(kSkyboxVertices), kSkyboxVertices, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
+    glBindVertexArray(0);
+
+    return true;
+}
+
+void OpenGLRenderer::releaseSkyboxResources()
+{
+    if (m_skyboxProgram) { glDeleteProgram(m_skyboxProgram); m_skyboxProgram = 0; }
+    if (m_skyboxVbo)     { glDeleteBuffers(1, &m_skyboxVbo); m_skyboxVbo = 0; }
+    if (m_skyboxVao)     { glDeleteVertexArrays(1, &m_skyboxVao); m_skyboxVao = 0; }
+    if (m_skyboxCubemap) { glDeleteTextures(1, &m_skyboxCubemap); m_skyboxCubemap = 0; }
+    m_skyboxLoadedPath.clear();
+}
+
+bool OpenGLRenderer::loadSkyboxCubemap(const std::string& folderPath)
+{
+    if (folderPath.empty())
+    {
+        if (m_skyboxCubemap) { glDeleteTextures(1, &m_skyboxCubemap); m_skyboxCubemap = 0; }
+        m_skyboxLoadedPath.clear();
+        return false;
+    }
+    if (folderPath == m_skyboxLoadedPath && m_skyboxCubemap != 0)
+        return true;
+
+    // Each face slot has a list of alternative file names (e.g. top/up, bottom/down)
+    // Standard cubemap order: +X, -X, +Y, -Y, +Z, -Z
+    struct FaceSlot { std::vector<std::string> names; GLenum target; };
+    const FaceSlot faceSlots[6] = {
+        { { "right" },          GL_TEXTURE_CUBE_MAP_POSITIVE_X },
+        { { "left" },           GL_TEXTURE_CUBE_MAP_NEGATIVE_X },
+        { { "top", "up" },     GL_TEXTURE_CUBE_MAP_POSITIVE_Y },
+        { { "bottom", "down" },GL_TEXTURE_CUBE_MAP_NEGATIVE_Y },
+        { { "front" },          GL_TEXTURE_CUBE_MAP_NEGATIVE_Z },
+        { { "back" },           GL_TEXTURE_CUBE_MAP_POSITIVE_Z }
+    };
+    const std::string extensions[3] = { ".jpg", ".png", ".bmp" };
+
+    if (m_skyboxCubemap) { glDeleteTextures(1, &m_skyboxCubemap); m_skyboxCubemap = 0; }
+
+    glGenTextures(1, &m_skyboxCubemap);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyboxCubemap);
+
+    auto& assetMgr = AssetManager::Instance();
+    bool allLoaded = true;
+
+    for (int i = 0; i < 6; ++i)
+    {
+        bool loaded = false;
+        for (const auto& name : faceSlots[i].names)
+        {
+            for (const auto& ext : extensions)
+            {
+                const std::string filePath = (std::filesystem::path(folderPath) / (name + ext)).string();
+                if (!std::filesystem::exists(filePath))
+                    continue;
+                int w = 0, h = 0, ch = 0;
+                unsigned char* data = assetMgr.loadRawImageData(filePath, w, h, ch);
+                if (data && w > 0 && h > 0)
+                {
+                    GLenum format = (ch == 4) ? GL_RGBA : GL_RGB;
+                    glTexImage2D(faceSlots[i].target, 0, GL_RGBA8, w, h, 0, format, GL_UNSIGNED_BYTE, data);
+                    assetMgr.freeRawImageData(data);
+                    loaded = true;
+                    break;
+                }
+                if (data) assetMgr.freeRawImageData(data);
+            }
+            if (loaded) break;
+        }
+        if (!loaded)
+        {
+            Logger::Instance().log(Logger::Category::Rendering,
+                "Skybox: missing face '" + faceSlots[i].names.front() + "' in " + folderPath, Logger::LogLevel::WARNING);
+            allLoaded = false;
+        }
+    }
+
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+    if (!allLoaded)
+    {
+        glDeleteTextures(1, &m_skyboxCubemap);
+        m_skyboxCubemap = 0;
+        return false;
+    }
+
+    return true;
+}
+
+void OpenGLRenderer::setSkyboxPath(const std::string& pathOrFolder)
+{
+    if (pathOrFolder.empty())
+    {
+        loadSkyboxCubemap("");
+        m_skyboxLoadedPath.clear();
+        return;
+    }
+
+    if (pathOrFolder == m_skyboxLoadedPath && m_skyboxCubemap != 0)
+        return;
+
+    // If the path ends with .asset, resolve to the folder path from the asset data
+    if (pathOrFolder.size() > 6 && pathOrFolder.substr(pathOrFolder.size() - 6) == ".asset")
+    {
+        auto& assetMgr = AssetManager::Instance();
+        const std::string absPath = assetMgr.getAbsoluteContentPath(pathOrFolder);
+        if (absPath.empty())
+        {
+            Logger::Instance().log(Logger::Category::Rendering,
+                "Skybox: failed to resolve asset path '" + pathOrFolder + "'", Logger::LogLevel::WARNING);
+            loadSkyboxCubemap("");
+            m_skyboxLoadedPath.clear();
+            return;
+        }
+
+        std::ifstream in(absPath, std::ios::binary);
+        if (!in.is_open())
+        {
+            Logger::Instance().log(Logger::Category::Rendering,
+                "Skybox: cannot open asset file '" + absPath + "'", Logger::LogLevel::WARNING);
+            loadSkyboxCubemap("");
+            m_skyboxLoadedPath.clear();
+            return;
+        }
+
+        json fileJson;
+        try { fileJson = json::parse(in); } catch (...) { loadSkyboxCubemap(""); m_skyboxLoadedPath.clear(); return; }
+        in.close();
+
+        if (!fileJson.is_object() || !fileJson.contains("data"))
+        {
+            loadSkyboxCubemap("");
+            m_skyboxLoadedPath.clear();
+            return;
+        }
+        const auto& data = fileJson.at("data");
+
+        // Try folderPath first (absolute or project-relative)
+        if (data.is_object() && data.contains("folderPath") && data.at("folderPath").is_string())
+        {
+            const std::string folder = data.at("folderPath").get<std::string>();
+            auto& diagnostics = DiagnosticsManager::Instance();
+            const std::string absFolder = (std::filesystem::path(diagnostics.getProjectInfo().projectPath) / folder).lexically_normal().string();
+            if (loadSkyboxCubemap(absFolder))
+            {
+                m_skyboxLoadedPath = pathOrFolder;
+            }
+            else
+            {
+                Logger::Instance().log(Logger::Category::Rendering,
+                    "Skybox: failed to load cubemap from '" + absFolder + "'", Logger::LogLevel::WARNING);
+                m_skyboxLoadedPath.clear();
+            }
+            return;
+        }
+
+        // Fallback: try to resolve individual face paths
+        if (data.is_object() && data.contains("faces") && data.at("faces").is_object())
+        {
+            const auto& faces = data.at("faces");
+            for (const auto& [key, val] : faces.items())
+            {
+                if (val.is_string() && !val.get<std::string>().empty())
+                {
+                    std::filesystem::path facePath(val.get<std::string>());
+                    std::string folder = facePath.parent_path().string();
+                    std::string absFolder = assetMgr.getAbsoluteContentPath(folder);
+                    if (!absFolder.empty())
+                    {
+                        absFolder = std::filesystem::path(absFolder).lexically_normal().string();
+                        if (loadSkyboxCubemap(absFolder))
+                        {
+                            m_skyboxLoadedPath = pathOrFolder;
+                        }
+                        else
+                        {
+                            m_skyboxLoadedPath.clear();
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+
+        loadSkyboxCubemap("");
+        m_skyboxLoadedPath.clear();
+        return;
+    }
+
+    // Direct folder path — try as-is first, then resolve via Content path
+    std::string resolvedFolder = std::filesystem::path(pathOrFolder).lexically_normal().string();
+    if (loadSkyboxCubemap(resolvedFolder))
+    {
+        m_skyboxLoadedPath = pathOrFolder;
+        return;
+    }
+
+    // Path may be content-relative — resolve through AssetManager
+    const std::string contentResolved = AssetManager::Instance().getAbsoluteContentPath(pathOrFolder);
+    if (!contentResolved.empty() && loadSkyboxCubemap(std::filesystem::path(contentResolved).lexically_normal().string()))
+    {
+        m_skyboxLoadedPath = pathOrFolder;
+    }
+    else
+    {
+        Logger::Instance().log(Logger::Category::Rendering,
+            "Skybox: failed to load from folder '" + pathOrFolder + "'", Logger::LogLevel::WARNING);
+        m_skyboxLoadedPath.clear();
+    }
+}
+
+void OpenGLRenderer::renderSkybox(const glm::mat4& view, const glm::mat4& projection)
+{
+    if (m_skyboxCubemap == 0 || !ensureSkyboxResources())
+        return;
+
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_FALSE);
+
+    glUseProgram(m_skyboxProgram);
+    // Strip translation from view matrix
+    glm::mat4 skyView = glm::mat4(glm::mat3(view));
+    glUniformMatrix4fv(m_skyboxLocProjection, 1, GL_FALSE, &projection[0][0]);
+    glUniformMatrix4fv(m_skyboxLocView, 1, GL_FALSE, &skyView[0][0]);
+    glUniform1i(m_skyboxLocSampler, 0);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyboxCubemap);
+
+    glBindVertexArray(m_skyboxVao);
+    glDrawArrays(GL_TRIANGLES, 0, 36);
+    glBindVertexArray(0);
+
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LESS);
+}
+
 // ---- Shadow Mapping ----
 
 bool OpenGLRenderer::ensureShadowResources()
@@ -3910,6 +4309,15 @@ void OpenGLRenderer::drawUIOutline(float x0, float y0, float x1, float y1, const
     glLineWidth(1.0f);
     drawUIPanel(x0, y0, x1, y1, color, projection, program, color, false);
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+}
+
+void OpenGLRenderer::setVSyncEnabled(bool enabled)
+{
+    m_vsyncEnabled = enabled;
+    if (m_window)
+    {
+        SDL_GL_SetSwapInterval(enabled ? 1 : 0);
+    }
 }
 
 GLuint OpenGLRenderer::getOrLoadUITexture(const std::string& path)

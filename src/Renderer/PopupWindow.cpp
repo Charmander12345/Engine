@@ -39,6 +39,7 @@ bool PopupWindow::create(const std::string& title, int width, int height)
 
     m_open = true;
     SDL_ShowWindow(m_window);
+    SDL_StartTextInput(m_window);
     return true;
 }
 
@@ -51,6 +52,7 @@ void PopupWindow::destroy()
     }
     if (m_window)
     {
+        SDL_StopTextInput(m_window);
         SDL_DestroyWindow(m_window);
         m_window = nullptr;
     }

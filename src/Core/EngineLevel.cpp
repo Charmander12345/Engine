@@ -42,6 +42,11 @@ void EngineLevel::setLevelData(const json& data)
 			m_hasEditorCamera = true;
 		}
 	}
+	m_skyboxPath.clear();
+	if (m_levelData.is_object() && m_levelData.contains("Skybox") && m_levelData.at("Skybox").is_string())
+	{
+		m_skyboxPath = m_levelData.at("Skybox").get<std::string>();
+	}
 	m_ecsPrepared = false;
 }
 
@@ -455,6 +460,15 @@ void EngineLevel::onEntityAdded(ECS::Entity entity)
 
 	if (!m_suppressEntityListNotifications)
 	{
+		setIsSaved(false);
+		if (m_onDirtyCallback)
+		{
+			m_onDirtyCallback();
+		}
+	}
+
+	if (!m_suppressEntityListNotifications)
+	{
 		for (auto& callback : m_entityListChangedCallbacks)
 		{
 			if (callback)
@@ -473,6 +487,16 @@ void EngineLevel::onEntityRemoved(ECS::Entity entity)
 	}
 	m_entities.erase(std::remove(m_entities.begin(), m_entities.end(), entity), m_entities.end());
 	m_scriptEntities.erase(std::remove(m_scriptEntities.begin(), m_scriptEntities.end(), entity), m_scriptEntities.end());
+
+	if (!m_suppressEntityListNotifications)
+	{
+		setIsSaved(false);
+		if (m_onDirtyCallback)
+		{
+			m_onDirtyCallback();
+		}
+	}
+
 	if (!m_suppressEntityListNotifications)
 	{
 		for (auto& callback : m_entityListChangedCallbacks)

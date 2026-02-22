@@ -68,6 +68,7 @@ target_include_directories(Renderer
         ${CMAKE_SOURCE_DIR}/src/Core
         ${CMAKE_SOURCE_DIR}/src/AssetManager
         ${CMAKE_SOURCE_DIR}/external/SDL3/include
+        ${CMAKE_SOURCE_DIR}/src/Landscape
 )
 
 target_link_libraries(Renderer
@@ -77,6 +78,7 @@ target_link_libraries(Renderer
         Logger
         Core
         AssetManager
+        Landscape
         ${Python3_LIBRARY_RELEASE}
 )
 

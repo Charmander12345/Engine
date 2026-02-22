@@ -17,6 +17,7 @@ public:
 
     bool prepare();
     void setMaterialCacheKeySuffix(const std::string& suffix) { m_materialCacheKeySuffix = suffix; }
+    void setFragmentShaderOverride(const std::string& name) { m_fragmentShaderOverride = name; }
     void setMatrices(const glm::mat4& model, const glm::mat4& view, const glm::mat4& projection);
     void setLightData(const glm::vec3& position, const glm::vec3& color, float intensity);
     void setLights(const std::vector<OpenGLMaterial::LightData>& lights);
@@ -41,6 +42,7 @@ private:
     std::shared_ptr<AssetData> m_asset;
     std::shared_ptr<OpenGLMaterial> m_material;
     std::string m_materialCacheKeySuffix;
+    std::string m_fragmentShaderOverride;
     glm::vec3 m_localBoundsMin{0.0f};
     glm::vec3 m_localBoundsMax{0.0f};
     bool m_hasLocalBounds{false};

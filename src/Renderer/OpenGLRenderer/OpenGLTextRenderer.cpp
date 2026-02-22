@@ -12,6 +12,11 @@
 
 OpenGLTextRenderer::~OpenGLTextRenderer()
 {
+    if (m_popupVao)
+    {
+        glDeleteVertexArrays(1, &m_popupVao);
+        m_popupVao = 0;
+    }
     if (m_vbo)
     {
         glDeleteBuffers(1, &m_vbo);
@@ -244,6 +249,22 @@ float OpenGLTextRenderer::getLineHeight(float scale) const
         return lineHeight * scale;
     }
     return 48.0f * scale;
+}
+
+void OpenGLTextRenderer::ensurePopupVao()
+{
+    if (m_popupVao != 0) return;
+    if (m_vbo == 0) return;
+
+    glGenVertexArrays(1, &m_popupVao);
+    glBindVertexArray(m_popupVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), reinterpret_cast<void*>(0));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), reinterpret_cast<void*>(2 * sizeof(float)));
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
 }
 
 bool OpenGLTextRenderer::buildGlyphAtlas(const std::string& fontPath)

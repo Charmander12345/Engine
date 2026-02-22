@@ -18,6 +18,9 @@
 #include "UIWidgets/SeparatorWidget.h"
 #include "../AssetManager/AssetManager.h"
 #include "../AssetManager/AssetTypes.h"
+#include "OpenGLRenderer/OpenGLRenderer.h"
+#include "PopupWindow.h"
+#include "../Landscape/LandscapeManager.h"
 
 namespace
 {
@@ -295,6 +298,25 @@ namespace
             const Vec2 textSize = (!display.empty() && measureText) ? measureText(display, scale) : Vec2{};
             size.x = textSize.x + element.padding.x * 2.0f + 16.0f;
             size.y = textSize.y + element.padding.y * 2.0f;
+            size.x = std::max(size.x, element.minSize.x);
+            size.y = std::max(size.y, element.minSize.y);
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
+        case WidgetElementType::DropdownButton:
+        {
+            const float scale = (element.fontSize > 0.0f) ? (element.fontSize / 48.0f) : 14.0f / 48.0f;
+            const Vec2 textSize = (!element.text.empty() && measureText) ? measureText(element.text, scale) : Vec2{};
+            // Text + padding + arrow indicator space (12px)
+            size.x = textSize.x + element.padding.x * 2.0f + 12.0f;
+            size.y = textSize.y + element.padding.y * 2.0f;
+            if (!element.imagePath.empty() && element.text.empty())
+            {
+                const float imgDefault = 24.0f;
+                size.x = std::max(size.x, imgDefault + element.padding.x * 2.0f + 12.0f);
+                size.y = std::max(size.y, imgDefault + element.padding.y * 2.0f);
+            }
             size.x = std::max(size.x, element.minSize.x);
             size.y = std::max(size.y, element.minSize.y);
             element.contentSizePixels = size;
@@ -993,6 +1015,156 @@ void UIManager::closeModalMessage()
     }
 }
 
+void UIManager::showConfirmDialog(const std::string& message, std::function<void()> onConfirm, std::function<void()> onCancel)
+{
+    if (message.empty())
+    {
+        return;
+    }
+
+    auto confirmCb = std::make_shared<std::function<void()>>(std::move(onConfirm));
+    auto cancelCb = std::make_shared<std::function<void()>>(std::move(onCancel));
+
+    if (!m_modalWidget)
+    {
+        m_modalWidget = std::make_shared<Widget>();
+        m_modalWidget->setName("ModalMessage");
+        m_modalWidget->setAnchor(WidgetAnchor::TopLeft);
+        m_modalWidget->setFillX(true);
+        m_modalWidget->setFillY(true);
+        m_modalWidget->setZOrder(10000);
+    }
+
+    WidgetElement overlay{};
+    overlay.id = "Modal.Overlay";
+    overlay.type = WidgetElementType::Panel;
+    overlay.from = Vec2{ 0.0f, 0.0f };
+    overlay.to = Vec2{ 1.0f, 1.0f };
+    overlay.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.45f };
+    overlay.isHitTestable = true;
+    overlay.runtimeOnly = true;
+
+    WidgetElement panel{};
+    panel.id = "Modal.Panel";
+    panel.type = WidgetElementType::StackPanel;
+    panel.from = Vec2{ 0.25f, 0.32f };
+    panel.to = Vec2{ 0.75f, 0.68f };
+    panel.padding = Vec2{ 20.0f, 16.0f };
+    panel.orientation = StackOrientation::Vertical;
+    panel.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.95f };
+    panel.isHitTestable = false;
+    panel.runtimeOnly = true;
+
+    WidgetElement msgText{};
+    msgText.id = "Modal.Text";
+    msgText.type = WidgetElementType::Text;
+    msgText.text = message;
+    msgText.font = "default.ttf";
+    msgText.fontSize = 16.0f;
+    msgText.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+    msgText.wrapText = true;
+    msgText.fillX = true;
+    msgText.fillY = true;
+    msgText.minSize = Vec2{ 0.0f, 36.0f };
+    msgText.runtimeOnly = true;
+
+    WidgetElement buttonRow{};
+    buttonRow.id = "Modal.ButtonRow";
+    buttonRow.type = WidgetElementType::StackPanel;
+    buttonRow.from = Vec2{ 0.0f, 0.0f };
+    buttonRow.to = Vec2{ 1.0f, 1.0f };
+    buttonRow.fillX = true;
+    buttonRow.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    buttonRow.minSize = Vec2{ 0.0f, 32.0f };
+    buttonRow.orientation = StackOrientation::Horizontal;
+    buttonRow.padding = Vec2{ 8.0f, 0.0f };
+    buttonRow.runtimeOnly = true;
+
+    WidgetElement spacerLeft{};
+    spacerLeft.id = "Modal.SpacerL";
+    spacerLeft.type = WidgetElementType::Panel;
+    spacerLeft.fillX = true;
+    spacerLeft.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    spacerLeft.runtimeOnly = true;
+
+    WidgetElement spacerMid{};
+    spacerMid.id = "Modal.SpacerM";
+    spacerMid.type = WidgetElementType::Panel;
+    spacerMid.fillX = true;
+    spacerMid.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    spacerMid.runtimeOnly = true;
+
+    WidgetElement spacerRight{};
+    spacerRight.id = "Modal.SpacerR";
+    spacerRight.type = WidgetElementType::Panel;
+    spacerRight.fillX = true;
+    spacerRight.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    spacerRight.runtimeOnly = true;
+
+    auto makeBtn = [](const std::string& id, const std::string& label, const Vec4& bgColor, const Vec4& hoverColor) {
+        WidgetElement btn{};
+        btn.id = id;
+        btn.type = WidgetElementType::Button;
+        btn.text = label;
+        btn.font = "default.ttf";
+        btn.fontSize = 14.0f;
+        btn.textAlignH = TextAlignH::Center;
+        btn.textAlignV = TextAlignV::Center;
+        btn.padding = Vec2{ 8.0f, 6.0f };
+        btn.minSize = Vec2{ 110.0f, 32.0f };
+        btn.color = bgColor;
+        btn.hoverColor = hoverColor;
+        btn.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+        btn.shaderVertex = "button_vertex.glsl";
+        btn.shaderFragment = "button_fragment.glsl";
+        btn.isHitTestable = true;
+        btn.runtimeOnly = true;
+        return btn;
+    };
+
+    WidgetElement yesBtn = makeBtn("Modal.Yes", "Delete",
+        Vec4{ 0.55f, 0.18f, 0.18f, 0.95f },
+        Vec4{ 0.70f, 0.22f, 0.22f, 1.0f });
+    yesBtn.onClicked = [this, confirmCb]()
+    {
+        closeModalMessage();
+        if (*confirmCb) (*confirmCb)();
+    };
+
+    WidgetElement noBtn = makeBtn("Modal.No", "Cancel",
+        Vec4{ 0.25f, 0.26f, 0.32f, 0.95f },
+        Vec4{ 0.35f, 0.36f, 0.42f, 0.98f });
+    noBtn.onClicked = [this, cancelCb]()
+    {
+        closeModalMessage();
+        if (*cancelCb) (*cancelCb)();
+    };
+
+    buttonRow.children.push_back(std::move(spacerLeft));
+    buttonRow.children.push_back(std::move(yesBtn));
+    buttonRow.children.push_back(std::move(spacerMid));
+    buttonRow.children.push_back(std::move(noBtn));
+    buttonRow.children.push_back(std::move(spacerRight));
+
+    panel.children.push_back(std::move(msgText));
+    panel.children.push_back(std::move(buttonRow));
+
+    std::vector<WidgetElement> elements;
+    elements.reserve(2);
+    elements.push_back(std::move(overlay));
+    elements.push_back(std::move(panel));
+    m_modalWidget->setElements(std::move(elements));
+    m_modalWidget->markLayoutDirty();
+
+    if (m_modalVisible)
+    {
+        unregisterWidget("ModalMessage");
+    }
+    registerWidget("ModalMessage", m_modalWidget);
+    m_modalVisible = true;
+    m_modalOnClosed = {};
+}
+
 void UIManager::showToastMessage(const std::string& message, float durationSeconds)
 {
     if (message.empty())
@@ -1396,6 +1568,7 @@ static const char* iconForAssetType(AssetType type)
     case AssetType::Audio:    return "sound.png";
     case AssetType::Script:   return "script.png";
     case AssetType::Shader:   return "shader.png";
+    case AssetType::Skybox:   return "texture.png";
     default:                  return "texture.png";
     }
 }
@@ -1414,6 +1587,7 @@ static Vec4 iconTintForAssetType(AssetType type)
     case AssetType::Shader:   return Vec4{ 0.75f, 0.50f, 1.00f, 1.0f }; // purple
     case AssetType::Level:    return Vec4{ 0.95f, 0.85f, 0.40f, 1.0f }; // gold
     case AssetType::Widget:   return Vec4{ 0.70f, 0.70f, 0.90f, 1.0f }; // lavender
+    case AssetType::Skybox:   return Vec4{ 0.40f, 0.75f, 0.95f, 1.0f }; // sky blue
     default:                  return Vec4{ 0.85f, 0.85f, 0.85f, 1.0f }; // light grey
     }
 }
@@ -1727,6 +1901,62 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
 
     builder.build(m_contentBrowserPath, 1);
 
+    // "Shaders" root node (project shaders directory, outside Content)
+    {
+        const std::filesystem::path shadersRoot =
+            std::filesystem::path(projectInfo.projectPath) / "Shaders";
+        if (std::filesystem::exists(shadersRoot))
+        {
+            const std::string shadersVirtualPath = "__Shaders__";
+            const std::string shadersId = "ContentBrowser.Dir.Shaders";
+            const bool expanded = m_expandedFolders.count(shadersVirtualPath) > 0;
+            WidgetElement shadersRow = makeTreeRow(shadersId, "Shaders", "folder.png", true, 0, Vec4{ 0.75f, 0.50f, 1.00f, 1.0f });
+            shadersRow.isExpanded = expanded;
+            if (m_selectedBrowserFolder == shadersVirtualPath)
+            {
+                shadersRow.color = Vec4{ 0.20f, 0.25f, 0.35f, 0.9f };
+            }
+            shadersRow.onClicked = [this, shadersVirtualPath]()
+            {
+                if (m_expandedFolders.count(shadersVirtualPath))
+                {
+                    if (m_selectedBrowserFolder == shadersVirtualPath)
+                        m_expandedFolders.erase(shadersVirtualPath);
+                }
+                else
+                {
+                    m_expandedFolders.insert(shadersVirtualPath);
+                }
+                m_selectedBrowserFolder = shadersVirtualPath;
+                refreshContentBrowser();
+            };
+            treePanel->children.push_back(std::move(shadersRow));
+
+            // If expanded, show shader files as tree rows
+            if (expanded)
+            {
+                std::vector<std::string> shaderFiles;
+                std::error_code ec;
+                for (const auto& fsEntry : std::filesystem::directory_iterator(shadersRoot, ec))
+                {
+                    if (fsEntry.is_regular_file())
+                    {
+                        shaderFiles.push_back(fsEntry.path().filename().string());
+                    }
+                }
+                std::sort(shaderFiles.begin(), shaderFiles.end());
+                for (const auto& fileName : shaderFiles)
+                {
+                    WidgetElement row = makeTreeRow(
+                        "ContentBrowser.Shader." + fileName,
+                        fileName, "shader.png", false, 1,
+                        Vec4{ 0.75f, 0.50f, 1.00f, 1.0f });
+                    treePanel->children.push_back(std::move(row));
+                }
+            }
+        }
+    }
+
     // ---- Populate Path Bar with breadcrumb buttons ----
     WidgetElement* pathBar = FindElementById(elements, "ContentBrowser.PathBar");
     if (pathBar)
@@ -1873,6 +2103,37 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
         gridPanel->scrollable = true;
 
         const std::string& gridFolder = m_selectedBrowserFolder;
+
+        // Handle Shaders virtual folder
+        const bool isShadersView = (gridFolder == "__Shaders__");
+        if (isShadersView)
+        {
+            const std::filesystem::path shadersDir =
+                std::filesystem::path(projectInfo.projectPath) / "Shaders";
+            if (std::filesystem::exists(shadersDir))
+            {
+                std::vector<std::string> shaderFiles;
+                std::error_code ec;
+                for (const auto& fsEntry : std::filesystem::directory_iterator(shadersDir, ec))
+                {
+                    if (fsEntry.is_regular_file())
+                    {
+                        shaderFiles.push_back(fsEntry.path().filename().string());
+                    }
+                }
+                std::sort(shaderFiles.begin(), shaderFiles.end());
+                for (const auto& fileName : shaderFiles)
+                {
+                    WidgetElement tile = makeGridTile(
+                        "ContentBrowser.Shader." + fileName,
+                        fileName, "shader.png",
+                        Vec4{ 0.75f, 0.50f, 1.00f, 1.0f }, false);
+                    gridPanel->children.push_back(std::move(tile));
+                }
+            }
+        }
+        else
+        {
         const std::filesystem::path gridDir = gridFolder.empty()
             ? contentRoot
             : contentRoot / gridFolder;
@@ -1905,6 +2166,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
                 // Double-click opens the folder
                 tile.onDoubleClicked = [uiMgr = this, folderSub]()
                 {
+                    uiMgr->m_selectedGridAsset.clear();
                     uiMgr->m_selectedBrowserFolder = folderSub;
                     if (!uiMgr->m_expandedFolders.count(folderSub))
                     {
@@ -1942,9 +2204,22 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
                 item.name, iconFile,
                 iconTintForAssetType(item.type), false);
 
+            // Highlight selected asset
+            if (relPath == m_selectedGridAsset)
+            {
+                tile.color = Vec4{ 0.18f, 0.30f, 0.50f, 0.9f };
+            }
+
             // Make asset tiles draggable
             tile.isDraggable = true;
             tile.dragPayload = std::to_string(static_cast<int>(item.type)) + "|" + relPath;
+
+            // Single-click selects; double-click opens
+            tile.onClicked = [uiMgr = this, relPath]()
+            {
+                uiMgr->m_selectedGridAsset = relPath;
+                uiMgr->refreshContentBrowser();
+            };
 
             tile.onDoubleClicked = [uiMgr = this, relPath]()
             {
@@ -1956,6 +2231,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
 
             gridPanel->children.push_back(std::move(tile));
         }
+        } // end else (not shaders)
     }
 
     widget->markLayoutDirty();
@@ -2177,6 +2453,12 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
         }
 
         Vec2 widgetPosition = widgetOffset;
+        if (widget->isAbsolutePositioned())
+        {
+            widgetPosition = widgetOffset;
+        }
+        else
+        {
         switch (widgetAnchor)
         {
         case WidgetAnchor::TopRight:
@@ -2195,6 +2477,7 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
             widgetPosition.x = available.x + widgetOffset.x;
             widgetPosition.y = available.y + widgetOffset.y;
             break;
+        }
         }
         widget->setComputedSizePixels(widgetSize, true);
         widget->setComputedPositionPixels(widgetPosition, true);
@@ -2320,6 +2603,20 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
         Logger::LogLevel::INFO);
 
     WidgetElement* target = hitTest(screenPos, true);
+
+    // Dismiss dropdown menu on click outside
+    if (m_dropdownVisible)
+    {
+        const bool clickedDropdown = target && target->id.rfind("Dropdown.", 0) == 0;
+        if (!clickedDropdown)
+        {
+            closeDropdownMenu();
+            if (!target)
+            {
+                return true; // consume click that dismissed the menu
+            }
+        }
+    }
 
     // Check if this element is draggable — set up pending drag
     if (target && target->isDraggable && !target->dragPayload.empty())
@@ -2464,6 +2761,46 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
         else
         {
             target->isExpanded = true;
+        }
+        markAllWidgetsDirty();
+    }
+    if (target->type == WidgetElementType::DropdownButton)
+    {
+        if (m_dropdownVisible)
+        {
+            closeDropdownMenu();
+        }
+        else
+        {
+            // Build menu items from dropdownItems (runtime callbacks) or items (labels)
+            std::vector<DropdownMenuItem> menuItems;
+            if (!target->dropdownItems.empty())
+            {
+                for (const auto& di : target->dropdownItems)
+                {
+                    menuItems.push_back({ di.label, di.onClick });
+                }
+            }
+            else if (!target->items.empty())
+            {
+                auto selCallback = target->onSelectionChanged;
+                for (int i = 0; i < static_cast<int>(target->items.size()); ++i)
+                {
+                    menuItems.push_back({ target->items[static_cast<size_t>(i)], [selCallback, i]()
+                    {
+                        if (selCallback) selCallback(i);
+                    }});
+                }
+            }
+            if (!menuItems.empty())
+            {
+                // Anchor below the button
+                const Vec2 anchor{
+                    target->computedPositionPixels.x,
+                    target->computedPositionPixels.y + target->computedSizePixels.y + 2.0f
+                };
+                showDropdownMenu(anchor, menuItems);
+            }
         }
         markAllWidgetsDirty();
     }
@@ -3470,4 +3807,615 @@ void UIManager::closeSaveProgressModal(bool success)
     }
 
     refreshStatusBar();
+}
+
+void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<DropdownMenuItem>& items)
+{
+    closeDropdownMenu();
+
+    if (items.empty()) return;
+
+    constexpr float kItemH = 28.0f;
+    constexpr float kPadY = 4.0f;
+    constexpr float kMenuW = 180.0f;
+    const float menuH = kPadY * 2.0f + static_cast<float>(items.size()) * kItemH;
+
+    auto widget = std::make_shared<Widget>();
+    widget->setName("DropdownMenu");
+    widget->setSizePixels(Vec2{ kMenuW, menuH });
+    widget->setPositionPixels(Vec2{ anchorPixels.x, anchorPixels.y });
+    widget->setAnchor(WidgetAnchor::TopLeft);
+    widget->setAbsolutePosition(true);
+    widget->setZOrder(9000);
+
+    std::vector<WidgetElement> elements;
+
+    // Background
+    WidgetElement bg;
+    bg.type  = WidgetElementType::Panel;
+    bg.id    = "Dropdown.Bg";
+    bg.from  = Vec2{ 0.0f, 0.0f };
+    bg.to    = Vec2{ 1.0f, 1.0f };
+    bg.color = Vec4{ 0.14f, 0.14f, 0.18f, 1.0f };
+    elements.push_back(bg);
+
+    for (size_t i = 0; i < items.size(); ++i)
+    {
+        const float y0 = kPadY + static_cast<float>(i) * kItemH;
+        const float y1 = y0 + kItemH;
+
+        WidgetElement item;
+        item.type          = WidgetElementType::Button;
+        item.id            = "Dropdown.Item." + std::to_string(i);
+        item.from          = Vec2{ 0.0f, y0 / menuH };
+        item.to            = Vec2{ 1.0f, y1 / menuH };
+        item.text          = items[i].label;
+        item.fontSize      = 13.0f;
+        item.color         = Vec4{ 0.14f, 0.14f, 0.18f, 0.0f };
+        item.hoverColor    = Vec4{ 0.24f, 0.24f, 0.30f, 1.0f };
+        item.textColor     = Vec4{ 0.88f, 0.88f, 0.92f, 1.0f };
+        item.textAlignH    = TextAlignH::Left;
+        item.textAlignV    = TextAlignV::Center;
+        item.padding       = Vec2{ 12.0f, 4.0f };
+        item.isHitTestable = true;
+
+        auto callback = items[i].onClick;
+        item.onClicked = [this, callback]()
+        {
+            closeDropdownMenu();
+            if (callback) callback();
+        };
+
+        elements.push_back(item);
+    }
+
+    widget->setElements(std::move(elements));
+    registerWidget("__DropdownMenu__", widget);
+    m_dropdownWidget = widget;
+    m_dropdownVisible = true;
+    markAllWidgetsDirty();
+}
+
+void UIManager::closeDropdownMenu()
+{
+    if (!m_dropdownVisible) return;
+    unregisterWidget("__DropdownMenu__");
+    m_dropdownWidget.reset();
+    m_dropdownVisible = false;
+    markAllWidgetsDirty();
+}
+
+bool UIManager::isOverContentBrowserGrid(const Vec2& screenPos) const
+{
+    const auto* entry = findWidgetEntry("ContentBrowser");
+    if (!entry || !entry->widget)
+        return false;
+
+    for (const auto& element : entry->widget->getElements())
+    {
+        const std::function<bool(const WidgetElement&)> findGrid =
+            [&](const WidgetElement& el) -> bool
+            {
+                if (el.id == "ContentBrowser.Grid" && el.hasComputedPosition && el.hasComputedSize)
+                {
+                    return screenPos.x >= el.computedPositionPixels.x &&
+                           screenPos.x <= el.computedPositionPixels.x + el.computedSizePixels.x &&
+                           screenPos.y >= el.computedPositionPixels.y &&
+                           screenPos.y <= el.computedPositionPixels.y + el.computedSizePixels.y;
+                }
+                for (const auto& child : el.children)
+                {
+                    if (findGrid(child))
+                        return true;
+                }
+                return false;
+            };
+        if (findGrid(element))
+            return true;
+    }
+    return false;
+}
+
+void UIManager::openLandscapeManagerPopup()
+{
+    if (!m_renderer)
+        return;
+
+    Logger::Instance().log(Logger::Category::Input, "WorldSettings: Tools -> Landscape Manager.", Logger::LogLevel::INFO);
+
+    if (LandscapeManager::hasExistingLandscape())
+    {
+        showToastMessage("A landscape already exists in the scene.", 3.0f);
+        return;
+    }
+
+    constexpr int kPopupW = 420;
+    constexpr int kPopupH = 340;
+    PopupWindow* popup = m_renderer->openPopupWindow(
+        "LandscapeManager", "Landscape Manager", kPopupW, kPopupH);
+    if (!popup) return;
+
+    if (!popup->uiManager().getRegisteredWidgets().empty()) return;
+
+    struct LandscapeFormState
+    {
+        std::string name        = "Landscape";
+        std::string widthStr    = "100";
+        std::string depthStr    = "100";
+        std::string subdivXStr  = "32";
+        std::string subdivZStr  = "32";
+    };
+    auto state = std::make_shared<LandscapeFormState>();
+
+    const float W = static_cast<float>(kPopupW);
+    const float H = static_cast<float>(kPopupH);
+
+    auto nx = [&](float px) { return px / W; };
+    auto ny = [&](float py) { return py / H; };
+
+    const auto makeLabel = [&](const std::string& id, const std::string& text,
+        float x0, float y0, float x1, float y1) -> WidgetElement
+    {
+        WidgetElement e;
+        e.type      = WidgetElementType::Text;
+        e.id        = id;
+        e.from      = Vec2{ nx(x0), ny(y0) };
+        e.to        = Vec2{ nx(x1), ny(y1) };
+        e.text      = text;
+        e.fontSize  = 13.0f;
+        e.textColor = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
+        e.textAlignV = TextAlignV::Center;
+        e.padding   = Vec2{ 6.0f, 0.0f };
+        return e;
+    };
+
+    const auto makeEntry = [&](const std::string& id, const std::string& val,
+        float x0, float y0, float x1, float y1) -> WidgetElement
+    {
+        WidgetElement e;
+        e.type         = WidgetElementType::EntryBar;
+        e.id           = id;
+        e.from         = Vec2{ nx(x0), ny(y0) };
+        e.to           = Vec2{ nx(x1), ny(y1) };
+        e.value        = val;
+        e.fontSize     = 13.0f;
+        e.color        = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
+        e.hoverColor   = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
+        e.textColor    = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+        e.padding      = Vec2{ 6.0f, 4.0f };
+        e.isHitTestable = true;
+        return e;
+    };
+
+    std::vector<WidgetElement> elements;
+
+    // Background
+    {
+        WidgetElement bg;
+        bg.type  = WidgetElementType::Panel;
+        bg.id    = "LM.Bg";
+        bg.from  = Vec2{ 0.0f, 0.0f };
+        bg.to    = Vec2{ 1.0f, 1.0f };
+        bg.color = Vec4{ 0.13f, 0.13f, 0.16f, 1.0f };
+        elements.push_back(bg);
+    }
+
+    // Title bar
+    {
+        WidgetElement title;
+        title.type  = WidgetElementType::Panel;
+        title.id    = "LM.TitleBg";
+        title.from  = Vec2{ 0.0f, 0.0f };
+        title.to    = Vec2{ 1.0f, ny(44.0f) };
+        title.color = Vec4{ 0.09f, 0.09f, 0.13f, 1.0f };
+        elements.push_back(title);
+
+        elements.push_back(makeLabel("LM.TitleText", "Landscape Manager",
+            8.0f, 0.0f, W - 8.0f, 44.0f));
+    }
+
+    constexpr float kRowH = 28.0f;
+    constexpr float kRowGap = 8.0f;
+    constexpr float kFormY0 = 54.0f;
+    constexpr float kLabelX1 = 130.0f;
+    constexpr float kEntryX0 = 138.0f;
+    const float kEntryX1 = W - 12.0f;
+
+    const auto rowY0 = [&](int row) { return kFormY0 + row * (kRowH + kRowGap); };
+    const auto rowY1 = [&](int row) { return rowY0(row) + kRowH; };
+
+    // Row 0: Name
+    elements.push_back(makeLabel("LM.NameLabel", "Name:", 12.0f, rowY0(0), kLabelX1, rowY1(0)));
+    {
+        auto e = makeEntry("LM.NameEntry", state->name, kEntryX0, rowY0(0), kEntryX1, rowY1(0));
+        e.onValueChanged = [state](const std::string& v) { state->name = v; };
+        elements.push_back(e);
+    }
+
+    // Row 1: Width
+    elements.push_back(makeLabel("LM.WidthLabel", "Width:", 12.0f, rowY0(1), kLabelX1, rowY1(1)));
+    {
+        auto e = makeEntry("LM.WidthEntry", state->widthStr, kEntryX0, rowY0(1), kEntryX1, rowY1(1));
+        e.onValueChanged = [state](const std::string& v) { state->widthStr = v; };
+        elements.push_back(e);
+    }
+
+    // Row 2: Depth
+    elements.push_back(makeLabel("LM.DepthLabel", "Depth:", 12.0f, rowY0(2), kLabelX1, rowY1(2)));
+    {
+        auto e = makeEntry("LM.DepthEntry", state->depthStr, kEntryX0, rowY0(2), kEntryX1, rowY1(2));
+        e.onValueChanged = [state](const std::string& v) { state->depthStr = v; };
+        elements.push_back(e);
+    }
+
+    // Row 3: Subdivisions X
+    elements.push_back(makeLabel("LM.SubXLabel", "Subdiv X:", 12.0f, rowY0(3), kLabelX1, rowY1(3)));
+    {
+        auto e = makeEntry("LM.SubXEntry", state->subdivXStr, kEntryX0, rowY0(3), kEntryX1, rowY1(3));
+        e.onValueChanged = [state](const std::string& v) { state->subdivXStr = v; };
+        elements.push_back(e);
+    }
+
+    // Row 4: Subdivisions Z
+    elements.push_back(makeLabel("LM.SubZLabel", "Subdiv Z:", 12.0f, rowY0(4), kLabelX1, rowY1(4)));
+    {
+        auto e = makeEntry("LM.SubZEntry", state->subdivZStr, kEntryX0, rowY0(4), kEntryX1, rowY1(4));
+        e.onValueChanged = [state](const std::string& v) { state->subdivZStr = v; };
+        elements.push_back(e);
+    }
+
+    // Divider
+    {
+        WidgetElement sep;
+        sep.type  = WidgetElementType::Panel;
+        sep.id    = "LM.Sep";
+        sep.from  = Vec2{ nx(8.0f), ny(rowY1(4) + 12.0f) };
+        sep.to    = Vec2{ nx(W - 8.0f), ny(rowY1(4) + 14.0f) };
+        sep.color = Vec4{ 0.28f, 0.28f, 0.32f, 1.0f };
+        elements.push_back(sep);
+    }
+
+    const float btnY0 = rowY1(4) + 20.0f;
+    const float btnY1 = btnY0 + 34.0f;
+
+    // Create button
+    {
+        WidgetElement btn;
+        btn.type          = WidgetElementType::Button;
+        btn.id            = "LM.CreateBtn";
+        btn.from          = Vec2{ nx(W - 220.0f), ny(btnY0) };
+        btn.to            = Vec2{ nx(W - 114.0f), ny(btnY1) };
+        btn.text          = "Create";
+        btn.fontSize      = 13.0f;
+        btn.color         = Vec4{ 0.12f, 0.32f, 0.12f, 1.0f };
+        btn.hoverColor    = Vec4{ 0.18f, 0.46f, 0.18f, 1.0f };
+        btn.textColor     = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+        btn.textAlignH    = TextAlignH::Center;
+        btn.textAlignV    = TextAlignV::Center;
+        btn.padding       = Vec2{ 8.0f, 4.0f };
+        btn.isHitTestable = true;
+        btn.onClicked     = [state, this]()
+        {
+            LandscapeParams p;
+            p.name   = state->name.empty() ? "Landscape" : state->name;
+            try { p.width  = std::stof(state->widthStr); }  catch(...) { p.width  = 100.0f; }
+            try { p.depth  = std::stof(state->depthStr); }  catch(...) { p.depth  = 100.0f; }
+            try { p.subdivisionsX = std::stoi(state->subdivXStr); } catch(...) { p.subdivisionsX = 32; }
+            try { p.subdivisionsZ = std::stoi(state->subdivZStr); } catch(...) { p.subdivisionsZ = 32; }
+
+            const ECS::Entity entity = LandscapeManager::spawnLandscape(p);
+            if (entity != 0)
+            {
+                refreshWorldOutliner();
+                selectEntity(entity);
+                showToastMessage("Landscape created: " + p.name, 3.0f);
+            }
+            else
+            {
+                showToastMessage("Failed to create landscape.", 3.0f);
+            }
+            m_renderer->closePopupWindow("LandscapeManager");
+        };
+        elements.push_back(btn);
+    }
+
+    // Cancel button
+    {
+        WidgetElement btn;
+        btn.type          = WidgetElementType::Button;
+        btn.id            = "LM.CancelBtn";
+        btn.from          = Vec2{ nx(W - 104.0f), ny(btnY0) };
+        btn.to            = Vec2{ nx(W - 12.0f),  ny(btnY1) };
+        btn.text          = "Cancel";
+        btn.fontSize      = 13.0f;
+        btn.color         = Vec4{ 0.22f, 0.22f, 0.25f, 1.0f };
+        btn.hoverColor    = Vec4{ 0.32f, 0.32f, 0.36f, 1.0f };
+        btn.textColor     = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
+        btn.textAlignH    = TextAlignH::Center;
+        btn.textAlignV    = TextAlignV::Center;
+        btn.padding       = Vec2{ 8.0f, 4.0f };
+        btn.isHitTestable = true;
+        btn.onClicked     = [this]()
+        {
+            m_renderer->closePopupWindow("LandscapeManager");
+        };
+        elements.push_back(btn);
+    }
+
+    auto widget = std::make_shared<Widget>();
+    widget->setName("LandscapeManagerWidget");
+    widget->setFillX(true);
+    widget->setFillY(true);
+    widget->setElements(std::move(elements));
+    popup->uiManager().registerWidget("LandscapeManager.Main", widget);
+}
+
+void UIManager::openEngineSettingsPopup()
+{
+    if (!m_renderer)
+        return;
+
+    constexpr int kPopupW = 620;
+    constexpr int kPopupH = 480;
+    PopupWindow* popup = m_renderer->openPopupWindow(
+        "EngineSettings", "Engine Settings", kPopupW, kPopupH);
+    if (!popup) return;
+    if (!popup->uiManager().getRegisteredWidgets().empty()) return;
+
+    const float W = static_cast<float>(kPopupW);
+    const float H = static_cast<float>(kPopupH);
+    auto nx = [&](float px) { return px / W; };
+    auto ny = [&](float py) { return py / H; };
+
+    struct SettingsState { int activeCategory{ 0 }; };
+    auto state = std::make_shared<SettingsState>();
+
+    const std::vector<std::string> categories = { "Rendering", "Debug" };
+    constexpr float kSidebarW = 140.0f;
+    constexpr float kTitleH = 44.0f;
+
+    std::vector<WidgetElement> elements;
+
+    // Background
+    {
+        WidgetElement bg;
+        bg.type  = WidgetElementType::Panel;
+        bg.id    = "ES.Bg";
+        bg.from  = Vec2{ 0.0f, 0.0f };
+        bg.to    = Vec2{ 1.0f, 1.0f };
+        bg.color = Vec4{ 0.13f, 0.13f, 0.16f, 1.0f };
+        elements.push_back(bg);
+    }
+
+    // Title bar
+    {
+        WidgetElement title;
+        title.type  = WidgetElementType::Panel;
+        title.id    = "ES.TitleBg";
+        title.from  = Vec2{ 0.0f, 0.0f };
+        title.to    = Vec2{ 1.0f, ny(kTitleH) };
+        title.color = Vec4{ 0.09f, 0.09f, 0.13f, 1.0f };
+        elements.push_back(title);
+
+        WidgetElement titleText;
+        titleText.type      = WidgetElementType::Text;
+        titleText.id        = "ES.TitleText";
+        titleText.from      = Vec2{ nx(8.0f), 0.0f };
+        titleText.to        = Vec2{ nx(W - 8.0f), ny(kTitleH) };
+        titleText.text      = "Engine Settings";
+        titleText.fontSize  = 14.0f;
+        titleText.textColor = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+        titleText.textAlignV = TextAlignV::Center;
+        titleText.padding   = Vec2{ 6.0f, 0.0f };
+        elements.push_back(titleText);
+    }
+
+    // Sidebar background
+    {
+        WidgetElement sidebarBg;
+        sidebarBg.type  = WidgetElementType::Panel;
+        sidebarBg.id    = "ES.SidebarBg";
+        sidebarBg.from  = Vec2{ 0.0f, ny(kTitleH) };
+        sidebarBg.to    = Vec2{ nx(kSidebarW), 1.0f };
+        sidebarBg.color = Vec4{ 0.10f, 0.10f, 0.13f, 1.0f };
+        elements.push_back(sidebarBg);
+    }
+
+    // Sidebar separator line
+    {
+        WidgetElement sep;
+        sep.type  = WidgetElementType::Panel;
+        sep.id    = "ES.SidebarSep";
+        sep.from  = Vec2{ nx(kSidebarW - 1.0f), ny(kTitleH) };
+        sep.to    = Vec2{ nx(kSidebarW), 1.0f };
+        sep.color = Vec4{ 0.25f, 0.25f, 0.30f, 1.0f };
+        elements.push_back(sep);
+    }
+
+    constexpr float kCatBtnH = 32.0f;
+    constexpr float kCatBtnGap = 2.0f;
+    constexpr float kCatBtnY0 = kTitleH + 8.0f;
+
+    OpenGLRenderer* renderer = m_renderer;
+    auto rebuildContent = [state, popup, categories, nx, ny, W, H, kSidebarW, kTitleH, renderer]()
+    {
+        auto& pMgr = popup->uiManager();
+        auto* entry = pMgr.findElementById("ES.ContentArea");
+        if (!entry) return;
+
+        entry->children.clear();
+
+        constexpr float kRowH = 30.0f;
+        constexpr float kRowGap = 6.0f;
+        constexpr float kContentPad = 16.0f;
+        const float contentW = W - kSidebarW;
+        int row = 0;
+
+        const auto addSectionLabel = [&](const std::string& id, const std::string& label)
+        {
+            WidgetElement sec;
+            sec.type      = WidgetElementType::Text;
+            sec.id        = id;
+            sec.text      = label;
+            sec.fontSize  = 13.0f;
+            sec.textColor = Vec4{ 0.55f, 0.60f, 0.70f, 1.0f };
+            sec.textAlignV = TextAlignV::Center;
+            sec.padding   = Vec2{ 4.0f, 0.0f };
+            sec.minSize   = Vec2{ contentW - kContentPad * 2.0f, kRowH };
+            entry->children.push_back(sec);
+            ++row;
+        };
+
+        const auto addSeparator = [&](const std::string& id)
+        {
+            WidgetElement sep;
+            sep.type    = WidgetElementType::Panel;
+            sep.id      = id;
+            sep.color   = Vec4{ 0.28f, 0.28f, 0.32f, 1.0f };
+            sep.minSize = Vec2{ contentW - kContentPad * 2.0f, 2.0f };
+            entry->children.push_back(sep);
+            ++row;
+        };
+
+        const auto addCheckbox = [&](const std::string& id, const std::string& label,
+            bool checked, std::function<void(bool)> onChange)
+        {
+            WidgetElement cb;
+            cb.type          = WidgetElementType::CheckBox;
+            cb.id            = id;
+            cb.text          = label;
+            cb.fontSize      = 13.0f;
+            cb.isChecked     = checked;
+            cb.color         = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
+            cb.hoverColor    = Vec4{ 0.24f, 0.24f, 0.30f, 1.0f };
+            cb.fillColor     = Vec4{ 0.25f, 0.6f, 0.95f, 1.0f };
+            cb.textColor     = Vec4{ 0.88f, 0.88f, 0.92f, 1.0f };
+            cb.padding       = Vec2{ 6.0f, 4.0f };
+            cb.isHitTestable = true;
+            cb.minSize       = Vec2{ contentW - kContentPad * 2.0f, kRowH };
+            cb.onCheckedChanged = std::move(onChange);
+            entry->children.push_back(cb);
+            ++row;
+        };
+
+        if (state->activeCategory == 0) // Rendering
+        {
+            addSectionLabel("ES.C.Sec.Lighting", "Lighting");
+            addCheckbox("ES.C.Shadows", "Shadows",
+                renderer->isShadowsEnabled(),
+                [renderer](bool v) {
+                    renderer->setShadowsEnabled(v);
+                    DiagnosticsManager::Instance().setState("ShadowsEnabled", v ? "1" : "0");
+                });
+            addSeparator("ES.C.Sep1");
+            addSectionLabel("ES.C.Sec.Display", "Display");
+            addCheckbox("ES.C.VSync", "VSync",
+                renderer->isVSyncEnabled(),
+                [renderer](bool v) {
+                    renderer->setVSyncEnabled(v);
+                    DiagnosticsManager::Instance().setState("VSyncEnabled", v ? "1" : "0");
+                });
+            addCheckbox("ES.C.Wireframe", "Wireframe Mode",
+                renderer->isWireframeEnabled(),
+                [renderer](bool v) {
+                    renderer->setWireframeEnabled(v);
+                    DiagnosticsManager::Instance().setState("WireframeEnabled", v ? "1" : "0");
+                });
+            addSeparator("ES.C.Sep2");
+            addSectionLabel("ES.C.Sec.Perf", "Performance");
+            addCheckbox("ES.C.Occlusion", "Occlusion Culling",
+                renderer->isOcclusionCullingEnabled(),
+                [renderer](bool v) {
+                    renderer->setOcclusionCullingEnabled(v);
+                    DiagnosticsManager::Instance().setState("OcclusionCullingEnabled", v ? "1" : "0");
+                });
+        }
+        else if (state->activeCategory == 1) // Debug
+        {
+            addSectionLabel("ES.C.Sec.Vis", "Visualizations");
+            addCheckbox("ES.C.UIDebug", "UI Debug Outlines",
+                renderer->isUIDebugEnabled(),
+                [renderer](bool v) {
+                    if (v != renderer->isUIDebugEnabled()) renderer->toggleUIDebug();
+                    DiagnosticsManager::Instance().setState("UIDebugEnabled", v ? "1" : "0");
+                });
+            addCheckbox("ES.C.BoundsDebug", "Bounding Box Debug",
+                renderer->isBoundsDebugEnabled(),
+                [renderer](bool v) {
+                    if (v != renderer->isBoundsDebugEnabled()) renderer->toggleBoundsDebug();
+                    DiagnosticsManager::Instance().setState("BoundsDebugEnabled", v ? "1" : "0");
+                });
+        }
+
+        for (size_t ci = 0; ci < categories.size(); ++ci)
+        {
+            const std::string btnId = "ES.Cat." + std::to_string(ci);
+            auto* catBtn = pMgr.findElementById(btnId);
+            if (catBtn)
+            {
+                catBtn->color = (static_cast<int>(ci) == state->activeCategory)
+                    ? Vec4{ 0.20f, 0.20f, 0.28f, 1.0f }
+                    : Vec4{ 0.10f, 0.10f, 0.13f, 0.0f };
+            }
+        }
+
+        pMgr.markAllWidgetsDirty();
+    };
+
+    for (size_t ci = 0; ci < categories.size(); ++ci)
+    {
+        const float by0 = kCatBtnY0 + static_cast<float>(ci) * (kCatBtnH + kCatBtnGap);
+        const float by1 = by0 + kCatBtnH;
+
+        WidgetElement catBtn;
+        catBtn.type          = WidgetElementType::Button;
+        catBtn.id            = "ES.Cat." + std::to_string(ci);
+        catBtn.from          = Vec2{ nx(4.0f), ny(by0) };
+        catBtn.to            = Vec2{ nx(kSidebarW - 4.0f), ny(by1) };
+        catBtn.text          = categories[ci];
+        catBtn.fontSize      = 13.0f;
+        catBtn.color         = (static_cast<int>(ci) == state->activeCategory)
+            ? Vec4{ 0.20f, 0.20f, 0.28f, 1.0f }
+            : Vec4{ 0.10f, 0.10f, 0.13f, 0.0f };
+        catBtn.hoverColor    = Vec4{ 0.22f, 0.22f, 0.28f, 1.0f };
+        catBtn.textColor     = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
+        catBtn.textAlignH    = TextAlignH::Left;
+        catBtn.textAlignV    = TextAlignV::Center;
+        catBtn.padding       = Vec2{ 12.0f, 4.0f };
+        catBtn.isHitTestable = true;
+
+        const int catIndex = static_cast<int>(ci);
+        catBtn.onClicked = [state, catIndex, rebuildContent]()
+        {
+            if (state->activeCategory != catIndex)
+            {
+                state->activeCategory = catIndex;
+                rebuildContent();
+            }
+        };
+        elements.push_back(catBtn);
+    }
+
+    // Content area
+    {
+        WidgetElement content;
+        content.type        = WidgetElementType::StackPanel;
+        content.id          = "ES.ContentArea";
+        content.from        = Vec2{ nx(kSidebarW + 16.0f), ny(kTitleH + 16.0f) };
+        content.to          = Vec2{ nx(W - 8.0f), ny(H - 8.0f) };
+        content.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        content.orientation = StackOrientation::Vertical;
+        content.padding     = Vec2{ 4.0f, 4.0f };
+        content.scrollable  = true;
+        elements.push_back(content);
+    }
+
+    auto widget = std::make_shared<Widget>();
+    widget->setName("EngineSettingsWidget");
+    widget->setFillX(true);
+    widget->setFillY(true);
+    widget->setElements(std::move(elements));
+    popup->uiManager().registerWidget("EngineSettings.Main", widget);
+
+    rebuildContent();
 }

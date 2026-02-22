@@ -414,6 +414,13 @@ void DiagnosticsManager::setActionInProgress(ActionType action, bool inProgress)
 void DiagnosticsManager::setActiveLevel(std::unique_ptr<EngineLevel> level)
 {
     m_activeLevel = std::move(level);
+    if (m_activeLevel)
+    {
+        m_activeLevel->setOnDirtyCallback([this]()
+        {
+            setScenePrepared(false);
+        });
+    }
     EngineLevel* active = m_activeLevel.get();
     for (auto& callback : m_activeLevelChangedCallbacks)
     {

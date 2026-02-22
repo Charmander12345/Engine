@@ -178,6 +178,7 @@ bool OpenGLMaterial::build()
     m_locViewPos = glGetUniformLocation(m_program, "uViewPos");
     m_locMaterialShininess = glGetUniformLocation(m_program, "material.shininess");
     m_locHasSpecularMap = glGetUniformLocation(m_program, "uHasSpecularMap");
+    m_locHasDiffuseMap = glGetUniformLocation(m_program, "uHasDiffuseMap");
     m_locLightCount = glGetUniformLocation(m_program, "uLightCount");
     m_locShadowMaps = glGetUniformLocation(m_program, "uShadowMaps");
     m_locShadowCount = glGetUniformLocation(m_program, "uShadowCount");
@@ -323,6 +324,10 @@ void OpenGLMaterial::bind()
     {
         glUniform1i(m_locHasSpecularMap, (m_textures.size() >= 2 && m_textures[1]) ? 1 : 0);
     }
+    if (m_locHasDiffuseMap >= 0)
+    {
+        glUniform1i(m_locHasDiffuseMap, (!m_textures.empty() && m_textures[0]) ? 1 : 0);
+    }
 
     // Multi-light uniforms
     const int lightCount = static_cast<int>(std::min(m_lights.size(), static_cast<size_t>(kMaxLights)));
@@ -418,6 +423,10 @@ void OpenGLMaterial::renderBatchContinuation()
     if (m_locHasSpecularMap >= 0)
     {
         glUniform1i(m_locHasSpecularMap, (m_textures.size() >= 2 && m_textures[1]) ? 1 : 0);
+    }
+    if (m_locHasDiffuseMap >= 0)
+    {
+        glUniform1i(m_locHasDiffuseMap, (!m_textures.empty() && m_textures[0]) ? 1 : 0);
     }
     if (m_locMaterialShininess >= 0)
     {

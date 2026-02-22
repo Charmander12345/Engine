@@ -1,5 +1,6 @@
 ﻿#include <iostream>
 #include <filesystem>
+#include <fstream>
 #include <cstdlib>
 #include <algorithm>
 #include <cstdio>
@@ -22,8 +23,8 @@
 #include "Core/MathTypes.h"
 #include "Core/AudioManager.h"
 #include "Core/UndoRedoManager.h"
+#include "Core/EngineLevel.h"
 #include "Scripting/PythonScripting.h"
-#include "LandscapeManager.h"
 
 using namespace std;
 
@@ -150,6 +151,29 @@ int main()
     logTimed(Logger::Category::Rendering, std::string("Renderer initialised successfully: ") + renderer->name(), Logger::LogLevel::INFO);
     SDL_GL_SetSwapInterval(0);
 
+    // Apply persisted engine settings
+    {
+        auto& diag = DiagnosticsManager::Instance();
+        if (auto v = diag.getState("ShadowsEnabled"))
+            glRenderer->setShadowsEnabled(*v != "0");
+        if (auto v = diag.getState("OcclusionCullingEnabled"))
+            glRenderer->setOcclusionCullingEnabled(*v != "0");
+        if (auto v = diag.getState("UIDebugEnabled"))
+        {
+            if ((*v == "1") != glRenderer->isUIDebugEnabled())
+                glRenderer->toggleUIDebug();
+        }
+        if (auto v = diag.getState("BoundsDebugEnabled"))
+        {
+            if ((*v == "1") != glRenderer->isBoundsDebugEnabled())
+                glRenderer->toggleBoundsDebug();
+        }
+        if (auto v = diag.getState("VSyncEnabled"))
+            glRenderer->setVSyncEnabled(*v == "1");
+        if (auto v = diag.getState("WireframeEnabled"))
+            glRenderer->setWireframeEnabled(*v == "1");
+    }
+
 #if defined(_WIN32)
     FreeConsole();
     logger.setSuppressStdout(true);
@@ -242,238 +266,7 @@ int main()
 
         glRenderer->getUIManager().registerClickEvent("WorldSettings.Tools.Landscape", [&glRenderer]()
             {
-                Logger::Instance().log(Logger::Category::Input, "WorldSettings: Tools -> Landscape Manager.", Logger::LogLevel::INFO);
-
-                // ---- Open or focus the popup --------------------------------
-                constexpr int kPopupW = 420;
-                constexpr int kPopupH = 340;
-                PopupWindow* popup = glRenderer->openPopupWindow(
-                    "LandscapeManager", "Landscape Manager", kPopupW, kPopupH);
-                if (!popup) return;
-
-                // Don't rebuild the UI if it already has widgets.
-                if (!popup->uiManager().getRegisteredWidgets().empty()) return;
-
-                // ---- Shared mutable state for the form ----------------------
-                struct LandscapeFormState
-                {
-                    std::string name        = "Landscape";
-                    std::string widthStr    = "100";
-                    std::string depthStr    = "100";
-                    std::string subdivXStr  = "32";
-                    std::string subdivZStr  = "32";
-                };
-                auto state = std::make_shared<LandscapeFormState>();
-
-                // ---- Build Widget with explicit normalized coordinates -------
-                // Popup size: 420 x 340
-                const float W = static_cast<float>(kPopupW);
-                const float H = static_cast<float>(kPopupH);
-
-                // Helper lambdas for normalized coords
-                auto nx = [&](float px) { return px / W; };
-                auto ny = [&](float py) { return py / H; };
-
-                const auto makeLabel = [&](const std::string& id, const std::string& text,
-                    float x0, float y0, float x1, float y1) -> WidgetElement
-                {
-                    WidgetElement e;
-                    e.type      = WidgetElementType::Text;
-                    e.id        = id;
-                    e.from      = Vec2{ nx(x0), ny(y0) };
-                    e.to        = Vec2{ nx(x1), ny(y1) };
-                    e.text      = text;
-                    e.fontSize  = 13.0f;
-                    e.textColor = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
-                    e.textAlignV = TextAlignV::Center;
-                    e.padding   = Vec2{ 6.0f, 0.0f };
-                    return e;
-                };
-
-                const auto makeEntry = [&](const std::string& id, const std::string& val,
-                    float x0, float y0, float x1, float y1) -> WidgetElement
-                {
-                    WidgetElement e;
-                    e.type         = WidgetElementType::EntryBar;
-                    e.id           = id;
-                    e.from         = Vec2{ nx(x0), ny(y0) };
-                    e.to           = Vec2{ nx(x1), ny(y1) };
-                    e.value        = val;
-                    e.fontSize     = 13.0f;
-                    e.color        = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
-                    e.hoverColor   = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
-                    e.textColor    = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
-                    e.padding      = Vec2{ 6.0f, 4.0f };
-                    e.isHitTestable = true;
-                    return e;
-                };
-
-                std::vector<WidgetElement> elements;
-
-                // Background
-                {
-                    WidgetElement bg;
-                    bg.type  = WidgetElementType::Panel;
-                    bg.id    = "LM.Bg";
-                    bg.from  = Vec2{ 0.0f, 0.0f };
-                    bg.to    = Vec2{ 1.0f, 1.0f };
-                    bg.color = Vec4{ 0.13f, 0.13f, 0.16f, 1.0f };
-                    elements.push_back(bg);
-                }
-
-                // Title bar
-                {
-                    WidgetElement title;
-                    title.type  = WidgetElementType::Panel;
-                    title.id    = "LM.TitleBg";
-                    title.from  = Vec2{ 0.0f, 0.0f };
-                    title.to    = Vec2{ 1.0f, ny(44.0f) };
-                    title.color = Vec4{ 0.09f, 0.09f, 0.13f, 1.0f };
-                    elements.push_back(title);
-
-                    elements.push_back(makeLabel("LM.TitleText", "Landscape Manager",
-                        8.0f, 0.0f, W - 8.0f, 44.0f));
-                }
-
-                // Form rows – each 28px tall, starting at y=56, gap=8px
-                constexpr float kRowH = 28.0f;
-                constexpr float kRowGap = 8.0f;
-                constexpr float kFormY0 = 54.0f;
-                constexpr float kLabelX1 = 130.0f;
-                constexpr float kEntryX0 = 138.0f;
-                constexpr float kEntryX1 = W - 12.0f;
-
-                const auto rowY0 = [&](int row) { return kFormY0 + row * (kRowH + kRowGap); };
-                const auto rowY1 = [&](int row) { return rowY0(row) + kRowH; };
-
-                // Row 0: Name
-                elements.push_back(makeLabel("LM.NameLabel", "Name:", 12.0f, rowY0(0), kLabelX1, rowY1(0)));
-                {
-                    auto e = makeEntry("LM.NameEntry", state->name, kEntryX0, rowY0(0), kEntryX1, rowY1(0));
-                    e.onValueChanged = [state](const std::string& v) { state->name = v; };
-                    elements.push_back(e);
-                }
-
-                // Row 1: Width
-                elements.push_back(makeLabel("LM.WidthLabel", "Width:", 12.0f, rowY0(1), kLabelX1, rowY1(1)));
-                {
-                    auto e = makeEntry("LM.WidthEntry", state->widthStr, kEntryX0, rowY0(1), kEntryX1, rowY1(1));
-                    e.onValueChanged = [state](const std::string& v) { state->widthStr = v; };
-                    elements.push_back(e);
-                }
-
-                // Row 2: Depth
-                elements.push_back(makeLabel("LM.DepthLabel", "Depth:", 12.0f, rowY0(2), kLabelX1, rowY1(2)));
-                {
-                    auto e = makeEntry("LM.DepthEntry", state->depthStr, kEntryX0, rowY0(2), kEntryX1, rowY1(2));
-                    e.onValueChanged = [state](const std::string& v) { state->depthStr = v; };
-                    elements.push_back(e);
-                }
-
-                // Row 3: Subdivisions X
-                elements.push_back(makeLabel("LM.SubXLabel", "Subdiv X:", 12.0f, rowY0(3), kLabelX1, rowY1(3)));
-                {
-                    auto e = makeEntry("LM.SubXEntry", state->subdivXStr, kEntryX0, rowY0(3), kEntryX1, rowY1(3));
-                    e.onValueChanged = [state](const std::string& v) { state->subdivXStr = v; };
-                    elements.push_back(e);
-                }
-
-                // Row 4: Subdivisions Z
-                elements.push_back(makeLabel("LM.SubZLabel", "Subdiv Z:", 12.0f, rowY0(4), kLabelX1, rowY1(4)));
-                {
-                    auto e = makeEntry("LM.SubZEntry", state->subdivZStr, kEntryX0, rowY0(4), kEntryX1, rowY1(4));
-                    e.onValueChanged = [state](const std::string& v) { state->subdivZStr = v; };
-                    elements.push_back(e);
-                }
-
-                // Divider
-                {
-                    WidgetElement sep;
-                    sep.type  = WidgetElementType::Panel;
-                    sep.id    = "LM.Sep";
-                    sep.from  = Vec2{ nx(8.0f), ny(rowY1(4) + 12.0f) };
-                    sep.to    = Vec2{ nx(W - 8.0f), ny(rowY1(4) + 14.0f) };
-                    sep.color = Vec4{ 0.28f, 0.28f, 0.32f, 1.0f };
-                    elements.push_back(sep);
-                }
-
-                // Button row
-                const float btnY0 = rowY1(4) + 20.0f;
-                const float btnY1 = btnY0 + 34.0f;
-
-                // Create button
-                {
-                    WidgetElement btn;
-                    btn.type          = WidgetElementType::Button;
-                    btn.id            = "LM.CreateBtn";
-                    btn.from          = Vec2{ nx(W - 220.0f), ny(btnY0) };
-                    btn.to            = Vec2{ nx(W - 114.0f), ny(btnY1) };
-                    btn.text          = "Create";
-                    btn.fontSize      = 13.0f;
-                    btn.color         = Vec4{ 0.12f, 0.32f, 0.12f, 1.0f };
-                    btn.hoverColor    = Vec4{ 0.18f, 0.46f, 0.18f, 1.0f };
-                    btn.textColor     = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
-                    btn.textAlignH    = TextAlignH::Center;
-                    btn.textAlignV    = TextAlignV::Center;
-                    btn.padding       = Vec2{ 8.0f, 4.0f };
-                    btn.isHitTestable = true;
-                    btn.onClicked     = [state, &glRenderer]()
-                    {
-                        LandscapeParams p;
-                        p.name   = state->name.empty() ? "Landscape" : state->name;
-                        try { p.width  = std::stof(state->widthStr); }  catch(...) { p.width  = 100.0f; }
-                        try { p.depth  = std::stof(state->depthStr); }  catch(...) { p.depth  = 100.0f; }
-                        try { p.subdivisionsX = std::stoi(state->subdivXStr); } catch(...) { p.subdivisionsX = 32; }
-                        try { p.subdivisionsZ = std::stoi(state->subdivZStr); } catch(...) { p.subdivisionsZ = 32; }
-
-                        const ECS::Entity entity = LandscapeManager::spawnLandscape(p);
-                        if (entity != 0)
-                        {
-                            glRenderer->getUIManager().refreshWorldOutliner();
-                            glRenderer->getUIManager().selectEntity(entity);
-                            glRenderer->getUIManager().showToastMessage(
-                                "Landscape created: " + p.name, 3.0f);
-                        }
-                        else
-                        {
-                            glRenderer->getUIManager().showToastMessage(
-                                "Failed to create landscape.", 3.0f);
-                        }
-                        glRenderer->closePopupWindow("LandscapeManager");
-                    };
-                    elements.push_back(btn);
-                }
-
-                // Cancel button
-                {
-                    WidgetElement btn;
-                    btn.type          = WidgetElementType::Button;
-                    btn.id            = "LM.CancelBtn";
-                    btn.from          = Vec2{ nx(W - 104.0f), ny(btnY0) };
-                    btn.to            = Vec2{ nx(W - 12.0f),  ny(btnY1) };
-                    btn.text          = "Cancel";
-                    btn.fontSize      = 13.0f;
-                    btn.color         = Vec4{ 0.22f, 0.22f, 0.25f, 1.0f };
-                    btn.hoverColor    = Vec4{ 0.32f, 0.32f, 0.36f, 1.0f };
-                    btn.textColor     = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
-                    btn.textAlignH    = TextAlignH::Center;
-                    btn.textAlignV    = TextAlignV::Center;
-                    btn.padding       = Vec2{ 8.0f, 4.0f };
-                    btn.isHitTestable = true;
-                    btn.onClicked     = [&glRenderer]()
-                    {
-                        glRenderer->closePopupWindow("LandscapeManager");
-                    };
-                    elements.push_back(btn);
-                }
-
-                // Assemble widget and register it in the popup UIManager
-                auto widget = std::make_shared<Widget>();
-                widget->setName("LandscapeManagerWidget");
-                widget->setFillX(true);
-                widget->setFillY(true);
-                widget->setElements(std::move(elements));
-                popup->uiManager().registerWidget("LandscapeManager.Main", widget);
+                glRenderer->getUIManager().openLandscapeManagerPopup();
             });
 
         glRenderer->getUIManager().registerClickEvent("TitleBar.Menu.Build", []()
@@ -506,9 +299,36 @@ int main()
                 Logger::Instance().log(Logger::Category::Input, "Toolbar: Scale mode.", Logger::LogLevel::INFO);
             });
 
-        glRenderer->getUIManager().registerClickEvent("ViewportOverlay.Settings", []()
+        glRenderer->getUIManager().registerClickEvent("ViewportOverlay.Settings", [&glRenderer]()
             {
                 Logger::Instance().log(Logger::Category::Input, "Toolbar: Settings clicked.", Logger::LogLevel::INFO);
+
+                auto& uiMgr = glRenderer->getUIManager();
+
+                // Toggle dropdown menu
+                if (uiMgr.isDropdownMenuOpen())
+                {
+                    uiMgr.closeDropdownMenu();
+                    return;
+                }
+
+                // Anchor below the Settings button, right-aligned
+                auto* btn = uiMgr.findElementById("ViewportOverlay.Settings");
+                Vec2 anchor{ 0.0f, 0.0f };
+                if (btn && btn->hasBounds)
+                {
+                    constexpr float kDropdownW = 180.0f;
+                    anchor = Vec2{ btn->boundsMaxPixels.x - kDropdownW, btn->boundsMaxPixels.y + 2.0f };
+                }
+
+                std::vector<UIManager::DropdownMenuItem> items;
+                items.push_back({ "Engine Settings", [&glRenderer]()
+                    {
+                        glRenderer->getUIManager().openEngineSettingsPopup();
+                    }
+                });
+
+                uiMgr.showDropdownMenu(anchor, items);
             });
 
         glRenderer->getUIManager().registerClickEvent("ViewportOverlay.PIE", [&glRenderer, playTexId, stopTexId, stopPIE]()
@@ -725,6 +545,123 @@ int main()
                             }
                         }
 
+                        // Skybox asset path entry
+                        if (auto* skyboxEntry = findElementById(widget->getElementsMutable(), "WorldSettings.SkyboxPath"))
+                        {
+                            skyboxEntry->value = glRenderer->getSkyboxPath();
+                            skyboxEntry->onValueChanged = [glRenderer](const std::string& value)
+                                {
+                                    glRenderer->setSkyboxPath(value);
+                                    auto& diag = DiagnosticsManager::Instance();
+                                    if (auto* level = diag.getActiveLevelSoft())
+                                    {
+                                        level->setSkyboxPath(value);
+                                    }
+                                    glRenderer->getUIManager().refreshStatusBar();
+                                };
+
+                            // Bind Clear button if it exists
+                            if (auto* clearBtn = findElementById(widget->getElementsMutable(), "WorldSettings.SkyboxClear"))
+                            {
+                                clearBtn->onClicked = [glRenderer]()
+                                    {
+                                        glRenderer->setSkyboxPath("");
+                                        auto& diag = DiagnosticsManager::Instance();
+                                        if (auto* level = diag.getActiveLevelSoft())
+                                        {
+                                            level->setSkyboxPath("");
+                                        }
+                                        glRenderer->getUIManager().refreshStatusBar();
+                                        glRenderer->getUIManager().showToastMessage("Skybox cleared", 2.5f);
+                                    };
+                            }
+                        }
+                        else
+                        {
+                            // Dynamically add Skybox section if the widget doesn't have it
+                            auto& elements = widget->getElementsMutable();
+                            WidgetElement* rootStack = nullptr;
+                            for (auto& el : elements)
+                            {
+                                if (el.type == WidgetElementType::StackPanel)
+                                {
+                                    rootStack = &el;
+                                    break;
+                                }
+                            }
+                            if (rootStack)
+                            {
+                                WidgetElement skyLabel{};
+                                skyLabel.id = "WorldSettings.SkyboxLabel";
+                                skyLabel.type = WidgetElementType::Text;
+                                skyLabel.text = "Skybox Asset";
+                                skyLabel.font = "default.ttf";
+                                skyLabel.fontSize = 13.0f;
+                                skyLabel.textColor = Vec4{ 0.7f, 0.75f, 0.85f, 1.0f };
+                                skyLabel.fillX = true;
+                                skyLabel.minSize = Vec2{ 0.0f, 22.0f };
+                                skyLabel.padding = Vec2{ 4.0f, 2.0f };
+                                skyLabel.runtimeOnly = true;
+                                rootStack->children.push_back(std::move(skyLabel));
+
+                                WidgetElement skyEntry{};
+                                skyEntry.id = "WorldSettings.SkyboxPath";
+                                skyEntry.type = WidgetElementType::EntryBar;
+                                skyEntry.value = glRenderer->getSkyboxPath();
+                                skyEntry.font = "default.ttf";
+                                skyEntry.fontSize = 13.0f;
+                                skyEntry.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
+                                skyEntry.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.9f };
+                                skyEntry.fillX = true;
+                                skyEntry.minSize = Vec2{ 0.0f, 24.0f };
+                                skyEntry.padding = Vec2{ 6.0f, 4.0f };
+                                skyEntry.isHitTestable = true;
+                                skyEntry.runtimeOnly = true;
+                                skyEntry.onValueChanged = [glRenderer](const std::string& value)
+                                    {
+                                        glRenderer->setSkyboxPath(value);
+                                        auto& diag = DiagnosticsManager::Instance();
+                                        if (auto* level = diag.getActiveLevelSoft())
+                                        {
+                                            level->setSkyboxPath(value);
+                                        }
+                                        glRenderer->getUIManager().refreshStatusBar();
+                                    };
+                                rootStack->children.push_back(std::move(skyEntry));
+
+                                WidgetElement clearBtn{};
+                                clearBtn.id = "WorldSettings.SkyboxClear";
+                                clearBtn.type = WidgetElementType::Button;
+                                clearBtn.text = "Clear Skybox";
+                                clearBtn.font = "default.ttf";
+                                clearBtn.fontSize = 12.0f;
+                                clearBtn.textColor = Vec4{ 0.9f, 0.7f, 0.7f, 1.0f };
+                                clearBtn.textAlignH = TextAlignH::Center;
+                                clearBtn.textAlignV = TextAlignV::Center;
+                                clearBtn.color = Vec4{ 0.3f, 0.15f, 0.15f, 0.8f };
+                                clearBtn.hoverColor = Vec4{ 0.45f, 0.2f, 0.2f, 0.95f };
+                                clearBtn.shaderVertex = "button_vertex.glsl";
+                                clearBtn.shaderFragment = "button_fragment.glsl";
+                                clearBtn.fillX = true;
+                                clearBtn.minSize = Vec2{ 0.0f, 24.0f };
+                                clearBtn.padding = Vec2{ 4.0f, 2.0f };
+                                clearBtn.isHitTestable = true;
+                                clearBtn.runtimeOnly = true;
+                                clearBtn.onClicked = [glRenderer]()
+                                    {
+                                        glRenderer->setSkyboxPath("");
+                                        auto& diag = DiagnosticsManager::Instance();
+                                        if (auto* level = diag.getActiveLevelSoft())
+                                        {
+                                            level->setSkyboxPath("");
+                                        }
+                                        glRenderer->getUIManager().refreshStatusBar();
+                                        glRenderer->getUIManager().showToastMessage("Skybox cleared", 2.5f);
+                                    };
+                                rootStack->children.push_back(std::move(clearBtn));
+                            }
+                        }
+
                         glRenderer->getUIManager().registerWidget("WorldSettings", widget);
                     }
                 }
@@ -831,6 +768,25 @@ int main()
                                     static_cast<int>(screenPos.x), static_cast<int>(screenPos.y));
                                 const auto target = static_cast<ECS::Entity>(targetEntity);
 
+                                // --- Skybox: set as level skybox, no entity needed ---
+                                if (assetType == AssetType::Skybox)
+                                {
+                                    glRenderer->setSkyboxPath(relPath);
+                                    auto* level = diagnostics.getActiveLevelSoft();
+                                    if (level)
+                                    {
+                                        level->setSkyboxPath(relPath);
+                                    }
+                                    Logger::Instance().log(Logger::Category::Engine,
+                                        "Set skybox from drag: " + relPath, Logger::LogLevel::INFO);
+                                    if (glRenderer)
+                                    {
+                                        glRenderer->getUIManager().refreshStatusBar();
+                                        glRenderer->getUIManager().showToastMessage("Skybox: " + assetName, 2.5f);
+                                    }
+                                    return;
+                                }
+
                                 // --- Non-Model3D types: apply to existing entity, or abort if none ---
                                 // Materials/Textures can only be applied to existing entities, never spawned alone.
                                 // Scripts likewise attach to existing entities.
@@ -930,7 +886,6 @@ int main()
                                 if (level)
                                 {
                                     level->onEntityAdded(entity);
-                                    level->setIsSaved(false);
                                 }
 
                                 Logger::Instance().log(Logger::Category::Engine,
@@ -938,7 +893,6 @@ int main()
                                     + std::to_string(spawnPos.x) + ", " + std::to_string(spawnPos.y) + ", " + std::to_string(spawnPos.z) + ")",
                                     Logger::LogLevel::INFO);
 
-                                diagnostics.setScenePrepared(false);
                                 if (glRenderer)
                                 {
                                     glRenderer->getUIManager().refreshWorldOutliner();
@@ -1166,6 +1120,33 @@ int main()
     diagnostics.registerKeyUpHandler(SDLK_DELETE, [&]() {
         if (!glRenderer) return false;
         auto& uiManager = glRenderer->getUIManager();
+
+        // Check for selected asset in Content Browser grid first
+        const std::string selectedAsset = uiManager.getSelectedGridAsset();
+        if (!selectedAsset.empty())
+        {
+            uiManager.showConfirmDialog(
+                "Are you sure you want to delete this asset?\nThis cannot be undone.",
+                [&glRenderer, selectedAsset]()
+                {
+                    auto& assetMgr = AssetManager::Instance();
+                    auto& uiMgr = glRenderer->getUIManager();
+                    if (assetMgr.deleteAsset(selectedAsset, true))
+                    {
+                        const std::string name = std::filesystem::path(selectedAsset).stem().string();
+                        uiMgr.clearSelectedGridAsset();
+                        uiMgr.refreshContentBrowser();
+                        uiMgr.showToastMessage("Deleted: " + name, 3.0f);
+                    }
+                    else
+                    {
+                        uiMgr.showToastMessage("Failed to delete asset.", 3.0f);
+                    }
+                });
+            return true;
+        }
+
+        // Otherwise try entity deletion
         const unsigned int selected = uiManager.getSelectedEntity();
         if (selected == 0) return false;
 
@@ -1184,7 +1165,6 @@ int main()
         if (level)
         {
             level->onEntityRemoved(static_cast<ECS::Entity>(selected));
-            level->setIsSaved(false);
         }
 
         // Remove from ECS
@@ -1194,7 +1174,6 @@ int main()
         uiManager.selectEntity(0);
         glRenderer->setSelectedEntity(0);
 
-        diagnostics.setScenePrepared(false);
         uiManager.refreshWorldOutliner();
         uiManager.showToastMessage("Deleted: " + entityName, 2.5f);
 
@@ -1424,6 +1403,363 @@ int main()
                     auto& uiManager = glRenderer->getUIManager();
                     uiManager.setMousePosition(mousePos);
                     isOverUI = uiManager.isPointerOverUI(mousePos);
+
+                    // Right-click context menu on Content Browser grid
+                    if (isOverUI && uiManager.isOverContentBrowserGrid(mousePos))
+                    {
+                        if (uiManager.isDropdownMenuOpen())
+                        {
+                            uiManager.closeDropdownMenu();
+                        }
+
+                        std::vector<UIManager::DropdownMenuItem> items;
+
+                        items.push_back({ "New Script", [&glRenderer]()
+                            {
+                                auto& uiMgr = glRenderer->getUIManager();
+                                const auto& folder = uiMgr.getSelectedBrowserFolder();
+                                if (folder == "__Shaders__") return;
+
+                                auto& diagnostics = DiagnosticsManager::Instance();
+                                auto& assetMgr = AssetManager::Instance();
+                                const std::filesystem::path contentDir =
+                                    std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content";
+                                const std::filesystem::path targetDir = folder.empty() ? contentDir : contentDir / folder;
+                                std::error_code ec;
+                                std::filesystem::create_directories(targetDir, ec);
+
+                                // Find a unique name
+                                std::string baseName = "NewScript";
+                                std::string fileName = baseName + ".py";
+                                int counter = 1;
+                                while (std::filesystem::exists(targetDir / fileName))
+                                {
+                                    fileName = baseName + std::to_string(counter++) + ".py";
+                                }
+
+                                const std::filesystem::path filePath = targetDir / fileName;
+                                std::ofstream out(filePath, std::ios::out | std::ios::trunc);
+                                if (out.is_open())
+                                {
+                                    out << "import engine\n\n";
+                                    out << "def onloaded(entity):\n";
+                                    out << "    pass\n\n";
+                                    out << "def tick(entity, dt):\n";
+                                    out << "    pass\n";
+                                    out.close();
+
+                                    // Register in asset registry
+                                    const std::string relPath = std::filesystem::relative(filePath, contentDir).generic_string();
+                                    AssetRegistryEntry entry;
+                                    entry.name = std::filesystem::path(fileName).stem().string();
+                                    entry.path = relPath;
+                                    entry.type = AssetType::Script;
+                                    assetMgr.registerAssetInRegistry(entry);
+                                    uiMgr.refreshContentBrowser();
+                                    uiMgr.showToastMessage("Created: " + fileName, 3.0f);
+                                }
+                            }});
+
+                        items.push_back({ "New Level", [&glRenderer]()
+                            {
+                                auto& uiMgr = glRenderer->getUIManager();
+                                const auto& folder = uiMgr.getSelectedBrowserFolder();
+                                if (folder == "__Shaders__") return;
+
+                                auto& diagnostics = DiagnosticsManager::Instance();
+                                auto& assetMgr = AssetManager::Instance();
+                                const std::filesystem::path contentDir =
+                                    std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content";
+                                const std::filesystem::path targetDir = folder.empty() ? contentDir : contentDir / folder;
+                                std::error_code ec;
+                                std::filesystem::create_directories(targetDir, ec);
+
+                                std::string baseName = "NewLevel";
+                                std::string fileName = baseName + ".map";
+                                int counter = 1;
+                                while (std::filesystem::exists(targetDir / fileName))
+                                {
+                                    fileName = baseName + std::to_string(counter++) + ".map";
+                                }
+
+                                auto level = std::make_unique<EngineLevel>();
+                                const std::string displayName = std::filesystem::path(fileName).stem().string();
+                                level->setName(displayName);
+                                const std::string relPath = std::filesystem::relative(targetDir / fileName, contentDir).generic_string();
+                                level->setPath(relPath);
+                                level->setAssetType(AssetType::Level);
+                                level->setLevelData(json::object());
+
+                                auto saveResult = assetMgr.saveNewLevelAsset(level.get());
+                                if (saveResult)
+                                {
+                                    AssetRegistryEntry entry;
+                                    entry.name = displayName;
+                                    entry.path = relPath;
+                                    entry.type = AssetType::Level;
+                                    assetMgr.registerAssetInRegistry(entry);
+                                    uiMgr.refreshContentBrowser();
+                                    uiMgr.showToastMessage("Created: " + fileName, 3.0f);
+                                }
+                            }});
+
+                        items.push_back({ "New Material", [&glRenderer]()
+                            {
+                                auto& uiMgr = glRenderer->getUIManager();
+                                const auto& folder = uiMgr.getSelectedBrowserFolder();
+                                if (folder == "__Shaders__") return;
+
+                                constexpr int kPopupW = 460;
+                                constexpr int kPopupH = 400;
+                                PopupWindow* popup = glRenderer->openPopupWindow(
+                                    "NewMaterial", "New Material", kPopupW, kPopupH);
+                                if (!popup) return;
+                                if (!popup->uiManager().getRegisteredWidgets().empty()) return;
+
+                                const float W = static_cast<float>(kPopupW);
+                                const float H = static_cast<float>(kPopupH);
+                                auto nx = [&](float px) { return px / W; };
+                                auto ny = [&](float py) { return py / H; };
+
+                                struct MaterialState
+                                {
+                                    std::string name = "NewMaterial";
+                                    std::string vertexShader = "vertex.glsl";
+                                    std::string fragmentShader = "fragment.glsl";
+                                    std::string diffuseTexture;
+                                    std::string specularTexture;
+                                    float shininess = 32.0f;
+                                    std::string folder;
+                                };
+                                auto state = std::make_shared<MaterialState>();
+                                state->folder = folder;
+
+                                std::vector<WidgetElement> elements;
+
+                                // Background
+                                {
+                                    WidgetElement bg;
+                                    bg.type = WidgetElementType::Panel;
+                                    bg.id = "NM.Bg";
+                                    bg.from = Vec2{ 0.0f, 0.0f };
+                                    bg.to = Vec2{ 1.0f, 1.0f };
+                                    bg.color = Vec4{ 0.13f, 0.13f, 0.16f, 1.0f };
+                                    elements.push_back(bg);
+                                }
+
+                                // Title
+                                {
+                                    WidgetElement title;
+                                    title.type = WidgetElementType::Text;
+                                    title.id = "NM.Title";
+                                    title.from = Vec2{ nx(8.0f), 0.0f };
+                                    title.to = Vec2{ 1.0f, ny(36.0f) };
+                                    title.text = "New Material";
+                                    title.fontSize = 15.0f;
+                                    title.textColor = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+                                    title.textAlignV = TextAlignV::Center;
+                                    title.padding = Vec2{ 6.0f, 0.0f };
+                                    elements.push_back(title);
+                                }
+
+                                // Form layout as StackPanel
+                                WidgetElement formStack;
+                                formStack.type = WidgetElementType::StackPanel;
+                                formStack.id = "NM.Form";
+                                formStack.from = Vec2{ nx(16.0f), ny(44.0f) };
+                                formStack.to = Vec2{ nx(W - 16.0f), ny(H - 50.0f) };
+                                formStack.padding = Vec2{ 4.0f, 4.0f };
+                                formStack.scrollable = true;
+
+                                auto makeLabel = [](const std::string& id, const std::string& text) {
+                                    WidgetElement lbl;
+                                    lbl.type = WidgetElementType::Text;
+                                    lbl.id = id;
+                                    lbl.text = text;
+                                    lbl.fontSize = 13.0f;
+                                    lbl.textColor = Vec4{ 0.7f, 0.75f, 0.85f, 1.0f };
+                                    lbl.fillX = true;
+                                    lbl.minSize = Vec2{ 0.0f, 20.0f };
+                                    lbl.runtimeOnly = true;
+                                    return lbl;
+                                };
+
+                                auto makeEntry = [](const std::string& id, const std::string& value) {
+                                    WidgetElement entry;
+                                    entry.type = WidgetElementType::EntryBar;
+                                    entry.id = id;
+                                    entry.value = value;
+                                    entry.fontSize = 13.0f;
+                                    entry.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
+                                    entry.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.9f };
+                                    entry.fillX = true;
+                                    entry.minSize = Vec2{ 0.0f, 24.0f };
+                                    entry.padding = Vec2{ 6.0f, 4.0f };
+                                    entry.isHitTestable = true;
+                                    entry.runtimeOnly = true;
+                                    return entry;
+                                };
+
+                                formStack.children.push_back(makeLabel("NM.NameLbl", "Name"));
+                                {
+                                    auto entry = makeEntry("NM.Name", state->name);
+                                    entry.onValueChanged = [state](const std::string& v) { state->name = v; };
+                                    formStack.children.push_back(std::move(entry));
+                                }
+
+                                formStack.children.push_back(makeLabel("NM.VsLbl", "Vertex Shader"));
+                                {
+                                    auto entry = makeEntry("NM.VertexShader", state->vertexShader);
+                                    entry.onValueChanged = [state](const std::string& v) { state->vertexShader = v; };
+                                    formStack.children.push_back(std::move(entry));
+                                }
+
+                                formStack.children.push_back(makeLabel("NM.FsLbl", "Fragment Shader"));
+                                {
+                                    auto entry = makeEntry("NM.FragmentShader", state->fragmentShader);
+                                    entry.onValueChanged = [state](const std::string& v) { state->fragmentShader = v; };
+                                    formStack.children.push_back(std::move(entry));
+                                }
+
+                                formStack.children.push_back(makeLabel("NM.DiffLbl", "Diffuse Texture (asset path)"));
+                                {
+                                    auto entry = makeEntry("NM.DiffuseTex", "");
+                                    entry.onValueChanged = [state](const std::string& v) { state->diffuseTexture = v; };
+                                    formStack.children.push_back(std::move(entry));
+                                }
+
+                                formStack.children.push_back(makeLabel("NM.SpecLbl", "Specular Texture (asset path)"));
+                                {
+                                    auto entry = makeEntry("NM.SpecularTex", "");
+                                    entry.onValueChanged = [state](const std::string& v) { state->specularTexture = v; };
+                                    formStack.children.push_back(std::move(entry));
+                                }
+
+                                formStack.children.push_back(makeLabel("NM.ShinLbl", "Shininess"));
+                                {
+                                    auto entry = makeEntry("NM.Shininess", "32");
+                                    entry.onValueChanged = [state](const std::string& v) {
+                                        try { state->shininess = std::stof(v); } catch (...) {}
+                                    };
+                                    formStack.children.push_back(std::move(entry));
+                                }
+
+                                elements.push_back(std::move(formStack));
+
+                                // Create button
+                                {
+                                    WidgetElement createBtn;
+                                    createBtn.type = WidgetElementType::Button;
+                                    createBtn.id = "NM.Create";
+                                    createBtn.from = Vec2{ nx(W - 180.0f), ny(H - 44.0f) };
+                                    createBtn.to = Vec2{ nx(W - 100.0f), ny(H - 12.0f) };
+                                    createBtn.text = "Create";
+                                    createBtn.fontSize = 14.0f;
+                                    createBtn.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+                                    createBtn.textAlignH = TextAlignH::Center;
+                                    createBtn.textAlignV = TextAlignV::Center;
+                                    createBtn.color = Vec4{ 0.15f, 0.45f, 0.25f, 0.95f };
+                                    createBtn.hoverColor = Vec4{ 0.2f, 0.6f, 0.35f, 1.0f };
+                                    createBtn.shaderVertex = "button_vertex.glsl";
+                                    createBtn.shaderFragment = "button_fragment.glsl";
+                                    createBtn.isHitTestable = true;
+                                    createBtn.onClicked = [state, &glRenderer, popup]()
+                                    {
+                                        auto& diagnostics = DiagnosticsManager::Instance();
+                                        auto& assetMgr = AssetManager::Instance();
+                                        const std::filesystem::path contentDir =
+                                            std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content";
+                                        const std::filesystem::path targetDir = state->folder.empty()
+                                            ? contentDir
+                                            : contentDir / state->folder;
+                                        std::error_code ec;
+                                        std::filesystem::create_directories(targetDir, ec);
+
+                                        const std::string matName = state->name.empty() ? "NewMaterial" : state->name;
+                                        std::string fileName = matName + ".asset";
+                                        int counter = 1;
+                                        while (std::filesystem::exists(targetDir / fileName))
+                                        {
+                                            fileName = matName + std::to_string(counter++) + ".asset";
+                                        }
+
+                                        auto mat = std::make_shared<AssetData>();
+                                        mat->setName(std::filesystem::path(fileName).stem().string());
+                                        mat->setAssetType(AssetType::Material);
+                                        mat->setType(AssetType::Material);
+                                        const std::string relPath = std::filesystem::relative(targetDir / fileName, contentDir).generic_string();
+                                        mat->setPath(relPath);
+
+                                        json matData = json::object();
+                                        if (!state->vertexShader.empty())
+                                            matData["m_shaderVertex"] = state->vertexShader;
+                                        if (!state->fragmentShader.empty())
+                                            matData["m_shaderFragment"] = state->fragmentShader;
+                                        std::vector<std::string> texPaths;
+                                        if (!state->diffuseTexture.empty())
+                                            texPaths.push_back(state->diffuseTexture);
+                                        if (!state->specularTexture.empty())
+                                            texPaths.push_back(state->specularTexture);
+                                        if (!texPaths.empty())
+                                            matData["m_textureAssetPaths"] = texPaths;
+                                        matData["m_shininess"] = state->shininess;
+                                        mat->setData(std::move(matData));
+
+                                        Asset asset;
+                                        asset.type = AssetType::Material;
+                                        auto id = assetMgr.registerLoadedAsset(mat);
+                                        if (id != 0)
+                                        {
+                                            mat->setId(id);
+                                            asset.ID = id;
+                                            assetMgr.saveAsset(asset, AssetManager::Sync);
+                                            AssetRegistryEntry entry;
+                                            entry.name = mat->getName();
+                                            entry.path = relPath;
+                                            entry.type = AssetType::Material;
+                                            assetMgr.registerAssetInRegistry(entry);
+                                        }
+
+                                        auto& uiMgr = glRenderer->getUIManager();
+                                        uiMgr.refreshContentBrowser();
+                                        uiMgr.showToastMessage("Created: " + fileName, 3.0f);
+
+                                        popup->close();
+                                    };
+                                    elements.push_back(std::move(createBtn));
+                                }
+
+                                // Cancel button
+                                {
+                                    WidgetElement cancelBtn;
+                                    cancelBtn.type = WidgetElementType::Button;
+                                    cancelBtn.id = "NM.Cancel";
+                                    cancelBtn.from = Vec2{ nx(W - 90.0f), ny(H - 44.0f) };
+                                    cancelBtn.to = Vec2{ nx(W - 16.0f), ny(H - 12.0f) };
+                                    cancelBtn.text = "Cancel";
+                                    cancelBtn.fontSize = 14.0f;
+                                    cancelBtn.textColor = Vec4{ 0.9f, 0.9f, 0.9f, 1.0f };
+                                    cancelBtn.textAlignH = TextAlignH::Center;
+                                    cancelBtn.textAlignV = TextAlignV::Center;
+                                    cancelBtn.color = Vec4{ 0.25f, 0.25f, 0.3f, 0.95f };
+                                    cancelBtn.hoverColor = Vec4{ 0.35f, 0.35f, 0.42f, 1.0f };
+                                    cancelBtn.shaderVertex = "button_vertex.glsl";
+                                    cancelBtn.shaderFragment = "button_fragment.glsl";
+                                    cancelBtn.isHitTestable = true;
+                                    cancelBtn.onClicked = [popup]() { popup->close(); };
+                                    elements.push_back(std::move(cancelBtn));
+                                }
+
+                                auto widget = std::make_shared<Widget>();
+                                widget->setName("NewMaterial");
+                                widget->setSizePixels(Vec2{ W, H });
+                                widget->setElements(std::move(elements));
+                                popup->uiManager().registerWidget("NewMaterial", widget);
+                            }});
+
+                        uiManager.showDropdownMenu(mousePos, items);
+                        continue;
+                    }
                 }
                 if (!isOverUI)
                 {

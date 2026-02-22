@@ -126,6 +126,7 @@ private:
     GLint m_locViewPos{-1};
     GLint m_locMaterialShininess{-1};
     GLint m_locHasSpecularMap{-1};
+    GLint m_locHasDiffuseMap{-1};
     GLint m_locLightCount{-1};
     struct LightUniformLocs
     {

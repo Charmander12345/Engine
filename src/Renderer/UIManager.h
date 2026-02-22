@@ -11,6 +11,8 @@
 #include "UIWidget.h"
 
 class EngineLevel;
+class OpenGLRenderer;
+class PopupWindow;
 
 class UIManager
 {
@@ -29,6 +31,9 @@ public:
 
     UIManager();
     ~UIManager() = default;
+
+    void setRenderer(OpenGLRenderer* renderer) { m_renderer = renderer; }
+    OpenGLRenderer* getRenderer() const { return m_renderer; }
 
     Vec2 getAvailableViewportSize() const;
     void setAvailableViewportSize(const Vec2& size);
@@ -61,8 +66,21 @@ public:
 
     void showModalMessage(const std::string& message, std::function<void()> onClosed = {});
     void closeModalMessage();
+    void showConfirmDialog(const std::string& message, std::function<void()> onConfirm, std::function<void()> onCancel = {});
     void showToastMessage(const std::string& message, float durationSeconds);
     void updateNotifications(float deltaSeconds);
+
+    struct DropdownMenuItem
+    {
+        std::string label;
+        std::function<void()> onClick;
+    };
+    void showDropdownMenu(const Vec2& anchorPixels, const std::vector<DropdownMenuItem>& items);
+    void closeDropdownMenu();
+    bool isDropdownMenuOpen() const { return m_dropdownVisible; }
+
+    void openLandscapeManagerPopup();
+    void openEngineSettingsPopup();
 
     static UIManager* GetActiveInstance();
     static void SetActiveInstance(UIManager* instance);
@@ -80,6 +98,7 @@ private:
     std::shared_ptr<Widget> createToastWidget(const std::string& message, const std::string& name) const;
     void updateToastStackLayout();
 
+    OpenGLRenderer* m_renderer{ nullptr };
     Vec2 m_availableViewportSize{};
     Vec2 m_mousePosition{};
     bool m_hasMousePosition{ false };
@@ -117,12 +136,17 @@ private:
     std::vector<ToastNotification> m_toasts;
     uint64_t m_nextToastId{ 1 };
 
+    // Dropdown menu state
+    std::shared_ptr<Widget> m_dropdownWidget;
+    bool m_dropdownVisible{ false };
+
 	void bindClickEventsForWidget(const std::shared_ptr<Widget>& widget);
 	void bindClickEventsForElement(WidgetElement& element);
 	EngineLevel* m_outlinerLevel{ nullptr };
 	unsigned int m_outlinerSelectedEntity{ 0 };
 	std::string m_contentBrowserPath;  // current subfolder relative to Content (empty = root)
 	std::string m_selectedBrowserFolder; // folder highlighted in tree (shown in grid)
+	std::string m_selectedGridAsset;     // relative asset path selected in grid (empty = none)
 	std::unordered_set<std::string> m_expandedFolders; // set of expanded folder paths
 
 	// Double-click detection
@@ -143,6 +167,14 @@ public:
 	void refreshContentBrowser(const std::string& subfolder = "");
 	void selectEntity(unsigned int entity);
 	unsigned int getSelectedEntity() const { return m_outlinerSelectedEntity; }
+	const std::string& getSelectedBrowserFolder() const { return m_selectedBrowserFolder; }
+
+	// Grid asset selection
+	const std::string& getSelectedGridAsset() const { return m_selectedGridAsset; }
+	void clearSelectedGridAsset() { m_selectedGridAsset.clear(); }
+
+	// Returns true if screenPos is over the content browser grid area
+	bool isOverContentBrowserGrid(const Vec2& screenPos) const;
 
 	void refreshStatusBar();
 	void showSaveProgressModal(size_t total);

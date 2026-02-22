@@ -264,6 +264,22 @@ private:
     GLuint m_boundsDebugProgram{0};
     GLsizei m_boundsDebugVertexCount{0};
     bool m_boundsDebugEnabled{false};
+    bool m_wireframeEnabled{false};
+    bool m_vsyncEnabled{false};
+
+    // Skybox
+    GLuint m_skyboxVao{0};
+    GLuint m_skyboxVbo{0};
+    GLuint m_skyboxProgram{0};
+    GLint  m_skyboxLocProjection{-1};
+    GLint  m_skyboxLocView{-1};
+    GLint  m_skyboxLocSampler{-1};
+    GLuint m_skyboxCubemap{0};
+    std::string m_skyboxLoadedPath;
+    bool ensureSkyboxResources();
+    void releaseSkyboxResources();
+    bool loadSkyboxCubemap(const std::string& folderPath);
+    void renderSkybox(const glm::mat4& view, const glm::mat4& projection);
 
     static constexpr size_t kFrameQueryCount = 3;
     std::array<GLuint, kFrameQueryCount> m_gpuTimerQueries{};
@@ -406,6 +422,17 @@ public:
     uint32_t getLastTotalCount() const { return m_lastTotalCount; }
     void toggleBoundsDebug() { m_boundsDebugEnabled = !m_boundsDebugEnabled; }
     bool isBoundsDebugEnabled() const { return m_boundsDebugEnabled; }
+
+    void setShadowsEnabled(bool enabled) { m_shadowEnabled = enabled; }
+    bool isShadowsEnabled() const { return m_shadowEnabled; }
+    void setOcclusionCullingEnabled(bool enabled) { m_occlusionEnabled = enabled; }
+    bool isOcclusionCullingEnabled() const { return m_occlusionEnabled; }
+    void setWireframeEnabled(bool enabled) { m_wireframeEnabled = enabled; }
+    bool isWireframeEnabled() const { return m_wireframeEnabled; }
+    void setVSyncEnabled(bool enabled);
+    bool isVSyncEnabled() const { return m_vsyncEnabled; }
+    void setSkyboxPath(const std::string& pathOrFolder);
+    const std::string& getSkyboxPath() const { return m_skyboxLoadedPath; }
     void requestPick(int screenX, int screenY) { m_pickRequested = true; m_pickX = screenX; m_pickY = screenY; }
     unsigned int getSelectedEntity() const { return m_selectedEntity; }
     void setSelectedEntity(unsigned int entity) { m_selectedEntity = entity; }

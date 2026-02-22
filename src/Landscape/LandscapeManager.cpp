@@ -60,9 +60,9 @@ ECS::Entity LandscapeManager::spawnLandscape(const LandscapeParams& params)
             const uint32_t bl = static_cast<uint32_t>((r + 1) * (cols + 1) + c    );
             const uint32_t br = static_cast<uint32_t>((r + 1) * (cols + 1) + c + 1);
             // Triangle 1
-            indices.push_back(tl); indices.push_back(bl); indices.push_back(tr);
+            indices.push_back(tl); indices.push_back(tr); indices.push_back(bl);
             // Triangle 2
-            indices.push_back(tr); indices.push_back(bl); indices.push_back(br);
+            indices.push_back(tr); indices.push_back(br); indices.push_back(bl);
         }
     }
 
@@ -138,14 +138,15 @@ ECS::Entity LandscapeManager::spawnLandscape(const LandscapeParams& params)
     mesh.meshAssetPath = relPath;
     ecs.addComponent<ECS::MeshComponent>(entity, mesh);
 
+    ECS::MaterialComponent material;
+    material.materialAssetPath = "Materials/WorldGrid.asset";
+    ecs.addComponent<ECS::MaterialComponent>(entity, material);
+
     auto* level = DiagnosticsManager::Instance().getActiveLevelSoft();
     if (level)
     {
         level->onEntityAdded(entity);
-        level->setIsSaved(false);
     }
-
-    DiagnosticsManager::Instance().setScenePrepared(false);
 
     logger.log(Logger::Category::Engine,
         "LandscapeManager: spawned entity " + std::to_string(entity) +
@@ -155,4 +156,21 @@ ECS::Entity LandscapeManager::spawnLandscape(const LandscapeParams& params)
         Logger::LogLevel::INFO);
 
     return entity;
+}
+
+bool LandscapeManager::hasExistingLandscape()
+{
+    auto& ecs = ECS::ECSManager::Instance();
+    ECS::Schema schema;
+    schema.require<ECS::MeshComponent>();
+    const auto entities = ecs.getEntitiesMatchingSchema(schema);
+    for (const auto entity : entities)
+    {
+        const auto* mesh = ecs.getComponent<ECS::MeshComponent>(entity);
+        if (mesh && mesh->meshAssetPath.rfind("Landscape/", 0) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
 }

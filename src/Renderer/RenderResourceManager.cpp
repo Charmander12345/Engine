@@ -1,6 +1,7 @@
 #include "RenderResourceManager.h"
 
 #include <memory>
+#include <unordered_set>
 
 #include "../Diagnostics/DiagnosticsManager.h"
 #include "../Logger/Logger.h"
@@ -158,7 +159,7 @@ std::shared_ptr<Widget> RenderResourceManager::buildWidgetAsset(const std::share
     return widget;
 }
 
-std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::buildRenderablesForSchema(const ECS::Schema& schema)
+std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::buildRenderablesForSchema(const ECS::Schema& schema, const std::string& defaultFragmentShader)
 {
     auto& logger = Logger::Instance();
     auto& ecs = ECS::ECSManager::Instance();
@@ -167,30 +168,129 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
     renderables.reserve(matches.size());
 
     auto& assetManager = AssetManager::Instance();
+
+    // Helper: resolve a relative content path to absolute
+    const auto resolvePath = [&](const std::string& rawPath) -> std::string
+    {
+        if (rawPath.empty())
+            return {};
+        std::string resolved = rawPath;
+        const std::filesystem::path p(rawPath);
+        if (!p.is_absolute())
+        {
+            const auto absPath = assetManager.getAbsoluteContentPath(rawPath);
+            if (!absPath.empty())
+                resolved = absPath;
+        }
+        if (!std::filesystem::exists(resolved))
+        {
+            const auto enginePath = assetManager.getAbsoluteEngineContentPath(rawPath);
+            if (!enginePath.empty() && std::filesystem::exists(enginePath))
+                resolved = enginePath;
+        }
+        return resolved;
+    };
+
+    // ── Pass 1: Collect all unique mesh + material paths ──
+    std::vector<std::pair<std::string, AssetType>> batchRequests;
+    std::unordered_set<std::string> seen;
+    for (const auto& match : matches)
+    {
+        if (!match.mesh.meshAssetPath.empty())
+        {
+            const std::string meshPath = resolvePath(match.mesh.meshAssetPath);
+            if (!meshPath.empty() && seen.insert(meshPath).second)
+            {
+                batchRequests.push_back({ meshPath, AssetType::Model3D });
+            }
+        }
+        if (!match.material.materialAssetPath.empty())
+        {
+            const std::string matPath = resolvePath(match.material.materialAssetPath);
+            if (!matPath.empty() && seen.insert(matPath).second)
+            {
+                batchRequests.push_back({ matPath, AssetType::Material });
+            }
+        }
+    }
+
+    // ── Batch-load meshes + materials in parallel ──
+    if (!batchRequests.empty())
+    {
+        logger.log(Logger::Category::Rendering,
+            "buildRenderablesForSchema: queuing " + std::to_string(batchRequests.size()) + " mesh/material load jobs",
+            Logger::LogLevel::INFO);
+        assetManager.loadBatchParallel(batchRequests);
+        logger.log(Logger::Category::Rendering,
+            "buildRenderablesForSchema: mesh/material batch done",
+            Logger::LogLevel::INFO);
+    }
+
+    // ── Pass 2: Discover texture paths from loaded materials ──
+    std::vector<std::pair<std::string, AssetType>> textureBatchRequests;
+    for (const auto& match : matches)
+    {
+        if (match.material.materialAssetPath.empty())
+            continue;
+        const std::string matPath = resolvePath(match.material.materialAssetPath);
+        if (matPath.empty())
+            continue;
+
+        // Skip if we already cached this material's data
+        if (m_materialDataCache.count(matPath))
+            continue;
+
+        // Try to read texture paths from the loaded material
+        auto matAsset = assetManager.getLoadedAssetByPath(matPath);
+        if (!matAsset)
+            continue;
+        const auto& matData = matAsset->getData();
+        if (!matData.is_object() || !matData.contains("m_textureAssetPaths"))
+            continue;
+        const auto& texPaths = matData.at("m_textureAssetPaths");
+        if (!texPaths.is_array())
+            continue;
+        for (const auto& pathValue : texPaths)
+        {
+            if (!pathValue.is_string())
+                continue;
+            const std::string texPath = resolvePath(pathValue.get<std::string>());
+            if (!texPath.empty() && seen.insert(texPath).second)
+            {
+                textureBatchRequests.push_back({ texPath, AssetType::Texture });
+            }
+        }
+    }
+
+    // ── Batch-load textures in parallel (stbi_load is the heavy part) ──
+    if (!textureBatchRequests.empty())
+    {
+        logger.log(Logger::Category::Rendering,
+            "buildRenderablesForSchema: queuing " + std::to_string(textureBatchRequests.size()) + " texture load jobs",
+            Logger::LogLevel::INFO);
+        assetManager.loadBatchParallel(textureBatchRequests);
+        logger.log(Logger::Category::Rendering,
+            "buildRenderablesForSchema: texture batch done",
+            Logger::LogLevel::INFO);
+    }
+
+    // ── Pass 3: Build renderables (all assets now in cache → instant hits) ──
     for (const auto& match : matches)
     {
         std::vector<std::shared_ptr<Texture>> textures;
         std::string materialCacheKey;
         float shininess = 32.0f;
+        std::string fragmentShaderOverride;
         if (!match.material.materialAssetPath.empty())
         {
-            std::string materialPath = match.material.materialAssetPath;
-            const std::filesystem::path matFs(materialPath);
-            if (!matFs.is_absolute())
-            {
-                const auto absPath = assetManager.getAbsoluteContentPath(materialPath);
-                if (!absPath.empty())
-                {
-                    materialPath = absPath;
-                }
-            }
-
+            std::string materialPath = resolvePath(match.material.materialAssetPath);
             materialCacheKey = materialPath;
             auto cachedMat = m_materialDataCache.find(materialCacheKey);
             if (cachedMat != m_materialDataCache.end())
             {
                 textures = cachedMat->second.textures;
                 shininess = cachedMat->second.shininess;
+                fragmentShaderOverride = cachedMat->second.shaderFragment;
             }
             else
             {
@@ -203,6 +303,10 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
                         const auto& matData = matAsset->getData();
                         if (matData.is_object())
                         {
+                            if (matData.contains("m_shaderFragment"))
+                            {
+                                fragmentShaderOverride = matData.at("m_shaderFragment").get<std::string>();
+                            }
                             if (matData.contains("m_shininess"))
                             {
                                 shininess = matData.at("m_shininess").get<float>();
@@ -219,16 +323,7 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
                                             textures.push_back(nullptr);
                                             continue;
                                         }
-                                        std::string texPath = pathValue.get<std::string>();
-                                        const std::filesystem::path texFs(texPath);
-                                        if (!texFs.is_absolute())
-                                        {
-                                            const auto absTex = assetManager.getAbsoluteContentPath(texPath);
-                                            if (!absTex.empty())
-                                            {
-                                                texPath = absTex;
-                                            }
-                                        }
+                                        std::string texPath = resolvePath(pathValue.get<std::string>());
                                         int texId = assetManager.loadAsset(texPath, AssetType::Texture, AssetManager::Sync);
                                         if (texId == 0)
                                         {
@@ -270,24 +365,12 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
 
                 if (!materialCacheKey.empty())
                 {
-                    m_materialDataCache[materialCacheKey] = { textures, shininess };
+                    m_materialDataCache[materialCacheKey] = { textures, shininess, fragmentShaderOverride };
                 }
             }
         }
 
-        std::string meshPath = match.mesh.meshAssetPath;
-        if (!meshPath.empty())
-        {
-            const std::filesystem::path meshFs(meshPath);
-            if (!meshFs.is_absolute())
-            {
-                const auto absPath = assetManager.getAbsoluteContentPath(meshPath);
-                if (!absPath.empty())
-                {
-                    meshPath = absPath;
-                }
-            }
-        }
+        std::string meshPath = resolvePath(match.mesh.meshAssetPath);
 
         int assetId = assetManager.loadAsset(meshPath, AssetType::Model3D, AssetManager::Sync);
         if (assetId == 0)
@@ -313,13 +396,22 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
         renderable.textures = textures;
         renderable.assetType = asset->getAssetType();
         renderable.shininess = shininess;
+
+        // Determine effective fragment shader override: material > default parameter
+        std::string effectiveFragShader = fragmentShaderOverride;
+        if (effectiveFragShader.empty())
+        {
+            effectiveFragShader = defaultFragmentShader;
+        }
+        renderable.fragmentShaderOverride = effectiveFragShader;
+
         if (match.hasTransform)
         {
             renderable.transform = match.transform;
         }
 
         const unsigned int meshCacheId = (asset->getId() != 0) ? asset->getId() : static_cast<unsigned int>(assetId);
-        const std::string obj3DCacheKey = std::to_string(meshCacheId) + "|" + materialCacheKey;
+        const std::string obj3DCacheKey = std::to_string(meshCacheId) + "|" + materialCacheKey + "|" + effectiveFragShader;
 
         if (renderable.assetType == AssetType::Model3D || renderable.assetType == AssetType::PointLight)
         {
@@ -336,6 +428,10 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
             {
                 auto obj = std::make_shared<OpenGLObject3D>(asset);
                 obj->setMaterialCacheKeySuffix(materialCacheKey);
+                if (!effectiveFragShader.empty())
+                {
+                    obj->setFragmentShaderOverride(effectiveFragShader);
+                }
                 if (obj->prepare())
                 {
                     obj->setTextures(textures);

@@ -152,6 +152,9 @@ add_custom_command(TARGET Engine POST_BUILD
     # Copy shaders to deploy directory
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${SHADERS_SOURCE_DIR}" "${ENGINE_DEPLOY_DIR}/shaders"
 
+    # Copy engine Content directory (textures, skyboxes, etc.) to deploy directory
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CONTENT_SOURCE_DIR}" "${ENGINE_DEPLOY_DIR}/Content"
+
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${Python3_RUNTIME_LIBRARY_RELEASE}" "${ENGINE_DEPLOY_DIR}"
 
     COMMAND_EXPAND_LISTS

@@ -18,6 +18,7 @@ namespace
         case WidgetElementType::Image: return "Image";
         case WidgetElementType::CheckBox: return "CheckBox";
         case WidgetElementType::DropDown: return "DropDown";
+        case WidgetElementType::DropdownButton: return "DropdownButton";
         case WidgetElementType::TreeView: return "TreeView";
         case WidgetElementType::TabView: return "TabView";
         default: return "Unknown";
@@ -38,6 +39,7 @@ namespace
         if (value == "Image") return WidgetElementType::Image;
         if (value == "CheckBox") return WidgetElementType::CheckBox;
         if (value == "DropDown") return WidgetElementType::DropDown;
+        if (value == "DropdownButton") return WidgetElementType::DropdownButton;
         if (value == "TreeView") return WidgetElementType::TreeView;
         if (value == "TabView") return WidgetElementType::TabView;
         return WidgetElementType::Unknown;
@@ -292,7 +294,8 @@ namespace
                 element.type == WidgetElementType::EntryBar ||
                 element.type == WidgetElementType::Slider ||
                 element.type == WidgetElementType::CheckBox ||
-                element.type == WidgetElementType::DropDown);
+                element.type == WidgetElementType::DropDown ||
+                element.type == WidgetElementType::DropdownButton);
         }
         if (entry.contains("fillX"))
         {
@@ -496,6 +499,13 @@ namespace
                 entry["items"] = element.items;
             }
             entry["selectedIndex"] = element.selectedIndex;
+        }
+        else if (element.type == WidgetElementType::DropdownButton)
+        {
+            if (!element.items.empty())
+            {
+                entry["items"] = element.items;
+            }
         }
         else if (element.type == WidgetElementType::TreeView)
         {
@@ -738,6 +748,17 @@ void Widget::setFillY(bool fill)
 bool Widget::getFillY() const
 {
     return m_fillY;
+}
+
+void Widget::setAbsolutePosition(bool absolute)
+{
+    m_absolutePosition = absolute;
+    m_layoutDirty = true;
+}
+
+bool Widget::isAbsolutePositioned() const
+{
+    return m_absolutePosition;
 }
 
 void Widget::markLayoutDirty()

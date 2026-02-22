@@ -15,5 +15,6 @@ enum class AssetType
     Script,
     Shader,
     Level,
-    Widget
+    Widget,
+    Skybox
 };

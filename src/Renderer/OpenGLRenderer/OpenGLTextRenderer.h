@@ -34,6 +34,12 @@ public:
     Vec2 measureText(const std::string& text, float scale) const;
     float getLineHeight(float scale) const;
 
+    // Popup GL-context VAO support (VAOs are not shared between contexts).
+    void ensurePopupVao();
+    void resetPopupVao() { m_popupVao = 0; }
+    GLuint getPopupVao() const { return m_popupVao; }
+    GLuint swapVao(GLuint newVao) { GLuint old = m_vao; m_vao = newVao; return old; }
+
 private:
     bool buildShaderProgram(const std::string& vertexShaderPath, const std::string& fragmentShaderPath, GLuint& outProgram);
     bool buildGlyphAtlas(const std::string& fontPath);
@@ -51,4 +57,5 @@ private:
     float m_fontAscent{0.0f};
     float m_fontDescent{0.0f};
     std::unordered_map<std::string, GLuint> m_programCache;
+    GLuint m_popupVao{0};
 };

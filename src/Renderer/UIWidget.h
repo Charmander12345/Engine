@@ -26,6 +26,7 @@ enum class WidgetElementType
     Image,
     CheckBox,
     DropDown,
+    DropdownButton,
     TreeView,
     TabView
 };
@@ -126,6 +127,14 @@ struct WidgetElement
     std::function<void(int)> onSelectionChanged;
     std::function<void(int)> onTabChanged;
 
+    // DropdownButton items (label + callback pairs, used with showDropdownMenu)
+    struct DropdownItem
+    {
+        std::string label;
+        std::function<void()> onClick;
+    };
+    std::vector<DropdownItem> dropdownItems;
+
     // Drag & Drop
     bool isDraggable{ false };
     std::string dragPayload;    // e.g. "Texture|MyTexture.asset" or "Model3D|Mesh.asset"
@@ -147,6 +156,8 @@ public:
     bool getFillX() const;
     void setFillY(bool fill);
     bool getFillY() const;
+    void setAbsolutePosition(bool absolute);
+    bool isAbsolutePositioned() const;
     const Vec2& getComputedSizePixels() const;
     bool hasComputedSize() const;
     void setComputedSizePixels(const Vec2& size, bool hasComputed);
@@ -174,6 +185,7 @@ private:
     WidgetAnchor m_anchor{ WidgetAnchor::TopLeft };
     bool m_fillX{ false };
     bool m_fillY{ false };
+    bool m_absolutePosition{ false };
     Vec2 m_computedSizePixels{};
     Vec2 m_computedPositionPixels{};
     bool m_hasComputedSize{ false };
