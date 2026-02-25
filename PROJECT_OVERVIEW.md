@@ -38,10 +38,13 @@
 11. [Scripting (Python)](#11-scripting-python)
     - 11.1 [Initialisierung](#111-initialisierung)
     - 11.2 [Script-API (engine-Modul)](#112-script-api-engine-modul)
-    - 11.3 [engine.pyi (IntelliSense)](#113-enginepyi-intellisense)
+    - 11.3 [Script-Lebenszyklus (PIE-Modus)](#113-script-lebenszyklus-pie-modus)
+    - 11.4 [engine.pyi (IntelliSense)](#114-enginepyi-intellisense)
 12. [Main Loop im Detail](#12-main-loop-im-detail)
 13. [Shutdown-Sequenz](#13-shutdown-sequenz)
 14. [Architektur-Diagramm](#14-architektur-diagramm)
+15. [Physik-System](#15-physik-system)
+16. [Landscape-System](#16-landscape-system)
 
 ---
 
@@ -79,8 +82,14 @@ Engine/
 │   ├── Diagnostics/                # Zustandsverwaltung, Config, PIE, Fenster
 │   │   ├── DiagnosticsManager.h/.cpp
 │   │   └── CMakeLists.txt
+│   ├── Landscape/                  # Landscape-/Terrain-Verwaltung
+│   │   ├── LandscapeManager.h/.cpp
+│   │   └── CMakeLists.txt
 │   ├── Logger/                     # Datei- und Konsolen-Logging
 │   │   ├── Logger.h/.cpp
+│   │   └── CMakeLists.txt
+│   ├── Physics/                    # Physik-Simulation (Rigid Body)
+│   │   ├── PhysicsWorld.h/.cpp
 │   │   └── CMakeLists.txt
 │   ├── Renderer/                   # Rendering-Abstraktion + OpenGL-Impl.
 │   │   ├── Renderer.h              # Abstrakte Renderer-Schnittstelle
@@ -92,6 +101,8 @@ Engine/
 │   │   ├── RenderResourceManager.h/.cpp  # Caching, Level-Vorbereitung
 │   │   ├── UIManager.h/.cpp        # Kompletter UI-Manager
 │   │   ├── UIWidget.h/.cpp         # Widget + WidgetElement Datenmodell
+│   │   ├── PopupWindow.h/.cpp      # Multi-Window Popup-System (Shared GL-Context)
+│   │   ├── SplashWindow.h/.cpp     # Splash-Fenster beim Engine-Start (eigenes SDL-Fenster + GL-Context)
 │   │   ├── OpenGLRenderer/         # OpenGL-spezifische Implementierung
 │   │   │   ├── OpenGLRenderer.h/.cpp
 │   │   │   ├── OpenGLCamera.h/.cpp
@@ -128,6 +139,8 @@ Engine/
 │   │   │   ├── DropDownWidget.h/.cpp
 │   │   │   ├── TreeViewWidget.h/.cpp
 │   │   │   └── TabViewWidget.h/.cpp
+│   │   ├── EditorWindows/           # Editor-Fenster (FBO-Override, 3D-Vorschau)
+│   │   │   └── MeshViewerWindow.h/.cpp  # Mesh-Viewer: Orbit-Kamera, dedizierter FBO
 │   │   └── CMakeLists.txt
 │   └── Scripting/                  # Eingebettetes Python-Scripting
 │       ├── PythonScripting.h/.cpp
@@ -164,8 +177,9 @@ set(CMAKE_CXX_STANDARD 20)
 | `Diagnostics`   | SHARED  | Core, Logger                                |
 | `AssetManager`  | SHARED  | Diagnostics, Logger, Core, SDL3::SDL3, assimp (static) |
 | `Renderer`      | SHARED  | SDL3::SDL3, freetype (static), Logger, Core, AssetManager |
-| `Scripting`     | SHARED  | SDL3::SDL3, Renderer, Logger, AssetManager, Diagnostics, Core, Python3 |
-| `Engine` (exe)  | EXE     | SDL3, Renderer, Logger, AssetManager, Diagnostics, Core, Scripting, Python3 |
+| `Scripting`     | SHARED  | SDL3::SDL3, Renderer, Logger, AssetManager, Diagnostics, Core, Physics, Python3 |
+| `Physics`       | STATIC  | Core, Logger                                |
+| `Engine` (exe)  | EXE     | SDL3, Renderer, Logger, AssetManager, Diagnostics, Core, Scripting, Physics, Python3 |
 
 ### 2.4 Build-Schritte
 1. CMake konfigurieren: `cmake -B build -G "Visual Studio 18 2026" -A x64`
@@ -220,14 +234,15 @@ set(CMAKE_CXX_STANDARD 20)
 ### 4.2 Editor-Widgets (UI-Panels)
 Beim Start werden sechs Editor-Widgets geladen:
 
-| Widget-Name       | Asset-Datei              | Funktion                                    |
-|-------------------|--------------------------|---------------------------------------------|
-| TitleBar          | `TitleBar.asset`         | 100px: HorizonEngine-Titel links + Projektname mittig + Min/Max/Close rechts, Tab-Leiste unten (volle Breite) |
-| ViewportOverlay   | `ViewportOverlay.asset`  | Toolbar: Select/Move/Rotate/Scale + Play/Stop (PIE) zentriert + Settings rechts |
-| WorldSettings     | `WorldSettings.asset`    | Clear-Color-Picker (RGB-Einträge)           |
-| WorldOutliner     | `WorldOutliner.asset`    | Entitäten-Liste des aktiven Levels          |
-| EntityDetails     | `EntityDetails.asset`    | Komponenten-Details der ausgewählten Entität|
-| ContentBrowser    | `ContentBrowser.asset`   | TreeView (Ordner-Hierarchie + Shaders-Root, Highlight) + Grid (Kacheln mit Icons, Selektion + Delete), Doppelklick-Navigation, farbcodierte PNGs, Rechtsklick-Kontextmenü (New Script/Level/Material) |
+| Widget-Name       | Asset-Datei              | Tab-Scope  | Funktion                                    |
+|-------------------|--------------------------|------------|---------------------------------------------|
+| TitleBar          | `TitleBar.asset`         | Global     | 100px: HorizonEngine-Titel links + Projektname mittig + Min/Max/Close rechts, Tab-Leiste unten (volle Breite) |
+| ViewportOverlay   | `ViewportOverlay.asset`  | Viewport   | Toolbar: Select/Move/Rotate/Scale + Play/Stop (PIE) zentriert + Settings rechts |
+| WorldSettings     | `WorldSettings.asset`    | Viewport   | Clear-Color-Picker (RGB-Einträge)           |
+| WorldOutliner     | `WorldOutliner.asset`    | Viewport   | Entitäten-Liste des aktiven Levels          |
+| EntityDetails     | `EntityDetails.asset`    | Viewport   | Komponenten-Details der ausgewählten Entität mit editierbaren Steuerelementen: Vec3-Eingabefelder (X/Y/Z farbcodiert) für Transform, EntryBars für Floats, CheckBoxen für Booleans, DropDowns für Enums, ColorPicker für Farben, Drag-and-Drop + Dropdown-Auswahl für Mesh/Material/Script-Assets, "+ Add Component"-Dropdown, Remove-Button (X) pro Komponente mit Bestätigungsdialog |
+| ContentBrowser    | `ContentBrowser.asset`   | Viewport   | TreeView (Ordner-Hierarchie + Shaders-Root, Highlight) + Grid (Kacheln mit Icons, Selektion + Delete + Rename + F2-Shortcut), Doppelklick-Navigation (Ordner öffnen, Model3D → Mesh-Viewer-Tab), farbcodierte PNGs, Rechtsklick-Kontextmenü (New Script/Level/Material) |
+| StatusBar         | `StatusBar.asset`        | Global     | Undo/Redo + Dirty-Zähler + Save All        |
 
 ### 4.3 Editor-Tab-System
 Die Engine unterstützt ein Tab-basiertes Editor-Layout:
@@ -236,8 +251,10 @@ Die Engine unterstützt ein Tab-basiertes Editor-Layout:
 - **Tab-Leiste** (untere Reihe der TitleBar, 50px): Dokument-/Level-Tabs horizontal von links nach rechts, volle Breite
 - **Toolbar** (ViewportOverlay, 34px): PIE-Controls zentriert, Settings rechts (Select/Move/Rotate/Scale temporär entfernt)
 - **Viewport-Tab**: Immer geöffnet (nicht schließbar), zeigt die 3D-Szene
+- **Mesh-Viewer-Tabs**: Schließbare Tabs für 3D-Mesh-Vorschau mit Split-View (Viewport + Properties), geöffnet per Doppelklick auf Model3D im Content Browser. Jeder Tab besitzt ein eigenes Runtime-EngineLevel.
 - **Per-Tab-Framebuffer**: Jeder Tab besitzt einen eigenen FBO (Color-Texture + Depth-RBO)
-- **Tab-Umschaltung**: Click-Events auf TitleBar.Tab.* Buttons wechseln den aktiven Tab
+- **Tab-Umschaltung**: Click-Events auf TitleBar.Tab.* Buttons wechseln den aktiven Tab. `setActiveTab()` tauscht das aktive Level per `swapActiveLevel()` aus (Editor-Level ↔ Mesh-Viewer-Runtime-Level) und speichert/restauriert Kamera-State.
+- **Tab-Scoped UI**: Widgets können einem Tab zugeordnet werden (`registerWidget(id, widget, tabId)`). Viewport-Widgets (ViewportOverlay, WorldSettings, WorldOutliner, EntityDetails, ContentBrowser) sind zum Tab "Viewport" zugeordnet, Mesh-Viewer-Properties-Panels zum jeweiligen Asset-Tab. Globale Widgets (TitleBar, StatusBar) bleiben immer sichtbar.
 - **FBO-Blit**: Der aktive Tab wird vor dem UI-Overlay auf den Bildschirm geblittet
 - **HZB/Pick/Outline**: Diese Render-Passes arbeiten innerhalb des Viewport-Tab-FBO
 
@@ -287,11 +304,12 @@ Zentrale Zustandsverwaltung der Engine (Singleton). Verwaltet:
 - **RHI-Auswahl**: `OpenGL`, `DirectX11`, `DirectX12` (derzeit nur OpenGL aktiv)
 - **Fenster-Konfiguration**: Größe (`Vec2`), Zustand (Normal/Maximized/Fullscreen)
 - **PIE-Modus** (Play In Editor): `setPIEActive(bool)` / `isPIEActive()`
-- **Aktives Level**: `setActiveLevel()` / `getActiveLevelSoft()`
+- **Aktives Level**: `setActiveLevel()` / `getActiveLevelSoft()` / `swapActiveLevel()` (atomarer Austausch via `unique_ptr`, gibt altes Level zurück, setzt Dirty-Callback, feuert `activeLevelChangedCallbacks`)
 - **Action-Tracking**: Asynchrone Aktionen (Loading, Saving, Importing, Building)
 - **Input-Dispatch**: Globale KeyDown/KeyUp-Handler
 - **Benachrichtigungen**: Modal- und Toast-Notifications (Queue-basiert)
 - **Shutdown-Request**: `requestShutdown()` → sauberes Beenden
+- **Entity-Dirty-Queue**: `invalidateEntity(entityId)` → markiert einzelne Entitäten für Render-Refresh. `consumeDirtyEntities()` liefert und leert die Queue (thread-safe via `m_mutex`). `hasDirtyEntities()` prüft ob Dirty-Entitäten vorhanden sind. Wird von `renderWorld()` pro Frame konsumiert.
 
 ### 6.2 Config-Persistierung
 - **Engine-Config**: `config/config.ini` (Key=Value-Format)
@@ -377,11 +395,16 @@ Die Asset-Pipeline ist in drei Phasen aufgeteilt:
 - **Shader-Pfad-Cache**: `ResolveShaderPath()` in `OpenGLObject3D` cached aufgelöste Dateipfade statisch, vermeidet wiederholte `std::filesystem::exists()`-Aufrufe.
 - **Material-Daten-Cache**: `RenderResourceManager::m_materialDataCache` cached geparste Material-Daten (Texturen, Shininess, Shader) nach Pfad.
 - **Deduplizierte Model-Matrix-Berechnung**: Render- und Mesh-Entries nutzen eine gemeinsame Lambda-Funktion für die Matrixberechnung.
+- **O(n²)-Registry-Schreibung eliminiert**: `m_suppressRegistrySave`-Flag unterdrückt wiederholtes `saveRegistry()` während `discoverAssetsAndBuildRegistry()`; Registry wird einmalig am Ende geschrieben.
+- **engine.pyi statisch deployed**: Die statische `src/Scripting/engine.pyi` wird per CMake post-build nach `Content/Scripting/engine.pyi` im Deploy-Verzeichnis kopiert. Beim Laden/Erstellen eines Projekts wird die Datei von dort per `fs::copy_file` in das Projekt-Verzeichnis (`Content/Scripts/engine.pyi`) kopiert — keine Laufzeit-Generierung mehr.
+- **Single-Open bei Asset-Discovery**: `readAssetHeader()` wird in `discoverAssetsAndBuildRegistry()` nur einmal pro Datei aufgerufen (statt doppeltem Open).
 
 ### 7.7 Asset-Registry
 - Beim Projektladen wird ein Asset-Register aufgebaut (`discoverAssetsAndBuildRegistry`)
 - Index nach Pfad und Name (`m_registryByPath`, `m_registryByName`)
 - Erlaubt schnelle Existenzprüfungen (`doesAssetExist`)
+- **Rename**: `renameAsset(relPath, newName)` benennt die Datei auf Disk um, aktualisiert die Registry (Name + Pfad + Index-Maps), alle geladenen AssetData-Objekte, ECS-Komponenten-Referenzen (Mesh/Material/Script-Pfade) und scannt Cross-Asset-Referenzen in .asset-Dateien. Die zugehörige Source-Datei (z.B. Textur-Original) wird ebenfalls umbenannt. Die Registry wird nach dem Rename persistiert.
+- **Move**: `moveAsset(oldRelPath, newRelPath)` verschiebt Assets analog (Datei + Registry + ECS + .asset-Referenzen).
 
 ### 7.8 Garbage Collector
 **Dateien:** `src/AssetManager/GarbageCollector.h/.cpp`
@@ -389,7 +412,16 @@ Die Asset-Pipeline ist in drei Phasen aufgeteilt:
 - `collect()` entfernt abgelaufene Einträge
 - Wird alle 60 Sekunden aus der Main-Loop aufgerufen
 
-### 7.9 Thread-Pool
+### 7.9 Asset-Integrität
+- **`validateRegistry()`**: Prüft alle Registry-Einträge gegen das Dateisystem. Entfernt Einträge, deren Dateien nicht mehr auf Disk existieren (z.B. extern gelöscht). Rebuild der Index-Maps + Persist + Version-Bump. Wird automatisch nach `discoverAssetsAndBuildRegistryAsync()` aufgerufen.
+- **`validateEntityReferences(showToast)`**: Prüft ECS-Entity-Referenzen (MeshComponent, MaterialComponent, ScriptComponent) gegen die Registry. Loggt Warnungen für fehlende Assets. Wird nach `prepareEcs()` in `RenderResourceManager::prepareActiveLevel()` aufgerufen, d.h. bei jedem Level-Laden.
+- **`repairEntityReferences()`**: Repariert ungültige Asset-Referenzen vor dem Rendering:
+  - **Fehlende Meshes**: Entfernt die `MeshComponent` von der Entity, damit der Renderer sie überspringt.
+  - **Fehlende Materialien**: Ersetzt den Material-Pfad durch `Materials/WorldGrid.asset` (das WorldGrid-Fallback-Material).
+  - Wird in `prepareActiveLevel()` vor `validateEntityReferences()` aufgerufen, sodass der RRM nur gültige Referenzen vorbereitet.
+- Alle Methoden sind öffentlich und können jederzeit manuell aufgerufen werden (z.B. aus GC-Zyklus oder UI-Aktion).
+
+### 7.10 Thread-Pool
 - Thread-Pool mit `hardware_concurrency()` Threads (min. 2)
 - Globale Job-Queue mit Mutex + Condition-Variable
 - `enqueueJob(std::function<void()>)` → nächster freier Thread führt aus
@@ -402,13 +434,35 @@ saveProject(projectPath)    // Speichert Projektdaten
 createProject(parentDir, name, info)  // Erstellt neues Projekt mit Default-Assets
 ```
 
-### 7.9 Pfad-Auflösung
+### 7.11 Pfad-Auflösung
 - `getAbsoluteContentPath(relative)` → `<Projekt>/Content/<relative>`
 - `getEditorWidgetPath(relative)` → `<Engine>/Editor/Widgets/<relative>`
 
-### 7.10 Bild-Laden (stb_image)
+### 7.12 Bild-Laden (stb_image)
 - `loadRawImageData(path, w, h, channels)` → Pixel-Daten
 - `freeRawImageData(data)` → Speicher freigeben
+
+### 7.13 Asset-Import (`importAssetFromPath`)
+- **Import-Dialog**: `OpenImportDialog()` öffnet SDL-Dateidialog, leitet an `importAssetFromPath()` weiter.
+- **Textur-Import**: Kopiert Bilddatei nach `Content/`, erstellt `.asset` mit `m_sourcePath`.
+- **Audio-Import**: Kopiert WAV nach `Content/`, erstellt `.asset` mit `m_sourcePath`.
+- **3D-Modell-Import (Assimp)**:
+  - Lädt OBJ, FBX, glTF, GLB, DAE, etc. via Assimp.
+  - **Import-Logging**: Loggt beim Import die Scene-Zusammenfassung (Anzahl Meshes, Materials, eingebettete Texturen, Animationen), pro Mesh Details (Vertices, Faces, UV-Kanäle, Normals, Tangents, Material-Index) und pro Material die Textur-Anzahl nach Typ (Diffuse, Specular, Normal, Height, Ambient, Emissive).
+  - Sammelt alle Meshes in einen Vertex/Index-Buffer (pos3 + uv2).
+  - **Material-Extraktion**: Iteriert `scene->mMaterials` und erstellt für jedes Material ein `.asset` unter `Content/Materials/` mit:
+    - `m_textureAssetPaths`: Pfade zu extrahierten Textur-Assets.
+    - `m_diffuseColor`, `m_specularColor`, `m_shininess`: Material-Eigenschaften aus Assimp.
+  - **Textur-Extraktion**: Für jedes Material werden Diffuse-, Specular- und Normal-Texturen extrahiert:
+    - **Externe Texturen**: Datei wird nach `Content/Textures/` kopiert, `.asset` mit `m_sourcePath` erstellt.
+    - **Eingebettete Texturen**: Komprimierte Daten (PNG/JPG) oder Raw-Pixel (TGA) werden nach `Content/Textures/` geschrieben.
+  - **Benennungskonvention**: Materialien und Texturen werden nach dem Mesh-Asset benannt:
+    - Material: `MeshName` (bei einem Material) oder `MeshName_Material_N` (bei mehreren).
+    - Texturen: `MeshName_Diffuse`, `MeshName_Specular`, `MeshName_Normal`.
+  - `m_materialAssetPaths` im Mesh-Asset speichert Referenzen auf erstellte Material-Assets.
+  - **Auto-Material bei Entity-Spawn**: Beim Hinzufügen eines Meshes zur Szene (Drag-Drop auf Viewport, Outliner-Entity, EntityDetails-Dropdown) wird automatisch die erste referenzierte MaterialComponent hinzugefügt, falls das Mesh-Asset `m_materialAssetPaths` enthält.
+- **Shader-Import**: Kopiert `.glsl`-Datei nach `Content/`.
+- **Script-Import**: Kopiert `.py`-Datei nach `Content/`.
 
 ---
 
@@ -484,6 +538,7 @@ Repräsentiert ein Level/eine Szene:
 - **ECS-Integration**: `prepareEcs()` – baut Entitäten aus Level-Daten
 - **Script-Entities**: `buildScriptEntityCache()` – cached alle Entitäten mit Script-Komponente
 - **Snapshot/Restore**: `snapshotEcsState()` / `restoreEcsSnapshot()` – für PIE-Modus
+- **ECS-Reset**: `resetPreparedState()` – setzt `m_ecsPrepared = false`, erzwingt erneuten `prepareEcs()`-Aufruf beim nächsten Render (wird bei Level-Swap zwischen Editor und Mesh-Viewer-Tabs benötigt)
 - **JSON-Serialisierung**: `setLevelData()` / `getLevelData()` / `serializeEcsEntities()`
 - **Callback**: `registerEntityListChangedCallback()` – benachrichtigt UI bei Änderungen
 
@@ -516,7 +571,7 @@ struct EntitySnapshot {
 | `Material`    | `MaterialComponent`  | materialAssetPath, materialAssetId               |
 | `Light`       | `LightComponent`     | type (Point/Dir/Spot), color, intensity, range, spotAngle |
 | `Camera`      | `CameraComponent`    | fov, nearClip, farClip                           |
-| `Physics`     | `PhysicsComponent`   | colliderType (Box/Sphere/Mesh), isStatic, mass   |
+| `Physics`     | `PhysicsComponent`   | colliderType (Box/Sphere/Mesh), isStatic (default: false), mass, restitution, friction, useGravity, isKinematic, velocity[3], angularVelocity[3], colliderSize[3] (default: 0.5 Half-Extents). Angular Damping (0.98/Schritt) verhindert Endlos-Rotation. |
 | `Script`      | `ScriptComponent`    | scriptPath, scriptAssetId                        |
 | `Name`        | `NameComponent`      | displayName                                      |
 
@@ -550,7 +605,12 @@ bool hasComponent<T>(entity);
 bool setComponent<T>(entity, component);
 std::vector<Entity> getEntitiesMatchingSchema(schema);
 std::vector<SchemaAssetMatch> getAssetsMatchingSchema(schema);
+uint64_t getComponentVersion(); // Globaler Zähler, inkrementiert bei jeder Komponentenänderung (add/set/remove)
 ```
+
+#### 8.5.6 Dirty-Flagging bei Komponentenänderungen
+- **Mechanismus**: `ECSManager::m_componentVersion` wird bei jedem `addComponent`, `setComponent` und `removeComponent` inkrementiert.
+- **UIManager-Polling**: `UIManager::updateNotifications()` vergleicht den aktuellen Versionszähler mit dem zuletzt gesehenen Wert (`m_lastEcsComponentVersion`). Bei Änderung werden `populateOutlinerDetails()` und `refreshWorldOutliner()` automatisch aufgerufen.
 
 ---
 
@@ -672,6 +732,13 @@ present()
 - Selection-Outline via Edge-Detection-Shader auf Pick-Buffer
 - **Pick-Buffer wird nur bei Bedarf gerendert** (wenn Pick angefragt oder Entity selektiert)
 
+#### 9.2.6 Per-Entity Render Refresh
+- `refreshEntity(entity)` → Sucht die Entität in `m_renderEntries` / `m_meshEntries`, baut GPU-Daten per `refreshEntityRenderable()` neu auf und tauscht In-Place aus
+- Handhabt Listen-Migration: Mesh+Material ↔ Mesh-Only (wenn Material hinzugefügt/entfernt wird)
+- Fügt neue Entitäten in die passende Liste ein, entfernt Entitäten die kein Mesh mehr haben
+- `renderWorld()` konsumiert pro Frame die Dirty-Entity-Queue (`DiagnosticsManager::consumeDirtyEntities()`) und ruft `refreshEntity()` für jede auf
+- Voller Scene-Rebuild (`setScenePrepared(false)`) wird nur noch bei Levelwechsel oder Asset-Verschiebung ausgelöst
+
 #### 9.2.6 Editor-Gizmos
 - 3D-Gizmo-Overlay für die selektierte Entity (Translate/Rotate/Scale)
 - Eigener GLSL-Shader (`m_gizmoProgram`) + dynamisches Line-VBO (`m_gizmoVao`/`m_gizmoVbo`)
@@ -686,6 +753,11 @@ present()
 - Nur bei `isRenderDirty()` wird das FBO neu gezeichnet
 - Sonst wird der Cache per `blitUiCache()` ins Backbuffer geblittet
 - Content-Area-Berechnung nur wenn Text-Queue nicht leer
+
+#### 9.2.8 Renderer-Performance-Optimierungen
+- **Cached Active Tab**: `m_cachedActiveTab` vermeidet wiederholte lineare Suche über die Tab-Liste pro Frame.
+- **Projection Guard**: Projektionsmatrix wird nur bei tatsächlicher Größenänderung neu berechnet (`m_lastProjectionWidth`/`m_lastProjectionHeight`).
+- **Toter Code entfernt**: `isRenderEntryRelevant()`-Lambda (immer `true`) aus der Render-Pipeline entfernt.
 
 #### 9.2.7 Editor-Tab-Framebuffer
 - Jeder Editor-Tab besitzt einen eigenen FBO (`EditorTab`-Struct: colorTex + depthRbo + snapshotTex)
@@ -812,6 +884,8 @@ Verwaltet das Caching und die Erstellung von Render-Ressourcen:
 - `getOrCreateObject2D/3D()` → Cache-basierte Objekt-Erstellung
 - `prepareTextRenderer()` → Lazy-Init des Text-Renderers
 - `buildWidgetAsset(asset)` → Erstellt Widget aus Asset-Daten
+- `refreshEntityRenderable(entity, defaultFragmentShader)` → Baut Render-Daten für eine einzelne Entität neu auf, nutzt bestehende GPU-Caches (Object3D, Material, Texturen); lädt nur fehlende Assets nach
+- `resolveContentPath(rawPath)` → Löst relative Asset-Pfade in absolute Dateipfade auf (Content-Ordner und Engine-Content als Fallback). **Öffentlich** (`public`), damit andere Subsysteme (z.B. `openMeshViewer`) Registry-relative Pfade vor AssetManager-Lookups auflösen können.
 - `clearCaches()` → Alle Caches leeren
 
 Caches:
@@ -831,20 +905,29 @@ Zentrale Verwaltung aller UI-Widgets:
 
 #### Registrierung:
 ```cpp
-registerWidget("TitleBar", widgetPtr);
+registerWidget("TitleBar", widgetPtr);                      // Global (alle Tabs)
+registerWidget("ViewportOverlay", widgetPtr, "Viewport");    // Tab-scoped (nur sichtbar wenn Tab aktiv)
 unregisterWidget("TitleBar");
 ```
 
+#### Tab-Scoped Widgets:
+- Jedes Widget hat einen optionalen `tabId` (leer = global, sichtbar in allen Tabs)
+- Nicht-leerer `tabId` = Widget nur sichtbar/hit-testbar wenn `m_activeTabId == tabId`
+- `setActiveTabId(id)` / `getActiveTabId()` steuern den aktiven Tab-Filter
+- Viewport-spezifische Widgets (ViewportOverlay, WorldSettings, WorldOutliner, EntityDetails, ContentBrowser) sind zum Tab `"Viewport"` zugeordnet
+- Globale Widgets (TitleBar, StatusBar) haben leeren `tabId` und bleiben immer sichtbar
+- Mesh-Viewer-Properties-Panels werden beim Öffnen mit dem jeweiligen Tab-ID registriert
+
 #### Z-Ordering:
 - Widgets haben Z-Order (niedrig = hinten)
-- `getWidgetsOrderedByZ()` → sortierte Liste (gecacht, dirty-flag)
+- `getWidgetsOrderedByZ()` → sortierte Liste (gecacht, dirty-flag, `std::stable_sort` für deterministische Reihenfolge bei gleichem Z-Wert)
 
 #### Input-Handling:
 ```cpp
 handleMouseDown(screenPos, button)  → Hit-Test → onClick/Focus
 handleScroll(screenPos, delta)       → Scroll auf scrollable-Elementen
 handleTextInput(text)                → Aktives Entry-Bar füllen
-handleKeyDown(key)                   → Backspace/Enter für Entry-Bars
+handleKeyDown(key)                   → Backspace/Enter für Entry-Bars, F2 für Asset-Rename im Content Browser
 setMousePosition(screenPos)          → Hover-States aktualisieren
 isPointerOverUI(screenPos)           → Prüft ob Maus über UI
 ```
@@ -858,6 +941,19 @@ needsLayoutUpdate()           → Prüft dirty-Flag
 - **Dock-Reihenfolge:** Top → Bottom → Left → Right → Other
 - Side-Panels (Left/Right) werden in der Höhe auf den verbleibenden Platz (`available.h`) begrenzt, sodass sie nicht hinter ContentBrowser/Footer ragen
 - Asset-Validierung stellt sicher, dass gecachte Widget-Dateien `m_fillY` enthalten; fehlende Eigenschaft löst Neugenerierung aus
+- **Größenberechnung:** `measureElementSize` erzwingt `minSize` für alle Kind-Elemente (StackPanel, Grid, TreeView, TabView, ColorPicker). Dadurch werden Elemente mit `minSize` korrekt in die Content-Höhe des Elternelements eingerechnet, was exakte Scroll-Bereiche und Spacing garantiert.
+- **Scroll-Clipping:** `computeElementBounds` begrenzt die Bounds scrollbarer Container auf deren eigene Rect-Fläche. Kinder die aus dem sichtbaren Bereich gescrollt wurden erweitern die Hit-Test-Bounds nicht mehr, sodass verdeckte Elemente keine Klicks/Hover mehr abfangen.
+- **EntityDetails Layout-Fix:** Das EntityDetails-Widget wird im ersten Layout-Durchlauf übersprungen und ausschließlich im zweiten Pass mit der korrekten Split-Größe (basierend auf WorldOutliner-Position × splitRatio) gelayoutet. Dadurch wird der ScrollOffset nicht mehr fälschlich am kleineren maxScroll des ersten Passes geklemmt, und das Panel lässt sich vollständig durchscrollen.
+- **DropdownButton-Sizing:** `layoutElement` behandelt `DropdownButton` jetzt im selben Content-basierten Sizing-Pfad wie `Text` und `Button`, sodass die Elementgröße korrekt aus dem gemessenen Inhalt abgeleitet wird.
+- **DropdownButton-Klick:** Dismiss-Logik erkennt DropdownButton-Elemente zusätzlich zum ID-Prefix `"Dropdown."`, damit der Klick nicht vorab geschluckt wird. Source-Tracking (`m_dropdownSourceId`) ermöglicht echtes Toggle-Verhalten (erneuter Klick auf denselben Button schließt das Menü). Leere Item-Listen zeigen einen deaktivierten Platzhalter „(No assets available)". `showDropdownMenu` akzeptiert einen `minWidth`-Parameter, sodass das Menü mindestens so breit wie der auslösende Button dargestellt wird.
+- **DropdownButton-Hover:** Der Renderer nutzt nun den Button-Shader (`m_defaultButtonVertex`/`m_defaultButtonFragment`) statt des Panel-Shaders für DropdownButton-Elemente, sodass Hover-Farbwechsel korrekt angezeigt werden.
+- **Hover-Stabilität:** `populateOutlinerDetails` invalidiert den gecachten `m_lastHoveredElement`-Zeiger beim Neuaufbau des Element-Baums, um Dangling-Pointer nach Elementzerstörung zu vermeiden.
+- **Panel-Breite:** WorldOutliner und EntityDetails verwenden eine Breite von 280 px (statt 200 px), um editierbare Steuerelemente besser darzustellen. Validierungs-Checks in `ensureEditorWidgetsCreated` erzwingen eine Neugenerierung älterer `.asset`-Dateien.
+- **DropDown-Z-Order:** Aufgeklappte DropDown-Listen werden in einem verzögerten zweiten Render-Durchgang gezeichnet, damit sie über allen anderen Steuerelementen liegen und nicht von Geschwister-Elementen verdeckt werden.
+- **DropDown-Hit-Testing:** `hitTest` enthält einen Vor-Durchlauf, der aufgeklappte DropDown-Elemente prioritär prüft, bevor die normale Baumtraversierung startet. Dadurch erhalten die Dropdown-Items den Klick und nicht darunterliegende Geschwister-Elemente.
+- **Registry-Refresh:** `AssetManager` besitzt einen atomaren Versionszähler (`m_registryVersion`), der bei jeder Registrierung, Umbenennung (`renameAsset`), Verschiebung (`moveAsset`) und Löschung (`deleteAsset`) hochgezählt wird. `UIManager::updateNotifications` vergleicht diesen Wert und baut das Details-Panel automatisch neu auf, damit Dropdowns (Mesh/Material/Script) sofort die aktuellen Asset-Namen und -Pfade anzeigen.
+- **Rename-Tastatureingabe:** Beim Inline-Umbenennen im Content Browser wird die Rename-EntryBar automatisch per `setFocusedEntry` fokussiert. Engine-Shortcuts (W/E/R-Gizmo, Ctrl+Z/Y/S, F2/DELETE) werden blockiert, solange ein Eingabefeld aktiv ist.
+- **Schriftgrößen:** Details-Panel-Hilfsfunktionen verwenden größere Schriftgrößen (Text 13 px, Eingabefelder/Checkboxen/Dropdowns 12 px) und breitere Labels (100 px) für bessere Lesbarkeit.
 
 #### Click-Events:
 ```cpp
@@ -875,11 +971,74 @@ registerClickEvent("TitleBar.Close", []() { ... });
 - `openEngineSettingsPopup()` — öffnet das Engine-Settings-Popup mit Sidebar-Navigation (vormals in `main.cpp`).
 - Beide Methoden nutzen den `m_renderer`-Back-Pointer (`setRenderer()`) um `OpenGLRenderer::openPopupWindow()` / `closePopupWindow()` aufzurufen.
 
+#### Mesh Viewer (Editor-Fenster):
+- **Klasse**: `MeshViewerWindow` (`src/Renderer/EditorWindows/MeshViewerWindow.h/.cpp`)
+- **Zweck**: 3D-Vorschau einzelner Static Meshes (Model3D-Assets) mit normaler FPS-Kamera und Eigenschaften-Panel.
+- **Architektur**: Nutzt ein **Runtime-EngineLevel** (`m_runtimeLevel`) mit einer Mesh-Entity, einem Directional Light und einer Ground-Plane. Das Level existiert **nur im Speicher** und wird nie auf Disk serialisiert (`saveLevelAsset` überspringt Levels mit dem Namen `__MeshViewer__`). Beim Öffnen des Viewers wird das aktive Level per `DiagnosticsManager::swapActiveLevel()` atomisch ausgetauscht. `renderWorld()` baut die Szene beim nächsten Frame automatisch aus dem JSON des Runtime-Levels auf.
+- **Auto-Material**: `createRuntimeLevel()` liest `m_materialAssetPaths[0]` aus dem Mesh-Asset und setzt den Material-Pfad in der MaterialComponent. Meshes ohne referenziertes Material rendern mit dem Grid-Shader-Fallback.
+- **Ground-Plane**: Eine skalierte `default_quad3d`-Entity (20×0.01×20 bei Y=-0.5) mit `Materials/WorldGrid.asset` als Material dient als Bodenebene mit Gitter-Darstellung.
+- **Performance-Stats**: FPS, CPU/GPU-Metriken und Occlusion-Stats werden in Mesh-Viewer-Tabs ausgeblendet (nur im Viewport-Tab sichtbar).
+- **Tab-basiertes System**: Jeder Mesh Viewer erstellt einen eigenen **EditorTab** mit eigenem FBO (`addTab(assetPath, name, closable)`). Beim Tab-Wechsel wird einfach der Framebuffer ausgetauscht — der Tab-FBO wird an der Position des Tab-Bereichs angezeigt. Dynamische Tab-Buttons werden in der TitleBar registriert.
+- **UI-Tab-Filterung**: Das Properties-Widget (`MeshViewerDetails.{assetPath}`) wird mit `tabId = assetPath` registriert. Der UIManager rendert/layoutet nur Widgets, deren `tabId` zum aktiven Tab passt. Viewport-Widgets (WorldOutliner, EntityDetails etc.) sind dem Tab `"Viewport"` zugeordnet und erscheinen nur dort.
+- **Kamera**: Normale FPS-Kamera (WASD + Rechtsklick-Mausbewegung). Beim Öffnen wird die Kamera automatisch aus der Mesh-AABB berechnet (Position: vorne-rechts-oben vom Zentrum, Blickrichtung zum Mesh). Die Kameraposition wird pro Tab im Level-EditorCamera gespeichert und beim Tab-Wechsel wiederhergestellt.
+- **Per-Tab Entity-Selektion**: `m_tabSelectedEntity` Map speichert die ausgewählte Entity pro Tab-ID. Beim Verlassen eines Tabs wird der Selection-State gesichert, beim Betreten wiederhergestellt. Viewport-Selektion in `m_savedViewportSelectedEntity`.
+- **Editierbare Asset-Properties**: Das Sidepanel (320px) zeigt bearbeitbare Felder für Scale X/Y/Z und Material-Pfad. Änderungen modifizieren die Asset-Daten direkt (`AssetData::getData()`) und markieren das Asset als unsaved (`setIsSaved(false)`), sodass es beim nächsten Speichern serialisiert wird.
+- **Runtime-Level-JSON**: Enthält ein `"Entities"`-Array mit drei Einträgen: (1) Mesh-Entity mit Transform + Mesh + Material (aus .asset) + Name, (2) Directional Light Entity mit Transform + Light + Name, (3) Ground-Plane Entity mit Transform + Mesh (default_quad3d) + Material (WorldGrid) + Name. Zusätzlich ein `"EditorCamera"`-Block mit initialer Position und Rotation.
+- **Level-Swap beim Tab-Wechsel**:
+  - **Öffnen**: `openMeshViewer()` erstellt Tab, speichert Editor-Kamera in `m_savedCameraPos`/`m_savedCameraRot`, tauscht Runtime-Level als aktives Level ein, ruft `setActiveTab(assetPath)` auf.
+  - **Schließen**: `closeMeshViewer()` wechselt zu `setActiveTab("Viewport")`, entfernt Tab-Buttons, deregistriert Properties-Widget, ruft `removeTab(assetPath)` auf.
+- **Beleuchtung**: Ein Directional Light im Runtime-Level (Rotation 50°/30°, Intensität 0.8, natürliches Warmweiß 0.9/0.85/0.78) von oben-rechts-vorne.
+- **Öffnung**: Doppelklick auf Model3D-Asset im Content Browser → `OpenGLRenderer::openMeshViewer(assetPath)`.
+   - **Pfad-Auflösung**: Der Content-Browser übergibt Registry-relative Pfade (z.B. `default_quad3d.asset`). `openMeshViewer()` ruft `RenderResourceManager::resolveContentPath(assetPath)` auf, um den Pfad in einen absoluten Dateipfad aufzulösen.
+   - Asset wird automatisch geladen falls noch nicht im Speicher (`AssetManager::loadAsset` mit `Sync`).
+   - Toast-Benachrichtigung "Loading {name}..." wird angezeigt.
+   - `createRuntimeLevel(assetPath)` erstellt das JSON-Level, Properties-Widget wird tab-scoped registriert.
+   - **Diagnose-Logging**: Detailliertes Logging an jedem Fehlerpunkt in `openMeshViewer()` und `MeshViewerWindow::initialize()`.
+- **Schließen**: `closeMeshViewer(assetPath)` — wechselt auf Viewport-Tab, stellt Editor-Level/Kamera wieder her, entfernt Tab und Widgets.
+- **Input-Routing in `main.cpp`**: `getMeshViewer(getActiveTabId())` steuert Orbit-Kamera-Input (Scroll → Zoom, Rechtsklick-Drag → Orbit).
+
 #### World-Outliner-Integration:
 ```cpp
 refreshWorldOutliner()          → Aktualisiert Entitäten-Liste
 selectEntity(entityId)          → Wählt Entität aus, zeigt Details
 ```
+- **Optimiertes Refresh**: `refreshWorldOutliner()` wird nur bei Entity-Erstellung/-Löschung aufgerufen (über `EngineLevel::m_entityListChangedCallbacks`). Komponentenänderungen (Add/Remove/Edit) lösen keinen Outliner-Rebuild aus, sondern nur ein `populateOutlinerDetails()`-Update des Detail-Panels.
+
+#### EntityDetails Drag-and-Drop & Asset-Auswahl:
+- **Mesh/Material/Script-Sektionen** enthalten jeweils:
+  - Aktuelle Asset-Pfad-Anzeige (Text)
+  - **DropdownButton** mit allen Projekt-Assets des passenden Typs (Model3D, Material, Script) — Auswahl setzt die Komponente direkt. Der DropdownButton dient gleichzeitig als Drop-Target für Drag-and-Drop aus dem Content Browser (IDs: `Details.{Mesh|Material|Script}.Dropdown`).
+- **Typ-Validierung**: Beim Drop wird der Asset-Typ aus dem Payload (`"typeInt|relPath"`) gegen den erwarteten Typ des DropdownButtons geprüft. Bei falschem Typ erscheint eine Toast-Meldung.
+- **`applyAssetToEntity(type, path, entity)`**: Interne Hilfsmethode — setzt `MeshComponent`, `MaterialComponent` oder `ScriptComponent` via ECS, ruft `invalidateEntity(entity)` auf (damit nur diese Entität per `refreshEntity()` neu aufgebaut wird, ohne alle Render-Ressourcen zu rebuilden), markiert das Level als unsaved (`setIsSaved(false)`), zeigt Toast-Bestätigung und aktualisiert das Details-Panel.
+
+#### EntityDetails Komponenten-Management:
+- **Remove-Button ("X")**: Jede Komponenten-Sektion (Name, Transform, Mesh, Material, Light, Camera, Physics, Script) hat in der Separator-Kopfzeile einen roten "X"-Button. Klick öffnet `showConfirmDialog` mit Bestätigung, bei "Delete" wird `ecs.removeComponent<T>(entity)` aufgerufen. Danach: Für renderable Komponenten (Mesh, Material, Transform) `invalidateEntity(entity)`, für andere (Name, Light, Camera, Physics, Script) keine Render-Invalidierung nötig (werden direkt aus ECS gelesen). Immer: `setIsSaved(false)` (Level dirty) und `populateOutlinerDetails(entity)` (Panel neu aufbauen). Der World Outliner wird **nicht** manuell refreshed — er aktualisiert sich nur bei Entity-Erstellung/-Löschung über den `EngineLevel`-Callback.
+- **"+ Add Component"-Dropdown**: Am Ende des Details-Panels listet ein `DropdownButton` alle Komponententypen auf, die die Entität noch **nicht** besitzt. Auswahl ruft `ecs.addComponent<T>(entity, T{})` mit Default-Werten auf, setzt `invalidateEntity(entity)` + `setIsSaved(false)`, ruft `populateOutlinerDetails(entity)` auf und zeigt eine Toast-Bestätigung. Der World Outliner wird nur bei Name-Komponentenzusatz refreshed.
+- **Auto-Refresh**: Durch das ECS Dirty-Flagging (`m_componentVersion`) wird das Details-Panel nach Add/Remove automatisch aktualisiert.
+
+#### EntityDetails Editierbare Komponentenwerte:
+Alle Komponentenwerte sind über passende Steuerelemente direkt im Details-Panel editierbar:
+
+| Komponente | Eigenschaft | Steuerelement |
+|---|---|---|
+| **Name** | `displayName` | EntryBar |
+| **Transform** | `position`, `rotation`, `scale` | Vec3-Reihen (3 farbcodierte EntryBars: X=rot, Y=grün, Z=blau) |
+| **Light** | `type` | DropDown (Point/Directional/Spot) |
+| **Light** | `color` | ColorPicker (kompakt) |
+| **Light** | `intensity`, `range`, `spotAngle` | Float-EntryBars |
+| **Camera** | `fov`, `nearClip`, `farClip` | Float-EntryBars |
+| **Camera** | `isActive` | CheckBox |
+| **Physics** | `colliderType` | DropDown (Box/Sphere/Mesh) |
+| **Physics** | `isStatic`, `isKinematic`, `useGravity` | CheckBoxen |
+| **Physics** | `mass`, `restitution`, `friction` | Float-EntryBars |
+| **Physics** | `colliderSize`, `velocity`, `angularVelocity` | Vec3-Reihen |
+| **Mesh/Material/Script** | Asset-Pfad | DropdownButton (bestehend) |
+
+- **Änderungsfluss**: Jedes Control ruft bei Commit `ecs.setComponent<T>(entity, updated)` auf, was `m_componentVersion` inkrementiert und das Panel beim nächsten Frame automatisch aktualisiert. **Alle Callbacks markieren das Level als unsaved** (`setIsSaved(false)`), damit Änderungen sofort im StatusBar-Dirty-Zähler reflektiert werden.
+- **Sofortige visuelle Rückmeldung**: Transform-, Light- und Camera-Werte werden vom Renderer jeden Frame direkt aus dem ECS gelesen (`updateModelMatrices`-Lambda, Light-Schema-Query, Camera-Query) — Änderungen sind sofort im Viewport sichtbar ohne Render-Invalidierung. Mesh/Material-Pfadänderungen nutzen `invalidateEntity(entity)`, das die betroffene Entität in eine Dirty-Queue (`DiagnosticsManager::m_dirtyEntities`) einreiht. Im nächsten Frame ruft `renderWorld()` für jede Dirty-Entität `refreshEntity()` → `refreshEntityRenderable()` auf, das bestehende GPU-Caches nutzt und nur fehlende Assets nachlädt — statt den gesamten Scene-Graph neu aufzubauen.
+- **Name-Änderungen**: Der Name-EntryBar aktualisiert zusätzlich das Entity-Header-Label (`Details.Entity.NameLabel`) und ruft `refreshWorldOutliner()` auf, damit Namensänderungen sofort im Outliner und im Details-Panel-Header reflektiert werden. Außerdem wird das Level als unsaved markiert.
+- **Hilfslambdas**: `makeFloatEntry`, `makeVec3Row`, `makeCheckBoxRow` erzeugen wiederverwendbare UI-Zeilen mit Label + Control + onValueChanged-Callback. Alle drei Lambdas rufen nach dem eigentlichen Wert-Callback automatisch `setIsSaved(false)` auf, sodass jede Werteänderung das Level dirty markiert.
+- **Inline-Callbacks** (Light-Typ-DropDown, Light-ColorPicker, Physics-Collider-DropDown): Diese Callbacks gehen nicht durch die Hilfslambdas, enthalten aber ebenfalls `setIsSaved(false)` für konsistente Dirty-Markierung.
 
 ---
 
@@ -1008,6 +1167,8 @@ Das `engine`-Modul wird Python-Skripten automatisch zur Verfügung gestellt und 
 | `set_scale(e, sx,sy,sz)` | Setzt Skalierung                   |
 | `set_mesh(e, path)`     | Setzt Mesh-Asset                      |
 | `get_mesh(e)`           | Gibt Mesh-Pfad zurück                 |
+| `get_light_color(e)`   | Gibt Lichtfarbe (r,g,b) zurück        |
+| `set_light_color(e, r,g,b)` | Setzt Lichtfarbe                 |
 
 #### engine.assetmanagement
 | Funktion                    | Beschreibung                          |
@@ -1051,11 +1212,84 @@ Das `engine`-Modul wird Python-Skripten automatisch zur Verfügung gestellt und 
 
 ---
 
-## 15. Landscape-System
+## 15. Physik-System
+
+**Dateien:** `src/Physics/PhysicsWorld.h`, `src/Physics/PhysicsWorld.cpp`
+
+### 15.1 Übersicht
+Eigene Rigid-Body-Physiksimulation als Singleton (`PhysicsWorld::Instance()`). Wird nur während des PIE-Modus aktiv.
+
+### 15.2 Architektur
+- **Fixed Timestep**: 1/60 s mit Akkumulator (Semi-Implicit Euler)
+- **Pipeline** (pro `step(dt)`):
+  1. `gatherBodies()` – Sammelt alle Entities mit `TransformComponent` + `PhysicsComponent` als `RigidBody` (einmal pro Frame, nicht pro Sub-Step)
+  2. Sub-Step-Schleife (Akkumulator):
+     1. `integrate()` – Velocity + Gravitation → Position/Rotation aktualisieren; Sleep-Timer prüfen
+     2. `detectCollisions()` – OBB-SAT (Box↔Box) / Sphere-Kollisionserkennung → `ContactPoint`-Liste
+     3. `resolveCollisions()` – Impuls-basierte Auflösung (Restitution + Friction + Positional Correction 80%); schlafende Körper werden aufgeweckt; `CollisionEvent`s gesammelt
+  3. `writeback()` – Aktualisierte Positionen/Rotationen zurück in die ECS-`TransformComponent`
+  4. `fireCollisionEvents()` – Alle gesammelten Kollisions-Events an den registrierten Callback dispatchen
+
+### 15.3 Kollisionstypen
+
+| Kombination       | Erkennung                              |
+|--------------------|----------------------------------------|
+| Sphere ↔ Sphere   | Distanz < Summe der Radien             |
+| Box ↔ Box         | OBB-SAT (15-Achsen Separating Axis Theorem, volle Rotationsunterstützung) |
+| Sphere ↔ Box      | Kugel-Zentrum in Box-Lokalraum transformiert → Nächster Punkt auf OBB → Distanzprüfung |
+
+### 15.4 RigidBody-Daten
+```cpp
+struct RigidBody {
+    Entity entity;
+    float position[3], rotation[3], scale[3];
+    float velocity[3], angularVelocity[3];
+    float mass, invMass, restitution, friction;
+    bool isStatic, useGravity;
+    int colliderType;        // 0=Box, 1=Sphere, 2=Mesh
+    float colliderSize[3];   // Halbmaße / Radius
+    float sleepTimer;        // Dauer unter Schwelle
+    bool isSleeping;         // Körper deaktiviert
+};
+```
+
+### 15.5 Kontakt-Auflösung
+```cpp
+struct ContactPoint {
+    RigidBody *a, *b;
+    float normal[3], depth;
+};
+// Impuls: j = -(1+e) * vRel·n / (invMassA + invMassB)
+// Reibung: Tangential-Impuls begrenzt durch µ * |j|
+// Positional Correction: 80% der Penetrationstiefe (Slop 0.01)
+```
+
+### 15.6 Integration
+- **PIE Start**: `PhysicsWorld::Instance().initialize()` (Gravitation auf 0, -9.81, 0; Akkumulator auf `fixedTimestep` vorgeladen → erster `step()` läuft sofort)
+- **PIE Frame**: `PhysicsWorld::Instance().step(dt)` (vor Scripting, damit Overlap-Events für Scripts verfügbar sind)
+- **PIE Stop**: `PhysicsWorld::Instance().shutdown()`
+
+### 15.7 Overlap-Tracking (Begin / End)
+- `PhysicsWorld` vergleicht pro Frame die aktuelle Menge kollidierender Entity-Paare mit der des Vorframes.
+- **Neue Paare** → `OverlapEvent` in `m_beginOverlapEvents`.
+- **Entfallene Paare** → `OverlapEvent` in `m_endOverlapEvents`.
+- `updateOverlapTracking()` wird nach `writeback()` und vor `fireCollisionEvents()` aufgerufen.
+- `Scripting::UpdateScripts()` iteriert über Begin-/End-Events und ruft für jede beteiligte Entity deren Script-Funktion auf:
+  - `on_entity_begin_overlap(entity, other_entity)` – Beim ersten Frame der Überlappung
+  - `on_entity_end_overlap(entity, other_entity)` – Beim ersten Frame nach dem Ende der Überlappung
+- Beide Entities eines Paares erhalten jeweils einen eigenen Aufruf (mit der anderen Entity als `other_entity`).
+
+### 15.8 CMake
+- Target: `Physics` (STATIC-Bibliothek)
+- Abhängigkeiten: Core, Logger
+
+---
+
+## 16. Landscape-System
 
 **Dateien:** `src/Landscape/LandscapeManager.h/.cpp`
 
-- `LandscapeManager::spawnLandscape(params)` – Generiert ein flaches Grid-Mesh (XZ-Ebene), speichert es als `.asset` in `Content/Landscape/`, erstellt ein ECS-Entity mit Transform + Mesh + Name + Material (WorldGrid).
+- `LandscapeManager::spawnLandscape(params)` – Generiert ein flaches Grid-Mesh (XZ-Ebene), speichert es als `.asset` in `Content/Landscape/`, erstellt ein ECS-Entity mit Transform + Mesh + Name + Material (WorldGrid) + Physics (statischer Box-Collider, Half-Extents = halbe Landscape-Breite/-Tiefe, Y=0.05).
 - `LandscapeManager::hasExistingLandscape()` – Prüft ob bereits ein Landscape-Entity existiert (MeshComponent-Pfad beginnt mit `Landscape/`).
 - **Nur ein Landscape pro Szene**: Das Landscape Manager Popup wird blockiert, wenn bereits ein Landscape existiert; stattdessen wird eine Toast-Nachricht angezeigt.
 - `LandscapeParams`: name, width, depth, subdivisionsX, subdivisionsZ.
@@ -1092,13 +1326,71 @@ Das `engine`-Modul wird Python-Skripten automatisch zur Verfügung gestellt und 
 | Funktion                    | Beschreibung                          |
 |-----------------------------|---------------------------------------|
 | `get_delta_time()`          | Letzte Frame-Deltazeit                |
+| `get_engine_time()`         | Sekunden seit Engine-Start (SDL)      |
 | `get_state(key)`            | Engine-State abfragen                 |
 | `set_state(key, value)`     | Engine-State setzen                   |
+
+#### engine.physics
+| Funktion                              | Beschreibung                          |
+|---------------------------------------|---------------------------------------|
+| `set_velocity(e, vx, vy, vz)`        | Geschwindigkeit setzen                |
+| `get_velocity(e)`                     | Geschwindigkeit abfragen (Tupel)      |
+| `add_force(e, fx, fy, fz)`           | Kraft anwenden (Impuls / Masse)       |
+| `add_impulse(e, ix, iy, iz)`         | Impuls direkt anwenden                |
+| `set_angular_velocity(e, x, y, z)`   | Winkelgeschwindigkeit setzen          |
+| `get_angular_velocity(e)`             | Winkelgeschwindigkeit abfragen        |
+| `set_gravity(gx, gy, gz)`            | Globale Gravitation setzen            |
+| `get_gravity()`                       | Globale Gravitation abfragen          |
+| `set_on_collision(callback)`          | Kollisions-Callback registrieren (entityA, entityB, normal, depth, point) |
+| `raycast(ox,oy,oz,dx,dy,dz,max)`     | Raycast → `{entity, point, normal, distance}` oder `None` |
+| `is_body_sleeping(entity)`            | Prüft ob Körper deaktiviert (schlafend) |
 
 #### engine.logging
 | Funktion                    | Beschreibung                          |
 |-----------------------------|---------------------------------------|
 | `log(message, level)`       | Log-Nachricht (0=Info, 1=Warn, 2=Error) |
+
+#### engine.math (alle Berechnungen in C++)
+| Funktion                    | Beschreibung                          |
+|-----------------------------|---------------------------------------|
+| `vec3(x,y,z)`              | Vec3-Tuple erzeugen                   |
+| `vec3_add(a,b)`            | Komponentenweise Addition             |
+| `vec3_sub(a,b)`            | Komponentenweise Subtraktion          |
+| `vec3_mul(a,b)`            | Komponentenweise Multiplikation       |
+| `vec3_div(a,b)`            | Komponentenweise Division             |
+| `vec3_scale(v,s)`          | Vec3 mit Skalar multiplizieren        |
+| `vec3_dot(a,b)`            | Skalarprodukt                         |
+| `vec3_cross(a,b)`          | Kreuzprodukt                          |
+| `vec3_length(v)`           | Länge                                 |
+| `vec3_length_sq(v)`        | Quadrierte Länge                      |
+| `vec3_normalize(v)`        | Normalisieren                         |
+| `vec3_negate(v)`           | Negieren                              |
+| `vec3_lerp(a,b,t)`         | Lineare Interpolation                 |
+| `vec3_distance(a,b)`       | Abstand                               |
+| `vec3_reflect(v,n)`        | Reflexion an Normale                  |
+| `vec3_min(a,b)` / `vec3_max(a,b)` | Komponentenweises Min/Max      |
+| `vec2(x,y)`                | Vec2-Tuple erzeugen                   |
+| `vec2_add/sub/scale/dot/length/normalize/lerp/distance` | Wie Vec3, für 2D |
+| `quat_from_euler(p,y,r)`   | Euler (Rad) → Quaternion (x,y,z,w)   |
+| `quat_to_euler(q)`         | Quaternion → Euler (Rad)              |
+| `quat_multiply(a,b)`       | Quaternion-Multiplikation             |
+| `quat_normalize(q)`        | Quaternion normalisieren              |
+| `quat_slerp(a,b,t)`        | Sphärische Interpolation              |
+| `quat_inverse(q)`          | Quaternion-Inverse                    |
+| `quat_rotate_vec3(q,v)`    | Vec3 mit Quaternion rotieren          |
+| `clamp(v,lo,hi)`           | Wert begrenzen                        |
+| `lerp(a,b,t)`              | Skalare Interpolation                 |
+| `deg_to_rad(d)` / `rad_to_deg(r)` | Grad ↔ Radiant              |
+| `sin(r)` / `cos(r)` / `tan(r)` | Trigonometrische Funktionen (Radiant) |
+| `asin(v)` / `acos(v)` / `atan(v)` | Inverse trigonometrische Funktionen |
+| `atan2(y,x)`               | Zwei-Argument Arkustangens            |
+| `sqrt(v)`                  | Quadratwurzel                         |
+| `abs(v)`                   | Betrag                                |
+| `pow(base,exp)`            | Potenz                                |
+| `floor(v)` / `ceil(v)` / `round(v)` | Runden (ab/auf/nächste Ganzzahl) |
+| `sign(v)`                  | Vorzeichen (-1, 0 oder 1)            |
+| `min(a,b)` / `max(a,b)`   | Minimum / Maximum zweier Werte        |
+| `pi()`                     | Konstante π                           |
 
 #### Konstanten
 ```python
@@ -1113,17 +1405,24 @@ input.Keys  # dict mit allen SDL-Key-Constants
 ```
 1. PIE starten:
    → Level.snapshotEcsState()
+   → PhysicsWorld::Instance().initialize()
    → DiagnosticsManager.setPIEActive(true)
 
-2. Pro Frame (Scripting::UpdateScripts):
-   → Level-Script laden + on_level_loaded() aufrufen (einmalig)
-   → Für jede Script-Entity:
-     → Script laden
-     → onloaded(entity) aufrufen (einmalig pro Entity)
-     → tick(entity, dt) aufrufen (jeden Frame)
-   → Async-Asset-Load-Callbacks verarbeiten
+2. Pro Frame:
+   → PhysicsWorld::Instance().step(dt)  (vor Scripting, Overlap-Events generieren)
+   → Scripting::UpdateScripts(dt):
+     → Level-Script laden + on_level_loaded() aufrufen (einmalig)
+     → Für jede Script-Entity:
+       → Script laden
+       → onloaded(entity) aufrufen (einmalig pro Entity)
+       → tick(entity, dt) aufrufen (jeden Frame)
+     → Overlap-Events dispatchen:
+       → on_entity_begin_overlap(entity, other_entity) (neue Kollisionen)
+       → on_entity_end_overlap(entity, other_entity) (beendete Kollisionen)
+     → Async-Asset-Load-Callbacks verarbeiten
 
 3. PIE stoppen:
+   → PhysicsWorld::Instance().shutdown()
    → DiagnosticsManager.setPIEActive(false)
    → AudioManager.stopAll()
    → Scripting::ReloadScripts() (Script-States zurücksetzen)
@@ -1133,7 +1432,12 @@ input.Keys  # dict mit allen SDL-Key-Constants
 ### 11.4 engine.pyi (IntelliSense)
 **Datei:** `src/Scripting/engine.pyi`
 
-Python-Stub-Datei für IDE-Unterstützung. Muss bei API-Änderungen synchron gehalten werden (siehe Projektrichtlinien).
+Statische Python-Stub-Datei für IDE-Unterstützung (Autovervollständigung, Typ-Hinweise).
+
+**Deployment-Ablauf:**
+1. CMake post-build kopiert `src/Scripting/engine.pyi` → `Content/Scripting/engine.pyi` im Deploy-Verzeichnis
+2. Beim Laden/Erstellen eines Projekts kopiert die Engine die Datei per `fs::copy_file` nach `<Projekt>/Content/Scripts/engine.pyi`
+3. Bei API-Änderungen muss nur die statische Datei `src/Scripting/engine.pyi` aktualisiert werden — keine Laufzeit-Generierung mehr
 
 ---
 
@@ -1181,6 +1485,9 @@ while (running) {
 
     // ═══ Scripting ═══ (nur bei PIE aktiv)
     Scripting::UpdateScripts(dt)
+
+    // ═══ Physik ═══ (nur bei PIE aktiv)
+    PhysicsWorld::Instance().step(dt)
 
     // ═══ UI-Updates ═══
     uiManager.updateNotifications(dt)
@@ -1266,32 +1573,47 @@ while (running) {
               │  │  SparseSet, Schema, Manager  │   │
               │  │  Components (8 Typen)        │   │
               │  └──────────────────────────────┘   │
-              └─────────────────┬──────────────────┘
-                                │
-              ┌─────────────────▼──────────────────┐
-              │           Renderer                  │
-              │  ┌────────────────────────────┐    │
-              │  │      OpenGLRenderer        │    │
-              │  │  Kamera, Shader, Material  │    │
-              │  │  2D/3D-Objekte, Text       │    │
-              │  │  HZB Occlusion, Picking    │    │
-              │  │  GPU Timer Queries         │    │
-              │  └────────────────────────────┘    │
-              │  ┌────────────────────────────┐    │
-              │  │       UI-System            │    │
-              │  │  UIManager, Widget, Elems  │    │
-              │  │  9 Widget-Typen            │    │
-              │  │  FBO-Caching, Notifications│    │
-              │  └────────────────────────────┘    │
-              │  ┌────────────────────────────┐    │
-              │  │  RenderResourceManager     │    │
-              │  │  Caching + Level-Prep      │    │
-              │  └────────────────────────────┘    │
-              └────────────────────────────────────┘
+              └───────┬─────────────────┬──────────┘
+                      │                 │
+    ┌─────────────────▼───┐  ┌──────────▼─────────────┐
+    │       Physics        │  │       Renderer          │
+    │  PhysicsWorld (PIE)  │  │  ┌──────────────────┐   │
+    │  Rigid Body, AABB,   │  │  │  OpenGLRenderer   │   │
+    │  Impulse Resolution  │  │  │  Kamera, Shader   │   │
+    └──────────────────────┘  │  │  Material, Text   │   │
+                              │  │  HZB, Picking     │   │
+                              │  └──────────────────┘   │
+                              │  ┌──────────────────┐   │
+                              │  │    UI-System      │   │
+                              │  │  UIManager, Elems │   │
+                              │  │  FBO-Caching      │   │
+                              │  └──────────────────┘   │
+                              │  ┌──────────────────┐   │
+                              │  │ RenderResource   │   │
+                              │  │ Manager + Cache  │   │
+                              │  └──────────────────┘   │
+                              └─────────────────────────┘
 
 Externe Bibliotheken:
   SDL3, FreeType, OpenAL Soft, GLAD, GLM, nlohmann/json, stb_image, Python 3
 ```
+
+---
+
+## 15. Physik-System
+**Dateien:** `src/Physics/PhysicsWorld.h/.cpp`
+
+- Fixed-Timestep-Rigid-Body-Simulation mit Semi-Implicit Euler.
+- Kollisionen: Box↔Box (rotationsberücksichtigtes AABB), Sphere↔Sphere, Sphere↔Box.
+- Sphere↔Box-Kontaktnormalen sind konsistent von A → B (stabilere Impulsreaktion).
+- Kanten-Überhang prüft Top-Contact per AABB-Overlap und setzt Kipp- plus Rollimpuls mit leichter Positional-Korrektur.
+
+---
+
+## 16. Landscape-System
+**Dateien:** `src/Landscape/LandscapeManager.h/.cpp`
+
+- Verwaltung von Terrain-Assets und Editor-Workflow (Popup, Import, Status).
 
 ---
 

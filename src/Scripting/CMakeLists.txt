@@ -17,6 +17,7 @@ target_include_directories(Scripting
         ${CMAKE_SOURCE_DIR}/src/AssetManager
         ${CMAKE_SOURCE_DIR}/src/Diagnostics
         ${CMAKE_SOURCE_DIR}/external/SDL3/include
+        ${CMAKE_SOURCE_DIR}/src/Physics
 )
 
 target_link_libraries(Scripting
@@ -27,6 +28,7 @@ target_link_libraries(Scripting
         AssetManager
         Diagnostics
         Core
+        Physics
         ${Python3_LIBRARY_RELEASE}
 )
 

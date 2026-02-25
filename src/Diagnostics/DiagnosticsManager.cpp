@@ -444,6 +444,28 @@ EngineLevel* DiagnosticsManager::getActiveLevelSoft()
     return m_activeLevel.get();
 }
 
+std::unique_ptr<EngineLevel> DiagnosticsManager::swapActiveLevel(std::unique_ptr<EngineLevel> newLevel)
+{
+    auto old = std::move(m_activeLevel);
+    m_activeLevel = std::move(newLevel);
+    if (m_activeLevel)
+    {
+        m_activeLevel->setOnDirtyCallback([this]()
+        {
+            setScenePrepared(false);
+        });
+    }
+    EngineLevel* active = m_activeLevel.get();
+    for (auto& callback : m_activeLevelChangedCallbacks)
+    {
+        if (callback)
+        {
+            callback(active);
+        }
+    }
+    return old;
+}
+
 void DiagnosticsManager::registerActiveLevelChangedCallback(ActiveLevelChangedCallback callback)
 {
     m_activeLevelChangedCallbacks.push_back(std::move(callback));
@@ -471,6 +493,38 @@ bool DiagnosticsManager::isScenePrepared() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_scenePrepared;
+}
+
+void DiagnosticsManager::invalidateEntity(unsigned int entityId)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_dirtyEntities.insert(entityId);
+}
+
+std::vector<unsigned int> DiagnosticsManager::consumeDirtyEntities()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<unsigned int> result(m_dirtyEntities.begin(), m_dirtyEntities.end());
+    m_dirtyEntities.clear();
+    return result;
+}
+
+bool DiagnosticsManager::hasDirtyEntities() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return !m_dirtyEntities.empty();
+}
+
+void DiagnosticsManager::setAssetRegistryReady(bool ready)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_assetRegistryReady = ready;
+}
+
+bool DiagnosticsManager::isAssetRegistryReady() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_assetRegistryReady;
 }
 
 void DiagnosticsManager::setPIEActive(bool active)

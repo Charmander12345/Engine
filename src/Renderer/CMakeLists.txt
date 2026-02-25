@@ -4,7 +4,9 @@ add_library(Renderer SHARED
     Shader.h
     PopupWindow.h
     PopupWindow.cpp
-    
+    SplashWindow.h
+    SplashWindow.cpp
+
     OpenGLRenderer/OpenGLRenderer.cpp
     OpenGLRenderer/OpenGLRenderer.h
     OpenGLRenderer/OpenGLShader.cpp
@@ -52,6 +54,8 @@ add_library(Renderer SHARED
     UIWidgets/TreeViewWidget.h
     UIWidgets/TabViewWidget.cpp
     UIWidgets/TabViewWidget.h
+    EditorWindows/MeshViewerWindow.cpp
+    EditorWindows/MeshViewerWindow.h
 )
 set_target_properties(Renderer PROPERTIES
     CXX_STANDARD 20

@@ -8,6 +8,7 @@
 #include <unordered_set>
 
 #include "../Core/MathTypes.h"
+#include "../AssetManager/AssetTypes.h"
 #include "UIWidget.h"
 
 class EngineLevel;
@@ -27,6 +28,7 @@ public:
         std::string id;
         std::shared_ptr<Widget> widget;
         uint64_t runtimeId{ 0 };
+        std::string tabId;  // empty = global (always visible), non-empty = only visible when this tab is active
     };
 
     UIManager();
@@ -42,10 +44,14 @@ public:
     const std::vector<UIEntry>& getRegisteredUI() const;
 
     void registerWidget(const std::string& id, const std::shared_ptr<Widget>& widget);
+    void registerWidget(const std::string& id, const std::shared_ptr<Widget>& widget, const std::string& tabId);
     const std::vector<WidgetEntry>& getRegisteredWidgets() const;
     const std::vector<const WidgetEntry*>& getWidgetsOrderedByZ() const;
     void unregisterWidget(const std::string& id);
     WidgetElement* findElementById(const std::string& elementId);
+
+    void setActiveTabId(const std::string& tabId);
+    const std::string& getActiveTabId() const;
 
     void updateLayouts(const std::function<Vec2(const std::string&, float)>& measureText);
     bool needsLayoutUpdate() const;
@@ -75,7 +81,7 @@ public:
         std::string label;
         std::function<void()> onClick;
     };
-    void showDropdownMenu(const Vec2& anchorPixels, const std::vector<DropdownMenuItem>& items);
+    void showDropdownMenu(const Vec2& anchorPixels, const std::vector<DropdownMenuItem>& items, float minWidth = 0.0f);
     void closeDropdownMenu();
     bool isDropdownMenuOpen() const { return m_dropdownVisible; }
 
@@ -92,6 +98,7 @@ private:
     void populateOutlinerWidget(const std::shared_ptr<Widget>& widget);
     void populateOutlinerDetails(unsigned int entity);
     void populateContentBrowserWidget(const std::shared_ptr<Widget>& widget);
+    void applyAssetToEntity(AssetType type, const std::string& assetPath, unsigned int entity);
     void updateHoverStates();
     void setFocusedEntry(WidgetElement* element);
     void ensureModalWidget();
@@ -114,6 +121,7 @@ private:
     mutable bool m_pointerCacheDirty{ true };
     WidgetElement* m_focusedEntry{ nullptr };
     bool m_renderDirty{ true };
+    std::string m_activeTabId{ "Viewport" };
 
     std::shared_ptr<Widget> m_modalWidget;
     std::string m_modalMessage;
@@ -139,6 +147,7 @@ private:
     // Dropdown menu state
     std::shared_ptr<Widget> m_dropdownWidget;
     bool m_dropdownVisible{ false };
+    std::string m_dropdownSourceId;  // id of the DropdownButton that opened the menu
 
 	void bindClickEventsForWidget(const std::shared_ptr<Widget>& widget);
 	void bindClickEventsForElement(WidgetElement& element);
@@ -148,6 +157,11 @@ private:
 	std::string m_selectedBrowserFolder; // folder highlighted in tree (shown in grid)
 	std::string m_selectedGridAsset;     // relative asset path selected in grid (empty = none)
 	std::unordered_set<std::string> m_expandedFolders; // set of expanded folder paths
+	bool m_registryWasReady{ false }; // tracks previous registry state for change detection
+	bool m_renamingGridAsset{ false };  // true while inline rename entry bar is shown
+	std::string m_renameOriginalPath;   // relPath of the asset being renamed
+	uint64_t m_lastEcsComponentVersion{ 0 }; // tracks ECS component changes for auto-refresh
+	uint64_t m_lastRegistryVersion{ 0 };     // tracks asset registry changes for auto-refresh
 
 	// Double-click detection
 	std::string m_lastClickedElementId;
@@ -172,6 +186,9 @@ public:
 	// Grid asset selection
 	const std::string& getSelectedGridAsset() const { return m_selectedGridAsset; }
 	void clearSelectedGridAsset() { m_selectedGridAsset.clear(); }
+
+	// True when a text entry bar has keyboard focus (blocks engine shortcuts).
+	bool hasEntryFocused() const { return m_focusedEntry != nullptr; }
 
 	// Returns true if screenPos is over the content browser grid area
 	bool isOverContentBrowserGrid(const Vec2& screenPos) const;

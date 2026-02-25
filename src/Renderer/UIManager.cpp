@@ -16,6 +16,12 @@
 #include "../Core/ECS/ECS.h"
 #include "../Core/UndoRedoManager.h"
 #include "UIWidgets/SeparatorWidget.h"
+#include "UIWidgets/DropdownButtonWidget.h"
+#include "UIWidgets/EntryBarWidget.h"
+#include "UIWidgets/SliderWidget.h"
+#include "UIWidgets/CheckBoxWidget.h"
+#include "UIWidgets/DropDownWidget.h"
+#include "UIWidgets/ColorPickerWidget.h"
 #include "../AssetManager/AssetManager.h"
 #include "../AssetManager/AssetTypes.h"
 #include "OpenGLRenderer/OpenGLRenderer.h"
@@ -136,7 +142,9 @@ namespace
         for (auto& child : element.children)
         {
             computeElementBounds(child);
-            if (child.hasBounds)
+            // For scrollable elements, don't expand bounds with children
+            // (they may be scrolled outside the visible area)
+            if (!element.scrollable && child.hasBounds)
             {
                 Vec2 childSize{ child.boundsMaxPixels.x - child.boundsMinPixels.x,
                     child.boundsMaxPixels.y - child.boundsMinPixels.y };
@@ -238,7 +246,9 @@ namespace
                 childSizes.reserve(element.children.size());
                 for (auto& child : element.children)
                 {
-                    const Vec2 childSize = measureElementSize(child, measureText);
+                    Vec2 childSize = measureElementSize(child, measureText);
+                    childSize.x = std::max(childSize.x, child.minSize.x);
+                    childSize.y = std::max(childSize.y, child.minSize.y);
                     Vec2 withMargin{
                         childSize.x + child.margin.x * 2.0f,
                         childSize.y + child.margin.y * 2.0f
@@ -329,7 +339,9 @@ namespace
             childSizes.reserve(element.children.size());
             for (auto& child : element.children)
             {
-                const Vec2 childSize = measureElementSize(child, measureText);
+                Vec2 childSize = measureElementSize(child, measureText);
+                childSize.x = std::max(childSize.x, child.minSize.x);
+                childSize.y = std::max(childSize.y, child.minSize.y);
                 Vec2 withMargin{
                     childSize.x + child.margin.x * 2.0f,
                     childSize.y + child.margin.y * 2.0f
@@ -361,7 +373,9 @@ namespace
             childSizes.reserve(element.children.size());
             for (auto& child : element.children)
             {
-                const Vec2 childSize = measureElementSize(child, measureText);
+                Vec2 childSize = measureElementSize(child, measureText);
+                childSize.x = std::max(childSize.x, child.minSize.x);
+                childSize.y = std::max(childSize.y, child.minSize.y);
                 Vec2 withMargin{
                     childSize.x + child.margin.x * 2.0f,
                     childSize.y + child.margin.y * 2.0f
@@ -519,7 +533,7 @@ namespace
                 height = element.contentSizePixels.y;
             }
         }
-        else if ((element.type == WidgetElementType::Text || element.type == WidgetElementType::Button) && element.hasContentSize)
+        else if ((element.type == WidgetElementType::Text || element.type == WidgetElementType::Button || element.type == WidgetElementType::DropdownButton) && element.hasContentSize)
         {
             if (baseW <= 0.0f)
             {
@@ -933,15 +947,21 @@ const std::vector<UIManager::UIEntry>& UIManager::getRegisteredUI() const
 
 void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widget>& widget)
 {
+    registerWidget(id, widget, std::string{});
+}
+
+void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widget>& widget, const std::string& tabId)
+{
     WidgetEntry* entry = findWidgetEntry(id);
     if (!entry)
     {
-        m_widgets.push_back(WidgetEntry{ id, widget, m_nextWidgetRuntimeId++ });
+        m_widgets.push_back(WidgetEntry{ id, widget, m_nextWidgetRuntimeId++, tabId });
         entry = &m_widgets.back();
     }
     else
     {
         entry->widget = widget;
+        entry->tabId = tabId;
     }
 
     if (entry->widget)
@@ -1187,6 +1207,43 @@ void UIManager::showToastMessage(const std::string& message, float durationSecon
 
 void UIManager::updateNotifications(float deltaSeconds)
 {
+    // Detect when the asset registry becomes ready and refresh the Content Browser
+    {
+        const bool registryReady = DiagnosticsManager::Instance().isAssetRegistryReady();
+        if (registryReady && !m_registryWasReady)
+        {
+            Logger::Instance().log(Logger::Category::UI, "Asset registry became ready, refreshing Content Browser.", Logger::LogLevel::INFO);
+            refreshContentBrowser();
+        }
+        m_registryWasReady = registryReady;
+    }
+
+    // Detect ECS component changes and refresh EntityDetails for the selected entity
+    {
+        const uint64_t currentVersion = ECS::ECSManager::Instance().getComponentVersion();
+        if (currentVersion != m_lastEcsComponentVersion)
+        {
+            m_lastEcsComponentVersion = currentVersion;
+            if (m_outlinerSelectedEntity != 0)
+            {
+                populateOutlinerDetails(m_outlinerSelectedEntity);
+            }
+        }
+    }
+
+    // Detect asset registry changes (new assets created/imported) and refresh EntityDetails dropdowns
+    {
+        const uint64_t currentRegVer = AssetManager::Instance().getRegistryVersion();
+        if (currentRegVer != m_lastRegistryVersion)
+        {
+            m_lastRegistryVersion = currentRegVer;
+            if (m_outlinerSelectedEntity != 0)
+            {
+                populateOutlinerDetails(m_outlinerSelectedEntity);
+            }
+        }
+    }
+
     m_notificationPollTimer += deltaSeconds;
     if (m_notificationPollTimer >= 1.0f)
     {
@@ -1362,13 +1419,8 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
 
     detailsPanel->children.clear();
 
-    const auto formatVec3 = [](const float values[3])
-        {
-            std::ostringstream stream;
-            stream << std::fixed << std::setprecision(2)
-                << values[0] << ", " << values[1] << ", " << values[2];
-            return stream.str();
-        };
+    // Invalidate cached hover pointer – the old elements are destroyed.
+    m_lastHoveredElement = nullptr;
 
     const auto makeTextLine = [](const std::string& text) -> WidgetElement
         {
@@ -1376,12 +1428,12 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             line.type = WidgetElementType::Text;
             line.text = text;
             line.font = "default.ttf";
-            line.fontSize = 12.0f;
+            line.fontSize = 13.0f;
             line.textAlignH = TextAlignH::Left;
             line.textAlignV = TextAlignV::Center;
             line.textColor = Vec4{ 0.85f, 0.86f, 0.9f, 1.0f };
             line.fillX = true;
-            line.minSize = Vec2{ 0.0f, 18.0f };
+            line.minSize = Vec2{ 0.0f, 20.0f };
             line.runtimeOnly = true;
             return line;
         };
@@ -1401,14 +1453,183 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             return result;
         };
 
-    const auto addSeparator = [&](const std::string& title, const std::vector<WidgetElement>& lines)
+    const auto addSeparator = [&](const std::string& title, const std::vector<WidgetElement>& lines,
+        std::function<void()> onRemove = {})
         {
             SeparatorWidget separator;
             separator.setId(sanitizeId(title));
             separator.setTitle(title);
             separator.setChildren(lines);
-            detailsPanel->children.push_back(separator.toElement());
+            WidgetElement separatorEl = separator.toElement();
+
+            if (onRemove)
+            {
+                // Find the header button (child index 1: divider=0, header=1, content=2)
+                // and wrap it in a horizontal StackPanel with a remove button
+                if (separatorEl.children.size() >= 2)
+                {
+                    WidgetElement originalHeader = std::move(separatorEl.children[1]);
+                    originalHeader.fillX = true;
+
+                    WidgetElement removeBtn{};
+                    removeBtn.id = "Details.Remove." + sanitizeId(title);
+                    removeBtn.type = WidgetElementType::Button;
+                    removeBtn.text = "X";
+                    removeBtn.font = "default.ttf";
+                    removeBtn.fontSize = 11.0f;
+                    removeBtn.textAlignH = TextAlignH::Center;
+                    removeBtn.textAlignV = TextAlignV::Center;
+                    removeBtn.minSize = Vec2{ 22.0f, 22.0f };
+                    removeBtn.padding = Vec2{ 2.0f, 2.0f };
+                    removeBtn.color = Vec4{ 0.45f, 0.15f, 0.15f, 0.9f };
+                    removeBtn.hoverColor = Vec4{ 0.65f, 0.20f, 0.20f, 1.0f };
+                    removeBtn.textColor = Vec4{ 0.95f, 0.80f, 0.80f, 1.0f };
+                    removeBtn.shaderVertex = "button_vertex.glsl";
+                    removeBtn.shaderFragment = "button_fragment.glsl";
+                    removeBtn.isHitTestable = true;
+                    removeBtn.runtimeOnly = true;
+
+                    const std::string compTitle = title;
+                    removeBtn.onClicked = [this, compTitle, onRemove]()
+                    {
+                        showConfirmDialog("Remove " + compTitle + " component?",
+                            [onRemove]() { onRemove(); },
+                            []() {});
+                    };
+
+                    WidgetElement headerRow{};
+                    headerRow.id = "Details.HeaderRow." + sanitizeId(title);
+                    headerRow.type = WidgetElementType::StackPanel;
+                    headerRow.orientation = StackOrientation::Horizontal;
+                    headerRow.fillX = true;
+                    headerRow.sizeToContent = true;
+                    headerRow.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                    headerRow.padding = Vec2{ 0.0f, 0.0f };
+                    headerRow.runtimeOnly = true;
+                    headerRow.children.push_back(std::move(originalHeader));
+                    headerRow.children.push_back(std::move(removeBtn));
+
+                    separatorEl.children[1] = std::move(headerRow);
+                }
+            }
+
+            detailsPanel->children.push_back(std::move(separatorEl));
         };
+
+    auto fmtF = [](float v) -> std::string {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%.2f", v);
+        return std::string(buf);
+    };
+
+    const auto makeFloatEntry = [&](const std::string& id, const std::string& label, float value,
+        std::function<void(float)> onChange) -> WidgetElement
+    {
+        WidgetElement row{};
+        row.type = WidgetElementType::StackPanel;
+        row.orientation = StackOrientation::Horizontal;
+        row.fillX = true;
+        row.sizeToContent = true;
+        row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        row.padding = Vec2{ 0.0f, 1.0f };
+        row.runtimeOnly = true;
+
+        WidgetElement lbl = makeTextLine(label);
+        lbl.minSize = Vec2{ 100.0f, 22.0f };
+        lbl.fillX = false;
+        row.children.push_back(std::move(lbl));
+
+        EntryBarWidget entry;
+        entry.setValue(fmtF(value));
+        entry.setFont("default.ttf");
+        entry.setFontSize(12.0f);
+        entry.setMinSize(Vec2{ 0.0f, 22.0f });
+        entry.setPadding(Vec2{ 4.0f, 2.0f });
+        entry.setOnValueChanged([onChange](const std::string& val) {
+            try { onChange(std::stof(val)); } catch (...) {}
+            if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+        });
+
+        WidgetElement entryEl = entry.toElement();
+        entryEl.id = id;
+        entryEl.fillX = true;
+        entryEl.runtimeOnly = true;
+        row.children.push_back(std::move(entryEl));
+
+        return row;
+    };
+
+    const auto makeVec3Row = [&](const std::string& idPrefix, const std::string& label, const float values[3],
+        std::function<void(int, float)> onChange) -> WidgetElement
+    {
+        WidgetElement row{};
+        row.type = WidgetElementType::StackPanel;
+        row.orientation = StackOrientation::Horizontal;
+        row.fillX = true;
+        row.sizeToContent = true;
+        row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        row.padding = Vec2{ 0.0f, 1.0f };
+        row.runtimeOnly = true;
+
+        WidgetElement lbl = makeTextLine(label);
+        lbl.minSize = Vec2{ 100.0f, 22.0f };
+        lbl.fillX = false;
+        row.children.push_back(std::move(lbl));
+
+        const char* axes[] = { "X", "Y", "Z" };
+        const Vec4 axisColors[] = {
+            { 0.22f, 0.10f, 0.10f, 0.9f },
+            { 0.10f, 0.20f, 0.10f, 0.9f },
+            { 0.10f, 0.10f, 0.22f, 0.9f },
+        };
+
+        for (int i = 0; i < 3; ++i)
+        {
+            EntryBarWidget entry;
+            entry.setValue(fmtF(values[i]));
+            entry.setFont("default.ttf");
+            entry.setFontSize(12.0f);
+            entry.setMinSize(Vec2{ 0.0f, 22.0f });
+            entry.setPadding(Vec2{ 4.0f, 2.0f });
+            entry.setBackgroundColor(axisColors[i]);
+
+            int axis = i;
+            entry.setOnValueChanged([onChange, axis](const std::string& val) {
+                try { onChange(axis, std::stof(val)); } catch (...) {}
+                if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            });
+
+            WidgetElement entryEl = entry.toElement();
+            entryEl.id = idPrefix + "." + axes[i];
+            entryEl.fillX = true;
+            entryEl.runtimeOnly = true;
+            row.children.push_back(std::move(entryEl));
+        }
+
+        return row;
+    };
+
+    const auto makeCheckBoxRow = [&](const std::string& id, const std::string& label, bool checked,
+        std::function<void(bool)> onChange) -> WidgetElement
+    {
+        CheckBoxWidget cb;
+        cb.setChecked(checked);
+        cb.setLabel(label);
+        cb.setFont("default.ttf");
+        cb.setFontSize(12.0f);
+        cb.setMinSize(Vec2{ 0.0f, 22.0f });
+        cb.setPadding(Vec2{ 4.0f, 2.0f });
+        cb.setOnCheckedChanged([onChange = std::move(onChange)](bool val) {
+            onChange(val);
+            if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+        });
+
+        WidgetElement el = cb.toElement();
+        el.id = id;
+        el.fillX = true;
+        el.runtimeOnly = true;
+        return el;
+    };
 
     if (entity == 0)
     {
@@ -1430,24 +1651,99 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
                 nameValue = nameComponent->displayName;
             }
         }
-        entityLines.push_back(makeTextLine("Name: " + nameValue));
+        WidgetElement nameLine = makeTextLine("Name: " + nameValue);
+        nameLine.id = "Details.Entity.NameLabel";
+        entityLines.push_back(std::move(nameLine));
     }
     addSeparator("Entity", entityLines);
 
     if (const auto* nameComponent = ecs.getComponent<ECS::NameComponent>(entity))
     {
         std::vector<WidgetElement> lines;
-        lines.push_back(makeTextLine("Display Name: " + nameComponent->displayName));
-        addSeparator("Name", lines);
+
+        EntryBarWidget nameEntry;
+        nameEntry.setValue(nameComponent->displayName);
+        nameEntry.setFont("default.ttf");
+        nameEntry.setFontSize(12.0f);
+        nameEntry.setMinSize(Vec2{ 0.0f, 22.0f });
+        nameEntry.setPadding(Vec2{ 6.0f, 3.0f });
+        nameEntry.setOnValueChanged([this, entity](const std::string& val) {
+            auto& ecs = ECS::ECSManager::Instance();
+            if (auto* comp = ecs.getComponent<ECS::NameComponent>(entity))
+            {
+                ECS::NameComponent updated = *comp;
+                updated.displayName = val;
+                ecs.setComponent<ECS::NameComponent>(entity, updated);
+            }
+            // Update the entity header label in the details panel
+            if (auto* lbl = findElementById("Details.Entity.NameLabel"))
+            {
+                lbl->text = "Name: " + (val.empty() ? std::string("<unnamed>") : val);
+            }
+            refreshWorldOutliner();
+            auto& diag = DiagnosticsManager::Instance();
+            if (auto* level = diag.getActiveLevelSoft())
+            {
+                level->setIsSaved(false);
+            }
+        });
+        WidgetElement nameEl = nameEntry.toElement();
+        nameEl.id = "Details.Name.Entry";
+        nameEl.fillX = true;
+        nameEl.runtimeOnly = true;
+        lines.push_back(std::move(nameEl));
+
+        addSeparator("Name", lines, [this, entity]() {
+            ECS::ECSManager::Instance().removeComponent<ECS::NameComponent>(entity);
+            if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            populateOutlinerDetails(entity);
+            refreshWorldOutliner();
+        });
     }
 
     if (const auto* transform = ecs.getComponent<ECS::TransformComponent>(entity))
     {
         std::vector<WidgetElement> lines;
-        lines.push_back(makeTextLine("Position: " + formatVec3(transform->position)));
-        lines.push_back(makeTextLine("Rotation: " + formatVec3(transform->rotation)));
-        lines.push_back(makeTextLine("Scale: " + formatVec3(transform->scale)));
-        addSeparator("Transform", lines);
+
+        lines.push_back(makeVec3Row("Details.Transform.Pos", "Position", transform->position,
+            [entity](int axis, float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::TransformComponent>(entity))
+                {
+                    ECS::TransformComponent updated = *comp;
+                    updated.position[axis] = val;
+                    ecs.setComponent<ECS::TransformComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeVec3Row("Details.Transform.Rot", "Rotation", transform->rotation,
+            [entity](int axis, float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::TransformComponent>(entity))
+                {
+                    ECS::TransformComponent updated = *comp;
+                    updated.rotation[axis] = val;
+                    ecs.setComponent<ECS::TransformComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeVec3Row("Details.Transform.Scale", "Scale", transform->scale,
+            [entity](int axis, float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::TransformComponent>(entity))
+                {
+                    ECS::TransformComponent updated = *comp;
+                    updated.scale[axis] = val;
+                    ecs.setComponent<ECS::TransformComponent>(entity, updated);
+                }
+            }));
+
+        addSeparator("Transform", lines, [this, entity]() {
+            ECS::ECSManager::Instance().removeComponent<ECS::TransformComponent>(entity);
+            DiagnosticsManager::Instance().invalidateEntity(entity);
+            if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            populateOutlinerDetails(entity);
+        });
     }
 
     if (const auto* mesh = ecs.getComponent<ECS::MeshComponent>(entity))
@@ -1455,7 +1751,44 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
         std::vector<WidgetElement> lines;
         lines.push_back(makeTextLine("Asset Path: " + mesh->meshAssetPath));
         lines.push_back(makeTextLine("Asset Id: " + std::to_string(mesh->meshAssetId)));
-        addSeparator("Mesh", lines);
+
+        // Dropdown to select a different mesh asset
+        {
+            DropdownButtonWidget dropdown;
+            dropdown.setText(mesh->meshAssetPath.empty() ? "Select Mesh..." : mesh->meshAssetPath);
+            dropdown.setFont("default.ttf");
+            dropdown.setFontSize(12.0f);
+            dropdown.setMinSize(Vec2{ 0.0f, 22.0f });
+            dropdown.setPadding(Vec2{ 6.0f, 3.0f });
+            dropdown.setBackgroundColor(Vec4{ 0.16f, 0.18f, 0.24f, 0.95f });
+            dropdown.setHoverColor(Vec4{ 0.22f, 0.26f, 0.34f, 1.0f });
+            dropdown.setTextColor(Vec4{ 0.8f, 0.85f, 0.95f, 1.0f });
+
+            const auto& registry = AssetManager::Instance().getAssetRegistry();
+            for (const auto& reg : registry)
+            {
+                if (reg.type == AssetType::Model3D)
+                {
+                    const std::string assetPath = reg.path;
+                    dropdown.addItem(reg.name.empty() ? reg.path : reg.name, [this, entity, assetPath]()
+                    {
+                        applyAssetToEntity(AssetType::Model3D, assetPath, entity);
+                    });
+                }
+            }
+            WidgetElement dropdownEl = dropdown.toElement();
+            dropdownEl.id = "Details.Mesh.Dropdown";
+            dropdownEl.fillX = true;
+            dropdownEl.runtimeOnly = true;
+            lines.push_back(std::move(dropdownEl));
+        }
+
+        addSeparator("Mesh", lines, [this, entity]() {
+            ECS::ECSManager::Instance().removeComponent<ECS::MeshComponent>(entity);
+            DiagnosticsManager::Instance().invalidateEntity(entity);
+            if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            populateOutlinerDetails(entity);
+        });
     }
 
     if (const auto* material = ecs.getComponent<ECS::MaterialComponent>(entity))
@@ -1463,60 +1796,380 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
         std::vector<WidgetElement> lines;
         lines.push_back(makeTextLine("Asset Path: " + material->materialAssetPath));
         lines.push_back(makeTextLine("Asset Id: " + std::to_string(material->materialAssetId)));
-        addSeparator("Material", lines);
+
+        // Dropdown to select a different material asset
+        {
+            DropdownButtonWidget dropdown;
+            dropdown.setText(material->materialAssetPath.empty() ? "Select Material..." : material->materialAssetPath);
+            dropdown.setFont("default.ttf");
+            dropdown.setFontSize(12.0f);
+            dropdown.setMinSize(Vec2{ 0.0f, 22.0f });
+            dropdown.setPadding(Vec2{ 6.0f, 3.0f });
+            dropdown.setBackgroundColor(Vec4{ 0.16f, 0.18f, 0.24f, 0.95f });
+            dropdown.setHoverColor(Vec4{ 0.22f, 0.26f, 0.34f, 1.0f });
+            dropdown.setTextColor(Vec4{ 0.8f, 0.85f, 0.95f, 1.0f });
+
+            const auto& registry = AssetManager::Instance().getAssetRegistry();
+            for (const auto& reg : registry)
+            {
+                if (reg.type == AssetType::Material)
+                {
+                    const std::string assetPath = reg.path;
+                    dropdown.addItem(reg.name.empty() ? reg.path : reg.name, [this, entity, assetPath]()
+                    {
+                        applyAssetToEntity(AssetType::Material, assetPath, entity);
+                    });
+                }
+            }
+            WidgetElement dropdownEl = dropdown.toElement();
+            dropdownEl.id = "Details.Material.Dropdown";
+            dropdownEl.fillX = true;
+            dropdownEl.runtimeOnly = true;
+            lines.push_back(std::move(dropdownEl));
+        }
+
+        addSeparator("Material", lines, [this, entity]() {
+            ECS::ECSManager::Instance().removeComponent<ECS::MaterialComponent>(entity);
+            DiagnosticsManager::Instance().invalidateEntity(entity);
+            if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            populateOutlinerDetails(entity);
+        });
     }
 
     if (const auto* light = ecs.getComponent<ECS::LightComponent>(entity))
     {
-        std::string typeLabel = "Point";
-        switch (light->type)
-        {
-        case ECS::LightComponent::LightType::Directional:
-            typeLabel = "Directional";
-            break;
-        case ECS::LightComponent::LightType::Spot:
-            typeLabel = "Spot";
-            break;
-        default:
-            break;
-        }
         std::vector<WidgetElement> lines;
-        lines.push_back(makeTextLine("Type: " + typeLabel));
-        lines.push_back(makeTextLine("Color: " + formatVec3(light->color)));
-        lines.push_back(makeTextLine("Intensity: " + std::to_string(light->intensity)));
-        lines.push_back(makeTextLine("Range: " + std::to_string(light->range)));
-        lines.push_back(makeTextLine("Spot Angle: " + std::to_string(light->spotAngle)));
-        addSeparator("Light", lines);
+
+        // Light Type dropdown
+        {
+            int currentIdx = static_cast<int>(light->type);
+            DropDownWidget typeDropdown;
+            typeDropdown.setItems({ "Point", "Directional", "Spot" });
+            typeDropdown.setSelectedIndex(currentIdx);
+            typeDropdown.setFont("default.ttf");
+            typeDropdown.setFontSize(12.0f);
+            typeDropdown.setMinSize(Vec2{ 0.0f, 22.0f });
+            typeDropdown.setPadding(Vec2{ 6.0f, 3.0f });
+            typeDropdown.setOnSelectionChanged([entity](int idx) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::LightComponent>(entity))
+                {
+                    ECS::LightComponent updated = *comp;
+                    updated.type = static_cast<ECS::LightComponent::LightType>(idx);
+                    ecs.setComponent<ECS::LightComponent>(entity, updated);
+                }
+                if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            });
+
+            WidgetElement row{};
+            row.type = WidgetElementType::StackPanel;
+            row.orientation = StackOrientation::Horizontal;
+            row.fillX = true;
+            row.sizeToContent = true;
+            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.padding = Vec2{ 0.0f, 1.0f };
+            row.runtimeOnly = true;
+
+            WidgetElement lbl = makeTextLine("Type");
+            lbl.minSize = Vec2{ 90.0f, 20.0f };
+            lbl.fillX = false;
+            row.children.push_back(std::move(lbl));
+
+            WidgetElement ddEl = typeDropdown.toElement();
+            ddEl.id = "Details.Light.Type";
+            ddEl.fillX = true;
+            ddEl.runtimeOnly = true;
+            row.children.push_back(std::move(ddEl));
+            lines.push_back(std::move(row));
+        }
+
+        // Light Color picker
+        {
+            WidgetElement row{};
+            row.type = WidgetElementType::StackPanel;
+            row.orientation = StackOrientation::Horizontal;
+            row.fillX = true;
+            row.sizeToContent = true;
+            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.padding = Vec2{ 0.0f, 1.0f };
+            row.runtimeOnly = true;
+
+            WidgetElement lbl = makeTextLine("Color");
+            lbl.minSize = Vec2{ 90.0f, 20.0f };
+            lbl.fillX = false;
+            row.children.push_back(std::move(lbl));
+
+            ColorPickerWidget cp;
+            cp.setColor(Vec4{ light->color[0], light->color[1], light->color[2], 1.0f });
+            cp.setCompact(true);
+            cp.setMinSize(Vec2{ 0.0f, 20.0f });
+            cp.setOnColorChanged([entity](const Vec4& c) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::LightComponent>(entity))
+                {
+                    ECS::LightComponent updated = *comp;
+                    updated.color[0] = c.x;
+                    updated.color[1] = c.y;
+                    updated.color[2] = c.z;
+                    ecs.setComponent<ECS::LightComponent>(entity, updated);
+                }
+                if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            });
+
+            WidgetElement cpEl = cp.toElement();
+            cpEl.id = "Details.Light.Color";
+            cpEl.fillX = true;
+            cpEl.runtimeOnly = true;
+            row.children.push_back(std::move(cpEl));
+            lines.push_back(std::move(row));
+        }
+
+        lines.push_back(makeFloatEntry("Details.Light.Intensity", "Intensity", light->intensity,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::LightComponent>(entity))
+                {
+                    ECS::LightComponent updated = *comp;
+                    updated.intensity = val;
+                    ecs.setComponent<ECS::LightComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Light.Range", "Range", light->range,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::LightComponent>(entity))
+                {
+                    ECS::LightComponent updated = *comp;
+                    updated.range = val;
+                    ecs.setComponent<ECS::LightComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Light.SpotAngle", "Spot Angle", light->spotAngle,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::LightComponent>(entity))
+                {
+                    ECS::LightComponent updated = *comp;
+                    updated.spotAngle = val;
+                    ecs.setComponent<ECS::LightComponent>(entity, updated);
+                }
+            }));
+
+        addSeparator("Light", lines, [this, entity]() {
+            ECS::ECSManager::Instance().removeComponent<ECS::LightComponent>(entity);
+            if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            populateOutlinerDetails(entity);
+        });
     }
 
     if (const auto* camera = ecs.getComponent<ECS::CameraComponent>(entity))
     {
         std::vector<WidgetElement> lines;
-        lines.push_back(makeTextLine("FOV: " + std::to_string(camera->fov)));
-        lines.push_back(makeTextLine("Near Clip: " + std::to_string(camera->nearClip)));
-        lines.push_back(makeTextLine("Far Clip: " + std::to_string(camera->farClip)));
-        addSeparator("Camera", lines);
+
+        lines.push_back(makeFloatEntry("Details.Camera.FOV", "FOV", camera->fov,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::CameraComponent>(entity))
+                {
+                    ECS::CameraComponent updated = *comp;
+                    updated.fov = val;
+                    ecs.setComponent<ECS::CameraComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Camera.NearClip", "Near Clip", camera->nearClip,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::CameraComponent>(entity))
+                {
+                    ECS::CameraComponent updated = *comp;
+                    updated.nearClip = val;
+                    ecs.setComponent<ECS::CameraComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Camera.FarClip", "Far Clip", camera->farClip,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::CameraComponent>(entity))
+                {
+                    ECS::CameraComponent updated = *comp;
+                    updated.farClip = val;
+                    ecs.setComponent<ECS::CameraComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeCheckBoxRow("Details.Camera.IsActive", "Active", camera->isActive,
+            [entity](bool val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::CameraComponent>(entity))
+                {
+                    ECS::CameraComponent updated = *comp;
+                    updated.isActive = val;
+                    ecs.setComponent<ECS::CameraComponent>(entity, updated);
+                }
+            }));
+
+        addSeparator("Camera", lines, [this, entity]() {
+            ECS::ECSManager::Instance().removeComponent<ECS::CameraComponent>(entity);
+            if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            populateOutlinerDetails(entity);
+        });
     }
 
     if (const auto* physics = ecs.getComponent<ECS::PhysicsComponent>(entity))
     {
-        std::string colliderType = "Box";
-        switch (physics->colliderType)
-        {
-        case ECS::PhysicsComponent::ColliderType::Sphere:
-            colliderType = "Sphere";
-            break;
-        case ECS::PhysicsComponent::ColliderType::Mesh:
-            colliderType = "Mesh";
-            break;
-        default:
-            break;
-        }
         std::vector<WidgetElement> lines;
-        lines.push_back(makeTextLine("Collider: " + colliderType));
-        lines.push_back(makeTextLine(std::string("Static: ") + (physics->isStatic ? "true" : "false")));
-        lines.push_back(makeTextLine("Mass: " + std::to_string(physics->mass)));
-        addSeparator("Physics", lines);
+
+        // Collider Type dropdown
+        {
+            int currentIdx = static_cast<int>(physics->colliderType);
+            DropDownWidget colliderDropdown;
+            colliderDropdown.setItems({ "Box", "Sphere", "Mesh" });
+            colliderDropdown.setSelectedIndex(currentIdx);
+            colliderDropdown.setFont("default.ttf");
+            colliderDropdown.setFontSize(12.0f);
+            colliderDropdown.setMinSize(Vec2{ 0.0f, 22.0f });
+            colliderDropdown.setPadding(Vec2{ 6.0f, 3.0f });
+            colliderDropdown.setOnSelectionChanged([entity](int idx) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
+                {
+                    ECS::PhysicsComponent updated = *comp;
+                    updated.colliderType = static_cast<ECS::PhysicsComponent::ColliderType>(idx);
+                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
+                }
+                if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            });
+
+            WidgetElement row{};
+            row.type = WidgetElementType::StackPanel;
+            row.orientation = StackOrientation::Horizontal;
+            row.fillX = true;
+            row.sizeToContent = true;
+            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.padding = Vec2{ 0.0f, 1.0f };
+            row.runtimeOnly = true;
+
+            WidgetElement lbl = makeTextLine("Collider");
+            lbl.minSize = Vec2{ 90.0f, 20.0f };
+            lbl.fillX = false;
+            row.children.push_back(std::move(lbl));
+
+            WidgetElement ddEl = colliderDropdown.toElement();
+            ddEl.id = "Details.Physics.Collider";
+            ddEl.fillX = true;
+            ddEl.runtimeOnly = true;
+            row.children.push_back(std::move(ddEl));
+            lines.push_back(std::move(row));
+        }
+
+        lines.push_back(makeVec3Row("Details.Physics.ColliderSize", "Collider Size", physics->colliderSize,
+            [entity](int axis, float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
+                {
+                    ECS::PhysicsComponent updated = *comp;
+                    updated.colliderSize[axis] = val;
+                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeCheckBoxRow("Details.Physics.Static", "Static", physics->isStatic,
+            [entity](bool val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
+                {
+                    ECS::PhysicsComponent updated = *comp;
+                    updated.isStatic = val;
+                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeCheckBoxRow("Details.Physics.Kinematic", "Kinematic", physics->isKinematic,
+            [entity](bool val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
+                {
+                    ECS::PhysicsComponent updated = *comp;
+                    updated.isKinematic = val;
+                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeCheckBoxRow("Details.Physics.Gravity", "Use Gravity", physics->useGravity,
+            [entity](bool val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
+                {
+                    ECS::PhysicsComponent updated = *comp;
+                    updated.useGravity = val;
+                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Physics.Mass", "Mass", physics->mass,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
+                {
+                    ECS::PhysicsComponent updated = *comp;
+                    updated.mass = val;
+                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Physics.Restitution", "Restitution", physics->restitution,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
+                {
+                    ECS::PhysicsComponent updated = *comp;
+                    updated.restitution = val;
+                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Physics.Friction", "Friction", physics->friction,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
+                {
+                    ECS::PhysicsComponent updated = *comp;
+                    updated.friction = val;
+                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeVec3Row("Details.Physics.Velocity", "Velocity", physics->velocity,
+            [entity](int axis, float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
+                {
+                    ECS::PhysicsComponent updated = *comp;
+                    updated.velocity[axis] = val;
+                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeVec3Row("Details.Physics.AngularVel", "Angular Vel", physics->angularVelocity,
+            [entity](int axis, float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
+                {
+                    ECS::PhysicsComponent updated = *comp;
+                    updated.angularVelocity[axis] = val;
+                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
+                }
+            }));
+
+        addSeparator("Physics", lines, [this, entity]() {
+            ECS::ECSManager::Instance().removeComponent<ECS::PhysicsComponent>(entity);
+            if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            populateOutlinerDetails(entity);
+        });
     }
 
     if (const auto* script = ecs.getComponent<ECS::ScriptComponent>(entity))
@@ -1524,10 +2177,221 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
         std::vector<WidgetElement> lines;
         lines.push_back(makeTextLine("Script Path: " + script->scriptPath));
         lines.push_back(makeTextLine("Asset Id: " + std::to_string(script->scriptAssetId)));
-        addSeparator("Script", lines);
+
+        // Dropdown to select a different script asset
+        {
+            DropdownButtonWidget dropdown;
+            dropdown.setText(script->scriptPath.empty() ? "Select Script..." : script->scriptPath);
+            dropdown.setFont("default.ttf");
+            dropdown.setFontSize(12.0f);
+            dropdown.setMinSize(Vec2{ 0.0f, 22.0f });
+            dropdown.setPadding(Vec2{ 6.0f, 3.0f });
+            dropdown.setBackgroundColor(Vec4{ 0.16f, 0.18f, 0.24f, 0.95f });
+            dropdown.setHoverColor(Vec4{ 0.22f, 0.26f, 0.34f, 1.0f });
+            dropdown.setTextColor(Vec4{ 0.8f, 0.85f, 0.95f, 1.0f });
+
+            const auto& registry = AssetManager::Instance().getAssetRegistry();
+            for (const auto& reg : registry)
+            {
+                if (reg.type == AssetType::Script)
+                {
+                    const std::string assetPath = reg.path;
+                    dropdown.addItem(reg.name.empty() ? reg.path : reg.name, [this, entity, assetPath]()
+                    {
+                        applyAssetToEntity(AssetType::Script, assetPath, entity);
+                    });
+                }
+            }
+            WidgetElement dropdownEl = dropdown.toElement();
+            dropdownEl.id = "Details.Script.Dropdown";
+            dropdownEl.fillX = true;
+            dropdownEl.runtimeOnly = true;
+            lines.push_back(std::move(dropdownEl));
+        }
+
+        addSeparator("Script", lines, [this, entity]() {
+            ECS::ECSManager::Instance().removeComponent<ECS::ScriptComponent>(entity);
+            if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            populateOutlinerDetails(entity);
+        });
+    }
+
+    // "Add Component" dropdown button
+    {
+        DropdownButtonWidget dropdown;
+        dropdown.setText("+ Add Component");
+        dropdown.setFont("default.ttf");
+        dropdown.setFontSize(12.0f);
+        dropdown.setMinSize(Vec2{ 0.0f, 26.0f });
+        dropdown.setPadding(Vec2{ 8.0f, 4.0f });
+        dropdown.setBackgroundColor(Vec4{ 0.14f, 0.30f, 0.14f, 0.95f });
+        dropdown.setHoverColor(Vec4{ 0.18f, 0.42f, 0.18f, 1.0f });
+        dropdown.setTextColor(Vec4{ 0.90f, 0.95f, 0.90f, 1.0f });
+
+        struct CompOption { std::string label; bool present; std::function<void()> addFn; };
+        std::vector<CompOption> options = {
+            { "Transform", ecs.hasComponent<ECS::TransformComponent>(entity),
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::TransformComponent>(entity); } },
+            { "Mesh", ecs.hasComponent<ECS::MeshComponent>(entity),
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::MeshComponent>(entity); } },
+            { "Material", ecs.hasComponent<ECS::MaterialComponent>(entity),
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::MaterialComponent>(entity); } },
+            { "Light", ecs.hasComponent<ECS::LightComponent>(entity),
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::LightComponent>(entity); } },
+            { "Camera", ecs.hasComponent<ECS::CameraComponent>(entity),
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::CameraComponent>(entity); } },
+            { "Physics", ecs.hasComponent<ECS::PhysicsComponent>(entity),
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::PhysicsComponent>(entity); } },
+            { "Script", ecs.hasComponent<ECS::ScriptComponent>(entity),
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::ScriptComponent>(entity); } },
+            { "Name", ecs.hasComponent<ECS::NameComponent>(entity),
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::NameComponent>(entity); } },
+        };
+
+        for (const auto& opt : options)
+        {
+            if (!opt.present)
+            {
+                auto addFn = opt.addFn;
+                dropdown.addItem(opt.label, [this, addFn, label = opt.label, entity]() {
+                    addFn();
+                    DiagnosticsManager::Instance().invalidateEntity(entity);
+                    if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+                    populateOutlinerDetails(entity);
+                    if (label == "Name")
+                    {
+                        refreshWorldOutliner();
+                    }
+                    showToastMessage("Added " + label + " component.", 2.0f);
+                });
+            }
+        }
+
+        WidgetElement dropdownEl = dropdown.toElement();
+        dropdownEl.id = "Details.AddComponent";
+        dropdownEl.fillX = true;
+        dropdownEl.runtimeOnly = true;
+        detailsPanel->children.push_back(std::move(dropdownEl));
     }
 
     detailsEntry->widget->markLayoutDirty();
+}
+
+void UIManager::applyAssetToEntity(AssetType type, const std::string& assetPath, unsigned int entity)
+{
+    if (entity == 0 || assetPath.empty())
+    {
+        return;
+    }
+
+    auto& ecs = ECS::ECSManager::Instance();
+
+    switch (type)
+    {
+    case AssetType::Model3D:
+    {
+        ECS::MeshComponent comp{};
+        comp.meshAssetPath = assetPath;
+        if (!ecs.hasComponent<ECS::MeshComponent>(entity))
+        {
+            ecs.addComponent<ECS::MeshComponent>(entity, comp);
+        }
+        else
+        {
+            ecs.setComponent<ECS::MeshComponent>(entity, comp);
+        }
+
+        // Auto-add MaterialComponent if the mesh asset references a material
+        {
+            auto meshAsset = AssetManager::Instance().getLoadedAssetByPath(assetPath);
+            if (!meshAsset)
+            {
+                int id = AssetManager::Instance().loadAsset(assetPath, AssetType::Model3D);
+                if (id > 0)
+                    meshAsset = AssetManager::Instance().getLoadedAssetByID(static_cast<unsigned int>(id));
+            }
+            if (meshAsset)
+            {
+                auto& assetData = meshAsset->getData();
+                if (assetData.contains("m_materialAssetPaths") && assetData["m_materialAssetPaths"].is_array()
+                    && !assetData["m_materialAssetPaths"].empty())
+                {
+                    std::string matPath = assetData["m_materialAssetPaths"][0].get<std::string>();
+                    if (!matPath.empty())
+                    {
+                        ECS::MaterialComponent matComp{};
+                        matComp.materialAssetPath = matPath;
+                        if (!ecs.hasComponent<ECS::MaterialComponent>(entity))
+                        {
+                            ecs.addComponent<ECS::MaterialComponent>(entity, matComp);
+                        }
+                        else
+                        {
+                            ecs.setComponent<ECS::MaterialComponent>(entity, matComp);
+                        }
+                        Logger::Instance().log(Logger::Category::UI,
+                            "Auto-assigned material '" + matPath + "' to entity " + std::to_string(entity),
+                            Logger::LogLevel::INFO);
+                    }
+                }
+            }
+        }
+
+        Logger::Instance().log(Logger::Category::UI,
+            "Applied mesh '" + assetPath + "' to entity " + std::to_string(entity),
+            Logger::LogLevel::INFO);
+        showToastMessage("Mesh assigned: " + assetPath, 2.5f);
+        break;
+    }
+    case AssetType::Material:
+    {
+        ECS::MaterialComponent comp{};
+        comp.materialAssetPath = assetPath;
+        if (!ecs.hasComponent<ECS::MaterialComponent>(entity))
+        {
+            ecs.addComponent<ECS::MaterialComponent>(entity, comp);
+        }
+        else
+        {
+            ecs.setComponent<ECS::MaterialComponent>(entity, comp);
+        }
+        Logger::Instance().log(Logger::Category::UI,
+            "Applied material '" + assetPath + "' to entity " + std::to_string(entity),
+            Logger::LogLevel::INFO);
+        showToastMessage("Material assigned: " + assetPath, 2.5f);
+        break;
+    }
+    case AssetType::Script:
+    {
+        ECS::ScriptComponent comp{};
+        comp.scriptPath = assetPath;
+        if (!ecs.hasComponent<ECS::ScriptComponent>(entity))
+        {
+            ecs.addComponent<ECS::ScriptComponent>(entity, comp);
+        }
+        else
+        {
+            ecs.setComponent<ECS::ScriptComponent>(entity, comp);
+        }
+        Logger::Instance().log(Logger::Category::UI,
+            "Applied script '" + assetPath + "' to entity " + std::to_string(entity),
+            Logger::LogLevel::INFO);
+        showToastMessage("Script assigned: " + assetPath, 2.5f);
+        break;
+    }
+    default:
+        showToastMessage("Unsupported asset type for entity assignment.", 3.0f);
+        return;
+    }
+
+    auto& diag = DiagnosticsManager::Instance();
+    diag.invalidateEntity(entity);
+    if (auto* level = diag.getActiveLevelSoft())
+    {
+        level->setIsSaved(false);
+    }
+
+    populateOutlinerDetails(entity);
 }
 
 void UIManager::refreshContentBrowser(const std::string& subfolder)
@@ -1546,6 +2410,14 @@ void UIManager::refreshContentBrowser(const std::string& subfolder)
             log.log(Logger::Category::UI, "[ContentBrowser] refreshContentBrowser: found widget entry, calling populateContentBrowserWidget", Logger::LogLevel::INFO);
             populateContentBrowserWidget(entry.widget);
             markAllWidgetsDirty();
+            // If we are in rename mode, auto-focus the rename EntryBar so keyboard input reaches it
+            if (m_renamingGridAsset)
+            {
+                if (auto* renameEntry = findElementById("ContentBrowser.RenameEntry"))
+                {
+                    setFocusedEntry(renameEntry);
+                }
+            }
             found = true;
             return;
         }
@@ -1742,6 +2614,44 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
     if (!std::filesystem::exists(contentRoot))
     {
         log.log(Logger::Category::UI, "[ContentBrowser] ABORT: contentRoot does not exist: " + contentRoot.string(), Logger::LogLevel::WARNING);
+        return;
+    }
+
+    // Show placeholder while the asset registry is still building
+    if (!DiagnosticsManager::Instance().isAssetRegistryReady())
+    {
+        log.log(Logger::Category::UI, "[ContentBrowser] Registry not ready yet, showing loading placeholder.", Logger::LogLevel::INFO);
+        auto& elements = widget->getElementsMutable();
+        WidgetElement* treePanel = FindElementById(elements, "ContentBrowser.Tree");
+        if (treePanel)
+        {
+            treePanel->children.clear();
+            WidgetElement loadingRow{};
+            loadingRow.id = "ContentBrowser.Loading";
+            loadingRow.type = WidgetElementType::Text;
+            loadingRow.text = "Building asset registry...";
+            loadingRow.font = "default.ttf";
+            loadingRow.fontSize = 13.0f;
+            loadingRow.textColor = Vec4{ 0.6f, 0.6f, 0.65f, 1.0f };
+            loadingRow.textAlignH = TextAlignH::Left;
+            loadingRow.textAlignV = TextAlignV::Center;
+            loadingRow.fillX = true;
+            loadingRow.minSize = Vec2{ 0.0f, 24.0f };
+            loadingRow.padding = Vec2{ 8.0f, 4.0f };
+            loadingRow.runtimeOnly = true;
+            treePanel->children.push_back(std::move(loadingRow));
+        }
+        WidgetElement* gridPanel = FindElementById(elements, "ContentBrowser.Grid");
+        if (gridPanel)
+        {
+            gridPanel->children.clear();
+        }
+        WidgetElement* pathBar = FindElementById(elements, "ContentBrowser.PathBar");
+        if (pathBar)
+        {
+            pathBar->children.clear();
+        }
+        widget->markLayoutDirty();
         return;
     }
 
@@ -2021,6 +2931,45 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             pathBar->children.push_back(std::move(importBtn));
         }
 
+        // Rename button (enabled only when a grid asset is selected)
+        {
+            WidgetElement renameBtn{};
+            renameBtn.id = "ContentBrowser.PathBar.Rename";
+            renameBtn.type = WidgetElementType::Button;
+            renameBtn.text = "Rename";
+            renameBtn.font = "default.ttf";
+            renameBtn.fontSize = 13.0f;
+            renameBtn.textAlignH = TextAlignH::Center;
+            renameBtn.textAlignV = TextAlignV::Center;
+            renameBtn.minSize = Vec2{ 60.0f, 20.0f };
+            renameBtn.shaderVertex = "button_vertex.glsl";
+            renameBtn.shaderFragment = "button_fragment.glsl";
+            renameBtn.isHitTestable = true;
+            renameBtn.runtimeOnly = true;
+            if (!m_selectedGridAsset.empty())
+            {
+                renameBtn.color = Vec4{ 0.35f, 0.30f, 0.15f, 0.95f };
+                renameBtn.hoverColor = Vec4{ 0.50f, 0.42f, 0.18f, 1.0f };
+                renameBtn.textColor = Vec4{ 0.95f, 0.92f, 0.8f, 1.0f };
+                renameBtn.onClicked = [this]()
+                {
+                    if (!m_selectedGridAsset.empty())
+                    {
+                        m_renamingGridAsset = true;
+                        m_renameOriginalPath = m_selectedGridAsset;
+                        refreshContentBrowser();
+                    }
+                };
+            }
+            else
+            {
+                renameBtn.color = Vec4{ 0.18f, 0.18f, 0.20f, 0.6f };
+                renameBtn.hoverColor = Vec4{ 0.18f, 0.18f, 0.20f, 0.6f };
+                renameBtn.textColor = Vec4{ 0.5f, 0.5f, 0.5f, 1.0f };
+            }
+            pathBar->children.push_back(std::move(renameBtn));
+        }
+
         // Breadcrumb segments: Content > Folder > SubFolder > ...
         std::vector<std::pair<std::string, std::string>> crumbs; // (label, path)
         crumbs.push_back({ "Content", "" });
@@ -2210,6 +3159,49 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
                 tile.color = Vec4{ 0.18f, 0.30f, 0.50f, 0.9f };
             }
 
+            // Inline rename: replace the label child with an EntryBar
+            if (m_renamingGridAsset && relPath == m_renameOriginalPath && tile.children.size() >= 2)
+            {
+                // Extract current name without extension as default value
+                const std::string stem = std::filesystem::path(relPath).stem().string();
+                WidgetElement entry{};
+                entry.id = "ContentBrowser.RenameEntry";
+                entry.type = WidgetElementType::EntryBar;
+                entry.value = item.name;
+                entry.font = "default.ttf";
+                entry.fontSize = 11.0f;
+                entry.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+                entry.color = Vec4{ 0.10f, 0.10f, 0.14f, 1.0f };
+                entry.hoverColor = Vec4{ 0.14f, 0.14f, 0.18f, 1.0f };
+                entry.from = Vec2{ 0.0f, 0.65f };
+                entry.to = Vec2{ 1.0f, 1.0f };
+                entry.padding = Vec2{ 2.0f, 1.0f };
+                entry.isHitTestable = true;
+                entry.isFocused = true;
+                entry.runtimeOnly = true;
+                entry.onValueChanged = [this, relPath](const std::string& newName)
+                {
+                    setFocusedEntry(nullptr);
+                    m_renamingGridAsset = false;
+                    if (!newName.empty() && newName != std::filesystem::path(relPath).stem().string())
+                    {
+                        if (AssetManager::Instance().renameAsset(relPath, newName))
+                        {
+                            showToastMessage("Renamed to: " + newName, 2.5f);
+                            m_selectedGridAsset.clear();
+                        }
+                        else
+                        {
+                            showToastMessage("Rename failed.", 3.0f);
+                        }
+                    }
+                    m_renameOriginalPath.clear();
+                    refreshContentBrowser();
+                };
+                // Replace the label child (index 1) with the entry bar
+                tile.children.back() = std::move(entry);
+            }
+
             // Make asset tiles draggable
             tile.isDraggable = true;
             tile.dragPayload = std::to_string(static_cast<int>(item.type)) + "|" + relPath;
@@ -2218,11 +3210,18 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             tile.onClicked = [uiMgr = this, relPath]()
             {
                 uiMgr->m_selectedGridAsset = relPath;
+                uiMgr->m_renamingGridAsset = false;
+                uiMgr->m_renameOriginalPath.clear();
                 uiMgr->refreshContentBrowser();
             };
 
-            tile.onDoubleClicked = [uiMgr = this, relPath]()
+            tile.onDoubleClicked = [uiMgr = this, relPath, assetType = item.type]()
             {
+                if (assetType == AssetType::Model3D && uiMgr->getRenderer())
+                {
+                    uiMgr->getRenderer()->openMeshViewer(relPath);
+                    return;
+                }
                 Logger::Instance().log(Logger::Category::UI,
                     "Content Browser: open asset '" + relPath + "'",
                     Logger::LogLevel::INFO);
@@ -2252,10 +3251,13 @@ const std::vector<const UIManager::WidgetEntry*>& UIManager::getWidgetsOrderedBy
         {
             if (entry.widget)
             {
+                // Tab-scoped filtering: skip widgets not matching the active tab
+                if (!entry.tabId.empty() && entry.tabId != m_activeTabId)
+                    continue;
                 m_widgetOrderCache.push_back(&entry);
             }
         }
-        std::sort(m_widgetOrderCache.begin(), m_widgetOrderCache.end(), [](const WidgetEntry* a, const WidgetEntry* b)
+        std::stable_sort(m_widgetOrderCache.begin(), m_widgetOrderCache.end(), [](const WidgetEntry* a, const WidgetEntry* b)
         {
             const int za = (a && a->widget) ? a->widget->getZOrder() : 0;
             const int zb = (b && b->widget) ? b->widget->getZOrder() : 0;
@@ -2275,6 +3277,21 @@ void UIManager::unregisterWidget(const std::string& id)
     m_widgetOrderDirty = true;
     m_pointerCacheDirty = true;
     m_renderDirty = true;
+}
+
+void UIManager::setActiveTabId(const std::string& tabId)
+{
+    if (m_activeTabId == tabId)
+        return;
+    m_activeTabId = tabId;
+    m_widgetOrderDirty = true;
+    m_pointerCacheDirty = true;
+    m_renderDirty = true;
+}
+
+const std::string& UIManager::getActiveTabId() const
+{
+    return m_activeTabId;
 }
 
 WidgetElement* UIManager::findElementById(const std::string& elementId)
@@ -2370,6 +3387,11 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
         {
             continue;
         }
+        // Tab-scoped filtering: skip widgets not matching the active tab
+        if (!entry.tabId.empty() && entry.tabId != m_activeTabId)
+        {
+            continue;
+        }
         switch (getDockSide(*entry.widget))
         {
         case DockSide::Top:
@@ -2412,6 +3434,16 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
         {
             continue;
         }
+
+        // EntityDetails is positioned by a second pass below (based on
+        // WorldOutliner split).  If we lay it out here with the wrong
+        // widget size the scroll offset gets clamped to a too-small
+        // maxScroll every frame, preventing full scrolling.
+        if (entryPtr->id == "EntityDetails")
+        {
+            continue;
+        }
+
         auto& widget = entryPtr->widget;
 
         bindClickEventsForWidget(widget);
@@ -2553,6 +3585,8 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
             detailsEntry->widget->setComputedPositionPixels(detailsPos, true);
             detailsEntry->widget->setComputedSizePixels(detailsSize, true);
 
+            bindClickEventsForWidget(detailsEntry->widget);
+
             for (auto& element : detailsEntry->widget->getElementsMutable())
             {
                 measureElementSize(element, measureText);
@@ -2598,17 +3632,14 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
         cancelDrag();
     }
 
-    Logger::Instance().log(Logger::Category::UI,
-        "MouseDown at (" + std::to_string(screenPos.x) + ", " + std::to_string(screenPos.y) + ")",
-        Logger::LogLevel::INFO);
-
     WidgetElement* target = hitTest(screenPos, true);
 
     // Dismiss dropdown menu on click outside
     if (m_dropdownVisible)
     {
-        const bool clickedDropdown = target && target->id.rfind("Dropdown.", 0) == 0;
-        if (!clickedDropdown)
+        const bool clickedInsideMenu = target && target->id.rfind("Dropdown.", 0) == 0;
+        const bool clickedSourceButton = target && target->type == WidgetElementType::DropdownButton;
+        if (!clickedInsideMenu && !clickedSourceButton)
         {
             closeDropdownMenu();
             if (!target)
@@ -2634,7 +3665,6 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
 
     if (!target)
     {
-        Logger::Instance().log(Logger::Category::UI, "Click miss at (" + std::to_string(screenPos.x) + ", " + std::to_string(screenPos.y) + ")", Logger::LogLevel::INFO);
         setFocusedEntry(nullptr);
         return false;
     }
@@ -2766,12 +3796,19 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
     }
     if (target->type == WidgetElementType::DropdownButton)
     {
-        if (m_dropdownVisible)
+        // Toggle: if clicking the same button that opened the menu, just close it
+        if (m_dropdownVisible && target->id == m_dropdownSourceId)
         {
             closeDropdownMenu();
         }
         else
         {
+            // Close any open dropdown first
+            if (m_dropdownVisible)
+            {
+                closeDropdownMenu();
+            }
+
             // Build menu items from dropdownItems (runtime callbacks) or items (labels)
             std::vector<DropdownMenuItem> menuItems;
             if (!target->dropdownItems.empty())
@@ -2792,15 +3829,20 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
                     }});
                 }
             }
-            if (!menuItems.empty())
+
+            // If no items available, show a placeholder
+            if (menuItems.empty())
             {
-                // Anchor below the button
-                const Vec2 anchor{
-                    target->computedPositionPixels.x,
-                    target->computedPositionPixels.y + target->computedSizePixels.y + 2.0f
-                };
-                showDropdownMenu(anchor, menuItems);
+                menuItems.push_back({ "(No assets available)", {} });
             }
+
+            // Anchor below the button, match button width
+            const Vec2 anchor{
+                target->computedPositionPixels.x,
+                target->computedPositionPixels.y + target->computedSizePixels.y + 2.0f
+            };
+            m_dropdownSourceId = target->id;
+            showDropdownMenu(anchor, menuItems, target->computedSizePixels.x);
         }
         markAllWidgetsDirty();
     }
@@ -2875,6 +3917,19 @@ bool UIManager::handleTextInput(const std::string& text)
 
 bool UIManager::handleKeyDown(int key)
 {
+    // F2: trigger inline rename on selected Content Browser asset
+    if (key == SDLK_F2)
+    {
+        if (!m_selectedGridAsset.empty() && !m_renamingGridAsset)
+        {
+            m_renamingGridAsset = true;
+            m_renameOriginalPath = m_selectedGridAsset;
+            refreshContentBrowser();
+            return true;
+        }
+        return false;
+    }
+
     if (!m_focusedEntry)
     {
         return false;
@@ -2900,6 +3955,12 @@ bool UIManager::handleKeyDown(int key)
     if (key == SDLK_ESCAPE)
     {
         setFocusedEntry(nullptr);
+        if (m_renamingGridAsset)
+        {
+            m_renamingGridAsset = false;
+            m_renameOriginalPath.clear();
+            refreshContentBrowser();
+        }
         return true;
     }
 
@@ -3135,6 +4196,48 @@ bool UIManager::handleMouseUp(const Vec2& screenPos, int button)
                 m_onDropOnEntity(payload, static_cast<unsigned int>(entityValue));
             }
             return true;
+        }
+
+        // Drop on EntityDetails dropdown buttons (Mesh, Material, Script)
+        const std::string detailsDropPrefix = "Details.";
+        const std::string dropSuffix = ".Dropdown";
+        if (dropTarget->id.rfind(detailsDropPrefix, 0) == 0 &&
+            dropTarget->id.size() > dropSuffix.size() &&
+            dropTarget->id.compare(dropTarget->id.size() - dropSuffix.size(), dropSuffix.size(), dropSuffix) == 0)
+        {
+            // Parse payload: "typeInt|relPath"
+            const auto pipePos = payload.find('|');
+            if (pipePos != std::string::npos && m_outlinerSelectedEntity != 0)
+            {
+                const int payloadTypeInt = std::atoi(payload.substr(0, pipePos).c_str());
+                const std::string assetPath = payload.substr(pipePos + 1);
+                const AssetType droppedType = static_cast<AssetType>(payloadTypeInt);
+
+                // Determine which dropdown was targeted
+                AssetType expectedType = AssetType::Unknown;
+                if (dropTarget->id == "Details.Mesh.Dropdown")
+                {
+                    expectedType = AssetType::Model3D;
+                }
+                else if (dropTarget->id == "Details.Material.Dropdown")
+                {
+                    expectedType = AssetType::Material;
+                }
+                else if (dropTarget->id == "Details.Script.Dropdown")
+                {
+                    expectedType = AssetType::Script;
+                }
+
+                if (expectedType != AssetType::Unknown && droppedType == expectedType)
+                {
+                    applyAssetToEntity(droppedType, assetPath, m_outlinerSelectedEntity);
+                }
+                else
+                {
+                    showToastMessage("Wrong asset type for this slot.", 3.0f);
+                }
+                return true;
+            }
         }
     }
 
@@ -3479,6 +4582,9 @@ bool UIManager::isPointerOverUI(const Vec2& screenPos) const
         {
             continue;
         }
+        // Tab-scoped filtering
+        if (!entry.tabId.empty() && entry.tabId != m_activeTabId)
+            continue;
         for (const auto& element : entry.widget->getElements())
         {
             if (hitAny(element))
@@ -3564,6 +4670,55 @@ WidgetElement* UIManager::hitTest(const Vec2& screenPos, bool /*logDetails*/) co
         };
 
     const auto& orderedAsc = getWidgetsOrderedByZ();
+
+    // Pre-pass: expanded DropDown items render on top (deferred), so they must
+    // win hit-testing over sibling elements that occupy the same screen area.
+    const std::function<WidgetElement*(const WidgetElement&)> findExpandedDropDown =
+        [&](const WidgetElement& element) -> WidgetElement*
+        {
+            for (auto& child : element.children)
+            {
+                if (auto* found = findExpandedDropDown(child))
+                {
+                    return found;
+                }
+            }
+            if (element.type == WidgetElementType::DropDown && element.isExpanded && !element.items.empty()
+                && element.hasComputedPosition && element.hasComputedSize)
+            {
+                const float itemHeight = std::max(20.0f, element.computedSizePixels.y);
+                const float dropHeight = itemHeight * static_cast<float>(element.items.size());
+                const Vec2 dropPos{ element.computedPositionPixels.x, element.computedPositionPixels.y + element.computedSizePixels.y };
+                const Vec2 dropSize{ element.computedSizePixels.x, dropHeight };
+                if (pointInRect(dropPos, dropSize, screenPos))
+                {
+                    return const_cast<WidgetElement*>(&element);
+                }
+                // Also match clicks on the collapsed header area itself
+                if (pointInRect(element.computedPositionPixels, element.computedSizePixels, screenPos))
+                {
+                    return const_cast<WidgetElement*>(&element);
+                }
+            }
+            return nullptr;
+        };
+
+    for (auto it = orderedAsc.rbegin(); it != orderedAsc.rend(); ++it)
+    {
+        const auto* entry = *it;
+        if (!entry || !entry->widget)
+        {
+            continue;
+        }
+        const auto& elements = entry->widget->getElements();
+        for (auto eit = elements.rbegin(); eit != elements.rend(); ++eit)
+        {
+            if (auto* hit = findExpandedDropDown(*eit))
+            {
+                return hit;
+            }
+        }
+    }
 
     for (auto it = orderedAsc.rbegin(); it != orderedAsc.rend(); ++it)
     {
@@ -3809,7 +4964,7 @@ void UIManager::closeSaveProgressModal(bool success)
     refreshStatusBar();
 }
 
-void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<DropdownMenuItem>& items)
+void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<DropdownMenuItem>& items, float minWidth)
 {
     closeDropdownMenu();
 
@@ -3817,12 +4972,13 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
 
     constexpr float kItemH = 28.0f;
     constexpr float kPadY = 4.0f;
-    constexpr float kMenuW = 180.0f;
+    constexpr float kDefaultMenuW = 180.0f;
+    const float menuW = std::max(kDefaultMenuW, minWidth);
     const float menuH = kPadY * 2.0f + static_cast<float>(items.size()) * kItemH;
 
     auto widget = std::make_shared<Widget>();
     widget->setName("DropdownMenu");
-    widget->setSizePixels(Vec2{ kMenuW, menuH });
+    widget->setSizePixels(Vec2{ menuW, menuH });
     widget->setPositionPixels(Vec2{ anchorPixels.x, anchorPixels.y });
     widget->setAnchor(WidgetAnchor::TopLeft);
     widget->setAbsolutePosition(true);
@@ -3860,11 +5016,24 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
         item.isHitTestable = true;
 
         auto callback = items[i].onClick;
-        item.onClicked = [this, callback]()
+        if (callback)
         {
-            closeDropdownMenu();
-            if (callback) callback();
-        };
+            item.onClicked = [this, callback]()
+            {
+                closeDropdownMenu();
+                callback();
+            };
+        }
+        else
+        {
+            // Placeholder item with no callback — just close the menu
+            item.textColor = Vec4{ 0.55f, 0.55f, 0.6f, 1.0f };
+            item.hoverColor = item.color;
+            item.onClicked = [this]()
+            {
+                closeDropdownMenu();
+            };
+        }
 
         elements.push_back(item);
     }
@@ -3882,6 +5051,7 @@ void UIManager::closeDropdownMenu()
     unregisterWidget("__DropdownMenu__");
     m_dropdownWidget.reset();
     m_dropdownVisible = false;
+    m_dropdownSourceId.clear();
     markAllWidgetsDirty();
 }
 
@@ -4170,7 +5340,7 @@ void UIManager::openEngineSettingsPopup()
     struct SettingsState { int activeCategory{ 0 }; };
     auto state = std::make_shared<SettingsState>();
 
-    const std::vector<std::string> categories = { "Rendering", "Debug" };
+    const std::vector<std::string> categories = { "General", "Rendering", "Debug" };
     constexpr float kSidebarW = 140.0f;
     constexpr float kTitleH = 44.0f;
 
@@ -4298,7 +5468,20 @@ void UIManager::openEngineSettingsPopup()
             ++row;
         };
 
-        if (state->activeCategory == 0) // Rendering
+        if (state->activeCategory == 0) // General
+        {
+            addSectionLabel("ES.C.Sec.Startup", "Startup");
+            const bool isSplash = []() {
+                if (auto v = DiagnosticsManager::Instance().getState("StartupMode"))
+                    return *v == "normal";
+                return true; // default to normal (splash)
+            }();
+            addCheckbox("ES.C.SplashScreen", "Splash Screen (Normal Startup)", isSplash,
+                [](bool v) {
+                    DiagnosticsManager::Instance().setState("StartupMode", v ? "normal" : "fast");
+                });
+        }
+        else if (state->activeCategory == 1) // Rendering
         {
             addSectionLabel("ES.C.Sec.Lighting", "Lighting");
             addCheckbox("ES.C.Shadows", "Shadows",
@@ -4330,7 +5513,7 @@ void UIManager::openEngineSettingsPopup()
                     DiagnosticsManager::Instance().setState("OcclusionCullingEnabled", v ? "1" : "0");
                 });
         }
-        else if (state->activeCategory == 1) // Debug
+        else if (state->activeCategory == 2) // Debug
         {
             addSectionLabel("ES.C.Sec.Vis", "Visualizations");
             addCheckbox("ES.C.UIDebug", "UI Debug Outlines",

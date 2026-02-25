@@ -5,8 +5,10 @@
 #include "../RenderResourceManager.h"
 #include "../UIManager.h"
 #include "../PopupWindow.h"
+#include "../EditorWindows/MeshViewerWindow.h"
 
 #include "../../Core/MathTypes.h"
+#include "../../Core/EngineLevel.h"
 #include "glad/include/gl.h"
 #include <memory>
 #include <unordered_map>
@@ -104,6 +106,9 @@ public:
     // Unproject a screen pixel to world space using the depth buffer.
     // Returns false if the depth at that pixel is at the far plane (no geometry hit).
     bool screenToWorldPos(int screenX, int screenY, Vec3& outWorldPos) const;
+
+    // Refresh a single entity's render data without rebuilding the entire scene.
+    void refreshEntity(ECS::Entity entity);
 
 private:
     void renderWorld();
@@ -217,6 +222,8 @@ private:
     std::vector<OpenGLMaterial::LightData> m_sceneLights;
     int m_cachedWindowWidth{0};
     int m_cachedWindowHeight{0};
+    int m_lastProjectionWidth{0};
+    int m_lastProjectionHeight{0};
     bool m_uiDebugEnabled{false};
     bool m_uiDebugEnabledPrev{false};
     WindowHitTestContext m_hitTestContext{};
@@ -406,6 +413,14 @@ private:
     void snapshotTabBeforeSwitch(EditorTab& tab);
     std::vector<EditorTab> m_editorTabs;
     std::string m_activeTabId{ "Viewport" };
+    EditorTab* m_cachedActiveTab{ nullptr };
+
+    // Saved viewport level when a mesh viewer tab is active
+    std::unique_ptr<EngineLevel> m_savedViewportLevel;
+    Vec3 m_savedCameraPos{};
+    Vec2 m_savedCameraRot{};
+    unsigned int m_savedViewportSelectedEntity{ 0 };
+    std::unordered_map<std::string, unsigned int> m_tabSelectedEntity;
 
     // Popup window management (multi-window)
     void drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int height);
@@ -413,6 +428,9 @@ private:
     void renderPopupWindows();
     std::unordered_map<std::string, std::unique_ptr<PopupWindow>> m_popupWindows;
     GLuint m_popupUiVao{ 0 };
+
+    // Mesh viewer editor windows
+    std::unordered_map<std::string, std::unique_ptr<MeshViewerWindow>> m_meshViewers;
 
 public:
     void toggleUIDebug() { m_uiDebugEnabled = !m_uiDebugEnabled; }
@@ -452,5 +470,10 @@ public:
     PopupWindow*  getPopupWindow(const std::string& id);
     // Route an SDL event to the focused popup. Returns true if the event was consumed.
     bool          routeEventToPopup(SDL_Event& event);
+
+    // Mesh viewer editor window
+    MeshViewerWindow* openMeshViewer(const std::string& assetPath);
+    void              closeMeshViewer(const std::string& assetPath);
+    MeshViewerWindow* getMeshViewer(const std::string& assetPath);
 
 };

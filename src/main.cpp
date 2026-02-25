@@ -15,6 +15,7 @@
 #include "Renderer/OpenGLRenderer/OpenGLRenderer.h"
 #include "Renderer/UIWidget.h"
 #include "Renderer/PopupWindow.h"
+#include "Renderer/SplashWindow.h"
 #include "Logger/Logger.h"
 #include "Diagnostics/DiagnosticsManager.h"
 #include "AssetManager/AssetManager.h"
@@ -25,6 +26,7 @@
 #include "Core/UndoRedoManager.h"
 #include "Core/EngineLevel.h"
 #include "Scripting/PythonScripting.h"
+#include "Physics/PhysicsWorld.h"
 
 using namespace std;
 
@@ -41,49 +43,13 @@ int main()
 
     logTimed(Logger::Category::Engine, "Engine starting...", Logger::LogLevel::INFO);
 
-    if (!Scripting::Initialize())
-    {
-        logTimed(Logger::Category::Engine, "Failed to initialize Python scripting.", Logger::LogLevel::ERROR);
-    }
-
-    auto& assetManager = AssetManager::Instance();
-    logTimed(Logger::Category::AssetManagement, "Initialising AssetManager...", Logger::LogLevel::INFO);
-        if (!assetManager.initialize())
-        {
-            logTimed(Logger::Category::AssetManagement, "AssetManager initialisation failed.", Logger::LogLevel::FATAL);
-            return -1;
-        }
-
-    logTimed(Logger::Category::AssetManagement, "AssetManager initialised successfully.", Logger::LogLevel::INFO);
-
-    std::string cwd = std::filesystem::current_path().string();
-    logTimed(Logger::Category::Engine, "Startup path: " + cwd, Logger::LogLevel::INFO);
-
-    std::filesystem::path downloadsPath;
+    // Hide the console immediately so the user never sees it.
 #if defined(_WIN32)
-    if (const char* userProfile = std::getenv("USERPROFILE"))
-    {
-        downloadsPath = std::filesystem::path(userProfile) / "Downloads";
-    }
-#else
-    if (const char* home = std::getenv("HOME"))
-    {
-        downloadsPath = std::filesystem::path(home) / "Downloads";
-    }
+    FreeConsole();
+    logger.setSuppressStdout(true);
 #endif
-    if (downloadsPath.empty())
-    {
-        downloadsPath = std::filesystem::current_path();
-    }
 
-    const std::filesystem::path projectRoot = downloadsPath / "SampleProject";
-    logTimed(Logger::Category::Engine, "Loading project...", Logger::LogLevel::INFO);
-    if (!assetManager.loadProject(projectRoot.string()))
-    {
-        logTimed(Logger::Category::Project, "Project not found. Creating default project: SampleProject", Logger::LogLevel::WARNING);
-        assetManager.createProject(downloadsPath.string(), "SampleProject", { "SampleProject", "1.0", "1.0", "", DiagnosticsManager::RHIType::OpenGL });
-    }
-
+    // --- Phase 1: Show something on screen as fast as possible ---
     logTimed(Logger::Category::Engine, "Initialising SDL (video + audio)...", Logger::LogLevel::INFO);
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO))
     {
@@ -92,19 +58,28 @@ int main()
     }
     logTimed(Logger::Category::Engine, "SDL initialised successfully.", Logger::LogLevel::INFO);
 
-    auto& audioManager = AudioManager::Instance();
-    logTimed(Logger::Category::Engine, "Initialising AudioManager (OpenAL)...", Logger::LogLevel::INFO);
-    if (!audioManager.initialize())
-    {
-        logTimed(Logger::Category::Engine, "AudioManager initialization failed.", Logger::LogLevel::ERROR);
-    }
-
     auto& diagnostics = DiagnosticsManager::Instance();
-    //diagnostics.setRHIType(DiagnosticsManager::RHIType::OpenGL);
     if (!diagnostics.loadConfig())
     {
         diagnostics.setWindowSize(Vec2{ 800.0f, 600.0f });
         diagnostics.setWindowState(DiagnosticsManager::WindowState::Maximized);
+    }
+
+    // Determine startup mode ("fast" = toast progress in main window, "normal" = splash screen)
+    const bool useSplash = [&]() {
+        if (auto v = diagnostics.getState("StartupMode"))
+            return *v == "normal";
+        return true; // default to normal (splash)
+    }();
+
+    SplashWindow splash;
+    if (useSplash)
+    {
+        if (splash.create())
+        {
+            splash.setStatus("Initializing renderer...");
+            splash.render();
+        }
     }
 
     logTimed(Logger::Category::Rendering, "Initialising Renderer (OpenGL)...", Logger::LogLevel::INFO);
@@ -118,8 +93,6 @@ int main()
         SDL_Quit();
         return -1;
     }
-
-    Scripting::SetRenderer(renderer);
 
     SDL_ShowCursor();
     if (auto* w = renderer->window())
@@ -174,16 +147,106 @@ int main()
             glRenderer->setWireframeEnabled(*v == "1");
     }
 
-#if defined(_WIN32)
-    FreeConsole();
-    logger.setSuppressStdout(true);
-#endif
-
-    // Show the engine window now that the console is gone.
+// In fast mode, show the main window immediately (splash mode keeps it hidden until ready).
+if (!useSplash)
+{
     if (auto* w = renderer->window())
     {
         SDL_ShowWindow(w);
     }
+}
+
+// Helper: show progress during subsystem init.
+// In splash mode: update splash status text.
+// In fast mode: show toast messages + render a progress frame in the main window.
+auto showProgress = [&](const std::string& msg)
+{
+    if (splash.isOpen())
+    {
+        splash.setStatus(msg);
+        splash.render();
+    }
+    else if (glRenderer)
+    {
+        glRenderer->getUIManager().showToastMessage(msg, 3.0f);
+        // Pump events + render one frame so the user sees the toast
+        SDL_Event ev;
+        while (SDL_PollEvent(&ev))
+        {
+            if (ev.type == SDL_EVENT_QUIT)
+                diagnostics.requestShutdown();
+        }
+        glRenderer->getUIManager().updateNotifications(0.016f);
+        renderer->render();
+        renderer->present();
+    }
+};
+
+    // --- Phase 2: Initialise subsystems one by one, showing progress ---
+
+    // Scripting
+    showProgress("Initializing scripting...");
+    logTimed(Logger::Category::Engine, "Initialising Python scripting...", Logger::LogLevel::INFO);
+    if (!Scripting::Initialize())
+    {
+        logTimed(Logger::Category::Engine, "Failed to initialize Python scripting.", Logger::LogLevel::ERROR);
+    }
+    Scripting::SetRenderer(renderer);
+
+    // Audio
+    showProgress("Initializing audio...");
+    auto& audioManager = AudioManager::Instance();
+    logTimed(Logger::Category::Engine, "Initialising AudioManager (OpenAL)...", Logger::LogLevel::INFO);
+    if (!audioManager.initialize())
+    {
+        logTimed(Logger::Category::Engine, "AudioManager initialization failed.", Logger::LogLevel::ERROR);
+    }
+
+    // Asset system
+    showProgress("Initializing asset system...");
+    auto& assetManager = AssetManager::Instance();
+    logTimed(Logger::Category::AssetManagement, "Initialising AssetManager...", Logger::LogLevel::INFO);
+    if (!assetManager.initialize())
+    {
+        logTimed(Logger::Category::AssetManagement, "AssetManager initialisation failed.", Logger::LogLevel::FATAL);
+        delete renderer;
+        SDL_Quit();
+        return -1;
+    }
+    logTimed(Logger::Category::AssetManagement, "AssetManager initialised successfully.", Logger::LogLevel::INFO);
+
+    // Load project
+    showProgress("Loading project...");
+    std::string cwd = std::filesystem::current_path().string();
+    logTimed(Logger::Category::Engine, "Startup path: " + cwd, Logger::LogLevel::INFO);
+
+    std::filesystem::path downloadsPath;
+#if defined(_WIN32)
+    if (const char* userProfile = std::getenv("USERPROFILE"))
+    {
+        downloadsPath = std::filesystem::path(userProfile) / "Downloads";
+    }
+#else
+    if (const char* home = std::getenv("HOME"))
+    {
+        downloadsPath = std::filesystem::path(home) / "Downloads";
+    }
+#endif
+    if (downloadsPath.empty())
+    {
+        downloadsPath = std::filesystem::current_path();
+    }
+
+    const std::filesystem::path projectRoot = downloadsPath / "SampleProject";
+    logTimed(Logger::Category::Engine, "Loading project...", Logger::LogLevel::INFO);
+    if (!assetManager.loadProject(projectRoot.string()))
+    {
+        logTimed(Logger::Category::Project, "Project not found. Creating default project: SampleProject", Logger::LogLevel::WARNING);
+        assetManager.createProject(downloadsPath.string(), "SampleProject", { "SampleProject", "1.0", "1.0", "", DiagnosticsManager::RHIType::OpenGL });
+    }
+
+    // --- Phase 3: Load editor UI widgets ---
+    showProgress("Loading editor UI...");
 
     std::function<void()> stopPIE;
 
@@ -202,6 +265,7 @@ int main()
                 diag.setPIEActive(false);
                 glRenderer->clearActiveCameraEntity();
                 AudioManager::Instance().stopAll();
+                PhysicsWorld::Instance().shutdown();
                 Scripting::ReloadScripts();
                 auto* level = diag.getActiveLevelSoft();
                 if (level)
@@ -345,6 +409,7 @@ int main()
                         return;
                     }
                     level->snapshotEcsState();
+                    PhysicsWorld::Instance().initialize();
                     diag.setPIEActive(true);
 
                     // Find the first entity with an active CameraComponent
@@ -423,7 +488,7 @@ int main()
                 {
                     if (auto widget = glRenderer->createWidgetFromAsset(asset))
                     {
-                        glRenderer->getUIManager().registerWidget("ViewportOverlay", widget);
+                        glRenderer->getUIManager().registerWidget("ViewportOverlay", widget, "Viewport");
                     }
                 }
             }
@@ -662,7 +727,7 @@ int main()
                             }
                         }
 
-                        glRenderer->getUIManager().registerWidget("WorldSettings", widget);
+                        glRenderer->getUIManager().registerWidget("WorldSettings", widget, "Viewport");
                     }
                 }
             }
@@ -678,7 +743,7 @@ int main()
                 {
                     if (auto widget = glRenderer->createWidgetFromAsset(asset))
                     {
-                        glRenderer->getUIManager().registerWidget("WorldOutliner", widget);
+                        glRenderer->getUIManager().registerWidget("WorldOutliner", widget, "Viewport");
                     }
                 }
             }
@@ -694,7 +759,7 @@ int main()
                 {
                     if (auto widget = glRenderer->createWidgetFromAsset(asset))
                     {
-                        glRenderer->getUIManager().registerWidget("EntityDetails", widget);
+                        glRenderer->getUIManager().registerWidget("EntityDetails", widget, "Viewport");
                     }
                 }
             }
@@ -732,7 +797,7 @@ int main()
                     if (auto widget = glRenderer->createWidgetFromAsset(asset))
                     {
                         logTimed(Logger::Category::UI, "[ContentBrowser] main: widget created name='" + widget->getName() + "' elements=" + std::to_string(widget->getElements().size()), Logger::LogLevel::INFO);
-                        glRenderer->getUIManager().registerWidget("ContentBrowser", widget);
+                        glRenderer->getUIManager().registerWidget("ContentBrowser", widget, "Viewport");
                         logTimed(Logger::Category::UI, "[ContentBrowser] main: registerWidget('ContentBrowser') completed", Logger::LogLevel::INFO);
 
                         glRenderer->getUIManager().registerClickEvent("ContentBrowser.PathBar.Import", [&renderer]()
@@ -799,35 +864,29 @@ int main()
                                         case AssetType::Material:
                                         case AssetType::Texture:
                                         {
-                                            auto* mat = ecs.getComponent<ECS::MaterialComponent>(target);
-                                            if (mat)
-                                                mat->materialAssetPath = relPath;
+                                            ECS::MaterialComponent matComp{};
+                                            matComp.materialAssetPath = relPath;
+                                            if (ecs.hasComponent<ECS::MaterialComponent>(target))
+                                                ecs.setComponent<ECS::MaterialComponent>(target, matComp);
                                             else
-                                            {
-                                                ECS::MaterialComponent m;
-                                                m.materialAssetPath = relPath;
-                                                ecs.addComponent<ECS::MaterialComponent>(target, m);
-                                            }
+                                                ecs.addComponent<ECS::MaterialComponent>(target, matComp);
                                             break;
                                         }
                                         case AssetType::Script:
                                         {
-                                            auto* sc = ecs.getComponent<ECS::ScriptComponent>(target);
-                                            if (sc)
-                                                sc->scriptPath = relPath;
+                                            ECS::ScriptComponent scriptComp{};
+                                            scriptComp.scriptPath = relPath;
+                                            if (ecs.hasComponent<ECS::ScriptComponent>(target))
+                                                ecs.setComponent<ECS::ScriptComponent>(target, scriptComp);
                                             else
-                                            {
-                                                ECS::ScriptComponent s;
-                                                s.scriptPath = relPath;
-                                                ecs.addComponent<ECS::ScriptComponent>(target, s);
-                                            }
+                                                ecs.addComponent<ECS::ScriptComponent>(target, scriptComp);
                                             break;
                                         }
                                         default:
                                             break;
                                         }
 
-                                        diagnostics.setScenePrepared(false);
+                                        diagnostics.invalidateEntity(targetEntity);
                                         auto* level = diagnostics.getActiveLevelSoft();
                                         if (level) level->setIsSaved(false);
                                         Logger::Instance().log(Logger::Category::Engine,
@@ -835,7 +894,6 @@ int main()
                                             Logger::LogLevel::INFO);
                                         if (glRenderer)
                                         {
-                                            glRenderer->getUIManager().refreshWorldOutliner();
                                             glRenderer->getUIManager().selectEntity(targetEntity);
                                             glRenderer->getUIManager().showToastMessage(
                                                 "Applied " + assetName + " → Entity " + std::to_string(targetEntity), 2.5f);
@@ -881,6 +939,32 @@ int main()
                                 ECS::MeshComponent mesh;
                                 mesh.meshAssetPath = relPath;
                                 ecs.addComponent<ECS::MeshComponent>(entity, mesh);
+
+                                // Auto-add MaterialComponent if the mesh asset references a material
+                                {
+                                    auto meshAsset = AssetManager::Instance().getLoadedAssetByPath(relPath);
+                                    if (!meshAsset)
+                                    {
+                                        int id = AssetManager::Instance().loadAsset(relPath, AssetType::Model3D);
+                                        if (id > 0)
+                                            meshAsset = AssetManager::Instance().getLoadedAssetByID(static_cast<unsigned int>(id));
+                                    }
+                                    if (meshAsset)
+                                    {
+                                        auto& assetData = meshAsset->getData();
+                                        if (assetData.contains("m_materialAssetPaths") && assetData["m_materialAssetPaths"].is_array()
+                                            && !assetData["m_materialAssetPaths"].empty())
+                                        {
+                                            std::string matPath = assetData["m_materialAssetPaths"][0].get<std::string>();
+                                            if (!matPath.empty())
+                                            {
+                                                ECS::MaterialComponent matComp{};
+                                                matComp.materialAssetPath = matPath;
+                                                ecs.addComponent<ECS::MaterialComponent>(entity, matComp);
+                                            }
+                                        }
+                                    }
+                                }
 
                                 auto* level = diagnostics.getActiveLevelSoft();
                                 if (level)
@@ -948,54 +1032,68 @@ int main()
                                 case AssetType::Material:
                                 case AssetType::Texture:
                                 {
-                                    auto* mat = ecs.getComponent<ECS::MaterialComponent>(entity);
-                                    if (mat)
-                                    {
-                                        mat->materialAssetPath = relPath;
-                                    }
+                                    ECS::MaterialComponent matComp{};
+                                    matComp.materialAssetPath = relPath;
+                                    if (ecs.hasComponent<ECS::MaterialComponent>(entity))
+                                        ecs.setComponent<ECS::MaterialComponent>(entity, matComp);
                                     else
-                                    {
-                                        ECS::MaterialComponent newMat;
-                                        newMat.materialAssetPath = relPath;
-                                        ecs.addComponent<ECS::MaterialComponent>(entity, newMat);
-                                    }
+                                        ecs.addComponent<ECS::MaterialComponent>(entity, matComp);
                                     break;
                                 }
                                 case AssetType::Model3D:
                                 {
-                                    auto* mesh = ecs.getComponent<ECS::MeshComponent>(entity);
-                                    if (mesh)
-                                    {
-                                        mesh->meshAssetPath = relPath;
-                                    }
+                                    ECS::MeshComponent meshComp{};
+                                    meshComp.meshAssetPath = relPath;
+                                    if (ecs.hasComponent<ECS::MeshComponent>(entity))
+                                        ecs.setComponent<ECS::MeshComponent>(entity, meshComp);
                                     else
+                                        ecs.addComponent<ECS::MeshComponent>(entity, meshComp);
+
+                                    // Auto-add MaterialComponent if the mesh asset references a material
                                     {
-                                        ECS::MeshComponent newMesh;
-                                        newMesh.meshAssetPath = relPath;
-                                        ecs.addComponent<ECS::MeshComponent>(entity, newMesh);
+                                        auto meshAsset = AssetManager::Instance().getLoadedAssetByPath(relPath);
+                                        if (!meshAsset)
+                                        {
+                                            int id = AssetManager::Instance().loadAsset(relPath, AssetType::Model3D);
+                                            if (id > 0)
+                                                meshAsset = AssetManager::Instance().getLoadedAssetByID(static_cast<unsigned int>(id));
+                                        }
+                                        if (meshAsset)
+                                        {
+                                            auto& assetData = meshAsset->getData();
+                                            if (assetData.contains("m_materialAssetPaths") && assetData["m_materialAssetPaths"].is_array()
+                                                && !assetData["m_materialAssetPaths"].empty())
+                                            {
+                                                std::string matPath = assetData["m_materialAssetPaths"][0].get<std::string>();
+                                                if (!matPath.empty())
+                                                {
+                                                    ECS::MaterialComponent matComp{};
+                                                    matComp.materialAssetPath = matPath;
+                                                    if (ecs.hasComponent<ECS::MaterialComponent>(entity))
+                                                        ecs.setComponent<ECS::MaterialComponent>(entity, matComp);
+                                                    else
+                                                        ecs.addComponent<ECS::MaterialComponent>(entity, matComp);
+                                                }
+                                            }
+                                        }
                                     }
                                     break;
                                 }
                                 case AssetType::Script:
                                 {
-                                    auto* script = ecs.getComponent<ECS::ScriptComponent>(entity);
-                                    if (script)
-                                    {
-                                        script->scriptPath = relPath;
-                                    }
+                                    ECS::ScriptComponent scriptComp{};
+                                    scriptComp.scriptPath = relPath;
+                                    if (ecs.hasComponent<ECS::ScriptComponent>(entity))
+                                        ecs.setComponent<ECS::ScriptComponent>(entity, scriptComp);
                                     else
-                                    {
-                                        ECS::ScriptComponent newScript;
-                                        newScript.scriptPath = relPath;
-                                        ecs.addComponent<ECS::ScriptComponent>(entity, newScript);
-                                    }
+                                        ecs.addComponent<ECS::ScriptComponent>(entity, scriptComp);
                                     break;
                                 }
                                 default:
                                     break;
                                 }
 
-                                DiagnosticsManager::Instance().setScenePrepared(false);
+                                DiagnosticsManager::Instance().invalidateEntity(entityId);
                                 auto* level = DiagnosticsManager::Instance().getActiveLevelSoft();
                                 if (level)
                                 {
@@ -1006,7 +1104,6 @@ int main()
                                     Logger::LogLevel::INFO);
                                 if (glRenderer)
                                 {
-                                    glRenderer->getUIManager().refreshWorldOutliner();
                                     glRenderer->getUIManager().showToastMessage(
                                         "Applied " + assetName + " → Entity " + std::to_string(entityId), 2.5f);
                                 }
@@ -1101,6 +1198,32 @@ int main()
 
     }
 
+    // All subsystems initialised — render the first frame while the splash is
+    // still visible so the main window never appears white / empty.
+    if (glRenderer)
+    {
+        glRenderer->getUIManager().showToastMessage("Engine ready!", 3.0f);
+        SDL_Event ev;
+        while (SDL_PollEvent(&ev))
+        {
+            if (ev.type == SDL_EVENT_QUIT)
+                diagnostics.requestShutdown();
+        }
+        glRenderer->getUIManager().updateNotifications(0.016f);
+        renderer->render();
+        renderer->present();
+    }
+
+    // Now that the framebuffer has real content, close splash and show window.
+    if (splash.isOpen())
+    {
+        splash.close();
+    }
+    if (auto* w = renderer->window())
+    {
+        SDL_ShowWindow(w);
+    }
+
     bool running = true;
     uint64_t frame = 0;
     logTimed(Logger::Category::Engine, "Entering main loop.", Logger::LogLevel::INFO);
@@ -1165,6 +1288,7 @@ int main()
         if (level)
         {
             level->onEntityRemoved(static_cast<ECS::Entity>(selected));
+            level->setIsSaved(false);
         }
 
         // Remove from ECS
@@ -1255,17 +1379,6 @@ int main()
         cpuLoggerMs = 0.0;
         cpuGcMs = 0.0;
 
-        auto logTimed = [&](Logger::Category category, const std::string& message, Logger::LogLevel level)
-        {
-            const uint64_t logStart = SDL_GetPerformanceCounter();
-            logger.log(category, message, level);
-            const uint64_t logEnd = SDL_GetPerformanceCounter();
-            if (freq > 0.0)
-            {
-                cpuLoggerMs += (static_cast<double>(logEnd - logStart) / freq * 1000.0);
-            }
-        };
-
         if (freq > 0.0 && (static_cast<double>(now - lastGcCounter) / freq) >= kGcIntervalSec)
         {
             const uint64_t gcStart = SDL_GetPerformanceCounter();
@@ -1274,8 +1387,7 @@ int main()
             cpuGcMs = (freq > 0.0) ? (static_cast<double>(gcEnd - gcStart) / freq * 1000.0) : 0.0;
             lastGcCounter = now;
 
-			logTimed(Logger::Category::Rendering, "Delta time (dt): " + std::to_string(dt) + " seconds.", Logger::LogLevel::INFO);
-            ++gcRuns;
+			++gcRuns;
             if ((gcRuns % 12) == 0)
             {
 				logTimed(Logger::Category::AssetManagement, "Periodic GC runs=" + std::to_string(gcRuns), Logger::LogLevel::INFO);
@@ -1445,6 +1557,10 @@ int main()
                                     out << "def onloaded(entity):\n";
                                     out << "    pass\n\n";
                                     out << "def tick(entity, dt):\n";
+                                    out << "    pass\n\n";
+                                    out << "def on_entity_begin_overlap(entity, other_entity):\n";
+                                    out << "    pass\n\n";
+                                    out << "def on_entity_end_overlap(entity, other_entity):\n";
                                     out << "    pass\n";
                                     out.close();
 
@@ -1866,8 +1982,8 @@ int main()
                     stopPIE();
                     continue;
                 }
-                // Gizmo mode shortcuts (W/E/R) – only in editor mode
-                if (!diagnostics.isPIEActive() && glRenderer)
+                // Gizmo mode shortcuts (W/E/R) – only in editor mode and not when a text entry is focused
+                if (!diagnostics.isPIEActive() && glRenderer && !glRenderer->getUIManager().hasEntryFocused())
                 {
                     if (event.key.key == SDLK_W)
                     {
@@ -1885,7 +2001,11 @@ int main()
                         continue;
                     }
                 }
-                diagnostics.dispatchKeyUp(event.key.key);
+                // Skip registered key handlers (F2/DELETE) when a text entry is focused
+                if (!glRenderer || !glRenderer->getUIManager().hasEntryFocused())
+                {
+                    diagnostics.dispatchKeyUp(event.key.key);
+                }
                 if (diagnostics.isPIEActive())
                 {
                     Scripting::HandleKeyUp(event.key.key);
@@ -1897,8 +2017,8 @@ int main()
             }
             else if (event.type == SDL_EVENT_KEY_DOWN)
             {
-                // Ctrl+Z = Undo, Ctrl+Y = Redo
-                if (glRenderer && !diagnostics.isPIEActive() && (event.key.mod & SDL_KMOD_CTRL))
+                // Ctrl+Z = Undo, Ctrl+Y = Redo (skip when a text entry is focused)
+                if (glRenderer && !diagnostics.isPIEActive() && (event.key.mod & SDL_KMOD_CTRL) && !glRenderer->getUIManager().hasEntryFocused())
                 {
                     if (event.key.key == SDLK_Z)
                     {
@@ -1979,6 +2099,7 @@ int main()
 
         if (diagnostics.isPIEActive())
         {
+            PhysicsWorld::Instance().step(static_cast<float>(dt));
             Scripting::UpdateScripts(static_cast<float>(dt));
         }
 
@@ -1989,6 +2110,9 @@ int main()
 
         if (glRenderer)
         {
+            // Only show performance stats on the Viewport tab, not in Mesh Viewer tabs
+            const bool isViewportTab = (glRenderer->getActiveTabId() == "Viewport");
+
             if (metricsUpdatePending)
             {
                 fpsText = "FPS: " + std::to_string(static_cast<int>(fpsValue + 0.5));
@@ -1998,15 +2122,18 @@ int main()
                 speedText = speedBuf;
             }
 
-            glRenderer->queueText(fpsText,
-                Vec2{ 0.02f, 0.05f },
-                0.6f,
-                Vec4{ 1.0f, 1.0f, 1.0f, 1.0f });
+            if (isViewportTab)
+            {
+                glRenderer->queueText(fpsText,
+                    Vec2{ 0.02f, 0.05f },
+                    0.6f,
+                    Vec4{ 1.0f, 1.0f, 1.0f, 1.0f });
 
-            glRenderer->queueText(speedText,
-                Vec2{ 0.02f, 0.09f },
-                0.4f,
-                Vec4{ 0.9f, 0.9f, 0.9f, 1.0f });
+                glRenderer->queueText(speedText,
+                    Vec2{ 0.02f, 0.09f },
+                    0.4f,
+                    Vec4{ 0.9f, 0.9f, 0.9f, 1.0f });
+            }
         }
 
         const uint64_t renderStartCounter = SDL_GetPerformanceCounter();
@@ -2020,6 +2147,8 @@ int main()
         cpuOtherMs = std::max(0.0, cpuFrameMs - cpuInputMs - cpuRenderMs);
         if (glRenderer)
         {
+            const bool isViewportTab = (glRenderer->getActiveTabId() == "Viewport");
+
             if (metricsUpdatePending)
             {
                 char buf[128];
@@ -2061,7 +2190,7 @@ int main()
                 occlusionText = buf;
             }
 
-            if (showMetrics)
+            if (showMetrics && isViewportTab)
             {
                 if (!cpuText.empty())
                 {
@@ -2096,7 +2225,7 @@ int main()
                     glRenderer->queueText(frameText, Vec2{ 0.02f, 0.41f }, 0.35f, Vec4{ 0.7f, 1.0f, 0.7f, 1.0f });
                 }
             }
-            if (showOcclusionStats && !occlusionText.empty())
+            if (showOcclusionStats && isViewportTab && !occlusionText.empty())
             {
                 glRenderer->queueText(occlusionText, Vec2{ 0.02f, 0.45f }, 0.35f, Vec4{ 1.0f, 0.85f, 0.4f, 1.0f });
             }

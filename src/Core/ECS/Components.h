@@ -53,8 +53,15 @@ namespace ECS
 			Sphere,
 			Mesh
 		} colliderType{ ColliderType::Box };
-		bool isStatic{ true };
+		bool isStatic{ false };
 		float mass{ 1.0f }; // Relevant if isStatic is false
+		float restitution{ 0.3f }; // Bounciness (0 = no bounce, 1 = perfect bounce)
+		float friction{ 0.5f };    // Surface friction coefficient
+		bool useGravity{ true };   // Affected by world gravity
+		bool isKinematic{ false }; // Moved by code only, not by physics forces
+		float velocity[3]{ 0.0f, 0.0f, 0.0f };
+		float angularVelocity[3]{ 0.0f, 0.0f, 0.0f };
+		float colliderSize[3]{ 0.5f, 0.5f, 0.5f }; // Box half-extents or sphere radius (x)
 	};
 
 	struct ScriptComponent

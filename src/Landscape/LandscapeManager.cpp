@@ -142,6 +142,15 @@ ECS::Entity LandscapeManager::spawnLandscape(const LandscapeParams& params)
     material.materialAssetPath = "Materials/WorldGrid.asset";
     ecs.addComponent<ECS::MaterialComponent>(entity, material);
 
+    ECS::PhysicsComponent physics;
+    physics.isStatic = true;
+    physics.useGravity = false;
+    physics.colliderType = ECS::PhysicsComponent::ColliderType::Box;
+    physics.colliderSize[0] = halfW;
+    physics.colliderSize[1] = 0.001f;
+    physics.colliderSize[2] = halfD;
+    ecs.addComponent<ECS::PhysicsComponent>(entity, physics);
+
     auto* level = DiagnosticsManager::Instance().getActiveLevelSoft();
     if (level)
     {

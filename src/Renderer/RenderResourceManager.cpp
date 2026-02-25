@@ -32,6 +32,31 @@ bool RenderResourceManager::prepareActiveLevel()
 		return false;
 	}
 
+	// Validate entity asset references after ECS is populated
+	{
+		auto& assetMgr = AssetManager::Instance();
+
+		// Repair broken references before rendering:
+		// - Missing mesh: remove MeshComponent so the entity is skipped.
+		// - Missing material: swap in the WorldGrid material.
+		const size_t fixed = assetMgr.repairEntityReferences();
+		if (fixed > 0)
+		{
+			logger.log(Logger::Category::Rendering,
+				"RenderResourceManager: repaired " + std::to_string(fixed) + " broken entity reference(s).",
+				Logger::LogLevel::WARNING);
+		}
+
+		// Log any remaining warnings (e.g. missing scripts)
+		const size_t broken = assetMgr.validateEntityReferences(true);
+		if (broken > 0)
+		{
+			logger.log(Logger::Category::Rendering,
+				"RenderResourceManager: " + std::to_string(broken) + " broken entity asset reference(s) detected.",
+				Logger::LogLevel::WARNING);
+		}
+	}
+
     logger.log(Logger::Category::Rendering, "RenderResourceManager: prepareActiveLevel() start", Logger::LogLevel::INFO);
 
     switch (diagnostics.getRHIType())
@@ -170,25 +195,9 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
     auto& assetManager = AssetManager::Instance();
 
     // Helper: resolve a relative content path to absolute
-    const auto resolvePath = [&](const std::string& rawPath) -> std::string
+    const auto resolvePath = [this](const std::string& rawPath) -> std::string
     {
-        if (rawPath.empty())
-            return {};
-        std::string resolved = rawPath;
-        const std::filesystem::path p(rawPath);
-        if (!p.is_absolute())
-        {
-            const auto absPath = assetManager.getAbsoluteContentPath(rawPath);
-            if (!absPath.empty())
-                resolved = absPath;
-        }
-        if (!std::filesystem::exists(resolved))
-        {
-            const auto enginePath = assetManager.getAbsoluteEngineContentPath(rawPath);
-            if (!enginePath.empty() && std::filesystem::exists(enginePath))
-                resolved = enginePath;
-        }
-        return resolved;
+        return resolveContentPath(rawPath);
     };
 
     // ── Pass 1: Collect all unique mesh + material paths ──
@@ -596,13 +605,205 @@ bool RenderResourceManager::prepareOpenGLObject3D(const std::shared_ptr<AssetDat
 bool RenderResourceManager::prepareOpenGLObject2D(const std::shared_ptr<AssetData>& asset, const std::vector<std::shared_ptr<Texture>>& textures)
 {
 	if (!asset)
-        return false;
+		return false;
 
-    OpenGLObject2D glObj(asset);
-    if (!glObj.prepare())
-    {
-        return false;
-    }
-    glObj.setTextures(textures);
-    return true;
+	OpenGLObject2D glObj(asset);
+	if (!glObj.prepare())
+	{
+		return false;
+	}
+	glObj.setTextures(textures);
+	return true;
+}
+
+std::string RenderResourceManager::resolveContentPath(const std::string& rawPath) const
+{
+	if (rawPath.empty())
+		return {};
+	auto& assetManager = AssetManager::Instance();
+	std::string resolved = rawPath;
+	const std::filesystem::path p(rawPath);
+	if (!p.is_absolute())
+	{
+		const auto absPath = assetManager.getAbsoluteContentPath(rawPath);
+		if (!absPath.empty())
+			resolved = absPath;
+	}
+	if (!std::filesystem::exists(resolved))
+	{
+		const auto enginePath = assetManager.getAbsoluteEngineContentPath(rawPath);
+		if (!enginePath.empty() && std::filesystem::exists(enginePath))
+			resolved = enginePath;
+	}
+	return resolved;
+}
+
+RenderResourceManager::RenderableAsset RenderResourceManager::refreshEntityRenderable(
+	ECS::Entity entity, const std::string& defaultFragmentShader)
+{
+	auto& logger = Logger::Instance();
+	auto& ecs = ECS::ECSManager::Instance();
+	auto& assetManager = AssetManager::Instance();
+
+	RenderableAsset result{};
+
+	// The entity must have at least a MeshComponent to produce a renderable.
+	const auto* meshComp = ecs.getComponent<ECS::MeshComponent>(entity);
+	if (!meshComp || meshComp->meshAssetPath.empty())
+		return result;
+
+	const auto* matComp = ecs.getComponent<ECS::MaterialComponent>(entity);
+	const auto* transComp = ecs.getComponent<ECS::TransformComponent>(entity);
+
+	// --- Resolve material (textures, shininess, fragment shader) ---
+	std::vector<std::shared_ptr<Texture>> textures;
+	std::string materialCacheKey;
+	float shininess = 32.0f;
+	std::string fragmentShaderOverride;
+
+	if (matComp && !matComp->materialAssetPath.empty())
+	{
+		std::string materialPath = resolveContentPath(matComp->materialAssetPath);
+		materialCacheKey = materialPath;
+
+		auto cachedMat = m_materialDataCache.find(materialCacheKey);
+		if (cachedMat != m_materialDataCache.end())
+		{
+			textures = cachedMat->second.textures;
+			shininess = cachedMat->second.shininess;
+			fragmentShaderOverride = cachedMat->second.shaderFragment;
+		}
+		else
+		{
+			int matId = assetManager.loadAsset(materialPath, AssetType::Material, AssetManager::Sync);
+			if (matId != 0)
+			{
+				if (auto matAsset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(matId)))
+				{
+					const auto& matData = matAsset->getData();
+					if (matData.is_object())
+					{
+						if (matData.contains("m_shaderFragment"))
+							fragmentShaderOverride = matData.at("m_shaderFragment").get<std::string>();
+						if (matData.contains("m_shininess"))
+							shininess = matData.at("m_shininess").get<float>();
+						if (matData.contains("m_textureAssetPaths"))
+						{
+							const auto& paths = matData.at("m_textureAssetPaths");
+							if (paths.is_array())
+							{
+								for (const auto& pathValue : paths)
+								{
+									if (!pathValue.is_string()) { textures.push_back(nullptr); continue; }
+									std::string texPath = resolveContentPath(pathValue.get<std::string>());
+									int texId = assetManager.loadAsset(texPath, AssetType::Texture, AssetManager::Sync);
+									if (texId == 0) { textures.push_back(nullptr); continue; }
+									auto texAsset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(texId));
+									if (!texAsset) { textures.push_back(nullptr); continue; }
+									const auto& texData = texAsset->getData();
+									if (!texData.is_object() || !texData.contains("m_width") || !texData.contains("m_height")
+										|| !texData.contains("m_channels") || !texData.contains("m_data"))
+									{
+										textures.push_back(nullptr); continue;
+									}
+									auto texture = std::make_shared<Texture>();
+									texture->setWidth(texData.at("m_width").get<int>());
+									texture->setHeight(texData.at("m_height").get<int>());
+									texture->setChannels(texData.at("m_channels").get<int>());
+									texture->setData(texData.at("m_data").get<std::vector<unsigned char>>());
+									textures.push_back(std::move(texture));
+								}
+							}
+						}
+					}
+				}
+			}
+			if (!materialCacheKey.empty())
+			{
+				m_materialDataCache[materialCacheKey] = { textures, shininess, fragmentShaderOverride };
+			}
+		}
+	}
+
+	// --- Resolve mesh ---
+	std::string meshPath = resolveContentPath(meshComp->meshAssetPath);
+	int assetId = assetManager.loadAsset(meshPath, AssetType::Model3D, AssetManager::Sync);
+	if (assetId == 0)
+		assetId = assetManager.loadAsset(meshPath, AssetType::Model2D, AssetManager::Sync);
+	if (assetId == 0)
+	{
+		logger.log(Logger::Category::Rendering,
+			"refreshEntityRenderable: failed to load mesh '" + meshComp->meshAssetPath + "'",
+			Logger::LogLevel::WARNING);
+		return result;
+	}
+
+	auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(assetId));
+	if (!asset)
+		return result;
+
+	result.entity = entity;
+	result.asset = asset;
+	result.textures = textures;
+	result.assetType = asset->getAssetType();
+	result.shininess = shininess;
+
+	std::string effectiveFragShader = fragmentShaderOverride.empty() ? defaultFragmentShader : fragmentShaderOverride;
+	result.fragmentShaderOverride = effectiveFragShader;
+
+	if (transComp)
+		result.transform = *transComp;
+
+	const unsigned int meshCacheId = (asset->getId() != 0) ? asset->getId() : static_cast<unsigned int>(assetId);
+	const std::string obj3DCacheKey = std::to_string(meshCacheId) + "|" + materialCacheKey + "|" + effectiveFragShader;
+
+	if (result.assetType == AssetType::Model3D || result.assetType == AssetType::PointLight)
+	{
+		auto it = m_object3DCache.find(obj3DCacheKey);
+		if (it != m_object3DCache.end())
+		{
+			result.object3D = it->second.lock();
+			if (!result.object3D)
+				m_object3DCache.erase(it);
+		}
+		if (!result.object3D)
+		{
+			auto obj = std::make_shared<OpenGLObject3D>(asset);
+			obj->setMaterialCacheKeySuffix(materialCacheKey);
+			if (!effectiveFragShader.empty())
+				obj->setFragmentShaderOverride(effectiveFragShader);
+			if (obj->prepare())
+			{
+				obj->setTextures(textures);
+				obj->setShininess(shininess);
+				result.object3D = obj;
+				m_object3DCache[obj3DCacheKey] = obj;
+				AssetManager::Instance().registerRuntimeResource(obj);
+			}
+		}
+	}
+	else if (result.assetType == AssetType::Model2D)
+	{
+		auto it = m_object2DCache.find(meshCacheId);
+		if (it != m_object2DCache.end())
+		{
+			result.object2D = it->second.lock();
+			if (!result.object2D)
+				m_object2DCache.erase(it);
+		}
+		if (!result.object2D)
+		{
+			auto obj = std::make_shared<OpenGLObject2D>(asset);
+			if (obj->prepare())
+			{
+				obj->setTextures(textures);
+				result.object2D = obj;
+				if (meshCacheId != 0)
+					m_object2DCache[meshCacheId] = obj;
+				AssetManager::Instance().registerRuntimeResource(obj);
+			}
+		}
+	}
+
+	return result;
 }

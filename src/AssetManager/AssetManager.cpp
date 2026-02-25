@@ -6,7 +6,6 @@
 #include <filesystem>
 #include <fstream>
 #include <cstdint>
-#include <unordered_set>
 #include <cctype>
 #include "AssetTypes.h"
 
@@ -67,57 +66,6 @@ namespace
         return AssetType::Unknown;
     }
 
-
-    static std::string normalizeKeyConstantName(const std::string& name)
-    {
-        std::string result;
-        bool lastUnderscore = false;
-        for (unsigned char c : name)
-        {
-            if (std::isalnum(c))
-            {
-                result.push_back(static_cast<char>(std::toupper(c)));
-                lastUnderscore = false;
-            }
-            else if (!lastUnderscore)
-            {
-                result.push_back('_');
-                lastUnderscore = true;
-            }
-        }
-        while (!result.empty() && result.back() == '_')
-        {
-            result.pop_back();
-        }
-        if (result.empty())
-        {
-            return {};
-        }
-        return "Key_" + result;
-    }
-
-    static void writeKeyConstants(std::ofstream& stubOut, const std::string& indent)
-    {
-        stubOut << indent << "Keys: Dict[str, int]\n";
-        stubOut << indent << "@staticmethod\n";
-        stubOut << indent << "def get_key(name: str) -> int: ...\n";
-
-        std::unordered_set<std::string> added;
-        for (int scancode = 0; scancode < SDL_SCANCODE_COUNT; ++scancode)
-        {
-            const char* name = SDL_GetScancodeName(static_cast<SDL_Scancode>(scancode));
-            if (!name || !*name)
-            {
-                continue;
-            }
-            const std::string constantName = normalizeKeyConstantName(name);
-            if (constantName.empty() || !added.insert(constantName).second)
-            {
-                continue;
-            }
-            stubOut << indent << constantName << ": int\n";
-        }
-    }
 
     static void SDLCALL OnImportDialogClosed(void* userdata, const char* const* filelist, int filter)
     {
@@ -315,6 +263,93 @@ static bool readAssetJson(std::ifstream& in, json& outJson, std::string& errorMe
 	return true;
 }
 
+static bool readAssetHeaderFromMemory(const std::vector<char>& buffer, AssetType& outType, std::string& outName, bool& outIsJson, size_t& headerEndPos)
+{
+	outIsJson = false;
+	if (buffer.empty()) return false;
+
+	// Check for JSON start
+	size_t i = 0;
+	while (i < buffer.size() && std::isspace(static_cast<unsigned char>(buffer[i]))) i++;
+	if (i < buffer.size() && buffer[i] == '{')
+	{
+		outIsJson = true;
+		// Parse the whole buffer to get header info
+		try {
+			json j = json::parse(buffer.begin() + i, buffer.end(), nullptr, false);
+			if (j.is_discarded()) return false;
+			if (!j.is_object() || !j.contains("type") || !j.contains("name")) return false;
+			outType = static_cast<AssetType>(j.at("type").get<int>());
+			outName = j.at("name").get<std::string>();
+			headerEndPos = 0; // JSON format logic usually just parses the whole thing
+			return true;
+		} catch (...) {
+			return false;
+		}
+	}
+
+	// Binary format check
+	if (buffer.size() < 12) return false; // Magic(4) + Version(4) + Type(4)
+
+	const char* ptr = buffer.data();
+	uint32_t magic = *reinterpret_cast<const uint32_t*>(ptr); ptr += 4;
+	uint32_t version = *reinterpret_cast<const uint32_t*>(ptr); ptr += 4;
+
+	if (magic != 0x41535453 || version != 2) return false;
+
+	int32_t typeInt = *reinterpret_cast<const int32_t*>(ptr); ptr += 4;
+	outType = static_cast<AssetType>(typeInt);
+
+	// Read string name length
+	if (ptr + 4 > buffer.data() + buffer.size()) return false;
+	uint32_t nameLen = *reinterpret_cast<const uint32_t*>(ptr); ptr += 4;
+
+	if (ptr + nameLen > buffer.data() + buffer.size()) return false;
+	outName.assign(ptr, nameLen);
+	ptr += nameLen;
+
+	headerEndPos = ptr - buffer.data();
+	return true;
+}
+
+static bool readAssetJsonFromMemory(const std::vector<char>& buffer, json& outJson, std::string& errorMessage, bool isJsonFormat, size_t headerEndPos)
+{
+	if (isJsonFormat)
+	{
+		// Find start of JSON
+		size_t i = 0;
+		while (i < buffer.size() && std::isspace(static_cast<unsigned char>(buffer[i]))) i++;
+		if (i >= buffer.size()) {
+			 outJson = json::object();
+			 return true;
+		}
+		outJson = json::parse(buffer.begin() + i, buffer.end(), nullptr, false);
+	}
+	else
+	{
+		// Binary format: headerEndPos is where JSON body starts
+		if (headerEndPos >= buffer.size()) {
+			 outJson = json::object(); // Empty body is valid?
+			 return true; 
+		}
+		const char* start = buffer.data() + headerEndPos;
+		const char* end = buffer.data() + buffer.size();
+		outJson = json::parse(start, end, nullptr, false);
+	}
+
+	if (outJson.is_discarded())
+	{
+		errorMessage = "Failed to parse asset JSON from memory.";
+		return false;
+	}
+
+	if (outJson.is_object() && outJson.contains("data"))
+	{
+		outJson = outJson.at("data");
+	}
+	return true;
+}
+
 std::vector<std::shared_ptr<AssetData>> AssetManager::getAssetsByType(AssetType type) const
 {
 	std::vector<std::shared_ptr<AssetData>> results;
@@ -430,11 +465,16 @@ void AssetManager::registerAssetInRegistry(const AssetRegistryEntry& entry)
         m_registryByName[entry.name] = idx;
     }
 
-    // Persist the updated registry to disk
-    auto& diagnostics = DiagnosticsManager::Instance();
-    if (diagnostics.isProjectLoaded() && !diagnostics.getProjectInfo().projectPath.empty())
+    m_registryVersion.fetch_add(1, std::memory_order_relaxed);
+
+    // Persist the updated registry to disk (skipped during batch operations)
+    if (!m_suppressRegistrySave)
     {
-        saveAssetRegistry(diagnostics.getProjectInfo().projectPath);
+        auto& diagnostics = DiagnosticsManager::Instance();
+        if (diagnostics.isProjectLoaded() && !diagnostics.getProjectInfo().projectPath.empty())
+        {
+            saveAssetRegistry(diagnostics.getProjectInfo().projectPath);
+        }
     }
 }
 
@@ -482,6 +522,8 @@ bool AssetManager::deleteAsset(const std::string& relPath, bool deleteFromDisk)
         {
             saveAssetRegistry(diagnostics.getProjectInfo().projectPath);
         }
+
+        m_registryVersion.fetch_add(1, std::memory_order_relaxed);
     }
 
     // Delete file from disk
@@ -510,6 +552,243 @@ bool AssetManager::deleteAsset(const std::string& relPath, bool deleteFromDisk)
     return found;
 }
 
+size_t AssetManager::validateRegistry()
+{
+    auto& logger = Logger::Instance();
+    auto& diagnostics = DiagnosticsManager::Instance();
+
+    if (!diagnostics.isProjectLoaded() || diagnostics.getProjectInfo().projectPath.empty())
+    {
+        return 0;
+    }
+
+    const fs::path contentDir = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+    if (!fs::exists(contentDir))
+    {
+        return 0;
+    }
+
+    std::vector<std::string> staleEntries;
+    for (const auto& entry : m_registry)
+    {
+        const fs::path absPath = contentDir / fs::path(entry.path);
+        std::error_code ec;
+        if (!fs::exists(absPath, ec))
+        {
+            staleEntries.push_back(entry.path);
+        }
+    }
+
+    if (staleEntries.empty())
+    {
+        return 0;
+    }
+
+    for (const auto& relPath : staleEntries)
+    {
+        logger.log(Logger::Category::AssetManagement,
+            "[Integrity] Stale registry entry (file missing): " + relPath, Logger::LogLevel::WARNING);
+
+        for (auto it = m_registry.begin(); it != m_registry.end(); ++it)
+        {
+            if (it->path == relPath)
+            {
+                m_registry.erase(it);
+                break;
+            }
+        }
+    }
+
+    // Rebuild index maps
+    m_registryByPath.clear();
+    m_registryByName.clear();
+    for (size_t i = 0; i < m_registry.size(); ++i)
+    {
+        if (!m_registry[i].path.empty())
+            m_registryByPath[m_registry[i].path] = i;
+        if (!m_registry[i].name.empty())
+            m_registryByName[m_registry[i].name] = i;
+    }
+
+    saveAssetRegistry(diagnostics.getProjectInfo().projectPath);
+    m_registryVersion.fetch_add(1, std::memory_order_relaxed);
+
+    logger.log(Logger::Category::AssetManagement,
+        "[Integrity] Removed " + std::to_string(staleEntries.size()) + " stale registry entries.",
+        Logger::LogLevel::WARNING);
+
+    return staleEntries.size();
+}
+
+size_t AssetManager::validateEntityReferences(bool showToast)
+{
+    auto& logger = Logger::Instance();
+    auto& ecs = ECS::ECSManager::Instance();
+    size_t broken = 0;
+
+    // Helper: check registry + project Content + engine Content on disk
+    auto assetExistsOnDisk = [this](const std::string& relPath) -> bool
+    {
+        if (relPath.empty())
+            return false;
+        if (doesAssetExist(relPath))
+            return true;
+        const std::string absProject = getAbsoluteContentPath(relPath);
+        if (!absProject.empty() && fs::exists(absProject))
+            return true;
+        const std::string absEngine = getAbsoluteEngineContentPath(relPath);
+        if (!absEngine.empty() && fs::exists(absEngine))
+            return true;
+        return false;
+    };
+
+    // Validate MeshComponent references
+    {
+        ECS::Schema schema;
+        schema.require<ECS::MeshComponent>();
+        for (const auto e : ecs.getEntitiesMatchingSchema(schema))
+        {
+            const auto* mesh = ecs.getComponent<ECS::MeshComponent>(e);
+            if (mesh && !mesh->meshAssetPath.empty() && !assetExistsOnDisk(mesh->meshAssetPath))
+            {
+                logger.log(Logger::Category::AssetManagement,
+                    "[Integrity] Entity " + std::to_string(e) + " references missing mesh: " + mesh->meshAssetPath,
+                    Logger::LogLevel::WARNING);
+                ++broken;
+            }
+        }
+    }
+
+    // Validate MaterialComponent references
+    {
+        ECS::Schema schema;
+        schema.require<ECS::MaterialComponent>();
+        for (const auto e : ecs.getEntitiesMatchingSchema(schema))
+        {
+            const auto* mat = ecs.getComponent<ECS::MaterialComponent>(e);
+            if (mat && !mat->materialAssetPath.empty() && !assetExistsOnDisk(mat->materialAssetPath))
+            {
+                logger.log(Logger::Category::AssetManagement,
+                    "[Integrity] Entity " + std::to_string(e) + " references missing material: " + mat->materialAssetPath,
+                    Logger::LogLevel::WARNING);
+                ++broken;
+            }
+        }
+    }
+
+    // Validate ScriptComponent references
+    {
+        ECS::Schema schema;
+        schema.require<ECS::ScriptComponent>();
+        for (const auto e : ecs.getEntitiesMatchingSchema(schema))
+        {
+            const auto* sc = ecs.getComponent<ECS::ScriptComponent>(e);
+            if (sc && !sc->scriptPath.empty() && !assetExistsOnDisk(sc->scriptPath))
+            {
+                logger.log(Logger::Category::AssetManagement,
+                    "[Integrity] Entity " + std::to_string(e) + " references missing script: " + sc->scriptPath,
+                    Logger::LogLevel::WARNING);
+                ++broken;
+            }
+        }
+    }
+
+    if (broken > 0)
+    {
+        logger.log(Logger::Category::AssetManagement,
+            "[Integrity] Found " + std::to_string(broken) + " broken entity asset reference(s).",
+            Logger::LogLevel::WARNING);
+    }
+
+    return broken;
+}
+
+size_t AssetManager::repairEntityReferences()
+{
+    auto& logger = Logger::Instance();
+    auto& ecs = ECS::ECSManager::Instance();
+    size_t repaired = 0;
+
+    const std::string worldGridMaterialPath = "Materials/WorldGrid.asset";
+
+    // Helper: check whether a content-relative asset path actually resolves to a
+    // file on disk. We check both the project Content directory and the engine
+    // Content directory (for built-in assets like WorldGrid). This is more
+    // reliable than a registry-only check because the registry might not cover
+    // engine assets and path separators may differ.
+    auto assetExistsOnDisk = [this](const std::string& relPath) -> bool
+    {
+        if (relPath.empty())
+            return false;
+
+        // 1. Registry (fast, covers project assets)
+        if (doesAssetExist(relPath))
+            return true;
+
+        // 2. Project Content directory
+        const std::string absProject = getAbsoluteContentPath(relPath);
+        if (!absProject.empty() && fs::exists(absProject))
+            return true;
+
+        // 3. Engine Content directory (built-in assets next to the executable)
+        const std::string absEngine = getAbsoluteEngineContentPath(relPath);
+        if (!absEngine.empty() && fs::exists(absEngine))
+            return true;
+
+        return false;
+    };
+
+    // Repair missing MeshComponent references — remove the component entirely
+    {
+        ECS::Schema schema;
+        schema.require<ECS::MeshComponent>();
+        const auto entities = ecs.getEntitiesMatchingSchema(schema);
+        for (const auto e : entities)
+        {
+            const auto* mesh = ecs.getComponent<ECS::MeshComponent>(e);
+            if (mesh && !mesh->meshAssetPath.empty() && !assetExistsOnDisk(mesh->meshAssetPath))
+            {
+                logger.log(Logger::Category::AssetManagement,
+                    "[Repair] Entity " + std::to_string(e) + ": removing missing mesh '" + mesh->meshAssetPath + "'",
+                    Logger::LogLevel::WARNING);
+                ecs.removeComponent<ECS::MeshComponent>(e);
+                ++repaired;
+            }
+        }
+    }
+
+    // Repair missing MaterialComponent references — replace with WorldGrid material
+    {
+        ECS::Schema schema;
+        schema.require<ECS::MaterialComponent>();
+        const auto entities = ecs.getEntitiesMatchingSchema(schema);
+        for (const auto e : entities)
+        {
+            const auto* mat = ecs.getComponent<ECS::MaterialComponent>(e);
+            if (mat && !mat->materialAssetPath.empty() && !assetExistsOnDisk(mat->materialAssetPath))
+            {
+                logger.log(Logger::Category::AssetManagement,
+                    "[Repair] Entity " + std::to_string(e) + ": replacing missing material '" + mat->materialAssetPath
+                    + "' with WorldGrid",
+                    Logger::LogLevel::WARNING);
+                ECS::MaterialComponent fixed{};
+                fixed.materialAssetPath = worldGridMaterialPath;
+                ecs.setComponent<ECS::MaterialComponent>(e, fixed);
+                ++repaired;
+            }
+        }
+    }
+
+    if (repaired > 0)
+    {
+        logger.log(Logger::Category::AssetManagement,
+            "[Repair] Fixed " + std::to_string(repaired) + " broken entity reference(s).",
+            Logger::LogLevel::WARNING);
+    }
+
+    return repaired;
+}
+
 bool AssetManager::discoverAssetsAndBuildRegistry(const std::string& projectRoot)
 {
     auto& log = Logger::Instance();
@@ -518,6 +797,9 @@ bool AssetManager::discoverAssetsAndBuildRegistry(const std::string& projectRoot
     m_registry.clear();
     m_registryByPath.clear();
     m_registryByName.clear();
+
+    // Suppress per-entry registry saves during batch discovery
+    m_suppressRegistrySave = true;
 
     fs::path contentRoot = fs::path(projectRoot) / "Content";
     if (!fs::exists(contentRoot))
@@ -579,13 +861,23 @@ bool AssetManager::discoverAssetsAndBuildRegistry(const std::string& projectRoot
         AssetType type = AssetType::Unknown;
         std::string name;
 
-        if (!readAssetHeaderType(p, type))
         {
-            ++filesSkippedHeaderType;
-            log.log(Logger::Category::AssetManagement, "[Registry]   skip (header type failed): " + p.string(), Logger::LogLevel::WARNING);
-            continue;
+            std::ifstream headerIn(p, std::ios::binary);
+            if (!headerIn.is_open())
+            {
+                ++filesSkippedHeaderType;
+                log.log(Logger::Category::AssetManagement, "[Registry]   skip (cannot open): " + p.string(), Logger::LogLevel::WARNING);
+                continue;
+            }
+            bool isJson = false;
+            if (!readAssetHeader(headerIn, type, name, isJson))
+            {
+                ++filesSkippedHeaderType;
+                log.log(Logger::Category::AssetManagement, "[Registry]   skip (header type failed): " + p.string(), Logger::LogLevel::WARNING);
+                continue;
+            }
         }
-        if (!readAssetHeaderName(p, name))
+        if (name.empty())
             name = p.stem().string();
 
         AssetRegistryEntry e;
@@ -601,6 +893,9 @@ bool AssetManager::discoverAssetsAndBuildRegistry(const std::string& projectRoot
         ++filesRegistered;
     }
 
+    // Re-enable per-entry saves now that batch discovery is done
+    m_suppressRegistrySave = false;
+
     log.log(Logger::Category::AssetManagement, "[Registry] discovery complete: scanned=" + std::to_string(filesScanned)
         + " registered=" + std::to_string(filesRegistered)
         + " skippedExtension=" + std::to_string(filesSkippedExtension)
@@ -610,6 +905,116 @@ bool AssetManager::discoverAssetsAndBuildRegistry(const std::string& projectRoot
         Logger::LogLevel::INFO);
 
     return true;
+}
+
+void AssetManager::discoverAssetsAndBuildRegistryAsync(const std::string& projectRoot)
+{
+    auto& diagnostics = DiagnosticsManager::Instance();
+    diagnostics.setAssetRegistryReady(false);
+
+    enqueueJob([this, projectRoot]()
+    {
+        auto& log = Logger::Instance();
+        auto& diagnostics = DiagnosticsManager::Instance();
+
+        log.log(Logger::Category::AssetManagement, "[Registry] async discovery started", Logger::LogLevel::INFO);
+
+        // Build into local containers on the worker thread
+        std::vector<AssetRegistryEntry> localRegistry;
+        std::unordered_map<std::string, size_t> localByPath;
+        std::unordered_map<std::string, size_t> localByName;
+
+        const fs::path contentRoot = fs::path(projectRoot) / "Content";
+        if (!fs::exists(contentRoot))
+        {
+            log.log(Logger::Category::AssetManagement, "[Registry] async ABORT: Content directory does not exist: " + contentRoot.string(), Logger::LogLevel::WARNING);
+            diagnostics.setAssetRegistryReady(true);
+            return;
+        }
+
+        int filesScanned = 0;
+        int filesRegistered = 0;
+
+        const auto registerLocal = [&](AssetRegistryEntry&& e)
+        {
+            const size_t idx = localRegistry.size();
+            if (!e.path.empty()) localByPath[e.path] = idx;
+            if (!e.name.empty()) localByName[e.name] = idx;
+            localRegistry.push_back(std::move(e));
+            ++filesRegistered;
+        };
+
+        for (const auto& entry : fs::recursive_directory_iterator(contentRoot))
+        {
+            if (!entry.is_regular_file()) continue;
+
+            ++filesScanned;
+            const fs::path p = entry.path();
+            const std::string ext = p.extension().string();
+
+            if (ext == ".py")
+            {
+                AssetRegistryEntry e;
+                e.name = p.stem().string();
+                e.type = AssetType::Script;
+                e.path = fs::relative(p, contentRoot).generic_string();
+                registerLocal(std::move(e));
+                continue;
+            }
+            if (ext == ".wav" || ext == ".mp3" || ext == ".ogg" || ext == ".flac")
+            {
+                AssetRegistryEntry e;
+                e.name = p.stem().string();
+                e.type = AssetType::Audio;
+                e.path = fs::relative(p, contentRoot).generic_string();
+                registerLocal(std::move(e));
+                continue;
+            }
+
+            if (ext != ".asset" && ext != ".map") continue;
+
+            AssetType type = AssetType::Unknown;
+            std::string name;
+            {
+                std::ifstream headerIn(p, std::ios::binary);
+                if (!headerIn.is_open()) continue;
+                bool isJson = false;
+                if (!readAssetHeader(headerIn, type, name, isJson)) continue;
+            }
+            if (name.empty()) name = p.stem().string();
+
+            AssetRegistryEntry e;
+            e.name = name;
+            e.type = type;
+            e.path = fs::relative(p, contentRoot).generic_string();
+            registerLocal(std::move(e));
+        }
+
+        log.log(Logger::Category::AssetManagement, "[Registry] async discovery complete: scanned=" + std::to_string(filesScanned)
+            + " registered=" + std::to_string(filesRegistered), Logger::LogLevel::INFO);
+
+        // Swap results into the shared registry under lock
+        {
+            std::lock_guard<std::mutex> lock(m_stateMutex);
+            m_registry = std::move(localRegistry);
+            m_registryByPath = std::move(localByPath);
+            m_registryByName = std::move(localByName);
+        }
+
+        // Save registry to disk
+        saveAssetRegistry(projectRoot);
+
+        diagnostics.setAssetRegistryReady(true);
+
+        // Validate registry entries against disk to catch externally deleted files
+        const size_t staleCount = validateRegistry();
+        if (staleCount > 0)
+        {
+            log.log(Logger::Category::AssetManagement, "[Registry] Cleaned " + std::to_string(staleCount) + " stale entries after discovery.", Logger::LogLevel::WARNING);
+        }
+
+        log.log(Logger::Category::AssetManagement, "[Registry] async registry ready. Total assets: " + std::to_string(m_registry.size()), Logger::LogLevel::INFO);
+    });
 }
 
 bool AssetManager::doesAssetExist(const std::string& pathOrName) const
@@ -1114,7 +1519,7 @@ void AssetManager::ensureEditorWidgetsCreated()
     const std::string outlinerWidgetRel = "WorldOutliner.asset";
     {
         json widgetJson = json::object();
-        widgetJson["m_sizePixels"] = json{ {"x", 200.0f}, {"y", 0.0f} };
+        widgetJson["m_sizePixels"] = json{ {"x", 280.0f}, {"y", 0.0f} };
         widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
         widgetJson["m_anchor"] = "TopRight";
         widgetJson["m_fillY"] = true;
@@ -1212,7 +1617,18 @@ void AssetManager::ensureEditorWidgetsCreated()
                             }
                         }
                     }
-                    existsAndOk = existsAndOk && hasList && hasNoDetails && hasFillY;
+                    bool hasCorrectWidth = false;
+                    if (!fileJson.is_discarded() && fileJson.contains("data"))
+                    {
+                        const auto& dw = fileJson.at("data");
+                        if (dw.is_object() && dw.contains("m_sizePixels") && dw.at("m_sizePixels").is_object())
+                        {
+                            const auto& sz = dw.at("m_sizePixels");
+                            if (sz.contains("x") && sz.at("x").is_number() && sz.at("x").get<float>() >= 280.0f)
+                                hasCorrectWidth = true;
+                        }
+                    }
+                    existsAndOk = existsAndOk && hasList && hasNoDetails && hasFillY && hasCorrectWidth;
                 }
             }
         }
@@ -1243,7 +1659,7 @@ void AssetManager::ensureEditorWidgetsCreated()
     const std::string entityDetailsWidgetRel = "EntityDetails.asset";
     {
         json widgetJson = json::object();
-        widgetJson["m_sizePixels"] = json{ {"x", 200.0f}, {"y", 0.0f} };
+        widgetJson["m_sizePixels"] = json{ {"x", 280.0f}, {"y", 0.0f} };
         widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
         widgetJson["m_anchor"] = "TopRight";
         widgetJson["m_zOrder"] = 2;
@@ -1333,7 +1749,18 @@ void AssetManager::ensureEditorWidgetsCreated()
                             }
                         }
                     }
-                    existsAndOk = existsAndOk && hasContent && contentScrollable;
+                    bool hasCorrectWidth = false;
+                    if (!fileJson.is_discarded() && fileJson.contains("data"))
+                    {
+                        const auto& dw = fileJson.at("data");
+                        if (dw.is_object() && dw.contains("m_sizePixels") && dw.at("m_sizePixels").is_object())
+                        {
+                            const auto& sz = dw.at("m_sizePixels");
+                            if (sz.contains("x") && sz.at("x").is_number() && sz.at("x").get<float>() >= 280.0f)
+                                hasCorrectWidth = true;
+                        }
+                    }
+                    existsAndOk = existsAndOk && hasContent && contentScrollable && hasCorrectWidth;
                 }
             }
         }
@@ -3390,6 +3817,7 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 	if (!diagnostics.isProjectLoaded())
 	{
 		logger.log(Logger::Category::AssetManagement, "Import failed: no project loaded.", Logger::LogLevel::ERROR);
+		diagnostics.enqueueToastNotification("Import failed: no project loaded.", 4.0f);
 		diagnostics.updateActionProgress(ActionID, false);
 		return;
 	}
@@ -3397,6 +3825,7 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 	if (!fs::exists(path))
 	{
 		logger.log(Logger::Category::AssetManagement, "Import asset failed: file does not exist: " + path, Logger::LogLevel::ERROR);
+		diagnostics.enqueueToastNotification("Import failed: file not found.", 4.0f);
 		diagnostics.updateActionProgress(ActionID, false);
 		return;
 	}
@@ -3409,6 +3838,7 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 	if (detectedType == AssetType::Unknown)
 	{
 		logger.log(Logger::Category::AssetManagement, "Import failed: unsupported file format: " + sourcePath.extension().string(), Logger::LogLevel::ERROR);
+		diagnostics.enqueueToastNotification("Import failed: unsupported format " + sourcePath.extension().string(), 4.0f);
 		diagnostics.updateActionProgress(ActionID, false);
 		return;
 	}
@@ -3480,6 +3910,53 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 			break;
 		}
 
+		// ── Log scene contents ──
+		logger.log(Logger::Category::AssetManagement,
+			"Import 3D model '" + assetName + "': " + std::to_string(scene->mNumMeshes) + " mesh(es), "
+			+ std::to_string(scene->mNumMaterials) + " material(s), "
+			+ std::to_string(scene->mNumTextures) + " embedded texture(s), "
+			+ std::to_string(scene->mNumAnimations) + " animation(s)",
+			Logger::LogLevel::INFO);
+
+		for (unsigned int mi = 0; mi < scene->mNumMeshes; ++mi)
+		{
+			const aiMesh* m = scene->mMeshes[mi];
+			std::string meshName = m->mName.length > 0 ? m->mName.C_Str() : ("Mesh_" + std::to_string(mi));
+			int uvChannels = 0;
+			for (int ch = 0; ch < AI_MAX_NUMBER_OF_TEXTURECOORDS; ++ch)
+			{
+				if (m->mTextureCoords[ch]) ++uvChannels; else break;
+			}
+			logger.log(Logger::Category::AssetManagement,
+				"  Mesh[" + std::to_string(mi) + "] '" + meshName + "': "
+				+ std::to_string(m->mNumVertices) + " vertices, "
+				+ std::to_string(m->mNumFaces) + " faces, "
+				+ std::to_string(uvChannels) + " UV channel(s), "
+				+ (m->HasNormals() ? "normals" : "no normals") + ", "
+				+ (m->HasTangentsAndBitangents() ? "tangents" : "no tangents") + ", "
+				+ "materialIndex=" + std::to_string(m->mMaterialIndex),
+				Logger::LogLevel::INFO);
+		}
+
+		for (unsigned int mi = 0; mi < scene->mNumMaterials; ++mi)
+		{
+			const aiMaterial* mat = scene->mMaterials[mi];
+			aiString matNameLog;
+			mat->Get(AI_MATKEY_NAME, matNameLog);
+			std::string mName = matNameLog.length > 0 ? matNameLog.C_Str() : ("Material_" + std::to_string(mi));
+
+			auto countTex = [&](aiTextureType t) { return mat->GetTextureCount(t); };
+			logger.log(Logger::Category::AssetManagement,
+				"  Material[" + std::to_string(mi) + "] '" + mName + "': "
+				+ std::to_string(countTex(aiTextureType_DIFFUSE)) + " diffuse, "
+				+ std::to_string(countTex(aiTextureType_SPECULAR)) + " specular, "
+				+ std::to_string(countTex(aiTextureType_NORMALS)) + " normal, "
+				+ std::to_string(countTex(aiTextureType_HEIGHT)) + " height, "
+				+ std::to_string(countTex(aiTextureType_AMBIENT)) + " ambient, "
+				+ std::to_string(countTex(aiTextureType_EMISSIVE)) + " emissive",
+				Logger::LogLevel::INFO);
+		}
+
 		// Collect all meshes into a single vertex/index buffer (pos3 + uv2 layout)
 		std::vector<float> vertices;
 		std::vector<uint32_t> indices;
@@ -3525,6 +4002,262 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 			"Import 3D model: " + std::to_string(vertices.size() / 5) + " vertices, " + std::to_string(indices.size()) + " indices",
 			Logger::LogLevel::INFO);
 
+		// ── Extract materials and textures from the Assimp scene ──
+		if (scene->HasMaterials())
+		{
+			const fs::path sourceDir = sourcePath.parent_path();
+			const fs::path texturesDir = contentDir / "Textures";
+			const fs::path materialsDir = contentDir / "Materials";
+			std::error_code dirEc;
+			fs::create_directories(texturesDir, dirEc);
+			fs::create_directories(materialsDir, dirEc);
+
+			json createdMaterials = json::array();
+
+			for (unsigned int mi = 0; mi < scene->mNumMaterials; ++mi)
+			{
+				const aiMaterial* aiMat = scene->mMaterials[mi];
+				std::string matName = (scene->mNumMaterials == 1)
+					? assetName
+					: (assetName + "_Material_" + std::to_string(mi));
+
+				json matData = json::object();
+				json textureAssetPaths = json::array();
+
+				// Helper: import a texture of a given Assimp type
+				auto importTexture = [&](aiTextureType texType, const std::string& label) -> std::string
+				{
+					if (aiMat->GetTextureCount(texType) == 0)
+						return {};
+
+					aiString aiTexPath;
+					if (aiMat->GetTexture(texType, 0, &aiTexPath) != AI_SUCCESS)
+						return {};
+
+					std::string texPathStr(aiTexPath.C_Str());
+					if (texPathStr.empty())
+						return {};
+
+					// Check for embedded textures (path starts with '*')
+					const aiTexture* embeddedTex = scene->GetEmbeddedTexture(texPathStr.c_str());
+					fs::path destImagePath;
+					std::string texAssetName;
+
+					if (embeddedTex)
+					{
+						// Embedded texture – write to disk
+						std::string embeddedExt = ".png";
+						if (embeddedTex->achFormatHint[0] != '\0')
+						{
+							embeddedExt = std::string(".") + embeddedTex->achFormatHint;
+						}
+						texAssetName = sanitizeName(assetName + "_" + label);
+						destImagePath = texturesDir / (texAssetName + embeddedExt);
+
+						if (embeddedTex->mHeight == 0)
+						{
+							// Compressed data (e.g. PNG/JPG stored as-is)
+							std::ofstream imgOut(destImagePath, std::ios::binary);
+							if (imgOut.is_open())
+							{
+								imgOut.write(reinterpret_cast<const char*>(embeddedTex->pcData), embeddedTex->mWidth);
+							}
+						}
+						else
+						{
+							// Raw RGBA pixel data – write as TGA
+							destImagePath.replace_extension(".tga");
+							std::ofstream imgOut(destImagePath, std::ios::binary);
+							if (imgOut.is_open())
+							{
+								const int w = static_cast<int>(embeddedTex->mWidth);
+								const int h = static_cast<int>(embeddedTex->mHeight);
+								uint8_t header[18] = {};
+								header[2] = 2;
+								header[12] = static_cast<uint8_t>(w & 0xFF);
+								header[13] = static_cast<uint8_t>((w >> 8) & 0xFF);
+								header[14] = static_cast<uint8_t>(h & 0xFF);
+								header[15] = static_cast<uint8_t>((h >> 8) & 0xFF);
+								header[16] = 32;
+								header[17] = 0x28;
+								imgOut.write(reinterpret_cast<const char*>(header), 18);
+								for (int y = 0; y < h; ++y)
+								{
+									for (int x = 0; x < w; ++x)
+									{
+										const auto& px = embeddedTex->pcData[y * w + x];
+										const uint8_t bgra[4] = { px.b, px.g, px.r, px.a };
+										imgOut.write(reinterpret_cast<const char*>(bgra), 4);
+									}
+								}
+							}
+						}
+					}
+					else
+					{
+						// External texture file – resolve relative to source model directory
+						fs::path externalPath = fs::path(texPathStr);
+						if (!externalPath.is_absolute())
+						{
+							externalPath = sourceDir / externalPath;
+						}
+						if (!fs::exists(externalPath))
+						{
+							logger.log(Logger::Category::AssetManagement,
+								"Import: texture file not found: " + externalPath.string(),
+								Logger::LogLevel::WARNING);
+							return {};
+						}
+						texAssetName = sanitizeName(assetName + "_" + label);
+						destImagePath = texturesDir / externalPath.filename();
+						std::error_code cpEc;
+						fs::copy_file(externalPath, destImagePath, fs::copy_options::skip_existing, cpEc);
+					}
+
+					if (texAssetName.empty() || !fs::exists(destImagePath))
+						return {};
+
+					// Create texture .asset file
+					const std::string texRelSourcePath = fs::relative(destImagePath, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
+					const fs::path texAssetPath = texturesDir / (texAssetName + ".asset");
+					const std::string texRelPath = fs::relative(texAssetPath, contentDir).generic_string();
+
+					// Skip if texture asset already exists
+					if (!fs::exists(texAssetPath))
+					{
+						int width = 0, height = 0, channels = 0;
+						unsigned char* imgData = stbi_load(destImagePath.string().c_str(), &width, &height, &channels, 4);
+						if (imgData)
+						{
+							channels = 4;
+							json texData = json::object();
+							texData["m_sourcePath"] = texRelSourcePath;
+							texData["m_width"] = width;
+							texData["m_height"] = height;
+							texData["m_channels"] = channels;
+
+							json texFileJson = json::object();
+							texFileJson["magic"] = 0x41535453;
+							texFileJson["version"] = 2;
+							texFileJson["type"] = static_cast<int>(AssetType::Texture);
+							texFileJson["name"] = texAssetName;
+							texFileJson["data"] = texData;
+
+							std::ofstream texOut(texAssetPath, std::ios::out | std::ios::trunc);
+							if (texOut.is_open())
+							{
+								texOut << texFileJson.dump(4);
+								texOut.close();
+
+								AssetRegistryEntry texRegEntry;
+								texRegEntry.name = texAssetName;
+								texRegEntry.path = texRelPath;
+								texRegEntry.type = AssetType::Texture;
+								registerAssetInRegistry(texRegEntry);
+
+								logger.log(Logger::Category::AssetManagement,
+									"Import: created texture asset: " + texAssetName,
+									Logger::LogLevel::INFO);
+							}
+							stbi_image_free(imgData);
+						}
+					}
+
+					return texRelPath;
+				};
+
+				// Import diffuse texture
+				std::string diffuseTexPath = importTexture(aiTextureType_DIFFUSE, "Diffuse");
+				if (!diffuseTexPath.empty())
+				{
+					textureAssetPaths.push_back(diffuseTexPath);
+				}
+
+				// Import specular texture
+				std::string specularTexPath = importTexture(aiTextureType_SPECULAR, "Specular");
+				if (!specularTexPath.empty())
+				{
+					textureAssetPaths.push_back(specularTexPath);
+				}
+
+				// Import normal map
+				std::string normalTexPath = importTexture(aiTextureType_NORMALS, "Normal");
+				if (normalTexPath.empty())
+				{
+					normalTexPath = importTexture(aiTextureType_HEIGHT, "Normal");
+				}
+				if (!normalTexPath.empty())
+				{
+					textureAssetPaths.push_back(normalTexPath);
+				}
+
+				if (!textureAssetPaths.empty())
+				{
+					matData["m_textureAssetPaths"] = textureAssetPaths;
+				}
+
+				// Extract material properties
+				aiColor3D diffuseColor(1.0f, 1.0f, 1.0f);
+				if (aiMat->Get(AI_MATKEY_COLOR_DIFFUSE, diffuseColor) == AI_SUCCESS)
+				{
+					matData["m_diffuseColor"] = json{ {"x", diffuseColor.r}, {"y", diffuseColor.g}, {"z", diffuseColor.b} };
+				}
+
+				aiColor3D specularColor(0.0f, 0.0f, 0.0f);
+				if (aiMat->Get(AI_MATKEY_COLOR_SPECULAR, specularColor) == AI_SUCCESS)
+				{
+					matData["m_specularColor"] = json{ {"x", specularColor.r}, {"y", specularColor.g}, {"z", specularColor.b} };
+				}
+
+				float shininess = 32.0f;
+				if (aiMat->Get(AI_MATKEY_SHININESS, shininess) == AI_SUCCESS)
+				{
+					matData["m_shininess"] = shininess;
+				}
+
+				// Write material .asset file
+				const fs::path matAssetPath = materialsDir / (matName + ".asset");
+				const std::string matRelPath = fs::relative(matAssetPath, contentDir).generic_string();
+
+				if (!fs::exists(matAssetPath))
+				{
+					json matFileJson = json::object();
+					matFileJson["magic"] = 0x41535453;
+					matFileJson["version"] = 2;
+					matFileJson["type"] = static_cast<int>(AssetType::Material);
+					matFileJson["name"] = matName;
+					matFileJson["data"] = matData;
+
+					std::ofstream matOut(matAssetPath, std::ios::out | std::ios::trunc);
+					if (matOut.is_open())
+					{
+						matOut << matFileJson.dump(4);
+						matOut.close();
+
+						AssetRegistryEntry matRegEntry;
+						matRegEntry.name = matName;
+						matRegEntry.path = matRelPath;
+						matRegEntry.type = AssetType::Material;
+						registerAssetInRegistry(matRegEntry);
+
+						logger.log(Logger::Category::AssetManagement,
+							"Import: created material asset: " + matName,
+							Logger::LogLevel::INFO);
+					}
+				}
+
+				createdMaterials.push_back(matRelPath);
+			}
+
+			if (!createdMaterials.empty())
+			{
+				data["m_materialAssetPaths"] = createdMaterials;
+				logger.log(Logger::Category::AssetManagement,
+					"Import: created " + std::to_string(createdMaterials.size()) + " material(s) for model " + assetName,
+					Logger::LogLevel::INFO);
+			}
+		}
+
 		success = true;
 		break;
 	}
@@ -3564,6 +4297,8 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 
 	if (!success)
 	{
+		const std::string failName = sourcePath.filename().string();
+		diagnostics.enqueueToastNotification("Import failed: " + failName, 4.0f);
 		diagnostics.updateActionProgress(ActionID, false);
 		return;
 	}
@@ -3576,6 +4311,7 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 	if (!out.is_open())
 	{
 		logger.log(Logger::Category::AssetManagement, "Import failed: could not create .asset file: " + destAssetPath.string(), Logger::LogLevel::ERROR);
+		diagnostics.enqueueToastNotification("Import failed: could not write asset file.", 4.0f);
 		diagnostics.updateActionProgress(ActionID, false);
 		return;
 	}
@@ -3742,6 +4478,8 @@ bool AssetManager::moveAsset(const std::string& oldRelPath, const std::string& n
 		}
 	}
 
+	m_registryVersion.fetch_add(1, std::memory_order_relaxed);
+
 	logger.log(Logger::Category::AssetManagement,
 		"moveAsset: " + oldRelPath + " → " + newRelPath + " (references updated)",
 		Logger::LogLevel::INFO);
@@ -3749,6 +4487,205 @@ bool AssetManager::moveAsset(const std::string& oldRelPath, const std::string& n
 	// Scan all .asset files on disk for references to the old path and update them.
 	// This catches cross-asset dependencies (e.g. Material → Texture, Level → Entity components).
 	updateAssetFileReferences(contentDir, oldRelPath, newRelPath);
+
+	return true;
+}
+
+bool AssetManager::renameAsset(const std::string& relPath, const std::string& newName)
+{
+	auto& logger = Logger::Instance();
+	auto& diagnostics = DiagnosticsManager::Instance();
+
+	if (relPath.empty() || newName.empty())
+	{
+		logger.log(Logger::Category::AssetManagement, "renameAsset: empty relPath or newName.", Logger::LogLevel::ERROR);
+		return false;
+	}
+
+	if (!diagnostics.isProjectLoaded())
+	{
+		logger.log(Logger::Category::AssetManagement, "renameAsset: no project loaded.", Logger::LogLevel::ERROR);
+		return false;
+	}
+
+	// Build new relative path: same parent folder, new filename with same extension
+	const fs::path oldRel(relPath);
+	const std::string ext = oldRel.extension().string();
+	const fs::path parentDir = oldRel.parent_path();
+	const std::string newRelPath = (parentDir / (newName + ext)).generic_string();
+
+	if (relPath == newRelPath)
+	{
+		return true; // no change needed
+	}
+
+	// Check the new path doesn't already exist in the registry
+	{
+		std::lock_guard<std::mutex> lock(m_stateMutex);
+		if (m_registryByPath.count(newRelPath))
+		{
+			logger.log(Logger::Category::AssetManagement, "renameAsset: target path already exists in registry: " + newRelPath, Logger::LogLevel::ERROR);
+			return false;
+		}
+	}
+
+	const fs::path contentDir = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+	const fs::path srcAbs = contentDir / relPath;
+	const fs::path destAbs = contentDir / newRelPath;
+
+	// Check source file exists
+	if (!fs::exists(srcAbs))
+	{
+		logger.log(Logger::Category::AssetManagement, "renameAsset: source file does not exist: " + srcAbs.string(), Logger::LogLevel::ERROR);
+		return false;
+	}
+
+	// Check destination doesn't already exist on disk
+	if (fs::exists(destAbs))
+	{
+		logger.log(Logger::Category::AssetManagement, "renameAsset: destination file already exists: " + destAbs.string(), Logger::LogLevel::ERROR);
+		return false;
+	}
+
+	// Rename the .asset file on disk
+	std::error_code ec;
+	fs::rename(srcAbs, destAbs, ec);
+	if (ec)
+	{
+		logger.log(Logger::Category::AssetManagement, "renameAsset: rename failed: " + ec.message(), Logger::LogLevel::ERROR);
+		return false;
+	}
+
+	// Also rename the source file if it sits alongside the .asset (e.g. textures, scripts)
+	{
+		std::ifstream in(destAbs);
+		if (in.is_open())
+		{
+			try
+			{
+				json fileJson = json::parse(in);
+				in.close();
+				if (fileJson.contains("data") && fileJson["data"].is_object() && fileJson["data"].contains("m_sourcePath"))
+				{
+					const std::string oldSourceRel = fileJson["data"]["m_sourcePath"].get<std::string>();
+					const fs::path oldSourceAbs = fs::path(diagnostics.getProjectInfo().projectPath) / oldSourceRel;
+					if (fs::exists(oldSourceAbs))
+					{
+						const fs::path sourceExt = fs::path(oldSourceRel).extension();
+						const fs::path newSourceAbs = oldSourceAbs.parent_path() / (newName + sourceExt.string());
+						if (oldSourceAbs != newSourceAbs)
+						{
+							fs::rename(oldSourceAbs, newSourceAbs, ec);
+						}
+						const std::string newSourceRel = fs::relative(newSourceAbs, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
+						fileJson["data"]["m_sourcePath"] = newSourceRel;
+
+						std::ofstream out(destAbs, std::ios::out | std::ios::trunc);
+						if (out.is_open())
+						{
+							out << fileJson.dump(4);
+						}
+					}
+				}
+
+				// Update the name field inside the asset file
+				if (fileJson.contains("name"))
+				{
+					fileJson["name"] = newName;
+					std::ofstream out(destAbs, std::ios::out | std::ios::trunc);
+					if (out.is_open())
+					{
+						out << fileJson.dump(4);
+					}
+				}
+			}
+			catch (...)
+			{
+				// Not valid JSON, skip
+			}
+		}
+	}
+
+	// Update registry entry
+	{
+		std::lock_guard<std::mutex> lock(m_stateMutex);
+		auto it = m_registryByPath.find(relPath);
+		if (it != m_registryByPath.end())
+		{
+			const size_t idx = it->second;
+			const std::string oldName = m_registry[idx].name;
+			m_registry[idx].path = newRelPath;
+			m_registry[idx].name = newName;
+			m_registryByPath.erase(it);
+			m_registryByPath[newRelPath] = idx;
+			m_registryByName.erase(oldName);
+			m_registryByName[newName] = idx;
+		}
+	}
+
+	// Update loaded asset paths
+	for (auto& [id, asset] : m_loadedAssets)
+	{
+		if (asset && asset->getPath() == relPath)
+		{
+			asset->setPath(newRelPath);
+			asset->setName(newName);
+		}
+	}
+
+	// Update ECS component references
+	auto& ecs = ECS::ECSManager::Instance();
+	{
+		ECS::Schema meshSchema;
+		meshSchema.require<ECS::MeshComponent>();
+		for (const auto e : ecs.getEntitiesMatchingSchema(meshSchema))
+		{
+			if (auto* mesh = ecs.getComponent<ECS::MeshComponent>(e))
+			{
+				if (mesh->meshAssetPath == relPath)
+					mesh->meshAssetPath = newRelPath;
+			}
+		}
+	}
+	{
+		ECS::Schema matSchema;
+		matSchema.require<ECS::MaterialComponent>();
+		for (const auto e : ecs.getEntitiesMatchingSchema(matSchema))
+		{
+			if (auto* mat = ecs.getComponent<ECS::MaterialComponent>(e))
+			{
+				if (mat->materialAssetPath == relPath)
+					mat->materialAssetPath = newRelPath;
+			}
+		}
+	}
+	{
+		ECS::Schema scriptSchema;
+		scriptSchema.require<ECS::ScriptComponent>();
+		for (const auto e : ecs.getEntitiesMatchingSchema(scriptSchema))
+		{
+			if (auto* script = ecs.getComponent<ECS::ScriptComponent>(e))
+			{
+				if (script->scriptPath == relPath)
+					script->scriptPath = newRelPath;
+			}
+		}
+	}
+
+	// Persist registry
+	if (diagnostics.isProjectLoaded() && !diagnostics.getProjectInfo().projectPath.empty())
+	{
+		saveAssetRegistry(diagnostics.getProjectInfo().projectPath);
+	}
+
+	m_registryVersion.fetch_add(1, std::memory_order_relaxed);
+
+	logger.log(Logger::Category::AssetManagement,
+		"renameAsset: " + relPath + " → " + newRelPath + " (references updated)",
+		Logger::LogLevel::INFO);
+
+	// Scan all .asset files for cross-references
+	updateAssetFileReferences(contentDir, relPath, newRelPath);
 
 	return true;
 }
@@ -3944,116 +4881,21 @@ bool AssetManager::loadProject(const std::string& projectPath, SyncState syncSta
     // New project/level context: force re-prepare of renderer resources.
     diagnostics.setScenePrepared(false);
 
-    {
-        const fs::path scriptsRoot = fs::path(info.projectPath) / "Content" / "Scripts";
-        std::error_code scriptsEc;
-        fs::create_directories(scriptsRoot, scriptsEc);
-        const fs::path stubPath = scriptsRoot / "engine.pyi";
-        std::ofstream stubOut(stubPath, std::ios::out | std::ios::trunc);
-        if (stubOut.is_open())
-        {
-			stubOut << "from typing import Callable, Dict, List, Optional, Tuple\n\n";
-			stubOut << "Component_Transform: int\nComponent_Mesh: int\nComponent_Material: int\n";
-			stubOut << "Component_Light: int\nComponent_Camera: int\nComponent_Physics: int\n";
-			stubOut << "Component_Script: int\nComponent_Name: int\n\n";
-			stubOut << "Asset_Texture: int\nAsset_Material: int\nAsset_Model2D: int\n";
-			stubOut << "Asset_Model3D: int\nAsset_PointLight: int\nAsset_Audio: int\n";
-			stubOut << "Asset_Script: int\nAsset_Shader: int\nAsset_Level: int\nAsset_Widget: int\n\n";
-			stubOut << "Log_Info: int\nLog_Warning: int\nLog_Error: int\n\n";
-			stubOut << "class _entity:\n";
-			stubOut << "    @staticmethod\n    def create_entity() -> int: ...\n";
-			stubOut << "    @staticmethod\n    def attach_component(entity: int, kind: int) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def detach_component(entity: int, kind: int) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def get_entities(kinds: List[int]) -> List[int]: ...\n";
-			stubOut << "    @staticmethod\n    def get_transform(entity: int) -> Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float]]]: ...\n";
-			stubOut << "    @staticmethod\n    def set_position(entity: int, x: float, y: float, z: float) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def translate(entity: int, dx: float, dy: float, dz: float) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def set_rotation(entity: int, pitch: float, yaw: float, roll: float) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def rotate(entity: int, dp: float, dy: float, dr: float) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def set_scale(entity: int, sx: float, sy: float, sz: float) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def set_mesh(entity: int, path: str) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def get_mesh(entity: int) -> Optional[str]: ...\n\n";
-			stubOut << "class _assetmanagement:\n";
-			stubOut << "    Asset_Texture: int\n";
-			stubOut << "    Asset_Material: int\n";
-			stubOut << "    Asset_Model2D: int\n";
-			stubOut << "    Asset_Model3D: int\n";
-			stubOut << "    Asset_PointLight: int\n";
-			stubOut << "    Asset_Audio: int\n";
-			stubOut << "    Asset_Script: int\n";
-			stubOut << "    Asset_Shader: int\n";
-			stubOut << "    Asset_Level: int\n";
-			stubOut << "    Asset_Widget: int\n";
-			stubOut << "    @staticmethod\n    def is_asset_loaded(path: str) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def load_asset(path: str, type: int, allow_gc: bool = False) -> int: ...\n";
-			stubOut << "    @staticmethod\n    def load_asset_async(path: str, type: int, on_loaded: Optional[Callable[[int], None]] = None, allow_gc: bool = False) -> int: ...\n";
-			stubOut << "    @staticmethod\n    def save_asset(id: int, type: int, sync: bool = True) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def unload_asset(id: int) -> bool: ...\n\n";
-			stubOut << "class _diagnostics:\n";
-			stubOut << "    @staticmethod\n    def get_delta_time() -> float: ...\n";
-			stubOut << "    @staticmethod\n    def get_state(key: str) -> Optional[str]: ...\n";
-			stubOut << "    @staticmethod\n    def set_state(key: str, value: str) -> bool: ...\n\n";
-			stubOut << "class _ui:\n";
-			stubOut << "    @staticmethod\n    def show_modal_message(message: str, on_closed: Optional[Callable[[], None]] = None) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def close_modal_message() -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def show_toast_message(message: str, duration: float = 2.5) -> bool: ...\n\n";
-			stubOut << "class _audio:\n";
-			stubOut << "    @staticmethod\n    def create_audio(path: str, loop: bool = False, gain: float = 1.0, keep_loaded: bool = False) -> int: ...\n";
-			stubOut << "    @staticmethod\n    def create_audio_from_asset(asset_id: int, loop: bool = False, gain: float = 1.0) -> int: ...\n";
-			stubOut << "    @staticmethod\n    def play_audio(path: str, loop: bool = False, gain: float = 1.0, keep_loaded: bool = False) -> int: ...\n";
-			stubOut << "    @staticmethod\n    def play_audio_handle(handle: int) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def set_audio_volume(handle: int, volume: float) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def get_audio_volume(handle: int) -> float: ...\n";
-			stubOut << "    @staticmethod\n    def pause_audio(handle: int) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def pause_audio_handle(handle: int) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def is_audio_playing(handle: int) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def is_audio_playing_path(path: str) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def stop_audio(handle: int) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def stop_audio_handle(handle: int) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def invalidate_audio_handle(handle: int) -> bool: ...\n\n";
-			stubOut << "class _input:\n";
-			stubOut << "    @staticmethod\n    def set_on_key_pressed(callback: Optional[Callable[[int], None]]) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def set_on_key_released(callback: Optional[Callable[[int], None]]) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def register_key_pressed(key: int, callback: Callable[[int], None]) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def register_key_released(key: int, callback: Callable[[int], None]) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def is_shift_pressed() -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def is_ctrl_pressed() -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def is_alt_pressed() -> bool: ...\n";
-			writeKeyConstants(stubOut, "    ");
-			stubOut << "\nclass _camera:\n";
-			stubOut << "    @staticmethod\n    def get_camera_position() -> Tuple[float, float, float]: ...\n";
-			stubOut << "    @staticmethod\n    def set_camera_position(x: float, y: float, z: float) -> bool: ...\n";
-			stubOut << "    @staticmethod\n    def get_camera_rotation() -> Tuple[float, float]: ...\n";
-			stubOut << "    @staticmethod\n    def set_camera_rotation(yaw: float, pitch: float) -> bool: ...\n\n";
-			stubOut << "class _logging:\n";
-			stubOut << "    @staticmethod\n    def log(message: str, level: int = 0) -> bool: ...\n\n";
-			stubOut << "entity: _entity\nassetmanagement: _assetmanagement\naudio: _audio\ninput: _input\nui: _ui\ncamera: _camera\ndiagnostics: _diagnostics\nlogging: _logging\n";
-        }
-    }
+	{
+		const fs::path scriptsRoot = fs::path(info.projectPath) / "Content" / "Scripts";
+		std::error_code scriptsEc;
+		fs::create_directories(scriptsRoot, scriptsEc);
+		const fs::path stubPath = scriptsRoot / "engine.pyi";
+		const fs::path srcStub = fs::current_path() / "Content" / "Scripting" / "engine.pyi";
+		fs::copy_file(srcStub, stubPath, fs::copy_options::overwrite_existing, scriptsEc);
+	}
 
     // Ensure default assets exist, but do not create/override the active level here.
     ensureDefaultAssetsCreated();
 
-    // Registry handling: build at the very end, so it includes any ensured default assets.
-	logger.log(Logger::Category::Project, "Building asset registry for project: " + info.projectName, Logger::LogLevel::INFO);
-    {
-        const bool registryLoaded = loadAssetRegistry(info.projectPath);
-        if (!registryLoaded)
-        {
-            logger.log(Logger::Category::AssetManagement, "Asset registry missing/invalid; will rebuild.", Logger::LogLevel::INFO);
-        }
-
-        if (!discoverAssetsAndBuildRegistry(info.projectPath))
-        {
-            logger.log(Logger::Category::AssetManagement, "Asset discovery failed.", Logger::LogLevel::ERROR);
-        }
-
-        if (!saveAssetRegistry(info.projectPath))
-        {
-            logger.log(Logger::Category::AssetManagement, "Failed to save asset registry.", Logger::LogLevel::WARNING);
-        }
-    }
-	logger.log(Logger::Category::AssetManagement, "Asset registry ready. Total assets: " + std::to_string(m_registry.size()), Logger::LogLevel::INFO);
+	// Registry handling: build asynchronously so project loading is not blocked.
+	logger.log(Logger::Category::Project, "Starting async asset registry build for project: " + info.projectName, Logger::LogLevel::INFO);
+	discoverAssetsAndBuildRegistryAsync(info.projectPath);
 
     if (!diagnostics.loadProjectConfig())
     {
@@ -4172,92 +5014,14 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
         return false;
     }
 
-    {
-        const fs::path stubPath = root / "Content" / "Scripts" / "engine.pyi";
-        if (!fs::exists(stubPath))
-        {
-            std::ofstream stubOut(stubPath, std::ios::out | std::ios::trunc);
-            if (stubOut.is_open())
-            {
-				stubOut << "from typing import Callable, Dict, List, Optional, Tuple\n\n";
-				stubOut << "Component_Transform: int\nComponent_Mesh: int\nComponent_Material: int\n";
-				stubOut << "Component_Light: int\nComponent_Camera: int\nComponent_Physics: int\n";
-				stubOut << "Component_Script: int\nComponent_Name: int\n\n";
-				stubOut << "Asset_Texture: int\nAsset_Material: int\nAsset_Model2D: int\n";
-				stubOut << "Asset_Model3D: int\nAsset_PointLight: int\nAsset_Audio: int\n";
-				stubOut << "Asset_Script: int\nAsset_Shader: int\nAsset_Level: int\nAsset_Widget: int\n\n";
-				stubOut << "Log_Info: int\nLog_Warning: int\nLog_Error: int\n\n";
-				stubOut << "class _entity:\n";
-				stubOut << "    @staticmethod\n    def create_entity() -> int: ...\n";
-				stubOut << "    @staticmethod\n    def attach_component(entity: int, kind: int) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def detach_component(entity: int, kind: int) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def get_entities(kinds: List[int]) -> List[int]: ...\n";
-				stubOut << "    @staticmethod\n    def get_transform(entity: int) -> Optional[Tuple[Tuple[float, float, float], Tuple[float, float, float], Tuple[float, float, float]]]: ...\n";
-				stubOut << "    @staticmethod\n    def set_position(entity: int, x: float, y: float, z: float) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def translate(entity: int, dx: float, dy: float, dz: float) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def set_rotation(entity: int, pitch: float, yaw: float, roll: float) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def rotate(entity: int, dp: float, dy: float, dr: float) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def set_scale(entity: int, sx: float, sy: float, sz: float) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def set_mesh(entity: int, path: str) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def get_mesh(entity: int) -> Optional[str]: ...\n\n";
-				stubOut << "class _assetmanagement:\n";
-				stubOut << "    Asset_Texture: int\n";
-				stubOut << "    Asset_Material: int\n";
-				stubOut << "    Asset_Model2D: int\n";
-				stubOut << "    Asset_Model3D: int\n";
-				stubOut << "    Asset_PointLight: int\n";
-				stubOut << "    Asset_Audio: int\n";
-				stubOut << "    Asset_Script: int\n";
-				stubOut << "    Asset_Shader: int\n";
-				stubOut << "    Asset_Level: int\n";
-				stubOut << "    Asset_Widget: int\n";
-				stubOut << "    @staticmethod\n    def is_asset_loaded(path: str) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def load_asset(path: str, type: int, allow_gc: bool = False) -> int: ...\n";
-				stubOut << "    @staticmethod\n    def load_asset_async(path: str, type: int, on_loaded: Optional[Callable[[int], None]] = None, allow_gc: bool = False) -> int: ...\n";
-				stubOut << "    @staticmethod\n    def save_asset(id: int, type: int, sync: bool = True) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def unload_asset(id: int) -> bool: ...\n\n";
-				stubOut << "class _diagnostics:\n";
-				stubOut << "    @staticmethod\n    def get_delta_time() -> float: ...\n";
-				stubOut << "    @staticmethod\n    def get_state(key: str) -> Optional[str]: ...\n";
-				stubOut << "    @staticmethod\n    def set_state(key: str, value: str) -> bool: ...\n\n";
-				stubOut << "class _ui:\n";
-				stubOut << "    @staticmethod\n    def show_modal_message(message: str, on_closed: Optional[Callable[[], None]] = None) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def close_modal_message() -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def show_toast_message(message: str, duration: float = 2.5) -> bool: ...\n\n";
-				stubOut << "class _audio:\n";
-				stubOut << "    @staticmethod\n    def create_audio(path: str, loop: bool = False, gain: float = 1.0, keep_loaded: bool = False) -> int: ...\n";
-				stubOut << "    @staticmethod\n    def create_audio_from_asset(asset_id: int, loop: bool = False, gain: float = 1.0) -> int: ...\n";
-				stubOut << "    @staticmethod\n    def play_audio(path: str, loop: bool = False, gain: float = 1.0, keep_loaded: bool = False) -> int: ...\n";
-				stubOut << "    @staticmethod\n    def play_audio_handle(handle: int) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def set_audio_volume(handle: int, volume: float) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def get_audio_volume(handle: int) -> float: ...\n";
-				stubOut << "    @staticmethod\n    def pause_audio(handle: int) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def pause_audio_handle(handle: int) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def is_audio_playing(handle: int) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def is_audio_playing_path(path: str) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def stop_audio(handle: int) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def stop_audio_handle(handle: int) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def invalidate_audio_handle(handle: int) -> bool: ...\n\n";
-				stubOut << "class _input:\n";
-				stubOut << "    @staticmethod\n    def set_on_key_pressed(callback: Optional[Callable[[int], None]]) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def set_on_key_released(callback: Optional[Callable[[int], None]]) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def register_key_pressed(key: int, callback: Callable[[int], None]) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def register_key_released(key: int, callback: Callable[[int], None]) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def is_shift_pressed() -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def is_ctrl_pressed() -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def is_alt_pressed() -> bool: ...\n";
-				writeKeyConstants(stubOut, "    ");
-				stubOut << "\nclass _camera:\n";
-				stubOut << "    @staticmethod\n    def get_camera_position() -> Tuple[float, float, float]: ...\n";
-				stubOut << "    @staticmethod\n    def set_camera_position(x: float, y: float, z: float) -> bool: ...\n";
-				stubOut << "    @staticmethod\n    def get_camera_rotation() -> Tuple[float, float]: ...\n";
-				stubOut << "    @staticmethod\n    def set_camera_rotation(yaw: float, pitch: float) -> bool: ...\n\n";
-				stubOut << "class _logging:\n";
-				stubOut << "    @staticmethod\n    def log(message: str, level: int = 0) -> bool: ...\n\n";
-				stubOut << "entity: _entity\nassetmanagement: _assetmanagement\naudio: _audio\ninput: _input\nui: _ui\ncamera: _camera\ndiagnostics: _diagnostics\nlogging: _logging\n";
-            }
-        }
-    }
+	{
+		const fs::path scriptsDir = root / "Content" / "Scripts";
+		fs::create_directories(scriptsDir, ec);
+		const fs::path stubPath = scriptsDir / "engine.pyi";
+		const fs::path srcStub = fs::current_path() / "Content" / "Scripting" / "engine.pyi";
+		std::error_code copyEc;
+		fs::copy_file(srcStub, stubPath, fs::copy_options::overwrite_existing, copyEc);
+	}
 
     auto infoWithPath = info;
     infoWithPath.projectPath = fs::absolute(root, ec).string();
@@ -4863,6 +5627,13 @@ AssetManager::SaveResult AssetManager::saveLevelAsset(EngineLevel* level)
 	if (!level)
 	{
 		result.errorMessage = "Level asset is null.";
+		return result;
+	}
+
+	// Skip runtime-only levels (e.g. Mesh Viewer preview scenes)
+	if (level->getName().rfind("__MeshViewer__", 0) == 0)
+	{
+		result.success = true;
 		return result;
 	}
 

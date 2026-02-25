@@ -40,6 +40,8 @@
 21. [Multi-Window / Popup-System](#21-multi-window--popup-system)
 22. [Landscape-System](#22-landscape-system)
 23. [Skybox-System](#23-skybox-system)
+24. [Physik-System](#24-physik-system)
+25. [Editor-Fenster / Mesh Viewer](#25-editor-fenster--mesh-viewer)
 
 ---
 
@@ -74,7 +76,7 @@
 | RHI-Auswahl (Enum: OpenGL/DX11/DX12)| 🟡     |
 | Fenster-Konfiguration (Größe, Zustand)| ✅    |
 | PIE-Modus (Play In Editor)           | ✅     |
-| Aktives Level verwalten              | ✅     |
+| Aktives Level verwalten (`setActiveLevel` / `getActiveLevelSoft` / `swapActiveLevel`) | ✅ |
 | Action-Tracking (Loading, Saving…)   | ✅     |
 | Input-Dispatch (KeyDown/KeyUp)       | ✅     |
 | Benachrichtigungen (Modal + Toast)   | ✅     |
@@ -109,6 +111,13 @@
 | Import: Texturen                         | ✅     |
 | Import: Audio (WAV)                      | ✅     |
 | Import: 3D-Modelle (Assimp: OBJ, FBX, glTF, DAE, etc.) | ✅ |
+| Import: 3D-Modell Material-Extraktion (Diffuse/Specular/Normal) | ✅ |
+| Import: 3D-Modell Textur-Extraktion (extern + eingebettet) | ✅ |
+| Import: Mesh-basierte Benennung (MeshName_Diffuse, MeshName_Material) | ✅ |
+| Import: Detailliertes Scene-Logging (Meshes, Materials, Texturen pro Typ) | ✅ |
+| Auto-Material bei Mesh-Hinzufügung (Viewport/Outliner/Details) | ✅ |
+| Viewport-Sofortupdate bei Mesh/Material-Änderung (setComponent + invalidateEntity) | ✅ |
+| Referenz-Reparatur vor RRM-Prepare (fehlende Meshes entfernen, fehlende Materialien → WorldGrid) | ✅ |
 | Assimp-Integration (static in AssetManager) | ✅ |
 | Import: Shader-Dateien (.glsl)             | ✅     |
 | Import: Scripts (.py)                      | ✅     |
@@ -123,6 +132,9 @@
 | Paralleles Batch-Laden (readAssetFromDisk + std::async) | ✅ |
 | Disk-I/O / CPU-Processing von Shared-State getrennt | ✅ |
 | Level-Preload (preloadLevelAssets: Mesh+Material+Textur parallel) | ✅ |
+| Registry-Save-Suppression (m_suppressRegistrySave bei Discovery) | ✅ |
+| engine.pyi statisch deployed (CMake post-build + fs::copy_file) | ✅ |
+| Single-Open Asset-Discovery (readAssetHeader 1× pro Datei) | ✅ |
 | Asset-Thumbnails / Vorschaubilder       | ❌     |
 | Asset-Versionierung                      | ❌     |
 | Hot-Reload (Dateiänderung erkennen)     | ❌     |
@@ -143,14 +155,13 @@
 | Euler-Rotation (XYZ-Ordnung)         | ✅     |
 | Column-Major / Row-Major Export      | ✅     |
 | JSON-Serialisierung (nlohmann)       | ✅     |
-| Quaternion-Unterstützung             | ❌     |
-| Mathe-Operatoren (+, -, *, /)       | ❌     |
-| Interpolation (Lerp, Slerp)         | ❌     |
+| Quaternion-Unterstützung (via engine.math Python-API) | ✅ |
+| Mathe-Operatoren (via engine.math Python-API: +, -, *, /) | ✅ |
+| Interpolation (Lerp, Slerp via engine.math Python-API) | ✅ |
 
 **Offene Punkte:**
-- Keine Quaternion-Rotation (nur Euler) → Gimbal Lock möglich
-- Keine arithmetischen Operatoren auf eigenen Typen (GLM wird intern für Berechnungen genutzt)
-- Keine Interpolations-Funktionen (Lerp, Slerp etc.)
+- C++-Structs selbst haben keine Operatoren (GLM wird intern genutzt)
+- Quaternion, Operatoren und Interpolation sind über `engine.math` Python-API verfügbar (Berechnung in C++)
 
 ---
 
@@ -180,6 +191,7 @@
 | Objekt-Registrierung + Gruppen          | ✅     |
 | Instancing (enable/disable)             | ✅     |
 | Snapshot/Restore (PIE-Modus)            | ✅     |
+| `resetPreparedState()` (ECS-Reset für Level-Swap) | ✅ |
 | Entity-Liste Callbacks                   | ✅     |
 | Level-Script-Pfad                       | ✅     |
 | Multi-Level-Verwaltung (Level wechseln) | 🟡     |
@@ -206,16 +218,16 @@
 | MaterialComponent                       | ✅     |
 | LightComponent (Point/Dir/Spot)        | ✅     |
 | CameraComponent                         | ✅     |
-| PhysicsComponent (Datenstruktur)        | 🟡     |
+| PhysicsComponent (vollständig: Collider, Mass, Restitution, Friction, Velocity, AngularVelocity, ColliderSize) | ✅     |
 | ScriptComponent                         | ✅     |
 | NameComponent                           | ✅     |
-| Physik-Simulation (Kollision, Dynamik) | ❌     |
+| Dirty-Flagging (m_componentVersion)     | ✅     |
+| Physik-Simulation (Kollision, Dynamik) | ✅     |
 | Hierarchie (Parent-Child-Entities)     | ❌     |
 | Entity-Recycling / Freelist            | ❌     |
 | Parallele Iteration                     | ❌     |
 
 **Offene Punkte:**
-- **PhysicsComponent**: Datenstruktur (ColliderType, isStatic, mass) existiert und wird serialisiert, aber es gibt **keine Physik-Engine** – keine Kollisionserkennung, keine Rigid-Body-Dynamik, keine Gravity
 - **CameraComponent**: FOV, Near/Far-Clip und `isActive`-Flag. Wird als aktive View-Kamera genutzt wenn eine Entity-Kamera im Renderer gesetzt ist (`setActiveCameraEntity`). View- und Projection-Matrix werden aus TransformComponent + CameraComponent berechnet.
 - Keine Parent-Child-Entity-Hierarchie (alle Entities sind flach)
 - Kein Entity-Recycling (gelöschte IDs werden nicht wiederverwendet)
@@ -285,6 +297,9 @@
 | Sortierung + Batch-Rendering              | ✅     |
 | Shader-Pfad-Cache (statisch, kein FS-Check pro prepare) | ✅ |
 | Model-Matrix-Berechnung dedupliziert (shared Lambda) | ✅ |
+| Cached Active Tab (m_cachedActiveTab, kein linearer Scan) | ✅ |
+| Projection Guard (Rebuild nur bei Größenänderung) | ✅ |
+| Toter Code entfernt (isRenderEntryRelevant) | ✅ |
 | Shadow Mapping (Multi-Light, Directional/Spot) | ✅     |
 | Shadow Mapping (Point Light Cube Maps)      | ✅     |
 | Post-Processing (Bloom, SSAO, HDR)       | ❌     |
@@ -316,13 +331,13 @@
 | WASD + Q/E Bewegung                 | ✅     |
 | Geschwindigkeits-Steuerung (Mausrad) | ✅     |
 | Pitch-Clamp (±89°)                  | ✅     |
-| Orbit-Kamera                        | ❌     |
+| Orbit-Kamera (Mesh Viewer)          | ✅     |
 | Cinematic-Kamera / Pfad-Follow      | ❌     |
 | Entity-Kamera (CameraComponent)     | ✅     |
 | Kamera-Überblendung                 | ❌     |
 
 **Offene Punkte:**
-- Nur Editor-FPS-Kamera – keine Orbit-Kamera für Objekt-Inspektion
+- Orbit-Kamera ist im Mesh-Viewer implementiert (`MeshViewerWindow`): Orbit-Parameter werden vor `renderWorld()` per `setPosition()`/`setRotationDegrees()` auf die Renderer-Kamera übertragen
 - Entity-Kamera via `setActiveCameraEntity()` / `clearActiveCameraEntity()` – überschreibt View + Projection aus CameraComponent + TransformComponent
 - Keine Kamera-Überblendung / Cinematic-Pfade
 
@@ -454,6 +469,8 @@
 | Widget-Cache                             | ✅     |
 | Text-Renderer Lazy-Init                  | ✅     |
 | Cache-Invalidierung                      | ✅     |
+| Per-Entity Render Refresh (refreshEntityRenderable) | ✅ |
+| Content-Pfad-Auflösung (resolveContentPath, **public**) | ✅ |
 
 **Keine offenen Punkte** – vollständig für den aktuellen Anwendungsfall.
 
@@ -466,17 +483,31 @@
 | Feature                              | Status |
 |--------------------------------------|--------|
 | Widget-Registrierung / Z-Ordering   | ✅     |
+| **Tab-Scoped Widgets** (tabId-Filter in Rendering + Hit-Testing) | ✅ |
 | Hit-Test + Focus                     | ✅     |
 | Maus-Interaktion (Click, Hover)     | ✅     |
 | Scroll-Unterstützung                | ✅     |
 | Text-Eingabe (Entry-Bars)           | ✅     |
-| Tastatur-Handling (Backspace/Enter) | ✅     |
+| Tastatur-Handling (Backspace/Enter/F2) | ✅     |
 | Layout-Berechnung                   | ✅     |
 | Click-Events (registrierbar)        | ✅     |
 | Modal-Nachrichten                   | ✅     |
 | Toast-Nachrichten (Stapel-Layout)   | ✅     |
 | World-Outliner Integration          | ✅     |
+| World-Outliner: Optimiertes Refresh (nur bei Entity-Erstellung/-Löschung) | ✅ |
 | Entity-Auswahl + Details            | ✅     |
+| EntityDetails: Asset-Dropdown (Mesh/Material/Script) | ✅ |
+| EntityDetails: Drop-Zones mit Typ-Validierung | ✅ |
+| EntityDetails: \"+ Add Component\"-Dropdown | ✅ |
+| EntityDetails: Remove-Button (X) pro Komponente mit Bestätigungsdialog | ✅ |
+| EntityDetails: Editierbare Komponentenwerte (EntryBar, Vec3, CheckBox, DropDown, ColorPicker) | ✅ |
+| EntityDetails: Sofortige visuelle Rückmeldung (Transform/Light/Camera per-Frame, Mesh/Material via Per-Entity Refresh) | ✅ |
+| EntityDetails: Alle Wertänderungen markieren Level als unsaved (`setIsSaved(false)`) | ✅ |
+| EntityDetails: Add/Remove Component mit `invalidateEntity()` + UI-Refresh | ✅ |
+| EntityDetails: Namensänderung reflektiert sofort in Outliner + Details-Header | ✅ |
+| Panel-Breite WorldOutliner/EntityDetails (280 px) | ✅ |
+| DropDown-Z-Order (verzögerter Render-Pass) | ✅ |
+| Verbesserte Schriftgrößen/Lesbarkeit im Details-Panel | ✅ |
 | Drag & Drop (CB → Viewport/Folder/Entity) | ✅ |
 | Popup-Builder: Landscape Manager (`openLandscapeManagerPopup`) | ✅ |
 | Popup-Builder: Engine Settings (`openEngineSettingsPopup`) | ✅ |
@@ -541,6 +572,9 @@
 | Nur aktiver Tab rendert World/UI     | ✅     |
 | Tab-Snapshot-Cache (kein Schwarzbild beim Wechsel) | ✅ |
 | Tab-Wechsel während PIE blockiert    | ✅     |
+| Mesh-Viewer-Tabs (Doppelklick auf Model3D) | ✅ |
+| **Tab-Scoped UI** (Viewport-Widgets + ContentBrowser nur bei Viewport-Tab, Mesh-Viewer-Props nur bei deren Tab) | ✅ |
+| **Level-Swap bei Tab-Wechsel** (`swapActiveLevel` + Camera Save/Restore) | ✅ |
 | Weitere Tabs (z.B. Material-Editor) | ❌     |
 
 **Offene Punkte:**
@@ -555,7 +589,7 @@
 - Content Browser: Icons werden per Tint-Color eingefärbt (Ordner gelb, Scripte grün, Texturen blau, Materials orange, Audio rot, Shader lila, etc.)
 - Content Browser: TreeView-Inhalte per `glScissor` auf den Zeichenbereich begrenzt (kein Überlauf beim Scrollen)
 - Content Browser: Grid-View zeigt Ordner + Assets des ausgewählten Ordners als quadratische Kacheln (80×80px, Icon + Name)
-- Content Browser: Doppelklick auf Grid-Ordner navigiert hinein, Doppelklick auf Asset öffnet es
+- Content Browser: Doppelklick auf Grid-Ordner navigiert hinein, Doppelklick auf Model3D-Asset öffnet Mesh-Viewer-Tab, Doppelklick auf andere Assets zeigt Toast
 - Content Browser: Ausgewählter Ordner im TreeView visuell hervorgehoben
 - Content Browser: Einfachklick auf TreeView-Ordner wählt ihn aus und aktualisiert Grid
 - Content Browser: Zweiter Klick auf bereits ausgewählten Ordner klappt ihn wieder zu
@@ -581,12 +615,32 @@
 - Side-Panels (WorldOutliner, WorldSettings) werden jetzt korrekt auf die verfügbare Höhe begrenzt – kein Überzeichnen hinter ContentBrowser/StatusBar mehr (Fallback-Höhe aus Content-Messung auf `available.h` geclampt; Asset-Validierung prüft `m_fillY`)
 - Scrollbare StackPanels/Grids werden per `glScissor` auf ihren Zeichenbereich begrenzt (kein Überlauf beim Scrollen)
 - EntityDetails: Asset-Validierung prüft jetzt `scrollable`-Flag auf Details.Content – veraltete Cache-Dateien ohne Scrolling werden automatisch neu generiert
+- EntityDetails: Mesh/Material/Script-Sektionen enthalten DropdownButtons mit allen Assets des passenden Typs; die DropdownButtons dienen gleichzeitig als Drop-Targets für Drag-and-Drop aus dem Content Browser (Typ-Validierung mit Toast bei falschem Typ). Separate Drop-Zone-Panels entfernt, da sie den Hit-Test der DropdownButtons blockieren konnten.
+- Scrollbare Container: `computeElementBounds` begrenzt Bounds auf die eigene sichtbare Fläche – herausgerollte Elemente erweitern die Hit-Test-Bounds nicht mehr (behebt falsches Hit-Testing im Content-Browser TreeView und Details-Panel nach dem Scrollen)
+- EntityDetails: Doppelter Layout-Pass behoben – das Widget wird im ersten Layout-Durchlauf übersprungen und nur im zweiten Pass mit korrekter Split-Größe gelayoutet. Vorher klemmte der ScrollOffset am kleineren maxScroll des ersten Passes, sodass nicht bis zum Ende gescrollt werden konnte und die DropdownButtons in unteren Sektionen unerreichbar waren.
+- `layoutElement`: DropdownButton nutzt jetzt den Content-basierten Sizing-Pfad (wie Text/Button), sodass die Höhe korrekt aus dem gemessenen Inhalt statt nur aus minSize kommt
+- DropdownButton: Klick-Handling komplett überarbeitet – Dismiss-Logik erkennt jetzt DropdownButton-Elemente (nicht nur ID-Prefix), Toggle-Verhalten per Source-Tracking (erneuter Klick schließt das Menü statt Close+Reopen), leere Items zeigen „(No assets available)" Platzhalter, Menü-Breite passt sich an Button-Breite an
+- DropdownButton: Renderer nutzt jetzt den Button-Shader (`m_defaultButtonVertex`/`m_defaultButtonFragment`) statt Panel-Shader, sodass Hover-Feedback korrekt angezeigt wird
+- Z-Ordering: `getWidgetsOrderedByZ` nutzt jetzt `std::stable_sort` statt `std::sort` für deterministische Reihenfolge bei gleichem Z-Wert (verhindert nicht-deterministisches Hit-Testing zwischen EntityDetails und ContentBrowser)
+- **DropdownButton Rendering**: `WidgetElementType::DropdownButton` hat jetzt einen eigenen Render-Case in beiden `renderElement`-Lambdas (`renderUI` und `drawUIWidgetsToFramebuffer`). Zeichnet Hintergrund-Panel mit Hover, Text mit Alignment + Padding und einen kleinen Pfeil-Indikator rechts. Nutzt Button-Shader (`m_defaultButtonVertex`/`m_defaultButtonFragment`). Behebt unsichtbare DropdownButtons im EntityDetails-Panel (Mesh/Material/Script-Auswahl und "+Add Component").
+- **F2-Tastenkürzel (Rename)**: `handleKeyDown` reagiert jetzt auf F2 – startet Inline-Rename im Content-Browser-Grid, wenn ein Asset selektiert ist (`m_selectedGridAsset` nicht leer, `m_renamingGridAsset` noch nicht aktiv). Check wird vor dem `m_focusedEntry`-Guard ausgeführt, damit F2 auch ohne fokussierte EntryBar funktioniert.
+- **Editierbare Komponentenwerte**: Alle ECS-Komponentenfelder sind im EntityDetails-Panel über passende Steuerelemente editierbar: Vec3-Reihen mit farbkodierten X/Y/Z-EntryBars (rot/grün/blau) für Transform-Position/Rotation/Scale und Physics-Vektoren, Float-EntryBars für Kamera-FOV/Clip-Planes und Light-Intensity/Range, CheckBoxen für Physics-isStatic/isKinematic/useGravity und Camera-isActive, DropDowns für LightType (Point/Directional/Spot) und ColliderType (Box/Sphere/Mesh), ColorPicker (kompakt) für Light-Color, EntryBar für NameComponent-displayName. Hilfslambdas `makeFloatEntry`, `makeVec3Row`, `makeCheckBoxRow` erzeugen die UI-Zeilen. Jede Änderung ruft `ecs.setComponent<T>()` auf, was `m_componentVersion` inkrementiert und Auto-Refresh auslöst.
+- **Sofortige visuelle Rückmeldung bei Komponentenänderungen**: Transform-, Light- und Camera-Werte werden vom Renderer jeden Frame direkt aus dem ECS gelesen (per-Frame-Queries in `renderWorld`) — Änderungen sind sofort im Viewport sichtbar. Mesh/Material-Pfadänderungen lösen `invalidateEntity(entity)` aus, was die Entität in die Dirty-Queue einreiht. Im nächsten Frame konsumiert `renderWorld()` die Queue und ruft `refreshEntity()` → `refreshEntityRenderable()` auf — bestehende GPU-Caches werden wiederverwendet, nur fehlende Assets werden nachgeladen (kein vollständiger Scene-Rebuild mehr). Alle Wert-Callbacks (`makeFloatEntry`, `makeVec3Row`, `makeCheckBoxRow` sowie Inline-Callbacks für Light-Typ, Light-Color, Physics-Collider) markieren das Level als unsaved (`setIsSaved(false)`). Add/Remove-Component-Callbacks rufen `invalidateEntity(entity)`, `populateOutlinerDetails(entity)` und `refreshWorldOutliner()` auf. Nicht-renderable Komponenten (Name, Light, Camera, Physics, Script) lösen keine Render-Invalidierung aus.
+- **Panel-Breite 280 px**: WorldOutliner und EntityDetails verwenden jetzt 280 px statt 200 px Breite. `ensureEditorWidgetsCreated` prüft die Breite im `.asset`-Cache und generiert die Datei bei abweichendem Wert automatisch neu.
+- **DropDown-Z-Order Fix**: Aufgeklappte DropDown-Listen (WidgetElementType::DropDown) werden nicht mehr inline im renderElement-Lambda gezeichnet, sondern in einem verzögerten zweiten Render-Durchgang nach allen Widgets. Dadurch liegen sie immer über allen Geschwister-Elementen. Betrifft beide Render-Pfade (renderUI und drawUIWidgetsToFramebuffer).
+- **DropDown-Hit-Testing Fix**: `hitTest` enthält einen Vor-Durchlauf, der aufgeklappte DropDown-Elemente mit Priorität prüft, bevor die reguläre Baumtraversierung beginnt. Geschwister-Elemente unterhalb eines aufgeklappten DropDowns fangen damit keine Klicks mehr ab.
+- **Registry-Version für Details-Panel-Refresh**: `AssetManager::m_registryVersion` (atomarer Zähler) wird bei `registerAssetInRegistry()`, `renameAsset()`, `moveAsset()` und `deleteAsset()` inkrementiert. `UIManager::updateNotifications` vergleicht den Wert mit `m_lastRegistryVersion` und baut das EntityDetails-Panel automatisch neu auf, sobald Assets erstellt, importiert, umbenannt, verschoben oder gelöscht werden. Dropdowns (Mesh/Material/Script/Add Component) zeigen die aktuellen Asset-Namen sofort an.
+- **Asset-Integritäts-Validierung**: Zwei neue Methoden in `AssetManager`: `validateRegistry()` prüft alle Registry-Einträge gegen das Dateisystem und entfernt Einträge für nicht mehr vorhandene Dateien (Rebuild Index-Maps + Persist + Version-Bump). `validateEntityReferences(showToast)` prüft ECS-Entity-Referenzen (MeshComponent, MaterialComponent, ScriptComponent) gegen die Registry und loggt Warnungen für fehlende Assets. `validateRegistry()` wird automatisch nach `discoverAssetsAndBuildRegistryAsync()` aufgerufen, `validateEntityReferences()` nach `prepareEcs()` in `RenderResourceManager::prepareActiveLevel()`.
+- **Rename-Tastatureingabe Fix**: Beim Starten eines Inline-Renames im Content Browser wird die EntryBar automatisch per `setFocusedEntry` fokussiert. Engine-Shortcuts (W/E/R Gizmo-Modi, Ctrl+Z/Y/S, F2/DELETE-Handlers via `diagnostics.dispatchKeyUp`) werden blockiert, solange `hasEntryFocused()` true ist. `onValueChanged`-Callback ruft `setFocusedEntry(nullptr)` vor dem Tree-Rebuild auf, um Dangling-Pointer zu vermeiden.
+- **Verbesserte Schriftgrößen**: Details-Panel Hilfslambdas nutzen größere Fonts (makeTextLine 13 px, Eingabefelder/Checkboxen/Dropdowns 12 px) und breitere Labels (100 px statt 90 px) für bessere Lesbarkeit.
+- Hover-Stabilität:
 - SeparatorWidget (Collapsible Sections): Redesign als flache Sektions-Header mit ▾/▸ Chevrons, dünner Trennlinie, subtilen Farben und 14px Content-Einrückung (statt prominenter Buttons mit v/>)
 - **Performance-Optimierungen:**
   - `updateHoverStates`: O(1) Tracked-Pointer statt O(N) Full-Tree-Walk pro Mausbewegung
   - `hitTest`: Keine temporäre Vektor-Allokation mehr, iteriert gecachte Liste direkt rückwärts
   - `drawUIPanel`/`drawUIImage`: Uniform-Locations pro Shader-Programm gecacht (eliminiert ~13 `glGetUniformLocation`-Aufrufe pro Draw)
   - Verbose INFO-Logging aus allen Per-Frame-Hotpaths entfernt (Hover, HitTest, ContentBrowser-Builder, RegisterWidget)
+  - Per-Click-Position-Logs entfernt (MouseDown/Click-Miss-Koordinaten waren diagnostischer Noise)
 - **Editor-Gizmos (Translate/Rotate/Scale):**
   - 3D-Gizmo-Rendering im Viewport für die ausgewählte Entity (immer im Vordergrund, keine Tiefenverdeckung)
   - Translate-Modus: 3 Achsenpfeile (Rot=X, Grün=Y, Blau=Z) mit Pfeilspitzen
@@ -599,7 +653,7 @@
   - Tastatur-Shortcuts: W=Translate, E=Rotate, R=Scale (nur im Editor-Modus, nicht während PIE)
   - Gizmo-Drag hat Vorrang vor Entity-Picking (Klick auf Achse startet Drag, nicht neuen Pick)
   - Eigener GLSL-Shader (Vertex + Fragment) mit dynamischem VBO für Linien-Geometrie
-- Weitere Editor-Tabs für zusätzliche Editoren noch nicht implementiert
+- Mesh-Viewer-Tabs für 3D-Modell-Vorschau implementiert (Doppelklick auf Model3D im Content Browser)
 - **StatusBar (Fußleiste):**
   - Horizontales Widget am unteren Fensterrand (32px, z-order=3, BottomLeft, fillX)
   - Undo-Button + Redo-Button links, Dirty-Asset-Zähler Mitte, Save-All-Button rechts
@@ -690,6 +744,50 @@
 
 ---
 
+## 25. Editor-Fenster / Mesh Viewer
+
+| Feature                                          | Status |
+|--------------------------------------------------|--------|
+| `MeshViewerWindow`-Klasse (`src/Renderer/EditorWindows/MeshViewerWindow.h/.cpp`) | ✅ |
+| **Tab-basiertes System** (eigener EditorTab pro Mesh Viewer mit eigenem FBO) | ✅ |
+| **Runtime-EngineLevel** pro Mesh-Viewer (isolierte Szene) | ✅ |
+| **Per-Tab-FBO**: Jeder Tab rendert in eigenen Framebuffer, Tab-Wechsel tauscht FBO | ✅ |
+| **UI-Tab-Filterung**: Properties-Widget mit `tabId` registriert, UIManager filtert nach aktivem Tab | ✅ |
+| **Dynamische Tab-Buttons** in TitleBar beim Öffnen/Schließen | ✅ |
+| **Level-Swap** beim Tab-Wechsel (`swapActiveLevel` + `setActiveTab`) | ✅ |
+| **Normale FPS-Kamera** (WASD+Maus, keine Orbit-Kamera, initiale Ausrichtung auf Mesh-AABB) | ✅ |
+| **Tab-scoped Properties-Widget** (`MeshViewerDetails.{path}`, tabId = assetPath) | ✅ |
+| **Default-Material-Komponente** im Runtime-Level (Mesh+Material für Render-Schema) | ✅ |
+| **Rendering über normale renderWorld-Pipeline** (kein eigener Render-Pfad, nutzt RRM + buildRenderablesForSchema) | ✅ |
+| **Auto-Material aus .asset** (liest `m_materialAssetPaths[0]` beim Level-Aufbau) | ✅ |
+| **Performance-Stats ausgeblendet** in Mesh-Viewer-Tabs (FPS, Metriken, Occlusion nur im Viewport) | ✅ |
+| **Rein-Runtime-Level** (kein Serialisieren auf Disk, `saveLevelAsset` überspringt `__MeshViewer__`) | ✅ |
+| **Ground-Plane** im Preview-Level (default_quad3d + WorldGrid-Material, 20×20 Einheiten) | ✅ |
+| Initiale Kameraposition aus Mesh-AABB berechnet  | ✅ |
+| Automatische Ausrichtung der Kamera auf Mesh-Zentrum | ✅ |
+| Standard-Beleuchtung (Directional Light, Rotation 50°/30°, natürliches Warmweiß, Intensität 0.8) | ✅ |
+| Kamera-State Save/Restore pro Tab (EditorCamera in Level) | ✅ |
+| **Per-Tab Entity-Selektion** (Selection-State wird beim Tab-Wechsel gespeichert/wiederhergestellt) | ✅ |
+| **Editierbare Asset-Properties** im Sidepanel (Scale X/Y/Z, Material-Pfad, markiert Asset als unsaved) | ✅ |
+| Doppelklick auf Model3D im Content Browser öffnet Viewer | ✅ |
+| Automatisches Laden von noch nicht geladenen Assets | ✅ |
+| Toast-Benachrichtigung "Loading..." während Laden | ✅ |
+| Pfad-Auflösung: Registry-relative → absolute Pfade via `resolveContentPath` | ✅ |
+| Detailliertes Diagnose-Logging in `initialize()` + `openMeshViewer()` | ✅ |
+| Input-Routing: `getMeshViewer(getActiveTabId())` in `main.cpp` | ✅ |
+| **Editor-Kamera State Save/Restore** beim Tab-Wechsel | ✅ |
+| Material-Vorschau im Mesh Viewer                 | ✅ |
+| Mesh-Editing (Vertices, Normals)                 | ❌ |
+| Animations-Vorschau                              | ❌ |
+| Info-Overlay (Vertex/Triangle-Count, Dateiname)  | ❌ |
+
+**Offene Punkte:**
+- Kein Mesh-Editing (nur Betrachtung)
+- Keine Animations-Unterstützung
+- Kein Info-Overlay (Vertex/Triangle-Count)
+
+---
+
 ## 22. Landscape-System
 
 | Feature                                           | Status |
@@ -700,7 +798,7 @@
 | Vertex-Format: x, y, z, u, v (5 Floats)          | ✅ |
 | Mesh als `.asset`-JSON in `Content/Landscape/` speichern | ✅ |
 | Asset über `AssetManager::loadAsset()` registrieren | ✅ |
-| ECS-Entity mit Transform + Mesh + Name           | ✅ |
+| ECS-Entity mit Transform + Mesh + Name + Physics (static Box) | ✅ |
 | Level-Dirty-Flag + Outliner-Refresh nach Spawn   | ✅ |
 | Grid-Shader mit vollem Lighting (Multi-Light, Schatten) | ✅ |
 | Landscape Manager Popup (via `TitleBar.Menu.Tools`) | ✅ |
@@ -709,7 +807,7 @@
 | Höhenkarte (Heightmap)                            | ❌ |
 | Landscape-Material / Textur-Blending             | ❌ |
 | LOD-System für Landscape                         | ❌ |
-| Kollision für Landscape                          | ❌ |
+| Statischer Box-Collider für Landscape (Half-Extents = halbe Breite/Tiefe) | ✅ |
 | Terrain-Sculpting im Editor                      | ❌ |
 
 **Offene Punkte:**
@@ -767,7 +865,7 @@
 | on_level_loaded() Callback          | ✅     |
 | onloaded(entity) Callback           | ✅     |
 | tick(entity, dt) pro Frame          | ✅     |
-| engine.pyi IntelliSense-Stubs       | ✅     |
+| engine.pyi statisch deployed (CMake + copy) | ✅     |
 | Async-Asset-Load Callbacks          | ✅     |
 | Mehrere Scripts pro Level           | ✅     |
 | Script-Fehlerbehandlung             | 🟡     |
@@ -778,23 +876,24 @@
 
 | Submodul                  | Status |
 |---------------------------|--------|
-| engine.entity (CRUD, Transform, Mesh) | ✅ |
+| engine.entity (CRUD, Transform, Mesh, Light) | ✅ |
 | engine.assetmanagement    | ✅     |
 | engine.audio              | ✅     |
 | engine.input              | ✅     |
 | engine.ui                 | ✅     |
 | engine.camera             | ✅     |
-| engine.diagnostics        | ✅     |
+| engine.diagnostics (delta_time, engine_time, state) | ✅     |
 | engine.logging            | ✅     |
-| engine.physics            | ❌     |
+| engine.physics            | ✅     |
+| engine.math (Vec2, Vec3, Quat, Scalar, Trig — C++-Berechnung) | ✅ |
 | engine.renderer (Shader-Parameter etc.) | ❌ |
 
 **Offene Punkte:**
 - Script-Fehler werden geloggt, aber kein detailliertes Error-Recovery (Script crasht → Fehlermeldung, aber kein Retry)
 - Kein Script-Debugger (Breakpoints etc.)
 - Kein Hot-Reload bei Script-Änderung (nur bei PIE-Neustart)
-- Kein `engine.physics`-Modul (da Physik-Simulation fehlt)
 - Kein Zugriff auf Renderer-Parameter (z.B. Material-Uniforms) aus Python
+- `engine.math` bietet 54 Funktionen: Vec3 (17), Vec2 (9), Quaternion (7), Scalar (4), Trigonometrie (7: sin, cos, tan, asin, acos, atan, atan2), Common Math (10: sqrt, abs, pow, floor, ceil, round, sign, min, max, pi) — alle Berechnungen laufen in C++
 
 ---
 
@@ -830,8 +929,8 @@ Große Feature-Blöcke, die noch nicht existieren:
 
 | System                            | Priorität | Beschreibung                                                                   |
 |-----------------------------------|-----------|--------------------------------------------------------------------------------|
-| **Physik-Engine**                | Hoch      | Kollisionserkennung, Rigid Body, Gravity – PhysicsComponent-Daten existieren bereits, aber keine Simulation |
-| **3D-Modell-Import (Assimp)**    | ✅     | Import von OBJ, FBX, glTF, GLB, DAE, 3DS, STL, PLY, X3D via Assimp            |
+| **Physik-Engine**                | ✅     | Rigid-Body-Simulation: Fixed Timestep, Semi-Implicit Euler, OBB-SAT/Sphere-Kollision, Impuls-Auflösung, Gravitation. `PhysicsWorld`-Singleton, `engine.physics` Python-API |
+| **3D-Modell-Import (Assimp)**    | ✅     | Import von OBJ, FBX, glTF, GLB, DAE, 3DS, STL, PLY, X3D via Assimp inkl. automatischer Material- und Textur-Extraktion (Diffuse, Specular, Normal; extern + eingebettet) |
 | **Entity-Hierarchie**            | Mittel    | Parent-Child-Beziehungen für Entities (kein ParentComponent im ECS)           |
 | **Entity-Kamera (Runtime)**      | ✅     | Entity-Kamera via `setActiveCameraEntity()` mit FOV/NearClip/FarClip aus CameraComponent |
 | **PBR-Material + Normal Mapping**| Mittel    | Physically Based Rendering, Normal/Roughness/Metallic-Maps (aktuell nur Blinn-Phong) |
@@ -839,7 +938,8 @@ Große Feature-Blöcke, die noch nicht existieren:
 | **Cascaded Shadow Maps**         | Mittel    | CSM für Directional Lights (aktuell feste ortho-Projektion, kein Cascading)  |
 | **Skeletal Animation**           | Mittel    | Bone-System, Skinning, Animation-Blending                                    |
 | **Cubemap / Skybox**            | Mittel    | Umgebungstexturen für Himmel                                                  |
-| **Drag & Drop (Editor)**        | ✅     | Model3D→Spawn (Depth-Raycast), Material/Script→Apply (pickEntityAtImmediate), Asset-Move mit tiefem Referenz-Scan aller .asset-Dateien, Entf zum Löschen |
+| **Drag & Drop (Editor)**        | ✅     | Model3D→Spawn (Depth-Raycast), Material/Script→Apply (pickEntityAtImmediate), Asset-Move mit tiefem Referenz-Scan aller .asset-Dateien, Entf zum Löschen, EntityDetails Drop-Zones mit Typ-Validierung |
+| **Asset Rename (Editor)**       | ✅     | Rename-Button in Content-Browser PathBar (aktiv bei selektiertem Asset) + F2-Tastenkürzel. Inline-EntryBar im Grid-Tile zum Eingeben des neuen Namens. `AssetManager::renameAsset()` benennt Datei + Source-File um, aktualisiert Registry (Name/Pfad/Index), geladene AssetData, ECS-Komponenten (Mesh/Material/Script) und scannt Cross-Asset-Referenzen in .asset-Dateien. Escape bricht ab. |
 | **Audio-Formate (OGG/MP3)**     | Niedrig   | Weitere Audio-Formate unterstützen (aktuell nur WAV)                         |
 | **3D-Audio (Positional)**       | Niedrig   | OpenAL-Listener-/Source-Positionierung nutzen                                |
 | **Particle-System**             | Niedrig   | GPU-/CPU-Partikel für Effekte                                                |
@@ -861,7 +961,55 @@ Große Feature-Blöcke, die noch nicht existieren:
 | **Popup-UI Refactoring**         | ✅     | Landscape-Manager- und Engine-Settings-Popup-Erstellung aus `main.cpp` in `UIManager` verschoben (`openLandscapeManagerPopup`, `openEngineSettingsPopup`). UIManager hält jetzt einen Back-Pointer auf `OpenGLRenderer`. |
 | **Performance-Optimierungen**    | ✅     | O(1)-Asset-Lookup via `m_loadedAssetsByPath`-Index (statt O(n)-Scan), Shader-Pfad-Cache in `OpenGLObject3D`, deduplizierte Model-Matrix-Berechnung in `renderWorld()`. |
 | **Paralleles Asset-Laden**       | ✅     | Dreiphasen-Architektur: `readAssetFromDisk()` (thread-safe Disk-I/O + CPU), `finalizeAssetLoad()` (Registration), GPU-Upload. Thread-Pool mit `hardware_concurrency()` Threads + globaler Job-Queue. `loadBatchParallel()` dispatched in den Pool mit Batch-Wait (atomic counter + CV). `preloadLevelAssets()` warmed den Cache beim Scene-Prepare mit allen Mesh-, Material- und Textur-Assets. |
+| **Physik-System**                | ✅     | `PhysicsWorld`-Singleton mit Fixed Timestep (1/60s), Semi-Implicit Euler, OBB-SAT Box-Box-Kollision, OBB-aware Sphere-Box-Kollision, Impuls-basierter Auflösung (Restitution + Friction + Positional Correction 80%). Korrekte Trägheitsmomente (Box: Vollbreiten, Sphere: echter Radius). `PhysicsComponent` erweitert (Velocity, AngularVelocity, Restitution, Friction, ColliderSize). `engine.physics` Python-API (11 Funktionen). PIE-Integration (init/step/shutdown). Kollisions-Callbacks, Raycast-API, Sleep/Deactivation. Overlap-Tracking (Begin/End) mit Per-Entity-Script-Dispatch (`on_entity_begin_overlap` / `on_entity_end_overlap`). Physik läuft sofort beim PIE-Start (Akkumulator vorgeladen). |
 
 ---
 
-*Generiert aus Analyse des Quellcodes. Stand: aktueller Branch `AssetManager_Json`.*
+## 24. Physik-System
+
+| Feature                                               | Status |
+|-------------------------------------------------------|--------|
+| `PhysicsWorld`-Singleton (`src/Physics/PhysicsWorld.h/.cpp`) | ✅ |
+| Fixed Timestep (1/60 s, Akkumulator)                 | ✅     |
+| Semi-Implicit Euler Integration                       | ✅     |
+| Gravitation (konfigurierbar, Default 0/-9.81/0)      | ✅     |
+| Kollision: Sphere ↔ Sphere                           | ✅     |
+| Kollision: Box ↔ Box (OBB-SAT, volle Rotationsunterstützung) | ✅     |
+| Kollision: Sphere ↔ Box (OBB-aware, Lokaltransformation) | ✅     |
+| Impuls-basierte Auflösung (Restitution)              | ✅     |
+| Reibung (Tangential-Impuls)                           | ✅     |
+| Positional Correction (80% Penetration, Slop 0.005)  | ✅     |
+| Korrekte Trägheitsmomente (Box: Vollbreiten, Sphere: echter Radius) | ✅ |
+| Korrekte Collider-Größen (Half-Extents nicht mehr doppelt halbiert) | ✅ |
+| Akkumulator-Loop: gatherBodies() nur einmal pro Frame | ✅     |
+| `PhysicsComponent` erweitert (Velocity, AngularVelocity, Restitution, Friction, ColliderSize) | ✅ |
+| ECS-Serialisierung aller neuen Felder                | ✅     |
+| PIE-Integration (init/step/shutdown)                 | ✅     |
+| EntityDetails UI (alle Komponentenfelder editierbar: DropDown, CheckBox, Vec3, Float, ColorPicker) | ✅     |
+| `engine.physics` Python-API (11 Funktionen)          | ✅     |
+| `engine.pyi` Stubs aktualisiert                      | ✅     |
+| CMake: `Physics` STATIC-Bibliothek                   | ✅     |
+| Kollisions-Callbacks (`setCollisionCallback`, `CollisionEvent`) | ✅ |
+| Raycast-API (`raycast`, Ray-AABB, Ray-Sphere)        | ✅     |
+| Sleep/Deactivation für ruhende Körper                | ✅     |
+| Overlap-Tracking (Begin/End pro Frame)               | ✅     |
+| Per-Entity Overlap-Script-Callbacks (`on_entity_begin_overlap` / `on_entity_end_overlap`) | ✅ |
+| Sofortiger Physik-Start bei PIE (Akkumulator vorgeladen) | ✅  |
+| Default-ColliderSize = 0.5 Half-Extents (passt zu Unit-Cube) | ✅ |
+| Entity-Löschung markiert Level als dirty               | ✅     |
+| Angular Damping (0.98 pro Schritt, verhindert Endlos-Rotation) | ✅ |
+| Kanten-Überhang (Top-Contact-Heuristik + Rollimpuls) | ✅     |
+| Mesh-Collider (Fallback → Box-AABB)                  | ⚠️     |
+| Constraints / Joints                                  | ❌     |
+| Continuous Collision Detection (CCD)                 | ❌     |
+| Broad-Phase (Spatial Hashing / BVH)                  | ❌     |
+
+**Offene Punkte:**
+- Mesh-Collider fällt aktuell auf Box-AABB zurück (kein Triangle-Mesh-Test)
+- Keine Constraints oder Joints (Gelenke, Federn)
+- Keine Continuous Collision Detection (Tunneling bei hohen Geschwindigkeiten möglich)
+- Keine Broad-Phase-Optimierung (O(n²) Paarweise Prüfung)
+
+---
+
+*Generiert aus Analyse des Quellcodes. Stand: aktueller Branch `Json_and_ecs`.*

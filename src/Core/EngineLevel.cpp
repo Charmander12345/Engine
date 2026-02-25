@@ -216,7 +216,14 @@ static json serializePhysicsComponent(const ECS::PhysicsComponent& component)
 	return json{
 		{"colliderType", static_cast<int>(component.colliderType)},
 		{"isStatic", component.isStatic},
-		{"mass", component.mass}
+		{"mass", component.mass},
+		{"restitution", component.restitution},
+		{"friction", component.friction},
+		{"useGravity", component.useGravity},
+		{"isKinematic", component.isKinematic},
+		{"velocity", serializeFloat3(component.velocity)},
+		{"angularVelocity", serializeFloat3(component.angularVelocity)},
+		{"colliderSize", serializeFloat3(component.colliderSize)}
 	};
 }
 
@@ -237,6 +244,34 @@ static void deserializePhysicsComponent(const json& value, ECS::PhysicsComponent
 	if (value.contains("mass"))
 	{
 		component.mass = value.at("mass").get<float>();
+	}
+	if (value.contains("restitution"))
+	{
+		component.restitution = value.at("restitution").get<float>();
+	}
+	if (value.contains("friction"))
+	{
+		component.friction = value.at("friction").get<float>();
+	}
+	if (value.contains("useGravity"))
+	{
+		component.useGravity = value.at("useGravity").get<bool>();
+	}
+	if (value.contains("isKinematic"))
+	{
+		component.isKinematic = value.at("isKinematic").get<bool>();
+	}
+	if (value.contains("velocity"))
+	{
+		deserializeFloat3(value.at("velocity"), component.velocity);
+	}
+	if (value.contains("angularVelocity"))
+	{
+		deserializeFloat3(value.at("angularVelocity"), component.angularVelocity);
+	}
+	if (value.contains("colliderSize"))
+	{
+		deserializeFloat3(value.at("colliderSize"), component.colliderSize);
 	}
 }
 

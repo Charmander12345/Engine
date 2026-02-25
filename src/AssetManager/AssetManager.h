@@ -125,11 +125,33 @@ public:
 	// Returns the full flat asset registry (all discovered .asset files with type + relative path).
 	const std::vector<AssetRegistryEntry>& getAssetRegistry() const;
 
+	// Monotonically increasing version; bumped whenever the registry changes.
+	uint64_t getRegistryVersion() const { return m_registryVersion.load(std::memory_order_relaxed); }
+
 	// Move an asset to a new folder, updating all references (registry, ECS components, .asset files).
 	bool moveAsset(const std::string& oldRelPath, const std::string& newRelPath);
 
+	// Rename an asset (file on disk + registry + ECS references + cross-asset references).
+	// newName is the new filename stem (without extension). Returns true on success.
+	bool renameAsset(const std::string& relPath, const std::string& newName);
+
 	// Save only the active level (e.g. to persist editor camera on shutdown).
 	bool saveActiveLevel();
+
+	// Validate registry entries against disk; removes stale entries whose files no longer exist.
+	// Returns the number of entries removed.
+	size_t validateRegistry();
+
+	// Validate ECS entity asset references against the registry. Logs warnings and
+	// optionally shows toast messages for broken references. Returns the number of
+	// broken references found.
+	size_t validateEntityReferences(bool showToast = true);
+
+	// Repair broken ECS entity asset references before rendering:
+	// - Missing mesh: removes MeshComponent from the entity.
+	// - Missing material: replaces with the WorldGrid material path.
+	// Returns the number of components repaired.
+	size_t repairEntityReferences();
 
 	// Called after a successful asset import
 	void setOnImportCompleted(std::function<void()> callback) { m_onImportCompleted = std::move(callback); }
@@ -163,6 +185,7 @@ private:
 	bool loadAssetRegistry(const std::string& projectRoot);
 	bool saveAssetRegistry(const std::string& projectRoot) const;
 	bool discoverAssetsAndBuildRegistry(const std::string& projectRoot);
+	void discoverAssetsAndBuildRegistryAsync(const std::string& projectRoot);
 
 	// Scan all .asset files under contentDir for string references to oldRelPath and replace with newRelPath.
 	void updateAssetFileReferences(const std::filesystem::path& contentDir, const std::string& oldRelPath, const std::string& newRelPath);
@@ -227,9 +250,11 @@ private:
 	GarbageCollector m_garbageCollector;
 	std::function<void()> m_onImportCompleted;
 
-    std::vector<AssetRegistryEntry> m_registry;
-    std::unordered_map<std::string, size_t> m_registryByPath;
-    std::unordered_map<std::string, size_t> m_registryByName;
+	std::vector<AssetRegistryEntry> m_registry;
+	std::unordered_map<std::string, size_t> m_registryByPath;
+	std::unordered_map<std::string, size_t> m_registryByName;
+	bool m_suppressRegistrySave{ false };
+	std::atomic<uint64_t> m_registryVersion{ 0 };
 
 	// Registry + GC / internal state protection
 	mutable std::mutex m_stateMutex;

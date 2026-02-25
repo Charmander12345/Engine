@@ -265,6 +265,9 @@ void OpenGLRenderer::shutdown()
     releaseUiFbo();
     releaseAllTabFbos();
 
+    // Release mesh viewer state before destroying GL resources.
+    m_meshViewers.clear();
+
     // Destroy all popup windows before releasing main GL resources.
     m_popupWindows.clear();
 
@@ -505,28 +508,31 @@ void OpenGLRenderer::render()
     m_cachedWindowWidth = width;
     m_cachedWindowHeight = height;
 
-    // Ensure active tab has a valid FBO
-    EditorTab* activeTab = nullptr;
+    // Ensure active tab has a valid FBO (cache for renderWorld reuse)
+    m_cachedActiveTab = nullptr;
     for (auto& tab : m_editorTabs)
     {
         if (tab.active)
         {
             ensureTabFbo(tab, width, height);
-            activeTab = &tab;
+            m_cachedActiveTab = &tab;
             break;
         }
     }
+    EditorTab* activeTab = m_cachedActiveTab;
 
-    // Only render world for the active tab
+    // Render content for the active tab (world or mesh viewer)
     const uint64_t worldStart = SDL_GetPerformanceCounter();
-    if (activeTab)
     {
-        renderWorld();
+        if (activeTab)
+        {
+            renderWorld();
+        }
     }
     const uint64_t worldEnd = SDL_GetPerformanceCounter();
     m_cpuRenderWorldMs = (freq > 0) ? (static_cast<double>(worldEnd - worldStart) * 1000.0 / static_cast<double>(freq)) : 0.0;
 
-    // Composite: hardware-blit active tab FBO to default framebuffer (no shader overhead)
+    // Composite: blit world content to default framebuffer
     if (activeTab && activeTab->fbo != 0)
     {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, activeTab->fbo);
@@ -567,28 +573,17 @@ void OpenGLRenderer::renderWorld()
     m_lastHiddenCount = 0;
     m_lastTotalCount = 0;
 
-    m_renderEntries.erase(
-        std::remove_if(m_renderEntries.begin(), m_renderEntries.end(),
-            [this](const RenderEntry& entry) { return !isRenderEntryRelevant(entry); }),
-        m_renderEntries.end());
-
     const Vec2 viewportSize = getViewportSize();
     const int width = static_cast<int>(viewportSize.x);
     const int height = static_cast<int>(viewportSize.y);
 
-    // Render into the active tab's FBO if available
-    EditorTab* activeTab = nullptr;
-    for (auto& tab : m_editorTabs)
+    // Render into the active tab's FBO
     {
-        if (tab.active)
+        EditorTab* activeTab = m_cachedActiveTab;
+        if (activeTab && activeTab->fbo != 0)
         {
-            activeTab = &tab;
-            break;
+            glBindFramebuffer(GL_FRAMEBUFFER, activeTab->fbo);
         }
-    }
-    if (activeTab && activeTab->fbo != 0)
-    {
-        glBindFramebuffer(GL_FRAMEBUFFER, activeTab->fbo);
     }
 
     glViewport(0, 0, width, height);
@@ -599,7 +594,7 @@ void OpenGLRenderer::renderWorld()
     float activeFov = 45.0f;
     float activeNear = 0.1f;
     float activeFar = 100.0f;
-    if (height > 0)
+    if (height > 0 && (width != m_lastProjectionWidth || height != m_lastProjectionHeight))
     {
         float aspectRatio = static_cast<float>(width) / static_cast<float>(height);
         m_projectionMatrix = glm::perspective(
@@ -608,6 +603,8 @@ void OpenGLRenderer::renderWorld()
             activeNear,
             activeFar
         );
+        m_lastProjectionWidth = width;
+        m_lastProjectionHeight = height;
     }
 
     auto& diagnostics = DiagnosticsManager::Instance();
@@ -705,8 +702,19 @@ void OpenGLRenderer::renderWorld()
             const Vec2& rot = level->getEditorCameraRotation();
             m_camera->setRotationDegrees(rot.x, rot.y);
         }
-        m_restoreCameraOnPrepare = false;
-    }
+		m_restoreCameraOnPrepare = false;
+	}
+
+	// Per-entity refresh for dirty entities (avoids full scene rebuild)
+	if (diagnostics.hasDirtyEntities())
+	{
+		auto dirtyEntities = diagnostics.consumeDirtyEntities();
+		for (unsigned int entityId : dirtyEntities)
+		{
+			refreshEntity(static_cast<ECS::Entity>(entityId));
+		}
+		m_pickDirty = true;
+	}
 
 	glm::mat4 view(1.0f);
 	bool usedEntityCamera = false;
@@ -1231,6 +1239,124 @@ void OpenGLRenderer::renderWorld()
 	}
 }
 
+void OpenGLRenderer::refreshEntity(ECS::Entity entity)
+{
+	if (entity == 0)
+		return;
+
+	auto& ecs = ECS::ECSManager::Instance();
+	const bool hasMesh = ecs.hasComponent<ECS::MeshComponent>(entity);
+	const bool hasMat = ecs.hasComponent<ECS::MaterialComponent>(entity);
+
+	// Helper: try to find and update an existing entry in a list.
+	// Returns true if the entity was found (updated or removed).
+	auto updateList = [&](std::vector<RenderEntry>& entries, const std::string& fragDefault) -> bool
+	{
+		for (auto it = entries.begin(); it != entries.end(); ++it)
+		{
+			if (it->entity != entity)
+				continue;
+
+			if (!hasMesh)
+			{
+				// Entity no longer has a mesh → remove from list
+				entries.erase(it);
+				return true;
+			}
+
+			auto renderable = m_resourceManager.refreshEntityRenderable(entity, fragDefault);
+			if (renderable.entity == 0 || (!renderable.object3D && !renderable.object2D))
+			{
+				entries.erase(it);
+				return true;
+			}
+
+			it->object3D = renderable.object3D;
+			it->object2D = renderable.object2D;
+			it->transform = renderable.transform;
+			return true;
+		}
+		return false;
+	};
+
+	// Try render entries first (entities with Mesh+Material)
+	if (updateList(m_renderEntries, ""))
+	{
+		// If entity was removed from renderEntries but still has a mesh (without material),
+		// it might need to go into meshEntries.
+		if (hasMesh && !hasMat)
+		{
+			// Check if already in meshEntries
+			bool inMesh = false;
+			for (const auto& e : m_meshEntries)
+			{
+				if (e.entity == entity) { inMesh = true; break; }
+			}
+			if (!inMesh)
+			{
+				auto renderable = m_resourceManager.refreshEntityRenderable(entity, "grid_fragment.glsl");
+				if (renderable.entity != 0 && (renderable.object3D || renderable.object2D))
+				{
+					RenderEntry entry;
+					entry.entity = renderable.entity;
+					entry.transform = renderable.transform;
+					entry.object3D = renderable.object3D;
+					entry.object2D = renderable.object2D;
+					m_meshEntries.push_back(std::move(entry));
+				}
+			}
+		}
+		return;
+	}
+
+	// Try mesh-only entries
+	if (updateList(m_meshEntries, "grid_fragment.glsl"))
+	{
+		// If entity gained a material, it should move to renderEntries
+		if (hasMesh && hasMat)
+		{
+			bool inRender = false;
+			for (const auto& e : m_renderEntries)
+			{
+				if (e.entity == entity) { inRender = true; break; }
+			}
+			if (!inRender)
+			{
+				auto renderable = m_resourceManager.refreshEntityRenderable(entity, "");
+				if (renderable.entity != 0 && (renderable.object3D || renderable.object2D))
+				{
+					RenderEntry entry;
+					entry.entity = renderable.entity;
+					entry.transform = renderable.transform;
+					entry.object3D = renderable.object3D;
+					entry.object2D = renderable.object2D;
+					m_renderEntries.push_back(std::move(entry));
+				}
+			}
+		}
+		return;
+	}
+
+	// Entity wasn't in either list — it's new. Add if it has a mesh.
+	if (hasMesh)
+	{
+		const std::string fragDefault = hasMat ? "" : "grid_fragment.glsl";
+		auto renderable = m_resourceManager.refreshEntityRenderable(entity, fragDefault);
+		if (renderable.entity != 0 && (renderable.object3D || renderable.object2D))
+		{
+			RenderEntry entry;
+			entry.entity = renderable.entity;
+			entry.transform = renderable.transform;
+			entry.object3D = renderable.object3D;
+			entry.object2D = renderable.object2D;
+			if (hasMat)
+				m_renderEntries.push_back(std::move(entry));
+			else
+				m_meshEntries.push_back(std::move(entry));
+		}
+	}
+}
+
 bool OpenGLRenderer::ensureUiFbo(int width, int height)
 {
     if (m_uiFbo != 0 && m_uiFboWidth == width && m_uiFboHeight == height)
@@ -1326,6 +1452,9 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
     glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
     const glm::mat4 uiProjection = glm::ortho(0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f);
+
+    struct DeferredDropDownCompact { float x0, y0, x1, y1, fontSize; int selectedIndex; std::vector<std::string> items; Vec4 textColor, hoverColor; Vec2 padding; };
+    std::vector<DeferredDropDownCompact> deferredDropDownsCompact;
 
     const auto renderElement = [&](const auto& self, const WidgetElement& element,
         float parentX, float parentY, float parentW, float parentH) -> void
@@ -1595,8 +1724,8 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
         }
         if (element.type == WidgetElementType::DropdownButton)
         {
-            const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
-            const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+            const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
+            const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);
             const GLuint prog = getUIQuadProgram(vp, fp);
             drawUIPanel(x0,y0,x1,y1,element.color,uiProjection,prog,element.hoverColor,element.isHovered);
             const float sc=(element.fontSize>0.0f)?element.fontSize/48.0f:14.0f/48.0f;
@@ -1656,18 +1785,34 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             drawUIPanel(x1-element.padding.x-as, y0+(heightPx-as)*0.5f, x1-element.padding.x, y0+(heightPx-as)*0.5f+as, element.textColor,uiProjection,prog,element.textColor,false);
             if (element.isExpanded && !element.items.empty())
             {
-                const float ih=std::max(20.0f,heightPx);
-                for (size_t i=0;i<element.items.size();++i)
-                {
-                    const float iy0=y1+static_cast<float>(i)*ih, iy1=iy0+ih;
-                    const bool sel=(static_cast<int>(i)==element.selectedIndex);
-                    const Vec4 ic=sel?Vec4{0.22f,0.22f,0.28f,0.98f}:Vec4{0.14f,0.14f,0.18f,0.98f};
-                    drawUIPanel(x0,iy0,x1,iy1,ic,uiProjection,prog,element.hoverColor,false);
-                    const Vec2 its=m_textRenderer->measureText(element.items[i],sc);
-                    m_textRenderer->drawText(element.items[i],Vec2{cx0d,iy0+(ih-its.y)*0.5f},sc,element.textColor);
-                }
+                const float fs=(element.fontSize>0.0f)?element.fontSize:14.0f;
+                deferredDropDownsCompact.push_back({ x0, y0, x1, y1, fs, element.selectedIndex, element.items, element.textColor, element.hoverColor, element.padding });
             }
             if (m_uiDebugEnabled) drawUIOutline(x0,y0,x1,y1,Vec4{0.9f,0.6f,0.1f,1.0f},uiProjection,prog);
+            return;
+        }
+        if (element.type == WidgetElementType::DropdownButton)
+        {
+            const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
+            const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);
+            const GLuint prog = getUIQuadProgram(vp, fp);
+            drawUIPanel(x0,y0,x1,y1,element.color,uiProjection,prog,element.hoverColor,element.isHovered);
+            if (!element.text.empty())
+            {
+                const float sc=(element.fontSize>0.0f)?element.fontSize/48.0f:14.0f/48.0f;
+                const float cx0b=x0+element.padding.x, cy0b=y0+element.padding.y;
+                const float cx1b=x1-element.padding.x, cy1b=y1-element.padding.y;
+                const float cwB=std::max(0.0f,cx1b-cx0b), chB=std::max(0.0f,cy1b-cy0b);
+                const Vec2 ts=m_textRenderer->measureText(element.text,sc);
+                float textX=cx0b, textY=cy0b+std::max(0.0f,(chB-ts.y)*0.5f);
+                switch(element.textAlignH){case TextAlignH::Center: textX=cx0b+(cwB-ts.x)*0.5f; break; case TextAlignH::Right: textX=cx1b-ts.x; break; default: break;}
+                m_textRenderer->drawText(element.text,Vec2{textX,textY},sc,element.textColor);
+            }
+            const float as=std::min(heightPx*0.3f,6.0f);
+            const float arrowX=x1-element.padding.x-as;
+            const float arrowY=y0+(heightPx-as)*0.5f;
+            drawUIPanel(arrowX,arrowY,arrowX+as,arrowY+as,element.textColor,uiProjection,prog,element.textColor,false);
+            if (m_uiDebugEnabled) drawUIOutline(x0,y0,x1,y1,Vec4{0.9f,0.7f,0.1f,1.0f},uiProjection,prog);
             return;
         }
         if (element.type == WidgetElementType::TreeView || element.type == WidgetElementType::TabView)
@@ -1735,6 +1880,28 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
         if (widgetSize.y <= 0.0f) widgetSize.y = static_cast<float>(height);
         for (const auto& element : widget->getElements())
             renderElement(renderElement, element, widgetPosition.x, widgetPosition.y, widgetSize.x, widgetSize.y);
+    }
+
+    // Deferred pass: draw expanded DropDown items on top of everything
+    for (const auto& dd : deferredDropDownsCompact)
+    {
+        const std::string& vp = resolveUIShaderPath("", m_defaultPanelVertex);
+        const std::string& fp = resolveUIShaderPath("", m_defaultPanelFragment);
+        const GLuint prog = getUIQuadProgram(vp, fp);
+        const float sc = dd.fontSize / 48.0f;
+        const float heightPx = dd.y1 - dd.y0;
+        const float ih = std::max(20.0f, heightPx);
+        const float cx0d = dd.x0 + dd.padding.x;
+        for (size_t i = 0; i < dd.items.size(); ++i)
+        {
+            const float iy0 = dd.y1 + static_cast<float>(i) * ih;
+            const float iy1 = iy0 + ih;
+            const bool sel = (static_cast<int>(i) == dd.selectedIndex);
+            const Vec4 ic = sel ? Vec4{0.22f,0.22f,0.28f,0.98f} : Vec4{0.14f,0.14f,0.18f,0.98f};
+            drawUIPanel(dd.x0, iy0, dd.x1, iy1, ic, uiProjection, prog, dd.hoverColor, false);
+            const Vec2 its = m_textRenderer->measureText(dd.items[i], sc);
+            m_textRenderer->drawText(dd.items[i], Vec2{cx0d, iy0 + (ih - its.y) * 0.5f}, sc, dd.textColor);
+        }
     }
 
     mgr.clearRenderDirty();
@@ -1966,6 +2133,488 @@ bool OpenGLRenderer::routeEventToPopup(SDL_Event& event)
     return false;
 }
 
+// ---------------------------------------------------------------------------
+// Mesh viewer editor window – takes over viewport, no tab created
+// ---------------------------------------------------------------------------
+MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
+{
+    // Return existing viewer if already open – just switch to its tab.
+    {
+        auto it = m_meshViewers.find(assetPath);
+        if (it != m_meshViewers.end() && it->second)
+        {
+            setActiveTab(assetPath);
+            return it->second.get();
+        }
+    }
+
+    const std::string displayName = std::filesystem::path(assetPath).stem().string();
+
+    m_uiManager.showToastMessage("Loading " + displayName + "...", 4.0f);
+
+    const std::string resolvedPath = m_resourceManager.resolveContentPath(assetPath);
+    if (resolvedPath.empty())
+    {
+        Logger::Instance().log(Logger::Category::Rendering,
+            "openMeshViewer: could not resolve content path for '" + assetPath + "'",
+            Logger::LogLevel::WARNING);
+        m_uiManager.showToastMessage("Failed to resolve " + displayName, 3.0f);
+        return nullptr;
+    }
+
+    auto& assetMgr = AssetManager::Instance();
+    auto existingAsset = assetMgr.getLoadedAssetByPath(resolvedPath);
+    if (!existingAsset)
+    {
+        Logger::Instance().log(Logger::Category::Rendering,
+            "openMeshViewer: asset '" + resolvedPath + "' not in memory, calling loadAsset (Sync)...",
+            Logger::LogLevel::INFO);
+        const int loadId = assetMgr.loadAsset(resolvedPath, AssetType::Model3D, AssetManager::Sync);
+        if (loadId == 0)
+        {
+            Logger::Instance().log(Logger::Category::Rendering,
+                "openMeshViewer: loadAsset returned 0 for '" + resolvedPath
+                + "' (original='" + assetPath + "'). The asset file may not exist or could not be parsed.",
+                Logger::LogLevel::WARNING);
+            m_uiManager.showToastMessage("Failed to load " + displayName, 3.0f);
+            return nullptr;
+        }
+        Logger::Instance().log(Logger::Category::Rendering,
+            "openMeshViewer: loadAsset returned id=" + std::to_string(loadId) + " for '" + resolvedPath + "'",
+            Logger::LogLevel::INFO);
+    }
+    else
+    {
+        Logger::Instance().log(Logger::Category::Rendering,
+            "openMeshViewer: asset '" + resolvedPath + "' already in memory (id="
+            + std::to_string(existingAsset->getId()) + ")",
+            Logger::LogLevel::INFO);
+    }
+
+    auto viewer = std::make_unique<MeshViewerWindow>();
+    if (!viewer->initialize(resolvedPath, m_resourceManager))
+    {
+        m_uiManager.showToastMessage("Failed to open " + displayName, 3.0f);
+        Logger::Instance().log(Logger::Category::Rendering,
+            "Mesh viewer init failed: " + resolvedPath + " (see preceding log lines for the specific step that failed)",
+            Logger::LogLevel::WARNING);
+        return nullptr;
+    }
+
+    if (!viewer->createRuntimeLevel(assetPath))
+    {
+        m_uiManager.showToastMessage("Failed to create preview level for " + displayName, 3.0f);
+        return nullptr;
+    }
+
+    MeshViewerWindow* ptr = viewer.get();
+    m_meshViewers[assetPath] = std::move(viewer);
+
+    // Create a new editor tab for this mesh viewer
+    addTab(assetPath, displayName, true);
+
+    // Create a dynamic tab button in the TitleBar.Tabs StackPanel
+    {
+        auto* tabsStack = m_uiManager.findElementById("TitleBar.Tabs");
+        if (tabsStack)
+        {
+            // Tab button
+            WidgetElement tabBtn{};
+            tabBtn.type = WidgetElementType::Button;
+            tabBtn.id = "TitleBar.Tab." + assetPath;
+            tabBtn.clickEvent = "TitleBar.Tab." + assetPath;
+            tabBtn.text = displayName;
+            tabBtn.font = "default.ttf";
+            tabBtn.fontSize = 12.0f;
+            tabBtn.textAlignH = TextAlignH::Center;
+            tabBtn.textAlignV = TextAlignV::Center;
+            tabBtn.fillY = true;
+            tabBtn.color = Vec4{ 0.14f, 0.14f, 0.14f, 1.0f };
+            tabBtn.hoverColor = Vec4{ 0.2f, 0.2f, 0.2f, 1.0f };
+            tabBtn.textColor = Vec4{ 0.9f, 0.9f, 0.9f, 1.0f };
+            tabBtn.minSize = Vec2{ 90.0f, 0.0f };
+            tabBtn.padding = Vec2{ 6.0f, 0.0f };
+            tabBtn.isHitTestable = true;
+            tabBtn.runtimeOnly = true;
+            tabsStack->children.push_back(std::move(tabBtn));
+
+            // Close button (×) next to the tab
+            WidgetElement closeBtn{};
+            closeBtn.type = WidgetElementType::Button;
+            closeBtn.id = "TitleBar.TabClose." + assetPath;
+            closeBtn.clickEvent = "TitleBar.TabClose." + assetPath;
+            closeBtn.text = "x";
+            closeBtn.font = "default.ttf";
+            closeBtn.fontSize = 12.0f;
+            closeBtn.textAlignH = TextAlignH::Center;
+            closeBtn.textAlignV = TextAlignV::Center;
+            closeBtn.fillY = true;
+            closeBtn.color = Vec4{ 0.14f, 0.14f, 0.14f, 1.0f };
+            closeBtn.hoverColor = Vec4{ 0.6f, 0.15f, 0.15f, 1.0f };
+            closeBtn.textColor = Vec4{ 0.7f, 0.7f, 0.7f, 1.0f };
+            closeBtn.minSize = Vec2{ 24.0f, 0.0f };
+            closeBtn.padding = Vec2{ 2.0f, 0.0f };
+            closeBtn.isHitTestable = true;
+            closeBtn.runtimeOnly = true;
+            tabsStack->children.push_back(std::move(closeBtn));
+        }
+    }
+
+    // Register click events for the tab button and close button
+    m_uiManager.registerClickEvent("TitleBar.Tab." + assetPath, [this, assetPath]()
+    {
+        setActiveTab(assetPath);
+        m_uiManager.markAllWidgetsDirty();
+    });
+    m_uiManager.registerClickEvent("TitleBar.TabClose." + assetPath, [this, assetPath]()
+    {
+        closeMeshViewer(assetPath);
+    });
+
+    // Register the details panel widget (tab-scoped – only visible when this tab is active)
+    {
+        auto propsWidget = std::make_shared<Widget>();
+        propsWidget->setName("MeshViewerDetails." + assetPath);
+        propsWidget->setAnchor(WidgetAnchor::TopRight);
+        propsWidget->setSizePixels(Vec2{ 320.0f, 0.0f });
+        propsWidget->setFillY(true);
+        propsWidget->setZOrder(1);
+
+        std::vector<WidgetElement> elements;
+
+        WidgetElement root{};
+        root.type = WidgetElementType::StackPanel;
+        root.id = "MeshViewer.Details.Root";
+        root.from = Vec2{ 0.0f, 0.0f };
+        root.to = Vec2{ 1.0f, 1.0f };
+        root.fillX = true;
+        root.fillY = true;
+        root.color = Vec4{ 0.14f, 0.14f, 0.18f, 0.95f };
+        root.padding = Vec2{ 10.0f, 10.0f };
+        root.scrollable = true;
+
+        WidgetElement title{};
+        title.type = WidgetElementType::Text;
+        title.id = "MeshViewer.Details.Title";
+        title.text = displayName;
+        title.font = "default.ttf";
+        title.fontSize = 16.0f;
+        title.textColor = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+        title.fillX = true;
+        title.minSize = Vec2{ 0.0f, 28.0f };
+        title.runtimeOnly = true;
+        root.children.push_back(std::move(title));
+
+        WidgetElement pathLine{};
+        pathLine.type = WidgetElementType::Text;
+        pathLine.id = "MeshViewer.Details.Path";
+        pathLine.text = "Path: " + assetPath;
+        pathLine.font = "default.ttf";
+        pathLine.fontSize = 12.0f;
+        pathLine.textColor = Vec4{ 0.7f, 0.7f, 0.75f, 1.0f };
+        pathLine.fillX = true;
+        pathLine.minSize = Vec2{ 0.0f, 20.0f };
+        pathLine.runtimeOnly = true;
+        root.children.push_back(std::move(pathLine));
+
+        WidgetElement statsLine{};
+        statsLine.type = WidgetElementType::Text;
+        statsLine.id = "MeshViewer.Details.Stats";
+        statsLine.text = "Vertices: " + std::to_string(ptr->getVertexCount())
+            + "  Indices: " + std::to_string(ptr->getIndexCount());
+        statsLine.font = "default.ttf";
+        statsLine.fontSize = 12.0f;
+        statsLine.textColor = Vec4{ 0.7f, 0.7f, 0.75f, 1.0f };
+        statsLine.fillX = true;
+        statsLine.minSize = Vec2{ 0.0f, 20.0f };
+        statsLine.runtimeOnly = true;
+        root.children.push_back(std::move(statsLine));
+
+        // --- Separator ---
+        {
+            WidgetElement sep{};
+            sep.type = WidgetElementType::Panel;
+            sep.fillX = true;
+            sep.minSize = Vec2{ 0.0f, 1.0f };
+            sep.color = Vec4{ 0.3f, 0.3f, 0.35f, 0.6f };
+            sep.runtimeOnly = true;
+            root.children.push_back(std::move(sep));
+        }
+
+        // --- Section header: Transform ---
+        {
+            WidgetElement header{};
+            header.type = WidgetElementType::Text;
+            header.text = "Transform";
+            header.font = "default.ttf";
+            header.fontSize = 13.0f;
+            header.textColor = Vec4{ 0.85f, 0.85f, 0.9f, 1.0f };
+            header.fillX = true;
+            header.minSize = Vec2{ 0.0f, 24.0f };
+            header.runtimeOnly = true;
+            root.children.push_back(std::move(header));
+        }
+
+        // Helper to create a label + entry bar row
+        const auto makeFloatRow = [&](const std::string& label, const std::string& fieldId, float value,
+            std::function<void(const std::string&)> onChange)
+        {
+            WidgetElement row{};
+            row.type = WidgetElementType::StackPanel;
+            row.fillX = true;
+            row.minSize = Vec2{ 0.0f, 26.0f };
+            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.runtimeOnly = true;
+            row.orientation = StackOrientation::Horizontal;
+
+            WidgetElement lbl{};
+            lbl.type = WidgetElementType::Text;
+            lbl.text = label;
+            lbl.font = "default.ttf";
+            lbl.fontSize = 12.0f;
+            lbl.textColor = Vec4{ 0.7f, 0.7f, 0.75f, 1.0f };
+            lbl.minSize = Vec2{ 80.0f, 26.0f };
+            lbl.textAlignV = TextAlignV::Center;
+            lbl.runtimeOnly = true;
+            row.children.push_back(std::move(lbl));
+
+            WidgetElement entry{};
+            entry.type = WidgetElementType::EntryBar;
+            entry.id = fieldId;
+            entry.value = std::to_string(value);
+            // Trim trailing zeros for cleaner display
+            if (entry.value.find('.') != std::string::npos)
+            {
+                entry.value.erase(entry.value.find_last_not_of('0') + 1, std::string::npos);
+                if (entry.value.back() == '.') entry.value.push_back('0');
+            }
+            entry.font = "default.ttf";
+            entry.fontSize = 12.0f;
+            entry.fillX = true;
+            entry.minSize = Vec2{ 60.0f, 24.0f };
+            entry.color = Vec4{ 0.1f, 0.1f, 0.13f, 1.0f };
+            entry.textColor = Vec4{ 0.9f, 0.9f, 0.92f, 1.0f };
+            entry.hoverColor = Vec4{ 0.15f, 0.15f, 0.18f, 1.0f };
+            entry.padding = Vec2{ 6.0f, 4.0f };
+            entry.isHitTestable = true;
+            entry.runtimeOnly = true;
+            entry.onValueChanged = std::move(onChange);
+            row.children.push_back(std::move(entry));
+
+            root.children.push_back(std::move(row));
+        };
+
+        // Read current scale from the mesh asset data (defaults to 1.0)
+        float scaleX = 1.0f, scaleY = 1.0f, scaleZ = 1.0f;
+        std::string currentMaterialPath;
+        {
+            auto meshAsset = assetMgr.getLoadedAssetByPath(resolvedPath);
+            if (meshAsset)
+            {
+                const auto& data = meshAsset->getData();
+                if (data.contains("m_scale") && data["m_scale"].is_array() && data["m_scale"].size() >= 3)
+                {
+                    scaleX = data["m_scale"][0].get<float>();
+                    scaleY = data["m_scale"][1].get<float>();
+                    scaleZ = data["m_scale"][2].get<float>();
+                }
+                if (data.contains("m_materialAssetPaths") && data["m_materialAssetPaths"].is_array()
+                    && !data["m_materialAssetPaths"].empty())
+                {
+                    currentMaterialPath = data["m_materialAssetPaths"][0].get<std::string>();
+                }
+            }
+        }
+
+        // Scale X/Y/Z
+        const std::string capturedResolved = resolvedPath;
+        makeFloatRow("Scale X", "MeshViewer.Details.ScaleX", scaleX,
+            [capturedResolved](const std::string& val) {
+                auto asset = AssetManager::Instance().getLoadedAssetByPath(capturedResolved);
+                if (!asset) return;
+                try {
+                    float v = std::stof(val);
+                    auto& data = asset->getData();
+                    if (!data.contains("m_scale")) data["m_scale"] = json::array({1.0f, 1.0f, 1.0f});
+                    data["m_scale"][0] = v;
+                    asset->setIsSaved(false);
+                } catch (...) {}
+            });
+        makeFloatRow("Scale Y", "MeshViewer.Details.ScaleY", scaleY,
+            [capturedResolved](const std::string& val) {
+                auto asset = AssetManager::Instance().getLoadedAssetByPath(capturedResolved);
+                if (!asset) return;
+                try {
+                    float v = std::stof(val);
+                    auto& data = asset->getData();
+                    if (!data.contains("m_scale")) data["m_scale"] = json::array({1.0f, 1.0f, 1.0f});
+                    data["m_scale"][1] = v;
+                    asset->setIsSaved(false);
+                } catch (...) {}
+            });
+        makeFloatRow("Scale Z", "MeshViewer.Details.ScaleZ", scaleZ,
+            [capturedResolved](const std::string& val) {
+                auto asset = AssetManager::Instance().getLoadedAssetByPath(capturedResolved);
+                if (!asset) return;
+                try {
+                    float v = std::stof(val);
+                    auto& data = asset->getData();
+                    if (!data.contains("m_scale")) data["m_scale"] = json::array({1.0f, 1.0f, 1.0f});
+                    data["m_scale"][2] = v;
+                    asset->setIsSaved(false);
+                } catch (...) {}
+            });
+
+        // --- Separator ---
+        {
+            WidgetElement sep{};
+            sep.type = WidgetElementType::Panel;
+            sep.fillX = true;
+            sep.minSize = Vec2{ 0.0f, 1.0f };
+            sep.color = Vec4{ 0.3f, 0.3f, 0.35f, 0.6f };
+            sep.runtimeOnly = true;
+            root.children.push_back(std::move(sep));
+        }
+
+        // --- Section header: Material ---
+        {
+            WidgetElement header{};
+            header.type = WidgetElementType::Text;
+            header.text = "Material";
+            header.font = "default.ttf";
+            header.fontSize = 13.0f;
+            header.textColor = Vec4{ 0.85f, 0.85f, 0.9f, 1.0f };
+            header.fillX = true;
+            header.minSize = Vec2{ 0.0f, 24.0f };
+            header.runtimeOnly = true;
+            root.children.push_back(std::move(header));
+        }
+
+        // Material path entry
+        {
+            WidgetElement row{};
+            row.type = WidgetElementType::StackPanel;
+            row.fillX = true;
+            row.minSize = Vec2{ 0.0f, 26.0f };
+            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.runtimeOnly = true;
+            row.orientation = StackOrientation::Horizontal;
+
+            WidgetElement lbl{};
+            lbl.type = WidgetElementType::Text;
+            lbl.text = "Path";
+            lbl.font = "default.ttf";
+            lbl.fontSize = 12.0f;
+            lbl.textColor = Vec4{ 0.7f, 0.7f, 0.75f, 1.0f };
+            lbl.minSize = Vec2{ 80.0f, 26.0f };
+            lbl.textAlignV = TextAlignV::Center;
+            lbl.runtimeOnly = true;
+            row.children.push_back(std::move(lbl));
+
+            WidgetElement entry{};
+            entry.type = WidgetElementType::EntryBar;
+            entry.id = "MeshViewer.Details.MaterialPath";
+            entry.value = currentMaterialPath;
+            entry.font = "default.ttf";
+            entry.fontSize = 12.0f;
+            entry.fillX = true;
+            entry.minSize = Vec2{ 60.0f, 24.0f };
+            entry.color = Vec4{ 0.1f, 0.1f, 0.13f, 1.0f };
+            entry.textColor = Vec4{ 0.9f, 0.9f, 0.92f, 1.0f };
+            entry.hoverColor = Vec4{ 0.15f, 0.15f, 0.18f, 1.0f };
+            entry.padding = Vec2{ 6.0f, 4.0f };
+            entry.isHitTestable = true;
+            entry.runtimeOnly = true;
+            entry.onValueChanged = [capturedResolved](const std::string& val) {
+                auto asset = AssetManager::Instance().getLoadedAssetByPath(capturedResolved);
+                if (!asset) return;
+                auto& data = asset->getData();
+                if (!data.contains("m_materialAssetPaths"))
+                    data["m_materialAssetPaths"] = json::array();
+                auto& paths = data["m_materialAssetPaths"];
+                if (paths.empty()) paths.push_back(val);
+                else paths[0] = val;
+                asset->setIsSaved(false);
+            };
+            row.children.push_back(std::move(entry));
+            root.children.push_back(std::move(row));
+        }
+
+        WidgetElement content{};
+        content.type = WidgetElementType::StackPanel;
+        content.id = "MeshViewer.Details.Content";
+        content.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        content.fillX = true;
+        content.sizeToContent = true;
+        content.padding = Vec2{ 0.0f, 4.0f };
+        content.runtimeOnly = true;
+        root.children.push_back(std::move(content));
+
+        elements.push_back(std::move(root));
+        propsWidget->setElements(std::move(elements));
+
+        // Tab-scoped: only visible/layouted when this tab is active
+        m_uiManager.registerWidget("MeshViewerDetails." + assetPath, propsWidget, assetPath);
+    }
+
+    // Switch to the new tab (handles level swap, camera save/restore)
+    setActiveTab(assetPath);
+
+    m_uiManager.markAllWidgetsDirty();
+    m_uiManager.showToastMessage(displayName + " ready", 2.5f);
+    Logger::Instance().log(Logger::Category::Rendering,
+        "Mesh viewer opened: " + assetPath, Logger::LogLevel::INFO);
+    return ptr;
+}
+
+void OpenGLRenderer::closeMeshViewer(const std::string& assetPath)
+{
+    // If this viewer's tab is active, switch back to Viewport first (handles level swap)
+    if (m_activeTabId == assetPath)
+    {
+        setActiveTab("Viewport");
+    }
+
+    // Destroy the viewer
+    auto it = m_meshViewers.find(assetPath);
+    if (it != m_meshViewers.end() && it->second)
+    {
+        it->second->destroyRuntimeLevel();
+    }
+    m_meshViewers.erase(assetPath);
+
+    // Clean up per-tab selection state
+    m_tabSelectedEntity.erase(assetPath);
+
+    // Unregister the details panel widget
+    m_uiManager.unregisterWidget("MeshViewerDetails." + assetPath);
+
+    // Remove the tab button and close button from TitleBar
+    {
+        auto* tabsStack = m_uiManager.findElementById("TitleBar.Tabs");
+        if (tabsStack)
+        {
+            const std::string tabBtnId = "TitleBar.Tab." + assetPath;
+            const std::string closeBtnId = "TitleBar.TabClose." + assetPath;
+            tabsStack->children.erase(
+                std::remove_if(tabsStack->children.begin(), tabsStack->children.end(),
+                    [&](const WidgetElement& el) { return el.id == tabBtnId || el.id == closeBtnId; }),
+                tabsStack->children.end());
+        }
+    }
+
+    // Remove the editor tab and its FBO
+    removeTab(assetPath);
+
+    m_uiManager.markAllWidgetsDirty();
+}
+
+MeshViewerWindow* OpenGLRenderer::getMeshViewer(const std::string& assetPath)
+{
+    auto it = m_meshViewers.find(assetPath);
+    return (it != m_meshViewers.end()) ? it->second.get() : nullptr;
+}
+
 void OpenGLRenderer::renderUI()
 {
     const uint64_t freq = SDL_GetPerformanceFrequency();
@@ -2023,6 +2672,9 @@ void OpenGLRenderer::renderUI()
             glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
         ensureUIShaderDefaults();
         const glm::mat4 uiProjection = glm::ortho(0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f);
+
+        struct DeferredDropDown { float x0, y0, x1, y1, fontSize; int selectedIndex; std::vector<std::string> items; Vec4 textColor, hoverColor; Vec2 padding; };
+        std::vector<DeferredDropDown> deferredDropDowns;
 
         const auto renderElement = [&](const auto& self, const WidgetElement& element,
             float parentX, float parentY, float parentW, float parentH) -> void
@@ -2600,26 +3252,61 @@ void OpenGLRenderer::renderUI()
 
                 if (element.isExpanded && !element.items.empty())
                 {
-                    const float itemHeight = std::max(20.0f, heightPx);
-                    const float dropY0 = y1;
-                    for (size_t i = 0; i < element.items.size(); ++i)
-                    {
-                        const float iy0 = dropY0 + static_cast<float>(i) * itemHeight;
-                        const float iy1 = iy0 + itemHeight;
-                        const bool isSelected = (static_cast<int>(i) == element.selectedIndex);
-                        const Vec4 itemColor = isSelected
-                            ? Vec4{ 0.22f, 0.22f, 0.28f, 0.98f }
-                            : Vec4{ 0.14f, 0.14f, 0.18f, 0.98f };
-                        drawUIPanel(x0, iy0, x1, iy1, itemColor, uiProjection, program, element.hoverColor, false);
-                        const Vec2 itemTextSize = m_textRenderer->measureText(element.items[i], scale);
-                        const float itemTextY = iy0 + (itemHeight - itemTextSize.y) * 0.5f;
-                        m_textRenderer->drawText(element.items[i], Vec2{ contentX0, itemTextY }, scale, element.textColor);
-                    }
+                    deferredDropDowns.push_back({ x0, y0, x1, y1, fontSize, element.selectedIndex, element.items, element.textColor, element.hoverColor, element.padding });
                 }
 
                 if (m_uiDebugEnabled)
                 {
                     drawUIOutline(x0, y0, x1, y1, Vec4{ 0.9f, 0.6f, 0.1f, 1.0f }, uiProjection, program);
+                }
+                return;
+            }
+            if (element.type == WidgetElementType::DropdownButton)
+            {
+                const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
+                const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);
+                const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
+                drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.hoverColor, element.isHovered);
+
+                if (!element.text.empty())
+                {
+                    const float fontSize = (element.fontSize > 0.0f) ? element.fontSize : 14.0f;
+                    const float scale = fontSize / 48.0f;
+                    const float contentX0 = x0 + element.padding.x;
+                    const float contentY0 = y0 + element.padding.y;
+                    const float contentX1 = x1 - element.padding.x;
+                    const float contentY1 = y1 - element.padding.y;
+                    const float contentW = std::max(0.0f, contentX1 - contentX0);
+                    const float contentH = std::max(0.0f, contentY1 - contentY0);
+
+                    const Vec2 textSize = m_textRenderer->measureText(element.text, scale);
+                    float textX = contentX0;
+                    float textY = contentY0 + std::max(0.0f, (contentH - textSize.y) * 0.5f);
+
+                    switch (element.textAlignH)
+                    {
+                    case TextAlignH::Center:
+                        textX = contentX0 + (contentW - textSize.x) * 0.5f;
+                        break;
+                    case TextAlignH::Right:
+                        textX = contentX1 - textSize.x;
+                        break;
+                    default:
+                        break;
+                    }
+
+                    m_textRenderer->drawText(element.text, Vec2{ textX, textY }, scale, element.textColor);
+                }
+
+                const float arrowSize = std::min(heightPx * 0.3f, 6.0f);
+                const float arrowX = x1 - element.padding.x - arrowSize;
+                const float arrowY = y0 + (heightPx - arrowSize) * 0.5f;
+                drawUIPanel(arrowX, arrowY, arrowX + arrowSize, arrowY + arrowSize,
+                    element.textColor, uiProjection, program, element.textColor, false);
+
+                if (m_uiDebugEnabled)
+                {
+                    drawUIOutline(x0, y0, x1, y1, Vec4{ 0.9f, 0.7f, 0.1f, 1.0f }, uiProjection, program);
                 }
                 return;
             }
@@ -2725,6 +3412,31 @@ void OpenGLRenderer::renderUI()
             for (const auto& element : widget->getElements())
             {
                 renderElement(renderElement, element, widgetPosition.x, widgetPosition.y, widgetSize.x, widgetSize.y);
+            }
+        }
+
+        // Deferred pass: draw expanded DropDown items on top of everything
+        for (const auto& dd : deferredDropDowns)
+        {
+            const std::string& vp = resolveUIShaderPath("", m_defaultPanelVertex);
+            const std::string& fp = resolveUIShaderPath("", m_defaultPanelFragment);
+            const GLuint prog = getUIQuadProgram(vp, fp);
+            const float scale = dd.fontSize / 48.0f;
+            const float heightPx = dd.y1 - dd.y0;
+            const float itemHeight = std::max(20.0f, heightPx);
+            const float contentX0 = dd.x0 + dd.padding.x;
+            for (size_t i = 0; i < dd.items.size(); ++i)
+            {
+                const float iy0 = dd.y1 + static_cast<float>(i) * itemHeight;
+                const float iy1 = iy0 + itemHeight;
+                const bool isSelected = (static_cast<int>(i) == dd.selectedIndex);
+                const Vec4 itemColor = isSelected
+                    ? Vec4{ 0.22f, 0.22f, 0.28f, 0.98f }
+                    : Vec4{ 0.14f, 0.14f, 0.18f, 0.98f };
+                drawUIPanel(dd.x0, iy0, dd.x1, iy1, itemColor, uiProjection, prog, dd.hoverColor, false);
+                const Vec2 itemTextSize = m_textRenderer->measureText(dd.items[i], scale);
+                const float itemTextY = iy0 + (itemHeight - itemTextSize.y) * 0.5f;
+                m_textRenderer->drawText(dd.items[i], Vec2{ contentX0, itemTextY }, scale, dd.textColor);
             }
         }
 
@@ -5065,6 +5777,103 @@ void OpenGLRenderer::setActiveTab(const std::string& id)
         return;
     }
 
+    auto& diag = DiagnosticsManager::Instance();
+    const std::string oldTabId = m_activeTabId;
+
+    // --- Level swap: leaving a mesh viewer tab → give level back to viewer ---
+    if (oldTabId != "Viewport")
+    {
+        auto viewerIt = m_meshViewers.find(oldTabId);
+        if (viewerIt != m_meshViewers.end() && viewerIt->second)
+        {
+            // Save per-tab entity selection
+            m_tabSelectedEntity[oldTabId] = m_selectedEntity;
+
+            // Save camera state into the viewer's runtime level before swapping out
+            auto returnedLevel = diag.swapActiveLevel(std::move(m_savedViewportLevel));
+            if (returnedLevel)
+            {
+                if (m_camera)
+                {
+                    returnedLevel->setEditorCameraPosition(m_camera->getPosition());
+                    returnedLevel->setEditorCameraRotation(m_camera->getRotationDegrees());
+                    returnedLevel->setHasEditorCamera(true);
+                }
+                returnedLevel->resetPreparedState();
+                viewerIt->second->giveRuntimeLevel(std::move(returnedLevel));
+            }
+        }
+    }
+    else
+    {
+        // Leaving Viewport: save the editor camera state and selection
+        m_savedViewportSelectedEntity = m_selectedEntity;
+        if (m_camera)
+        {
+            m_savedCameraPos = m_camera->getPosition();
+            m_savedCameraRot = m_camera->getRotationDegrees();
+        }
+    }
+
+    // Clear selection before switching tabs
+    m_selectedEntity = 0;
+    m_uiManager.selectEntity(0);
+
+    // --- Level swap: entering a mesh viewer tab → swap in viewer's level ---
+    if (id != "Viewport")
+    {
+        auto viewerIt = m_meshViewers.find(id);
+        if (viewerIt != m_meshViewers.end() && viewerIt->second)
+        {
+            auto viewerLevel = viewerIt->second->takeRuntimeLevel();
+            if (viewerLevel)
+            {
+                viewerLevel->resetPreparedState();
+                m_savedViewportLevel = diag.swapActiveLevel(std::move(viewerLevel));
+                if (m_savedViewportLevel)
+                {
+                    m_savedViewportLevel->resetPreparedState();
+                }
+            }
+            diag.setScenePrepared(false);
+
+            // Restore per-tab entity selection
+            auto selIt = m_tabSelectedEntity.find(id);
+            if (selIt != m_tabSelectedEntity.end())
+            {
+                m_selectedEntity = selIt->second;
+                m_uiManager.selectEntity(m_selectedEntity);
+            }
+        }
+    }
+    else
+    {
+        // Returning to Viewport: restore the saved level
+        if (m_savedViewportLevel)
+        {
+            m_savedViewportLevel->resetPreparedState();
+            auto old = diag.swapActiveLevel(std::move(m_savedViewportLevel));
+            if (old)
+            {
+                auto viewerIt = m_meshViewers.find(oldTabId);
+                if (viewerIt != m_meshViewers.end() && viewerIt->second)
+                {
+                    old->resetPreparedState();
+                    viewerIt->second->giveRuntimeLevel(std::move(old));
+                }
+            }
+            diag.setScenePrepared(false);
+        }
+        // Restore editor camera and selection
+        if (m_camera)
+        {
+            m_camera->setPosition(m_savedCameraPos);
+            m_camera->setRotationDegrees(m_savedCameraRot.x, m_savedCameraRot.y);
+        }
+        m_selectedEntity = m_savedViewportSelectedEntity;
+        m_uiManager.selectEntity(m_selectedEntity);
+    }
+
     // Snapshot the current active tab so it can be displayed as a cached image later
     for (auto& tab : m_editorTabs)
     {
@@ -5078,6 +5887,9 @@ void OpenGLRenderer::setActiveTab(const std::string& id)
             m_activeTabId = id;
         }
     }
+
+    // Update the UIManager's active tab for widget filtering
+    m_uiManager.setActiveTabId(id);
 }
 
 const std::string& OpenGLRenderer::getActiveTabId() const

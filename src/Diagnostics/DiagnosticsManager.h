@@ -110,10 +110,18 @@ public:
     void setActiveLevel(std::unique_ptr<EngineLevel> level);
     std::unique_ptr<EngineLevel> getActiveLevel();
     EngineLevel* getActiveLevelSoft();
+    std::unique_ptr<EngineLevel> swapActiveLevel(std::unique_ptr<EngineLevel> newLevel);
 	void registerActiveLevelChangedCallback(ActiveLevelChangedCallback callback);
 
     void setScenePrepared(bool prepared);
     bool isScenePrepared() const;
+
+    void invalidateEntity(unsigned int entityId);
+    std::vector<unsigned int> consumeDirtyEntities();
+    bool hasDirtyEntities() const;
+
+    void setAssetRegistryReady(bool ready);
+    bool isAssetRegistryReady() const;
 
     void setPIEActive(bool active);
     bool isPIEActive() const;
@@ -167,7 +175,9 @@ private:
     std::unique_ptr<EngineLevel> m_activeLevel;
 
     bool m_scenePrepared{ false };
+    std::unordered_set<unsigned int> m_dirtyEntities;
     bool m_pieActive{ false };
+    bool m_assetRegistryReady{ false };
 
 	bool isLoadingAsset{ false };
     bool isSavingAsset{ false };

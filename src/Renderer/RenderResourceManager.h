@@ -41,6 +41,11 @@ public:
     };
 
     std::vector<RenderableAsset> buildRenderablesForSchema(const ECS::Schema& schema, const std::string& defaultFragmentShader = "");
+
+    // Rebuild the renderable for a single entity using cached GPU resources where possible.
+    // Returns a valid RenderableAsset on success; entity==0 on failure.
+    RenderableAsset refreshEntityRenderable(ECS::Entity entity, const std::string& defaultFragmentShader = "");
+
     std::shared_ptr<OpenGLObject2D> getOrCreateObject2D(const std::shared_ptr<AssetData>& asset,
         const std::vector<std::shared_ptr<Texture>>& textures);
     std::shared_ptr<OpenGLObject3D> getOrCreateObject3D(const std::shared_ptr<AssetData>& asset,
@@ -48,11 +53,12 @@ public:
     void clearCaches();
     std::shared_ptr<OpenGLTextRenderer> prepareTextRenderer();
     void prepareAssets(const std::vector<AssetPrepKind>& kinds);
-    std::shared_ptr<Widget> buildWidgetAsset(const std::shared_ptr<AssetData>& asset);
+	std::shared_ptr<Widget> buildWidgetAsset(const std::shared_ptr<AssetData>& asset);
+	std::string resolveContentPath(const std::string& rawPath) const;
 
 private:
-    bool prepareOpenGL(EngineLevel& level);
-    bool prepareOpenGLObject2D(const std::shared_ptr<AssetData>& asset, const std::vector<std::shared_ptr<Texture>>& textures);
+	bool prepareOpenGL(EngineLevel& level);
+	bool prepareOpenGLObject2D(const std::shared_ptr<AssetData>& asset, const std::vector<std::shared_ptr<Texture>>& textures);
 	bool prepareOpenGLObject3D(const std::shared_ptr<AssetData>& asset, const std::vector<std::shared_ptr<Texture>>& textures);
 
     std::unordered_map<unsigned int, std::weak_ptr<OpenGLObject2D>> m_object2DCache;

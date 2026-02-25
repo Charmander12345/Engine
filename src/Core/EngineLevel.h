@@ -63,6 +63,9 @@ public:
 	void registerEntityListChangedCallback(std::function<void()> callback);
 	void setOnDirtyCallback(std::function<void()> callback) { m_onDirtyCallback = std::move(callback); }
 
+	// Reset the prepared state so prepareEcs() runs again on next renderWorld cycle.
+	void resetPreparedState() { m_ecsPrepared = false; }
+
 	void setEditorCameraPosition(const Vec3& pos) { m_editorCameraPosition = pos; }
 	const Vec3& getEditorCameraPosition() const { return m_editorCameraPosition; }
 	void setEditorCameraRotation(const Vec2& rot) { m_editorCameraRotation = rot; }

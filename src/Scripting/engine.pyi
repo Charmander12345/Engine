@@ -1,6 +1,6 @@
 """Engine scripting API type stubs for IntelliSense."""
 
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Top-level constants
@@ -93,6 +93,16 @@ class entity:
     @staticmethod
     def get_mesh(entity: int) -> Optional[str]:
         """Get mesh asset path for an entity."""
+        ...
+
+    @staticmethod
+    def get_light_color(entity: int) -> Optional[tuple[float, float, float]]:
+        """Get light color (r, g, b) for an entity with LightComponent."""
+        ...
+
+    @staticmethod
+    def set_light_color(entity: int, r: float, g: float, b: float) -> bool:
+        """Set light color (r, g, b) for an entity with LightComponent."""
         ...
 
 # ---------------------------------------------------------------------------
@@ -279,6 +289,66 @@ class ui:
         ...
 
 # ---------------------------------------------------------------------------
+# engine.physics
+# ---------------------------------------------------------------------------
+
+class physics:
+    @staticmethod
+    def set_velocity(entity: int, x: float, y: float, z: float) -> None:
+        """Set linear velocity of an entity with PhysicsComponent."""
+        ...
+
+    @staticmethod
+    def get_velocity(entity: int) -> Tuple[float, float, float]:
+        """Get linear velocity of an entity -> (x, y, z)."""
+        ...
+
+    @staticmethod
+    def add_force(entity: int, fx: float, fy: float, fz: float) -> None:
+        """Apply a force (divided by mass) to an entity."""
+        ...
+
+    @staticmethod
+    def add_impulse(entity: int, ix: float, iy: float, iz: float) -> None:
+        """Apply a direct velocity impulse to an entity."""
+        ...
+
+    @staticmethod
+    def set_angular_velocity(entity: int, x: float, y: float, z: float) -> None:
+        """Set angular velocity of an entity (degrees/sec)."""
+        ...
+
+    @staticmethod
+    def get_angular_velocity(entity: int) -> Tuple[float, float, float]:
+        """Get angular velocity of an entity -> (x, y, z)."""
+        ...
+
+    @staticmethod
+    def set_gravity(x: float, y: float, z: float) -> None:
+        """Set world gravity vector."""
+        ...
+
+    @staticmethod
+    def get_gravity() -> Tuple[float, float, float]:
+        """Get current world gravity -> (x, y, z)."""
+        ...
+
+    @staticmethod
+    def set_on_collision(callback: Optional[Callable]) -> None:
+        """Register a collision callback(entityA, entityB, normal, depth, point) or None to clear."""
+        ...
+
+    @staticmethod
+    def raycast(ox: float, oy: float, oz: float, dx: float, dy: float, dz: float, max_dist: float = 1000.0) -> Optional[dict]:
+        """Cast a ray and return hit dict {entity, point, normal, distance} or None."""
+        ...
+
+    @staticmethod
+    def is_body_sleeping(entity: int) -> bool:
+        """Check if an entity's physics body is sleeping."""
+        ...
+
+# ---------------------------------------------------------------------------
 # engine.camera
 # ---------------------------------------------------------------------------
 
@@ -314,6 +384,11 @@ class diagnostics:
         ...
 
     @staticmethod
+    def get_engine_time() -> float:
+        """Get seconds elapsed since engine start."""
+        ...
+
+    @staticmethod
     def get_state(key: str) -> Optional[str]:
         """Get engine state string."""
         ...
@@ -331,4 +406,237 @@ class logging:
     @staticmethod
     def log(message: str, level: int = 0) -> bool:
         """Log a message (level: 0=info, 1=warn, 2=error)."""
+        ...
+
+# ---------------------------------------------------------------------------
+# engine.math  – all computations run in C++
+# ---------------------------------------------------------------------------
+
+class math:
+    # --- Vec3 (tuple[float, float, float]) ---
+    @staticmethod
+    def vec3(x: float = 0.0, y: float = 0.0, z: float = 0.0) -> Tuple[float, float, float]:
+        """Create a Vec3 tuple."""
+        ...
+    @staticmethod
+    def vec3_add(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        """Component-wise add two Vec3."""
+        ...
+    @staticmethod
+    def vec3_sub(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        """Component-wise subtract two Vec3."""
+        ...
+    @staticmethod
+    def vec3_mul(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        """Component-wise multiply two Vec3."""
+        ...
+    @staticmethod
+    def vec3_div(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        """Component-wise divide two Vec3."""
+        ...
+    @staticmethod
+    def vec3_scale(v: Tuple[float, float, float], s: float) -> Tuple[float, float, float]:
+        """Scale Vec3 by a scalar."""
+        ...
+    @staticmethod
+    def vec3_dot(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
+        """Dot product of two Vec3."""
+        ...
+    @staticmethod
+    def vec3_cross(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        """Cross product of two Vec3."""
+        ...
+    @staticmethod
+    def vec3_length(v: Tuple[float, float, float]) -> float:
+        """Length of a Vec3."""
+        ...
+    @staticmethod
+    def vec3_length_sq(v: Tuple[float, float, float]) -> float:
+        """Squared length of a Vec3."""
+        ...
+    @staticmethod
+    def vec3_normalize(v: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        """Normalize a Vec3."""
+        ...
+    @staticmethod
+    def vec3_negate(v: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        """Negate a Vec3."""
+        ...
+    @staticmethod
+    def vec3_lerp(a: Tuple[float, float, float], b: Tuple[float, float, float], t: float) -> Tuple[float, float, float]:
+        """Linearly interpolate between two Vec3."""
+        ...
+    @staticmethod
+    def vec3_distance(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
+        """Distance between two Vec3."""
+        ...
+    @staticmethod
+    def vec3_reflect(v: Tuple[float, float, float], n: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        """Reflect Vec3 over a normal."""
+        ...
+    @staticmethod
+    def vec3_min(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        """Component-wise min of two Vec3."""
+        ...
+    @staticmethod
+    def vec3_max(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        """Component-wise max of two Vec3."""
+        ...
+
+    # --- Vec2 (tuple[float, float]) ---
+    @staticmethod
+    def vec2(x: float = 0.0, y: float = 0.0) -> Tuple[float, float]:
+        """Create a Vec2 tuple."""
+        ...
+    @staticmethod
+    def vec2_add(a: Tuple[float, float], b: Tuple[float, float]) -> Tuple[float, float]:
+        """Component-wise add two Vec2."""
+        ...
+    @staticmethod
+    def vec2_sub(a: Tuple[float, float], b: Tuple[float, float]) -> Tuple[float, float]:
+        """Component-wise subtract two Vec2."""
+        ...
+    @staticmethod
+    def vec2_scale(v: Tuple[float, float], s: float) -> Tuple[float, float]:
+        """Scale Vec2 by a scalar."""
+        ...
+    @staticmethod
+    def vec2_dot(a: Tuple[float, float], b: Tuple[float, float]) -> float:
+        """Dot product of two Vec2."""
+        ...
+    @staticmethod
+    def vec2_length(v: Tuple[float, float]) -> float:
+        """Length of a Vec2."""
+        ...
+    @staticmethod
+    def vec2_normalize(v: Tuple[float, float]) -> Tuple[float, float]:
+        """Normalize a Vec2."""
+        ...
+    @staticmethod
+    def vec2_lerp(a: Tuple[float, float], b: Tuple[float, float], t: float) -> Tuple[float, float]:
+        """Linearly interpolate between two Vec2."""
+        ...
+    @staticmethod
+    def vec2_distance(a: Tuple[float, float], b: Tuple[float, float]) -> float:
+        """Distance between two Vec2."""
+        ...
+
+    # --- Quaternion (tuple[float, float, float, float] = (x, y, z, w)) ---
+    @staticmethod
+    def quat_from_euler(pitch: float, yaw: float, roll: float) -> Tuple[float, float, float, float]:
+        """Euler (pitch,yaw,roll) radians -> quaternion (x,y,z,w)."""
+        ...
+    @staticmethod
+    def quat_to_euler(q: Tuple[float, float, float, float]) -> Tuple[float, float, float]:
+        """Quaternion -> Euler (pitch,yaw,roll) radians."""
+        ...
+    @staticmethod
+    def quat_multiply(a: Tuple[float, float, float, float], b: Tuple[float, float, float, float]) -> Tuple[float, float, float, float]:
+        """Multiply two quaternions."""
+        ...
+    @staticmethod
+    def quat_normalize(q: Tuple[float, float, float, float]) -> Tuple[float, float, float, float]:
+        """Normalize a quaternion."""
+        ...
+    @staticmethod
+    def quat_slerp(a: Tuple[float, float, float, float], b: Tuple[float, float, float, float], t: float) -> Tuple[float, float, float, float]:
+        """Slerp between two quaternions."""
+        ...
+    @staticmethod
+    def quat_inverse(q: Tuple[float, float, float, float]) -> Tuple[float, float, float, float]:
+        """Inverse of a quaternion."""
+        ...
+    @staticmethod
+    def quat_rotate_vec3(q: Tuple[float, float, float, float], v: Tuple[float, float, float]) -> Tuple[float, float, float]:
+        """Rotate a Vec3 by a quaternion."""
+        ...
+
+    # --- Scalar utilities ---
+    @staticmethod
+    def clamp(value: float, min_val: float, max_val: float) -> float:
+        """Clamp value between min and max."""
+        ...
+    @staticmethod
+    def lerp(a: float, b: float, t: float) -> float:
+        """Linearly interpolate between two scalars."""
+        ...
+    @staticmethod
+    def deg_to_rad(degrees: float) -> float:
+        """Convert degrees to radians."""
+        ...
+    @staticmethod
+    def rad_to_deg(radians: float) -> float:
+        """Convert radians to degrees."""
+        ...
+
+    # --- Trigonometric ---
+    @staticmethod
+    def sin(radians: float) -> float:
+        """Sine of angle in radians."""
+        ...
+    @staticmethod
+    def cos(radians: float) -> float:
+        """Cosine of angle in radians."""
+        ...
+    @staticmethod
+    def tan(radians: float) -> float:
+        """Tangent of angle in radians."""
+        ...
+    @staticmethod
+    def asin(value: float) -> float:
+        """Arc sine, returns radians."""
+        ...
+    @staticmethod
+    def acos(value: float) -> float:
+        """Arc cosine, returns radians."""
+        ...
+    @staticmethod
+    def atan(value: float) -> float:
+        """Arc tangent, returns radians."""
+        ...
+    @staticmethod
+    def atan2(y: float, x: float) -> float:
+        """Two-argument arc tangent (y, x), returns radians."""
+        ...
+
+    # --- Common math ---
+    @staticmethod
+    def sqrt(value: float) -> float:
+        """Square root."""
+        ...
+    @staticmethod
+    def abs(value: float) -> float:
+        """Absolute value."""
+        ...
+    @staticmethod
+    def pow(base: float, exponent: float) -> float:
+        """Raise base to exponent."""
+        ...
+    @staticmethod
+    def floor(value: float) -> float:
+        """Round down to nearest integer."""
+        ...
+    @staticmethod
+    def ceil(value: float) -> float:
+        """Round up to nearest integer."""
+        ...
+    @staticmethod
+    def round(value: float) -> float:
+        """Round to nearest integer."""
+        ...
+    @staticmethod
+    def sign(value: float) -> float:
+        """Sign of value (-1, 0, or 1)."""
+        ...
+    @staticmethod
+    def min(a: float, b: float) -> float:
+        """Minimum of two values."""
+        ...
+    @staticmethod
+    def max(a: float, b: float) -> float:
+        """Maximum of two values."""
+        ...
+    @staticmethod
+    def pi() -> float:
+        """Return the constant pi."""
         ...

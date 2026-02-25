@@ -62,6 +62,7 @@ add_subdirectory(src/Core)
 add_subdirectory(src/Renderer)
 add_subdirectory(src/Scripting)
 add_subdirectory(src/Landscape)
+add_subdirectory(src/Physics)
 
 if (NOT TARGET OpenAL::OpenAL)
     message(FATAL_ERROR "OpenAL target not available from external/openal-soft.")
@@ -83,6 +84,7 @@ target_include_directories(Engine
         ${CMAKE_SOURCE_DIR}/src/Diagnostics
         ${CMAKE_SOURCE_DIR}/src/Core
         ${CMAKE_SOURCE_DIR}/src/Landscape
+        ${CMAKE_SOURCE_DIR}/src/Physics
         ${Python3_INCLUDE_DIRS}
 )
 
@@ -96,6 +98,7 @@ target_link_libraries(Engine
         Core
         Scripting
         Landscape
+        Physics
         ${Python3_LIBRARY_RELEASE}
 )
 
@@ -154,6 +157,10 @@ add_custom_command(TARGET Engine POST_BUILD
 
     # Copy engine Content directory (textures, skyboxes, etc.) to deploy directory
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CONTENT_SOURCE_DIR}" "${ENGINE_DEPLOY_DIR}/Content"
+
+    # Copy static engine.pyi type stub to deploy directory for project distribution
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/Content/Scripting"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/src/Scripting/engine.pyi" "${ENGINE_DEPLOY_DIR}/Content/Scripting/engine.pyi"
 
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${Python3_RUNTIME_LIBRARY_RELEASE}" "${ENGINE_DEPLOY_DIR}"
 

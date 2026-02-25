@@ -122,6 +122,8 @@ public:
 	static ECSManager& Instance();
 	void initialize(const ECSConfig& config);
 
+	uint64_t getComponentVersion() const { return m_componentVersion; }
+
 	Entity createEntity();
 	bool createEntity(Entity entity);
 	bool removeEntity(Entity entity);
@@ -160,6 +162,7 @@ public:
 	static constexpr size_t MaxEntities = 10000;
 	Entity m_nextEntity{ 1 };
 	unsigned int m_maxEntities{ MaxEntities };
+	uint64_t m_componentVersion{ 0 };
 
 	std::vector<Entity> m_entities;
 	std::array<std::bitset<MaxComponentTypes>, MaxEntities> m_entityMasks{};
@@ -335,6 +338,7 @@ inline bool ECSManager::addComponent(Entity entity, const T& component)
 	}
 	storage.insert(entity, component);
 	m_entityMasks[entity].set(static_cast<size_t>(ComponentTraits<T>::kind));
+	++m_componentVersion;
 	return true;
 }
 
@@ -348,6 +352,7 @@ inline bool ECSManager::removeComponent(Entity entity)
 	}
 	storage.erase(entity);
 	m_entityMasks[entity].reset(static_cast<size_t>(ComponentTraits<T>::kind));
+	++m_componentVersion;
 	return true;
 }
 
@@ -366,6 +371,7 @@ inline bool ECSManager::setComponent(Entity entity, const T& component)
 		return false;
 	}
 	storage.get(entity) = component;
+	++m_componentVersion;
 	return true;
 }
 
