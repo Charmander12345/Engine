@@ -929,7 +929,7 @@ Große Feature-Blöcke, die noch nicht existieren:
 
 | System                            | Priorität | Beschreibung                                                                   |
 |-----------------------------------|-----------|--------------------------------------------------------------------------------|
-| **Physik-Engine**                | ✅     | Rigid-Body-Simulation: Fixed Timestep, Semi-Implicit Euler, OBB-SAT/Sphere-Kollision, Impuls-Auflösung, Gravitation. `PhysicsWorld`-Singleton, `engine.physics` Python-API |
+| **Physik-Engine**                | ✅     | Rigid-Body-Simulation: Fixed Timestep, Semi-Implicit Euler, OBB-SAT/Sphere-Kollision, 3×3 Inertia-Tensor, 4-Iterationen Sequential Impulses, Gravitation. `PhysicsWorld`-Singleton, `engine.physics` Python-API |
 | **3D-Modell-Import (Assimp)**    | ✅     | Import von OBJ, FBX, glTF, GLB, DAE, 3DS, STL, PLY, X3D via Assimp inkl. automatischer Material- und Textur-Extraktion (Diffuse, Specular, Normal; extern + eingebettet) |
 | **Entity-Hierarchie**            | Mittel    | Parent-Child-Beziehungen für Entities (kein ParentComponent im ECS)           |
 | **Entity-Kamera (Runtime)**      | ✅     | Entity-Kamera via `setActiveCameraEntity()` mit FOV/NearClip/FarClip aus CameraComponent |
@@ -961,7 +961,7 @@ Große Feature-Blöcke, die noch nicht existieren:
 | **Popup-UI Refactoring**         | ✅     | Landscape-Manager- und Engine-Settings-Popup-Erstellung aus `main.cpp` in `UIManager` verschoben (`openLandscapeManagerPopup`, `openEngineSettingsPopup`). UIManager hält jetzt einen Back-Pointer auf `OpenGLRenderer`. |
 | **Performance-Optimierungen**    | ✅     | O(1)-Asset-Lookup via `m_loadedAssetsByPath`-Index (statt O(n)-Scan), Shader-Pfad-Cache in `OpenGLObject3D`, deduplizierte Model-Matrix-Berechnung in `renderWorld()`. |
 | **Paralleles Asset-Laden**       | ✅     | Dreiphasen-Architektur: `readAssetFromDisk()` (thread-safe Disk-I/O + CPU), `finalizeAssetLoad()` (Registration), GPU-Upload. Thread-Pool mit `hardware_concurrency()` Threads + globaler Job-Queue. `loadBatchParallel()` dispatched in den Pool mit Batch-Wait (atomic counter + CV). `preloadLevelAssets()` warmed den Cache beim Scene-Prepare mit allen Mesh-, Material- und Textur-Assets. |
-| **Physik-System**                | ✅     | `PhysicsWorld`-Singleton mit Fixed Timestep (1/60s), Semi-Implicit Euler, OBB-SAT Box-Box-Kollision, OBB-aware Sphere-Box-Kollision, Impuls-basierter Auflösung (Restitution + Friction + Positional Correction 80%). Korrekte Trägheitsmomente (Box: Vollbreiten, Sphere: echter Radius). `PhysicsComponent` erweitert (Velocity, AngularVelocity, Restitution, Friction, ColliderSize). `engine.physics` Python-API (11 Funktionen). PIE-Integration (init/step/shutdown). Kollisions-Callbacks, Raycast-API, Sleep/Deactivation. Overlap-Tracking (Begin/End) mit Per-Entity-Script-Dispatch (`on_entity_begin_overlap` / `on_entity_end_overlap`). Physik läuft sofort beim PIE-Start (Akkumulator vorgeladen). |
+| **Physik-System**                | ✅     | `PhysicsWorld`-Singleton mit Fixed Timestep (1/60s), Semi-Implicit Euler, OBB-SAT Box-Box-Kollision, OBB-aware Sphere-Box-Kollision, Impuls-basierter Auflösung (4 Solver-Iterationen, Sequential Impulses, Restitution nur in 1. Iteration + Geschwindigkeitsschwelle 0.5 m/s). Voller 3×3 Inverse-Inertia-Tensor (pro-Achse Ixx/Iyy/Izz, rotiert in Weltkoordinaten). Positional Correction 40%. Linear Damping (0.999) + Angular Damping (0.98). `PhysicsComponent` erweitert (Velocity, AngularVelocity, Restitution, Friction, ColliderSize). `engine.physics` Python-API (11 Funktionen). PIE-Integration (init/step/shutdown). Kollisions-Callbacks, Raycast-API, Sleep/Deactivation. Overlap-Tracking (Begin/End) mit Per-Entity-Script-Dispatch (`on_entity_begin_overlap` / `on_entity_end_overlap`). Physik läuft sofort beim PIE-Start (Akkumulator vorgeladen). |
 
 ---
 
@@ -975,11 +975,15 @@ Große Feature-Blöcke, die noch nicht existieren:
 | Gravitation (konfigurierbar, Default 0/-9.81/0)      | ✅     |
 | Kollision: Sphere ↔ Sphere                           | ✅     |
 | Kollision: Box ↔ Box (OBB-SAT, volle Rotationsunterstützung) | ✅     |
+| Vertex-Averaging Kontaktpunkt (Face-Kontakte: Durchschnitt eindringender Vertices → korrektes Kipp-Drehmoment) | ✅ |
 | Kollision: Sphere ↔ Box (OBB-aware, Lokaltransformation) | ✅     |
-| Impuls-basierte Auflösung (Restitution)              | ✅     |
+| Impuls-basierte Auflösung (4 Solver-Iterationen, Sequential Impulses) | ✅     |
+| Restitution (nur in 1. Iteration, verhindert Energiegewinn) | ✅     |
 | Reibung (Tangential-Impuls)                           | ✅     |
-| Positional Correction (80% Penetration, Slop 0.005)  | ✅     |
-| Korrekte Trägheitsmomente (Box: Vollbreiten, Sphere: echter Radius) | ✅ |
+| Positional Correction (40% Penetration, Slop 0.005)  | ✅     |
+| Voller 3×3 Inverse-Inertia-Tensor (pro-Achse Ixx/Iyy/Izz, rotiert in Weltkoordinaten) | ✅ |
+| Restitution-Geschwindigkeitsschwelle (e=0 unter 0.5 m/s, verhindert Micro-Bouncing) | ✅ |
+| Linear Velocity Damping (0.999 pro Schritt)           | ✅     |
 | Korrekte Collider-Größen (Half-Extents nicht mehr doppelt halbiert) | ✅ |
 | Akkumulator-Loop: gatherBodies() nur einmal pro Frame | ✅     |
 | `PhysicsComponent` erweitert (Velocity, AngularVelocity, Restitution, Friction, ColliderSize) | ✅ |
@@ -997,8 +1001,7 @@ Große Feature-Blöcke, die noch nicht existieren:
 | Sofortiger Physik-Start bei PIE (Akkumulator vorgeladen) | ✅  |
 | Default-ColliderSize = 0.5 Half-Extents (passt zu Unit-Cube) | ✅ |
 | Entity-Löschung markiert Level als dirty               | ✅     |
-| Angular Damping (0.98 pro Schritt, verhindert Endlos-Rotation) | ✅ |
-| Kanten-Überhang (Top-Contact-Heuristik + Rollimpuls) | ✅     |
+| Angular Damping (0.98) + Linear Damping (0.999) pro Schritt | ✅ |
 | Mesh-Collider (Fallback → Box-AABB)                  | ⚠️     |
 | Constraints / Joints                                  | ❌     |
 | Continuous Collision Detection (CCD)                 | ❌     |

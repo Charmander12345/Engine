@@ -23,7 +23,7 @@ void PhysicsWorld::initialize()
     m_gravity[2] = 0.0f;
     m_fixedTimestep = 1.0f / 60.0f;
     m_accumulator = m_fixedTimestep;
-    m_sleepThreshold = 0.01f;
+    m_sleepThreshold = 0.05f;
     m_sleepTime = 0.5f;
     m_collisionEvents.clear();
     m_activeOverlaps.clear();
@@ -80,6 +80,7 @@ void PhysicsWorld::step(float dt)
         integrate(m_fixedTimestep);
         detectCollisions();
         resolveCollisions();
+        updateSleep(m_fixedTimestep);
         m_accumulator -= m_fixedTimestep;
     }
 
@@ -139,9 +140,9 @@ void PhysicsWorld::integrate(float ts)
         // Apply gravity
         if (b.useGravity)
         {
-            b.velocity[0] += m_gravity[0] * ts;
-            b.velocity[1] += m_gravity[1] * ts;
-            b.velocity[2] += m_gravity[2] * ts;
+            b.velocity[0] += m_gravity[0] * b.mass * ts;
+            b.velocity[1] += m_gravity[1] * b.mass * ts;
+            b.velocity[2] += m_gravity[2] * b.mass * ts;
         }
 
         // Update position
@@ -149,40 +150,22 @@ void PhysicsWorld::integrate(float ts)
         b.position[1] += b.velocity[1] * ts;
         b.position[2] += b.velocity[2] * ts;
 
+        // Linear damping (prevents hovering from micro-impulses)
+        constexpr float kLinearDamping = 0.98f;
+        b.velocity[0] *= kLinearDamping;
+        b.velocity[1] *= kLinearDamping;
+        b.velocity[2] *= kLinearDamping;
+
         // Simple angular integration (degrees)
         b.rotation[0] += b.angularVelocity[0] * ts;
         b.rotation[1] += b.angularVelocity[1] * ts;
         b.rotation[2] += b.angularVelocity[2] * ts;
 
         // Angular damping (prevents infinite spinning)
-        constexpr float kAngularDamping = 0.95f;
+        constexpr float kAngularDamping = 0.99f;
         b.angularVelocity[0] *= kAngularDamping;
         b.angularVelocity[1] *= kAngularDamping;
         b.angularVelocity[2] *= kAngularDamping;
-
-        // Sleep check
-        const float speedSq = b.velocity[0] * b.velocity[0]
-                             + b.velocity[1] * b.velocity[1]
-                             + b.velocity[2] * b.velocity[2];
-        const float angSpeedSq = b.angularVelocity[0] * b.angularVelocity[0]
-                               + b.angularVelocity[1] * b.angularVelocity[1]
-                               + b.angularVelocity[2] * b.angularVelocity[2];
-        const float threshSq = m_sleepThreshold * m_sleepThreshold;
-
-        if (speedSq < threshSq && angSpeedSq < threshSq)
-        {
-            b.sleepTimer += ts;
-            if (b.sleepTimer >= m_sleepTime)
-            {
-                b.isSleeping = true;
-                b.velocity[0] = b.velocity[1] = b.velocity[2] = 0.0f;
-                b.angularVelocity[0] = b.angularVelocity[1] = b.angularVelocity[2] = 0.0f;
-            }
-        }
-        else
-        {
-            b.sleepTimer = 0.0f;
-        }
     }
 }
 
@@ -249,6 +232,13 @@ static void vec3Cross(const float a[3], const float b[3], float out[3])
     out[2] = a[0] * b[1] - a[1] * b[0];
 }
 
+static void mat3MulVec3(const float M[3][3], const float v[3], float out[3])
+{
+    out[0] = M[0][0]*v[0] + M[0][1]*v[1] + M[0][2]*v[2];
+    out[1] = M[1][0]*v[0] + M[1][1]*v[1] + M[1][2]*v[2];
+    out[2] = M[2][0]*v[0] + M[2][1]*v[1] + M[2][2]*v[2];
+}
+
 void PhysicsWorld::detectCollisions()
 {
     m_contacts.clear();
@@ -278,33 +268,29 @@ void PhysicsWorld::detectCollisions()
 
             if (tA == 1 && tB == 1) // Sphere-Sphere
             {
-                hit = testSphereSphere(m_bodies[i], m_bodies[j], cp);
+                testSphereSphere(i, j, m_contacts);
             }
             else if (tA == 0 && tB == 0) // Box-Box (includes Mesh fallback)
             {
-                hit = testBoxBox(m_bodies[i], m_bodies[j], cp);
+                testBoxBox(i, j, m_contacts);
             }
             else if (tA == 1 && tB == 0) // Sphere-Box
             {
-                hit = testSphereBox(m_bodies[i], m_bodies[j], cp);
+                testSphereBox(i, j, m_contacts);
             }
             else if (tA == 0 && tB == 1) // Box-Sphere
             {
-                hit = testSphereBox(m_bodies[j], m_bodies[i], cp);
-                if (hit)
+                size_t startIdx = m_contacts.size();
+                testSphereBox(j, i, m_contacts);
+                // Swap so bodyA is i and bodyB is j, flip normal
+                for (size_t k = startIdx; k < m_contacts.size(); ++k)
                 {
-                    // Swap so bodyA is i and bodyB is j, flip normal
-                    cp.bodyA = i;
-                    cp.bodyB = j;
-                    cp.normal[0] = -cp.normal[0];
-                    cp.normal[1] = -cp.normal[1];
-                    cp.normal[2] = -cp.normal[2];
+                    m_contacts[k].bodyA = i;
+                    m_contacts[k].bodyB = j;
+                    m_contacts[k].normal[0] = -m_contacts[k].normal[0];
+                    m_contacts[k].normal[1] = -m_contacts[k].normal[1];
+                    m_contacts[k].normal[2] = -m_contacts[k].normal[2];
                 }
-            }
-
-            if (hit)
-            {
-                m_contacts.push_back(cp);
             }
         }
     }
@@ -312,8 +298,11 @@ void PhysicsWorld::detectCollisions()
 
 // ── Sphere-Sphere ───────────────────────────────────────────────────────
 
-bool PhysicsWorld::testSphereSphere(const RigidBody& a, const RigidBody& b, ContactPoint& out) const
+void PhysicsWorld::testSphereSphere(int bodyAIdx, int bodyBIdx, std::vector<ContactPoint>& contacts) const
 {
+    const RigidBody& a = m_bodies[bodyAIdx];
+    const RigidBody& b = m_bodies[bodyBIdx];
+
     const float rA = a.colliderSize[0] * std::max({ a.scale[0], a.scale[1], a.scale[2] });
     const float rB = b.colliderSize[0] * std::max({ b.scale[0], b.scale[1], b.scale[2] });
 
@@ -326,8 +315,11 @@ bool PhysicsWorld::testSphereSphere(const RigidBody& a, const RigidBody& b, Cont
     const float sumR = rA + rB;
 
     if (dist >= sumR || dist < 1e-8f)
-        return false;
+        return;
 
+    ContactPoint out;
+    out.bodyA = bodyAIdx;
+    out.bodyB = bodyBIdx;
     out.depth = sumR - dist;
     out.normal[0] = diff[0] / dist;
     out.normal[1] = diff[1] / dist;
@@ -336,13 +328,16 @@ bool PhysicsWorld::testSphereSphere(const RigidBody& a, const RigidBody& b, Cont
     out.contactPoint[0] = a.position[0] + out.normal[0] * rA;
     out.contactPoint[1] = a.position[1] + out.normal[1] * rA;
     out.contactPoint[2] = a.position[2] + out.normal[2] * rA;
-    return true;
+
+    contacts.push_back(out);
 }
 
 // ── OBB-OBB (Separating Axis Theorem) ───────────────────────────────────
 
-bool PhysicsWorld::testBoxBox(const RigidBody& a, const RigidBody& b, ContactPoint& out) const
+void PhysicsWorld::testBoxBox(int bodyAIdx, int bodyBIdx, std::vector<ContactPoint>& contacts) const
 {
+    const RigidBody& a = m_bodies[bodyAIdx];
+    const RigidBody& b = m_bodies[bodyBIdx];
     // Half-extents (colliderSize is already half-extents, scaled by entity scale)
     const float eA[3] = { a.colliderSize[0] * a.scale[0],
                           a.colliderSize[1] * a.scale[1],
@@ -391,17 +386,17 @@ bool PhysicsWorld::testBoxBox(const RigidBody& a, const RigidBody& b, ContactPoi
     };
 
     // --- A's 3 face normals (axes 0-2) ---
-    if (!testAxis(eA[0], eB[0]*AbsR[0][0]+eB[1]*AbsR[0][1]+eB[2]*AbsR[0][2], T[0], 0)) return false;
-    if (!testAxis(eA[1], eB[0]*AbsR[1][0]+eB[1]*AbsR[1][1]+eB[2]*AbsR[1][2], T[1], 1)) return false;
-    if (!testAxis(eA[2], eB[0]*AbsR[2][0]+eB[1]*AbsR[2][1]+eB[2]*AbsR[2][2], T[2], 2)) return false;
+    if (!testAxis(eA[0], eB[0]*AbsR[0][0]+eB[1]*AbsR[0][1]+eB[2]*AbsR[0][2], T[0], 0)) return;
+    if (!testAxis(eA[1], eB[0]*AbsR[1][0]+eB[1]*AbsR[1][1]+eB[2]*AbsR[1][2], T[1], 1)) return;
+    if (!testAxis(eA[2], eB[0]*AbsR[2][0]+eB[1]*AbsR[2][1]+eB[2]*AbsR[2][2], T[2], 2)) return;
 
     // --- B's 3 face normals (axes 3-5) ---
     if (!testAxis(eA[0]*AbsR[0][0]+eA[1]*AbsR[1][0]+eA[2]*AbsR[2][0], eB[0],
-                  T[0]*R[0][0]+T[1]*R[1][0]+T[2]*R[2][0], 3)) return false;
+                  T[0]*R[0][0]+T[1]*R[1][0]+T[2]*R[2][0], 3)) return;
     if (!testAxis(eA[0]*AbsR[0][1]+eA[1]*AbsR[1][1]+eA[2]*AbsR[2][1], eB[1],
-                  T[0]*R[0][1]+T[1]*R[1][1]+T[2]*R[2][1], 4)) return false;
+                  T[0]*R[0][1]+T[1]*R[1][1]+T[2]*R[2][1], 4)) return;
     if (!testAxis(eA[0]*AbsR[0][2]+eA[1]*AbsR[1][2]+eA[2]*AbsR[2][2], eB[2],
-                  T[0]*R[0][2]+T[1]*R[1][2]+T[2]*R[2][2], 5)) return false;
+                  T[0]*R[0][2]+T[1]*R[1][2]+T[2]*R[2][2], 5)) return;
 
     // --- 9 edge-edge cross product axes (axes 6-14) ---
     // For A_i x B_j:  i1=(i+1)%3, i2=(i+2)%3,  j1=(j+1)%3, j2=(j+2)%3
@@ -418,7 +413,7 @@ bool PhysicsWorld::testBoxBox(const RigidBody& a, const RigidBody& b, ContactPoi
             const float rb = eB[j1]*AbsR[i][j2] + eB[j2]*AbsR[i][j1];
             const float d  = T[i2]*R[i1][j] - T[i1]*R[i2][j];
             const float pen = (ra + rb) - std::abs(d);
-            if (pen <= 0.0f) return false; // separating axis found
+            if (pen <= 0.0f) return; // separating axis found
 
             // Only consider for contact normal if cross product is non-degenerate
             const float lenSq = 1.0f - R[i][j]*R[i][j];
@@ -457,23 +452,65 @@ bool PhysicsWorld::testBoxBox(const RigidBody& a, const RigidBody& b, ContactPoi
         n[0] = -n[0]; n[1] = -n[1]; n[2] = -n[2];
     }
 
-    out.depth = minPen;
-    out.normal[0] = n[0]; out.normal[1] = n[1]; out.normal[2] = n[2];
-
     // --- Compute contact point on the collision surface ---
     if (bestIdx < 3) {
-        // Contact on A's face (axis bestIdx toward B)
+        // Contact on A's face (axis fi toward B)
         const int fi = bestIdx;
         const float faceSign = (T[fi] >= 0.0f) ? 1.0f : -1.0f;
-        float localCP[3];
-        localCP[fi] = faceSign * eA[fi];
-        for (int k = 0; k < 3; ++k)
-            if (k != fi) localCP[k] = std::clamp(T[k], -eA[k], eA[k]);
-        out.contactPoint[0] = a.position[0] + RA[0][0]*localCP[0] + RA[0][1]*localCP[1] + RA[0][2]*localCP[2];
-        out.contactPoint[1] = a.position[1] + RA[1][0]*localCP[0] + RA[1][1]*localCP[1] + RA[1][2]*localCP[2];
-        out.contactPoint[2] = a.position[2] + RA[2][0]*localCP[0] + RA[2][1]*localCP[1] + RA[2][2]*localCP[2];
+
+        // A's outward face normal in world space (pointing toward B)
+        const float faceN[3] = { faceSign * RA[0][fi], faceSign * RA[1][fi], faceSign * RA[2][fi] };
+
+        // A point on A's face in world space
+        const float fP[3] = {
+            a.position[0] + faceSign * eA[fi] * RA[0][fi],
+            a.position[1] + faceSign * eA[fi] * RA[1][fi],
+            a.position[2] + faceSign * eA[fi] * RA[2][fi]
+        };
+
+        bool added = false;
+        for (int vi = 0; vi < 8; ++vi) {
+            const float s0 = (vi & 1) ? 1.0f : -1.0f;
+            const float s1 = (vi & 2) ? 1.0f : -1.0f;
+            const float s2 = (vi & 4) ? 1.0f : -1.0f;
+            const float vx = b.position[0] + s0*eB[0]*RB[0][0] + s1*eB[1]*RB[0][1] + s2*eB[2]*RB[0][2];
+            const float vy = b.position[1] + s0*eB[0]*RB[1][0] + s1*eB[1]*RB[1][1] + s2*eB[2]*RB[1][2];
+            const float vz = b.position[2] + s0*eB[0]*RB[2][0] + s1*eB[1]*RB[2][1] + s2*eB[2]*RB[2][2];
+
+            // Signed distance from face plane (negative = penetrating A)
+            const float d = (vx - fP[0])*faceN[0] + (vy - fP[1])*faceN[1] + (vz - fP[2])*faceN[2];
+            if (d < 0.01f) {
+                ContactPoint cp;
+                cp.bodyA = bodyAIdx;
+                cp.bodyB = bodyBIdx;
+                cp.normal[0] = n[0]; cp.normal[1] = n[1]; cp.normal[2] = n[2];
+                cp.depth = std::max(-d, 0.0f);
+                cp.contactPoint[0] = vx - d * faceN[0];
+                cp.contactPoint[1] = vy - d * faceN[1];
+                cp.contactPoint[2] = vz - d * faceN[2];
+                contacts.push_back(cp);
+                added = true;
+            }
+        }
+
+        if (!added) {
+            // Fallback: project B's center onto A's face
+            float localCP[3];
+            localCP[fi] = faceSign * eA[fi];
+            for (int k = 0; k < 3; ++k)
+                if (k != fi) localCP[k] = std::clamp(T[k], -eA[k], eA[k]);
+            ContactPoint cp;
+            cp.bodyA = bodyAIdx;
+            cp.bodyB = bodyBIdx;
+            cp.normal[0] = n[0]; cp.normal[1] = n[1]; cp.normal[2] = n[2];
+            cp.depth = minPen;
+            cp.contactPoint[0] = a.position[0] + RA[0][0]*localCP[0] + RA[0][1]*localCP[1] + RA[0][2]*localCP[2];
+            cp.contactPoint[1] = a.position[1] + RA[1][0]*localCP[0] + RA[1][1]*localCP[1] + RA[1][2]*localCP[2];
+            cp.contactPoint[2] = a.position[2] + RA[2][0]*localCP[0] + RA[2][1]*localCP[1] + RA[2][2]*localCP[2];
+            contacts.push_back(cp);
+        }
     } else if (bestIdx < 6) {
-        // Contact on B's face (axis bestIdx-3 toward A)
+        // Contact on B's face (axis fj toward A)
         const int fj = bestIdx - 3;
         const float localA[3] = {
             -tw[0]*RB[0][0] - tw[1]*RB[1][0] - tw[2]*RB[2][0],
@@ -481,13 +518,57 @@ bool PhysicsWorld::testBoxBox(const RigidBody& a, const RigidBody& b, ContactPoi
             -tw[0]*RB[0][2] - tw[1]*RB[1][2] - tw[2]*RB[2][2]
         };
         const float faceSign = (localA[fj] >= 0.0f) ? 1.0f : -1.0f;
-        float localCP[3];
-        localCP[fj] = faceSign * eB[fj];
-        for (int k = 0; k < 3; ++k)
-            if (k != fj) localCP[k] = std::clamp(localA[k], -eB[k], eB[k]);
-        out.contactPoint[0] = b.position[0] + RB[0][0]*localCP[0] + RB[0][1]*localCP[1] + RB[0][2]*localCP[2];
-        out.contactPoint[1] = b.position[1] + RB[1][0]*localCP[0] + RB[1][1]*localCP[1] + RB[1][2]*localCP[2];
-        out.contactPoint[2] = b.position[2] + RB[2][0]*localCP[0] + RB[2][1]*localCP[1] + RB[2][2]*localCP[2];
+
+        // B's outward face normal in world space (pointing toward A)
+        const float faceN[3] = { faceSign * RB[0][fj], faceSign * RB[1][fj], faceSign * RB[2][fj] };
+
+        // A point on B's face in world space
+        const float fP[3] = {
+            b.position[0] + faceSign * eB[fj] * RB[0][fj],
+            b.position[1] + faceSign * eB[fj] * RB[1][fj],
+            b.position[2] + faceSign * eB[fj] * RB[2][fj]
+        };
+
+        bool added = false;
+        for (int vi = 0; vi < 8; ++vi) {
+            const float s0 = (vi & 1) ? 1.0f : -1.0f;
+            const float s1 = (vi & 2) ? 1.0f : -1.0f;
+            const float s2 = (vi & 4) ? 1.0f : -1.0f;
+            const float vx = a.position[0] + s0*eA[0]*RA[0][0] + s1*eA[1]*RA[0][1] + s2*eA[2]*RA[0][2];
+            const float vy = a.position[1] + s0*eA[0]*RA[1][0] + s1*eA[1]*RA[1][1] + s2*eA[2]*RA[1][2];
+            const float vz = a.position[2] + s0*eA[0]*RA[2][0] + s1*eA[1]*RA[2][1] + s2*eA[2]*RA[2][2];
+
+            const float d = (vx - fP[0])*faceN[0] + (vy - fP[1])*faceN[1] + (vz - fP[2])*faceN[2];
+            if (d < 0.01f) {
+                ContactPoint cp;
+                cp.bodyA = bodyAIdx;
+                cp.bodyB = bodyBIdx;
+                cp.normal[0] = n[0]; cp.normal[1] = n[1]; cp.normal[2] = n[2];
+                cp.depth = std::max(-d, 0.0f);
+                cp.contactPoint[0] = vx - d * faceN[0];
+                cp.contactPoint[1] = vy - d * faceN[1];
+                cp.contactPoint[2] = vz - d * faceN[2];
+                contacts.push_back(cp);
+                added = true;
+            }
+        }
+
+        if (!added) {
+            // Fallback: project A's center onto B's face
+            float localCP[3];
+            localCP[fj] = faceSign * eB[fj];
+            for (int k = 0; k < 3; ++k)
+                if (k != fj) localCP[k] = std::clamp(localA[k], -eB[k], eB[k]);
+            ContactPoint cp;
+            cp.bodyA = bodyAIdx;
+            cp.bodyB = bodyBIdx;
+            cp.normal[0] = n[0]; cp.normal[1] = n[1]; cp.normal[2] = n[2];
+            cp.depth = minPen;
+            cp.contactPoint[0] = b.position[0] + RB[0][0]*localCP[0] + RB[0][1]*localCP[1] + RB[0][2]*localCP[2];
+            cp.contactPoint[1] = b.position[1] + RB[1][0]*localCP[0] + RB[1][1]*localCP[1] + RB[1][2]*localCP[2];
+            cp.contactPoint[2] = b.position[2] + RB[2][0]*localCP[0] + RB[2][1]*localCP[1] + RB[2][2]*localCP[2];
+            contacts.push_back(cp);
+        }
     } else {
         // Edge-edge: closest points on the two edges
         const int ei = (bestIdx - 6) / 3;
@@ -529,18 +610,24 @@ bool PhysicsWorld::testBoxBox(const RigidBody& a, const RigidBody& b, ContactPoi
             s = std::clamp((ab*bw - bb*aw) / denom, -eA[ei], eA[ei]);
             t = std::clamp((aa*bw - ab*aw) / denom, -eB[ej], eB[ej]);
         }
-        out.contactPoint[0] = 0.5f*(pA[0]+s*dA[0] + pB[0]+t*dB[0]);
-        out.contactPoint[1] = 0.5f*(pA[1]+s*dA[1] + pB[1]+t*dB[1]);
-        out.contactPoint[2] = 0.5f*(pA[2]+s*dA[2] + pB[2]+t*dB[2]);
+        ContactPoint cp;
+        cp.bodyA = bodyAIdx;
+        cp.bodyB = bodyBIdx;
+        cp.normal[0] = n[0]; cp.normal[1] = n[1]; cp.normal[2] = n[2];
+        cp.depth = minPen;
+        cp.contactPoint[0] = 0.5f*(pA[0]+s*dA[0] + pB[0]+t*dB[0]);
+        cp.contactPoint[1] = 0.5f*(pA[1]+s*dA[1] + pB[1]+t*dB[1]);
+        cp.contactPoint[2] = 0.5f*(pA[2]+s*dA[2] + pB[2]+t*dB[2]);
+        contacts.push_back(cp);
     }
-
-    return true;
 }
 
 // ── Sphere-Box (OBB-aware) ──────────────────────────────────────────────
 
-bool PhysicsWorld::testSphereBox(const RigidBody& sphere, const RigidBody& box, ContactPoint& out) const
+void PhysicsWorld::testSphereBox(int bodyAIdx, int bodyBIdx, std::vector<ContactPoint>& contacts) const
 {
+    const RigidBody& sphere = m_bodies[bodyAIdx];
+    const RigidBody& box = m_bodies[bodyBIdx];
     const float radius = sphere.colliderSize[0] * std::max({ sphere.scale[0], sphere.scale[1], sphere.scale[2] });
     const float he[3] = { box.colliderSize[0] * box.scale[0],
                           box.colliderSize[1] * box.scale[1],
@@ -572,9 +659,13 @@ bool PhysicsWorld::testSphereBox(const RigidBody& sphere, const RigidBody& box, 
     const float distSq = diff[0]*diff[0] + diff[1]*diff[1] + diff[2]*diff[2];
 
     if (distSq >= radius * radius || distSq < 1e-12f)
-        return false;
+        return;
 
     const float dist = std::sqrt(distSq);
+
+    ContactPoint out;
+    out.bodyA = bodyAIdx;
+    out.bodyB = bodyBIdx;
     out.depth = radius - dist;
 
     // Normal in local frame (from box surface toward sphere centre)
@@ -590,23 +681,120 @@ bool PhysicsWorld::testSphereBox(const RigidBody& sphere, const RigidBody& box, 
     out.contactPoint[0] = box.position[0] + R[0][0]*closest[0] + R[0][1]*closest[1] + R[0][2]*closest[2];
     out.contactPoint[1] = box.position[1] + R[1][0]*closest[0] + R[1][1]*closest[1] + R[1][2]*closest[2];
     out.contactPoint[2] = box.position[2] + R[2][0]*closest[0] + R[2][1]*closest[1] + R[2][2]*closest[2];
-    return true;
+
+    contacts.push_back(out);
 }
 
 // ── Impulse-based collision resolution ──────────────────────────────────
 
 void PhysicsWorld::resolveCollisions()
 {
+    if (m_contacts.empty()) return;
+
+    // --- Precompute world-space inverse inertia tensors for all bodies ---
+    // I_local for box: diag(Ixx, Iyy, Izz) with per-axis values
+    // I_world^{-1} = R * diag(1/Ixx, 1/Iyy, 1/Izz) * R^T
+    struct BodyInertia { float invI[3][3]{}; };
+    std::vector<BodyInertia> inertias(m_bodies.size());
+
+    for (size_t i = 0; i < m_bodies.size(); ++i)
+    {
+        const auto& rb = m_bodies[i];
+        if (rb.isStatic || rb.isKinematic || rb.mass <= 0.0f) continue;
+
+        float R[3][3];
+        mat3FromEuler(rb.rotation, R);
+
+        float invIlocal[3];
+        if (rb.colliderType == 1) // Sphere: I = (2/5) * m * r^2 (isotropic)
+        {
+            const float r = rb.colliderSize[0] * std::max({ rb.scale[0], rb.scale[1], rb.scale[2] });
+            const float I = 0.4f * rb.mass * r * r;
+            const float inv = (I > 1e-6f) ? 1.0f / I : 0.0f;
+            invIlocal[0] = invIlocal[1] = invIlocal[2] = inv;
+        }
+        else // Box: per-axis inertia
+        {
+            const float w = rb.colliderSize[0] * rb.scale[0] * 2.0f;
+            const float h = rb.colliderSize[1] * rb.scale[1] * 2.0f;
+            const float d = rb.colliderSize[2] * rb.scale[2] * 2.0f;
+            const float Ix = (1.0f / 12.0f) * rb.mass * (h * h + d * d);
+            const float Iy = (1.0f / 12.0f) * rb.mass * (w * w + d * d);
+            const float Iz = (1.0f / 12.0f) * rb.mass * (w * w + h * h);
+            invIlocal[0] = (Ix > 1e-6f) ? 1.0f / Ix : 0.0f;
+            invIlocal[1] = (Iy > 1e-6f) ? 1.0f / Iy : 0.0f;
+            invIlocal[2] = (Iz > 1e-6f) ? 1.0f / Iz : 0.0f;
+        }
+
+        auto& bi = inertias[i];
+        for (int row = 0; row < 3; ++row)
+            for (int col = 0; col < 3; ++col)
+                for (int k = 0; k < 3; ++k)
+                    bi.invI[row][col] += R[row][k] * invIlocal[k] * R[col][k];
+    }
+
+    // --- Phase 1: Wake bodies, store events ---
     for (auto& c : m_contacts)
     {
         auto& a = m_bodies[c.bodyA];
         auto& b = m_bodies[c.bodyB];
 
-        // Wake sleeping bodies on contact
         if (a.isSleeping) { a.isSleeping = false; a.sleepTimer = 0.0f; }
         if (b.isSleeping) { b.isSleeping = false; b.sleepTimer = 0.0f; }
 
-        // Store collision event
+        // Apply friction-based damping to take out acceleration/velocity on contact
+        float combinedFriction = a.friction * b.friction;
+        if (combinedFriction > 0.0f)
+        {
+            float damping = std::clamp(1.0f - (combinedFriction * 0.05f), 0.0f, 1.0f);
+            a.velocity[0] *= damping; a.velocity[1] *= damping; a.velocity[2] *= damping;
+            b.velocity[0] *= damping; b.velocity[1] *= damping; b.velocity[2] *= damping;
+            // Removed angular velocity damping so objects can tip over naturally
+        }
+
+        // Tipping assist: Calculate vector from contact point to the average of the remaining vertices.
+        // Mathematically, this direction is the same as from the contact point to the center of mass,
+        // just scaled by 8/7 (approx 1.14). We use this to apply a rotational torque and a horizontal push.
+        float grav[3] = { 0.0f, -1.0f, 0.0f };
+        float tipFactor = 50.0f * m_fixedTimestep;
+        float pushFactor = 5.0f * m_fixedTimestep;
+
+        if (!a.isStatic && !a.isKinematic) {
+            float rA[3] = { a.position[0] - c.contactPoint[0],
+                            a.position[1] - c.contactPoint[1],
+                            a.position[2] - c.contactPoint[2] };
+
+            float avgDir[3] = { rA[0] * 1.14f, rA[1] * 1.14f, rA[2] * 1.14f };
+
+            float tipTorque[3];
+            vec3Cross(avgDir, grav, tipTorque);
+            a.angularVelocity[0] += tipTorque[0] * tipFactor;
+            a.angularVelocity[1] += tipTorque[1] * tipFactor;
+            a.angularVelocity[2] += tipTorque[2] * tipFactor;
+
+            // Push the object horizontally in the direction of the remaining mass
+            a.velocity[0] += avgDir[0] * pushFactor;
+            a.velocity[2] += avgDir[2] * pushFactor;
+        }
+
+        if (!b.isStatic && !b.isKinematic) {
+            float rB[3] = { b.position[0] - c.contactPoint[0],
+                            b.position[1] - c.contactPoint[1],
+                            b.position[2] - c.contactPoint[2] };
+
+            float avgDir[3] = { rB[0] * 1.14f, rB[1] * 1.14f, rB[2] * 1.14f };
+
+            float tipTorque[3];
+            vec3Cross(avgDir, grav, tipTorque);
+            b.angularVelocity[0] += tipTorque[0] * tipFactor;
+            b.angularVelocity[1] += tipTorque[1] * tipFactor;
+            b.angularVelocity[2] += tipTorque[2] * tipFactor;
+
+            // Push the object horizontally in the direction of the remaining mass
+            b.velocity[0] += avgDir[0] * pushFactor;
+            b.velocity[2] += avgDir[2] * pushFactor;
+        }
+
         CollisionEvent ev{};
         ev.entityA = a.entity;
         ev.entityB = b.entity;
@@ -614,151 +802,247 @@ void PhysicsWorld::resolveCollisions()
         ev.depth = c.depth;
         std::memcpy(ev.contactPoint, c.contactPoint, sizeof(float) * 3);
         m_collisionEvents.push_back(ev);
+    }
+
+    // --- Phase 2: Iterative velocity resolution (sequential impulses) ---
+    constexpr int kSolverIterations = 8;
+    constexpr float deg2rad = 3.14159265f / 180.0f;
+    constexpr float rad2deg = 180.0f / 3.14159265f;
+
+    for (int iter = 0; iter < kSolverIterations; ++iter)
+    {
+        for (auto& c : m_contacts)
+        {
+            auto& a = m_bodies[c.bodyA];
+            auto& b = m_bodies[c.bodyB];
+
+            const float invMassSum = a.invMass + b.invMass;
+            if (invMassSum <= 0.0f) continue;
+
+            const auto& invIA = inertias[c.bodyA].invI;
+            const auto& invIB = inertias[c.bodyB].invI;
+
+            float rA[3] = { c.contactPoint[0] - a.position[0],
+                            c.contactPoint[1] - a.position[1],
+                            c.contactPoint[2] - a.position[2] };
+            float rB[3] = { c.contactPoint[0] - b.position[0],
+                            c.contactPoint[1] - b.position[1],
+                            c.contactPoint[2] - b.position[2] };
+
+            float wA_rad[3] = { a.angularVelocity[0] * deg2rad,
+                                a.angularVelocity[1] * deg2rad,
+                                a.angularVelocity[2] * deg2rad };
+            float wB_rad[3] = { b.angularVelocity[0] * deg2rad,
+                                b.angularVelocity[1] * deg2rad,
+                                b.angularVelocity[2] * deg2rad };
+
+            float vA_contact[3], vB_contact[3];
+            vec3Cross(wA_rad, rA, vA_contact);
+            vec3Cross(wB_rad, rB, vB_contact);
+            for (int k = 0; k < 3; ++k) {
+                vA_contact[k] += a.velocity[k];
+                vB_contact[k] += b.velocity[k];
+            }
+            float relVel[3] = { vB_contact[0] - vA_contact[0],
+                                vB_contact[1] - vA_contact[1],
+                                vB_contact[2] - vA_contact[2] };
+
+            const float velAlongNormal = vec3Dot(relVel, c.normal);
+
+            // Baumgarte stabilization to resolve penetrations with torque
+            constexpr float kSlop = 0.01f;
+            constexpr float kBiasFactor = 0.4f;
+            float biasVel = 0.0f;
+            if (c.depth > kSlop) {
+                biasVel = (kBiasFactor / m_fixedTimestep) * (c.depth - kSlop);
+            }
+
+            float targetVel = biasVel;
+            // Restitution only on first iteration; kill restitution for low-speed
+            // contacts to prevent micro-bouncing (threshold ≈ gravity * timestep)
+            constexpr float kRestitutionThreshold = 0.5f;
+            if (iter == 0 && velAlongNormal < -kRestitutionThreshold) {
+                targetVel += -std::min(a.restitution, b.restitution) * velAlongNormal;
+            }
+
+            // Angular contribution using full inverse inertia tensor
+            float rACrossN[3], rBCrossN[3];
+            vec3Cross(rA, c.normal, rACrossN);
+            vec3Cross(rB, c.normal, rBCrossN);
+
+            float invIA_rACrossN[3], invIB_rBCrossN[3];
+            mat3MulVec3(invIA, rACrossN, invIA_rACrossN);
+            mat3MulVec3(invIB, rBCrossN, invIB_rBCrossN);
+
+            const float angFactorA = vec3Dot(rACrossN, invIA_rACrossN);
+            const float angFactorB = vec3Dot(rBCrossN, invIB_rBCrossN);
+            const float denominator = invMassSum + angFactorA + angFactorB;
+            if (std::abs(denominator) < 1e-6f) continue;
+
+            float j = -(velAlongNormal - targetVel) / denominator;
+
+            // Accumulate and clamp normal impulse
+            float oldNormalImpulse = c.normalImpulse;
+            c.normalImpulse = std::max(oldNormalImpulse + j, 0.0f);
+            j = c.normalImpulse - oldNormalImpulse;
+
+            float impulse[3] = { c.normal[0] * j, c.normal[1] * j, c.normal[2] * j };
+
+            for (int k = 0; k < 3; ++k) {
+                a.velocity[k] -= impulse[k] * a.invMass;
+                b.velocity[k] += impulse[k] * b.invMass;
+            }
+
+            float torqueA[3], torqueB[3];
+            vec3Cross(rA, impulse, torqueA);
+            vec3Cross(rB, impulse, torqueB);
+
+            float deltaOmegaA[3], deltaOmegaB[3];
+            mat3MulVec3(invIA, torqueA, deltaOmegaA);
+            mat3MulVec3(invIB, torqueB, deltaOmegaB);
+
+            for (int k = 0; k < 3; ++k) {
+                a.angularVelocity[k] -= deltaOmegaA[k] * rad2deg;
+                b.angularVelocity[k] += deltaOmegaB[k] * rad2deg;
+            }
+
+            // Friction impulse (tangential)
+            // Recompute relative velocity after normal impulse
+            wA_rad[0] = a.angularVelocity[0] * deg2rad;
+            wA_rad[1] = a.angularVelocity[1] * deg2rad;
+            wA_rad[2] = a.angularVelocity[2] * deg2rad;
+            wB_rad[0] = b.angularVelocity[0] * deg2rad;
+            wB_rad[1] = b.angularVelocity[1] * deg2rad;
+            wB_rad[2] = b.angularVelocity[2] * deg2rad;
+            vec3Cross(wA_rad, rA, vA_contact);
+            vec3Cross(wB_rad, rB, vB_contact);
+            for (int k = 0; k < 3; ++k) {
+                vA_contact[k] += a.velocity[k];
+                vB_contact[k] += b.velocity[k];
+            }
+            relVel[0] = vB_contact[0] - vA_contact[0];
+            relVel[1] = vB_contact[1] - vA_contact[1];
+            relVel[2] = vB_contact[2] - vA_contact[2];
+
+            const float newVelAlongNormal = vec3Dot(relVel, c.normal);
+
+            float tangent[3] = {
+                relVel[0] - c.normal[0] * newVelAlongNormal,
+                relVel[1] - c.normal[1] * newVelAlongNormal,
+                relVel[2] - c.normal[2] * newVelAlongNormal
+            };
+            const float tangentLen = vec3Length(tangent);
+            if (tangentLen > 1e-8f)
+            {
+                tangent[0] /= tangentLen;
+                tangent[1] /= tangentLen;
+                tangent[2] /= tangentLen;
+
+                const float velAlongTangent = vec3Dot(relVel, tangent);
+
+                float rACrossT[3], rBCrossT[3];
+                vec3Cross(rA, tangent, rACrossT);
+                vec3Cross(rB, tangent, rBCrossT);
+
+                float invIA_rACrossT[3], invIB_rBCrossT[3];
+                mat3MulVec3(invIA, rACrossT, invIA_rACrossT);
+                mat3MulVec3(invIB, rBCrossT, invIB_rBCrossT);
+
+                const float angFactorTA = vec3Dot(rACrossT, invIA_rACrossT);
+                const float angFactorTB = vec3Dot(rBCrossT, invIB_rBCrossT);
+                const float frictionDenominator = invMassSum + angFactorTA + angFactorTB;
+                if (std::abs(frictionDenominator) < 1e-6f) continue;
+
+                float jt = -velAlongTangent / frictionDenominator;
+                const float mu = std::sqrt(a.friction * b.friction);
+                const float maxFriction = c.normalImpulse * mu;
+
+                float oldTangentImpulse = c.tangentImpulse;
+                c.tangentImpulse = std::clamp(oldTangentImpulse + jt, -maxFriction, maxFriction);
+                jt = c.tangentImpulse - oldTangentImpulse;
+
+                float frictionImpulse[3] = { tangent[0] * jt, tangent[1] * jt, tangent[2] * jt };
+
+                for (int k = 0; k < 3; ++k)
+                {
+                    a.velocity[k] -= frictionImpulse[k] * a.invMass;
+                    b.velocity[k] += frictionImpulse[k] * b.invMass;
+                }
+
+                vec3Cross(rA, frictionImpulse, torqueA);
+                vec3Cross(rB, frictionImpulse, torqueB);
+
+                mat3MulVec3(invIA, torqueA, deltaOmegaA);
+                mat3MulVec3(invIB, torqueB, deltaOmegaB);
+
+                for (int k = 0; k < 3; ++k)
+                {
+                    a.angularVelocity[k] -= deltaOmegaA[k] * rad2deg;
+                    b.angularVelocity[k] += deltaOmegaB[k] * rad2deg;
+                }
+            }
+        }
+    }
+
+    // --- Phase 3: Positional correction (Projection) ---
+    constexpr float kSlop = 0.01f;
+    constexpr float kPercent = 0.2f;
+    for (const auto& c : m_contacts)
+    {
+        auto& a = m_bodies[c.bodyA];
+        auto& b = m_bodies[c.bodyB];
 
         const float invMassSum = a.invMass + b.invMass;
         if (invMassSum <= 0.0f) continue;
 
-        // Positional correction (prevent sinking)
-        constexpr float kSlop = 0.005f;
-        constexpr float kCorrection = 0.8f;
-        const float corrMag = std::max(c.depth - kSlop, 0.0f) * kCorrection / invMassSum;
+        const float corrMag = std::max(c.depth - kSlop, 0.0f) * kPercent / invMassSum;
+        if (corrMag <= 0.0f) continue;
+
         for (int k = 0; k < 3; ++k)
         {
             a.position[k] -= c.normal[k] * corrMag * a.invMass;
             b.position[k] += c.normal[k] * corrMag * b.invMass;
         }
+    }
+}
 
-        // --- Rotational Impulse Calculation ---
+// ── Sleep update ────────────────────────────────────────────────────────
 
-        // Relative position vectors from CoM to contact point
-        float rA[3] = { c.contactPoint[0] - a.position[0], c.contactPoint[1] - a.position[1], c.contactPoint[2] - a.position[2] };
-        float rB[3] = { c.contactPoint[0] - b.position[0], c.contactPoint[1] - b.position[1], c.contactPoint[2] - b.position[2] };
+void PhysicsWorld::updateSleep(float ts)
+{
+    for (auto& b : m_bodies)
+    {
+        if (b.isStatic || b.isKinematic || b.isSleeping) continue;
 
-        // Angular velocity in rad/s (engine uses deg/s)
-        constexpr float deg2rad = 3.14159265f / 180.0f;
-        float wA_rad[3] = { a.angularVelocity[0] * deg2rad, a.angularVelocity[1] * deg2rad, a.angularVelocity[2] * deg2rad };
-        float wB_rad[3] = { b.angularVelocity[0] * deg2rad, b.angularVelocity[1] * deg2rad, b.angularVelocity[2] * deg2rad };
+        const float speedSq = b.velocity[0] * b.velocity[0]
+                             + b.velocity[1] * b.velocity[1]
+                             + b.velocity[2] * b.velocity[2];
+        const float angSpeedSq = b.angularVelocity[0] * b.angularVelocity[0]
+                               + b.angularVelocity[1] * b.angularVelocity[1]
+                               + b.angularVelocity[2] * b.angularVelocity[2];
+        const float threshSq = m_sleepThreshold * m_sleepThreshold;
 
-        // Relative velocity at contact point
-        float vA_contact[3], vB_contact[3];
-        vec3Cross(wA_rad, rA, vA_contact);
-        vec3Cross(wB_rad, rB, vB_contact);
-        for (int k=0; k<3; ++k) {
-            vA_contact[k] += a.velocity[k];
-            vB_contact[k] += b.velocity[k];
-        }
-        float relVel[3] = { vB_contact[0] - vA_contact[0], vB_contact[1] - vA_contact[1], vB_contact[2] - vA_contact[2] };
-        
-        const float velAlongNormal = vec3Dot(relVel, c.normal);
-
-        // Don't resolve if separating
-        if (velAlongNormal > 0.0f) continue;
-
-        // Restitution
-        const float e = std::min(a.restitution, b.restitution);
-
-        // Simplified scalar inverse inertia
-        auto getInvInertiaScalar = [](const RigidBody& rb) {
-            if (rb.isStatic || rb.isKinematic || rb.mass <= 0.0f) return 0.0f;
-
-            if (rb.colliderType == 1) // Sphere: I = (2/5) * m * r^2
-            {
-                // colliderSize[0] IS the radius for spheres
-                const float r = rb.colliderSize[0] * std::max({ rb.scale[0], rb.scale[1], rb.scale[2] });
-                const float I = 0.4f * rb.mass * r * r;
-                return (I > 1e-6f) ? 1.0f / I : 0.0f;
-            }
-            else // Box: I = (1/12) * m * (W^2 + H^2 + D^2) with full widths
-            {
-                // colliderSize is half-extents; full width = 2 * half-extent * scale
-                const float w = rb.colliderSize[0] * rb.scale[0] * 2.0f;
-                const float h = rb.colliderSize[1] * rb.scale[1] * 2.0f;
-                const float d = rb.colliderSize[2] * rb.scale[2] * 2.0f;
-                const float I = (1.0f/12.0f) * rb.mass * (w*w + h*h + d*d);
-                return (I > 1e-6f) ? 1.0f / I : 0.0f;
-            }
-        };
-        const float invInertiaA = getInvInertiaScalar(a);
-        const float invInertiaB = getInvInertiaScalar(b);
-
-        // Denominator for impulse calculation
-        float rACrossN[3], rBCrossN[3];
-        vec3Cross(rA, c.normal, rACrossN);
-        vec3Cross(rB, c.normal, rBCrossN);
-        const float angFactorA = invInertiaA * vec3Dot(rACrossN, rACrossN);
-        const float angFactorB = invInertiaB * vec3Dot(rBCrossN, rBCrossN);
-        const float denominator = invMassSum + angFactorA + angFactorB;
-        if (std::abs(denominator) < 1e-6f) continue;
-
-        // Impulse magnitude
-        const float j = -(1.0f + e) * velAlongNormal / denominator;
-        float impulse[3] = { c.normal[0] * j, c.normal[1] * j, c.normal[2] * j };
-
-        // Apply linear impulse
-        for (int k = 0; k < 3; ++k) {
-            a.velocity[k] -= impulse[k] * a.invMass;
-            b.velocity[k] += impulse[k] * b.invMass;
-        }
-
-        // Apply angular impulse
-        constexpr float rad2deg = 180.0f / 3.14159265f;
-        float torqueA[3], torqueB[3];
-        vec3Cross(rA, impulse, torqueA);
-        vec3Cross(rB, impulse, torqueB);
-        
-        a.angularVelocity[0] -= invInertiaA * torqueA[0] * rad2deg;
-        a.angularVelocity[1] -= invInertiaA * torqueA[1] * rad2deg;
-        a.angularVelocity[2] -= invInertiaA * torqueA[2] * rad2deg;
-
-        b.angularVelocity[0] += invInertiaB * torqueB[0] * rad2deg;
-        b.angularVelocity[1] += invInertiaB * torqueB[1] * rad2deg;
-        b.angularVelocity[2] += invInertiaB * torqueB[2] * rad2deg;
-
-        // Friction impulse (tangential)
-        float tangent[3] = {
-            relVel[0] - c.normal[0] * velAlongNormal,
-            relVel[1] - c.normal[1] * velAlongNormal,
-            relVel[2] - c.normal[2] * velAlongNormal
-        };
-        const float tangentLen = vec3Length(tangent);
-        if (tangentLen > 1e-8f)
+        if (speedSq < threshSq && angSpeedSq < threshSq)
         {
-            tangent[0] /= tangentLen;
-            tangent[1] /= tangentLen;
-            tangent[2] /= tangentLen;
+            // Aggressive damping when almost sleeping to prevent micro-sliding
+            b.velocity[0] *= 0.5f;
+            b.velocity[1] *= 0.5f;
+            b.velocity[2] *= 0.5f;
+            b.angularVelocity[0] *= 0.5f;
+            b.angularVelocity[1] *= 0.5f;
+            b.angularVelocity[2] *= 0.5f;
 
-            const float velAlongTangent = vec3Dot(relVel, tangent);
-
-            float rACrossT[3], rBCrossT[3];
-            vec3Cross(rA, tangent, rACrossT);
-            vec3Cross(rB, tangent, rBCrossT);
-            const float angFactorTA = invInertiaA * vec3Dot(rACrossT, rACrossT);
-            const float angFactorTB = invInertiaB * vec3Dot(rBCrossT, rBCrossT);
-            const float frictionDenominator = invMassSum + angFactorTA + angFactorTB;
-            if (std::abs(frictionDenominator) < 1e-6f) continue;
-
-            const float jt = -velAlongTangent / frictionDenominator;
-            const float mu = std::sqrt(a.friction * b.friction);
-            const float frictionJ = std::clamp(jt, -std::abs(j) * mu, std::abs(j) * mu);
-            
-            float frictionImpulse[3] = { tangent[0] * frictionJ, tangent[1] * frictionJ, tangent[2] * frictionJ };
-
-            for (int k = 0; k < 3; ++k)
+            b.sleepTimer += ts;
+            if (b.sleepTimer >= m_sleepTime)
             {
-                a.velocity[k] -= frictionImpulse[k] * a.invMass;
-                b.velocity[k] += frictionImpulse[k] * b.invMass;
+                b.isSleeping = true;
+                b.velocity[0] = b.velocity[1] = b.velocity[2] = 0.0f;
+                b.angularVelocity[0] = b.angularVelocity[1] = b.angularVelocity[2] = 0.0f;
             }
-
-            vec3Cross(rA, frictionImpulse, torqueA);
-            vec3Cross(rB, frictionImpulse, torqueB);
-
-            a.angularVelocity[0] -= invInertiaA * torqueA[0] * rad2deg;
-            a.angularVelocity[1] -= invInertiaA * torqueA[1] * rad2deg;
-            a.angularVelocity[2] -= invInertiaA * torqueA[2] * rad2deg;
-
-            b.angularVelocity[0] += invInertiaB * torqueB[0] * rad2deg;
-            b.angularVelocity[1] += invInertiaB * torqueB[1] * rad2deg;
-            b.angularVelocity[2] += invInertiaB * torqueB[2] * rad2deg;
+        }
+        else
+        {
+            b.sleepTimer = 0.0f;
         }
     }
 }

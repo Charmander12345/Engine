@@ -571,7 +571,7 @@ struct EntitySnapshot {
 | `Material`    | `MaterialComponent`  | materialAssetPath, materialAssetId               |
 | `Light`       | `LightComponent`     | type (Point/Dir/Spot), color, intensity, range, spotAngle |
 | `Camera`      | `CameraComponent`    | fov, nearClip, farClip                           |
-| `Physics`     | `PhysicsComponent`   | colliderType (Box/Sphere/Mesh), isStatic (default: false), mass, restitution, friction, useGravity, isKinematic, velocity[3], angularVelocity[3], colliderSize[3] (default: 0.5 Half-Extents). Angular Damping (0.98/Schritt) verhindert Endlos-Rotation. |
+| `Physics`     | `PhysicsComponent`   | colliderType (Box/Sphere/Mesh), isStatic (default: false), mass, restitution, friction, useGravity, isKinematic, velocity[3], angularVelocity[3], colliderSize[3] (default: 0.5 Half-Extents). Linear Damping (0.999/Schritt), Angular Damping (0.98/Schritt). Restitution-Schwelle 0.5 m/s verhindert Micro-Bouncing. |
 | `Script`      | `ScriptComponent`    | scriptPath, scriptAssetId                        |
 | `Name`        | `NameComponent`      | displayName                                      |
 
@@ -1224,9 +1224,9 @@ Eigene Rigid-Body-Physiksimulation als Singleton (`PhysicsWorld::Instance()`). W
 - **Pipeline** (pro `step(dt)`):
   1. `gatherBodies()` – Sammelt alle Entities mit `TransformComponent` + `PhysicsComponent` als `RigidBody` (einmal pro Frame, nicht pro Sub-Step)
   2. Sub-Step-Schleife (Akkumulator):
-     1. `integrate()` – Velocity + Gravitation → Position/Rotation aktualisieren; Sleep-Timer prüfen
+     1. `integrate()` – Velocity + Gravitation → Position/Rotation aktualisieren; Linear Damping (0.999/Schritt) + Angular Damping (0.98/Schritt); Sleep-Timer prüfen
      2. `detectCollisions()` – OBB-SAT (Box↔Box) / Sphere-Kollisionserkennung → `ContactPoint`-Liste
-     3. `resolveCollisions()` – Impuls-basierte Auflösung (Restitution + Friction + Positional Correction 80%); schlafende Körper werden aufgeweckt; `CollisionEvent`s gesammelt
+     3. `resolveCollisions()` – Impuls-basierte Auflösung mit vollem 3×3 Inverse-Inertia-Tensor (pro-Achse Ixx, Iyy, Izz, rotiert in Weltkoordinaten: I⁻¹_world = R·diag(1/Ixx,1/Iyy,1/Izz)·Rᵀ); 4 Solver-Iterationen (Sequential Impulses); Restitution nur in 1. Iteration; Friction + Positional Correction 80%; schlafende Körper werden aufgeweckt; `CollisionEvent`s gesammelt
   3. `writeback()` – Aktualisierte Positionen/Rotationen zurück in die ECS-`TransformComponent`
   4. `fireCollisionEvents()` – Alle gesammelten Kollisions-Events an den registrierten Callback dispatchen
 
@@ -1235,7 +1235,7 @@ Eigene Rigid-Body-Physiksimulation als Singleton (`PhysicsWorld::Instance()`). W
 | Kombination       | Erkennung                              |
 |--------------------|----------------------------------------|
 | Sphere ↔ Sphere   | Distanz < Summe der Radien             |
-| Box ↔ Box         | OBB-SAT (15-Achsen Separating Axis Theorem, volle Rotationsunterstützung) |
+| Box ↔ Box         | OBB-SAT (15-Achsen Separating Axis Theorem, volle Rotationsunterstützung, Vertex-Averaging Kontaktpunkt für Kipp-Drehmoment) |
 | Sphere ↔ Box      | Kugel-Zentrum in Box-Lokalraum transformiert → Nächster Punkt auf OBB → Distanzprüfung |
 
 ### 15.4 RigidBody-Daten
@@ -1259,9 +1259,16 @@ struct ContactPoint {
     RigidBody *a, *b;
     float normal[3], depth;
 };
-// Impuls: j = -(1+e) * vRel·n / (invMassA + invMassB)
-// Reibung: Tangential-Impuls begrenzt durch µ * |j|
-// Positional Correction: 80% der Penetrationstiefe (Slop 0.01)
+// Phase 1: Positional Correction (40%, Slop 0.005) + Event-Sammlung
+// Phase 2: 4 Solver-Iterationen (Sequential Impulses):
+//   Inverse Inertia Tensor: I⁻¹_world = R · diag(1/Ixx, 1/Iyy, 1/Izz) · Rᵀ
+//   Box: Ixx=(1/12)*m*(h²+d²), Iyy=(1/12)*m*(w²+d²), Izz=(1/12)*m*(w²+h²)
+//   Sphere: I=(2/5)*m*r² (isotrop)
+//   Impuls: j = -(1+e) * vRel·n / (invMassA + invMassB + angFactorA + angFactorB)
+//   angFactor = (r×n) · (I⁻¹_world · (r×n))
+//   Reibung: Tangential-Impuls begrenzt durch µ * |j|
+//   Restitution-Schwelle: e=0 wenn |vRel·n| < 0.5 m/s (verhindert Micro-Bouncing)
+//   Restitution nur in 1. Iteration (verhindert Energiegewinn)
 ```
 
 ### 15.6 Integration

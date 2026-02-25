@@ -108,6 +108,8 @@ private:
         float normal[3]{};   // from A to B
         float depth{ 0.0f };
         float contactPoint[3]{};
+        float normalImpulse{ 0.0f };
+        float tangentImpulse{ 0.0f };
     };
 
     // ── Simulation steps ────────────────────────────────────────────
@@ -115,12 +117,13 @@ private:
     void integrate(float ts);
     void detectCollisions();
     void resolveCollisions();
+    void updateSleep(float ts);
     void writeback();
 
     // ── Collision helpers ───────────────────────────────────────────
-    bool testSphereSphere(const RigidBody& a, const RigidBody& b, ContactPoint& out) const;
-    bool testBoxBox(const RigidBody& a, const RigidBody& b, ContactPoint& out) const;
-    bool testSphereBox(const RigidBody& sphere, const RigidBody& box, ContactPoint& out) const;
+    void testSphereSphere(int bodyAIdx, int bodyBIdx, std::vector<ContactPoint>& contacts) const;
+    void testBoxBox(int bodyAIdx, int bodyBIdx, std::vector<ContactPoint>& contacts) const;
+    void testSphereBox(int bodyAIdx, int bodyBIdx, std::vector<ContactPoint>& contacts) const;
 
     // ── Raycast helpers ─────────────────────────────────────────────
     bool rayTestBox(const float origin[3], const float dir[3], float maxDist,
