@@ -13,3 +13,6 @@
 [submodule "external/Jolt"]
 	path = external/Jolt
 	url = https://github.com/jrouwe/JoltPhysics
+[submodule "external/PhysX"]
+	path = external/PhysX
+	url = https://github.com/NVIDIA-Omniverse/PhysX.git
