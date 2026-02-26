@@ -128,48 +128,7 @@ void PhysicsWorld::gatherBodies()
     }
 }
 
-// ── Integration (semi-implicit Euler) ───────────────────────────────────
-
-void PhysicsWorld::integrate(float ts)
-{
-    for (auto& b : m_bodies)
-    {
-        if (b.isStatic || b.isKinematic) continue;
-        if (b.isSleeping) continue;
-
-        // Apply gravity
-        if (b.useGravity)
-        {
-            b.velocity[0] += m_gravity[0] * b.mass * ts;
-            b.velocity[1] += m_gravity[1] * b.mass * ts;
-            b.velocity[2] += m_gravity[2] * b.mass * ts;
-        }
-
-        // Update position
-        b.position[0] += b.velocity[0] * ts;
-        b.position[1] += b.velocity[1] * ts;
-        b.position[2] += b.velocity[2] * ts;
-
-        // Linear damping (prevents hovering from micro-impulses)
-        constexpr float kLinearDamping = 0.98f;
-        b.velocity[0] *= kLinearDamping;
-        b.velocity[1] *= kLinearDamping;
-        b.velocity[2] *= kLinearDamping;
-
-        // Simple angular integration (degrees)
-        b.rotation[0] += b.angularVelocity[0] * ts;
-        b.rotation[1] += b.angularVelocity[1] * ts;
-        b.rotation[2] += b.angularVelocity[2] * ts;
-
-        // Angular damping (prevents infinite spinning)
-        constexpr float kAngularDamping = 0.99f;
-        b.angularVelocity[0] *= kAngularDamping;
-        b.angularVelocity[1] *= kAngularDamping;
-        b.angularVelocity[2] *= kAngularDamping;
-    }
-}
-
-// ── Collision detection ─────────────────────────────────────────────────
+// ── Math Helpers ────────────────────────────────────────────────────────
 
 static float vec3Dot(const float a[3], const float b[3])
 {
@@ -213,6 +172,107 @@ static void mat3FromEuler(const float eulerDegrees[3], float R[3][3]) {
     R[2][1] = sy * sr + cy * sp * cr;
     R[2][2] = cy * cp;
 }
+
+static void eulerFromMat3(const float R[3][3], float eulerDegrees[3]) {
+    constexpr float rad2deg = 180.0f / 3.14159265f;
+    float p = std::asin(std::clamp(-R[1][2], -1.0f, 1.0f));
+    float y, r;
+    if (std::abs(R[1][2]) < 0.999999f) {
+        y = std::atan2(R[0][2], R[2][2]);
+        r = std::atan2(R[1][0], R[1][1]);
+    } else {
+        y = std::atan2(-R[2][0], R[0][0]);
+        r = 0.0f;
+    }
+    eulerDegrees[0] = p * rad2deg;
+    eulerDegrees[1] = y * rad2deg;
+    eulerDegrees[2] = r * rad2deg;
+}
+
+static void mat3FromAxisAngle(const float axis[3], float angle, float R[3][3]) {
+    float c = std::cos(angle);
+    float s = std::sin(angle);
+    float t = 1.0f - c;
+    float x = axis[0], y = axis[1], z = axis[2];
+
+    R[0][0] = t*x*x + c;
+    R[0][1] = t*x*y - s*z;
+    R[0][2] = t*x*z + s*y;
+
+    R[1][0] = t*x*y + s*z;
+    R[1][1] = t*y*y + c;
+    R[1][2] = t*y*z - s*x;
+
+    R[2][0] = t*x*z - s*y;
+    R[2][1] = t*y*z + s*x;
+    R[2][2] = t*z*z + c;
+}
+
+static void mat3Mul(const float A[3][3], const float B[3][3], float out[3][3]) {
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            out[i][j] = A[i][0]*B[0][j] + A[i][1]*B[1][j] + A[i][2]*B[2][j];
+        }
+    }
+}
+
+// ── Integration (semi-implicit Euler) ───────────────────────────────────
+
+void PhysicsWorld::integrate(float ts)
+{
+    for (auto& b : m_bodies)
+    {
+        if (b.isStatic || b.isKinematic) continue;
+        if (b.isSleeping) continue;
+
+        // Apply gravity
+        if (b.useGravity)
+        {
+            b.velocity[0] += m_gravity[0] * b.mass * ts;
+            b.velocity[1] += m_gravity[1] * b.mass * ts;
+            b.velocity[2] += m_gravity[2] * b.mass * ts;
+        }
+
+        // Update position
+        b.position[0] += b.velocity[0] * ts;
+        b.position[1] += b.velocity[1] * ts;
+        b.position[2] += b.velocity[2] * ts;
+
+        // Linear damping (prevents hovering from micro-impulses)
+        constexpr float kLinearDamping = 0.98f;
+        b.velocity[0] *= kLinearDamping;
+        b.velocity[1] *= kLinearDamping;
+        b.velocity[2] *= kLinearDamping;
+
+        // Angular integration
+        constexpr float deg2rad = 3.14159265f / 180.0f;
+        float w[3] = { b.angularVelocity[0] * deg2rad, b.angularVelocity[1] * deg2rad, b.angularVelocity[2] * deg2rad };
+        float angle = vec3Length(w) * ts;
+        if (angle > 1e-6f) {
+            float axis[3] = { w[0], w[1], w[2] };
+            vec3Normalize(axis);
+
+            float R_rot[3][3];
+            mat3FromAxisAngle(axis, angle, R_rot);
+
+            float R_current[3][3];
+            mat3FromEuler(b.rotation, R_current);
+
+            float R_new[3][3];
+            mat3Mul(R_rot, R_current, R_new);
+
+            eulerFromMat3(R_new, b.rotation);
+        }
+
+        // Angular damping (prevents infinite spinning)
+        constexpr float kAngularDamping = 0.99f;
+        b.angularVelocity[0] *= kAngularDamping;
+        b.angularVelocity[1] *= kAngularDamping;
+        b.angularVelocity[2] *= kAngularDamping;
+    }
+}
+
+// ── Collision detection ─────────────────────────────────────────────────
 
 static void computeRotatedAABB(const float halfExtents[3], const float eulerDegrees[3], float outHE[3])
 {
@@ -750,49 +810,6 @@ void PhysicsWorld::resolveCollisions()
             a.velocity[0] *= damping; a.velocity[1] *= damping; a.velocity[2] *= damping;
             b.velocity[0] *= damping; b.velocity[1] *= damping; b.velocity[2] *= damping;
             // Removed angular velocity damping so objects can tip over naturally
-        }
-
-        // Tipping assist: Calculate vector from contact point to the average of the remaining vertices.
-        // Mathematically, this direction is the same as from the contact point to the center of mass,
-        // just scaled by 8/7 (approx 1.14). We use this to apply a rotational torque and a horizontal push.
-        float grav[3] = { 0.0f, -1.0f, 0.0f };
-        float tipFactor = 50.0f * m_fixedTimestep;
-        float pushFactor = 5.0f * m_fixedTimestep;
-
-        if (!a.isStatic && !a.isKinematic) {
-            float rA[3] = { a.position[0] - c.contactPoint[0],
-                            a.position[1] - c.contactPoint[1],
-                            a.position[2] - c.contactPoint[2] };
-
-            float avgDir[3] = { rA[0] * 1.14f, rA[1] * 1.14f, rA[2] * 1.14f };
-
-            float tipTorque[3];
-            vec3Cross(avgDir, grav, tipTorque);
-            a.angularVelocity[0] += tipTorque[0] * tipFactor;
-            a.angularVelocity[1] += tipTorque[1] * tipFactor;
-            a.angularVelocity[2] += tipTorque[2] * tipFactor;
-
-            // Push the object horizontally in the direction of the remaining mass
-            a.velocity[0] += avgDir[0] * pushFactor;
-            a.velocity[2] += avgDir[2] * pushFactor;
-        }
-
-        if (!b.isStatic && !b.isKinematic) {
-            float rB[3] = { b.position[0] - c.contactPoint[0],
-                            b.position[1] - c.contactPoint[1],
-                            b.position[2] - c.contactPoint[2] };
-
-            float avgDir[3] = { rB[0] * 1.14f, rB[1] * 1.14f, rB[2] * 1.14f };
-
-            float tipTorque[3];
-            vec3Cross(avgDir, grav, tipTorque);
-            b.angularVelocity[0] += tipTorque[0] * tipFactor;
-            b.angularVelocity[1] += tipTorque[1] * tipFactor;
-            b.angularVelocity[2] += tipTorque[2] * tipFactor;
-
-            // Push the object horizontally in the direction of the remaining mass
-            b.velocity[0] += avgDir[0] * pushFactor;
-            b.velocity[2] += avgDir[2] * pushFactor;
         }
 
         CollisionEvent ev{};
