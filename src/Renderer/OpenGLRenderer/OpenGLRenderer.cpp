@@ -257,6 +257,7 @@ void OpenGLRenderer::shutdown()
     }
     releaseHzbResources();
     releaseBoundsDebugResources();
+    releaseHeightFieldDebugResources();
     releaseSkyboxResources();
     releaseShadowResources();
     releasePointShadowResources();
@@ -1189,6 +1190,9 @@ void OpenGLRenderer::renderWorld()
 	{
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 	}
+
+	// HeightField debug wireframe overlay
+	renderHeightFieldDebug(viewProj);
 
 	// Build HZB from current frame's depth buffer for next frame's occlusion tests
 	// Skip HZB when scene has few objects (overhead exceeds benefit)
@@ -3902,6 +3906,192 @@ void OpenGLRenderer::releaseBoundsDebugResources()
         m_boundsDebugVao = 0;
     }
     m_boundsDebugVertexCount = 0;
+}
+
+// ---- HeightField Debug Wireframe ----
+
+void OpenGLRenderer::rebuildHeightFieldDebugMesh()
+{
+    // Release previous mesh
+    releaseHeightFieldDebugResources();
+
+    auto& ecs = ECS::ECSManager::Instance();
+
+    // Find the first entity with a HeightFieldComponent
+    ECS::Schema hfSchema;
+    hfSchema.require<ECS::HeightFieldComponent>();
+    const auto hfEntities = ecs.getEntitiesMatchingSchema(hfSchema);
+    ECS::Entity hfEntity = hfEntities.empty() ? 0 : hfEntities.front();
+    if (hfEntity == 0)
+    {
+        return;
+    }
+
+    const auto* hfc = ecs.getComponent<ECS::HeightFieldComponent>(hfEntity);
+    if (!hfc || hfc->sampleCount < 2 || hfc->heights.empty())
+    {
+        return;
+    }
+
+    const int sc = hfc->sampleCount;
+    const auto expectedSize = static_cast<size_t>(sc) * sc;
+    if (hfc->heights.size() < expectedSize)
+    {
+        return;
+    }
+
+    // Get entity transform offset
+    glm::vec3 entityOffset(0.0f);
+    if (const auto* tc = ecs.getComponent<ECS::TransformComponent>(hfEntity))
+    {
+        entityOffset = glm::vec3(tc->position[0], tc->position[1], tc->position[2]);
+    }
+
+    // Build world-space vertex positions from HeightFieldComponent data
+    const int vertexCount = sc * sc;
+    std::vector<float> vertices;
+    vertices.reserve(static_cast<size_t>(vertexCount) * 3);
+
+    for (int r = 0; r < sc; ++r)
+    {
+        for (int c = 0; c < sc; ++c)
+        {
+            const float x = hfc->offsetX + static_cast<float>(c) * hfc->scaleX + entityOffset.x;
+            const float y = hfc->heights[r * sc + c] * hfc->scaleY + hfc->offsetY + entityOffset.y;
+            const float z = hfc->offsetZ + static_cast<float>(r) * hfc->scaleZ + entityOffset.z;
+            vertices.push_back(x);
+            vertices.push_back(y);
+            vertices.push_back(z);
+        }
+    }
+
+    // Build line indices: horizontal + vertical grid lines
+    std::vector<GLuint> indices;
+    indices.reserve(static_cast<size_t>((sc - 1) * sc * 2 + sc * (sc - 1) * 2));
+
+    // Horizontal lines (along columns for each row)
+    for (int r = 0; r < sc; ++r)
+    {
+        for (int c = 0; c < sc - 1; ++c)
+        {
+            indices.push_back(static_cast<GLuint>(r * sc + c));
+            indices.push_back(static_cast<GLuint>(r * sc + c + 1));
+        }
+    }
+    // Vertical lines (along rows for each column)
+    for (int c = 0; c < sc; ++c)
+    {
+        for (int r = 0; r < sc - 1; ++r)
+        {
+            indices.push_back(static_cast<GLuint>(r * sc + c));
+            indices.push_back(static_cast<GLuint>((r + 1) * sc + c));
+        }
+    }
+
+    if (indices.empty())
+    {
+        return;
+    }
+
+    glGenVertexArrays(1, &m_hfDebugVao);
+    glGenBuffers(1, &m_hfDebugVbo);
+    glGenBuffers(1, &m_hfDebugIbo);
+
+    glBindVertexArray(m_hfDebugVao);
+
+    glBindBuffer(GL_ARRAY_BUFFER, m_hfDebugVbo);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), reinterpret_cast<void*>(0));
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_hfDebugIbo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(GLuint), indices.data(), GL_STATIC_DRAW);
+
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    m_hfDebugIndexCount = static_cast<GLsizei>(indices.size());
+    m_hfDebugVersion = ecs.getComponentVersion();
+}
+
+void OpenGLRenderer::renderHeightFieldDebug(const glm::mat4& viewProj)
+{
+    if (!m_hfDebugEnabled)
+    {
+        return;
+    }
+
+    // Rebuild mesh when ECS data changes
+    auto& ecs = ECS::ECSManager::Instance();
+    if (m_hfDebugVao == 0 || ecs.getComponentVersion() != m_hfDebugVersion)
+    {
+        rebuildHeightFieldDebugMesh();
+    }
+
+    if (m_hfDebugVao == 0 || m_hfDebugIndexCount == 0)
+    {
+        return;
+    }
+
+    // Reuse the bounds debug shader program
+    if (!ensureBoundsDebugResources())
+    {
+        return;
+    }
+
+    const GLboolean cullWasEnabled = glIsEnabled(GL_CULL_FACE);
+    glDisable(GL_CULL_FACE);
+
+    glUseProgram(m_boundsDebugProgram);
+    glBindVertexArray(m_hfDebugVao);
+
+    // Identity model matrix – vertices are already in world space
+    const glm::mat4 identity(1.0f);
+
+    const GLint viewProjLoc = glGetUniformLocation(m_boundsDebugProgram, "uViewProj");
+    if (viewProjLoc >= 0)
+    {
+        glUniformMatrix4fv(viewProjLoc, 1, GL_FALSE, &viewProj[0][0]);
+    }
+    const GLint modelLoc = glGetUniformLocation(m_boundsDebugProgram, "uModel");
+    if (modelLoc >= 0)
+    {
+        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, &identity[0][0]);
+    }
+    const GLint colorLoc = glGetUniformLocation(m_boundsDebugProgram, "uColor");
+    if (colorLoc >= 0)
+    {
+        glUniform4f(colorLoc, 0.1f, 0.85f, 0.3f, 1.0f); // green wireframe
+    }
+
+    glDrawElements(GL_LINES, m_hfDebugIndexCount, GL_UNSIGNED_INT, nullptr);
+
+    glBindVertexArray(0);
+    glUseProgram(0);
+    if (cullWasEnabled)
+    {
+        glEnable(GL_CULL_FACE);
+    }
+}
+
+void OpenGLRenderer::releaseHeightFieldDebugResources()
+{
+    if (m_hfDebugIbo)
+    {
+        glDeleteBuffers(1, &m_hfDebugIbo);
+        m_hfDebugIbo = 0;
+    }
+    if (m_hfDebugVbo)
+    {
+        glDeleteBuffers(1, &m_hfDebugVbo);
+        m_hfDebugVbo = 0;
+    }
+    if (m_hfDebugVao)
+    {
+        glDeleteVertexArrays(1, &m_hfDebugVao);
+        m_hfDebugVao = 0;
+    }
+    m_hfDebugIndexCount = 0;
 }
 
 // ---- Skybox ----

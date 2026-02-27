@@ -186,7 +186,7 @@
 | Level-Daten (JSON-basiert)               | ✅     |
 | ECS-Vorbereitung (prepareEcs)           | ✅     |
 | Entity-Serialisierung (JSON ↔ ECS)      | ✅     |
-| Alle 8 Komponentenarten serialisierbar  | ✅     |
+| Alle 10 Komponentenarten serialisierbar (inkl. HeightFieldComponent) | ✅ |
 | Script-Entity-Cache                      | ✅     |
 | Objekt-Registrierung + Gruppen          | ✅     |
 | Instancing (enable/disable)             | ✅     |
@@ -208,7 +208,7 @@
 | Feature                                 | Status |
 |-----------------------------------------|--------|
 | Entity-Erzeugung / -Löschung           | ✅     |
-| 8 Komponentenarten                     | ✅     |
+| 10 Komponentenarten                    | ✅     |
 | SparseSet-Speicherung (O(1)-Zugriff)   | ✅     |
 | Schema-basierte Abfragen               | ✅     |
 | Bitmasken-System                        | ✅     |
@@ -221,6 +221,8 @@
 | PhysicsComponent (vollständig: Collider, Mass, Restitution, Friction, Velocity, AngularVelocity, ColliderSize) | ✅     |
 | ScriptComponent                         | ✅     |
 | NameComponent                           | ✅     |
+| CollisionComponent (Box/Sphere/Capsule/Cylinder/HeightField) | ✅ |
+| HeightFieldComponent (Höhendaten, Skalierung, Offsets) | ✅ |
 | Dirty-Flagging (m_componentVersion)     | ✅     |
 | Physik-Simulation (Kollision, Dynamik) | ✅     |
 | Hierarchie (Parent-Child-Entities)     | ❌     |
@@ -281,7 +283,7 @@
 | HZB Occlusion Culling (Mip-Pyramid)      | ✅     |
 | PBO-basierter Async-Readback              | ✅     |
 | Entity-Picking (Pick-FBO + Farbcodierung) | ✅     |
-| Entity-Löschen (Entf-Taste)               | ✅     |
+| Entity-Löschen (Entf-Taste + Undo/Redo)          | ✅     |
 | Screen-to-World (Depth-Buffer Unproject)  | ✅     |
 | Selection-Outline (Edge-Detection)        | ✅     |
 | GPU Timer Queries (Triple-Buffered)       | ✅     |
@@ -289,6 +291,7 @@
 | Metriken-Overlay (F10)                    | ✅     |
 | Occlusion-Stats (F9)                      | ✅     |
 | Bounds-Debug (F8)                         | ✅     |
+| HeightField Debug Wireframe (Engine Settings) | ✅     |
 | UI-Debug-Rahmen (F11)                     | ✅     |
 | FPS-Cap (F12)                             | ✅     |
 | Custom Window Hit-Test (Resize/Drag, konfigurierbarer Button-Bereich links/rechts) | ✅     |
@@ -544,7 +547,7 @@
 | TitleBar (100px: HorizonEngine-Titel + Projektname + Min/Max/Close rechts, Tab-Leiste unten) | ✅ |
 | Toolbar / ViewportOverlay (Select/Move/Rotate/Scale + PIE + Settings) | ✅ |
 | Settings-Button → Dropdown-Menü → "Engine Settings" | ✅ |
-| Engine Settings Popup (Sidebar + Content, Kategorien: Rendering, Debug) | ✅ |
+| Engine Settings Popup (Sidebar + Content, Kategorien: General, Rendering, Debug, Physics) | ✅ |
 | Dropdown-Menü-System (`showDropdownMenu` / `closeDropdownMenu`) | ✅ |
 | WorldSettings   | ✅     |
 | WorldOutliner   | ✅     |
@@ -670,6 +673,9 @@
   - `onChanged`-Callback: Feuert nach jedem push/undo/redo → markiert aktives Level als dirty, refresht StatusBar
   - `clear()` feuert NICHT `onChanged` (nach Speichern soll Level nicht erneut dirty werden)
   - Gizmo-Integration: `beginGizmoDrag` snapshoted die alte TransformComponent, `endGizmoDrag` pusht Command mit old/new Transform
+  - Entity-Löschen (DELETE): Vollständiger Snapshot aller 10 Komponentenarten (`std::make_optional`) vor Löschung. Undo erstellt Entity mit derselben ID (`ecs.createEntity(entity)`) und stellt alle Komponenten wieder her.
+  - Entity-Spawn (Drag-and-Drop Model3D auf Viewport): Undo entfernt die gespawnte Entity aus Level und ECS (`level->onEntityRemoved()` + `ecs.removeEntity()`).
+  - Landscape-Erstellung: Undo entfernt die Landscape-Entity aus Level und ECS.
   - Tastenkürzel: Ctrl+Z (Undo), Ctrl+Y (Redo), Ctrl+S (Save All)
   - StatusBar-Buttons rufen `undo()` / `redo()` auf
   - Undo-History wird beim Speichern gecleared (`UndoRedoManager::clear()`)
@@ -731,9 +737,10 @@
 | Fenstergröße dynamisch (refreshSize)             | ✅ |
 | Docking / Snapping                               | ❌ |
 | Mehrere Popups gleichzeitig                      | ✅ |
-| Engine Settings Popup (Sidebar-Layout, Kategorien, Rendering+Debug) | ✅ |
+| Engine Settings Popup (Sidebar-Layout, Kategorien: General, Rendering, Debug, Physics) | ✅ |
 | Dropdown-Menü als Overlay-Widget (z-Order 9000, Click-Outside-Dismiss) | ✅ |
-| Engine Settings Persistenz via `config.ini` (Shadows, Occlusion, Debug, VSync, Wireframe) | ✅ |
+| Engine Settings Persistenz via `config.ini` (Shadows, Occlusion, Debug, VSync, Wireframe, Physics, HeightField Debug) | ✅ |
+| Physics-Kategorie (Gravity X/Y/Z, Fixed Timestep, Sleep Threshold) | ✅ |
 | VSync Toggle (Engine Settings → Rendering → Display) | ✅ |
 | Wireframe Mode (Engine Settings → Rendering → Display) | ✅ |
 | Absolute Widget-Positionierung (`setAbsolutePosition`) | ✅ |
@@ -798,20 +805,23 @@
 | Vertex-Format: x, y, z, u, v (5 Floats)          | ✅ |
 | Mesh als `.asset`-JSON in `Content/Landscape/` speichern | ✅ |
 | Asset über `AssetManager::loadAsset()` registrieren | ✅ |
-| ECS-Entity mit Transform + Mesh + Name + Physics (static Box) | ✅ |
+| ECS-Entity mit Transform + Mesh + Name + Material (WorldGrid) + CollisionComponent (HeightField) + HeightFieldComponent + PhysicsComponent (Static) | ✅ |
 | Level-Dirty-Flag + Outliner-Refresh nach Spawn   | ✅ |
+| Landscape-Erstellung Undo/Redo-Action            | ✅ |
 | Grid-Shader mit vollem Lighting (Multi-Light, Schatten) | ✅ |
 | Landscape Manager Popup (via `TitleBar.Menu.Tools`) | ✅ |
 | Popup-UI: Name, Width, Depth, Subdiv X, Subdiv Z, Create/Cancel | ✅ |
 | Nur ein Landscape pro Szene (Popup blockiert bei existierendem) | ✅ |
+| HeightField Debug Wireframe (grünes Gitter-Overlay im Viewport) | ✅ |
 | Höhenkarte (Heightmap)                            | ❌ |
 | Landscape-Material / Textur-Blending             | ❌ |
 | LOD-System für Landscape                         | ❌ |
-| Statischer Box-Collider für Landscape (Half-Extents = halbe Breite/Tiefe) | ✅ |
+| HeightField-Collider für Landscape (Jolt HeightFieldShape aus Höhendaten) | ✅ |
 | Terrain-Sculpting im Editor                      | ❌ |
 
 **Offene Punkte:**
-- Aktuell nur flache Ebene – keine Höhenkarte
+- Aktuell nur flache Ebene – keine Höhenkarte (HeightField-Collider ist vorbereitet, Höhendaten standardmäßig 0)
+- HeightField Debug Wireframe: Rendert das HeightField-Kollisionsgitter als grünes Wireframe-Overlay im Viewport (Engine Settings → Debug → HeightField Debug). Automatischer Rebuild bei ECS-Änderungen via `getComponentVersion()`. Nutzt den bestehenden `boundsDebugProgram`-Shader.
 - Für große Terrains empfiehlt sich später LOD + Streaming
 
 ---
@@ -929,7 +939,8 @@ Große Feature-Blöcke, die noch nicht existieren:
 
 | System                            | Priorität | Beschreibung                                                                   |
 |-----------------------------------|-----------|--------------------------------------------------------------------------------|
-| **Physik-Engine**                | ✅     | Rigid-Body-Simulation: Fixed Timestep, Semi-Implicit Euler, OBB-SAT/Sphere-Kollision, 3×3 Inertia-Tensor, 4-Iterationen Sequential Impulses, Gravitation. `PhysicsWorld`-Singleton, `engine.physics` Python-API |
+| **Physik-Engine (Jolt)**         | ✅     | Jolt Physics v5.5.1 Backend: Fixed Timestep, Box/Sphere-Kollision, Constraint-Solving, Sleep, Raycast. `PhysicsWorld`-Singleton, `engine.physics` Python-API |
+| **Physik-Engine (PhysX)**        | ✅     | NVIDIA PhysX 5.6.1 Backend (optional, `ENGINE_PHYSX_BACKEND`): Box/Sphere/Capsule/Cylinder/HeightField-Collider, Kontakt-Callbacks, Raycast, Sleep. Statische Libs, DLL-CRT, `/WX-` Override. |
 | **3D-Modell-Import (Assimp)**    | ✅     | Import von OBJ, FBX, glTF, GLB, DAE, 3DS, STL, PLY, X3D via Assimp inkl. automatischer Material- und Textur-Extraktion (Diffuse, Specular, Normal; extern + eingebettet) |
 | **Entity-Hierarchie**            | Mittel    | Parent-Child-Beziehungen für Entities (kein ParentComponent im ECS)           |
 | **Entity-Kamera (Runtime)**      | ✅     | Entity-Kamera via `setActiveCameraEntity()` mit FOV/NearClip/FarClip aus CameraComponent |
@@ -938,7 +949,7 @@ Große Feature-Blöcke, die noch nicht existieren:
 | **Cascaded Shadow Maps**         | Mittel    | CSM für Directional Lights (aktuell feste ortho-Projektion, kein Cascading)  |
 | **Skeletal Animation**           | Mittel    | Bone-System, Skinning, Animation-Blending                                    |
 | **Cubemap / Skybox**            | Mittel    | Umgebungstexturen für Himmel                                                  |
-| **Drag & Drop (Editor)**        | ✅     | Model3D→Spawn (Depth-Raycast), Material/Script→Apply (pickEntityAtImmediate), Asset-Move mit tiefem Referenz-Scan aller .asset-Dateien, Entf zum Löschen, EntityDetails Drop-Zones mit Typ-Validierung |
+| **Drag & Drop (Editor)**        | ✅     | Model3D→Spawn (Depth-Raycast + Undo/Redo), Material/Script→Apply (pickEntityAtImmediate), Asset-Move mit tiefem Referenz-Scan aller .asset-Dateien, Entf zum Löschen (mit Undo/Redo), EntityDetails Drop-Zones mit Typ-Validierung |
 | **Asset Rename (Editor)**       | ✅     | Rename-Button in Content-Browser PathBar (aktiv bei selektiertem Asset) + F2-Tastenkürzel. Inline-EntryBar im Grid-Tile zum Eingeben des neuen Namens. `AssetManager::renameAsset()` benennt Datei + Source-File um, aktualisiert Registry (Name/Pfad/Index), geladene AssetData, ECS-Komponenten (Mesh/Material/Script) und scannt Cross-Asset-Referenzen in .asset-Dateien. Escape bricht ab. |
 | **Audio-Formate (OGG/MP3)**     | Niedrig   | Weitere Audio-Formate unterstützen (aktuell nur WAV)                         |
 | **3D-Audio (Positional)**       | Niedrig   | OpenAL-Listener-/Source-Positionierung nutzen                                |
@@ -954,64 +965,84 @@ Große Feature-Blöcke, die noch nicht existieren:
 
 | System                            | Status | Beschreibung                                                                   |
 |-----------------------------------|--------|--------------------------------------------------------------------------------|
-| **Undo/Redo**                    | ✅     | Command-Pattern für Editor-Aktionen (UndoRedoManager-Singleton, Ctrl+Z/Y, StatusBar-Buttons) |
+| **Undo/Redo**                    | ✅     | Command-Pattern für Editor-Aktionen (UndoRedoManager-Singleton, Ctrl+Z/Y, StatusBar-Buttons). Entity-Löschen (DELETE) mit vollständigem Komponenten-Snapshot, Entity-Spawn (Drag-and-Drop) und Landscape-Erstellung erzeugen Undo/Redo-Actions |
 | **Editor-Gizmos**               | ✅     | Translate/Rotate/Scale-Gizmos für Entity-Manipulation (W/E/R Shortcuts)      |
 | **Shadow Mapping (Dir/Spot)**    | ✅     | Multi-Light Shadow Maps für bis zu 4 Directional/Spot Lights, 5×5 PCF       |
 | **Shadow Mapping (Point Lights)**| ✅     | Omnidirektionale Cube-Map Shadows für bis zu 4 Point Lights via Geometry-Shader |
 | **Popup-UI Refactoring**         | ✅     | Landscape-Manager- und Engine-Settings-Popup-Erstellung aus `main.cpp` in `UIManager` verschoben (`openLandscapeManagerPopup`, `openEngineSettingsPopup`). UIManager hält jetzt einen Back-Pointer auf `OpenGLRenderer`. |
 | **Performance-Optimierungen**    | ✅     | O(1)-Asset-Lookup via `m_loadedAssetsByPath`-Index (statt O(n)-Scan), Shader-Pfad-Cache in `OpenGLObject3D`, deduplizierte Model-Matrix-Berechnung in `renderWorld()`. |
 | **Paralleles Asset-Laden**       | ✅     | Dreiphasen-Architektur: `readAssetFromDisk()` (thread-safe Disk-I/O + CPU), `finalizeAssetLoad()` (Registration), GPU-Upload. Thread-Pool mit `hardware_concurrency()` Threads + globaler Job-Queue. `loadBatchParallel()` dispatched in den Pool mit Batch-Wait (atomic counter + CV). `preloadLevelAssets()` warmed den Cache beim Scene-Prepare mit allen Mesh-, Material- und Textur-Assets. |
-| **Physik-System**                | ✅     | `PhysicsWorld`-Singleton mit Fixed Timestep (1/60s), Semi-Implicit Euler, OBB-SAT Box-Box-Kollision, OBB-aware Sphere-Box-Kollision, Impuls-basierter Auflösung (4 Solver-Iterationen, Sequential Impulses, Restitution nur in 1. Iteration + Geschwindigkeitsschwelle 0.5 m/s). Voller 3×3 Inverse-Inertia-Tensor (pro-Achse Ixx/Iyy/Izz, rotiert in Weltkoordinaten). Positional Correction 40%. Linear Damping (0.999) + Angular Damping (0.98). `PhysicsComponent` erweitert (Velocity, AngularVelocity, Restitution, Friction, ColliderSize). `engine.physics` Python-API (11 Funktionen). PIE-Integration (init/step/shutdown). Kollisions-Callbacks, Raycast-API, Sleep/Deactivation. Overlap-Tracking (Begin/End) mit Per-Entity-Script-Dispatch (`on_entity_begin_overlap` / `on_entity_end_overlap`). Physik läuft sofort beim PIE-Start (Akkumulator vorgeladen). |
+| **Physik-System (Jolt)**         | ✅     | `PhysicsWorld`-Singleton mit Backend-Abstraktion (`IPhysicsBackend`). `JoltBackend` (Jolt Physics v5.5.1). Zwei ECS-Komponenten: `CollisionComponent` + `PhysicsComponent`. BodyDesc/BodyState für backend-agnostische Body-Verwaltung. ECS↔Backend-Sync in PhysicsWorld, alle Jolt-spezifischen Typen in JoltBackend isoliert. |
+| **Physik-System (PhysX)**        | ✅     | `PhysXBackend` (NVIDIA PhysX 5.6.1, `external/PhysX/`). Optional via `ENGINE_PHYSX_BACKEND` CMake-Option. Kontakt-Callbacks (`SimCallbackImpl`), Euler↔Quat-Konvertierung, PVD-Support. `PhysicsWorld::Backend`-Enum (Jolt/PhysX) für Backend-Auswahl bei `initialize()`. |
 
 ---
 
-## 24. Physik-System
+## 24. Physik-System (Jolt Physics / PhysX)
 
 | Feature                                               | Status |
 |-------------------------------------------------------|--------|
-| `PhysicsWorld`-Singleton (`src/Physics/PhysicsWorld.h/.cpp`) | ✅ |
+| **Backend-Abstraktion (`IPhysicsBackend`-Interface)** | ✅     |
+| **Backend: Jolt Physics v5.5.1** (`JoltBackend`, `external/jolt/`) | ✅ |
+| **Backend: NVIDIA PhysX 5.6.1** (`PhysXBackend`, `external/PhysX/`) | ✅ |
+| `PhysicsWorld`-Singleton (backend-agnostisch, `src/Physics/PhysicsWorld.h/.cpp`) | ✅ |
+| `PhysicsWorld::Backend`-Enum (Jolt/PhysX) + `initialize(Backend)` | ✅ |
+| `IPhysicsBackend`-Interface (`src/Physics/IPhysicsBackend.h`) | ✅ |
+| `JoltBackend`-Implementierung (`src/Physics/JoltBackend.h/.cpp`) | ✅ |
+| `PhysXBackend`-Implementierung (`src/Physics/PhysXBackend.h/.cpp`) | ✅ |
+| `BodyDesc`-Struct (backend-agnostische Body-Erstellung) | ✅ |
+| `BodyState`-Struct (backend-agnostischer Body-Readback) | ✅ |
 | Fixed Timestep (1/60 s, Akkumulator)                 | ✅     |
-| Semi-Implicit Euler Integration                       | ✅     |
 | Gravitation (konfigurierbar, Default 0/-9.81/0)      | ✅     |
-| Kollision: Sphere ↔ Sphere                           | ✅     |
-| Kollision: Box ↔ Box (OBB-SAT, volle Rotationsunterstützung) | ✅     |
-| Vertex-Averaging Kontaktpunkt (Face-Kontakte: Durchschnitt eindringender Vertices → korrektes Kipp-Drehmoment) | ✅ |
-| Kollision: Sphere ↔ Box (OBB-aware, Lokaltransformation) | ✅     |
-| Impuls-basierte Auflösung (4 Solver-Iterationen, Sequential Impulses) | ✅     |
-| Restitution (nur in 1. Iteration, verhindert Energiegewinn) | ✅     |
-| Reibung (Tangential-Impuls)                           | ✅     |
-| Positional Correction (40% Penetration, Slop 0.005)  | ✅     |
-| Voller 3×3 Inverse-Inertia-Tensor (pro-Achse Ixx/Iyy/Izz, rotiert in Weltkoordinaten) | ✅ |
-| Restitution-Geschwindigkeitsschwelle (e=0 unter 0.5 m/s, verhindert Micro-Bouncing) | ✅ |
-| Linear Velocity Damping (0.999 pro Schritt)           | ✅     |
-| Korrekte Collider-Größen (Half-Extents nicht mehr doppelt halbiert) | ✅ |
-| Akkumulator-Loop: gatherBodies() nur einmal pro Frame | ✅     |
-| `PhysicsComponent` erweitert (Velocity, AngularVelocity, Restitution, Friction, ColliderSize) | ✅ |
-| ECS-Serialisierung aller neuen Felder                | ✅     |
-| PIE-Integration (init/step/shutdown)                 | ✅     |
-| EntityDetails UI (alle Komponentenfelder editierbar: DropDown, CheckBox, Vec3, Float, ColorPicker) | ✅     |
-| `engine.physics` Python-API (11 Funktionen)          | ✅     |
-| `engine.pyi` Stubs aktualisiert                      | ✅     |
-| CMake: `Physics` STATIC-Bibliothek                   | ✅     |
+| **Komponenten-Split: `CollisionComponent` + `PhysicsComponent`** | ✅ |
+| `CollisionComponent`: Form, Oberfläche, Sensor       | ✅     |
+| `PhysicsComponent`: Dynamik (optional, Default=Static)| ✅     |
+| Collider: Box, Sphere, Capsule, Cylinder, HeightField | ✅    |
+| Collider-Offset                                       | ✅     |
+| Sensor/Trigger-Volumes (`isSensor`)                   | ✅     |
+| MotionType (Static/Kinematic/Dynamic)                 | ✅     |
+| GravityFactor (pro Body)                              | ✅     |
+| LinearDamping / AngularDamping                        | ✅     |
+| MaxLinearVelocity / MaxAngularVelocity                | ✅     |
+| MotionQuality: Discrete / LinearCast (CCD)            | ✅     |
+| AllowSleeping (pro Body)                              | ✅     |
+| ECS↔Backend Synchronisation (`syncBodiesToBackend`/`syncBodiesFromBackend`) | ✅ |
+| Dynamische Body-Erzeugung/-Löschung pro Frame        | ✅     |
 | Kollisions-Callbacks (`setCollisionCallback`, `CollisionEvent`) | ✅ |
-| Raycast-API (`raycast`, Ray-AABB, Ray-Sphere)        | ✅     |
-| Sleep/Deactivation für ruhende Körper                | ✅     |
+| Raycast (delegiert an Backend)                        | ✅     |
+| Sleep/Deactivation                                    | ✅     |
 | Overlap-Tracking (Begin/End pro Frame)               | ✅     |
 | Per-Entity Overlap-Script-Callbacks (`on_entity_begin_overlap` / `on_entity_end_overlap`) | ✅ |
-| Sofortiger Physik-Start bei PIE (Akkumulator vorgeladen) | ✅  |
-| Default-ColliderSize = 0.5 Half-Extents (passt zu Unit-Cube) | ✅ |
-| Entity-Löschung markiert Level als dirty               | ✅     |
-| Angular Damping (0.98) + Linear Damping (0.999) pro Schritt | ✅ |
-| Mesh-Collider (Fallback → Box-AABB)                  | ⚠️     |
-| Constraints / Joints                                  | ❌     |
-| Continuous Collision Detection (CCD)                 | ❌     |
-| Broad-Phase (Spatial Hashing / BVH)                  | ❌     |
+| ECS-Serialisierung (Collision + Physics + HeightField separat) | ✅ |
+| Backward-Kompatibilität (`deserializeLegacyPhysics`) | ✅     |
+| Editor-UI: Collision-Sektion (Dropdown inkl. HeightField, Size, Offset, Sensor) | ✅ |
+| Editor-UI: Physics-Sektion (MotionType, Damping, CCD, etc.) | ✅ |
+| Engine Settings: Physics-Backend-Dropdown (Jolt / PhysX)   | ✅ |
+| PIE-Integration (init/step/shutdown)                 | ✅     |
+| `engine.physics` Python-API (11 Funktionen)          | ✅     |
+| `engine.pyi` Stubs + `Component_Collision` Konstante | ✅     |
+| CMake: `Physics` SHARED-Bibliothek (linkt Jolt + optional PhysX) | ✅ |
+| CMake: `ENGINE_PHYSX_BACKEND` Option + `ENGINE_PHYSX_BACKEND_AVAILABLE` Define | ✅ |
+| PhysX: Statische Libs, DLL-CRT-Override (`/MDd`/`/MD`), `/WX-` Override | ✅ |
+| PhysX: Stub-freeglut für PUBLIC_RELEASE-Build                 | ✅     |
+| PhysX: PxFoundation/PxPhysics/PxScene/PxPvd Lifecycle         | ✅     |
+| PhysX: Kontakt-Callbacks (`SimCallbackImpl`, `PxSimulationEventCallback`) | ✅ |
+| Euler↔Quaternion (Y·X·Z Rotationsreihenfolge)        | ✅     |
+| Jolt JobSystemThreadPool (multi-threaded Solver)     | ✅     |
+| Mesh-Collider (Fallback → Box)                       | ⚠️     |
+| PhysX-Backend                                         | ✅     |
+| Jolt Constraints / Joints                             | ❌     |
+| Mesh-Shape (Triangle-Mesh via Jolt `MeshShape`)      | ❌     |
+| Convex-Hull-Collider                                  | ❌     |
 
 **Offene Punkte:**
-- Mesh-Collider fällt aktuell auf Box-AABB zurück (kein Triangle-Mesh-Test)
-- Keine Constraints oder Joints (Gelenke, Federn)
-- Keine Continuous Collision Detection (Tunneling bei hohen Geschwindigkeiten möglich)
-- Keine Broad-Phase-Optimierung (O(n²) Paarweise Prüfung)
+- Backend-Abstraktion abgeschlossen: `IPhysicsBackend`-Interface mit `BodyDesc`/`BodyState`/`CollisionEventData`/`RaycastResult`-Structs. `PhysicsWorld` delegiert an `m_backend`. Zwei Backends: `JoltBackend` (Jolt 5.5.1) und `PhysXBackend` (PhysX 5.6.1). Backend-Auswahl über `PhysicsWorld::initialize(Backend)`.
+- Engine Settings enthält ein Physics-Backend-Dropdown (Jolt / PhysX) unter der Physics-Kategorie. Die Auswahl wird in `DiagnosticsManager` persistiert (`PhysicsBackend`-Key) und beim PIE-Start ausgelesen, um das gewählte Backend zu initialisieren. PhysX-Option erscheint nur wenn `ENGINE_PHYSX_BACKEND_AVAILABLE` gesetzt ist.
+- PhysX-Backend ist optional (`ENGINE_PHYSX_BACKEND` CMake-Option). Wenn `external/PhysX` nicht vorhanden ist, wird nur Jolt gebaut. Conditional compile via `ENGINE_PHYSX_BACKEND_AVAILABLE` Define.
+- PhysX-Integration erfordert CRT-Override (DLL-Runtime `/MD(d)`) und `/WX-` für alle PhysX-Targets, da PhysX `CMAKE_CXX_FLAGS` wholesale ersetzt und `/WX` (Warnings-as-Errors) verwendet.
+- Mesh-Collider (Typ 4) fällt aktuell auf Box zurück – Jolt `MeshShape`/`ConvexHullShape` noch nicht integriert
+- Keine Jolt-Constraints/Joints genutzt (Gelenke, Federn, etc.)
+- **Bugfix: PhysX HeightField Fall-Through** – `PhysXBackend::createBody()` behandelte `heightSampleCount` fälschlich als Gesamtzahl (√N), obwohl es die Per-Side-Anzahl ist. Zusätzlich fehlte die Anwendung des HeightField-Offsets als Shape-Local-Pose und Row/Column-Scales waren vertauscht. Behoben: Direktverwendung von `heightSampleCount`, Offset als `setLocalPose`, korrektes Scale-Mapping (Row=Z, Column=X).
+- **Bugfix: Jolt HeightField Stuck** – Jolt erfordert `sampleCount = 2^n + 1` (z.B. 3, 5, 9, 17). Der LandscapeManager erzeugte `sampleCount = gridSize + 1 = 4`, was Jolts `HeightFieldShapeSettings::Create()` zum Fehler veranlasste und ein winziges BoxShape-Fallback einsetzte. Behoben: (1) `JoltBackend` resampled per bilinearer Interpolation auf den nächsten gültigen Count, (2) `LandscapeManager` rundet gridSize auf die nächste Zweierpotenz auf.
 
 ---
 

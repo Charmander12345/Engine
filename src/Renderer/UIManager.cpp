@@ -2019,15 +2019,16 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
         });
     }
 
-    if (const auto* physics = ecs.getComponent<ECS::PhysicsComponent>(entity))
+    // ── Collision Component ──────────────────────────────────────────────
+    if (const auto* collision = ecs.getComponent<ECS::CollisionComponent>(entity))
     {
         std::vector<WidgetElement> lines;
 
         // Collider Type dropdown
         {
-            int currentIdx = static_cast<int>(physics->colliderType);
+            int currentIdx = static_cast<int>(collision->colliderType);
             DropDownWidget colliderDropdown;
-            colliderDropdown.setItems({ "Box", "Sphere", "Mesh" });
+            colliderDropdown.setItems({ "Box", "Sphere", "Capsule", "Cylinder", "Mesh", "HeightField" });
             colliderDropdown.setSelectedIndex(currentIdx);
             colliderDropdown.setFont("default.ttf");
             colliderDropdown.setFontSize(12.0f);
@@ -2035,11 +2036,11 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             colliderDropdown.setPadding(Vec2{ 6.0f, 3.0f });
             colliderDropdown.setOnSelectionChanged([entity](int idx) {
                 auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
+                if (auto* comp = ecs.getComponent<ECS::CollisionComponent>(entity))
                 {
-                    ECS::PhysicsComponent updated = *comp;
-                    updated.colliderType = static_cast<ECS::PhysicsComponent::ColliderType>(idx);
-                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
+                    ECS::CollisionComponent updated = *comp;
+                    updated.colliderType = static_cast<ECS::CollisionComponent::ColliderType>(idx);
+                    ecs.setComponent<ECS::CollisionComponent>(entity, updated);
                 }
                 if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
             });
@@ -2059,56 +2060,122 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             row.children.push_back(std::move(lbl));
 
             WidgetElement ddEl = colliderDropdown.toElement();
-            ddEl.id = "Details.Physics.Collider";
+            ddEl.id = "Details.Collision.Collider";
             ddEl.fillX = true;
             ddEl.runtimeOnly = true;
             row.children.push_back(std::move(ddEl));
             lines.push_back(std::move(row));
         }
 
-        lines.push_back(makeVec3Row("Details.Physics.ColliderSize", "Collider Size", physics->colliderSize,
+        lines.push_back(makeVec3Row("Details.Collision.Size", "Size", collision->colliderSize,
             [entity](int axis, float val) {
                 auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
+                if (auto* comp = ecs.getComponent<ECS::CollisionComponent>(entity))
                 {
-                    ECS::PhysicsComponent updated = *comp;
+                    ECS::CollisionComponent updated = *comp;
                     updated.colliderSize[axis] = val;
-                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
+                    ecs.setComponent<ECS::CollisionComponent>(entity, updated);
                 }
             }));
 
-        lines.push_back(makeCheckBoxRow("Details.Physics.Static", "Static", physics->isStatic,
+        lines.push_back(makeVec3Row("Details.Collision.Offset", "Offset", collision->colliderOffset,
+            [entity](int axis, float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::CollisionComponent>(entity))
+                {
+                    ECS::CollisionComponent updated = *comp;
+                    updated.colliderOffset[axis] = val;
+                    ecs.setComponent<ECS::CollisionComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Collision.Restitution", "Restitution", collision->restitution,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::CollisionComponent>(entity))
+                {
+                    ECS::CollisionComponent updated = *comp;
+                    updated.restitution = val;
+                    ecs.setComponent<ECS::CollisionComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Collision.Friction", "Friction", collision->friction,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::CollisionComponent>(entity))
+                {
+                    ECS::CollisionComponent updated = *comp;
+                    updated.friction = val;
+                    ecs.setComponent<ECS::CollisionComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeCheckBoxRow("Details.Collision.Sensor", "Is Sensor", collision->isSensor,
             [entity](bool val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::CollisionComponent>(entity))
+                {
+                    ECS::CollisionComponent updated = *comp;
+                    updated.isSensor = val;
+                    ecs.setComponent<ECS::CollisionComponent>(entity, updated);
+                }
+            }));
+
+        addSeparator("Collision", lines, [this, entity]() {
+            ECS::ECSManager::Instance().removeComponent<ECS::CollisionComponent>(entity);
+            if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            populateOutlinerDetails(entity);
+        });
+    }
+
+    // ── Physics Component ────────────────────────────────────────────────
+    if (const auto* physics = ecs.getComponent<ECS::PhysicsComponent>(entity))
+    {
+        std::vector<WidgetElement> lines;
+
+        // Motion Type dropdown
+        {
+            int currentIdx = static_cast<int>(physics->motionType);
+            DropDownWidget motionDropdown;
+            motionDropdown.setItems({ "Static", "Kinematic", "Dynamic" });
+            motionDropdown.setSelectedIndex(currentIdx);
+            motionDropdown.setFont("default.ttf");
+            motionDropdown.setFontSize(12.0f);
+            motionDropdown.setMinSize(Vec2{ 0.0f, 22.0f });
+            motionDropdown.setPadding(Vec2{ 6.0f, 3.0f });
+            motionDropdown.setOnSelectionChanged([entity](int idx) {
                 auto& ecs = ECS::ECSManager::Instance();
                 if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
                 {
                     ECS::PhysicsComponent updated = *comp;
-                    updated.isStatic = val;
+                    updated.motionType = static_cast<ECS::PhysicsComponent::MotionType>(idx);
                     ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
                 }
-            }));
+                if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            });
 
-        lines.push_back(makeCheckBoxRow("Details.Physics.Kinematic", "Kinematic", physics->isKinematic,
-            [entity](bool val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
-                {
-                    ECS::PhysicsComponent updated = *comp;
-                    updated.isKinematic = val;
-                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
-                }
-            }));
+            WidgetElement row{};
+            row.type = WidgetElementType::StackPanel;
+            row.orientation = StackOrientation::Horizontal;
+            row.fillX = true;
+            row.sizeToContent = true;
+            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.padding = Vec2{ 0.0f, 1.0f };
+            row.runtimeOnly = true;
 
-        lines.push_back(makeCheckBoxRow("Details.Physics.Gravity", "Use Gravity", physics->useGravity,
-            [entity](bool val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
-                {
-                    ECS::PhysicsComponent updated = *comp;
-                    updated.useGravity = val;
-                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
-                }
-            }));
+            WidgetElement lbl = makeTextLine("Motion Type");
+            lbl.minSize = Vec2{ 90.0f, 20.0f };
+            lbl.fillX = false;
+            row.children.push_back(std::move(lbl));
+
+            WidgetElement ddEl = motionDropdown.toElement();
+            ddEl.id = "Details.Physics.MotionType";
+            ddEl.fillX = true;
+            ddEl.runtimeOnly = true;
+            row.children.push_back(std::move(ddEl));
+            lines.push_back(std::move(row));
+        }
 
         lines.push_back(makeFloatEntry("Details.Physics.Mass", "Mass", physics->mass,
             [entity](float val) {
@@ -2121,24 +2188,111 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
                 }
             }));
 
-        lines.push_back(makeFloatEntry("Details.Physics.Restitution", "Restitution", physics->restitution,
+        lines.push_back(makeFloatEntry("Details.Physics.GravityFactor", "Gravity Factor", physics->gravityFactor,
             [entity](float val) {
                 auto& ecs = ECS::ECSManager::Instance();
                 if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
                 {
                     ECS::PhysicsComponent updated = *comp;
-                    updated.restitution = val;
+                    updated.gravityFactor = val;
                     ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
                 }
             }));
 
-        lines.push_back(makeFloatEntry("Details.Physics.Friction", "Friction", physics->friction,
+        lines.push_back(makeFloatEntry("Details.Physics.LinearDamping", "Linear Damping", physics->linearDamping,
             [entity](float val) {
                 auto& ecs = ECS::ECSManager::Instance();
                 if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
                 {
                     ECS::PhysicsComponent updated = *comp;
-                    updated.friction = val;
+                    updated.linearDamping = val;
+                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Physics.AngularDamping", "Angular Damping", physics->angularDamping,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
+                {
+                    ECS::PhysicsComponent updated = *comp;
+                    updated.angularDamping = val;
+                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Physics.MaxLinVel", "Max Linear Vel", physics->maxLinearVelocity,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
+                {
+                    ECS::PhysicsComponent updated = *comp;
+                    updated.maxLinearVelocity = val;
+                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Physics.MaxAngVel", "Max Angular Vel", physics->maxAngularVelocity,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
+                {
+                    ECS::PhysicsComponent updated = *comp;
+                    updated.maxAngularVelocity = val;
+                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
+                }
+            }));
+
+        // Motion Quality dropdown
+        {
+            int currentIdx = static_cast<int>(physics->motionQuality);
+            DropDownWidget mqDropdown;
+            mqDropdown.setItems({ "Discrete", "LinearCast (CCD)" });
+            mqDropdown.setSelectedIndex(currentIdx);
+            mqDropdown.setFont("default.ttf");
+            mqDropdown.setFontSize(12.0f);
+            mqDropdown.setMinSize(Vec2{ 0.0f, 22.0f });
+            mqDropdown.setPadding(Vec2{ 6.0f, 3.0f });
+            mqDropdown.setOnSelectionChanged([entity](int idx) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
+                {
+                    ECS::PhysicsComponent updated = *comp;
+                    updated.motionQuality = static_cast<ECS::PhysicsComponent::MotionQuality>(idx);
+                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
+                }
+                if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            });
+
+            WidgetElement row{};
+            row.type = WidgetElementType::StackPanel;
+            row.orientation = StackOrientation::Horizontal;
+            row.fillX = true;
+            row.sizeToContent = true;
+            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.padding = Vec2{ 0.0f, 1.0f };
+            row.runtimeOnly = true;
+
+            WidgetElement lbl = makeTextLine("Motion Quality");
+            lbl.minSize = Vec2{ 90.0f, 20.0f };
+            lbl.fillX = false;
+            row.children.push_back(std::move(lbl));
+
+            WidgetElement ddEl = mqDropdown.toElement();
+            ddEl.id = "Details.Physics.MotionQuality";
+            ddEl.fillX = true;
+            ddEl.runtimeOnly = true;
+            row.children.push_back(std::move(ddEl));
+            lines.push_back(std::move(row));
+        }
+
+        lines.push_back(makeCheckBoxRow("Details.Physics.AllowSleep", "Allow Sleeping", physics->allowSleeping,
+            [entity](bool val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
+                {
+                    ECS::PhysicsComponent updated = *comp;
+                    updated.allowSleeping = val;
                     ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
                 }
             }));
@@ -2240,6 +2394,8 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
               [entity]() { ECS::ECSManager::Instance().addComponent<ECS::LightComponent>(entity); } },
             { "Camera", ecs.hasComponent<ECS::CameraComponent>(entity),
               [entity]() { ECS::ECSManager::Instance().addComponent<ECS::CameraComponent>(entity); } },
+            { "Collision", ecs.hasComponent<ECS::CollisionComponent>(entity),
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::CollisionComponent>(entity); } },
             { "Physics", ecs.hasComponent<ECS::PhysicsComponent>(entity),
               [entity]() { ECS::ECSManager::Instance().addComponent<ECS::PhysicsComponent>(entity); } },
             { "Script", ecs.hasComponent<ECS::ScriptComponent>(entity),
@@ -5279,6 +5435,19 @@ void UIManager::openLandscapeManagerPopup()
                 refreshWorldOutliner();
                 selectEntity(entity);
                 showToastMessage("Landscape created: " + p.name, 3.0f);
+
+                // Push undo/redo for landscape creation
+                UndoRedoManager::Command cmd;
+                cmd.description = "Create Landscape " + p.name;
+                cmd.execute = [entity]() {};
+                cmd.undo = [entity]()
+                    {
+                        auto& e = ECS::ECSManager::Instance();
+                        auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
+                        if (lvl) lvl->onEntityRemoved(entity);
+                        e.removeEntity(entity);
+                    };
+                UndoRedoManager::Instance().pushCommand(std::move(cmd));
             }
             else
             {
@@ -5340,7 +5509,7 @@ void UIManager::openEngineSettingsPopup()
     struct SettingsState { int activeCategory{ 0 }; };
     auto state = std::make_shared<SettingsState>();
 
-    const std::vector<std::string> categories = { "General", "Rendering", "Debug" };
+    const std::vector<std::string> categories = { "General", "Rendering", "Debug", "Physics" };
     constexpr float kSidebarW = 140.0f;
     constexpr float kTitleH = 44.0f;
 
@@ -5447,6 +5616,46 @@ void UIManager::openEngineSettingsPopup()
             ++row;
         };
 
+        const auto addFloatEntry = [&](const std::string& id, const std::string& label,
+            const std::string& value, std::function<void(const std::string&)> onChange)
+        {
+            WidgetElement rowPanel;
+            rowPanel.type        = WidgetElementType::StackPanel;
+            rowPanel.id          = id + ".Row";
+            rowPanel.orientation = StackOrientation::Horizontal;
+            rowPanel.minSize     = Vec2{ contentW - kContentPad * 2.0f, kRowH };
+            rowPanel.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            rowPanel.padding     = Vec2{ 6.0f, 2.0f };
+
+            WidgetElement lbl;
+            lbl.type      = WidgetElementType::Text;
+            lbl.id        = id + ".Lbl";
+            lbl.text      = label;
+            lbl.fontSize  = 13.0f;
+            lbl.textColor = Vec4{ 0.88f, 0.88f, 0.92f, 1.0f };
+            lbl.textAlignV = TextAlignV::Center;
+            lbl.minSize   = Vec2{ 140.0f, kRowH };
+            lbl.padding   = Vec2{ 0.0f, 0.0f };
+            rowPanel.children.push_back(lbl);
+
+            WidgetElement eb;
+            eb.type          = WidgetElementType::EntryBar;
+            eb.id            = id;
+            eb.value         = value;
+            eb.fontSize      = 12.0f;
+            eb.color         = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
+            eb.hoverColor    = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
+            eb.textColor     = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+            eb.padding       = Vec2{ 6.0f, 4.0f };
+            eb.isHitTestable = true;
+            eb.minSize       = Vec2{ contentW - kContentPad * 2.0f - 140.0f - 12.0f, kRowH };
+            eb.onValueChanged = std::move(onChange);
+            rowPanel.children.push_back(eb);
+
+            entry->children.push_back(rowPanel);
+            ++row;
+        };
+
         const auto addCheckbox = [&](const std::string& id, const std::string& label,
             bool checked, std::function<void(bool)> onChange)
         {
@@ -5465,6 +5674,48 @@ void UIManager::openEngineSettingsPopup()
             cb.minSize       = Vec2{ contentW - kContentPad * 2.0f, kRowH };
             cb.onCheckedChanged = std::move(onChange);
             entry->children.push_back(cb);
+            ++row;
+        };
+
+        const auto addDropdown = [&](const std::string& id, const std::string& label,
+            const std::vector<std::string>& items, int selected,
+            std::function<void(int)> onChange)
+        {
+            WidgetElement rowPanel;
+            rowPanel.type        = WidgetElementType::StackPanel;
+            rowPanel.id          = id + ".Row";
+            rowPanel.orientation = StackOrientation::Horizontal;
+            rowPanel.minSize     = Vec2{ contentW - kContentPad * 2.0f, kRowH };
+            rowPanel.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            rowPanel.padding     = Vec2{ 6.0f, 2.0f };
+
+            WidgetElement lbl;
+            lbl.type      = WidgetElementType::Text;
+            lbl.id        = id + ".Lbl";
+            lbl.text      = label;
+            lbl.fontSize  = 13.0f;
+            lbl.textColor = Vec4{ 0.88f, 0.88f, 0.92f, 1.0f };
+            lbl.textAlignV = TextAlignV::Center;
+            lbl.minSize   = Vec2{ 140.0f, kRowH };
+            lbl.padding   = Vec2{ 0.0f, 0.0f };
+            rowPanel.children.push_back(lbl);
+
+            WidgetElement dd;
+            dd.type          = WidgetElementType::DropDown;
+            dd.id            = id;
+            dd.items         = items;
+            dd.selectedIndex = selected;
+            dd.fontSize      = 12.0f;
+            dd.color         = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
+            dd.hoverColor    = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
+            dd.textColor     = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+            dd.padding       = Vec2{ 6.0f, 4.0f };
+            dd.isHitTestable = true;
+            dd.minSize       = Vec2{ contentW - kContentPad * 2.0f - 140.0f - 12.0f, kRowH };
+            dd.onSelectionChanged = std::move(onChange);
+            rowPanel.children.push_back(dd);
+
+            entry->children.push_back(rowPanel);
             ++row;
         };
 
@@ -5527,6 +5778,88 @@ void UIManager::openEngineSettingsPopup()
                 [renderer](bool v) {
                     if (v != renderer->isBoundsDebugEnabled()) renderer->toggleBoundsDebug();
                     DiagnosticsManager::Instance().setState("BoundsDebugEnabled", v ? "1" : "0");
+                });
+            addCheckbox("ES.C.HFDebug", "HeightField Debug",
+                renderer->isHeightFieldDebugEnabled(),
+                [renderer](bool v) {
+                    renderer->setHeightFieldDebugEnabled(v);
+                    DiagnosticsManager::Instance().setState("HeightFieldDebugEnabled", v ? "1" : "0");
+                });
+        }
+        else if (state->activeCategory == 3) // Physics
+        {
+            auto& diag = DiagnosticsManager::Instance();
+
+            // ── Backend selector ────────────────────────────────────
+            addSectionLabel("ES.C.Sec.Backend", "Backend");
+            {
+                std::vector<std::string> backendItems;
+                backendItems.push_back("Jolt");
+#ifdef ENGINE_PHYSX_BACKEND_AVAILABLE
+                backendItems.push_back("PhysX");
+#endif
+                // Determine current selection from persisted state
+                int selectedBackend = 0; // default: Jolt
+                if (auto v = diag.getState("PhysicsBackend"))
+                {
+#ifdef ENGINE_PHYSX_BACKEND_AVAILABLE
+                    if (*v == "PhysX") selectedBackend = 1;
+#endif
+                }
+
+                addDropdown("ES.C.Backend", "Physics Backend",
+                    backendItems, selectedBackend,
+                    [](int index) {
+                        std::string name = "Jolt";
+#ifdef ENGINE_PHYSX_BACKEND_AVAILABLE
+                        if (index == 1) name = "PhysX";
+#endif
+                        DiagnosticsManager::Instance().setState("PhysicsBackend", name);
+                    });
+            }
+
+            addSeparator("ES.C.Sep.PhysBackend");
+
+            addSectionLabel("ES.C.Sec.Gravity", "Gravity");
+
+            // Read current values from DiagnosticsManager (persisted) or PhysicsWorld defaults
+            auto readFloat = [&](const std::string& key, float fallback) -> std::string {
+                if (auto v = diag.getState(key)) return *v;
+                std::ostringstream ss; ss << fallback; return ss.str();
+            };
+
+            addFloatEntry("ES.C.GravityX", "Gravity X",
+                readFloat("PhysicsGravityX", 0.0f),
+                [](const std::string& v) {
+                    DiagnosticsManager::Instance().setState("PhysicsGravityX", v);
+                });
+            addFloatEntry("ES.C.GravityY", "Gravity Y",
+                readFloat("PhysicsGravityY", -9.81f),
+                [](const std::string& v) {
+                    DiagnosticsManager::Instance().setState("PhysicsGravityY", v);
+                });
+            addFloatEntry("ES.C.GravityZ", "Gravity Z",
+                readFloat("PhysicsGravityZ", 0.0f),
+                [](const std::string& v) {
+                    DiagnosticsManager::Instance().setState("PhysicsGravityZ", v);
+                });
+
+            addSeparator("ES.C.Sep.Phys1");
+            addSectionLabel("ES.C.Sec.Simulation", "Simulation");
+
+            addFloatEntry("ES.C.FixedTimestep", "Fixed Timestep (s)",
+                readFloat("PhysicsFixedTimestep", 1.0f / 60.0f),
+                [](const std::string& v) {
+                    DiagnosticsManager::Instance().setState("PhysicsFixedTimestep", v);
+                });
+
+            addSeparator("ES.C.Sep.Phys2");
+            addSectionLabel("ES.C.Sec.Sleep", "Sleep / Deactivation");
+
+            addFloatEntry("ES.C.SleepThreshold", "Sleep Threshold",
+                readFloat("PhysicsSleepThreshold", 0.05f),
+                [](const std::string& v) {
+                    DiagnosticsManager::Instance().setState("PhysicsSleepThreshold", v);
                 });
         }
 

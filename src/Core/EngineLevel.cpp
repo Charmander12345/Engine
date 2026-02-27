@@ -211,68 +211,116 @@ static void deserializeCameraComponent(const json& value, ECS::CameraComponent& 
 	}
 }
 
-static json serializePhysicsComponent(const ECS::PhysicsComponent& component)
+static json serializeCollisionComponent(const ECS::CollisionComponent& component)
 {
 	return json{
 		{"colliderType", static_cast<int>(component.colliderType)},
-		{"isStatic", component.isStatic},
-		{"mass", component.mass},
+		{"colliderSize", serializeFloat3(component.colliderSize)},
+		{"colliderOffset", serializeFloat3(component.colliderOffset)},
 		{"restitution", component.restitution},
 		{"friction", component.friction},
-		{"useGravity", component.useGravity},
-		{"isKinematic", component.isKinematic},
+		{"isSensor", component.isSensor}
+	};
+}
+
+static void deserializeCollisionComponent(const json& value, ECS::CollisionComponent& component)
+{
+	if (!value.is_object()) return;
+	if (value.contains("colliderType"))
+		component.colliderType = static_cast<ECS::CollisionComponent::ColliderType>(value.at("colliderType").get<int>());
+	if (value.contains("colliderSize"))
+		deserializeFloat3(value.at("colliderSize"), component.colliderSize);
+	if (value.contains("colliderOffset"))
+		deserializeFloat3(value.at("colliderOffset"), component.colliderOffset);
+	if (value.contains("restitution"))
+		component.restitution = value.at("restitution").get<float>();
+	if (value.contains("friction"))
+		component.friction = value.at("friction").get<float>();
+	if (value.contains("isSensor"))
+		component.isSensor = value.at("isSensor").get<bool>();
+}
+
+static json serializePhysicsComponent(const ECS::PhysicsComponent& component)
+{
+	return json{
+		{"motionType", static_cast<int>(component.motionType)},
+		{"mass", component.mass},
+		{"gravityFactor", component.gravityFactor},
+		{"linearDamping", component.linearDamping},
+		{"angularDamping", component.angularDamping},
+		{"maxLinearVelocity", component.maxLinearVelocity},
+		{"maxAngularVelocity", component.maxAngularVelocity},
+		{"motionQuality", static_cast<int>(component.motionQuality)},
+		{"allowSleeping", component.allowSleeping},
 		{"velocity", serializeFloat3(component.velocity)},
-		{"angularVelocity", serializeFloat3(component.angularVelocity)},
-		{"colliderSize", serializeFloat3(component.colliderSize)}
+		{"angularVelocity", serializeFloat3(component.angularVelocity)}
 	};
 }
 
 static void deserializePhysicsComponent(const json& value, ECS::PhysicsComponent& component)
 {
-	if (!value.is_object())
-	{
-		return;
-	}
-	if (value.contains("colliderType"))
-	{
-		component.colliderType = static_cast<ECS::PhysicsComponent::ColliderType>(value.at("colliderType").get<int>());
-	}
-	if (value.contains("isStatic"))
-	{
-		component.isStatic = value.at("isStatic").get<bool>();
-	}
+	if (!value.is_object()) return;
+	if (value.contains("motionType"))
+		component.motionType = static_cast<ECS::PhysicsComponent::MotionType>(value.at("motionType").get<int>());
 	if (value.contains("mass"))
-	{
 		component.mass = value.at("mass").get<float>();
-	}
-	if (value.contains("restitution"))
-	{
-		component.restitution = value.at("restitution").get<float>();
-	}
-	if (value.contains("friction"))
-	{
-		component.friction = value.at("friction").get<float>();
-	}
-	if (value.contains("useGravity"))
-	{
-		component.useGravity = value.at("useGravity").get<bool>();
-	}
-	if (value.contains("isKinematic"))
-	{
-		component.isKinematic = value.at("isKinematic").get<bool>();
-	}
+	if (value.contains("gravityFactor"))
+		component.gravityFactor = value.at("gravityFactor").get<float>();
+	if (value.contains("linearDamping"))
+		component.linearDamping = value.at("linearDamping").get<float>();
+	if (value.contains("angularDamping"))
+		component.angularDamping = value.at("angularDamping").get<float>();
+	if (value.contains("maxLinearVelocity"))
+		component.maxLinearVelocity = value.at("maxLinearVelocity").get<float>();
+	if (value.contains("maxAngularVelocity"))
+		component.maxAngularVelocity = value.at("maxAngularVelocity").get<float>();
+	if (value.contains("motionQuality"))
+		component.motionQuality = static_cast<ECS::PhysicsComponent::MotionQuality>(value.at("motionQuality").get<int>());
+	if (value.contains("allowSleeping"))
+		component.allowSleeping = value.at("allowSleeping").get<bool>();
 	if (value.contains("velocity"))
-	{
 		deserializeFloat3(value.at("velocity"), component.velocity);
-	}
 	if (value.contains("angularVelocity"))
-	{
 		deserializeFloat3(value.at("angularVelocity"), component.angularVelocity);
-	}
+}
+
+/// Backward compatibility: old "Physics" block had collision fields mixed in.
+/// Splits into CollisionComponent + PhysicsComponent when old format is detected.
+static bool deserializeLegacyPhysics(const json& value, ECS::CollisionComponent& cc, ECS::PhysicsComponent& pc)
+{
+	if (!value.is_object() || !value.contains("isStatic"))
+		return false; // not legacy format
+
+	// Collision fields
+	if (value.contains("colliderType"))
+		cc.colliderType = static_cast<ECS::CollisionComponent::ColliderType>(value.at("colliderType").get<int>());
 	if (value.contains("colliderSize"))
-	{
-		deserializeFloat3(value.at("colliderSize"), component.colliderSize);
-	}
+		deserializeFloat3(value.at("colliderSize"), cc.colliderSize);
+	if (value.contains("restitution"))
+		cc.restitution = value.at("restitution").get<float>();
+	if (value.contains("friction"))
+		cc.friction = value.at("friction").get<float>();
+
+	// Physics fields
+	bool isStatic = value.value("isStatic", false);
+	bool isKinematic = value.value("isKinematic", false);
+	if (isStatic)
+		pc.motionType = ECS::PhysicsComponent::MotionType::Static;
+	else if (isKinematic)
+		pc.motionType = ECS::PhysicsComponent::MotionType::Kinematic;
+	else
+		pc.motionType = ECS::PhysicsComponent::MotionType::Dynamic;
+
+	if (value.contains("mass"))
+		pc.mass = value.at("mass").get<float>();
+	bool useGravity = value.value("useGravity", true);
+	pc.gravityFactor = useGravity ? 1.0f : 0.0f;
+	if (value.contains("velocity"))
+		deserializeFloat3(value.at("velocity"), pc.velocity);
+	if (value.contains("angularVelocity"))
+		deserializeFloat3(value.at("angularVelocity"), pc.angularVelocity);
+
+	return true;
 }
 
 static json serializeScriptComponent(const ECS::ScriptComponent& component)
@@ -286,6 +334,33 @@ static void deserializeScriptComponent(const json& value, ECS::ScriptComponent& 
 	{
 		component.scriptPath = value.at("scriptPath").get<std::string>();
 	}
+}
+
+static json serializeHeightFieldComponent(const ECS::HeightFieldComponent& component)
+{
+	return json{
+		{"heights", component.heights},
+		{"sampleCount", component.sampleCount},
+		{"offsetX", component.offsetX},
+		{"offsetY", component.offsetY},
+		{"offsetZ", component.offsetZ},
+		{"scaleX", component.scaleX},
+		{"scaleY", component.scaleY},
+		{"scaleZ", component.scaleZ}
+	};
+}
+
+static void deserializeHeightFieldComponent(const json& value, ECS::HeightFieldComponent& component)
+{
+	if (!value.is_object()) return;
+	if (value.contains("heights"))      component.heights     = value.at("heights").get<std::vector<float>>();
+	if (value.contains("sampleCount"))  component.sampleCount = value.at("sampleCount").get<int>();
+	if (value.contains("offsetX"))      component.offsetX     = value.at("offsetX").get<float>();
+	if (value.contains("offsetY"))      component.offsetY     = value.at("offsetY").get<float>();
+	if (value.contains("offsetZ"))      component.offsetZ     = value.at("offsetZ").get<float>();
+	if (value.contains("scaleX"))       component.scaleX      = value.at("scaleX").get<float>();
+	if (value.contains("scaleY"))       component.scaleY      = value.at("scaleY").get<float>();
+	if (value.contains("scaleZ"))       component.scaleZ      = value.at("scaleZ").get<float>();
 }
 
 static json serializeNameComponent(const ECS::NameComponent& component)
@@ -416,16 +491,41 @@ bool EngineLevel::prepareEcs()
 					m_ecs->addComponent<ECS::CameraComponent>(entity, component);
 				}
 				if (componentsJson.contains("Physics"))
-				{
-					ECS::PhysicsComponent component;
-					deserializePhysicsComponent(componentsJson.at("Physics"), component);
-					m_ecs->addComponent<ECS::PhysicsComponent>(entity, component);
-				}
+					{
+						const auto& physJson = componentsJson.at("Physics");
+						// Check for legacy format (has "isStatic" field)
+						ECS::CollisionComponent cc;
+						ECS::PhysicsComponent pc;
+						if (deserializeLegacyPhysics(physJson, cc, pc))
+						{
+							// Legacy: single Physics block → split into both components
+							m_ecs->addComponent<ECS::CollisionComponent>(entity, cc);
+							m_ecs->addComponent<ECS::PhysicsComponent>(entity, pc);
+						}
+						else
+						{
+							// New format
+							deserializePhysicsComponent(physJson, pc);
+							m_ecs->addComponent<ECS::PhysicsComponent>(entity, pc);
+						}
+					}
+					if (componentsJson.contains("Collision"))
+					{
+						ECS::CollisionComponent component;
+						deserializeCollisionComponent(componentsJson.at("Collision"), component);
+						m_ecs->addComponent<ECS::CollisionComponent>(entity, component);
+					}
 				if (componentsJson.contains("Script"))
 				{
 					ECS::ScriptComponent component;
 					deserializeScriptComponent(componentsJson.at("Script"), component);
 					m_ecs->addComponent<ECS::ScriptComponent>(entity, component);
+				}
+				if (componentsJson.contains("HeightField"))
+				{
+					ECS::HeightFieldComponent component;
+					deserializeHeightFieldComponent(componentsJson.at("HeightField"), component);
+					m_ecs->addComponent<ECS::HeightFieldComponent>(entity, component);
 				}
 				if (componentsJson.contains("Name"))
 				{
@@ -626,9 +726,17 @@ json EngineLevel::serializeEcsEntities() const
 		{
 			componentsJson["Physics"] = serializePhysicsComponent(*component);
 		}
+		if (const auto* component = ecs.getComponent<ECS::CollisionComponent>(entity))
+		{
+			componentsJson["Collision"] = serializeCollisionComponent(*component);
+		}
 		if (const auto* component = ecs.getComponent<ECS::ScriptComponent>(entity))
 		{
 			componentsJson["Script"] = serializeScriptComponent(*component);
+		}
+		if (const auto* component = ecs.getComponent<ECS::HeightFieldComponent>(entity))
+		{
+			componentsJson["HeightField"] = serializeHeightFieldComponent(*component);
 		}
 		if (const auto* component = ecs.getComponent<ECS::NameComponent>(entity))
 		{
@@ -846,6 +954,11 @@ void EngineLevel::snapshotEcsState()
 			snap.physics = *c;
 			snap.mask.set(static_cast<size_t>(ECS::ComponentKind::Physics));
 		}
+		if (const auto* c = ecs.getComponent<ECS::CollisionComponent>(entity))
+		{
+			snap.collision = *c;
+			snap.mask.set(static_cast<size_t>(ECS::ComponentKind::Collision));
+		}
 		if (const auto* c = ecs.getComponent<ECS::ScriptComponent>(entity))
 		{
 			snap.script = *c;
@@ -855,6 +968,11 @@ void EngineLevel::snapshotEcsState()
 		{
 			snap.name = *c;
 			snap.mask.set(static_cast<size_t>(ECS::ComponentKind::Name));
+		}
+		if (const auto* c = ecs.getComponent<ECS::HeightFieldComponent>(entity))
+		{
+			snap.heightField = *c;
+			snap.mask.set(static_cast<size_t>(ECS::ComponentKind::HeightField));
 		}
 		m_componentSnapshot[entity] = std::move(snap);
 	}
@@ -890,10 +1008,14 @@ bool EngineLevel::restoreEcsSnapshot()
 			ecs.setComponent<ECS::CameraComponent>(entity, snap.camera);
 		if (snap.mask.test(static_cast<size_t>(ECS::ComponentKind::Physics)))
 			ecs.setComponent<ECS::PhysicsComponent>(entity, snap.physics);
+		if (snap.mask.test(static_cast<size_t>(ECS::ComponentKind::Collision)))
+			ecs.setComponent<ECS::CollisionComponent>(entity, snap.collision);
 		if (snap.mask.test(static_cast<size_t>(ECS::ComponentKind::Script)))
 			ecs.setComponent<ECS::ScriptComponent>(entity, snap.script);
 		if (snap.mask.test(static_cast<size_t>(ECS::ComponentKind::Name)))
 			ecs.setComponent<ECS::NameComponent>(entity, snap.name);
+		if (snap.mask.test(static_cast<size_t>(ECS::ComponentKind::HeightField)))
+			ecs.setComponent<ECS::HeightFieldComponent>(entity, snap.heightField);
 	}
 
 	m_componentSnapshot.clear();

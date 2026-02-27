@@ -20,17 +20,30 @@ ECS::Entity LandscapeManager::spawnLandscape(const LandscapeParams& params)
     auto& assetManager = AssetManager::Instance();
 
     // -----------------------------------------------------------------------
-    // 1. Generate flat grid geometry
+    // 1. Generate grid geometry
     //    Vertex layout: x, y, z, u, v  (5 floats per vertex)
     // -----------------------------------------------------------------------
-    const int cols = std::max(1, params.subdivisionsX);
-    const int rows = std::max(1, params.subdivisionsZ);
+    // Jolt HeightFieldShape requires sampleCount = (2^n + 1).
+    // Round gridSize up to the next power-of-2 so sampleCount satisfies this.
+    int rawGridSize = std::max({3, params.subdivisionsX, params.subdivisionsZ});
+    int pow2 = 2;
+    while (pow2 < rawGridSize) pow2 *= 2;
+    const int gridSize = pow2;
+    const int cols = gridSize;
+    const int rows = gridSize;
+    const int sampleCount = gridSize + 1; // Always 2^n + 1
+
+    std::vector<float> heights = params.heightData;
+    if (heights.size() != static_cast<size_t>(sampleCount * sampleCount))
+    {
+        heights.assign(sampleCount * sampleCount, 0.0f);
+    }
 
     const float halfW = params.width * 0.5f;
     const float halfD = params.depth * 0.5f;
 
     std::vector<float> vertices;
-    vertices.reserve(static_cast<size_t>((cols + 1) * (rows + 1)) * 5);
+    vertices.reserve(static_cast<size_t>(sampleCount * sampleCount) * 5);
 
     for (int r = 0; r <= rows; ++r)
     {
@@ -38,10 +51,11 @@ ECS::Entity LandscapeManager::spawnLandscape(const LandscapeParams& params)
         {
             const float x =  -halfW + params.width  * (static_cast<float>(c) / static_cast<float>(cols));
             const float z =  -halfD + params.depth  * (static_cast<float>(r) / static_cast<float>(rows));
+            const float y = heights[r * sampleCount + c];
             const float u =  static_cast<float>(c) / static_cast<float>(cols);
             const float v =  static_cast<float>(r) / static_cast<float>(rows);
             vertices.push_back(x);
-            vertices.push_back(0.0f); // flat Y
+            vertices.push_back(y);
             vertices.push_back(z);
             vertices.push_back(u);
             vertices.push_back(v);
@@ -128,6 +142,7 @@ ECS::Entity LandscapeManager::spawnLandscape(const LandscapeParams& params)
     const ECS::Entity entity = ecs.createEntity();
 
     ECS::TransformComponent transform{};
+    transform.position[1] = 0.0f; // No offset needed for heightfield
     ecs.addComponent<ECS::TransformComponent>(entity, transform);
 
     ECS::NameComponent nameComp;
@@ -142,13 +157,24 @@ ECS::Entity LandscapeManager::spawnLandscape(const LandscapeParams& params)
     material.materialAssetPath = "Materials/WorldGrid.asset";
     ecs.addComponent<ECS::MaterialComponent>(entity, material);
 
+    ECS::CollisionComponent collision;
+    collision.colliderType = ECS::CollisionComponent::ColliderType::HeightField;
+    ecs.addComponent<ECS::CollisionComponent>(entity, collision);
+
+    ECS::HeightFieldComponent hfComp;
+    hfComp.heights = heights;
+    hfComp.sampleCount = sampleCount;
+    hfComp.offsetX = -halfW;
+    hfComp.offsetY = 0.0f;
+    hfComp.offsetZ = -halfD;
+    hfComp.scaleX = params.width / static_cast<float>(cols);
+    hfComp.scaleY = 1.0f;
+    hfComp.scaleZ = params.depth / static_cast<float>(rows);
+    ecs.addComponent<ECS::HeightFieldComponent>(entity, hfComp);
+
     ECS::PhysicsComponent physics;
-    physics.isStatic = true;
-    physics.useGravity = false;
-    physics.colliderType = ECS::PhysicsComponent::ColliderType::Box;
-    physics.colliderSize[0] = halfW;
-    physics.colliderSize[1] = 0.001f;
-    physics.colliderSize[2] = halfD;
+    physics.motionType = ECS::PhysicsComponent::MotionType::Static;
+    physics.gravityFactor = 0.0f;
     ecs.addComponent<ECS::PhysicsComponent>(entity, physics);
 
     auto* level = DiagnosticsManager::Instance().getActiveLevelSoft();

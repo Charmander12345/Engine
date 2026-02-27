@@ -86,6 +86,11 @@ target_link_libraries(Renderer
         ${Python3_LIBRARY_RELEASE}
 )
 
+# Expose PhysX availability so UIManager can show the backend dropdown option.
+if(ENGINE_PHYSX_AVAILABLE)
+    target_compile_definitions(Renderer PRIVATE ENGINE_PHYSX_BACKEND_AVAILABLE=1)
+endif()
+
 if (WIN32)
     set_target_properties(Renderer PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()

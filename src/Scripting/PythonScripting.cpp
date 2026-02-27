@@ -590,6 +590,8 @@ namespace
             return ECS::addComponent<ECS::CameraComponent>(entity);
         case ECS::ComponentKind::Physics:
             return ECS::addComponent<ECS::PhysicsComponent>(entity);
+        case ECS::ComponentKind::Collision:
+            return ECS::addComponent<ECS::CollisionComponent>(entity);
         case ECS::ComponentKind::Script:
             return ECS::addComponent<ECS::ScriptComponent>(entity);
         case ECS::ComponentKind::Name:
@@ -620,6 +622,8 @@ namespace
             return ECS::removeComponent<ECS::CameraComponent>(entity);
         case ECS::ComponentKind::Physics:
             return ECS::removeComponent<ECS::PhysicsComponent>(entity);
+        case ECS::ComponentKind::Collision:
+            return ECS::removeComponent<ECS::CollisionComponent>(entity);
         case ECS::ComponentKind::Script:
             return ECS::removeComponent<ECS::ScriptComponent>(entity);
         case ECS::ComponentKind::Name:
@@ -650,6 +654,9 @@ namespace
             return true;
         case ECS::ComponentKind::Physics:
             schema.require<ECS::PhysicsComponent>();
+            return true;
+        case ECS::ComponentKind::Collision:
+            schema.require<ECS::CollisionComponent>();
             return true;
         case ECS::ComponentKind::Script:
             schema.require<ECS::ScriptComponent>();
@@ -1743,7 +1750,7 @@ namespace
             return nullptr;
         auto* pc = ECS::ECSManager::Instance().getComponent<ECS::PhysicsComponent>(static_cast<ECS::Entity>(entity));
         if (!pc) { PyErr_SetString(PyExc_ValueError, "Entity has no PhysicsComponent."); return nullptr; }
-        if (pc->isStatic || pc->isKinematic || pc->mass <= 0.0f) Py_RETURN_NONE;
+        if (pc->motionType != ECS::PhysicsComponent::MotionType::Dynamic || pc->mass <= 0.0f) Py_RETURN_NONE;
         const float invMass = 1.0f / pc->mass;
         pc->velocity[0] += fx * invMass;
         pc->velocity[1] += fy * invMass;
@@ -1759,7 +1766,7 @@ namespace
             return nullptr;
         auto* pc = ECS::ECSManager::Instance().getComponent<ECS::PhysicsComponent>(static_cast<ECS::Entity>(entity));
         if (!pc) { PyErr_SetString(PyExc_ValueError, "Entity has no PhysicsComponent."); return nullptr; }
-        if (pc->isStatic || pc->isKinematic) Py_RETURN_NONE;
+        if (pc->motionType != ECS::PhysicsComponent::MotionType::Dynamic) Py_RETURN_NONE;
         pc->velocity[0] += ix;
         pc->velocity[1] += iy;
         pc->velocity[2] += iz;
@@ -2641,6 +2648,7 @@ namespace
         PyModule_AddIntConstant(module, "Component_Physics", static_cast<int>(ECS::ComponentKind::Physics));
         PyModule_AddIntConstant(module, "Component_Script", static_cast<int>(ECS::ComponentKind::Script));
         PyModule_AddIntConstant(module, "Component_Name", static_cast<int>(ECS::ComponentKind::Name));
+        PyModule_AddIntConstant(module, "Component_Collision", static_cast<int>(ECS::ComponentKind::Collision));
 
         PyModule_AddIntConstant(module, "Asset_Texture", static_cast<int>(AssetType::Texture));
         PyModule_AddIntConstant(module, "Asset_Material", static_cast<int>(AssetType::Material));

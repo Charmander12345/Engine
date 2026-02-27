@@ -127,6 +127,9 @@ private:
     bool ensureBoundsDebugResources();
     void releaseBoundsDebugResources();
     void drawBoundsDebugBox(const glm::vec3& center, const glm::vec3& extent, const glm::mat4& viewProj);
+    void rebuildHeightFieldDebugMesh();
+    void renderHeightFieldDebug(const glm::mat4& viewProj);
+    void releaseHeightFieldDebugResources();
     bool ensurePickFbo(int width, int height);
     void releasePickFbo();
     void renderPickBuffer(const glm::mat4& view, const glm::mat4& projection);
@@ -271,6 +274,15 @@ private:
     GLuint m_boundsDebugProgram{0};
     GLsizei m_boundsDebugVertexCount{0};
     bool m_boundsDebugEnabled{false};
+
+    // HeightField debug wireframe
+    GLuint m_hfDebugVao{0};
+    GLuint m_hfDebugVbo{0};
+    GLuint m_hfDebugIbo{0};
+    GLsizei m_hfDebugIndexCount{0};
+    bool m_hfDebugEnabled{false};
+    unsigned int m_hfDebugVersion{0};
+
     bool m_wireframeEnabled{false};
     bool m_vsyncEnabled{false};
 
@@ -440,6 +452,8 @@ public:
     uint32_t getLastTotalCount() const { return m_lastTotalCount; }
     void toggleBoundsDebug() { m_boundsDebugEnabled = !m_boundsDebugEnabled; }
     bool isBoundsDebugEnabled() const { return m_boundsDebugEnabled; }
+    void setHeightFieldDebugEnabled(bool enabled) { m_hfDebugEnabled = enabled; }
+    bool isHeightFieldDebugEnabled() const { return m_hfDebugEnabled; }
 
     void setShadowsEnabled(bool enabled) { m_shadowEnabled = enabled; }
     bool isShadowsEnabled() const { return m_shadowEnabled; }

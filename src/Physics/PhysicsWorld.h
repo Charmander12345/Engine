@@ -2,24 +2,35 @@
 
 #include <vector>
 #include <set>
+#include <map>
 #include <cstdint>
 #include <functional>
+#include <memory>
+
+class IPhysicsBackend;
 
 namespace ECS { class ECSManager; }
 
-/// Lightweight rigid-body physics simulation that operates on ECS entities with
-/// a PhysicsComponent and a TransformComponent.  Uses impulse-based collision
-/// resolution with a fixed-timestep accumulator.
+/// Rigid-body physics simulation – backend-agnostic.
+/// Delegates to IPhysicsBackend (JoltBackend, PhysXBackend, …) while keeping
+/// ECS synchronisation and event dispatch in this layer.
 class PhysicsWorld
 {
 public:
     static PhysicsWorld& Instance();
 
+    /// Available physics backend implementations.
+    enum class Backend { Jolt, PhysX };
+
+    /// Initialize with the default backend (Jolt).
     void initialize();
+
+    /// Initialize with a specific backend.
+    void initialize(Backend backend);
+
     void shutdown();
 
     /// Advance the simulation by `dt` seconds (variable frame delta).
-    /// Internally uses a fixed timestep with an accumulator.
     void step(float dt);
 
     /// World-space gravity (m/s^2).  Default: (0, -9.81, 0).
@@ -79,59 +90,9 @@ private:
     PhysicsWorld(const PhysicsWorld&) = delete;
     PhysicsWorld& operator=(const PhysicsWorld&) = delete;
 
-    // ── Internal types ──────────────────────────────────────────────
-    struct RigidBody
-    {
-        uint32_t entity{ 0 };
-        float position[3]{};
-        float rotation[3]{};
-        float scale[3]{ 1,1,1 };
-        float velocity[3]{};
-        float angularVelocity[3]{};
-        float mass{ 1.0f };
-        float invMass{ 1.0f };
-        float restitution{ 0.3f };
-        float friction{ 0.5f };
-        float colliderSize[3]{ 1,1,1 };
-        int   colliderType{ 0 }; // 0=Box, 1=Sphere
-        bool  isStatic{ true };
-        bool  useGravity{ true };
-        bool  isKinematic{ false };
-        float sleepTimer{ 0.0f };
-        bool  isSleeping{ false };
-    };
-
-    struct ContactPoint
-    {
-        int  bodyA{ -1 };
-        int  bodyB{ -1 };
-        float normal[3]{};   // from A to B
-        float depth{ 0.0f };
-        float contactPoint[3]{};
-        float normalImpulse{ 0.0f };
-        float tangentImpulse{ 0.0f };
-    };
-
-    // ── Simulation steps ────────────────────────────────────────────
-    void gatherBodies();
-    void integrate(float ts);
-    void detectCollisions();
-    void resolveCollisions();
-    void updateSleep(float ts);
-    void writeback();
-
-    // ── Collision helpers ───────────────────────────────────────────
-    void testSphereSphere(int bodyAIdx, int bodyBIdx, std::vector<ContactPoint>& contacts) const;
-    void testBoxBox(int bodyAIdx, int bodyBIdx, std::vector<ContactPoint>& contacts) const;
-    void testSphereBox(int bodyAIdx, int bodyBIdx, std::vector<ContactPoint>& contacts) const;
-
-    // ── Raycast helpers ─────────────────────────────────────────────
-    bool rayTestBox(const float origin[3], const float dir[3], float maxDist,
-                    const RigidBody& body, float& outDist, float outNormal[3]) const;
-    bool rayTestSphere(const float origin[3], const float dir[3], float maxDist,
-                       const RigidBody& body, float& outDist, float outNormal[3]) const;
-
-    // ── Collision event dispatch ─────────────────────────────────────
+    // ── ECS ↔ Backend sync ──────────────────────────────────────────
+    void syncBodiesToBackend();
+    void syncBodiesFromBackend();
     void fireCollisionEvents();
     void updateOverlapTracking();
 
@@ -140,15 +101,18 @@ private:
     float m_fixedTimestep{ 1.0f / 60.0f };
     float m_accumulator{ 0.0f };
     float m_sleepThreshold{ 0.01f };
-    float m_sleepTime{ 0.5f };
     bool  m_initialized{ false };
 
-    std::vector<RigidBody>       m_bodies;
-    std::vector<ContactPoint>    m_contacts;
+    // ── Backend ─────────────────────────────────────────────────────
+    std::unique_ptr<IPhysicsBackend> m_backend;
+
+    // ── Entity ↔ backend handle tracking ────────────────────────────
+    std::set<uint32_t> m_trackedEntities;   // entities that have a body in the backend
+
+    // ── Collision / overlap data ────────────────────────────────────
     std::vector<CollisionEvent>  m_collisionEvents;
     CollisionCallback            m_collisionCallback;
 
-    // ── Overlap tracking ────────────────────────────────────────────
     std::set<std::pair<uint32_t, uint32_t>> m_activeOverlaps;
     std::vector<OverlapEvent>               m_beginOverlapEvents;
     std::vector<OverlapEvent>               m_endOverlapEvents;

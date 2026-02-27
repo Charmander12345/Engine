@@ -90,8 +90,10 @@ public:
 		ECS::LightComponent light{};
 		ECS::CameraComponent camera{};
 		ECS::PhysicsComponent physics{};
+		ECS::CollisionComponent collision{};
 		ECS::ScriptComponent script{};
 		ECS::NameComponent name{};
+		ECS::HeightFieldComponent heightField{};
 		std::bitset<ECS::MaxComponentTypes> mask{};
 	};
 

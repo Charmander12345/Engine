@@ -88,7 +88,7 @@ Engine/
 │   ├── Logger/                     # Datei- und Konsolen-Logging
 │   │   ├── Logger.h/.cpp
 │   │   └── CMakeLists.txt
-│   ├── Physics/                    # Physik-Simulation (Rigid Body)
+│   ├── Physics/                    # Physik-Simulation (Jolt Physics)
 │   │   ├── PhysicsWorld.h/.cpp
 │   │   └── CMakeLists.txt
 │   ├── Renderer/                   # Rendering-Abstraktion + OpenGL-Impl.
@@ -461,6 +461,7 @@ createProject(parentDir, name, info)  // Erstellt neues Projekt mit Default-Asse
     - Texturen: `MeshName_Diffuse`, `MeshName_Specular`, `MeshName_Normal`.
   - `m_materialAssetPaths` im Mesh-Asset speichert Referenzen auf erstellte Material-Assets.
   - **Auto-Material bei Entity-Spawn**: Beim Hinzufügen eines Meshes zur Szene (Drag-Drop auf Viewport, Outliner-Entity, EntityDetails-Dropdown) wird automatisch die erste referenzierte MaterialComponent hinzugefügt, falls das Mesh-Asset `m_materialAssetPaths` enthält.
+  - **Entity-Spawn Undo/Redo**: Beim Drag-and-Drop eines Model3D-Assets auf den Viewport wird nach dem Spawn eine Undo/Redo-Action erstellt. Undo entfernt die gespawnte Entity aus Level und ECS.
 - **Shader-Import**: Kopiert `.glsl`-Datei nach `Content/`.
 - **Script-Import**: Kopiert `.py`-Datei nach `Content/`.
 
@@ -547,7 +548,7 @@ Repräsentiert ein Level/eine Szene:
 struct EntitySnapshot {
     TransformComponent, MeshComponent, MaterialComponent,
     LightComponent, CameraComponent, PhysicsComponent,
-    ScriptComponent, NameComponent, mask
+    ScriptComponent, NameComponent, CollisionComponent, mask
 };
 // snapshotEcsState() → m_componentSnapshot
 // restoreEcsSnapshot() → stellt Zustand wieder her
@@ -571,7 +572,8 @@ struct EntitySnapshot {
 | `Material`    | `MaterialComponent`  | materialAssetPath, materialAssetId               |
 | `Light`       | `LightComponent`     | type (Point/Dir/Spot), color, intensity, range, spotAngle |
 | `Camera`      | `CameraComponent`    | fov, nearClip, farClip                           |
-| `Physics`     | `PhysicsComponent`   | colliderType (Box/Sphere/Mesh), isStatic (default: false), mass, restitution, friction, useGravity, isKinematic, velocity[3], angularVelocity[3], colliderSize[3] (default: 0.5 Half-Extents). Linear Damping (0.999/Schritt), Angular Damping (0.98/Schritt). Restitution-Schwelle 0.5 m/s verhindert Micro-Bouncing. |
+| `Collision`   | `CollisionComponent` | ColliderType enum (Box/Sphere/Capsule/Cylinder/Mesh), colliderSize[3] (Half-Extents/Radius/HalfHeight), colliderOffset[3], restitution, friction, isSensor (Trigger-Volume) |
+| `Physics`     | `PhysicsComponent`   | MotionType enum (Static/Kinematic/Dynamic), mass, gravityFactor (float, 1.0=normal), linearDamping, angularDamping, maxLinearVelocity (500), maxAngularVelocity (47.12), MotionQuality enum (Discrete/LinearCast CCD), allowSleeping, velocity[3], angularVelocity[3] |
 | `Script`      | `ScriptComponent`    | scriptPath, scriptAssetId                        |
 | `Name`        | `NameComponent`      | displayName                                      |
 
@@ -731,6 +733,8 @@ present()
 - Mausklick → `requestPick(x, y)` → `pickEntityAt` → `m_selectedEntity`
 - Selection-Outline via Edge-Detection-Shader auf Pick-Buffer
 - **Pick-Buffer wird nur bei Bedarf gerendert** (wenn Pick angefragt oder Entity selektiert)
+- **Entity-Löschen (DELETE-Taste)**: Erstellt einen vollständigen Snapshot aller 10 Komponentenarten (`std::make_optional`) vor der Löschung. Eine Undo/Redo-Action wird gepusht: Undo erstellt die Entity mit derselben ID (`ecs.createEntity(entity)`) und stellt alle gesicherten Komponenten wieder her.
+- **Entity-Spawn Undo/Redo**: Beim Drag-and-Drop-Spawn eines Model3D-Assets auf den Viewport wird eine Undo/Redo-Action erzeugt. Undo entfernt die Entity via `level->onEntityRemoved()` + `ecs.removeEntity()`.
 
 #### 9.2.6 Per-Entity Render Refresh
 - `refreshEntity(entity)` → Sucht die Entität in `m_renderEntries` / `m_meshEntries`, baut GPU-Daten per `refreshEntityRenderable()` neu auf und tauscht In-Place aus
@@ -1214,81 +1218,121 @@ Das `engine`-Modul wird Python-Skripten automatisch zur Verfügung gestellt und 
 
 ## 15. Physik-System
 
-**Dateien:** `src/Physics/PhysicsWorld.h`, `src/Physics/PhysicsWorld.cpp`
+**Dateien:** `src/Physics/PhysicsWorld.h/.cpp`, `src/Physics/IPhysicsBackend.h`, `src/Physics/JoltBackend.h/.cpp`
+**Backend:** Jolt Physics v5.5.1 (`external/jolt/`) via austauschbares Backend-Interface
 
 ### 15.1 Übersicht
-Eigene Rigid-Body-Physiksimulation als Singleton (`PhysicsWorld::Instance()`). Wird nur während des PIE-Modus aktiv.
+Backend-agnostische Rigid-Body-Simulation als Singleton (`PhysicsWorld::Instance()`). Wird nur während des PIE-Modus aktiv.
 
-### 15.2 Architektur
-- **Fixed Timestep**: 1/60 s mit Akkumulator (Semi-Implicit Euler)
+Die Physik-Logik ist in zwei Schichten aufgeteilt:
+- **PhysicsWorld** (Backend-agnostisch): ECS-Synchronisation, Event-Dispatch, Overlap-Tracking, Fixed-Timestep-Akkumulator. Delegiert an `IPhysicsBackend`.
+- **IPhysicsBackend** (abstraktes Interface): Definiert `BodyDesc`, `BodyState`, `CollisionEventData`, `RaycastResult` und ~15 virtuelle Methoden für Lifecycle, Body-Verwaltung, Simulation, Raycast und Sleep.
+- **JoltBackend** (konkrete Implementierung): Kapselt alle Jolt-Physics-spezifischen Typen (`JPH::PhysicsSystem`, `JPH::BodyInterface`, Layer-Definitionen, `EngineContactListener`). Weitere Backends (z.B. PhysX) können durch Implementierung von `IPhysicsBackend` hinzugefügt werden.
+
+### 15.2 Komponenten-Architektur
+Die Physik nutzt zwei separate ECS-Komponenten:
+- **CollisionComponent** (erforderlich): Definiert Form (Collider), Oberflächeneigenschaften und Trigger-Volumes.
+- **PhysicsComponent** (optional): Definiert Rigid-Body-Dynamik. Fehlt diese Komponente, wird der Body als statisch behandelt.
+
+Minimale Voraussetzung für einen Jolt-Body: `TransformComponent` + `CollisionComponent`.
+
+#### CollisionComponent
+```cpp
+struct CollisionComponent {
+    enum ColliderType { Box=0, Sphere=1, Capsule=2, Cylinder=3, Mesh=4 };
+    int colliderType = 0;
+    float colliderSize[3] = {0.5f, 0.5f, 0.5f}; // Half-Extents / Radius / HalfHeight
+    float colliderOffset[3] = {0, 0, 0};          // Offset via OffsetCenterOfMassShape
+    float restitution = 0.3f;
+    float friction = 0.5f;
+    bool isSensor = false;                         // Trigger-Volume (kein physischer Kontakt)
+};
+```
+
+#### PhysicsComponent
+```cpp
+struct PhysicsComponent {
+    enum MotionType { Static=0, Kinematic=1, Dynamic=2 };
+    enum MotionQuality { Discrete=0, LinearCast=1 }; // CCD
+    int motionType = 2;         // Default: Dynamic
+    float mass = 1.0f;
+    float gravityFactor = 1.0f; // Skaliert Gravitation pro Body
+    float linearDamping = 0.05f;
+    float angularDamping = 0.05f;
+    float maxLinearVelocity = 500.0f;
+    float maxAngularVelocity = 47.12f; // ~15π rad/s
+    int motionQuality = 0;      // 0=Discrete, 1=LinearCast (CCD)
+    bool allowSleeping = true;
+    float velocity[3] = {0,0,0};
+    float angularVelocity[3] = {0,0,0};
+};
+```
+
+### 15.3 Architektur
+- **Backend-Abstraction**: `PhysicsWorld` hält ein `std::unique_ptr<IPhysicsBackend> m_backend` und delegiert alle Backend-spezifischen Operationen.
+- **Fixed Timestep**: 1/60 s mit Akkumulator, delegiert an `IPhysicsBackend::step()`
 - **Pipeline** (pro `step(dt)`):
-  1. `gatherBodies()` – Sammelt alle Entities mit `TransformComponent` + `PhysicsComponent` als `RigidBody` (einmal pro Frame, nicht pro Sub-Step)
-  2. Sub-Step-Schleife (Akkumulator):
-     1. `integrate()` – Velocity + Gravitation → Position/Rotation aktualisieren; Linear Damping (0.999/Schritt) + Angular Damping (0.98/Schritt); Sleep-Timer prüfen
-     2. `detectCollisions()` – OBB-SAT (Box↔Box) / Sphere-Kollisionserkennung → `ContactPoint`-Liste
-     3. `resolveCollisions()` – Impuls-basierte Auflösung mit vollem 3×3 Inverse-Inertia-Tensor (pro-Achse Ixx, Iyy, Izz, rotiert in Weltkoordinaten: I⁻¹_world = R·diag(1/Ixx,1/Iyy,1/Izz)·Rᵀ); 4 Solver-Iterationen (Sequential Impulses); Restitution nur in 1. Iteration; Friction + Positional Correction 80%; schlafende Körper werden aufgeweckt; `CollisionEvent`s gesammelt
-  3. `writeback()` – Aktualisierte Positionen/Rotationen zurück in die ECS-`TransformComponent`
-  4. `fireCollisionEvents()` – Alle gesammelten Kollisions-Events an den registrierten Callback dispatchen
+  1. `syncBodiesToBackend()` – Erzeugt/aktualisiert Bodies via `IPhysicsBackend::createBody(BodyDesc)` / `updateBody()` aus ECS (`TransformComponent` + `CollisionComponent`, optional `PhysicsComponent`)
+  2. `m_backend->step()` – Backend übernimmt Kollisionserkennung, Impulsauflösung, Constraint-Solving, Sleep-Management
+  3. `syncBodiesFromBackend()` – Liest `BodyState` (Position, Rotation, Velocity) via `IPhysicsBackend::getBodyState()` zurück ins ECS (nur Dynamic)
+  4. `updateOverlapTracking()` + `fireCollisionEvents()` – Overlap-Tracking und Collision-Callbacks
+- **Entity-Tracking**: `m_trackedEntities` (std::set) verfolgt welche Entities einen Body im Backend haben.
 
-### 15.3 Kollisionstypen
+### 15.4 Unterstützte Collider-Formen
 
-| Kombination       | Erkennung                              |
-|--------------------|----------------------------------------|
-| Sphere ↔ Sphere   | Distanz < Summe der Radien             |
-| Box ↔ Box         | OBB-SAT (15-Achsen Separating Axis Theorem, volle Rotationsunterstützung, Vertex-Averaging Kontaktpunkt für Kipp-Drehmoment) |
-| Sphere ↔ Box      | Kugel-Zentrum in Box-Lokalraum transformiert → Nächster Punkt auf OBB → Distanzprüfung |
+| ColliderType | Jolt Shape         | colliderSize-Mapping                     |
+|--------------|--------------------|-----------------------------------------|
+| Box (0)      | `JPH::BoxShape`   | [halfX, halfY, halfZ]                    |
+| Sphere (1)   | `JPH::SphereShape` | [radius, -, -]                          |
+| Capsule (2)  | `JPH::CapsuleShape`| [radius, halfHeight, -]                 |
+| Cylinder (3) | `JPH::CylinderShape`| [radius, halfHeight, -]                |
+| Mesh (4)     | Fallback → BoxShape | Noch nicht implementiert                |
 
-### 15.4 RigidBody-Daten
-```cpp
-struct RigidBody {
-    Entity entity;
-    float position[3], rotation[3], scale[3];
-    float velocity[3], angularVelocity[3];
-    float mass, invMass, restitution, friction;
-    bool isStatic, useGravity;
-    int colliderType;        // 0=Box, 1=Sphere, 2=Mesh
-    float colliderSize[3];   // Halbmaße / Radius
-    float sleepTimer;        // Dauer unter Schwelle
-    bool isSleeping;         // Körper deaktiviert
-};
-```
+- **Collider-Offset**: `colliderOffset[3]` wird über `JPH::OffsetCenterOfMassShape` angewendet.
+- **Sensor/Trigger**: `isSensor=true` → `BodyCreationSettings::mIsSensor = true` (keine physische Reaktion, nur Overlap-Events).
 
-### 15.5 Kontakt-Auflösung
-```cpp
-struct ContactPoint {
-    RigidBody *a, *b;
-    float normal[3], depth;
-};
-// Phase 1: Positional Correction (40%, Slop 0.005) + Event-Sammlung
-// Phase 2: 4 Solver-Iterationen (Sequential Impulses):
-//   Inverse Inertia Tensor: I⁻¹_world = R · diag(1/Ixx, 1/Iyy, 1/Izz) · Rᵀ
-//   Box: Ixx=(1/12)*m*(h²+d²), Iyy=(1/12)*m*(w²+d²), Izz=(1/12)*m*(w²+h²)
-//   Sphere: I=(2/5)*m*r² (isotrop)
-//   Impuls: j = -(1+e) * vRel·n / (invMassA + invMassB + angFactorA + angFactorB)
-//   angFactor = (r×n) · (I⁻¹_world · (r×n))
-//   Reibung: Tangential-Impuls begrenzt durch µ * |j|
-//   Restitution-Schwelle: e=0 wenn |vRel·n| < 0.5 m/s (verhindert Micro-Bouncing)
-//   Restitution nur in 1. Iteration (verhindert Energiegewinn)
-```
+### 15.5 Jolt Body-Eigenschaften
+
+| Eigenschaft          | Jolt-Mapping                              |
+|----------------------|------------------------------------------|
+| motionType           | `JPH::EMotionType` (Static/Kinematic/Dynamic) |
+| mass                 | `JPH::MassProperties` via Shape          |
+| gravityFactor        | `BodyCreationSettings::mGravityFactor`    |
+| linearDamping        | `BodyCreationSettings::mLinearDamping`    |
+| angularDamping       | `BodyCreationSettings::mAngularDamping`   |
+| maxLinearVelocity    | `BodyCreationSettings::mMaxLinearVelocity`|
+| maxAngularVelocity   | `BodyCreationSettings::mMaxAngularVelocity`|
+| motionQuality        | `JPH::EMotionQuality` (Discrete/LinearCast CCD) |
+| allowSleeping        | `BodyCreationSettings::mAllowSleeping`    |
+| isSensor             | `BodyCreationSettings::mIsSensor`         |
+| restitution          | `BodyCreationSettings::mRestitution`      |
+| friction             | `BodyCreationSettings::mFriction`         |
 
 ### 15.6 Integration
-- **PIE Start**: `PhysicsWorld::Instance().initialize()` (Gravitation auf 0, -9.81, 0; Akkumulator auf `fixedTimestep` vorgeladen → erster `step()` läuft sofort)
-- **PIE Frame**: `PhysicsWorld::Instance().step(dt)` (vor Scripting, damit Overlap-Events für Scripts verfügbar sind)
+- **PIE Start**: `PhysicsWorld::Instance().initialize()` (Gravitation auf 0, -9.81, 0)
+- **PIE Frame**: `PhysicsWorld::Instance().step(dt)` (vor Scripting)
 - **PIE Stop**: `PhysicsWorld::Instance().shutdown()`
 
 ### 15.7 Overlap-Tracking (Begin / End)
 - `PhysicsWorld` vergleicht pro Frame die aktuelle Menge kollidierender Entity-Paare mit der des Vorframes.
 - **Neue Paare** → `OverlapEvent` in `m_beginOverlapEvents`.
 - **Entfallene Paare** → `OverlapEvent` in `m_endOverlapEvents`.
-- `updateOverlapTracking()` wird nach `writeback()` und vor `fireCollisionEvents()` aufgerufen.
-- `Scripting::UpdateScripts()` iteriert über Begin-/End-Events und ruft für jede beteiligte Entity deren Script-Funktion auf:
-  - `on_entity_begin_overlap(entity, other_entity)` – Beim ersten Frame der Überlappung
-  - `on_entity_end_overlap(entity, other_entity)` – Beim ersten Frame nach dem Ende der Überlappung
-- Beide Entities eines Paares erhalten jeweils einen eigenen Aufruf (mit der anderen Entity als `other_entity`).
+- `Scripting::UpdateScripts()` ruft für jede beteiligte Entity deren Script-Funktion auf:
+  - `on_entity_begin_overlap(entity, other_entity)`
+  - `on_entity_end_overlap(entity, other_entity)`
 
-### 15.8 CMake
-- Target: `Physics` (STATIC-Bibliothek)
-- Abhängigkeiten: Core, Logger
+### 15.8 Serialisierung
+- **Neue Formate**: `CollisionComponent`, `PhysicsComponent` und `HeightFieldComponent` werden separat als "Collision", "Physics" und "HeightField" JSON-Keys serialisiert. Die `HeightFieldComponent`-Serialisierung umfasst: `heights`-Vektor, `sampleCount`, `offsetX/Y/Z`, `scaleX/Y/Z`.
+- **Backward Compatibility**: `deserializeLegacyPhysics()` erkennt alte Formate (mit "isStatic"-Feld) und splittet sie automatisch in beide Komponenten.
+
+### 15.9 Editor-UI
+- **Collision-Sektion**: ColliderType-Dropdown (Box/Sphere/Capsule/Cylinder/Mesh/HeightField), Size, Offset, Restitution, Friction, isSensor-Checkbox.
+- **Physics-Sektion**: MotionType-Dropdown (Static/Kinematic/Dynamic), Mass, GravityFactor, LinearDamping, AngularDamping, MaxLinearVelocity, MaxAngularVelocity, MotionQuality-Dropdown (Discrete/LinearCast CCD), AllowSleeping, Velocity, AngularVelocity.
+
+### 15.10 CMake
+- Target: `Physics` (SHARED-Bibliothek)
+- Quellen: `PhysicsWorld.cpp`, `IPhysicsBackend.h`, `JoltBackend.cpp`
+- Abhängigkeiten: Core, Logger, Jolt
 
 ---
 
@@ -1296,13 +1340,13 @@ struct ContactPoint {
 
 **Dateien:** `src/Landscape/LandscapeManager.h/.cpp`
 
-- `LandscapeManager::spawnLandscape(params)` – Generiert ein flaches Grid-Mesh (XZ-Ebene), speichert es als `.asset` in `Content/Landscape/`, erstellt ein ECS-Entity mit Transform + Mesh + Name + Material (WorldGrid) + Physics (statischer Box-Collider, Half-Extents = halbe Landscape-Breite/-Tiefe, Y=0.05).
+- `LandscapeManager::spawnLandscape(params)` – Generiert ein flaches Grid-Mesh (XZ-Ebene), speichert es als `.asset` in `Content/Landscape/`, erstellt ein ECS-Entity mit Transform + Mesh + Name + Material (WorldGrid) + CollisionComponent (HeightField) + HeightFieldComponent (Höhendaten, Offsets, Skalierung) + Physics (statisch). Jolt HeightFieldShape wird direkt aus den Höhendaten erzeugt.
 - `LandscapeManager::hasExistingLandscape()` – Prüft ob bereits ein Landscape-Entity existiert (MeshComponent-Pfad beginnt mit `Landscape/`).
 - **Nur ein Landscape pro Szene**: Das Landscape Manager Popup wird blockiert, wenn bereits ein Landscape existiert; stattdessen wird eine Toast-Nachricht angezeigt.
-- `LandscapeParams`: name, width, depth, subdivisionsX, subdivisionsZ.
-- Popup-UI über `UIManager::openLandscapeManagerPopup()` mit Formular (Name, Width, Depth, SubdivX, SubdivZ, Create/Cancel). Die Widget-Erstellung wurde aus `main.cpp` in den UIManager verschoben.
+- `LandscapeParams`: name, width, depth, subdivisionsX, subdivisionsZ, heightData (optional).
+- Popup-UI über `UIManager::openLandscapeManagerPopup()` mit Formular (Name, Width, Depth, SubdivX, SubdivZ, Create/Cancel). Die Widget-Erstellung wurde aus `main.cpp` in den UIManager verschoben. Landscape-Erstellung erzeugt eine Undo/Redo-Action (Undo entfernt das Entity).
 - **Dropdown-Menü-System**: `UIManager::showDropdownMenu(anchor, items)` / `closeDropdownMenu()` — zeigt ein Overlay-Widget (z-Order 9000) mit klickbaren Menüeinträgen an einer Pixelposition. Click-Outside schließt das Menü automatisch.
-- **Engine Settings Popup** über `UIManager::openEngineSettingsPopup()` (aufgerufen aus `ViewportOverlay.Settings` → Dropdown-Menü → "Engine Settings"): Links Sidebar mit Kategorie-Buttons (Rendering, Debug), rechts scrollbarer Content-Bereich mit Checkboxen. Rendering-Kategorie enthält: Shadows, VSync, Wireframe Mode, Occlusion Culling. Debug-Kategorie enthält: UI Debug Outlines, Bounding Box Debug. Kategoriewechsel baut den Content-Bereich dynamisch um. Alle Änderungen werden in `config.ini` via `DiagnosticsManager::setState()` persistiert und beim nächsten Start über `loadConfig()` → Renderer-Flags wiederhergestellt. Die Widget-Erstellung wurde aus `main.cpp` in den UIManager verschoben.
+- **Engine Settings Popup** über `UIManager::openEngineSettingsPopup()` (aufgerufen aus `ViewportOverlay.Settings` → Dropdown-Menü → "Engine Settings"): Links Sidebar mit Kategorie-Buttons (General, Rendering, Debug, Physics), rechts scrollbarer Content-Bereich mit Checkboxen und Float-Eingabefeldern. General-Kategorie enthält: Splash Screen. Rendering-Kategorie enthält: Shadows, VSync, Wireframe Mode, Occlusion Culling. Debug-Kategorie enthält: UI Debug Outlines, Bounding Box Debug. Physics-Kategorie enthält: Backend-Dropdown (Jolt / PhysX, PhysX nur sichtbar wenn `ENGINE_PHYSX_BACKEND_AVAILABLE` definiert), Gravity X/Y/Z (Float-Eingabefelder, Default 0/-9.81/0), Fixed Timestep (Default 1/60 s), Sleep Threshold (Default 0.05). Die Backend-Auswahl wird als `PhysicsBackend`-Key in `DiagnosticsManager` persistiert und beim PIE-Start ausgelesen, um `PhysicsWorld::initialize(Backend)` mit dem gewählten Backend aufzurufen. Kategoriewechsel baut den Content-Bereich dynamisch um. Alle Änderungen werden in `config.ini` via `DiagnosticsManager::setState()` persistiert und beim PIE-Start auf `PhysicsWorld` angewendet (Backend, Gravity, Timestep, Sleep Threshold). Die Widget-Erstellung wurde aus `main.cpp` in den UIManager verschoben.
 - Grid-Shader (`grid_fragment.glsl`) nutzt vollständige Lichtberechnung (Multi-Light, Schatten, Blinn-Phong) — Landscape wird von allen Lichtquellen der Szene beeinflusst.
 - `EngineLevel::onEntityAdded()` / `onEntityRemoved()` setzen automatisch das Level-Dirty-Flag (`setIsSaved(false)`) und `setScenePrepared(false)` via Callback, sodass alle Aufrufer (Spawn, Delete, Landscape) einheitlich behandelt werden.
 
@@ -1483,7 +1527,9 @@ while (running) {
         F10 → Metriken toggle
         F11 → UI-Debug toggle
         F12 → FPS-Cap toggle
+        HeightField Debug → Engine Settings Toggle (config.ini persistiert)
         ESC → PIE stoppen
+        DELETE → Selektierte Entity löschen (Snapshot aller Komponenten → Undo/Redo-Action)
         Sonst → DiagnosticsManager + Scripting
     - KEY_DOWN → UI-Keyboard + DiagnosticsManager + Scripting
 
@@ -1513,14 +1559,15 @@ while (running) {
 
 ### Debug-Tasten
 
-| Taste | Funktion                              |
-|-------|---------------------------------------|
-| F8    | Bounding-Box-Debug toggle             |
-| F9    | Occlusion-Statistiken toggle          |
-| F10   | Performance-Metriken toggle           |
-| F11   | UI-Debug (Bounds-Rahmen) toggle       |
-| F12   | FPS-Cap (60 FPS) toggle               |
-| ESC   | PIE stoppen (wenn aktiv)              |
+| Taste  | Funktion                              |
+|--------|---------------------------------------|
+| F8     | Bounding-Box-Debug toggle             |
+| F9     | Occlusion-Statistiken toggle          |
+| F10    | Performance-Metriken toggle           |
+| F11    | UI-Debug (Bounds-Rahmen) toggle       |
+| F12    | FPS-Cap (60 FPS) toggle               |
+| ESC    | PIE stoppen (wenn aktiv)              |
+| DELETE | Selektierte Entity löschen (mit Undo/Redo) |
 
 ### Kamera-Steuerung
 
@@ -1585,8 +1632,9 @@ while (running) {
     ┌─────────────────▼───┐  ┌──────────▼─────────────┐
     │       Physics        │  │       Renderer          │
     │  PhysicsWorld (PIE)  │  │  ┌──────────────────┐   │
-    │  Rigid Body, AABB,   │  │  │  OpenGLRenderer   │   │
-    │  Impulse Resolution  │  │  │  Kamera, Shader   │   │
+    │  Jolt Physics v5.5   │  │  │  OpenGLRenderer   │   │
+    │  PhysX 5.6 (optional)│  │  │                   │   │
+    │  Rigid Body, Raycast │  │  │  Kamera, Shader   │   │
     └──────────────────────┘  │  │  Material, Text   │   │
                               │  │  HZB, Picking     │   │
                               │  └──────────────────┘   │
@@ -1602,18 +1650,33 @@ while (running) {
                               └─────────────────────────┘
 
 Externe Bibliotheken:
-  SDL3, FreeType, OpenAL Soft, GLAD, GLM, nlohmann/json, stb_image, Python 3
+  SDL3, FreeType, OpenAL Soft, GLAD, GLM, nlohmann/json, stb_image, Python 3, Jolt Physics, NVIDIA PhysX 5.6.1
 ```
 
 ---
 
 ## 15. Physik-System
-**Dateien:** `src/Physics/PhysicsWorld.h/.cpp`
+**Dateien:** `src/Physics/PhysicsWorld.h/.cpp`, `src/Physics/IPhysicsBackend.h`, `src/Physics/JoltBackend.h/.cpp`, `src/Physics/PhysXBackend.h/.cpp`
+**Backends:** Jolt Physics v5.5.1 (`external/jolt/`) + NVIDIA PhysX 5.6.1 (`external/PhysX/`, optional) via austauschbares `IPhysicsBackend`-Interface
 
-- Fixed-Timestep-Rigid-Body-Simulation mit Semi-Implicit Euler.
-- Kollisionen: Box↔Box (rotationsberücksichtigtes AABB), Sphere↔Sphere, Sphere↔Box.
-- Sphere↔Box-Kontaktnormalen sind konsistent von A → B (stabilere Impulsreaktion).
-- Kanten-Überhang prüft Top-Contact per AABB-Overlap und setzt Kipp- plus Rollimpuls mit leichter Positional-Korrektur.
+- **Backend-Abstraktion**: `PhysicsWorld` ist backend-agnostisch und delegiert über `std::unique_ptr<IPhysicsBackend>`. `PhysicsWorld::Backend`-Enum (Jolt/PhysX) + `initialize(Backend)` für Backend-Auswahl.
+- **JoltBackend** (`JoltBackend.h/.cpp`): Kapselt alle Jolt-spezifischen Typen. `EngineContactListener` für thread-safe Kollisionsereignisse. Broadphase-Layer (NON_MOVING/MOVING).
+- **PhysXBackend** (`PhysXBackend.h/.cpp`): NVIDIA PhysX 5.6.1 Implementierung. `SimCallbackImpl` (`PxSimulationEventCallback`) für Kontakt-Callbacks. PxFoundation/PxPhysics/PxScene/PxPvd Lifecycle. Optional via `ENGINE_PHYSX_BACKEND` CMake-Option (`ENGINE_PHYSX_BACKEND_AVAILABLE` Define).
+- Zwei ECS-Komponenten: `CollisionComponent` (Form/Oberfläche, erforderlich) + `PhysicsComponent` (Dynamik, optional → statisch wenn fehlend).
+- Collider-Formen: Box, Sphere, Capsule, Cylinder, HeightField (Mesh fällt auf Box zurück). Collider-Offset via Backend.
+- Fixed-Timestep-Akkumulator delegiert an `IPhysicsBackend::step()`.
+- Backend übernimmt Kollisionserkennung, Impulsauflösung, Constraint-Solving und Sleep-Management.
+- `syncBodiesToBackend()`: Erzeugt/aktualisiert Bodies via `IPhysicsBackend::createBody(BodyDesc)` aus ECS.
+- `syncBodiesFromBackend()`: Liest `BodyState` (Position, Rotation, Velocity) via Backend zurück ins ECS (nur Dynamic).
+- Body-Eigenschaften: gravityFactor, linearDamping, angularDamping, maxLinearVelocity, maxAngularVelocity, motionQuality (CCD), allowSleeping, isSensor.
+- Entity-Tracking via `m_trackedEntities` (std::set) in PhysicsWorld.
+- Raycast via `IPhysicsBackend::raycast()` → `RaycastResult`.
+- Backward-Kompatibilität: `deserializeLegacyPhysics()` migriert alte Formate.
+- Euler↔Quaternion-Konvertierung in beiden Backends mit Rotationsreihenfolge Y(Yaw)·X(Pitch)·Z(Roll).
+- **PhysX CMake-Integration**: Statische Libs via `add_subdirectory(external/PhysX/physx/compiler/public)`. DLL-CRT-Override (`/MDd`/`/MD`) und `/WX-` für alle PhysX-Targets. Stub-freeglut für PUBLIC_RELEASE-Build. `CMAKE_CONFIGURATION_TYPES` Save/Restore um PhysX-Overrides zu isolieren.
+- **HeightField-Kollision (Bugfixes)**:
+  - **PhysX**: `BodyDesc.heightSampleCount` ist die Seitenlänge (nicht Gesamtanzahl) – direkter Einsatz statt `sqrtf()`. HeightField-Offset via `PxShape::setLocalPose()` angewandt (PhysX-HeightField beginnt bei (0,0,0)). Skalierungsreihenfolge korrigiert: `rowScale=Z`, `columnScale=X`. PxI16-Clamping für Höhenwerte.
+  - **Jolt**: `HeightFieldShapeSettings` erfordert `sampleCount = 2^n + 1`. Bilineare Resampling-Logik für nicht-konforme Zählungen mit proportionaler Skalierungsanpassung. Fallback vermeidet fehlerhafte BoxShape-Ersetzung.
 
 ---
 
@@ -1621,6 +1684,8 @@ Externe Bibliotheken:
 **Dateien:** `src/Landscape/LandscapeManager.h/.cpp`
 
 - Verwaltung von Terrain-Assets und Editor-Workflow (Popup, Import, Status).
+- **HeightField Debug Wireframe**: Visualisiert das HeightField-Kollisionsgitter als grünes Wireframe-Overlay im Viewport. Toggle über Engine Settings → Debug → HeightField Debug. Automatischer Mesh-Rebuild bei ECS-Änderungen via `getComponentVersion()`. Nutzt den bestehenden `boundsDebugProgram`-Shader (GL_LINES, Identity-Model-Matrix, World-Space-Vertices). Persistenz über `config.ini` (`HeightFieldDebugEnabled`).
+- **Grid-Größe**: `gridSize` wird auf die nächste Zweierpotenz aufgerundet, sodass `sampleCount = gridSize + 1` immer `2^n + 1` ergibt (Jolt-HeightField-Kompatibilität). Standard: gridSize=3 → aufgerundet auf 4 → sampleCount=5.
 
 ---
 

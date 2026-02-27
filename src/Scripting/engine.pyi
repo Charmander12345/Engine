@@ -14,6 +14,7 @@ Component_Camera: int
 Component_Physics: int
 Component_Script: int
 Component_Name: int
+Component_Collision: int
 
 Asset_Texture: int
 Asset_Material: int
@@ -227,6 +228,110 @@ class audio:
 
 class input:
     Keys: dict[str, int]
+
+    Key_A: int
+    Key_B: int
+    Key_C: int
+    Key_D: int
+    Key_E: int
+    Key_F: int
+    Key_G: int
+    Key_H: int
+    Key_I: int
+    Key_J: int
+    Key_K: int
+    Key_L: int
+    Key_M: int
+    Key_N: int
+    Key_O: int
+    Key_P: int
+    Key_Q: int
+    Key_R: int
+    Key_S: int
+    Key_T: int
+    Key_U: int
+    Key_V: int
+    Key_W: int
+    Key_X: int
+    Key_Y: int
+    Key_Z: int
+    Key_1: int
+    Key_2: int
+    Key_3: int
+    Key_4: int
+    Key_5: int
+    Key_6: int
+    Key_7: int
+    Key_8: int
+    Key_9: int
+    Key_0: int
+    Key_RETURN: int
+    Key_ESCAPE: int
+    Key_BACKSPACE: int
+    Key_TAB: int
+    Key_SPACE: int
+    Key_MINUS: int
+    Key_EQUALS: int
+    Key_LEFTBRACKET: int
+    Key_RIGHTBRACKET: int
+    Key_BACKSLASH: int
+    Key_SEMICOLON: int
+    Key_APOSTROPHE: int
+    Key_GRAVE: int
+    Key_COMMA: int
+    Key_PERIOD: int
+    Key_SLASH: int
+    Key_CAPSLOCK: int
+    Key_F1: int
+    Key_F2: int
+    Key_F3: int
+    Key_F4: int
+    Key_F5: int
+    Key_F6: int
+    Key_F7: int
+    Key_F8: int
+    Key_F9: int
+    Key_F10: int
+    Key_F11: int
+    Key_F12: int
+    Key_PRINTSCREEN: int
+    Key_SCROLLLOCK: int
+    Key_PAUSE: int
+    Key_INSERT: int
+    Key_HOME: int
+    Key_PAGEUP: int
+    Key_DELETE: int
+    Key_END: int
+    Key_PAGEDOWN: int
+    Key_RIGHT: int
+    Key_LEFT: int
+    Key_DOWN: int
+    Key_UP: int
+    Key_NUMLOCKCLEAR: int
+    Key_KP_DIVIDE: int
+    Key_KP_MULTIPLY: int
+    Key_KP_MINUS: int
+    Key_KP_PLUS: int
+    Key_KP_ENTER: int
+    Key_KP_1: int
+    Key_KP_2: int
+    Key_KP_3: int
+    Key_KP_4: int
+    Key_KP_5: int
+    Key_KP_6: int
+    Key_KP_7: int
+    Key_KP_8: int
+    Key_KP_9: int
+    Key_KP_0: int
+    Key_KP_PERIOD: int
+    Key_LCTRL: int
+    Key_LSHIFT: int
+    Key_LALT: int
+    Key_LGUI: int
+    Key_RCTRL: int
+    Key_RSHIFT: int
+    Key_RALT: int
+    Key_RGUI: int
 
     @staticmethod
     def set_on_key_pressed(callback: Callable[[int], None]) -> bool:

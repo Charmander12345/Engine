@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <functional>
+#include <optional>
 #include <SDL3/SDL.h>
 
 #if defined(_WIN32)
@@ -141,6 +142,8 @@ int main()
             if ((*v == "1") != glRenderer->isBoundsDebugEnabled())
                 glRenderer->toggleBoundsDebug();
         }
+        if (auto v = diag.getState("HeightFieldDebugEnabled"))
+            glRenderer->setHeightFieldDebugEnabled(*v == "1");
         if (auto v = diag.getState("VSyncEnabled"))
             glRenderer->setVSyncEnabled(*v == "1");
         if (auto v = diag.getState("WireframeEnabled"))
@@ -409,7 +412,34 @@ auto showProgress = [&](const std::string& msg)
                         return;
                     }
                     level->snapshotEcsState();
-                    PhysicsWorld::Instance().initialize();
+
+                    // Determine selected physics backend from settings
+                    PhysicsWorld::Backend selectedBackend = PhysicsWorld::Backend::Jolt;
+                    if (auto v = diag.getState("PhysicsBackend"))
+                    {
+#ifdef ENGINE_PHYSX_BACKEND_AVAILABLE
+                        if (*v == "PhysX") selectedBackend = PhysicsWorld::Backend::PhysX;
+#endif
+                    }
+                    PhysicsWorld::Instance().initialize(selectedBackend);
+
+                    // Apply persisted physics settings
+                    {
+                        auto& physics = PhysicsWorld::Instance();
+                        auto toFloat = [&](const std::string& key, float fallback) -> float {
+                            if (auto v = diag.getState(key)) {
+                                try { return std::stof(*v); } catch (...) {}
+                            }
+                            return fallback;
+                        };
+                        float gx = toFloat("PhysicsGravityX", 0.0f);
+                        float gy = toFloat("PhysicsGravityY", -9.81f);
+                        float gz = toFloat("PhysicsGravityZ", 0.0f);
+                        physics.setGravity(gx, gy, gz);
+                        physics.setFixedTimestep(toFloat("PhysicsFixedTimestep", 1.0f / 60.0f));
+                        physics.setSleepThreshold(toFloat("PhysicsSleepThreshold", 0.05f));
+                    }
+
                     diag.setPIEActive(true);
 
                     // Find the first entity with an active CameraComponent
@@ -983,6 +1013,47 @@ auto showProgress = [&](const std::string& msg)
                                     glRenderer->getUIManager().selectEntity(static_cast<unsigned int>(entity));
                                     glRenderer->getUIManager().showToastMessage("Spawned: " + assetName, 2.5f);
                                 }
+
+                                // Snapshot components for spawn undo/redo
+                                auto spSavedTransform   = ecs.hasComponent<ECS::TransformComponent>(entity)   ? std::make_optional(*ecs.getComponent<ECS::TransformComponent>(entity))   : std::nullopt;
+                                auto spSavedName        = ecs.hasComponent<ECS::NameComponent>(entity)        ? std::make_optional(*ecs.getComponent<ECS::NameComponent>(entity))        : std::nullopt;
+                                auto spSavedMesh        = ecs.hasComponent<ECS::MeshComponent>(entity)        ? std::make_optional(*ecs.getComponent<ECS::MeshComponent>(entity))        : std::nullopt;
+                                auto spSavedMaterial    = ecs.hasComponent<ECS::MaterialComponent>(entity)    ? std::make_optional(*ecs.getComponent<ECS::MaterialComponent>(entity))    : std::nullopt;
+                                auto spSavedLight       = ecs.hasComponent<ECS::LightComponent>(entity)       ? std::make_optional(*ecs.getComponent<ECS::LightComponent>(entity))       : std::nullopt;
+                                auto spSavedCamera      = ecs.hasComponent<ECS::CameraComponent>(entity)      ? std::make_optional(*ecs.getComponent<ECS::CameraComponent>(entity))      : std::nullopt;
+                                auto spSavedPhysics     = ecs.hasComponent<ECS::PhysicsComponent>(entity)     ? std::make_optional(*ecs.getComponent<ECS::PhysicsComponent>(entity))     : std::nullopt;
+                                auto spSavedScript      = ecs.hasComponent<ECS::ScriptComponent>(entity)      ? std::make_optional(*ecs.getComponent<ECS::ScriptComponent>(entity))      : std::nullopt;
+                                auto spSavedCollision   = ecs.hasComponent<ECS::CollisionComponent>(entity)   ? std::make_optional(*ecs.getComponent<ECS::CollisionComponent>(entity))   : std::nullopt;
+                                auto spSavedHeightField = ecs.hasComponent<ECS::HeightFieldComponent>(entity) ? std::make_optional(*ecs.getComponent<ECS::HeightFieldComponent>(entity)) : std::nullopt;
+
+                                // Push undo/redo for entity spawn
+                                UndoRedoManager::Command spawnCmd;
+                                spawnCmd.description = "Spawn " + assetName;
+                                spawnCmd.execute = [entity, spSavedTransform, spSavedName, spSavedMesh, spSavedMaterial, spSavedLight, spSavedCamera, spSavedPhysics, spSavedScript, spSavedCollision, spSavedHeightField]()
+                                    {
+                                        auto& e = ECS::ECSManager::Instance();
+                                        e.createEntity(entity);
+                                        if (spSavedTransform)   e.addComponent<ECS::TransformComponent>(entity, *spSavedTransform);
+                                        if (spSavedName)        e.addComponent<ECS::NameComponent>(entity, *spSavedName);
+                                        if (spSavedMesh)        e.addComponent<ECS::MeshComponent>(entity, *spSavedMesh);
+                                        if (spSavedMaterial)    e.addComponent<ECS::MaterialComponent>(entity, *spSavedMaterial);
+                                        if (spSavedLight)       e.addComponent<ECS::LightComponent>(entity, *spSavedLight);
+                                        if (spSavedCamera)      e.addComponent<ECS::CameraComponent>(entity, *spSavedCamera);
+                                        if (spSavedPhysics)     e.addComponent<ECS::PhysicsComponent>(entity, *spSavedPhysics);
+                                        if (spSavedScript)      e.addComponent<ECS::ScriptComponent>(entity, *spSavedScript);
+                                        if (spSavedCollision)   e.addComponent<ECS::CollisionComponent>(entity, *spSavedCollision);
+                                        if (spSavedHeightField) e.addComponent<ECS::HeightFieldComponent>(entity, *spSavedHeightField);
+                                        auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
+                                        if (lvl) lvl->onEntityAdded(entity);
+                                    };
+                                spawnCmd.undo = [entity]()
+                                    {
+                                        auto& e = ECS::ECSManager::Instance();
+                                        auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
+                                        if (lvl) lvl->onEntityRemoved(entity);
+                                        e.removeEntity(entity);
+                                    };
+                                UndoRedoManager::Instance().pushCommand(std::move(spawnCmd));
                             });
 
                         // --- Drag & Drop: asset dropped on content browser folder → move asset ---
@@ -1275,24 +1346,36 @@ auto showProgress = [&](const std::string& msg)
 
         auto& ecs = ECS::ECSManager::Instance();
         auto* level = diagnostics.getActiveLevelSoft();
+        const auto entity = static_cast<ECS::Entity>(selected);
 
         // Get entity name for feedback
         std::string entityName = "Entity " + std::to_string(selected);
-        if (const auto* nameComp = ecs.getComponent<ECS::NameComponent>(static_cast<ECS::Entity>(selected)))
+        if (const auto* nameComp = ecs.getComponent<ECS::NameComponent>(entity))
         {
             if (!nameComp->displayName.empty())
                 entityName = nameComp->displayName;
         }
 
+        // Snapshot components for undo
+        auto savedTransform   = ecs.hasComponent<ECS::TransformComponent>(entity)   ? std::make_optional(*ecs.getComponent<ECS::TransformComponent>(entity))   : std::nullopt;
+        auto savedName        = ecs.hasComponent<ECS::NameComponent>(entity)        ? std::make_optional(*ecs.getComponent<ECS::NameComponent>(entity))        : std::nullopt;
+        auto savedMesh        = ecs.hasComponent<ECS::MeshComponent>(entity)        ? std::make_optional(*ecs.getComponent<ECS::MeshComponent>(entity))        : std::nullopt;
+        auto savedMaterial    = ecs.hasComponent<ECS::MaterialComponent>(entity)    ? std::make_optional(*ecs.getComponent<ECS::MaterialComponent>(entity))    : std::nullopt;
+        auto savedLight       = ecs.hasComponent<ECS::LightComponent>(entity)       ? std::make_optional(*ecs.getComponent<ECS::LightComponent>(entity))       : std::nullopt;
+        auto savedCamera      = ecs.hasComponent<ECS::CameraComponent>(entity)      ? std::make_optional(*ecs.getComponent<ECS::CameraComponent>(entity))      : std::nullopt;
+        auto savedPhysics     = ecs.hasComponent<ECS::PhysicsComponent>(entity)     ? std::make_optional(*ecs.getComponent<ECS::PhysicsComponent>(entity))     : std::nullopt;
+        auto savedScript      = ecs.hasComponent<ECS::ScriptComponent>(entity)      ? std::make_optional(*ecs.getComponent<ECS::ScriptComponent>(entity))      : std::nullopt;
+        auto savedCollision   = ecs.hasComponent<ECS::CollisionComponent>(entity)   ? std::make_optional(*ecs.getComponent<ECS::CollisionComponent>(entity))   : std::nullopt;
+        auto savedHeightField = ecs.hasComponent<ECS::HeightFieldComponent>(entity) ? std::make_optional(*ecs.getComponent<ECS::HeightFieldComponent>(entity)) : std::nullopt;
+
         // Remove from level tracking first
         if (level)
         {
-            level->onEntityRemoved(static_cast<ECS::Entity>(selected));
-            level->setIsSaved(false);
+            level->onEntityRemoved(entity);
         }
 
         // Remove from ECS
-        ecs.removeEntity(static_cast<ECS::Entity>(selected));
+        ecs.removeEntity(entity);
 
         // Clear selection and deselect in renderer
         uiManager.selectEntity(0);
@@ -1304,6 +1387,40 @@ auto showProgress = [&](const std::string& msg)
         Logger::Instance().log(Logger::Category::Engine,
             "Deleted entity " + std::to_string(selected) + " (" + entityName + ")",
             Logger::LogLevel::INFO);
+
+        // Push undo/redo command
+        UndoRedoManager::Command cmd;
+        cmd.description = "Delete " + entityName;
+        cmd.execute = [entity]()
+            {
+                auto& e = ECS::ECSManager::Instance();
+                if (std::find(e.getEntitiesMatchingSchema(ECS::Schema()).begin(),
+                              e.getEntitiesMatchingSchema(ECS::Schema()).end(), entity) != e.getEntitiesMatchingSchema(ECS::Schema()).end())
+                {
+                    auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
+                    if (lvl) lvl->onEntityRemoved(entity);
+                    e.removeEntity(entity);
+                }
+            };
+        cmd.undo = [entity, savedTransform, savedName, savedMesh, savedMaterial, savedLight, savedCamera, savedPhysics, savedScript, savedCollision, savedHeightField]()
+            {
+                auto& e = ECS::ECSManager::Instance();
+                e.createEntity(entity);
+                if (savedTransform)   e.addComponent<ECS::TransformComponent>(entity, *savedTransform);
+                if (savedName)        e.addComponent<ECS::NameComponent>(entity, *savedName);
+                if (savedMesh)        e.addComponent<ECS::MeshComponent>(entity, *savedMesh);
+                if (savedMaterial)    e.addComponent<ECS::MaterialComponent>(entity, *savedMaterial);
+                if (savedLight)       e.addComponent<ECS::LightComponent>(entity, *savedLight);
+                if (savedCamera)      e.addComponent<ECS::CameraComponent>(entity, *savedCamera);
+                if (savedPhysics)     e.addComponent<ECS::PhysicsComponent>(entity, *savedPhysics);
+                if (savedScript)      e.addComponent<ECS::ScriptComponent>(entity, *savedScript);
+                if (savedCollision)   e.addComponent<ECS::CollisionComponent>(entity, *savedCollision);
+                if (savedHeightField) e.addComponent<ECS::HeightFieldComponent>(entity, *savedHeightField);
+                auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
+                if (lvl) lvl->onEntityAdded(entity);
+            };
+        UndoRedoManager::Instance().pushCommand(std::move(cmd));
+
         return true;
         });
 

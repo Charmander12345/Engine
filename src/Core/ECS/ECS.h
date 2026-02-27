@@ -16,7 +16,7 @@ struct ECSConfig
 };
 
 using Entity = unsigned int;
-static constexpr size_t MaxComponentTypes = 8;
+static constexpr size_t MaxComponentTypes = 10;
 
 enum class ComponentKind : size_t
 {
@@ -27,7 +27,9 @@ enum class ComponentKind : size_t
 	Camera,
 	Physics,
 	Script,
-	Name
+	Name,
+	Collision,
+	HeightField
 };
 
 template<typename T>
@@ -79,6 +81,18 @@ template<>
 struct ComponentTraits<NameComponent>
 {
 	static constexpr ComponentKind kind = ComponentKind::Name;
+};
+
+template<>
+struct ComponentTraits<CollisionComponent>
+{
+	static constexpr ComponentKind kind = ComponentKind::Collision;
+};
+
+template<>
+struct ComponentTraits<HeightFieldComponent>
+{
+	static constexpr ComponentKind kind = ComponentKind::HeightField;
 };
 
 class Schema
@@ -178,6 +192,8 @@ public:
 	SparseSet<PhysicsComponent, MaxEntities> m_physicsComponents;
 	SparseSet<ScriptComponent, MaxEntities> m_scriptComponents;
 	SparseSet<NameComponent, MaxEntities> m_nameComponents;
+	SparseSet<CollisionComponent, MaxEntities> m_collisionComponents;
+	SparseSet<HeightFieldComponent, MaxEntities> m_heightFieldComponents;
 
 	template<typename T>
 	SparseSet<T, MaxEntities>& getStorage();
@@ -279,10 +295,18 @@ inline SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage()
 	{
 		return m_nameComponents;
 	}
+	else if constexpr (std::is_same_v<T, CollisionComponent>)
+	{
+		return m_collisionComponents;
+	}
+	else if constexpr (std::is_same_v<T, ScriptComponent>)
+	{
+		return m_scriptComponents;
+	}
 	else
 	{
-		static_assert(std::is_same_v<T, ScriptComponent>, "Unsupported component type");
-		return m_scriptComponents;
+		static_assert(std::is_same_v<T, HeightFieldComponent>, "Unsupported component type");
+		return m_heightFieldComponents;
 	}
 }
 
@@ -317,10 +341,18 @@ inline const SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage() con
 	{
 		return m_nameComponents;
 	}
+	else if constexpr (std::is_same_v<T, CollisionComponent>)
+	{
+		return m_collisionComponents;
+	}
+	else if constexpr (std::is_same_v<T, ScriptComponent>)
+	{
+		return m_scriptComponents;
+	}
 	else
 	{
-		static_assert(std::is_same_v<T, ScriptComponent>, "Unsupported component type");
-		return m_scriptComponents;
+		static_assert(std::is_same_v<T, HeightFieldComponent>, "Unsupported component type");
+		return m_heightFieldComponents;
 	}
 }
 

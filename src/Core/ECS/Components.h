@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <vector>
 
 
 namespace ECS
@@ -45,23 +46,46 @@ namespace ECS
 		bool isActive{ false }; // Mark as the primary runtime camera
 	};
 
-	struct PhysicsComponent
+	struct CollisionComponent
 	{
 		enum class ColliderType
 		{
 			Box,
 			Sphere,
-			Mesh
+			Capsule,
+			Cylinder,
+			Mesh,
+			HeightField
 		} colliderType{ ColliderType::Box };
-		bool isStatic{ false };
-		float mass{ 1.0f }; // Relevant if isStatic is false
-		float restitution{ 0.3f }; // Bounciness (0 = no bounce, 1 = perfect bounce)
-		float friction{ 0.5f };    // Surface friction coefficient
-		bool useGravity{ true };   // Affected by world gravity
-		bool isKinematic{ false }; // Moved by code only, not by physics forces
+		float colliderSize[3]{ 0.5f, 0.5f, 0.5f };   // Box: half-extents, Sphere: radius(x), Capsule/Cylinder: radius(x)+halfHeight(y)
+		float colliderOffset[3]{ 0.0f, 0.0f, 0.0f };  // Local offset from entity transform
+		float restitution{ 0.3f };  // Bounciness (0 = no bounce, 1 = perfect bounce)
+		float friction{ 0.5f };     // Surface friction coefficient
+		bool  isSensor{ false };    // Trigger volume (overlap events only, no physics response)
+	};
+
+	struct PhysicsComponent
+	{
+		enum class MotionType
+		{
+			Static,
+			Kinematic,
+			Dynamic
+		} motionType{ MotionType::Dynamic };
+		float mass{ 1.0f };
+		float gravityFactor{ 1.0f };          // 0 = no gravity, 1 = full, can be >1
+		float linearDamping{ 0.05f };         // Velocity decay per second
+		float angularDamping{ 0.05f };        // Angular velocity decay per second
+		float maxLinearVelocity{ 500.0f };    // Clamp (m/s)
+		float maxAngularVelocity{ 47.1239f }; // Clamp (rad/s, ~0.25*PI*60 Jolt default)
+		enum class MotionQuality
+		{
+			Discrete,
+			LinearCast   // Continuous collision detection
+		} motionQuality{ MotionQuality::Discrete };
+		bool  allowSleeping{ true };
 		float velocity[3]{ 0.0f, 0.0f, 0.0f };
 		float angularVelocity[3]{ 0.0f, 0.0f, 0.0f };
-		float colliderSize[3]{ 0.5f, 0.5f, 0.5f }; // Box half-extents or sphere radius (x)
 	};
 
 	struct ScriptComponent
@@ -73,5 +97,17 @@ namespace ECS
 	struct NameComponent
 	{
 		std::string displayName;
+	};
+
+	struct HeightFieldComponent
+	{
+		std::vector<float> heights;
+		int sampleCount{ 0 };
+		float offsetX{ 0.0f };
+		float offsetY{ 0.0f };
+		float offsetZ{ 0.0f };
+		float scaleX{ 1.0f };
+		float scaleY{ 1.0f };
+		float scaleZ{ 1.0f };
 	};
 }
