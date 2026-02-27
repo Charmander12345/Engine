@@ -76,11 +76,16 @@
 | RHI-Auswahl (Enum: OpenGL/DX11/DX12)| 🟡     |
 | Fenster-Konfiguration (Größe, Zustand)| ✅    |
 | PIE-Modus (Play In Editor)           | ✅     |
+| PIE Maus-Capture + Shift+F1 Pause   | ✅     |
 | Aktives Level verwalten (`setActiveLevel` / `getActiveLevelSoft` / `swapActiveLevel`) | ✅ |
 | Action-Tracking (Loading, Saving…)   | ✅     |
 | Input-Dispatch (KeyDown/KeyUp)       | ✅     |
 | Benachrichtigungen (Modal + Toast)   | ✅     |
 | Shutdown-Request                     | ✅     |
+| Engine Settings: Laptop-Modus        | ✅     |
+| Known Projects Liste (max. 20, config.ini) | ✅ |
+| Default-Startup-Projekt (config.ini) | ✅     |
+| Projekt-Auswahl-Screen (Recent/Open/New) | ✅ |
 
 **Offene Punkte:**
 - RHI-Auswahl existiert als Enum, aber nur OpenGL ist tatsächlich implementiert (DirectX 11/12 nicht vorhanden)
@@ -338,6 +343,13 @@
 | Cinematic-Kamera / Pfad-Follow      | ❌     |
 | Entity-Kamera (CameraComponent)     | ✅     |
 | Kamera-Überblendung                 | ❌     |
+| Editor: WASD nur bei Rechtsklick    | ✅     |
+| Editor: Laptop-Modus (WASD frei)    | ✅     |
+| Editor: W/E/R Gizmo nur ohne RMB   | ✅     |
+| PIE: Maus-Capture + WASD immer      | ✅     |
+| PIE: Shift+F1 Maus freigeben       | ✅     |
+| PIE: Viewport-Klick recapture      | ✅     |
+| PIE: ESC → vorherigen Zustand      | ✅     |
 
 **Offene Punkte:**
 - Orbit-Kamera ist im Mesh-Viewer implementiert (`MeshViewerWindow`): Orbit-Parameter werden vor `renderWorld()` per `setPosition()`/`setRotationDegrees()` auf die Renderer-Kamera übertragen
@@ -548,6 +560,7 @@
 | Toolbar / ViewportOverlay (Select/Move/Rotate/Scale + PIE + Settings) | ✅ |
 | Settings-Button → Dropdown-Menü → "Engine Settings" | ✅ |
 | Engine Settings Popup (Sidebar + Content, Kategorien: General, Rendering, Debug, Physics) | ✅ |
+| Projekt-Auswahl-Screen (Sidebar: Recent Projects, Open Project, New Project) | ✅ |
 | Dropdown-Menü-System (`showDropdownMenu` / `closeDropdownMenu`) | ✅ |
 | WorldSettings   | ✅     |
 | WorldOutliner   | ✅     |

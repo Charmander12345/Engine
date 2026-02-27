@@ -126,6 +126,10 @@ public:
     void setPIEActive(bool active);
     bool isPIEActive() const;
 
+    // Known / recent projects
+    void addKnownProject(const std::string& projectPath);
+    std::vector<std::string> getKnownProjects() const;
+
     void requestShutdown();
     bool isShutdownRequested() const;
 
@@ -178,6 +182,7 @@ private:
     std::unordered_set<unsigned int> m_dirtyEntities;
     bool m_pieActive{ false };
     bool m_assetRegistryReady{ false };
+    std::vector<std::string> m_knownProjects;
 
 	bool isLoadingAsset{ false };
     bool isSavingAsset{ false };

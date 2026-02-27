@@ -311,6 +311,20 @@ bool DiagnosticsManager::loadConfig()
         m_windowState = WindowState::Maximized;
     }
 
+    // Restore known projects from semicolon-separated list
+    m_knownProjects.clear();
+    auto itKP = m_states.find("KnownProjects");
+    if (itKP != m_states.end() && !itKP->second.empty())
+    {
+        std::istringstream ss(itKP->second);
+        std::string token;
+        while (std::getline(ss, token, ';'))
+        {
+            if (!token.empty())
+                m_knownProjects.push_back(token);
+        }
+    }
+
     setWindowSize(Vec2{ width, height });
     return true;
 }
@@ -537,6 +551,36 @@ bool DiagnosticsManager::isPIEActive() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_pieActive;
+}
+
+void DiagnosticsManager::addKnownProject(const std::string& projectPath)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    // Remove duplicates first
+    for (auto it = m_knownProjects.begin(); it != m_knownProjects.end(); ++it)
+    {
+        if (*it == projectPath) { m_knownProjects.erase(it); break; }
+    }
+    // Push to front (most recent)
+    m_knownProjects.insert(m_knownProjects.begin(), projectPath);
+    // Keep at most 20 entries
+    if (m_knownProjects.size() > 20)
+        m_knownProjects.resize(20);
+
+    // Persist into state as semicolon-separated list
+    std::string joined;
+    for (size_t i = 0; i < m_knownProjects.size(); ++i)
+    {
+        if (i > 0) joined += ';';
+        joined += m_knownProjects[i];
+    }
+    m_states["KnownProjects"] = joined;
+}
+
+std::vector<std::string> DiagnosticsManager::getKnownProjects() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_knownProjects;
 }
 
 void DiagnosticsManager::requestShutdown()

@@ -1847,7 +1847,8 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             {
                 const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
                 const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
-                drawUIPanel(x0,y0,x1,y1,element.color,uiProjection,getUIQuadProgram(vp,fp),element.color,false);
+                const Vec4& hc = (element.hoverColor.w > 0.0f) ? element.hoverColor : element.color;
+                drawUIPanel(x0,y0,x1,y1,element.color,uiProjection,getUIQuadProgram(vp,fp),hc,element.isHovered);
             }
             if (element.scrollable)
             {
@@ -1938,12 +1939,14 @@ void OpenGLRenderer::renderPopupWindows()
     if (m_popupWindows.empty()) return;
 
     // Clean up popups that have been marked as closed (deferred destruction).
+    bool anyDestroyed = false;
     for (auto it = m_popupWindows.begin(); it != m_popupWindows.end(); )
     {
         if (it->second && !it->second->isOpen())
         {
             it->second->destroy();
             it = m_popupWindows.erase(it);
+            anyDestroyed = true;
 
             // The popup's GL context was destroyed, invalidating context-local VAOs.
             // Reset handles so they get recreated for the next popup.
@@ -1957,6 +1960,13 @@ void OpenGLRenderer::renderPopupWindows()
         {
             ++it;
         }
+    }
+
+    // If a popup was destroyed its GL context is gone – ensure the main
+    // context is current again before any further GL work (including renderUI).
+    if (anyDestroyed)
+    {
+        SDL_GL_MakeCurrent(m_window, m_glContext);
     }
 
     if (m_popupWindows.empty()) return;
@@ -3354,7 +3364,8 @@ void OpenGLRenderer::renderUI()
                     const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
                     const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
                     const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
-                    drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.color, false);
+                    const Vec4& hc = (element.hoverColor.w > 0.0f) ? element.hoverColor : element.color;
+                    drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, hc, element.isHovered);
                 }
 
                 const bool needsClip = element.scrollable;

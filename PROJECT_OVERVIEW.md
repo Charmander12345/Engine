@@ -215,8 +215,11 @@ set(CMAKE_CXX_STANDARD 20)
 1.  Logger::Instance().initialize()
 2.  Scripting::Initialize()           → Python-Interpreter starten
 3.  AssetManager::Instance().initialize()
-4.  Projektverzeichnis bestimmen (Downloads/SampleProject)
-5.  AssetManager::loadProject() oder createProject()
+4.  DiagnosticsManager::loadConfig()  → Fenstergröße, Fenster-Zustand, bekannte Projekte
+5.  Projekt-Auswahl:
+    a) DefaultProject aus config.ini → direkt laden
+    b) Kein Default → Projekt-Auswahl-Screen anzeigen (Recent/Open/New)
+    c) Fallback → Downloads/SampleProject erstellen
 6.  SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)
 7.  AudioManager::Instance().initialize()   → OpenAL-Kontext
 8.  DiagnosticsManager::loadConfig()        → Fenstergröße, Fenster-Zustand
@@ -1508,27 +1511,28 @@ while (running) {
     assetManager.collectGarbage()
 
     // ═══ Input (Kamera) ═══
-    WASD → moveCamera (relativ, kamera-vorwärts)
-    Q/E  → moveCamera (hoch/runter)
+    WASD → moveCamera (nur bei Rechtsklick gehalten, oder Laptop-Modus, oder PIE)
+    Q/E  → moveCamera (hoch/runter, gleiche Bedingung)
     Maus-Position → UIManager.setMousePosition
 
     // ═══ Event-Verarbeitung ═══
     SDL_PollEvent:
     - QUIT → running = false
-    - MOUSE_MOTION → UI-Hover + Kamera-Rotation (bei Rechtsklick)
-    - MOUSE_BUTTON_DOWN (Links) → UI-Hit-Test oder Entity-Picking
-    - MOUSE_BUTTON_DOWN (Rechts) → Kamera-Steuerung aktivieren
+    - MOUSE_MOTION → UI-Hover + Kamera-Rotation (bei Rechtsklick oder PIE-Maus-Capture)
+    - MOUSE_BUTTON_DOWN (Links) → PIE-Recapture oder UI-Hit-Test oder Entity-Picking
+    - MOUSE_BUTTON_DOWN (Rechts) → Kamera-Steuerung aktivieren (nur außerhalb PIE)
     - MOUSE_BUTTON_UP (Rechts) → Kamera-Steuerung deaktivieren
     - MOUSE_WHEEL → UI-Scroll oder Kamera-Geschwindigkeit ändern
     - TEXT_INPUT → UI-Texteingabe
     - KEY_UP:
+        Shift+F1 → PIE-Maus freigeben / Input pausieren
         F8  → Bounds-Debug toggle
         F9  → Occlusion-Stats toggle
         F10 → Metriken toggle
         F11 → UI-Debug toggle
         F12 → FPS-Cap toggle
-        HeightField Debug → Engine Settings Toggle (config.ini persistiert)
         ESC → PIE stoppen
+        W/E/R → Gizmo-Modus (nur ohne Rechtsklick, außerhalb PIE)
         DELETE → Selektierte Entity löschen (Snapshot aller Komponenten → Undo/Redo-Action)
         Sonst → DiagnosticsManager + Scripting
     - KEY_DOWN → UI-Keyboard + DiagnosticsManager + Scripting
@@ -1559,24 +1563,62 @@ while (running) {
 
 ### Debug-Tasten
 
-| Taste  | Funktion                              |
-|--------|---------------------------------------|
-| F8     | Bounding-Box-Debug toggle             |
-| F9     | Occlusion-Statistiken toggle          |
-| F10    | Performance-Metriken toggle           |
-| F11    | UI-Debug (Bounds-Rahmen) toggle       |
-| F12    | FPS-Cap (60 FPS) toggle               |
-| ESC    | PIE stoppen (wenn aktiv)              |
-| DELETE | Selektierte Entity löschen (mit Undo/Redo) |
+| Taste      | Funktion                              |
+|------------|---------------------------------------|
+| F8         | Bounding-Box-Debug toggle             |
+| F9         | Occlusion-Statistiken toggle          |
+| F10        | Performance-Metriken toggle           |
+| F11        | UI-Debug (Bounds-Rahmen) toggle       |
+| F12        | FPS-Cap (60 FPS) toggle               |
+| ESC        | PIE stoppen (wenn aktiv)              |
+| Shift+F1   | PIE-Maus freigeben / Input pausieren  |
+| DELETE     | Selektierte Entity löschen (mit Undo/Redo) |
 
 ### Kamera-Steuerung
 
+**Editor-Modus (Normal):**
+
 | Eingabe           | Aktion                                |
 |-------------------|---------------------------------------|
-| W/A/S/D           | Kamera vorwärts/links/rückwärts/rechts |
-| Q/E               | Kamera runter/hoch                    |
+| RMB + W/A/S/D     | Kamera vorwärts/links/rückwärts/rechts |
+| RMB + Q/E         | Kamera runter/hoch                    |
 | Rechte Maustaste  | Kamera-Rotation aktivieren            |
 | Mausrad (+ RMB)   | Kamera-Geschwindigkeit ändern (0.5x–5.0x) |
+| W/E/R (ohne RMB)  | Gizmo-Modus: Translate/Rotate/Scale   |
+
+**Editor-Modus (Laptop-Modus):**
+
+| Eingabe           | Aktion                                |
+|-------------------|---------------------------------------|
+| W/A/S/D           | Kamera vorwärts/links/rückwärts/rechts (ohne RMB) |
+| Q/E               | Kamera runter/hoch                    |
+| Rechte Maustaste  | Kamera-Rotation aktivieren            |
+
+**PIE-Modus:**
+
+| Eingabe           | Aktion                                |
+|-------------------|---------------------------------------|
+| W/A/S/D           | Kamera-Bewegung (immer aktiv)         |
+| Maus-Bewegung     | Kamera-Rotation (Maus versteckt & gefangen) |
+| Shift+F1          | Maus freigeben, Input pausieren       |
+| Klick auf Viewport | Maus erneut fangen, Input fortsetzen |
+| ESC               | PIE beenden, vorherigen Zustand wiederherstellen |
+
+### Projekt-Auswahl-Screen
+
+Beim Start prüft die Engine, ob ein `DefaultProject`-Eintrag in `config.ini` existiert. Falls nicht (oder das Projekt nicht gefunden wird), öffnet sich ein Popup-Fenster mit drei Kategorien:
+
+| Kategorie        | Funktion                                                                                 |
+|------------------|------------------------------------------------------------------------------------------|
+| Recent Projects  | Liste bekannter Projekte (Pfade aus `KnownProjects` in config.ini), klickbar zum Laden   |
+| Open Project     | "Browse"-Button öffnet SDL-Dateidialog zum Auswählen einer `.project`-Datei              |
+| New Project      | Projektname + Speicherort (Browse-Dialog) eingeben, "Create Project"-Button zum Erstellen |
+
+- Sidebar-Layout analog zu Engine Settings (Buttons links, Content rechts)
+- Mini-Event-Loop im Startup: Render + Event-Pumping bis ein Projekt gewählt wird
+- Gewähltes Projekt wird als `DefaultProject` in config.ini gespeichert
+- Erfolgreich geladene/erstellte Projekte werden automatisch in die Known-Projects-Liste aufgenommen (max. 20 Einträge, zuletzt verwendete zuerst)
+- Nicht mehr existierende Projekte werden in der Liste als "(not found)" angezeigt und sind nicht klickbar
 
 ---
 

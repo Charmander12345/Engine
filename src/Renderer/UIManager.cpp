@@ -5731,6 +5731,38 @@ void UIManager::openEngineSettingsPopup()
                 [](bool v) {
                     DiagnosticsManager::Instance().setState("StartupMode", v ? "normal" : "fast");
                 });
+
+            addSeparator("ES.C.Sep.Input");
+            addSectionLabel("ES.C.Sec.Input", "Input");
+            const bool isLaptop = []() {
+                if (auto v = DiagnosticsManager::Instance().getState("LaptopMode"))
+                    return *v == "1";
+                return false;
+            }();
+            addCheckbox("ES.C.LaptopMode", "Laptop Mode (WASD without right-click)", isLaptop,
+                [](bool v) {
+                    DiagnosticsManager::Instance().setState("LaptopMode", v ? "1" : "0");
+                });
+
+            addSeparator("ES.C.Sep.Project");
+            addSectionLabel("ES.C.Sec.Project", "Project");
+            const bool hasDefault = []() {
+                auto v = DiagnosticsManager::Instance().getState("DefaultProject");
+                return v && !v->empty();
+            }();
+            addCheckbox("ES.C.DefaultProject", "Remember project on startup", hasDefault,
+                [](bool v) {
+                    if (!v)
+                    {
+                        DiagnosticsManager::Instance().setState("DefaultProject", "");
+                    }
+                    else
+                    {
+                        const auto& info = DiagnosticsManager::Instance().getProjectInfo();
+                        if (!info.projectPath.empty())
+                            DiagnosticsManager::Instance().setState("DefaultProject", info.projectPath);
+                    }
+                });
         }
         else if (state->activeCategory == 1) // Rendering
         {
@@ -5796,7 +5828,7 @@ void UIManager::openEngineSettingsPopup()
                 std::vector<std::string> backendItems;
                 backendItems.push_back("Jolt");
 #ifdef ENGINE_PHYSX_BACKEND_AVAILABLE
-                backendItems.push_back("PhysX");
+                backendItems.push_back("PhysX (experimental)");
 #endif
                 // Determine current selection from persisted state
                 int selectedBackend = 0; // default: Jolt
@@ -5932,6 +5964,635 @@ void UIManager::openEngineSettingsPopup()
     widget->setFillY(true);
     widget->setElements(std::move(elements));
     popup->uiManager().registerWidget("EngineSettings.Main", widget);
+
+    rebuildContent();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Project Selection Screen
+// ─────────────────────────────────────────────────────────────────────────────
+void UIManager::openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault)> onProjectChosen)
+{
+    if (!m_renderer)
+        return;
+
+    constexpr int kPopupW = 720;
+    constexpr int kPopupH = 540;
+    PopupWindow* popup = m_renderer->openPopupWindow(
+        "ProjectScreen", "HorizonEngine – Project Selection", kPopupW, kPopupH);
+    if (!popup) return;
+    if (!popup->uiManager().getRegisteredWidgets().empty()) return;
+
+    const float W = static_cast<float>(kPopupW);
+    const float H = static_cast<float>(kPopupH);
+    auto nx = [&](float px) { return px / W; };
+    auto ny = [&](float py) { return py / H; };
+
+    struct PSState
+    {
+        int activeCategory{ 0 };
+        std::string newProjectName{ "MyProject" };
+        std::string newProjectLocation;
+        bool setAsDefault{ false };
+    };
+    auto state = std::make_shared<PSState>();
+
+#if defined(_WIN32)
+    if (const char* userProfile = std::getenv("USERPROFILE"))
+        state->newProjectLocation = (std::filesystem::path(userProfile) / "Documents").string();
+#else
+    if (const char* home = std::getenv("HOME"))
+        state->newProjectLocation = (std::filesystem::path(home) / "Documents").string();
+#endif
+    if (state->newProjectLocation.empty())
+        state->newProjectLocation = std::filesystem::current_path().string();
+
+    const std::vector<std::string> categories = { "Recent Projects", "Open Project", "New Project" };
+    constexpr float kSidebarW = 170.0f;
+    constexpr float kTitleH = 48.0f;
+    constexpr float kFooterH = 40.0f;
+
+    std::vector<WidgetElement> elements;
+
+    // ── Background ─────────────────────────────────────────────────────
+    {
+        WidgetElement bg;
+        bg.type  = WidgetElementType::Panel;
+        bg.id    = "PS.Bg";
+        bg.from  = Vec2{ 0.0f, 0.0f };
+        bg.to    = Vec2{ 1.0f, 1.0f };
+        bg.color = Vec4{ 0.11f, 0.11f, 0.14f, 1.0f };
+        elements.push_back(bg);
+    }
+
+    // ── Title bar (accent stripe) ──────────────────────────────────────
+    {
+        WidgetElement titleBg;
+        titleBg.type  = WidgetElementType::Panel;
+        titleBg.id    = "PS.TitleBg";
+        titleBg.from  = Vec2{ 0.0f, 0.0f };
+        titleBg.to    = Vec2{ 1.0f, ny(kTitleH) };
+        titleBg.color = Vec4{ 0.14f, 0.16f, 0.22f, 1.0f };
+        elements.push_back(titleBg);
+
+        WidgetElement accent;
+        accent.type  = WidgetElementType::Panel;
+        accent.id    = "PS.TitleAccent";
+        accent.from  = Vec2{ 0.0f, ny(kTitleH - 2.0f) };
+        accent.to    = Vec2{ 1.0f, ny(kTitleH) };
+        accent.color = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
+        elements.push_back(accent);
+
+        WidgetElement titleText;
+        titleText.type      = WidgetElementType::Text;
+        titleText.id        = "PS.TitleText";
+        titleText.from      = Vec2{ nx(12.0f), 0.0f };
+        titleText.to        = Vec2{ nx(W - 12.0f), ny(kTitleH - 2.0f) };
+        titleText.text      = "HorizonEngine  —  Project Selection";
+        titleText.fontSize  = 16.0f;
+        titleText.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+        titleText.textAlignV = TextAlignV::Center;
+        titleText.padding   = Vec2{ 6.0f, 0.0f };
+        elements.push_back(titleText);
+    }
+
+    // ── Sidebar ────────────────────────────────────────────────────────
+    {
+        WidgetElement sidebarBg;
+        sidebarBg.type  = WidgetElementType::Panel;
+        sidebarBg.id    = "PS.SidebarBg";
+        sidebarBg.from  = Vec2{ 0.0f, ny(kTitleH) };
+        sidebarBg.to    = Vec2{ nx(kSidebarW), 1.0f };
+        sidebarBg.color = Vec4{ 0.09f, 0.09f, 0.11f, 1.0f };
+        elements.push_back(sidebarBg);
+
+        WidgetElement sep;
+        sep.type  = WidgetElementType::Panel;
+        sep.id    = "PS.SidebarSep";
+        sep.from  = Vec2{ nx(kSidebarW - 1.0f), ny(kTitleH) };
+        sep.to    = Vec2{ nx(kSidebarW), 1.0f };
+        sep.color = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
+        elements.push_back(sep);
+    }
+
+    // ── Footer background (for checkbox) ───────────────────────────────
+    {
+        WidgetElement footerSep;
+        footerSep.type  = WidgetElementType::Panel;
+        footerSep.id    = "PS.FooterSep";
+        footerSep.from  = Vec2{ nx(kSidebarW), ny(H - kFooterH - 1.0f) };
+        footerSep.to    = Vec2{ 1.0f, ny(H - kFooterH) };
+        footerSep.color = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
+        elements.push_back(footerSep);
+
+        WidgetElement footerBg;
+        footerBg.type  = WidgetElementType::Panel;
+        footerBg.id    = "PS.FooterBg";
+        footerBg.from  = Vec2{ nx(kSidebarW), ny(H - kFooterH) };
+        footerBg.to    = Vec2{ 1.0f, 1.0f };
+        footerBg.color = Vec4{ 0.10f, 0.10f, 0.13f, 1.0f };
+        elements.push_back(footerBg);
+    }
+
+    // ── "Set as default" checkbox (always visible in footer) ───────────
+    {
+        WidgetElement cb;
+        cb.type          = WidgetElementType::CheckBox;
+        cb.id            = "PS.DefaultCB";
+        cb.text          = "Set as default project (skip this screen on next start)";
+        cb.fontSize      = 12.0f;
+        cb.isChecked     = state->setAsDefault;
+        cb.color         = Vec4{ 0.22f, 0.22f, 0.28f, 1.0f };
+        cb.hoverColor    = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
+        cb.fillColor     = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
+        cb.textColor     = Vec4{ 0.88f, 0.90f, 0.95f, 1.0f };
+        cb.padding       = Vec2{ 8.0f, 4.0f };
+        cb.isHitTestable = true;
+        cb.from          = Vec2{ nx(kSidebarW + 12.0f), ny(H - kFooterH + 4.0f) };
+        cb.to            = Vec2{ nx(W - 12.0f), ny(H - 4.0f) };
+        cb.onCheckedChanged = [state](bool v) { state->setAsDefault = v; };
+        elements.push_back(cb);
+    }
+
+    constexpr float kCatBtnH = 34.0f;
+    constexpr float kCatBtnGap = 2.0f;
+    constexpr float kCatBtnY0 = kTitleH + 10.0f;
+
+    OpenGLRenderer* renderer = m_renderer;
+    auto callbackPtr = std::make_shared<std::function<void(const std::string&, bool, bool)>>(std::move(onProjectChosen));
+
+    // ── Content builder ────────────────────────────────────────────────
+    auto rebuildContent = [state, popup, categories, nx, ny, W, H, kSidebarW, kTitleH, kFooterH, renderer, callbackPtr]()
+    {
+        auto& pMgr = popup->uiManager();
+        auto* entry = pMgr.findElementById("PS.ContentArea");
+        if (!entry) return;
+
+        entry->children.clear();
+
+        constexpr float kRowH = 32.0f;
+        constexpr float kContentPad = 16.0f;
+        const float contentW = W - kSidebarW;
+
+        const auto addSectionLabel = [&](const std::string& id, const std::string& label)
+        {
+            WidgetElement sec;
+            sec.type      = WidgetElementType::Text;
+            sec.id        = id;
+            sec.text      = label;
+            sec.fontSize  = 14.0f;
+            sec.textColor = Vec4{ 0.45f, 0.60f, 0.90f, 1.0f };
+            sec.textAlignV = TextAlignV::Center;
+            sec.padding   = Vec2{ 4.0f, 2.0f };
+            sec.minSize   = Vec2{ contentW - kContentPad * 2.0f, kRowH };
+            entry->children.push_back(sec);
+        };
+
+        const auto addSeparator = [&](const std::string& id)
+        {
+            WidgetElement sep;
+            sep.type    = WidgetElementType::Panel;
+            sep.id      = id;
+            sep.color   = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
+            sep.minSize = Vec2{ contentW - kContentPad * 2.0f, 1.0f };
+            entry->children.push_back(sep);
+        };
+
+        const auto addActionButton = [&](const std::string& id, const std::string& label,
+            const Vec4& bgColor, const Vec4& hoverColor, std::function<void()> onClick)
+        {
+            WidgetElement btn;
+            btn.type          = WidgetElementType::Button;
+            btn.id            = id;
+            btn.text          = label;
+            btn.fontSize      = 14.0f;
+            btn.color         = bgColor;
+            btn.hoverColor    = hoverColor;
+            btn.textColor     = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+            btn.textAlignH    = TextAlignH::Center;
+            btn.textAlignV    = TextAlignV::Center;
+            btn.padding       = Vec2{ 16.0f, 8.0f };
+            btn.isHitTestable = true;
+            btn.minSize       = Vec2{ contentW - kContentPad * 2.0f, 38.0f };
+            btn.shaderVertex   = "button_vertex.glsl";
+            btn.shaderFragment = "button_fragment.glsl";
+            btn.onClicked     = std::move(onClick);
+            entry->children.push_back(btn);
+        };
+
+        const auto addSmallButton = [&](const std::string& id, const std::string& label,
+            std::function<void()> onClick)
+        {
+            WidgetElement btn;
+            btn.type          = WidgetElementType::Button;
+            btn.id            = id;
+            btn.text          = label;
+            btn.fontSize      = 12.0f;
+            btn.color         = Vec4{ 0.18f, 0.20f, 0.26f, 1.0f };
+            btn.hoverColor    = Vec4{ 0.25f, 0.28f, 0.36f, 1.0f };
+            btn.textColor     = Vec4{ 0.85f, 0.88f, 0.95f, 1.0f };
+            btn.textAlignH    = TextAlignH::Center;
+            btn.textAlignV    = TextAlignV::Center;
+            btn.padding       = Vec2{ 12.0f, 6.0f };
+            btn.isHitTestable = true;
+            btn.minSize       = Vec2{ 160.0f, 30.0f };
+            btn.shaderVertex   = "button_vertex.glsl";
+            btn.shaderFragment = "button_fragment.glsl";
+            btn.onClicked     = std::move(onClick);
+            entry->children.push_back(btn);
+        };
+
+        const auto addEntryRow = [&](const std::string& id, const std::string& label,
+            const std::string& value, std::function<void(const std::string&)> onChange)
+        {
+            WidgetElement rowPanel;
+            rowPanel.type        = WidgetElementType::StackPanel;
+            rowPanel.id          = id + ".Row";
+            rowPanel.orientation = StackOrientation::Horizontal;
+            rowPanel.minSize     = Vec2{ contentW - kContentPad * 2.0f, kRowH };
+            rowPanel.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            rowPanel.padding     = Vec2{ 6.0f, 2.0f };
+
+            WidgetElement lbl;
+            lbl.type      = WidgetElementType::Text;
+            lbl.id        = id + ".Lbl";
+            lbl.text      = label;
+            lbl.fontSize  = 13.0f;
+            lbl.textColor = Vec4{ 0.80f, 0.82f, 0.88f, 1.0f };
+            lbl.textAlignV = TextAlignV::Center;
+            lbl.minSize   = Vec2{ 120.0f, kRowH };
+            rowPanel.children.push_back(lbl);
+
+            WidgetElement eb;
+            eb.type          = WidgetElementType::EntryBar;
+            eb.id            = id;
+            eb.value         = value;
+            eb.fontSize      = 13.0f;
+            eb.color         = Vec4{ 0.15f, 0.16f, 0.20f, 1.0f };
+            eb.hoverColor    = Vec4{ 0.20f, 0.22f, 0.28f, 1.0f };
+            eb.textColor     = Vec4{ 0.95f, 0.95f, 0.97f, 1.0f };
+            eb.padding       = Vec2{ 8.0f, 5.0f };
+            eb.isHitTestable = true;
+            eb.minSize       = Vec2{ contentW - kContentPad * 2.0f - 120.0f - 12.0f, kRowH };
+            eb.onValueChanged = std::move(onChange);
+            rowPanel.children.push_back(eb);
+
+            entry->children.push_back(rowPanel);
+        };
+
+        // ── Category: Recent Projects ──────────────────────────────────
+        if (state->activeCategory == 0)
+        {
+            addSectionLabel("PS.C.Sec.Recent", "Known Projects");
+            addSeparator("PS.C.Sep.Recent");
+
+            const auto knownProjects = DiagnosticsManager::Instance().getKnownProjects();
+            if (knownProjects.empty())
+            {
+                WidgetElement noProjects;
+                noProjects.type      = WidgetElementType::Text;
+                noProjects.id        = "PS.C.NoProjects";
+                noProjects.text      = "No known projects yet.\nOpen or create a project to get started.";
+                noProjects.fontSize  = 13.0f;
+                noProjects.textColor = Vec4{ 0.45f, 0.47f, 0.55f, 1.0f };
+                noProjects.textAlignV = TextAlignV::Center;
+                noProjects.padding   = Vec2{ 10.0f, 16.0f };
+                noProjects.minSize   = Vec2{ contentW - kContentPad * 2.0f, 80.0f };
+                entry->children.push_back(noProjects);
+            }
+            else
+            {
+                // Column header row
+                {
+                    WidgetElement hdrRow;
+                    hdrRow.type        = WidgetElementType::StackPanel;
+                    hdrRow.id          = "PS.C.ListHdr";
+                    hdrRow.orientation = StackOrientation::Horizontal;
+                    hdrRow.minSize     = Vec2{ contentW - kContentPad * 2.0f, 24.0f };
+                    hdrRow.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                    hdrRow.padding     = Vec2{ 12.0f, 2.0f };
+
+                    WidgetElement hdrName;
+                    hdrName.type      = WidgetElementType::Text;
+                    hdrName.id        = "PS.C.ListHdr.Name";
+                    hdrName.text      = "Name";
+                    hdrName.fontSize  = 11.0f;
+                    hdrName.textColor = Vec4{ 0.40f, 0.44f, 0.55f, 1.0f };
+                    hdrName.textAlignV = TextAlignV::Center;
+                    hdrName.minSize   = Vec2{ 160.0f, 22.0f };
+                    hdrRow.children.push_back(hdrName);
+
+                    WidgetElement hdrPath;
+                    hdrPath.type      = WidgetElementType::Text;
+                    hdrPath.id        = "PS.C.ListHdr.Path";
+                    hdrPath.text      = "Path";
+                    hdrPath.fontSize  = 11.0f;
+                    hdrPath.textColor = Vec4{ 0.40f, 0.44f, 0.55f, 1.0f };
+                    hdrPath.textAlignV = TextAlignV::Center;
+                    hdrPath.fillX     = true;
+                    hdrPath.minSize   = Vec2{ 0.0f, 22.0f };
+                    hdrRow.children.push_back(hdrPath);
+
+                    entry->children.push_back(hdrRow);
+                }
+
+                addSeparator("PS.C.Sep.ListHdr");
+
+                for (size_t i = 0; i < knownProjects.size(); ++i)
+                {
+                    const std::string& projPath = knownProjects[i];
+                    const std::string projName = std::filesystem::path(projPath).filename().string();
+                    const bool exists = std::filesystem::exists(projPath);
+                    const std::string rowId = "PS.C.Proj." + std::to_string(i);
+                    const bool isEven = (i % 2 == 0);
+
+                    // List row – horizontal: Name | Path
+                    WidgetElement row;
+                    row.type        = WidgetElementType::StackPanel;
+                    row.id          = rowId + ".Row";
+                    row.orientation = StackOrientation::Horizontal;
+                    row.minSize     = Vec2{ contentW - kContentPad * 2.0f, 36.0f };
+                    row.color       = isEven
+                        ? Vec4{ 0.16f, 0.16f, 0.21f, 1.0f }
+                        : Vec4{ 0.12f, 0.12f, 0.15f, 1.0f };
+                    row.hoverColor  = exists
+                        ? Vec4{ 0.22f, 0.28f, 0.42f, 1.0f }
+                        : row.color;
+                    row.padding     = Vec2{ 12.0f, 4.0f };
+                    row.isHitTestable = exists;
+
+                    // Project name column
+                    WidgetElement nameCol;
+                    nameCol.type      = WidgetElementType::Text;
+                    nameCol.id        = rowId + ".Name";
+                    nameCol.text      = projName;
+                    nameCol.fontSize  = 13.0f;
+                    nameCol.textColor = exists
+                        ? Vec4{ 0.95f, 0.95f, 1.0f, 1.0f }
+                        : Vec4{ 0.50f, 0.38f, 0.38f, 1.0f };
+                    nameCol.textAlignV = TextAlignV::Center;
+                    nameCol.minSize   = Vec2{ 160.0f, 28.0f };
+                    row.children.push_back(nameCol);
+
+                    // Path column
+                    WidgetElement pathCol;
+                    pathCol.type      = WidgetElementType::Text;
+                    pathCol.id        = rowId + ".Path";
+                    pathCol.text      = exists ? projPath : (projPath + "  (not found)");
+                    pathCol.fontSize  = 11.0f;
+                    pathCol.textColor = exists
+                        ? Vec4{ 0.50f, 0.55f, 0.65f, 1.0f }
+                        : Vec4{ 0.45f, 0.30f, 0.30f, 0.8f };
+                    pathCol.textAlignV = TextAlignV::Center;
+                    pathCol.fillX     = true;
+                    pathCol.minSize   = Vec2{ 0.0f, 28.0f };
+                    row.children.push_back(pathCol);
+
+                    if (exists)
+                    {
+                        row.onClicked = [callbackPtr, projPath, popup, state]()
+                        {
+                            if (*callbackPtr)
+                                (*callbackPtr)(projPath, false, state->setAsDefault);
+                            popup->close();
+                        };
+                    }
+
+                    entry->children.push_back(row);
+
+                    // Separator line between rows
+                    {
+                        WidgetElement rowSep;
+                        rowSep.type    = WidgetElementType::Panel;
+                        rowSep.id      = rowId + ".Sep";
+                        rowSep.color   = Vec4{ 0.26f, 0.28f, 0.34f, 1.0f };
+                        rowSep.minSize = Vec2{ contentW - kContentPad * 2.0f, 1.0f };
+                        entry->children.push_back(rowSep);
+                    }
+                }
+            }
+        }
+        // ── Category: Open Project ─────────────────────────────────────
+        else if (state->activeCategory == 1)
+        {
+            addSectionLabel("PS.C.Sec.Open", "Open Existing Project");
+            addSeparator("PS.C.Sep.Open");
+
+            WidgetElement desc;
+            desc.type      = WidgetElementType::Text;
+            desc.id        = "PS.C.OpenDesc";
+            desc.text      = "Select a .project file to open an existing project.";
+            desc.fontSize  = 13.0f;
+            desc.textColor = Vec4{ 0.65f, 0.68f, 0.75f, 1.0f };
+            desc.padding   = Vec2{ 10.0f, 12.0f };
+            desc.minSize   = Vec2{ contentW - kContentPad * 2.0f, 44.0f };
+            entry->children.push_back(desc);
+
+            addActionButton("PS.C.BrowseBtn", "Browse for .project file...",
+                Vec4{ 0.22f, 0.35f, 0.60f, 1.0f },
+                Vec4{ 0.28f, 0.42f, 0.72f, 1.0f },
+                [callbackPtr, popup, renderer, state]()
+                {
+                    SDL_DialogFileFilter filters[] = {
+                        { "Project Files", "project" },
+                        { "All Files", "*" }
+                    };
+
+                    struct BrowseCtx
+                    {
+                        std::shared_ptr<std::function<void(const std::string&, bool, bool)>> callback;
+                        std::shared_ptr<PSState> state;
+                        PopupWindow* popup;
+                    };
+                    auto* ctx = new BrowseCtx{ callbackPtr, state, popup };
+
+                    SDL_ShowOpenFileDialog(
+                        [](void* userdata, const char* const* filelist, int filter)
+                        {
+                            auto* c = static_cast<BrowseCtx*>(userdata);
+                            if (filelist && filelist[0])
+                            {
+                                std::filesystem::path projFile(filelist[0]);
+                                std::string projDir = projFile.parent_path().string();
+                                if (*(c->callback))
+                                    (*(c->callback))(projDir, false, c->state->setAsDefault);
+                                c->popup->close();
+                            }
+                            delete c;
+                        },
+                        ctx,
+                        renderer ? renderer->window() : nullptr,
+                        filters,
+                        SDL_arraysize(filters),
+                        nullptr,
+                        false
+                    );
+                });
+        }
+        // ── Category: New Project ──────────────────────────────────────
+        else if (state->activeCategory == 2)
+        {
+            addSectionLabel("PS.C.Sec.New", "Create New Project");
+            addSeparator("PS.C.Sep.New");
+
+            addEntryRow("PS.C.ProjName", "Project Name", state->newProjectName,
+                [state](const std::string& v) { state->newProjectName = v; });
+
+            addEntryRow("PS.C.ProjLoc", "Location", state->newProjectLocation,
+                [state](const std::string& v) { state->newProjectLocation = v; });
+
+            addSmallButton("PS.C.BrowseLocBtn", "Browse...",
+                [state, popup, renderer]()
+                {
+                    struct FolderCtx
+                    {
+                        std::shared_ptr<PSState> state;
+                        PopupWindow* popup;
+                    };
+                    auto* ctx = new FolderCtx{ state, popup };
+
+                    SDL_ShowOpenFolderDialog(
+                        [](void* userdata, const char* const* filelist, int filter)
+                        {
+                            auto* c = static_cast<FolderCtx*>(userdata);
+                            if (filelist && filelist[0])
+                            {
+                                c->state->newProjectLocation = filelist[0];
+                                auto& pMgr = c->popup->uiManager();
+                                if (auto* el = pMgr.findElementById("PS.C.ProjLoc"))
+                                {
+                                    el->value = filelist[0];
+                                }
+                                pMgr.markAllWidgetsDirty();
+                            }
+                            delete c;
+                        },
+                        ctx,
+                        renderer ? renderer->window() : nullptr,
+                        nullptr,
+                        false
+                    );
+                });
+
+            addSeparator("PS.C.Sep.New2");
+
+            // Preview path
+            {
+                const std::string previewPath = (std::filesystem::path(state->newProjectLocation) / state->newProjectName).string();
+                WidgetElement preview;
+                preview.type      = WidgetElementType::Text;
+                preview.id        = "PS.C.Preview";
+                preview.text      = "Target:  " + previewPath;
+                preview.fontSize  = 11.0f;
+                preview.textColor = Vec4{ 0.45f, 0.55f, 0.70f, 1.0f };
+                preview.padding   = Vec2{ 10.0f, 6.0f };
+                preview.minSize   = Vec2{ contentW - kContentPad * 2.0f, 26.0f };
+                entry->children.push_back(preview);
+            }
+
+            {
+                WidgetElement spacer;
+                spacer.type    = WidgetElementType::Panel;
+                spacer.id      = "PS.C.Spacer.New";
+                spacer.color   = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                spacer.minSize = Vec2{ contentW - kContentPad * 2.0f, 8.0f };
+                entry->children.push_back(spacer);
+            }
+
+            addActionButton("PS.C.CreateBtn", "Create Project",
+                Vec4{ 0.18f, 0.50f, 0.28f, 1.0f },
+                Vec4{ 0.22f, 0.62f, 0.35f, 1.0f },
+                [state, callbackPtr, popup]()
+                {
+                    if (state->newProjectName.empty())
+                        return;
+                    const std::string fullPath = (std::filesystem::path(state->newProjectLocation) / state->newProjectName).string();
+                    if (*callbackPtr)
+                        (*callbackPtr)(fullPath, true, state->setAsDefault);
+                    popup->close();
+                });
+        }
+
+        // Update sidebar highlights
+        for (size_t ci = 0; ci < categories.size(); ++ci)
+        {
+            const std::string btnId = "PS.Cat." + std::to_string(ci);
+            auto* catBtn = pMgr.findElementById(btnId);
+            if (catBtn)
+            {
+                const bool active = (static_cast<int>(ci) == state->activeCategory);
+                catBtn->color     = active
+                    ? Vec4{ 0.20f, 0.26f, 0.40f, 1.0f }
+                    : Vec4{ 0.09f, 0.09f, 0.11f, 0.0f };
+                catBtn->textColor = active
+                    ? Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }
+                    : Vec4{ 0.65f, 0.68f, 0.72f, 1.0f };
+            }
+        }
+
+        pMgr.markAllWidgetsDirty();
+    };
+
+    // ── Sidebar category buttons ───────────────────────────────────────
+    for (size_t ci = 0; ci < categories.size(); ++ci)
+    {
+        const float by0 = kCatBtnY0 + static_cast<float>(ci) * (kCatBtnH + kCatBtnGap);
+        const float by1 = by0 + kCatBtnH;
+
+        const bool active = (static_cast<int>(ci) == state->activeCategory);
+        WidgetElement catBtn;
+        catBtn.type          = WidgetElementType::Button;
+        catBtn.id            = "PS.Cat." + std::to_string(ci);
+        catBtn.from          = Vec2{ nx(6.0f), ny(by0) };
+        catBtn.to            = Vec2{ nx(kSidebarW - 6.0f), ny(by1) };
+        catBtn.text          = categories[ci];
+        catBtn.fontSize      = 13.0f;
+        catBtn.color         = active
+            ? Vec4{ 0.20f, 0.26f, 0.40f, 1.0f }
+            : Vec4{ 0.09f, 0.09f, 0.11f, 0.0f };
+        catBtn.hoverColor    = Vec4{ 0.22f, 0.28f, 0.42f, 1.0f };
+        catBtn.textColor     = active
+            ? Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }
+            : Vec4{ 0.65f, 0.68f, 0.72f, 1.0f };
+        catBtn.textAlignH    = TextAlignH::Left;
+        catBtn.textAlignV    = TextAlignV::Center;
+        catBtn.padding       = Vec2{ 14.0f, 4.0f };
+        catBtn.isHitTestable = true;
+        catBtn.shaderVertex   = "button_vertex.glsl";
+        catBtn.shaderFragment = "button_fragment.glsl";
+
+        const int catIndex = static_cast<int>(ci);
+        catBtn.onClicked = [state, catIndex, rebuildContent]()
+        {
+            if (state->activeCategory != catIndex)
+            {
+                state->activeCategory = catIndex;
+                rebuildContent();
+            }
+        };
+        elements.push_back(catBtn);
+    }
+
+    // ── Content area (above footer) ────────────────────────────────────
+    {
+        WidgetElement content;
+        content.type        = WidgetElementType::StackPanel;
+        content.id          = "PS.ContentArea";
+        content.from        = Vec2{ nx(kSidebarW + 16.0f), ny(kTitleH + 12.0f) };
+        content.to          = Vec2{ nx(W - 12.0f), ny(H - kFooterH - 6.0f) };
+        content.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        content.orientation = StackOrientation::Vertical;
+        content.padding     = Vec2{ 4.0f, 4.0f };
+        content.scrollable  = true;
+        elements.push_back(content);
+    }
+
+    auto widget = std::make_shared<Widget>();
+    widget->setName("ProjectScreenWidget");
+    widget->setFillX(true);
+    widget->setFillY(true);
+    widget->setElements(std::move(elements));
+    popup->uiManager().registerWidget("ProjectScreen.Main", widget);
 
     rebuildContent();
 }

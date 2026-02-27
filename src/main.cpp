@@ -223,29 +223,149 @@ auto showProgress = [&](const std::string& msg)
     std::string cwd = std::filesystem::current_path().string();
     logTimed(Logger::Category::Engine, "Startup path: " + cwd, Logger::LogLevel::INFO);
 
-    std::filesystem::path downloadsPath;
-#if defined(_WIN32)
-    if (const char* userProfile = std::getenv("USERPROFILE"))
+    bool projectLoaded = false;
+
+    // Check for a persisted default project
     {
-        downloadsPath = std::filesystem::path(userProfile) / "Downloads";
-    }
-#else
-    if (const char* home = std::getenv("HOME"))
-    {
-        downloadsPath = std::filesystem::path(home) / "Downloads";
-    }
-#endif
-    if (downloadsPath.empty())
-    {
-        downloadsPath = std::filesystem::current_path();
+        auto defaultProj = diagnostics.getState("DefaultProject");
+        if (defaultProj && !defaultProj->empty())
+        {
+            logTimed(Logger::Category::Engine, "Loading default project: " + *defaultProj, Logger::LogLevel::INFO);
+            if (assetManager.loadProject(*defaultProj))
+            {
+                projectLoaded = true;
+                diagnostics.addKnownProject(*defaultProj);
+            }
+            else
+            {
+                logTimed(Logger::Category::Project, "Default project failed to load: " + *defaultProj, Logger::LogLevel::WARNING);
+            }
+        }
     }
 
-    const std::filesystem::path projectRoot = downloadsPath / "SampleProject";
-    logTimed(Logger::Category::Engine, "Loading project...", Logger::LogLevel::INFO);
-    if (!assetManager.loadProject(projectRoot.string()))
+    // If no default project (or it failed), show project selection screen
+    if (!projectLoaded && glRenderer)
     {
-        logTimed(Logger::Category::Project, "Project not found. Creating default project: SampleProject", Logger::LogLevel::WARNING);
-        assetManager.createProject(downloadsPath.string(), "SampleProject", { "SampleProject", "1.0", "1.0", "", DiagnosticsManager::RHIType::OpenGL });
+        // Close splash so only the project popup is visible; keep main window hidden.
+        if (splash.isOpen())
+        {
+            splash.close();
+        }
+        // In fast mode the main window was shown early – hide it for a clean look.
+        if (auto* w = renderer->window())
+        {
+            SDL_HideWindow(w);
+        }
+
+        std::string chosenPath;
+        bool chosenIsNew = false;
+        bool chosenSetDefault = false;
+        bool projectChosen = false;
+
+        glRenderer->getUIManager().openProjectScreen(
+            [&chosenPath, &chosenIsNew, &chosenSetDefault, &projectChosen](const std::string& path, bool isNew, bool setAsDefault)
+            {
+                chosenPath = path;
+                chosenIsNew = isNew;
+                chosenSetDefault = setAsDefault;
+                projectChosen = true;
+            });
+
+        // Mini event loop: render + pump events until a project is chosen or window closed
+        while (!projectChosen && !diagnostics.isShutdownRequested())
+        {
+            SDL_Event ev;
+            while (SDL_PollEvent(&ev))
+            {
+                if (ev.type == SDL_EVENT_QUIT)
+                {
+                    diagnostics.requestShutdown();
+                    break;
+                }
+                if (glRenderer->routeEventToPopup(ev))
+                    continue;
+            }
+            if (diagnostics.isShutdownRequested())
+                break;
+
+            // Render first so renderPopupWindows() can clean up closed popups
+            renderer->render();
+            renderer->present();
+
+            // If the popup was closed without choosing (e.g. X button), exit
+            if (!glRenderer->getPopupWindow("ProjectScreen"))
+                break;
+
+            SDL_Delay(16);
+        }
+
+        if (diagnostics.isShutdownRequested())
+        {
+            renderer->shutdown();
+            delete renderer;
+            SDL_Quit();
+            Scripting::Shutdown();
+            return 0;
+        }
+
+        if (projectChosen)
+        {
+            if (chosenIsNew)
+            {
+                const std::string parentDir = std::filesystem::path(chosenPath).parent_path().string();
+                const std::string projName = std::filesystem::path(chosenPath).filename().string();
+                logTimed(Logger::Category::Engine, "Creating new project: " + projName + " at " + parentDir, Logger::LogLevel::INFO);
+                if (assetManager.createProject(parentDir, projName, { projName, "1.0", "1.0", "", DiagnosticsManager::RHIType::OpenGL }))
+                {
+                    projectLoaded = true;
+                    diagnostics.addKnownProject(diagnostics.getProjectInfo().projectPath);
+                    if (chosenSetDefault)
+                        diagnostics.setState("DefaultProject", diagnostics.getProjectInfo().projectPath);
+                }
+            }
+            else
+            {
+                logTimed(Logger::Category::Engine, "Loading project: " + chosenPath, Logger::LogLevel::INFO);
+                if (assetManager.loadProject(chosenPath))
+                {
+                    projectLoaded = true;
+                    diagnostics.addKnownProject(diagnostics.getProjectInfo().projectPath);
+                    if (chosenSetDefault)
+                        diagnostics.setState("DefaultProject", diagnostics.getProjectInfo().projectPath);
+                }
+            }
+        }
+    }
+
+    // Fallback: if still no project loaded, create a default one
+    if (!projectLoaded)
+    {
+        std::filesystem::path downloadsPath;
+#if defined(_WIN32)
+        if (const char* userProfile = std::getenv("USERPROFILE"))
+        {
+            downloadsPath = std::filesystem::path(userProfile) / "Downloads";
+        }
+#else
+        if (const char* home = std::getenv("HOME"))
+        {
+            downloadsPath = std::filesystem::path(home) / "Downloads";
+        }
+#endif
+        if (downloadsPath.empty())
+        {
+            downloadsPath = std::filesystem::current_path();
+        }
+
+        const std::filesystem::path projectRoot = downloadsPath / "SampleProject";
+        logTimed(Logger::Category::Engine, "Loading fallback project...", Logger::LogLevel::INFO);
+        if (!assetManager.loadProject(projectRoot.string()))
+        {
+            logTimed(Logger::Category::Project, "Project not found. Creating default project: SampleProject", Logger::LogLevel::WARNING);
+            assetManager.createProject(downloadsPath.string(), "SampleProject", { "SampleProject", "1.0", "1.0", "", DiagnosticsManager::RHIType::OpenGL });
+        }
+        diagnostics.addKnownProject(diagnostics.getProjectInfo().projectPath);
+        diagnostics.setState("DefaultProject", diagnostics.getProjectInfo().projectPath);
     }
 
     // --- Phase 3: Load editor UI widgets ---
@@ -253,12 +373,16 @@ auto showProgress = [&](const std::string& msg)
 
     std::function<void()> stopPIE;
 
+    // PIE input capture state (declared here so lambdas can capture by reference)
+    bool pieMouseCaptured = false;
+    bool pieInputPaused = false;
+
     if (glRenderer)
     {
         const GLuint playTexId = glRenderer->preloadUITexture("Play.tga");
         const GLuint stopTexId = glRenderer->preloadUITexture("Stop.tga");
 
-        stopPIE = [&glRenderer, playTexId]()
+        stopPIE = [&glRenderer, playTexId, &pieMouseCaptured, &pieInputPaused, &renderer]()
             {
                 auto& diag = DiagnosticsManager::Instance();
                 if (!diag.isPIEActive())
@@ -275,6 +399,14 @@ auto showProgress = [&](const std::string& msg)
                 {
                     level->restoreEcsSnapshot();
                 }
+                // Restore mouse state from PIE capture
+                pieMouseCaptured = false;
+                pieInputPaused = false;
+                if (auto* w = renderer->window())
+                {
+                    SDL_SetWindowRelativeMouseMode(w, false);
+                }
+                SDL_ShowCursor();
                 auto& uiMgr = glRenderer->getUIManager();
                 if (auto* el = uiMgr.findElementById("ViewportOverlay.PIE"))
                 {
@@ -398,7 +530,7 @@ auto showProgress = [&](const std::string& msg)
                 uiMgr.showDropdownMenu(anchor, items);
             });
 
-        glRenderer->getUIManager().registerClickEvent("ViewportOverlay.PIE", [&glRenderer, playTexId, stopTexId, stopPIE]()
+        glRenderer->getUIManager().registerClickEvent("ViewportOverlay.PIE", [&glRenderer, playTexId, stopTexId, stopPIE, &pieMouseCaptured, &pieInputPaused, &renderer]()
             {
                 auto& diag = DiagnosticsManager::Instance();
                 const bool wasActive = diag.isPIEActive();
@@ -469,6 +601,15 @@ auto showProgress = [&](const std::string& msg)
                             Logger::Instance().log(Logger::Category::Engine, "PIE: using entity camera " + std::to_string(activeCamEntity), Logger::LogLevel::INFO);
                         }
                     }
+
+                    // Capture mouse for PIE: hide cursor, enable relative mouse mode
+                    pieMouseCaptured = true;
+                    pieInputPaused = false;
+                    if (auto* w = renderer->window())
+                    {
+                        SDL_SetWindowRelativeMouseMode(w, true);
+                    }
+                    SDL_HideCursor();
 
                     auto& uiMgr = glRenderer->getUIManager();
                     if (auto* el = uiMgr.findElementById("ViewportOverlay.PIE"))
@@ -1273,6 +1414,9 @@ auto showProgress = [&](const std::string& msg)
     // still visible so the main window never appears white / empty.
     if (glRenderer)
     {
+        // Ensure all loaded widgets are marked dirty so the UI FBO is fully redrawn.
+        glRenderer->getUIManager().markAllWidgetsDirty();
+
         glRenderer->getUIManager().showToastMessage("Engine ready!", 3.0f);
         SDL_Event ev;
         while (SDL_PollEvent(&ev))
@@ -1293,6 +1437,7 @@ auto showProgress = [&](const std::string& msg)
     if (auto* w = renderer->window())
     {
         SDL_ShowWindow(w);
+        SDL_RaiseWindow(w);
     }
 
     bool running = true;
@@ -1518,12 +1663,22 @@ auto showProgress = [&](const std::string& msg)
         const bool* keys = SDL_GetKeyboardState(nullptr);
         if (keys)
         {
-            if (keys[SDL_SCANCODE_W]) renderer->moveCamera(+moveSpeed, 0.0f, 0.0f);
-            if (keys[SDL_SCANCODE_S]) renderer->moveCamera(-moveSpeed, 0.0f, 0.0f);
-            if (keys[SDL_SCANCODE_A]) renderer->moveCamera(0.0f, -moveSpeed, 0.0f);
-            if (keys[SDL_SCANCODE_D]) renderer->moveCamera(0.0f, +moveSpeed, 0.0f);
-            if (keys[SDL_SCANCODE_Q]) renderer->moveCamera(0.0f, 0.0f, -moveSpeed);
-            if (keys[SDL_SCANCODE_E]) renderer->moveCamera(0.0f, 0.0f, +moveSpeed);
+            const bool inPIE = diagnostics.isPIEActive();
+            const bool laptopMode = [&]() {
+                if (auto v = diagnostics.getState("LaptopMode")) return *v == "1";
+                return false;
+            }();
+            // In PIE (and not paused): always move. Outside PIE: require right-click (unless laptop mode).
+            const bool canMove = (inPIE && pieMouseCaptured && !pieInputPaused) || (!inPIE && (rightMouseDown || laptopMode));
+            if (canMove)
+            {
+                if (keys[SDL_SCANCODE_W]) renderer->moveCamera(+moveSpeed, 0.0f, 0.0f);
+                if (keys[SDL_SCANCODE_S]) renderer->moveCamera(-moveSpeed, 0.0f, 0.0f);
+                if (keys[SDL_SCANCODE_A]) renderer->moveCamera(0.0f, -moveSpeed, 0.0f);
+                if (keys[SDL_SCANCODE_D]) renderer->moveCamera(0.0f, +moveSpeed, 0.0f);
+                if (keys[SDL_SCANCODE_Q]) renderer->moveCamera(0.0f, 0.0f, -moveSpeed);
+                if (keys[SDL_SCANCODE_E]) renderer->moveCamera(0.0f, 0.0f, +moveSpeed);
+            }
         }
 
         if (!hasMousePos)
@@ -1591,6 +1746,18 @@ auto showProgress = [&](const std::string& msg)
                     }
                     if (!isOverUI)
                     {
+                        // PIE: recapture mouse when clicking on viewport while input is paused
+                        if (diagnostics.isPIEActive() && pieInputPaused)
+                        {
+                            pieInputPaused = false;
+                            if (auto* w = renderer->window())
+                            {
+                                SDL_SetWindowRelativeMouseMode(w, true);
+                            }
+                            SDL_HideCursor();
+                            logTimed(Logger::Category::Input, "PIE: input resumed (viewport click), mouse captured.", Logger::LogLevel::INFO);
+                            continue;
+                        }
                         // Try gizmo interaction first; only pick entity if gizmo not hit
                         if (!glRenderer->beginGizmoDrag(static_cast<int>(event.button.x), static_cast<int>(event.button.y)))
                         {
@@ -1994,7 +2161,7 @@ auto showProgress = [&](const std::string& msg)
                         continue;
                     }
                 }
-                if (!isOverUI)
+                if (!isOverUI && !diagnostics.isPIEActive())
                 {
                     rightMouseDown = true;
                     if (auto* w = renderer->window())
@@ -2006,12 +2173,15 @@ auto showProgress = [&](const std::string& msg)
             }
             else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_RIGHT)
             {
-                rightMouseDown = false;
-                if (auto* w = renderer->window())
+                if (rightMouseDown)
                 {
-                    SDL_SetWindowRelativeMouseMode(w, false);
+                    rightMouseDown = false;
+                    if (auto* w = renderer->window())
+                    {
+                        SDL_SetWindowRelativeMouseMode(w, false);
+                    }
+                    SDL_ShowCursor();
                 }
-                SDL_ShowCursor();
             }
 
             if (event.type == SDL_EVENT_MOUSE_WHEEL)
@@ -2039,7 +2209,7 @@ auto showProgress = [&](const std::string& msg)
                 }
             }
 
-            if (event.type == SDL_EVENT_MOUSE_MOTION && rightMouseDown)
+            if (event.type == SDL_EVENT_MOUSE_MOTION && (rightMouseDown || (diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused)))
             {
                 // Use a frame-rate independent sensitivity (degrees per pixel).
                 // Relative mouse motion already represents physical movement, not a per-frame quantity.
@@ -2099,8 +2269,23 @@ auto showProgress = [&](const std::string& msg)
                     stopPIE();
                     continue;
                 }
-                // Gizmo mode shortcuts (W/E/R) – only in editor mode and not when a text entry is focused
-                if (!diagnostics.isPIEActive() && glRenderer && !glRenderer->getUIManager().hasEntryFocused())
+                // Shift+F1: toggle PIE mouse capture (show cursor, pause PIE input)
+                if (event.key.key == SDLK_F1 && (event.key.mod & SDL_KMOD_SHIFT) && diagnostics.isPIEActive())
+                {
+                    if (pieMouseCaptured && !pieInputPaused)
+                    {
+                        pieInputPaused = true;
+                        if (auto* w = renderer->window())
+                        {
+                            SDL_SetWindowRelativeMouseMode(w, false);
+                        }
+                        SDL_ShowCursor();
+                        logTimed(Logger::Category::Input, "PIE: input paused (Shift+F1), mouse released.", Logger::LogLevel::INFO);
+                    }
+                    continue;
+                }
+                // Gizmo mode shortcuts (W/E/R) – only in editor mode, not when holding right-click, and not when a text entry is focused
+                if (!diagnostics.isPIEActive() && !rightMouseDown && glRenderer && !glRenderer->getUIManager().hasEntryFocused())
                 {
                     if (event.key.key == SDLK_W)
                     {

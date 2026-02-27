@@ -175,7 +175,7 @@ private:
     RenderResourceManager m_resourceManager;
     EngineLevel* m_cachedLevel{ nullptr };
     bool m_restoreCameraOnPrepare{ false };
-    Vec4 m_clearColor{ 0.5f, 0.5f, 0.5f, 1.0f };
+    Vec4 m_clearColor{ 0.0f, 0.0f, 0.0f, 1.0f };
 
     UIManager m_uiManager;
 

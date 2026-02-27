@@ -87,6 +87,7 @@ public:
 
     void openLandscapeManagerPopup();
     void openEngineSettingsPopup();
+    void openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault)> onProjectChosen);
 
     static UIManager* GetActiveInstance();
     static void SetActiveInstance(UIManager* instance);
