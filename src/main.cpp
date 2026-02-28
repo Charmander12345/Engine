@@ -73,6 +73,193 @@ int main()
         return true; // default to normal (splash)
     }();
 
+    std::string chosenPath;
+    bool chosenIsNew = false;
+    bool chosenSetDefault = false;
+    bool chosenIncludeDefaultContent = true;
+    bool projectChosen = false;
+    bool startupSelectionCancelled = false;
+
+    // Check for a persisted default project
+    auto defaultProj = diagnostics.getState("DefaultProject");
+    if (defaultProj && !defaultProj->empty() && std::filesystem::exists(*defaultProj))
+    {
+        chosenPath = *defaultProj;
+        projectChosen = true;
+    }
+
+    // If no default project, show project selection screen using a temporary renderer
+    if (!projectChosen)
+    {
+        logTimed(Logger::Category::Engine, "No valid default project found. Opening project selection...", Logger::LogLevel::INFO);
+
+        auto* tempRenderer = new OpenGLRenderer();
+        if (tempRenderer->initialize())
+        {
+            SDL_WindowID tempWindowId = 0;
+            if (auto* w = tempRenderer->window())
+            {
+                SDL_SetWindowHitTest(w, nullptr, nullptr); // use native titlebar hit-testing in startup window
+                SDL_SetWindowBordered(w, true);
+                SDL_SetWindowFullscreen(w, 0);
+                SDL_RestoreWindow(w);
+                SDL_SetWindowSize(w, 720, 540);
+                SDL_SetWindowPosition(w, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+                SDL_ShowWindow(w);
+                SDL_RaiseWindow(w);
+                SDL_StartTextInput(w);
+                tempWindowId = SDL_GetWindowID(w);
+            }
+
+            tempRenderer->getUIManager().openProjectScreen(
+                [&](const std::string& path, bool isNew, bool setAsDefault, bool includeDefaultContent)
+                {
+                    chosenPath = path;
+                    chosenIsNew = isNew;
+                    chosenSetDefault = setAsDefault;
+                    chosenIncludeDefaultContent = includeDefaultContent;
+                    projectChosen = true;
+                });
+
+            bool tempWindowOpen = true;
+            while (!projectChosen && tempWindowOpen)
+            {
+                auto& tempUi = tempRenderer->getUIManager();
+                SDL_Event ev;
+                while (SDL_PollEvent(&ev))
+                {
+                    if (ev.type == SDL_EVENT_QUIT)
+                    {
+                        diagnostics.requestShutdown();
+                        startupSelectionCancelled = true;
+                        tempWindowOpen = false;
+                        break;
+                    }
+
+                    if (ev.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && tempWindowId != 0 && ev.window.windowID == tempWindowId)
+                    {
+                        diagnostics.requestShutdown();
+                        startupSelectionCancelled = true;
+                        tempWindowOpen = false;
+                        break;
+                    }
+
+                    if (ev.type == SDL_EVENT_MOUSE_MOTION)
+                    {
+                        tempUi.setMousePosition(Vec2{ ev.motion.x, ev.motion.y });
+                    }
+
+                    if (ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+                    {
+                        const Vec2 mousePos{ static_cast<float>(ev.button.x), static_cast<float>(ev.button.y) };
+                        tempUi.setMousePosition(mousePos);
+                        if (tempUi.handleMouseDown(mousePos, ev.button.button))
+                        {
+                            continue;
+                        }
+                    }
+
+                    if (ev.type == SDL_EVENT_MOUSE_BUTTON_UP)
+                    {
+                        const Vec2 mousePos{ static_cast<float>(ev.button.x), static_cast<float>(ev.button.y) };
+                        tempUi.setMousePosition(mousePos);
+                        if (tempUi.handleMouseUp(mousePos, ev.button.button))
+                        {
+                            continue;
+                        }
+                    }
+
+                    if (ev.type == SDL_EVENT_MOUSE_WHEEL)
+                    {
+                        if (tempUi.handleScroll(tempUi.getMousePosition(), ev.wheel.y))
+                        {
+                            continue;
+                        }
+                    }
+
+                    if (ev.type == SDL_EVENT_TEXT_INPUT)
+                    {
+                        if (tempUi.handleTextInput(ev.text.text))
+                        {
+                            continue;
+                        }
+                    }
+
+                    if (ev.type == SDL_EVENT_KEY_DOWN)
+                    {
+                        if (tempUi.handleKeyDown(ev.key.key))
+                        {
+                            continue;
+                        }
+                    }
+
+                    if (tempRenderer->routeEventToPopup(ev))
+                        continue;
+                }
+
+                if (!tempWindowOpen)
+                {
+                    logTimed(Logger::Category::Engine, "Project selection window was closed without choosing a project.", Logger::LogLevel::INFO);
+                    break;
+                }
+
+                tempRenderer->render();
+                tempRenderer->present();
+
+                SDL_Delay(16);
+            }
+
+            // Drain quit events
+            SDL_Event drain;
+            while (SDL_PollEvent(&drain))
+            {
+                if (drain.type == SDL_EVENT_QUIT) continue;
+            }
+        }
+        if (auto* w = tempRenderer->window())
+        {
+            SDL_StopTextInput(w);
+        }
+        tempRenderer->shutdown();
+        delete tempRenderer;
+    }
+
+    if (startupSelectionCancelled || diagnostics.isShutdownRequested())
+    {
+        logTimed(Logger::Category::Engine, "Startup project selection cancelled. Exiting engine.", Logger::LogLevel::INFO);
+        SDL_Quit();
+        return 0;
+    }
+
+    // Fallback: if still no project chosen, use SampleProject
+    if (!projectChosen)
+    {
+        std::filesystem::path downloadsPath;
+#if defined(_WIN32)
+        if (const char* userProfile = std::getenv("USERPROFILE"))
+        {
+            downloadsPath = std::filesystem::path(userProfile) / "Downloads";
+        }
+#else
+        if (const char* home = std::getenv("HOME"))
+        {
+            downloadsPath = std::filesystem::path(home) / "Downloads";
+        }
+#endif
+        if (downloadsPath.empty())
+        {
+            downloadsPath = std::filesystem::current_path();
+        }
+
+        chosenPath = (downloadsPath / "SampleProject").string();
+        chosenIsNew = !std::filesystem::exists(chosenPath);
+        chosenSetDefault = true;
+        chosenIncludeDefaultContent = true;
+        projectChosen = true;
+        logTimed(Logger::Category::Engine, "Fallback to SampleProject: " + chosenPath, Logger::LogLevel::INFO);
+    }
+
+    // Now we have a project to load/create. Show SplashWindow.
     SplashWindow splash;
     if (useSplash)
     {
@@ -150,40 +337,37 @@ int main()
             glRenderer->setWireframeEnabled(*v == "1");
     }
 
-// In fast mode, show the main window immediately (splash mode keeps it hidden until ready).
-if (!useSplash)
-{
-    if (auto* w = renderer->window())
+    // In fast mode, show the main window immediately (splash mode keeps it hidden until ready).
+    if (!useSplash)
     {
-        SDL_ShowWindow(w);
-    }
-}
-
-// Helper: show progress during subsystem init.
-// In splash mode: update splash status text.
-// In fast mode: show toast messages + render a progress frame in the main window.
-auto showProgress = [&](const std::string& msg)
-{
-    if (splash.isOpen())
-    {
-        splash.setStatus(msg);
-        splash.render();
-    }
-    else if (glRenderer)
-    {
-        glRenderer->getUIManager().showToastMessage(msg, 3.0f);
-        // Pump events + render one frame so the user sees the toast
-        SDL_Event ev;
-        while (SDL_PollEvent(&ev))
+        if (auto* w = renderer->window())
         {
-            if (ev.type == SDL_EVENT_QUIT)
-                diagnostics.requestShutdown();
+            SDL_ShowWindow(w);
         }
-        glRenderer->getUIManager().updateNotifications(0.016f);
-        renderer->render();
-        renderer->present();
     }
-};
+
+    // Helper: show progress during subsystem init.
+    auto showProgress = [&](const std::string& msg)
+    {
+        if (splash.isOpen())
+        {
+            splash.setStatus(msg);
+            splash.render();
+        }
+        else if (glRenderer)
+        {
+            glRenderer->getUIManager().showToastMessage(msg, 3.0f);
+            SDL_Event ev;
+            while (SDL_PollEvent(&ev))
+            {
+                if (ev.type == SDL_EVENT_QUIT)
+                    continue; // ignore – may be leftover from popup destruction
+            }
+            glRenderer->getUIManager().updateNotifications(0.016f);
+            renderer->render();
+            renderer->present();
+        }
+    };
 
     // --- Phase 2: Initialise subsystems one by one, showing progress ---
 
@@ -225,147 +409,41 @@ auto showProgress = [&](const std::string& msg)
 
     bool projectLoaded = false;
 
-    // Check for a persisted default project
+    if (chosenIsNew)
     {
-        auto defaultProj = diagnostics.getState("DefaultProject");
-        if (defaultProj && !defaultProj->empty())
+        const std::string parentDir = std::filesystem::path(chosenPath).parent_path().string();
+        const std::string projName = std::filesystem::path(chosenPath).filename().string();
+        logTimed(Logger::Category::Engine, "Creating new project: " + projName + " at " + parentDir, Logger::LogLevel::INFO);
+        if (assetManager.createProject(parentDir, projName, { projName, "1.0", "1.0", "", DiagnosticsManager::RHIType::OpenGL }, AssetManager::Sync, chosenIncludeDefaultContent))
         {
-            logTimed(Logger::Category::Engine, "Loading default project: " + *defaultProj, Logger::LogLevel::INFO);
-            if (assetManager.loadProject(*defaultProj))
-            {
-                projectLoaded = true;
-                diagnostics.addKnownProject(*defaultProj);
-            }
-            else
-            {
-                logTimed(Logger::Category::Project, "Default project failed to load: " + *defaultProj, Logger::LogLevel::WARNING);
-            }
+            projectLoaded = true;
+        }
+    }
+    else
+    {
+        logTimed(Logger::Category::Engine, "Loading project: " + chosenPath, Logger::LogLevel::INFO);
+        if (assetManager.loadProject(chosenPath))
+        {
+            projectLoaded = true;
         }
     }
 
-    // If no default project (or it failed), show project selection screen
-    if (!projectLoaded && glRenderer)
+    if (projectLoaded)
     {
-        // Close splash so only the project popup is visible; keep main window hidden.
-        if (splash.isOpen())
-        {
-            splash.close();
-        }
-        // In fast mode the main window was shown early – hide it for a clean look.
-        if (auto* w = renderer->window())
-        {
-            SDL_HideWindow(w);
-        }
-
-        std::string chosenPath;
-        bool chosenIsNew = false;
-        bool chosenSetDefault = false;
-        bool projectChosen = false;
-
-        glRenderer->getUIManager().openProjectScreen(
-            [&chosenPath, &chosenIsNew, &chosenSetDefault, &projectChosen](const std::string& path, bool isNew, bool setAsDefault)
-            {
-                chosenPath = path;
-                chosenIsNew = isNew;
-                chosenSetDefault = setAsDefault;
-                projectChosen = true;
-            });
-
-        // Mini event loop: render + pump events until a project is chosen or window closed
-        while (!projectChosen && !diagnostics.isShutdownRequested())
-        {
-            SDL_Event ev;
-            while (SDL_PollEvent(&ev))
-            {
-                if (ev.type == SDL_EVENT_QUIT)
-                {
-                    diagnostics.requestShutdown();
-                    break;
-                }
-                if (glRenderer->routeEventToPopup(ev))
-                    continue;
-            }
-            if (diagnostics.isShutdownRequested())
-                break;
-
-            // Render first so renderPopupWindows() can clean up closed popups
-            renderer->render();
-            renderer->present();
-
-            // If the popup was closed without choosing (e.g. X button), exit
-            if (!glRenderer->getPopupWindow("ProjectScreen"))
-                break;
-
-            SDL_Delay(16);
-        }
-
-        if (diagnostics.isShutdownRequested())
-        {
-            renderer->shutdown();
-            delete renderer;
-            SDL_Quit();
-            Scripting::Shutdown();
-            return 0;
-        }
-
-        if (projectChosen)
-        {
-            if (chosenIsNew)
-            {
-                const std::string parentDir = std::filesystem::path(chosenPath).parent_path().string();
-                const std::string projName = std::filesystem::path(chosenPath).filename().string();
-                logTimed(Logger::Category::Engine, "Creating new project: " + projName + " at " + parentDir, Logger::LogLevel::INFO);
-                if (assetManager.createProject(parentDir, projName, { projName, "1.0", "1.0", "", DiagnosticsManager::RHIType::OpenGL }))
-                {
-                    projectLoaded = true;
-                    diagnostics.addKnownProject(diagnostics.getProjectInfo().projectPath);
-                    if (chosenSetDefault)
-                        diagnostics.setState("DefaultProject", diagnostics.getProjectInfo().projectPath);
-                }
-            }
-            else
-            {
-                logTimed(Logger::Category::Engine, "Loading project: " + chosenPath, Logger::LogLevel::INFO);
-                if (assetManager.loadProject(chosenPath))
-                {
-                    projectLoaded = true;
-                    diagnostics.addKnownProject(diagnostics.getProjectInfo().projectPath);
-                    if (chosenSetDefault)
-                        diagnostics.setState("DefaultProject", diagnostics.getProjectInfo().projectPath);
-                }
-            }
-        }
-    }
-
-    // Fallback: if still no project loaded, create a default one
-    if (!projectLoaded)
-    {
-        std::filesystem::path downloadsPath;
-#if defined(_WIN32)
-        if (const char* userProfile = std::getenv("USERPROFILE"))
-        {
-            downloadsPath = std::filesystem::path(userProfile) / "Downloads";
-        }
-#else
-        if (const char* home = std::getenv("HOME"))
-        {
-            downloadsPath = std::filesystem::path(home) / "Downloads";
-        }
-#endif
-        if (downloadsPath.empty())
-        {
-            downloadsPath = std::filesystem::current_path();
-        }
-
-        const std::filesystem::path projectRoot = downloadsPath / "SampleProject";
-        logTimed(Logger::Category::Engine, "Loading fallback project...", Logger::LogLevel::INFO);
-        if (!assetManager.loadProject(projectRoot.string()))
-        {
-            logTimed(Logger::Category::Project, "Project not found. Creating default project: SampleProject", Logger::LogLevel::WARNING);
-            assetManager.createProject(downloadsPath.string(), "SampleProject", { "SampleProject", "1.0", "1.0", "", DiagnosticsManager::RHIType::OpenGL });
-        }
         diagnostics.addKnownProject(diagnostics.getProjectInfo().projectPath);
-        diagnostics.setState("DefaultProject", diagnostics.getProjectInfo().projectPath);
+        if (chosenSetDefault)
+            diagnostics.setState("DefaultProject", diagnostics.getProjectInfo().projectPath);
+    }
+    else
+    {
+        logTimed(Logger::Category::Engine,
+            "No project could be loaded or created. Shutting down.",
+            Logger::LogLevel::FATAL);
+        renderer->shutdown();
+        delete renderer;
+        SDL_Quit();
+        Scripting::Shutdown();
+        return -1;
     }
 
     // --- Phase 3: Load editor UI widgets ---
@@ -1422,23 +1500,36 @@ auto showProgress = [&](const std::string& msg)
         while (SDL_PollEvent(&ev))
         {
             if (ev.type == SDL_EVENT_QUIT)
-                diagnostics.requestShutdown();
+                continue; // ignore – may be leftover from popup destruction
         }
         glRenderer->getUIManager().updateNotifications(0.016f);
         renderer->render();
         renderer->present();
     }
 
-    // Now that the framebuffer has real content, close splash and show window.
-    if (splash.isOpen())
-    {
-        splash.close();
-    }
+    // Now that the framebuffer has real content, show the main window FIRST
+    // so that SDL doesn't think the application is closing when we destroy the splash.
     if (auto* w = renderer->window())
     {
         SDL_ShowWindow(w);
         SDL_RaiseWindow(w);
     }
+    if (splash.isOpen())
+    {
+        splash.close();
+    }
+
+    // Ensure no stale shutdown flag from intermediate event pumps.
+    if (diagnostics.isShutdownRequested())
+    {
+        logTimed(Logger::Category::Engine,
+            "Clearing stale shutdown request before main loop (caused by popup lifecycle events).",
+            Logger::LogLevel::WARNING);
+    }
+
+    // Reset shutdown flag – only TitleBar.Close and SDL_EVENT_QUIT inside the
+    // main loop should be able to shut the engine down from this point on.
+    diagnostics.resetShutdownRequest();
 
     bool running = true;
     uint64_t frame = 0;
@@ -1809,6 +1900,41 @@ auto showProgress = [&](const std::string& msg)
                         }
 
                         std::vector<UIManager::DropdownMenuItem> items;
+
+                        items.push_back({ "New Folder", [&glRenderer]()
+                            {
+                                auto& uiMgr = glRenderer->getUIManager();
+                                const auto& folder = uiMgr.getSelectedBrowserFolder();
+                                if (folder == "__Shaders__") return;
+
+                                auto& diagnostics = DiagnosticsManager::Instance();
+                                const std::filesystem::path contentDir =
+                                    std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content";
+                                const std::filesystem::path targetDir = folder.empty() ? contentDir : contentDir / folder;
+                                std::error_code ec;
+                                std::filesystem::create_directories(targetDir, ec);
+
+                                std::string baseName = "NewFolder";
+                                std::string folderName = baseName;
+                                int counter = 1;
+                                while (std::filesystem::exists(targetDir / folderName))
+                                {
+                                    folderName = baseName + std::to_string(counter++);
+                                }
+
+                                std::filesystem::create_directory(targetDir / folderName, ec);
+                                if (!ec)
+                                {
+                                    uiMgr.refreshContentBrowser();
+                                    uiMgr.showToastMessage("Created folder: " + folderName, 3.0f);
+                                }
+                                else
+                                {
+                                    uiMgr.showToastMessage("Failed to create folder.", 3.0f);
+                                }
+                            }});
+
+                        items.push_back({ "", {}, true });
 
                         items.push_back({ "New Script", [&glRenderer]()
                             {
@@ -2396,6 +2522,7 @@ auto showProgress = [&](const std::string& msg)
 
         if (diagnostics.isShutdownRequested())
         {
+            logTimed(Logger::Category::Engine, "Shutdown requested – exiting main loop.", Logger::LogLevel::INFO);
             running = false;
         }
 

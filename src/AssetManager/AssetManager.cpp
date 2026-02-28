@@ -7,6 +7,7 @@
 #include <fstream>
 #include <cstdint>
 #include <cctype>
+#include <exception>
 #include "AssetTypes.h"
 
 #include <SDL3/SDL.h>
@@ -1038,6 +1039,10 @@ const std::vector<AssetRegistryEntry>& AssetManager::getAssetRegistry() const
 
 bool AssetManager::initialize()
 {
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        m_initialized = true;
+    }
     startWorkerPool();
 	s_nextAssetID = 1;
     AudioManager::Instance().setAudioResolver([](unsigned int assetId) -> std::optional<AudioManager::AudioBufferData>
@@ -3024,6 +3029,10 @@ bool AssetManager::unloadAsset(unsigned int assetId)
 bool AssetManager::registerRuntimeResource(const std::shared_ptr<EngineObject>& resource)
 {
 	std::lock_guard<std::mutex> lock(m_stateMutex);
+	if (!m_initialized)
+	{
+		return false;
+	}
 	return m_garbageCollector.registerResource(resource);
 }
 
@@ -4782,7 +4791,7 @@ void AssetManager::updateAssetFileReferences(const std::filesystem::path& conten
 	}
 }
 
-bool AssetManager::loadProject(const std::string& projectPath, SyncState syncState)
+bool AssetManager::loadProject(const std::string& projectPath, SyncState syncState, bool ensureDefaultContent)
 {
     auto& logger = Logger::Instance();
     auto& diagnostics = DiagnosticsManager::Instance();
@@ -4890,8 +4899,30 @@ bool AssetManager::loadProject(const std::string& projectPath, SyncState syncSta
 		fs::copy_file(srcStub, stubPath, fs::copy_options::overwrite_existing, scriptsEc);
 	}
 
-    // Ensure default assets exist, but do not create/override the active level here.
-    ensureDefaultAssetsCreated();
+    // Ensure default assets if requested (new-project flow may opt out for blank projects).
+    if (ensureDefaultContent)
+    {
+        try
+        {
+            ensureDefaultAssetsCreated();
+        }
+        catch (const std::exception& ex)
+        {
+            logger.log(Logger::Category::Project,
+                std::string("Exception while ensuring default assets during project load: ") + ex.what(),
+                Logger::LogLevel::ERROR);
+            diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingProject, false);
+            return false;
+        }
+        catch (...)
+        {
+            logger.log(Logger::Category::Project,
+                "Unknown exception while ensuring default assets during project load.",
+                Logger::LogLevel::ERROR);
+            diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingProject, false);
+            return false;
+        }
+    }
 
 	// Registry handling: build asynchronously so project loading is not blocked.
 	logger.log(Logger::Category::Project, "Starting async asset registry build for project: " + info.projectName, Logger::LogLevel::INFO);
@@ -4992,7 +5023,7 @@ bool AssetManager::saveProject(const std::string& projectPath, SyncState syncSta
     return true;
 }
 
-bool AssetManager::createProject(const std::string& parentDir, const std::string& projectName, const DiagnosticsManager::ProjectInfo& info, SyncState syncState)
+bool AssetManager::createProject(const std::string& parentDir, const std::string& projectName, const DiagnosticsManager::ProjectInfo& info, SyncState syncState, bool includeDefaultContent)
 {
     auto& logger = Logger::Instance();
     auto& diagnostics = DiagnosticsManager::Instance();
@@ -5034,14 +5065,20 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
 
     const std::string defaultLevelPath = (fs::path("Levels") / "DefaultLevel.map").generic_string();
     auto defaultlevel = std::make_unique<EngineLevel>();
+    defaultlevel->setName("DefaultLevel");
+    defaultlevel->setPath(defaultLevelPath);
+    defaultlevel->setAssetType(AssetType::Level);
     diagnostics.setActiveLevel(std::move(defaultlevel));
 
     // ensure defaults.ini exists for the new project
     diagnostics.loadProjectConfig();
 
-    if (auto level = diagnostics.getActiveLevel())
+    if (!includeDefaultContent)
     {
-        saveLevelAsset(level);
+        if (auto level = diagnostics.getActiveLevel())
+        {
+            saveLevelAsset(level);
+        }
     }
 
     bool saved = saveProject(root.string());
@@ -5050,7 +5087,7 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
     {
         logger.log("Project created at: " + root.string(), Logger::LogLevel::INFO);
     }
-	bool loaded = loadProject(root.string());
+	bool loaded = loadProject(root.string(), syncState, includeDefaultContent);
     if (!loaded)
     {
         logger.log("Failed to load newly created project: " + root.string(), Logger::LogLevel::ERROR);

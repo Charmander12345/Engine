@@ -117,9 +117,9 @@ public:
 	void saveAllAssetsAsync(std::function<void(size_t saved, size_t total)> onProgress = {}, std::function<void(bool success)> onFinished = {});
 
 	//Project management
-	bool loadProject(const std::string& projectPath, SyncState syncState = Sync);
+	bool loadProject(const std::string& projectPath, SyncState syncState = Sync, bool ensureDefaultContent = true);
 	bool saveProject(const std::string& projectPath, SyncState syncState = Sync);
-	bool createProject(const std::string& parentDir, const std::string& projectName, const DiagnosticsManager::ProjectInfo& info, SyncState syncState = Sync);
+	bool createProject(const std::string& parentDir, const std::string& projectName, const DiagnosticsManager::ProjectInfo& info, SyncState syncState = Sync, bool includeDefaultContent = true);
 	void unloadAllAssets();
 
 	// Returns the full flat asset registry (all discovered .asset files with type + relative path).
@@ -276,6 +276,7 @@ private:
 	std::unordered_map<unsigned int, std::shared_ptr<AssetData>> m_loadedAssets;
 	std::unordered_map<std::string, unsigned int> m_loadedAssetsByPath;
 	std::unordered_set<unsigned int> m_gcEligibleAssets;
+	bool m_initialized{ false };
 	mutable std::mutex m_asyncJobMutex;
 	int m_nextAsyncJobId{ 1 };
 	std::unordered_set<int> m_runningAssetJobs;

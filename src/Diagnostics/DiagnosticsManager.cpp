@@ -577,6 +577,22 @@ void DiagnosticsManager::addKnownProject(const std::string& projectPath)
     m_states["KnownProjects"] = joined;
 }
 
+void DiagnosticsManager::removeKnownProject(const std::string& projectPath)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_knownProjects.erase(
+        std::remove(m_knownProjects.begin(), m_knownProjects.end(), projectPath),
+        m_knownProjects.end());
+
+    std::string joined;
+    for (size_t i = 0; i < m_knownProjects.size(); ++i)
+    {
+        if (i > 0) joined += ';';
+        joined += m_knownProjects[i];
+    }
+    m_states["KnownProjects"] = joined;
+}
+
 std::vector<std::string> DiagnosticsManager::getKnownProjects() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -593,6 +609,12 @@ bool DiagnosticsManager::isShutdownRequested() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_shutdownRequested;
+}
+
+void DiagnosticsManager::resetShutdownRequest()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_shutdownRequested = false;
 }
 
 DiagnosticsManager::DiagnosticsManager()

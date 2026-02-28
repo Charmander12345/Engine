@@ -73,6 +73,8 @@ public:
     void showModalMessage(const std::string& message, std::function<void()> onClosed = {});
     void closeModalMessage();
     void showConfirmDialog(const std::string& message, std::function<void()> onConfirm, std::function<void()> onCancel = {});
+    void showConfirmDialogWithCheckbox(const std::string& message, const std::string& checkboxLabel, bool checkedByDefault,
+        std::function<void(bool checked)> onConfirm, std::function<void()> onCancel = {});
     void showToastMessage(const std::string& message, float durationSeconds);
     void updateNotifications(float deltaSeconds);
 
@@ -80,6 +82,7 @@ public:
     {
         std::string label;
         std::function<void()> onClick;
+        bool isSeparator{ false };
     };
     void showDropdownMenu(const Vec2& anchorPixels, const std::vector<DropdownMenuItem>& items, float minWidth = 0.0f);
     void closeDropdownMenu();
@@ -87,7 +90,7 @@ public:
 
     void openLandscapeManagerPopup();
     void openEngineSettingsPopup();
-    void openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault)> onProjectChosen);
+    void openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent)> onProjectChosen);
 
     static UIManager* GetActiveInstance();
     static void SetActiveInstance(UIManager* instance);

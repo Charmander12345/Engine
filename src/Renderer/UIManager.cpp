@@ -1185,6 +1185,180 @@ void UIManager::showConfirmDialog(const std::string& message, std::function<void
     m_modalOnClosed = {};
 }
 
+void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const std::string& checkboxLabel, bool checkedByDefault,
+    std::function<void(bool checked)> onConfirm, std::function<void()> onCancel)
+{
+    if (message.empty())
+    {
+        return;
+    }
+
+    auto confirmCb = std::make_shared<std::function<void(bool)>>(std::move(onConfirm));
+    auto cancelCb = std::make_shared<std::function<void()>>(std::move(onCancel));
+    auto checkboxState = std::make_shared<bool>(checkedByDefault);
+
+    if (!m_modalWidget)
+    {
+        m_modalWidget = std::make_shared<Widget>();
+        m_modalWidget->setName("ModalMessage");
+        m_modalWidget->setAnchor(WidgetAnchor::TopLeft);
+        m_modalWidget->setFillX(true);
+        m_modalWidget->setFillY(true);
+        m_modalWidget->setZOrder(10000);
+    }
+
+    WidgetElement overlay{};
+    overlay.id = "Modal.Overlay";
+    overlay.type = WidgetElementType::Panel;
+    overlay.from = Vec2{ 0.0f, 0.0f };
+    overlay.to = Vec2{ 1.0f, 1.0f };
+    overlay.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.45f };
+    overlay.isHitTestable = true;
+    overlay.runtimeOnly = true;
+
+    WidgetElement panel{};
+    panel.id = "Modal.Panel";
+    panel.type = WidgetElementType::StackPanel;
+    panel.from = Vec2{ 0.25f, 0.30f };
+    panel.to = Vec2{ 0.75f, 0.70f };
+    panel.padding = Vec2{ 20.0f, 16.0f };
+    panel.orientation = StackOrientation::Vertical;
+    panel.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.95f };
+    panel.isHitTestable = false;
+    panel.runtimeOnly = true;
+
+    WidgetElement msgText{};
+    msgText.id = "Modal.Text";
+    msgText.type = WidgetElementType::Text;
+    msgText.text = message;
+    msgText.font = "default.ttf";
+    msgText.fontSize = 16.0f;
+    msgText.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+    msgText.wrapText = true;
+    msgText.fillX = true;
+    msgText.fillY = true;
+    msgText.minSize = Vec2{ 0.0f, 36.0f };
+    msgText.runtimeOnly = true;
+
+    WidgetElement checkbox{};
+    checkbox.id = "Modal.Checkbox";
+    checkbox.type = WidgetElementType::CheckBox;
+    checkbox.text = checkboxLabel;
+    checkbox.font = "default.ttf";
+    checkbox.fontSize = 13.0f;
+    checkbox.isChecked = checkedByDefault;
+    checkbox.fillX = true;
+    checkbox.minSize = Vec2{ 0.0f, 26.0f };
+    checkbox.padding = Vec2{ 2.0f, 2.0f };
+    checkbox.color = Vec4{ 0.18f, 0.18f, 0.22f, 0.9f };
+    checkbox.hoverColor = Vec4{ 0.24f, 0.24f, 0.30f, 1.0f };
+    checkbox.fillColor = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
+    checkbox.textColor = Vec4{ 0.90f, 0.90f, 0.94f, 1.0f };
+    checkbox.isHitTestable = true;
+    checkbox.runtimeOnly = true;
+    checkbox.onCheckedChanged = [checkboxState](bool checked)
+    {
+        *checkboxState = checked;
+    };
+
+    WidgetElement buttonRow{};
+    buttonRow.id = "Modal.ButtonRow";
+    buttonRow.type = WidgetElementType::StackPanel;
+    buttonRow.from = Vec2{ 0.0f, 0.0f };
+    buttonRow.to = Vec2{ 1.0f, 1.0f };
+    buttonRow.fillX = true;
+    buttonRow.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    buttonRow.minSize = Vec2{ 0.0f, 32.0f };
+    buttonRow.orientation = StackOrientation::Horizontal;
+    buttonRow.padding = Vec2{ 8.0f, 0.0f };
+    buttonRow.runtimeOnly = true;
+
+    WidgetElement spacerLeft{};
+    spacerLeft.id = "Modal.SpacerL";
+    spacerLeft.type = WidgetElementType::Panel;
+    spacerLeft.fillX = true;
+    spacerLeft.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    spacerLeft.runtimeOnly = true;
+
+    WidgetElement spacerMid{};
+    spacerMid.id = "Modal.SpacerM";
+    spacerMid.type = WidgetElementType::Panel;
+    spacerMid.fillX = true;
+    spacerMid.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    spacerMid.runtimeOnly = true;
+
+    WidgetElement spacerRight{};
+    spacerRight.id = "Modal.SpacerR";
+    spacerRight.type = WidgetElementType::Panel;
+    spacerRight.fillX = true;
+    spacerRight.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    spacerRight.runtimeOnly = true;
+
+    auto makeBtn = [](const std::string& id, const std::string& label, const Vec4& bgColor, const Vec4& hoverColor) {
+        WidgetElement btn{};
+        btn.id = id;
+        btn.type = WidgetElementType::Button;
+        btn.text = label;
+        btn.font = "default.ttf";
+        btn.fontSize = 14.0f;
+        btn.textAlignH = TextAlignH::Center;
+        btn.textAlignV = TextAlignV::Center;
+        btn.padding = Vec2{ 8.0f, 6.0f };
+        btn.minSize = Vec2{ 110.0f, 32.0f };
+        btn.color = bgColor;
+        btn.hoverColor = hoverColor;
+        btn.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+        btn.shaderVertex = "button_vertex.glsl";
+        btn.shaderFragment = "button_fragment.glsl";
+        btn.isHitTestable = true;
+        btn.runtimeOnly = true;
+        return btn;
+    };
+
+    WidgetElement yesBtn = makeBtn("Modal.Yes", "Delete",
+        Vec4{ 0.55f, 0.18f, 0.18f, 0.95f },
+        Vec4{ 0.70f, 0.22f, 0.22f, 1.0f });
+    yesBtn.onClicked = [this, confirmCb, checkboxState]()
+    {
+        closeModalMessage();
+        if (*confirmCb) (*confirmCb)(*checkboxState);
+    };
+
+    WidgetElement noBtn = makeBtn("Modal.No", "Cancel",
+        Vec4{ 0.25f, 0.26f, 0.32f, 0.95f },
+        Vec4{ 0.35f, 0.36f, 0.42f, 0.98f });
+    noBtn.onClicked = [this, cancelCb]()
+    {
+        closeModalMessage();
+        if (*cancelCb) (*cancelCb)();
+    };
+
+    buttonRow.children.push_back(std::move(spacerLeft));
+    buttonRow.children.push_back(std::move(yesBtn));
+    buttonRow.children.push_back(std::move(spacerMid));
+    buttonRow.children.push_back(std::move(noBtn));
+    buttonRow.children.push_back(std::move(spacerRight));
+
+    panel.children.push_back(std::move(msgText));
+    panel.children.push_back(std::move(checkbox));
+    panel.children.push_back(std::move(buttonRow));
+
+    std::vector<WidgetElement> elements;
+    elements.reserve(2);
+    elements.push_back(std::move(overlay));
+    elements.push_back(std::move(panel));
+    m_modalWidget->setElements(std::move(elements));
+    m_modalWidget->markLayoutDirty();
+
+    if (m_modalVisible)
+    {
+        unregisterWidget("ModalMessage");
+    }
+    registerWidget("ModalMessage", m_modalWidget);
+    m_modalVisible = true;
+    m_modalOnClosed = {};
+}
+
 void UIManager::showToastMessage(const std::string& message, float durationSeconds)
 {
     if (message.empty())
@@ -5156,6 +5330,19 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
         const float y0 = kPadY + static_cast<float>(i) * kItemH;
         const float y1 = y0 + kItemH;
 
+        if (items[i].isSeparator)
+        {
+            WidgetElement sep;
+            sep.type = WidgetElementType::Panel;
+            sep.id = "Dropdown.Sep." + std::to_string(i);
+            sep.from = Vec2{ 0.08f, (y0 + kItemH * 0.5f) / menuH };
+            sep.to = Vec2{ 0.92f, (y0 + kItemH * 0.5f + 1.0f) / menuH };
+            sep.color = Vec4{ 0.30f, 0.32f, 0.38f, 1.0f };
+            sep.isHitTestable = false;
+            elements.push_back(std::move(sep));
+            continue;
+        }
+
         WidgetElement item;
         item.type          = WidgetElementType::Button;
         item.id            = "Dropdown.Item." + std::to_string(i);
@@ -5971,20 +6158,22 @@ void UIManager::openEngineSettingsPopup()
 // ─────────────────────────────────────────────────────────────────────────────
 // Project Selection Screen
 // ─────────────────────────────────────────────────────────────────────────────
-void UIManager::openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault)> onProjectChosen)
+void UIManager::openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent)> onProjectChosen)
 {
     if (!m_renderer)
         return;
 
-    constexpr int kPopupW = 720;
-    constexpr int kPopupH = 540;
-    PopupWindow* popup = m_renderer->openPopupWindow(
-        "ProjectScreen", "HorizonEngine – Project Selection", kPopupW, kPopupH);
-    if (!popup) return;
-    if (!popup->uiManager().getRegisteredWidgets().empty()) return;
+    if (findWidgetEntry("ProjectScreen.Main"))
+        return;
 
-    const float W = static_cast<float>(kPopupW);
-    const float H = static_cast<float>(kPopupH);
+    constexpr float kScreenW = 720.0f;
+    constexpr float kScreenH = 540.0f;
+    OpenGLRenderer* renderer = m_renderer;
+    UIManager* screenMgr = this;
+    SDL_Window* hostWindow = renderer ? renderer->window() : nullptr;
+
+    const float W = kScreenW;
+    const float H = kScreenH;
     auto nx = [&](float px) { return px / W; };
     auto ny = [&](float py) { return py / H; };
 
@@ -5994,6 +6183,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         std::string newProjectName{ "MyProject" };
         std::string newProjectLocation;
         bool setAsDefault{ false };
+        bool includeDefaultContent{ true };
     };
     auto state = std::make_shared<PSState>();
 
@@ -6118,13 +6308,20 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
     constexpr float kCatBtnGap = 2.0f;
     constexpr float kCatBtnY0 = kTitleH + 10.0f;
 
-    OpenGLRenderer* renderer = m_renderer;
-    auto callbackPtr = std::make_shared<std::function<void(const std::string&, bool, bool)>>(std::move(onProjectChosen));
+    auto callbackPtr = std::make_shared<std::function<void(const std::string&, bool, bool, bool)>>(std::move(onProjectChosen));
+    auto closeScreen = [screenMgr]()
+    {
+        if (screenMgr)
+        {
+            screenMgr->unregisterWidget("ProjectScreen.Main");
+        }
+    };
+    auto rebuildContentPtr = std::make_shared<std::function<void()>>();
 
     // ── Content builder ────────────────────────────────────────────────
-    auto rebuildContent = [state, popup, categories, nx, ny, W, H, kSidebarW, kTitleH, kFooterH, renderer, callbackPtr]()
+    *rebuildContentPtr = [state, screenMgr, hostWindow, categories, nx, ny, W, H, kSidebarW, kTitleH, kFooterH, renderer, callbackPtr, closeScreen, rebuildContentPtr]()
     {
-        auto& pMgr = popup->uiManager();
+        auto& pMgr = *screenMgr;
         auto* entry = pMgr.findElementById("PS.ContentArea");
         if (!entry) return;
 
@@ -6268,29 +6465,29 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     hdrRow.type        = WidgetElementType::StackPanel;
                     hdrRow.id          = "PS.C.ListHdr";
                     hdrRow.orientation = StackOrientation::Horizontal;
-                    hdrRow.minSize     = Vec2{ contentW - kContentPad * 2.0f, 24.0f };
-                    hdrRow.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-                    hdrRow.padding     = Vec2{ 12.0f, 2.0f };
+                    hdrRow.minSize     = Vec2{ contentW - kContentPad * 2.0f, 26.0f };
+                    hdrRow.color       = Vec4{ 0.10f, 0.10f, 0.13f, 1.0f };
+                    hdrRow.padding     = Vec2{ 18.0f, 2.0f };
 
                     WidgetElement hdrName;
                     hdrName.type      = WidgetElementType::Text;
                     hdrName.id        = "PS.C.ListHdr.Name";
-                    hdrName.text      = "Name";
+                    hdrName.text      = "Project";
                     hdrName.fontSize  = 11.0f;
-                    hdrName.textColor = Vec4{ 0.40f, 0.44f, 0.55f, 1.0f };
+                    hdrName.textColor = Vec4{ 0.45f, 0.50f, 0.65f, 1.0f };
                     hdrName.textAlignV = TextAlignV::Center;
-                    hdrName.minSize   = Vec2{ 160.0f, 22.0f };
+                    hdrName.minSize   = Vec2{ 180.0f, 24.0f };
                     hdrRow.children.push_back(hdrName);
 
                     WidgetElement hdrPath;
                     hdrPath.type      = WidgetElementType::Text;
                     hdrPath.id        = "PS.C.ListHdr.Path";
-                    hdrPath.text      = "Path";
+                    hdrPath.text      = "Location";
                     hdrPath.fontSize  = 11.0f;
-                    hdrPath.textColor = Vec4{ 0.40f, 0.44f, 0.55f, 1.0f };
+                    hdrPath.textColor = Vec4{ 0.45f, 0.50f, 0.65f, 1.0f };
                     hdrPath.textAlignV = TextAlignV::Center;
                     hdrPath.fillX     = true;
-                    hdrPath.minSize   = Vec2{ 0.0f, 22.0f };
+                    hdrPath.minSize   = Vec2{ 0.0f, 24.0f };
                     hdrRow.children.push_back(hdrPath);
 
                     entry->children.push_back(hdrRow);
@@ -6306,32 +6503,43 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     const std::string rowId = "PS.C.Proj." + std::to_string(i);
                     const bool isEven = (i % 2 == 0);
 
-                    // List row – horizontal: Name | Path
+                    // Outer row container – holds accent bar + content
                     WidgetElement row;
                     row.type        = WidgetElementType::StackPanel;
                     row.id          = rowId + ".Row";
                     row.orientation = StackOrientation::Horizontal;
-                    row.minSize     = Vec2{ contentW - kContentPad * 2.0f, 36.0f };
+                    row.minSize     = Vec2{ contentW - kContentPad * 2.0f, 44.0f };
                     row.color       = isEven
-                        ? Vec4{ 0.16f, 0.16f, 0.21f, 1.0f }
-                        : Vec4{ 0.12f, 0.12f, 0.15f, 1.0f };
+                        ? Vec4{ 0.15f, 0.15f, 0.20f, 1.0f }
+                        : Vec4{ 0.11f, 0.11f, 0.14f, 1.0f };
                     row.hoverColor  = exists
-                        ? Vec4{ 0.22f, 0.28f, 0.42f, 1.0f }
+                        ? Vec4{ 0.20f, 0.26f, 0.40f, 1.0f }
                         : row.color;
-                    row.padding     = Vec2{ 12.0f, 4.0f };
+                    row.padding     = Vec2{ 0.0f, 0.0f };
                     row.isHitTestable = exists;
+
+                    // Left accent bar
+                    WidgetElement accent;
+                    accent.type    = WidgetElementType::Panel;
+                    accent.id      = rowId + ".Accent";
+                    accent.color   = exists
+                        ? Vec4{ 0.30f, 0.55f, 0.95f, 1.0f }
+                        : Vec4{ 0.45f, 0.28f, 0.28f, 0.6f };
+                    accent.minSize = Vec2{ 4.0f, 44.0f };
+                    row.children.push_back(accent);
 
                     // Project name column
                     WidgetElement nameCol;
                     nameCol.type      = WidgetElementType::Text;
                     nameCol.id        = rowId + ".Name";
                     nameCol.text      = projName;
-                    nameCol.fontSize  = 13.0f;
+                    nameCol.fontSize  = 14.0f;
                     nameCol.textColor = exists
-                        ? Vec4{ 0.95f, 0.95f, 1.0f, 1.0f }
+                        ? Vec4{ 0.95f, 0.97f, 1.0f, 1.0f }
                         : Vec4{ 0.50f, 0.38f, 0.38f, 1.0f };
                     nameCol.textAlignV = TextAlignV::Center;
-                    nameCol.minSize   = Vec2{ 160.0f, 28.0f };
+                    nameCol.padding   = Vec2{ 12.0f, 0.0f };
+                    nameCol.minSize   = Vec2{ 180.0f, 44.0f };
                     row.children.push_back(nameCol);
 
                     // Path column
@@ -6341,20 +6549,83 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     pathCol.text      = exists ? projPath : (projPath + "  (not found)");
                     pathCol.fontSize  = 11.0f;
                     pathCol.textColor = exists
-                        ? Vec4{ 0.50f, 0.55f, 0.65f, 1.0f }
+                        ? Vec4{ 0.48f, 0.54f, 0.68f, 1.0f }
                         : Vec4{ 0.45f, 0.30f, 0.30f, 0.8f };
                     pathCol.textAlignV = TextAlignV::Center;
                     pathCol.fillX     = true;
-                    pathCol.minSize   = Vec2{ 0.0f, 28.0f };
+                    pathCol.padding   = Vec2{ 4.0f, 0.0f };
+                    pathCol.minSize   = Vec2{ 0.0f, 44.0f };
                     row.children.push_back(pathCol);
+
+                    WidgetElement removeBtn;
+                    removeBtn.type = WidgetElementType::Button;
+                    removeBtn.id = rowId + ".Remove";
+                    removeBtn.text = "X";
+                    removeBtn.fontSize = 12.0f;
+                    removeBtn.color = Vec4{ 0.35f, 0.16f, 0.16f, 0.95f };
+                    removeBtn.hoverColor = Vec4{ 0.55f, 0.22f, 0.22f, 1.0f };
+                    removeBtn.textColor = Vec4{ 0.95f, 0.88f, 0.88f, 1.0f };
+                    removeBtn.textAlignH = TextAlignH::Center;
+                    removeBtn.textAlignV = TextAlignV::Center;
+                    removeBtn.padding = Vec2{ 0.0f, 0.0f };
+                    removeBtn.fillY = true;
+                    removeBtn.minSize = Vec2{ 44.0f, 44.0f };
+                    removeBtn.isHitTestable = true;
+                    removeBtn.shaderVertex = "button_vertex.glsl";
+                    removeBtn.shaderFragment = "button_fragment.glsl";
+                    removeBtn.onClicked = [projPath, projName, exists, screenMgr, rebuildContentPtr]()
+                    {
+                        const auto removeEntry = [projPath, screenMgr, rebuildContentPtr](bool deleteFromFilesystem)
+                        {
+                            if (deleteFromFilesystem)
+                            {
+                                std::error_code removeEc;
+                                std::filesystem::remove_all(std::filesystem::path(projPath), removeEc);
+                                if (screenMgr)
+                                {
+                                    if (removeEc)
+                                    {
+                                        screenMgr->showToastMessage("Failed to delete project folder.", 3.0f);
+                                    }
+                                    else
+                                    {
+                                        screenMgr->showToastMessage("Deleted project folder.", 2.5f);
+                                    }
+                                }
+                            }
+
+                            DiagnosticsManager::Instance().removeKnownProject(projPath);
+                            if (rebuildContentPtr && *rebuildContentPtr)
+                            {
+                                (*rebuildContentPtr)();
+                            }
+                        };
+
+                        if (!exists)
+                        {
+                            removeEntry(false);
+                            return;
+                        }
+
+                        if (screenMgr)
+                        {
+                            screenMgr->showConfirmDialogWithCheckbox(
+                                "Remove project from list?\n" + projName,
+                                "Delete from filesystem",
+                                false,
+                                removeEntry,
+                                []() {});
+                        }
+                    };
+                    row.children.push_back(removeBtn);
 
                     if (exists)
                     {
-                        row.onClicked = [callbackPtr, projPath, popup, state]()
+                        row.onClicked = [callbackPtr, projPath, state, closeScreen]()
                         {
                             if (*callbackPtr)
-                                (*callbackPtr)(projPath, false, state->setAsDefault);
-                            popup->close();
+                                (*callbackPtr)(projPath, false, state->setAsDefault, state->includeDefaultContent);
+                            closeScreen();
                         };
                     }
 
@@ -6365,7 +6636,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                         WidgetElement rowSep;
                         rowSep.type    = WidgetElementType::Panel;
                         rowSep.id      = rowId + ".Sep";
-                        rowSep.color   = Vec4{ 0.26f, 0.28f, 0.34f, 1.0f };
+                        rowSep.color   = Vec4{ 0.22f, 0.24f, 0.30f, 1.0f };
                         rowSep.minSize = Vec2{ contentW - kContentPad * 2.0f, 1.0f };
                         entry->children.push_back(rowSep);
                     }
@@ -6391,7 +6662,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             addActionButton("PS.C.BrowseBtn", "Browse for .project file...",
                 Vec4{ 0.22f, 0.35f, 0.60f, 1.0f },
                 Vec4{ 0.28f, 0.42f, 0.72f, 1.0f },
-                [callbackPtr, popup, renderer, state]()
+                [callbackPtr, hostWindow, state, closeScreen]()
                 {
                     SDL_DialogFileFilter filters[] = {
                         { "Project Files", "project" },
@@ -6400,11 +6671,11 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
 
                     struct BrowseCtx
                     {
-                        std::shared_ptr<std::function<void(const std::string&, bool, bool)>> callback;
+                        std::shared_ptr<std::function<void(const std::string&, bool, bool, bool)>> callback;
                         std::shared_ptr<PSState> state;
-                        PopupWindow* popup;
+                        std::function<void()> closeScreen;
                     };
-                    auto* ctx = new BrowseCtx{ callbackPtr, state, popup };
+                    auto* ctx = new BrowseCtx{ callbackPtr, state, closeScreen };
 
                     SDL_ShowOpenFileDialog(
                         [](void* userdata, const char* const* filelist, int filter)
@@ -6415,13 +6686,14 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                                 std::filesystem::path projFile(filelist[0]);
                                 std::string projDir = projFile.parent_path().string();
                                 if (*(c->callback))
-                                    (*(c->callback))(projDir, false, c->state->setAsDefault);
-                                c->popup->close();
+                                    (*(c->callback))(projDir, false, c->state->setAsDefault, c->state->includeDefaultContent);
+                                if (c->closeScreen)
+                                    c->closeScreen();
                             }
                             delete c;
                         },
                         ctx,
-                        renderer ? renderer->window() : nullptr,
+                        hostWindow,
                         filters,
                         SDL_arraysize(filters),
                         nullptr,
@@ -6435,21 +6707,63 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             addSectionLabel("PS.C.Sec.New", "Create New Project");
             addSeparator("PS.C.Sep.New");
 
+            const auto sanitizeProjectName = [](const std::string& input) -> std::string
+            {
+                std::string out;
+                out.reserve(input.size());
+                for (char c : input)
+                {
+                    const unsigned char uc = static_cast<unsigned char>(c);
+                    if (uc < 32)
+                        continue;
+                    if (c == '\\' || c == '/' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|')
+                        continue;
+                    out.push_back(c);
+                }
+                while (!out.empty() && (out.back() == ' ' || out.back() == '.'))
+                {
+                    out.pop_back();
+                }
+                return out;
+            };
+
+            const auto updatePreviewText = [state, &pMgr]()
+            {
+                const std::string previewPath = (std::filesystem::path(state->newProjectLocation) / state->newProjectName).string();
+                if (auto* previewEl = pMgr.findElementById("PS.C.Preview"))
+                {
+                    previewEl->text = "Target:  " + previewPath;
+                    pMgr.markAllWidgetsDirty();
+                }
+            };
+
             addEntryRow("PS.C.ProjName", "Project Name", state->newProjectName,
-                [state](const std::string& v) { state->newProjectName = v; });
+                [state, updatePreviewText, sanitizeProjectName, &pMgr](const std::string& v)
+                {
+                    state->newProjectName = sanitizeProjectName(v);
+                    if (auto* nameEl = pMgr.findElementById("PS.C.ProjName"))
+                    {
+                        nameEl->value = state->newProjectName;
+                    }
+                    updatePreviewText();
+                });
 
             addEntryRow("PS.C.ProjLoc", "Location", state->newProjectLocation,
-                [state](const std::string& v) { state->newProjectLocation = v; });
+                [state, updatePreviewText](const std::string& v)
+                {
+                    state->newProjectLocation = v;
+                    updatePreviewText();
+                });
 
             addSmallButton("PS.C.BrowseLocBtn", "Browse...",
-                [state, popup, renderer]()
+                [state, hostWindow, screenMgr]()
                 {
                     struct FolderCtx
                     {
                         std::shared_ptr<PSState> state;
-                        PopupWindow* popup;
+                        UIManager* ui;
                     };
-                    auto* ctx = new FolderCtx{ state, popup };
+                    auto* ctx = new FolderCtx{ state, screenMgr };
 
                     SDL_ShowOpenFolderDialog(
                         [](void* userdata, const char* const* filelist, int filter)
@@ -6458,17 +6772,22 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                             if (filelist && filelist[0])
                             {
                                 c->state->newProjectLocation = filelist[0];
-                                auto& pMgr = c->popup->uiManager();
+                                auto& pMgr = *c->ui;
                                 if (auto* el = pMgr.findElementById("PS.C.ProjLoc"))
                                 {
                                     el->value = filelist[0];
+                                }
+                                const std::string previewPath = (std::filesystem::path(c->state->newProjectLocation) / c->state->newProjectName).string();
+                                if (auto* previewEl = pMgr.findElementById("PS.C.Preview"))
+                                {
+                                    previewEl->text = "Target:  " + previewPath;
                                 }
                                 pMgr.markAllWidgetsDirty();
                             }
                             delete c;
                         },
                         ctx,
-                        renderer ? renderer->window() : nullptr,
+                        hostWindow,
                         nullptr,
                         false
                     );
@@ -6499,17 +6818,45 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 entry->children.push_back(spacer);
             }
 
+            {
+                WidgetElement includeDefaultContentCb;
+                includeDefaultContentCb.type = WidgetElementType::CheckBox;
+                includeDefaultContentCb.id = "PS.C.IncludeDefaultContent";
+                includeDefaultContentCb.text = "Include default content";
+                includeDefaultContentCb.fontSize = 12.0f;
+                includeDefaultContentCb.isChecked = state->includeDefaultContent;
+                includeDefaultContentCb.color = Vec4{ 0.22f, 0.22f, 0.28f, 1.0f };
+                includeDefaultContentCb.hoverColor = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
+                includeDefaultContentCb.fillColor = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
+                includeDefaultContentCb.textColor = Vec4{ 0.88f, 0.90f, 0.95f, 1.0f };
+                includeDefaultContentCb.padding = Vec2{ 8.0f, 4.0f };
+                includeDefaultContentCb.isHitTestable = true;
+                includeDefaultContentCb.minSize = Vec2{ contentW - kContentPad * 2.0f, 24.0f };
+                includeDefaultContentCb.onCheckedChanged = [state](bool v)
+                {
+                    state->includeDefaultContent = v;
+                };
+                entry->children.push_back(includeDefaultContentCb);
+            }
+
             addActionButton("PS.C.CreateBtn", "Create Project",
                 Vec4{ 0.18f, 0.50f, 0.28f, 1.0f },
                 Vec4{ 0.22f, 0.62f, 0.35f, 1.0f },
-                [state, callbackPtr, popup]()
+                [state, callbackPtr, closeScreen, sanitizeProjectName, screenMgr]()
                 {
+                    state->newProjectName = sanitizeProjectName(state->newProjectName);
                     if (state->newProjectName.empty())
+                    {
+                        if (screenMgr)
+                        {
+                            screenMgr->showToastMessage("Please enter a valid project name.", 3.0f);
+                        }
                         return;
+                    }
                     const std::string fullPath = (std::filesystem::path(state->newProjectLocation) / state->newProjectName).string();
                     if (*callbackPtr)
-                        (*callbackPtr)(fullPath, true, state->setAsDefault);
-                    popup->close();
+                        (*callbackPtr)(fullPath, true, state->setAsDefault, state->includeDefaultContent);
+                    closeScreen();
                 });
         }
 
@@ -6562,12 +6909,15 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         catBtn.shaderFragment = "button_fragment.glsl";
 
         const int catIndex = static_cast<int>(ci);
-        catBtn.onClicked = [state, catIndex, rebuildContent]()
+        catBtn.onClicked = [state, catIndex, rebuildContentPtr]()
         {
             if (state->activeCategory != catIndex)
             {
                 state->activeCategory = catIndex;
-                rebuildContent();
+                if (rebuildContentPtr && *rebuildContentPtr)
+                {
+                    (*rebuildContentPtr)();
+                }
             }
         };
         elements.push_back(catBtn);
@@ -6592,7 +6942,10 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
     widget->setFillX(true);
     widget->setFillY(true);
     widget->setElements(std::move(elements));
-    popup->uiManager().registerWidget("ProjectScreen.Main", widget);
+    screenMgr->registerWidget("ProjectScreen.Main", widget);
 
-    rebuildContent();
+    if (rebuildContentPtr && *rebuildContentPtr)
+    {
+        (*rebuildContentPtr)();
+    }
 }

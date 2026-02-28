@@ -26,6 +26,8 @@ public:
     OpenGLTextRenderer() = default;
     ~OpenGLTextRenderer() override;
 
+    void shutdown();
+
     bool initialize(const std::string& fontPath, const std::string& vertexShaderPath, const std::string& fragmentShaderPath);
     void setScreenSize(int width, int height);
     void drawText(const std::string& text, const Vec2& screenPos, float scale, const Vec4& color);

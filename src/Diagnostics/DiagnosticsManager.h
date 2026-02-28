@@ -128,10 +128,12 @@ public:
 
     // Known / recent projects
     void addKnownProject(const std::string& projectPath);
+    void removeKnownProject(const std::string& projectPath);
     std::vector<std::string> getKnownProjects() const;
 
     void requestShutdown();
     bool isShutdownRequested() const;
+    void resetShutdownRequest();
 
     struct ToastNotification
     {

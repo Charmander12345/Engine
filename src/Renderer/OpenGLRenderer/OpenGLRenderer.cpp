@@ -304,6 +304,11 @@ void OpenGLRenderer::shutdown()
         glDeleteProgram(m_uiQuadProgram);
         m_uiQuadProgram = 0;
     }
+    if (m_uiImageProgram)
+    {
+        glDeleteProgram(m_uiImageProgram);
+        m_uiImageProgram = 0;
+    }
     for (auto& entry : m_uiQuadPrograms)
     {
         if (entry.second)
@@ -312,6 +317,21 @@ void OpenGLRenderer::shutdown()
         }
     }
     m_uiQuadPrograms.clear();
+
+    for (auto& [path, tex] : m_uiTextureCache)
+    {
+        if (tex != 0)
+        {
+            glDeleteTextures(1, &tex);
+        }
+    }
+    m_uiTextureCache.clear();
+
+    if (m_textRenderer)
+    {
+        m_textRenderer->shutdown();
+        m_textRenderer.reset();
+    }
 
     // Any additional renderer-owned GPU resources can be released here.
     m_camera.reset();

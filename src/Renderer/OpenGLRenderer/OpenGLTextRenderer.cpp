@@ -12,6 +12,11 @@
 
 OpenGLTextRenderer::~OpenGLTextRenderer()
 {
+    shutdown();
+}
+
+void OpenGLTextRenderer::shutdown()
+{
     if (m_popupVao)
     {
         glDeleteVertexArrays(1, &m_popupVao);

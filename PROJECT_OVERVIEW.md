@@ -311,7 +311,7 @@ Zentrale Zustandsverwaltung der Engine (Singleton). Verwaltet:
 - **Action-Tracking**: Asynchrone Aktionen (Loading, Saving, Importing, Building)
 - **Input-Dispatch**: Globale KeyDown/KeyUp-Handler
 - **Benachrichtigungen**: Modal- und Toast-Notifications (Queue-basiert)
-- **Shutdown-Request**: `requestShutdown()` → sauberes Beenden
+- **Shutdown-Request**: `requestShutdown()` → sauberes Beenden; `resetShutdownRequest()` → setzt Flag zurück (wird vor Main-Loop aufgerufen um verwaiste Flags aus der Startup-Phase zu entfernen)
 - **Entity-Dirty-Queue**: `invalidateEntity(entityId)` → markiert einzelne Entitäten für Render-Refresh. `consumeDirtyEntities()` liefert und leert die Queue (thread-safe via `m_mutex`). `hasDirtyEntities()` prüft ob Dirty-Entitäten vorhanden sind. Wird von `renderWorld()` pro Frame konsumiert.
 
 ### 6.2 Config-Persistierung
@@ -432,9 +432,9 @@ Die Asset-Pipeline ist in drei Phasen aufgeteilt:
 
 ### 7.10 Projekt-Verwaltung
 ```cpp
-loadProject(projectPath)    // Lädt Projekt + Registry + Config
-saveProject(projectPath)    // Speichert Projektdaten
-createProject(parentDir, name, info)  // Erstellt neues Projekt mit Default-Assets
+loadProject(projectPath, syncState, ensureDefaultContent=true)    // Lädt Projekt + Registry + Config; optional ohne Default-Content-Erzeugung
+saveProject(projectPath)                                        // Speichert Projektdaten
+createProject(parentDir, name, info, syncState, includeDefaultContent=true)  // Erstellt neues Projekt; optional nur Blank-Level
 ```
 
 ### 7.11 Pfad-Auflösung
@@ -1348,7 +1348,8 @@ struct PhysicsComponent {
 - **Nur ein Landscape pro Szene**: Das Landscape Manager Popup wird blockiert, wenn bereits ein Landscape existiert; stattdessen wird eine Toast-Nachricht angezeigt.
 - `LandscapeParams`: name, width, depth, subdivisionsX, subdivisionsZ, heightData (optional).
 - Popup-UI über `UIManager::openLandscapeManagerPopup()` mit Formular (Name, Width, Depth, SubdivX, SubdivZ, Create/Cancel). Die Widget-Erstellung wurde aus `main.cpp` in den UIManager verschoben. Landscape-Erstellung erzeugt eine Undo/Redo-Action (Undo entfernt das Entity).
-- **Dropdown-Menü-System**: `UIManager::showDropdownMenu(anchor, items)` / `closeDropdownMenu()` — zeigt ein Overlay-Widget (z-Order 9000) mit klickbaren Menüeinträgen an einer Pixelposition. Click-Outside schließt das Menü automatisch.
+- **Dropdown-Menü-System**: `UIManager::showDropdownMenu(anchor, items)` / `closeDropdownMenu()` — zeigt ein Overlay-Widget (z-Order 9000) mit klickbaren Menüeinträgen an einer Pixelposition. Unterstützt zusätzlich visuelle Separator-Einträge (`DropdownMenuItem::isSeparator`). Click-Outside schließt das Menü automatisch.
+- **Content-Browser-Kontextmenü (Grid, Rechtsklick)**: enthält `New Folder`, anschließend Separator, dann `New Script`, `New Level`, `New Material`.
 - **Engine Settings Popup** über `UIManager::openEngineSettingsPopup()` (aufgerufen aus `ViewportOverlay.Settings` → Dropdown-Menü → "Engine Settings"): Links Sidebar mit Kategorie-Buttons (General, Rendering, Debug, Physics), rechts scrollbarer Content-Bereich mit Checkboxen und Float-Eingabefeldern. General-Kategorie enthält: Splash Screen. Rendering-Kategorie enthält: Shadows, VSync, Wireframe Mode, Occlusion Culling. Debug-Kategorie enthält: UI Debug Outlines, Bounding Box Debug. Physics-Kategorie enthält: Backend-Dropdown (Jolt / PhysX, PhysX nur sichtbar wenn `ENGINE_PHYSX_BACKEND_AVAILABLE` definiert), Gravity X/Y/Z (Float-Eingabefelder, Default 0/-9.81/0), Fixed Timestep (Default 1/60 s), Sleep Threshold (Default 0.05). Die Backend-Auswahl wird als `PhysicsBackend`-Key in `DiagnosticsManager` persistiert und beim PIE-Start ausgelesen, um `PhysicsWorld::initialize(Backend)` mit dem gewählten Backend aufzurufen. Kategoriewechsel baut den Content-Bereich dynamisch um. Alle Änderungen werden in `config.ini` via `DiagnosticsManager::setState()` persistiert und beim PIE-Start auf `PhysicsWorld` angewendet (Backend, Gravity, Timestep, Sleep Threshold). Die Widget-Erstellung wurde aus `main.cpp` in den UIManager verschoben.
 - Grid-Shader (`grid_fragment.glsl`) nutzt vollständige Lichtberechnung (Multi-Light, Schatten, Blinn-Phong) — Landscape wird von allen Lichtquellen der Szene beeinflusst.
 - `EngineLevel::onEntityAdded()` / `onEntityRemoved()` setzen automatisch das Level-Dirty-Flag (`setIsSaved(false)`) und `setScenePrepared(false)` via Callback, sodass alle Aufrufer (Spawn, Delete, Landscape) einheitlich behandelt werden.
@@ -1538,7 +1539,9 @@ while (running) {
     - KEY_DOWN → UI-Keyboard + DiagnosticsManager + Scripting
 
     // ═══ Shutdown-Check ═══
-    if (diagnostics.isShutdownRequested()) running = false
+    if (diagnostics.isShutdownRequested())
+        LOG("Shutdown requested – exiting main loop.")
+        running = false
 
     // ═══ Scripting ═══ (nur bei PIE aktiv)
     Scripting::UpdateScripts(dt)
@@ -1606,19 +1609,41 @@ while (running) {
 
 ### Projekt-Auswahl-Screen
 
-Beim Start prüft die Engine, ob ein `DefaultProject`-Eintrag in `config.ini` existiert. Falls nicht (oder das Projekt nicht gefunden wird), öffnet sich ein Popup-Fenster mit drei Kategorien:
+Beim Start prüft die Engine, ob ein `DefaultProject`-Eintrag in `config.ini` existiert. Falls nicht (oder das Projekt nicht gefunden wird), läuft die Projektauswahl über einen temporären Renderer im normalen Hauptfenster.
 
 | Kategorie        | Funktion                                                                                 |
 |------------------|------------------------------------------------------------------------------------------|
 | Recent Projects  | Liste bekannter Projekte (Pfade aus `KnownProjects` in config.ini), klickbar zum Laden   |
 | Open Project     | "Browse"-Button öffnet SDL-Dateidialog zum Auswählen einer `.project`-Datei              |
-| New Project      | Projektname + Speicherort (Browse-Dialog) eingeben, "Create Project"-Button zum Erstellen |
+| New Project      | Projektname + Speicherort (Browse-Dialog) eingeben, Checkbox **"Include default content"**, Live-Preview des Zielpfads, danach "Create Project" |
 
 - Sidebar-Layout analog zu Engine Settings (Buttons links, Content rechts)
-- Mini-Event-Loop im Startup: Render + Event-Pumping bis ein Projekt gewählt wird
+- **Isolierte Ressourcen**: Der Projekt-Auswahl-Screen nutzt einen temporären `OpenGLRenderer` (`tempRenderer`), der vor der Initialisierung der Haupt-Engine (AssetManager, Scripting, Audio) erstellt und danach wieder zerstört wird. Dadurch werden keine unnötigen Subsysteme geladen, bevor ein Projekt feststeht.
+- Während der `tempRenderer`-Phase werden keine Runtime-Ressourcen beim `AssetManager` registriert (Guard auf `AssetManager::initialize()`), damit keine GL-Ressourcen über den temporären Kontext hinaus gehalten werden.
+- Mini-Event-Loop im Startup: Render + Event-Pumping bis ein Projekt gewählt oder das Temp-Hauptfenster geschlossen wird
+- Das Temp-Hauptfenster wird explizit angezeigt (`SDL_ShowWindow`/`SDL_RaiseWindow`) und nicht versteckt.
+- Das Startup-Fenster läuft als **normales Fenster mit nativer Titlebar** (`SDL_SetWindowBordered(true)`, kein Fullscreen/Maximize) und deaktiviert Custom-HitTest (`SDL_SetWindowHitTest(..., nullptr, nullptr)`), damit Button-Hit-Testing stabil bleibt.
+- Im Startup-Mini-Loop werden Maus-/Tastatur-/Text-Events explizit an `tempRenderer->getUIManager()` weitergereicht (`handleMouseDown/Up`, `handleScroll`, `handleTextInput`, `handleKeyDown`), damit die Projektauswahl-UI korrekt klick- und editierbar ist.
+- Für das Startup-Fenster wird `SDL_StartTextInput(window)` explizit aktiviert, damit Texteingaben in `EntryBar`-Felder zuverlässig ankommen.
+- `SDL_EVENT_QUIT` bzw. `SDL_EVENT_WINDOW_CLOSE_REQUESTED` für das Temp-Fenster beendet die Projektauswahl-Schleife sauber.
+- Nach Schließen des Temp-Fensters und Zerstörung des `tempRenderer` wird das kleine Ladefenster (`SplashWindow`) angezeigt und die Haupt-Engine initialisiert; vor dem Schließen des Splash wird zuerst das Hauptfenster sichtbar gemacht, um SDL-`QUIT`-Fehlverhalten beim letzten sichtbaren Fenster zu vermeiden.
+- Dateidialoge (Browse) nutzen das sichtbare Temp-Hauptfenster als Parent, damit Fokus und Stacking korrekt funktionieren.
+- Im Bereich **Recent Projects** gibt es pro Eintrag einen quadratischen Lösch-Button (volle Zeilenhöhe). Existierende Projekte fragen vor dem Entfernen per Confirm-Dialog nach; der Dialog enthält zusätzlich die Checkbox **"Delete from filesystem"**. Fehlende Projekte werden direkt aus der Liste entfernt.
+- **New Project** validiert den Projektnamen gegen ungültige Dateiname-Zeichen (`\\ / : * ? " < > |`) und verhindert Erstellung mit leerem/ungültigem Namen.
+- Wird das Temp-Fenster ohne Projektauswahl geschlossen (z.B. Alt+F4/Schließen-Button), wird `DiagnosticsManager::requestShutdown()` gesetzt und die Engine beendet, statt auf `SampleProject` zu fallen.
+- `DefaultProject` wird nur dann neu geschrieben, wenn im Projekt-Auswahlfenster die Checkbox **"Set as default project"** aktiv ist.
+- Beim Laden eines Projekts mit aktivem Default-Content-Pfad ist `AssetManager::loadProject(...)` jetzt gegen Exceptions in `ensureDefaultAssetsCreated()` abgesichert (Error-Log + sauberer Abbruch statt Hard-Crash).
+- Bei **"Include default content"** wird beim Projekt-Erstellen kein leeres `DefaultLevel.map` vorab gespeichert; stattdessen erzeugt `ensureDefaultAssetsCreated()` direkt ein befülltes Default-Level (Cubes + Point/Directional/Spot-Licht).
+- **Nur wenn auch das Fallback-Projekt nicht geladen werden kann**, wird die Engine mit einem `FATAL`-Log heruntergefahren
+- Alle Entscheidungspunkte (Temp-Fenster geschlossen ohne Auswahl, Fallback-Versuch, endgültiges Scheitern) werden geloggt
+- **Alle Event-Pumps zwischen Startup-Auswahl und Main-Loop** (z.B. `showProgress`, "Engine ready"-Pump) ignorieren `SDL_EVENT_QUIT` weiterhin (`continue`), damit verspätete Quit-Events aus Fenster-Übergängen die Engine nicht vorzeitig beenden
+- Vor dem Eintritt in die Main-Loop wird `resetShutdownRequest()` aufgerufen, um verwaiste Shutdown-Flags zu beseitigen
+- Nur `TitleBar.Close` und `SDL_EVENT_QUIT` **innerhalb** der Main-Loop können die Engine ab diesem Punkt beenden
+- Der Shutdown-Check in der Main-Loop (`isShutdownRequested()`) loggt jetzt den Grund bevor `running = false` gesetzt wird
 - Gewähltes Projekt wird als `DefaultProject` in config.ini gespeichert
 - Erfolgreich geladene/erstellte Projekte werden automatisch in die Known-Projects-Liste aufgenommen (max. 20 Einträge, zuletzt verwendete zuerst)
 - Nicht mehr existierende Projekte werden in der Liste als "(not found)" angezeigt und sind nicht klickbar
+- Bekannte Projekte werden mit abwechselnden Zeilenhintergründen, blauem Akzentstreifen links und vergrößerter Schrift dargestellt, um Einträge klar voneinander abzugrenzen
 
 ---
 

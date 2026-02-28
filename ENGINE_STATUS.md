@@ -561,6 +561,15 @@
 | Settings-Button → Dropdown-Menü → "Engine Settings" | ✅ |
 | Engine Settings Popup (Sidebar + Content, Kategorien: General, Rendering, Debug, Physics) | ✅ |
 | Projekt-Auswahl-Screen (Sidebar: Recent Projects, Open Project, New Project) | ✅ |
+| New-Project: Checkbox "Include default content" (unchecked => Blank DefaultLevel ohne Default-Assets) | ✅ |
+| New-Project mit "Include default content": DefaultLevel wird befüllt (Cubes + Lichter) statt als leere Map angelegt | ✅ |
+| New-Project: Zielpfad-Preview wird bei Name/Location live aktualisiert | ✅ |
+| Content-Browser-Rechtsklickmenü: "New Folder" + Separator vor weiteren Create-Optionen | ✅ |
+| Projekt-Liste: Akzentstreifen, alternierende Zeilen, größere Schrift | ✅ |
+| Recent-Projects: pro Eintrag quadratischer Lösch-Button in voller Zeilenhöhe | ✅ |
+| Existing-Project-Remove-Dialog enthält Checkbox "Delete from filesystem" | ✅ |
+| Recent-Projects: existierend => Confirm, fehlend => direkt entfernen | ✅ |
+| New-Project: Dateinameingabe validiert ungültige Zeichen vor Erstellung | ✅ |
 | Dropdown-Menü-System (`showDropdownMenu` / `closeDropdownMenu`) | ✅ |
 | WorldSettings   | ✅     |
 | WorldOutliner   | ✅     |
@@ -747,6 +756,26 @@
 | Popup schließen per `SDL_EVENT_WINDOW_CLOSE_REQUESTED` | ✅ |
 | Deferred Popup-Destruction (sichere Lebenszeit)  | ✅ |
 | Popup fokussieren wenn bereits offen             | ✅ |
+| SDL_EVENT_QUIT-Drain nach Popup-Schließung (verhindert Engine-Abort) | ✅ |
+| Projekt-Mini-Event-Loop beendet bei `SDL_EVENT_QUIT`/`SDL_EVENT_WINDOW_CLOSE_REQUESTED` des Temp-Hauptfensters (kein globales Ignore mehr) | ✅ |
+| Startup-Projektfenster nutzt native Titlebar (nicht fullscreen, nicht maximized, kein Custom-HitTest) | ✅ |
+| Alt+F4/Schließen im Startup-Projektfenster setzt `DiagnosticsManager::requestShutdown()` und beendet die Engine (kein SampleProject-Fallback) | ✅ |
+| Startup-Projektauswahl leitet Input-Events direkt an `UIManager` weiter (Mouse/Scroll/Text/KeyDown) für funktionierendes UI-HitTesting | ✅ |
+| Startup-Projektfenster aktiviert `SDL_StartTextInput(window)` für zuverlässige Texteingabe in EntryBars | ✅ |
+| `AssetManager::createProject(..., includeDefaultContent)` / `loadProject(..., ensureDefaultContent)` unterstützen optionales Starten ohne Default-Content | ✅ |
+| `DefaultProject` wird nur bei gesetzter "Set as default project"-Checkbox aus dem Projekt-Auswahlfenster aktualisiert | ✅ |
+| Projekt-Load mit Default-Content ist gegen Exceptions in `ensureDefaultAssetsCreated()` abgesichert (kein Hard-Crash, sauberer Fehlerpfad) | ✅ |
+| Default-Lights im Projekt-Content enthalten `PointLight.asset`, `DirectionalLight.asset`, `SpotLight.asset` | ✅ |
+| Projekt-Auswahl nutzt isolierten `tempRenderer` vor Initialisierung der Haupt-Engine | ✅ |
+| `AssetManager::registerRuntimeResource()` ist vor `initialize()` deaktiviert (kein GL-Resource-Leak aus Startup-Renderer) | ✅ |
+| Hauptfenster wird nach Startup-Auswahl immer bedingungslos wieder sichtbar | ✅ |
+| Engine beendet sich nur wenn kein Projekt (inkl. Fallback) geladen werden kann | ✅ |
+| Entscheidungs-Logging an allen Stellen des Projekt-Auswahl-Flows | ✅ |
+| Alle Zwischen-Event-Pumps (showProgress, "Engine ready") ignorieren SDL_EVENT_QUIT | ✅ |
+| `resetShutdownRequest()` vor Main-Loop-Eintritt (verhindert verwaiste Shutdown-Flags) | ✅ |
+| Shutdown-Check in der Main-Loop loggt den Exit-Grund | ✅ |
+| Hauptfenster wird vor `SplashWindow::close()` sichtbar gemacht (stabiler Window-Übergang) | ✅ |
+| Dateidialoge in der Startup-Projektauswahl nutzen das sichtbare Temp-Hauptfenster als Parent | ✅ |
 | Fenstergröße dynamisch (refreshSize)             | ✅ |
 | Docking / Snapping                               | ❌ |
 | Mehrere Popups gleichzeitig                      | ✅ |
