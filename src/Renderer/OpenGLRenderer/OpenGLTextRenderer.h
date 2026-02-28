@@ -9,9 +9,10 @@
 
 #include "../../Core/EngineObject.h"
 #include "../../Core/MathTypes.h"
+#include "../ITextRenderer.h"
 #include "glad/include/gl.h"
 
-class OpenGLTextRenderer : public EngineObject
+class OpenGLTextRenderer : public EngineObject, public ITextRenderer
 {
 public:
     struct Glyph
@@ -26,15 +27,15 @@ public:
     OpenGLTextRenderer() = default;
     ~OpenGLTextRenderer() override;
 
-    void shutdown();
+    void shutdown() override;
 
-    bool initialize(const std::string& fontPath, const std::string& vertexShaderPath, const std::string& fragmentShaderPath);
-    void setScreenSize(int width, int height);
-    void drawText(const std::string& text, const Vec2& screenPos, float scale, const Vec4& color);
+    bool initialize(const std::string& fontPath, const std::string& vertexShaderPath, const std::string& fragmentShaderPath) override;
+    void setScreenSize(int width, int height) override;
+    void drawText(const std::string& text, const Vec2& screenPos, float scale, const Vec4& color) override;
     void drawTextWithShader(const std::string& text, const Vec2& screenPos, float scale, const Vec4& color,
         const std::string& vertexShaderPath, const std::string& fragmentShaderPath);
-    Vec2 measureText(const std::string& text, float scale) const;
-    float getLineHeight(float scale) const;
+    Vec2 measureText(const std::string& text, float scale) const override;
+    float getLineHeight(float scale) const override;
 
     // Popup GL-context VAO support (VAOs are not shared between contexts).
     void ensurePopupVao();

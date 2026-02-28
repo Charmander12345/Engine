@@ -244,10 +244,8 @@ std::filesystem::path DiagnosticsManager::getProjectConfigPath() const
     return root / "Config" / "defaults.ini";
 }
 
-bool DiagnosticsManager::saveConfig() const
+bool DiagnosticsManager::saveConfigInternal() const
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-
     const auto cfg = getConfigPath();
     if (cfg.empty())
     {
@@ -262,6 +260,12 @@ bool DiagnosticsManager::saveConfig() const
     data["WindowState"] = windowStateToString(m_windowState);
 
     return writeKeyValueFile(cfg, data);
+}
+
+bool DiagnosticsManager::saveConfig() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return saveConfigInternal();
 }
 
 bool DiagnosticsManager::loadConfig()
@@ -387,7 +391,7 @@ void DiagnosticsManager::clearProjectInfo()
     m_activeLevel.reset();
     m_scenePrepared = false;
 
-    for (auto& callback : m_activeLevelChangedCallbacks)
+    for (auto& [token, callback] : m_activeLevelChangedCallbacks)
     {
         if (callback)
         {
@@ -436,7 +440,7 @@ void DiagnosticsManager::setActiveLevel(std::unique_ptr<EngineLevel> level)
         });
     }
     EngineLevel* active = m_activeLevel.get();
-    for (auto& callback : m_activeLevelChangedCallbacks)
+    for (auto& [token, callback] : m_activeLevelChangedCallbacks)
     {
         if (callback)
         {
@@ -470,7 +474,7 @@ std::unique_ptr<EngineLevel> DiagnosticsManager::swapActiveLevel(std::unique_ptr
         });
     }
     EngineLevel* active = m_activeLevel.get();
-    for (auto& callback : m_activeLevelChangedCallbacks)
+    for (auto& [token, callback] : m_activeLevelChangedCallbacks)
     {
         if (callback)
         {
@@ -480,9 +484,16 @@ std::unique_ptr<EngineLevel> DiagnosticsManager::swapActiveLevel(std::unique_ptr
     return old;
 }
 
-void DiagnosticsManager::registerActiveLevelChangedCallback(ActiveLevelChangedCallback callback)
+size_t DiagnosticsManager::registerActiveLevelChangedCallback(ActiveLevelChangedCallback callback)
 {
-    m_activeLevelChangedCallbacks.push_back(std::move(callback));
+    const size_t token = m_nextLevelCallbackToken++;
+    m_activeLevelChangedCallbacks[token] = std::move(callback);
+    return token;
+}
+
+void DiagnosticsManager::unregisterActiveLevelChangedCallback(size_t token)
+{
+    m_activeLevelChangedCallbacks.erase(token);
 }
 
 // Alternativ, wenn Sie den Besitz übertragen wollen (Achtung: m_activeLevel ist danach nullptr!):
@@ -575,6 +586,7 @@ void DiagnosticsManager::addKnownProject(const std::string& projectPath)
         joined += m_knownProjects[i];
     }
     m_states["KnownProjects"] = joined;
+    saveConfigInternal();
 }
 
 void DiagnosticsManager::removeKnownProject(const std::string& projectPath)
@@ -591,6 +603,7 @@ void DiagnosticsManager::removeKnownProject(const std::string& projectPath)
         joined += m_knownProjects[i];
     }
     m_states["KnownProjects"] = joined;
+    saveConfigInternal();
 }
 
 std::vector<std::string> DiagnosticsManager::getKnownProjects() const

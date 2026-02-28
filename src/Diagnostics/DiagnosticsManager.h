@@ -111,7 +111,8 @@ public:
     std::unique_ptr<EngineLevel> getActiveLevel();
     EngineLevel* getActiveLevelSoft();
     std::unique_ptr<EngineLevel> swapActiveLevel(std::unique_ptr<EngineLevel> newLevel);
-	void registerActiveLevelChangedCallback(ActiveLevelChangedCallback callback);
+	size_t registerActiveLevelChangedCallback(ActiveLevelChangedCallback callback);
+	void unregisterActiveLevelChangedCallback(size_t token);
 
     void setScenePrepared(bool prepared);
     bool isScenePrepared() const;
@@ -167,6 +168,7 @@ private:
 
     std::filesystem::path getConfigPath() const;
     std::filesystem::path getProjectConfigPath() const;
+    bool saveConfigInternal() const;
 
     static bool readKeyValueFile(const std::filesystem::path& filePath, std::unordered_map<std::string, std::string>& out);
     static bool writeKeyValueFile(const std::filesystem::path& filePath, const std::unordered_map<std::string, std::string>& data);
@@ -194,7 +196,8 @@ private:
 
     std::unordered_map<int, std::vector<KeyCallback>> m_keyDownHandlers;
     std::unordered_map<int, std::vector<KeyCallback>> m_keyUpHandlers;
-	std::vector<ActiveLevelChangedCallback> m_activeLevelChangedCallbacks;
+	std::unordered_map<size_t, ActiveLevelChangedCallback> m_activeLevelChangedCallbacks;
+	size_t m_nextLevelCallbackToken{ 1 };
 
 	std::unordered_map<unsigned int, Action> m_actions;
 	bool m_shutdownRequested{ false };

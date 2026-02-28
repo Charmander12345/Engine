@@ -56,6 +56,7 @@ Engine/
 ├── external/                       # Drittanbieter-Bibliotheken
 │   ├── SDL3/                       # Simple DirectMedia Layer 3
 │   ├── freetype/                   # FreeType (Schriftart-Rendering)
+│   ├── glm/                        # GLM Mathematics (Header-only, backend-agnostisch)
 │   └── openal-soft/                # OpenAL Soft (3D-Audio)
 ├── src/
 │   ├── main.cpp                    # Einstiegspunkt der Anwendung
@@ -92,10 +93,16 @@ Engine/
 │   │   ├── PhysicsWorld.h/.cpp
 │   │   └── CMakeLists.txt
 │   ├── Renderer/                   # Rendering-Abstraktion + OpenGL-Impl.
-│   │   ├── Renderer.h              # Abstrakte Renderer-Schnittstelle
+│   │   ├── Renderer.h              # Abstrakte Renderer-Schnittstelle (~130 Zeilen, ~60 virtuelle Methoden)
+│   │   ├── RendererCapabilities.h  # Backend-Fähigkeiten (Shadows, Occlusion, etc.)
 │   │   ├── Camera.h                # Abstrakte Kamera-Schnittstelle
 │   │   ├── Shader.h                # Abstrakte Shader-Schnittstelle
 │   │   ├── ShaderProgram.h         # Abstrakte ShaderProgram-Schnittstelle
+│   │   ├── IRenderObject2D.h       # Abstrakte 2D-Render-Objekt-Schnittstelle
+│   │   ├── IRenderObject3D.h       # Abstrakte 3D-Render-Objekt-Schnittstelle
+│   │   ├── ITextRenderer.h         # Abstrakte Text-Renderer-Schnittstelle
+│   │   ├── IShaderProgram.h        # Abstrakte Shader-Programm-Schnittstelle
+│   │   ├── ITexture.h              # Abstrakte GPU-Textur-Schnittstelle
 │   │   ├── Material.h              # CPU-seitige Material-Basisklasse
 │   │   ├── Texture.h/.cpp          # CPU-seitige Textur-Daten
 │   │   ├── RenderResourceManager.h/.cpp  # Caching, Level-Vorbereitung
@@ -114,7 +121,6 @@ Engine/
 │   │   │   ├── OpenGLObject3D.h/.cpp
 │   │   │   ├── OpenGLTextRenderer.h/.cpp
 │   │   │   ├── glad/               # OpenGL-Loader (GLAD)
-│   │   │   ├── glm/                # OpenGL Mathematics (Header-only)
 │   │   │   └── shaders/            # GLSL-Shader-Dateien
 │   │   │       ├── vertex.glsl / fragment.glsl       # 3D-Welt (Beleuchtung, Texturen)
 │   │   │       ├── grid_fragment.glsl                # Prozedurales Grid-Material (Multi-Light, Schatten, Blinn-Phong)
@@ -142,6 +148,7 @@ Engine/
 │   │   ├── EditorWindows/           # Editor-Fenster (FBO-Override, 3D-Vorschau)
 │   │   │   └── MeshViewerWindow.h/.cpp  # Mesh-Viewer: Orbit-Kamera, dedizierter FBO
 │   │   └── CMakeLists.txt
+├── RENDERER_ABSTRACTION_PLAN.md     # Detaillierter Plan zur Backend-Abstrahierung des Renderers
 │   └── Scripting/                  # Eingebettetes Python-Scripting
 │       ├── PythonScripting.h/.cpp
 │       └── engine.pyi              # Python-Stubs für IntelliSense
@@ -200,7 +207,7 @@ set(CMAKE_CXX_STANDARD 20)
 | **FreeType**     | `external/freetype/`    | TrueType-Schriftart-Rasterung           |
 | **OpenAL Soft**  | `external/openal-soft/` | 3D-Audiowiedergabe (OpenAL-API)         |
 | **GLAD**         | In-Tree (`glad/`)       | OpenGL-Funktionen laden                 |
-| **GLM**          | In-Tree (`glm/`)        | Mathe-Bibliothek für OpenGL (glm::mat4 etc.) |
+| **GLM**          | `external/glm/`         | Backend-agnostische Mathe-Bibliothek (glm::mat4 etc.) |
 | **nlohmann/json**| In-Tree (`json.hpp`)    | JSON-Parsing für Assets und Config      |
 | **stb_image**    | In-Tree (`stb_image.h`) | Bildformate laden (PNG, TGA, JPG, etc.) |
 | **Python 3**     | System-Installation     | Eingebetteter Skript-Interpreter        |
@@ -308,6 +315,7 @@ Zentrale Zustandsverwaltung der Engine (Singleton). Verwaltet:
 - **Fenster-Konfiguration**: Größe (`Vec2`), Zustand (Normal/Maximized/Fullscreen)
 - **PIE-Modus** (Play In Editor): `setPIEActive(bool)` / `isPIEActive()`
 - **Aktives Level**: `setActiveLevel()` / `getActiveLevelSoft()` / `swapActiveLevel()` (atomarer Austausch via `unique_ptr`, gibt altes Level zurück, setzt Dirty-Callback, feuert `activeLevelChangedCallbacks`)
+- **Level-Changed-Callbacks**: Token-basierte Registrierung via `registerActiveLevelChangedCallback()` → gibt `size_t`-Token zurück. `unregisterActiveLevelChangedCallback(token)` entfernt den Callback. Intern als `unordered_map<size_t, Callback>` gespeichert, damit kurzlebige Subscriber (z. B. temporärer UIManager) ihren Callback sicher abmelden können.
 - **Action-Tracking**: Asynchrone Aktionen (Loading, Saving, Importing, Building)
 - **Input-Dispatch**: Globale KeyDown/KeyUp-Handler
 - **Benachrichtigungen**: Modal- und Toast-Notifications (Queue-basiert)
@@ -657,29 +665,24 @@ uint64_t getComponentVersion(); // Globaler Zähler, inkrementiert bei jeder Kom
 ## 9. Renderer
 
 ### 9.1 Renderer (abstrakt)
-**Datei:** `src/Renderer/Renderer.h`
+**Datei:** `src/Renderer/Renderer.h`, `src/Renderer/RendererCapabilities.h`
 
-Abstrakte Schnittstelle für jeden Rendering-Backend:
+Abstrakte Schnittstelle für jeden Rendering-Backend (~130 Zeilen, ~60 virtuelle Methoden):
 
-```cpp
-class Renderer {
-    virtual bool initialize() = 0;
-    virtual void shutdown() = 0;
-    virtual void clear() = 0;
-    virtual void render() = 0;
-    virtual void present() = 0;
-    virtual const std::string& name() const = 0;
-    virtual SDL_Window* window() const = 0;
+**Pure-virtual (Core):** initialize, shutdown, clear, render, present, name, window, Camera-Steuerung, getUIManager, screenToWorldPos
 
-    // Kamera-Steuerung
-    virtual void moveCamera(forward, right, up) = 0;
-    virtual void rotateCamera(yawDelta, pitchDelta) = 0;
-    virtual Vec3 getCameraPosition() const = 0;
-    virtual void setCameraPosition(position) = 0;
-    virtual Vec2 getCameraRotationDegrees() const = 0;
-    virtual void setCameraRotationDegrees(yaw, pitch) = 0;
-};
-```
+**Virtual mit Default-Implementierung (optional):**
+- Rendering-Toggles: Shadows, VSync, Wireframe, Occlusion Culling
+- Debug-Visualisierungen: UI Debug, Bounds Debug, HeightField Debug
+- Entity Picking: pickEntityAt, requestPick, getSelectedEntity, setSelectedEntity
+- Gizmo: GizmoMode/GizmoAxis Enums, beginGizmoDrag, updateGizmoDrag, endGizmoDrag
+- Editor Tabs: addTab, removeTab, setActiveTab, getActiveTabId
+- Popup Windows: openPopupWindow, closePopupWindow, getPopupWindow, routeEventToPopup
+- Mesh Viewer: openMeshViewer, closeMeshViewer, getMeshViewer
+- Viewport/Visuals: getViewportSize, setClearColor, getClearColor, setSkyboxPath, getSkyboxPath, queueText, createWidgetFromAsset, preloadUITexture
+- Scene Management: refreshEntity
+- Capabilities: getCapabilities → RendererCapabilities
+- Performance Metrics: GPU/CPU Timing, Occlusion-Statistiken
 
 ---
 
@@ -1629,7 +1632,7 @@ Beim Start prüft die Engine, ob ein `DefaultProject`-Eintrag in `config.ini` ex
 - Nach Schließen des Temp-Fensters und Zerstörung des `tempRenderer` wird das kleine Ladefenster (`SplashWindow`) angezeigt und die Haupt-Engine initialisiert; vor dem Schließen des Splash wird zuerst das Hauptfenster sichtbar gemacht, um SDL-`QUIT`-Fehlverhalten beim letzten sichtbaren Fenster zu vermeiden.
 - Dateidialoge (Browse) nutzen das sichtbare Temp-Hauptfenster als Parent, damit Fokus und Stacking korrekt funktionieren.
 - Im Bereich **Recent Projects** gibt es pro Eintrag einen quadratischen Lösch-Button (volle Zeilenhöhe). Existierende Projekte fragen vor dem Entfernen per Confirm-Dialog nach; der Dialog enthält zusätzlich die Checkbox **"Delete from filesystem"**. Fehlende Projekte werden direkt aus der Liste entfernt.
-- **New Project** validiert den Projektnamen gegen ungültige Dateiname-Zeichen (`\\ / : * ? " < > |`) und verhindert Erstellung mit leerem/ungültigem Namen.
+- **New Project** validiert den Projektnamen gegen ungültige Dateiname-Zeichen (`\\ / : * ? " < > |`) und zeigt eine **Warnung**, statt ungültige Eingaben automatisch zu korrigieren.
 - Wird das Temp-Fenster ohne Projektauswahl geschlossen (z.B. Alt+F4/Schließen-Button), wird `DiagnosticsManager::requestShutdown()` gesetzt und die Engine beendet, statt auf `SampleProject` zu fallen.
 - `DefaultProject` wird nur dann neu geschrieben, wenn im Projekt-Auswahlfenster die Checkbox **"Set as default project"** aktiv ist.
 - Beim Laden eines Projekts mit aktivem Default-Content-Pfad ist `AssetManager::loadProject(...)` jetzt gegen Exceptions in `ensureDefaultAssetsCreated()` abgesichert (Error-Log + sauberer Abbruch statt Hard-Crash).

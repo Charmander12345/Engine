@@ -161,14 +161,14 @@ bool OpenGLObject3D::hasLocalBounds() const
     return m_hasLocalBounds;
 }
 
-const glm::vec3& OpenGLObject3D::getLocalBoundsMin() const
+Vec3 OpenGLObject3D::getLocalBoundsMin() const
 {
-    return m_localBoundsMin;
+    return Vec3{ m_localBoundsMin.x, m_localBoundsMin.y, m_localBoundsMin.z };
 }
 
-const glm::vec3& OpenGLObject3D::getLocalBoundsMax() const
+Vec3 OpenGLObject3D::getLocalBoundsMax() const
 {
-    return m_localBoundsMax;
+    return Vec3{ m_localBoundsMax.x, m_localBoundsMax.y, m_localBoundsMax.z };
 }
 
 GLuint OpenGLObject3D::getProgram() const
@@ -181,12 +181,12 @@ GLuint OpenGLObject3D::getVao() const
     return m_material ? m_material->getVao() : 0;
 }
 
-GLsizei OpenGLObject3D::getVertexCount() const
+int OpenGLObject3D::getVertexCount() const
 {
     return m_material ? m_material->getVertexCount() : 0;
 }
 
-GLsizei OpenGLObject3D::getIndexCount() const
+int OpenGLObject3D::getIndexCount() const
 {
     return m_material ? m_material->getIndexCount() : 0;
 }

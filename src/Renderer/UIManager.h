@@ -32,7 +32,7 @@ public:
     };
 
     UIManager();
-    ~UIManager() = default;
+    ~UIManager();
 
     void setRenderer(OpenGLRenderer* renderer) { m_renderer = renderer; }
     OpenGLRenderer* getRenderer() const { return m_renderer; }
@@ -156,6 +156,7 @@ private:
 	void bindClickEventsForWidget(const std::shared_ptr<Widget>& widget);
 	void bindClickEventsForElement(WidgetElement& element);
 	EngineLevel* m_outlinerLevel{ nullptr };
+	size_t m_levelChangedCallbackToken{ 0 };
 	unsigned int m_outlinerSelectedEntity{ 0 };
 	std::string m_contentBrowserPath;  // current subfolder relative to Content (empty = root)
 	std::string m_selectedBrowserFolder; // folder highlighted in tree (shown in grid)

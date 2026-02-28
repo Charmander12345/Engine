@@ -6,26 +6,27 @@
 #include "glad/include/gl.h"
 #include <memory>
 #include "OpenGLShader.h"
+#include "../IShaderProgram.h"
 
-class OpenGLShaderProgram
+class OpenGLShaderProgram : public IShaderProgram
 {
 public:
     OpenGLShaderProgram();
-    ~OpenGLShaderProgram();
+    ~OpenGLShaderProgram() override;
 
     bool attach(const OpenGLShader& shader);
-    bool link();
+    bool link() override;
 
-    void bind() const;
-    void unbind() const;
+    void bind() const override;
+    void unbind() const override;
 
-    bool isLinked() const { return m_linked; }
-    const std::string& linkLog() const { return m_linkLog; }
+    bool isLinked() const override { return m_linked; }
+    const std::string& linkLog() const override { return m_linkLog; }
     GLuint id() const { return m_program; }
 
     // Uniform setters
-    void setUniform(const std::string& name, float value);
-    void setUniform(const std::string& name, int32_t value);
+    void setUniform(const std::string& name, float value) override;
+    void setUniform(const std::string& name, int32_t value) override;
     void setUniform(const std::string& name, const glm::vec3& value);
     void setUniform(const std::string& name, const glm::vec4& value);
     void setUniformMat4(const std::string& name, const glm::mat4& value);

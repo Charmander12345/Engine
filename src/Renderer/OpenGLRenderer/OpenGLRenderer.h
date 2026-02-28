@@ -49,9 +49,6 @@ struct EditorTab
 class OpenGLRenderer : public Renderer
 {
 public:
-    enum class GizmoMode { None, Translate, Rotate, Scale };
-    enum class GizmoAxis { None, X, Y, Z };
-
     OpenGLRenderer();
     ~OpenGLRenderer() override;
 
@@ -62,12 +59,14 @@ public:
     void present() override;
     const std::string& name() const override;
 
-    double getLastGpuFrameMs() const { return m_lastGpuFrameMs; }
-    double getLastCpuRenderWorldMs() const { return m_cpuRenderWorldMs; }
-    double getLastCpuRenderUiMs() const { return m_cpuRenderUiMs; }
-    double getLastCpuUiLayoutMs() const { return m_cpuUiLayoutMs; }
-    double getLastCpuUiDrawMs() const { return m_cpuUiDrawMs; }
-    double getLastCpuEcsMs() const { return m_cpuEcsMs; }
+    RendererCapabilities getCapabilities() const override;
+
+    double getLastGpuFrameMs() const override { return m_lastGpuFrameMs; }
+    double getLastCpuRenderWorldMs() const override { return m_cpuRenderWorldMs; }
+    double getLastCpuRenderUiMs() const override { return m_cpuRenderUiMs; }
+    double getLastCpuUiLayoutMs() const override { return m_cpuUiLayoutMs; }
+    double getLastCpuUiDrawMs() const override { return m_cpuUiDrawMs; }
+    double getLastCpuEcsMs() const override { return m_cpuEcsMs; }
 
     SDL_Window* window() const override;
 
@@ -82,33 +81,33 @@ public:
     unsigned int getActiveCameraEntity() const override;
     void clearActiveCameraEntity() override;
 
-    void setClearColor(const Vec4& color);
-    const Vec4& getClearColor() const;
+    void setClearColor(const Vec4& color) override;
+    Vec4 getClearColor() const override;
 
-    void queueText(const std::string& text, const Vec2& screenPos, float scale, const Vec4& color);
-    Vec2 getViewportSize() const;
-    UIManager& getUIManager();
-    const UIManager& getUIManager() const;
-    std::shared_ptr<Widget> createWidgetFromAsset(const std::shared_ptr<AssetData>& asset);
-    GLuint preloadUITexture(const std::string& path);
+    void queueText(const std::string& text, const Vec2& screenPos, float scale, const Vec4& color) override;
+    Vec2 getViewportSize() const override;
+    UIManager& getUIManager() override;
+    const UIManager& getUIManager() const override;
+    std::shared_ptr<Widget> createWidgetFromAsset(const std::shared_ptr<AssetData>& asset) override;
+    unsigned int preloadUITexture(const std::string& path) override;
 
-    void addTab(const std::string& id, const std::string& name, bool closable);
-    void removeTab(const std::string& id);
-    void setActiveTab(const std::string& id);
-    const std::string& getActiveTabId() const;
+    void addTab(const std::string& id, const std::string& name, bool closable) override;
+    void removeTab(const std::string& id) override;
+    void setActiveTab(const std::string& id) override;
+    const std::string& getActiveTabId() const override;
     const std::vector<EditorTab>& getTabs() const;
 
-    unsigned int pickEntityAt(int x, int y);
+    unsigned int pickEntityAt(int x, int y) override;
 
     // Re-renders the pick buffer with the latest view/projection, then picks.
-    unsigned int pickEntityAtImmediate(int x, int y);
+    unsigned int pickEntityAtImmediate(int x, int y) override;
 
     // Unproject a screen pixel to world space using the depth buffer.
     // Returns false if the depth at that pixel is at the far plane (no geometry hit).
-    bool screenToWorldPos(int screenX, int screenY, Vec3& outWorldPos) const;
+    bool screenToWorldPos(int screenX, int screenY, Vec3& outWorldPos) const override;
 
     // Refresh a single entity's render data without rebuilding the entire scene.
-    void refreshEntity(ECS::Entity entity);
+    void refreshEntity(ECS::Entity entity) override;
 
 private:
     void renderWorld();
@@ -445,49 +444,49 @@ private:
     std::unordered_map<std::string, std::unique_ptr<MeshViewerWindow>> m_meshViewers;
 
 public:
-    void toggleUIDebug() { m_uiDebugEnabled = !m_uiDebugEnabled; }
-    bool isUIDebugEnabled() const { return m_uiDebugEnabled; }
-    uint32_t getLastVisibleCount() const { return m_lastVisibleCount; }
-    uint32_t getLastHiddenCount() const { return m_lastHiddenCount; }
-    uint32_t getLastTotalCount() const { return m_lastTotalCount; }
-    void toggleBoundsDebug() { m_boundsDebugEnabled = !m_boundsDebugEnabled; }
-    bool isBoundsDebugEnabled() const { return m_boundsDebugEnabled; }
-    void setHeightFieldDebugEnabled(bool enabled) { m_hfDebugEnabled = enabled; }
-    bool isHeightFieldDebugEnabled() const { return m_hfDebugEnabled; }
+    void toggleUIDebug() override { m_uiDebugEnabled = !m_uiDebugEnabled; }
+    bool isUIDebugEnabled() const override { return m_uiDebugEnabled; }
+    uint32_t getLastVisibleCount() const override { return m_lastVisibleCount; }
+    uint32_t getLastHiddenCount() const override { return m_lastHiddenCount; }
+    uint32_t getLastTotalCount() const override { return m_lastTotalCount; }
+    void toggleBoundsDebug() override { m_boundsDebugEnabled = !m_boundsDebugEnabled; }
+    bool isBoundsDebugEnabled() const override { return m_boundsDebugEnabled; }
+    void setHeightFieldDebugEnabled(bool enabled) override { m_hfDebugEnabled = enabled; }
+    bool isHeightFieldDebugEnabled() const override { return m_hfDebugEnabled; }
 
-    void setShadowsEnabled(bool enabled) { m_shadowEnabled = enabled; }
-    bool isShadowsEnabled() const { return m_shadowEnabled; }
-    void setOcclusionCullingEnabled(bool enabled) { m_occlusionEnabled = enabled; }
-    bool isOcclusionCullingEnabled() const { return m_occlusionEnabled; }
-    void setWireframeEnabled(bool enabled) { m_wireframeEnabled = enabled; }
-    bool isWireframeEnabled() const { return m_wireframeEnabled; }
-    void setVSyncEnabled(bool enabled);
-    bool isVSyncEnabled() const { return m_vsyncEnabled; }
-    void setSkyboxPath(const std::string& pathOrFolder);
-    const std::string& getSkyboxPath() const { return m_skyboxLoadedPath; }
-    void requestPick(int screenX, int screenY) { m_pickRequested = true; m_pickX = screenX; m_pickY = screenY; }
-    unsigned int getSelectedEntity() const { return m_selectedEntity; }
-    void setSelectedEntity(unsigned int entity) { m_selectedEntity = entity; }
+    void setShadowsEnabled(bool enabled) override { m_shadowEnabled = enabled; }
+    bool isShadowsEnabled() const override { return m_shadowEnabled; }
+    void setOcclusionCullingEnabled(bool enabled) override { m_occlusionEnabled = enabled; }
+    bool isOcclusionCullingEnabled() const override { return m_occlusionEnabled; }
+    void setWireframeEnabled(bool enabled) override { m_wireframeEnabled = enabled; }
+    bool isWireframeEnabled() const override { return m_wireframeEnabled; }
+    void setVSyncEnabled(bool enabled) override;
+    bool isVSyncEnabled() const override { return m_vsyncEnabled; }
+    void setSkyboxPath(const std::string& pathOrFolder) override;
+    std::string getSkyboxPath() const override { return m_skyboxLoadedPath; }
+    void requestPick(int screenX, int screenY) override { m_pickRequested = true; m_pickX = screenX; m_pickY = screenY; }
+    unsigned int getSelectedEntity() const override { return m_selectedEntity; }
+    void setSelectedEntity(unsigned int entity) override { m_selectedEntity = entity; }
 
     // Gizmo public API
-    void setGizmoMode(GizmoMode mode) { m_gizmoMode = mode; }
-    GizmoMode getGizmoMode() const { return m_gizmoMode; }
-    bool beginGizmoDrag(int screenX, int screenY);
-    void updateGizmoDrag(int screenX, int screenY);
-    void endGizmoDrag();
-    bool isGizmoDragging() const { return m_gizmoDragging; }
+    void setGizmoMode(GizmoMode mode) override { m_gizmoMode = mode; }
+    GizmoMode getGizmoMode() const override { return m_gizmoMode; }
+    bool beginGizmoDrag(int screenX, int screenY) override;
+    void updateGizmoDrag(int screenX, int screenY) override;
+    void endGizmoDrag() override;
+    bool isGizmoDragging() const override { return m_gizmoDragging; }
 
     // Multi-window / popup management
     // Opens (or returns existing) a popup window with shared GL context.
-    PopupWindow* openPopupWindow(const std::string& id, const std::string& title, int width, int height);
-    void          closePopupWindow(const std::string& id);
-    PopupWindow*  getPopupWindow(const std::string& id);
+    PopupWindow* openPopupWindow(const std::string& id, const std::string& title, int width, int height) override;
+    void          closePopupWindow(const std::string& id) override;
+    PopupWindow*  getPopupWindow(const std::string& id) override;
     // Route an SDL event to the focused popup. Returns true if the event was consumed.
-    bool          routeEventToPopup(SDL_Event& event);
+    bool          routeEventToPopup(SDL_Event& event) override;
 
     // Mesh viewer editor window
-    MeshViewerWindow* openMeshViewer(const std::string& assetPath);
-    void              closeMeshViewer(const std::string& assetPath);
-    MeshViewerWindow* getMeshViewer(const std::string& assetPath);
+    MeshViewerWindow* openMeshViewer(const std::string& assetPath) override;
+    void              closeMeshViewer(const std::string& assetPath) override;
+    MeshViewerWindow* getMeshViewer(const std::string& assetPath) override;
 
 };

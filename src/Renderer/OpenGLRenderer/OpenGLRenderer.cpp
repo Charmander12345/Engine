@@ -497,7 +497,7 @@ void OpenGLRenderer::setClearColor(const Vec4& color)
     m_clearColor = color;
 }
 
-const Vec4& OpenGLRenderer::getClearColor() const
+Vec4 OpenGLRenderer::getClearColor() const
 {
     return m_clearColor;
 }
@@ -926,7 +926,7 @@ void OpenGLRenderer::renderWorld()
 			}
 			if (entry.object3D->hasLocalBounds())
 			{
-				ComputeWorldAabb(entry.object3D->getLocalBoundsMin(), entry.object3D->getLocalBoundsMax(), cmd.modelMatrix, cmd.boundsMin, cmd.boundsMax);
+				ComputeWorldAabb(entry.object3D->localBoundsMinGLM(), entry.object3D->localBoundsMaxGLM(), cmd.modelMatrix, cmd.boundsMin, cmd.boundsMax);
 				cmd.hasBounds = true;
 				if (!IsAabbInsideFrustum(frustumPlanes, cmd.boundsMin, cmd.boundsMax))
 				{
@@ -984,7 +984,7 @@ void OpenGLRenderer::renderWorld()
 
 			if (glObj->hasLocalBounds())
 			{
-				ComputeWorldAabb(glObj->getLocalBoundsMin(), glObj->getLocalBoundsMax(), cmd.modelMatrix, cmd.boundsMin, cmd.boundsMax);
+				ComputeWorldAabb(glObj->localBoundsMinGLM(), glObj->localBoundsMaxGLM(), cmd.modelMatrix, cmd.boundsMin, cmd.boundsMax);
 				cmd.hasBounds = true;
 				if (!IsAabbInsideFrustum(frustumPlanes, cmd.boundsMin, cmd.boundsMax))
 				{
@@ -1048,7 +1048,7 @@ void OpenGLRenderer::renderWorld()
 
 				if (glObj->hasLocalBounds())
 				{
-					ComputeWorldAabb(glObj->getLocalBoundsMin(), glObj->getLocalBoundsMax(), cmd.modelMatrix, cmd.boundsMin, cmd.boundsMax);
+					ComputeWorldAabb(glObj->localBoundsMinGLM(), glObj->localBoundsMaxGLM(), cmd.modelMatrix, cmd.boundsMin, cmd.boundsMax);
 					cmd.hasBounds = true;
 					if (!IsAabbInsideFrustum(frustumPlanes, cmd.boundsMin, cmd.boundsMax))
 					{
@@ -1107,7 +1107,7 @@ void OpenGLRenderer::renderWorld()
 			}
 			if (entry.object3D->hasLocalBounds())
 			{
-				ComputeWorldAabb(entry.object3D->getLocalBoundsMin(), entry.object3D->getLocalBoundsMax(), cmd.modelMatrix, cmd.boundsMin, cmd.boundsMax);
+				ComputeWorldAabb(entry.object3D->localBoundsMinGLM(), entry.object3D->localBoundsMaxGLM(), cmd.modelMatrix, cmd.boundsMin, cmd.boundsMax);
 				cmd.hasBounds = true;
 				if (!IsAabbInsideFrustum(frustumPlanes, cmd.boundsMin, cmd.boundsMax))
 				{
@@ -5318,7 +5318,7 @@ GLuint OpenGLRenderer::getOrLoadUITexture(const std::string& path)
     return tex;
 }
 
-GLuint OpenGLRenderer::preloadUITexture(const std::string& path)
+unsigned int OpenGLRenderer::preloadUITexture(const std::string& path)
 {
     return getOrLoadUITexture(path);
 }
@@ -5546,6 +5546,20 @@ void OpenGLRenderer::clearActiveCameraEntity()
 const std::string& OpenGLRenderer::name() const
 {
     return m_name;
+}
+
+RendererCapabilities OpenGLRenderer::getCapabilities() const
+{
+    RendererCapabilities caps;
+    caps.supportsShadows       = true;
+    caps.supportsOcclusion     = true;
+    caps.supportsWireframe     = true;
+    caps.supportsVSync         = true;
+    caps.supportsEntityPicking = true;
+    caps.supportsGizmos        = true;
+    caps.supportsSkybox        = true;
+    caps.supportsPopupWindows  = true;
+    return caps;
 }
 
 SDL_Window* OpenGLRenderer::window() const

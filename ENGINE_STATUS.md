@@ -78,6 +78,7 @@
 | PIE-Modus (Play In Editor)           | ✅     |
 | PIE Maus-Capture + Shift+F1 Pause   | ✅     |
 | Aktives Level verwalten (`setActiveLevel` / `getActiveLevelSoft` / `swapActiveLevel`) | ✅ |
+| Token-basierte Level-Changed-Callbacks (register/unregister) | ✅ |
 | Action-Tracking (Loading, Saving…)   | ✅     |
 | Input-Dispatch (KeyDown/KeyUp)       | ✅     |
 | Benachrichtigungen (Modal + Toast)   | ✅     |
@@ -319,6 +320,7 @@
 | DirectX 11 Backend                        | ❌     |
 | DirectX 12 Backend                        | ❌     |
 | Vulkan Backend                            | ❌     |
+| **Renderer-Abstrahierung (Multi-Backend-Vorbereitung)** | 🟡 |
 
 **Offene Punkte:**
 - Kein Post-Processing (Bloom, SSAO, HDR, Tonemapping)
@@ -326,6 +328,11 @@
 - Transparenz nur eingeschränkt (kein korrektes Order-Independent-Transparency)
 - Instancing existiert auf CPU-/Level-Seite, aber kein GPU-Instanced-Rendering
 - Keine Alternative zu OpenGL (DirectX / Vulkan nicht implementiert, nur als Enum-Placeholder)
+- **Renderer-Abstrahierung geplant:** Detaillierter 15-Schritte-Plan in `RENDERER_ABSTRACTION_PLAN.md` erstellt. Bereits abstrahiert: `Renderer`, `Camera`, `Shader` (dünne Interfaces), `UIWidget` (backend-agnostisch). Noch zu entkoppeln: `UIManager` (referenziert `OpenGLRenderer*` direkt), `RenderResourceManager` (OpenGL-Typen in Public API), `PopupWindow` (`SDL_GLContext`), `SplashWindow` (raw GL handles), `MeshViewerWindow` (`OpenGLObject3D`), `EditorTab` (`GLuint` FBO/Tex), `main.cpp` (direkte Instanziierung), `CMakeLists.txt` (monolithisches Target).
+- **Schritt 1.1 erledigt:** GLM von `src/Renderer/OpenGLRenderer/glm/` nach `external/glm/` verschoben. Include-Pfad `${CMAKE_SOURCE_DIR}/external` als PUBLIC in `src/Renderer/CMakeLists.txt` hinzugefügt. Build verifiziert ✅.
+- **Schritt 1.2 erledigt:** Abstrakte Render-Ressourcen-Interfaces erstellt: `IRenderObject2D`, `IRenderObject3D`, `ITextRenderer`, `IShaderProgram`, `ITexture`. Alle OpenGL-Klassen erben korrekt davon. Build verifiziert ✅.
+- **Schritt 2.1 erledigt:** `RendererCapabilities.h` erstellt — Backend-Fähigkeiten-Struct (Shadows, Occlusion, Wireframe, VSync, EntityPicking, Gizmos, Skybox, PopupWindows). Build verifiziert ✅.
+- **Schritt 2.2 erledigt:** `Renderer.h` von ~36 auf ~130 Zeilen erweitert mit ~60 virtuellen Methoden. GizmoMode/GizmoAxis Enums in Renderer definiert. OpenGLRenderer: ~45 Methoden mit `override` markiert, `getCapabilities()` implementiert (alle Caps = true). Build verifiziert ✅.
 
 ---
 
@@ -569,7 +576,7 @@
 | Recent-Projects: pro Eintrag quadratischer Lösch-Button in voller Zeilenhöhe | ✅ |
 | Existing-Project-Remove-Dialog enthält Checkbox "Delete from filesystem" | ✅ |
 | Recent-Projects: existierend => Confirm, fehlend => direkt entfernen | ✅ |
-| New-Project: Dateinameingabe validiert ungültige Zeichen vor Erstellung | ✅ |
+| New-Project: Dateinameingabe zeigt Warnung bei ungültigen Zeichen (keine Auto-Korrektur) | ✅ |
 | Dropdown-Menü-System (`showDropdownMenu` / `closeDropdownMenu`) | ✅ |
 | WorldSettings   | ✅     |
 | WorldOutliner   | ✅     |
@@ -997,6 +1004,7 @@ Große Feature-Blöcke, die noch nicht existieren:
 | **3D-Audio (Positional)**       | Niedrig   | OpenAL-Listener-/Source-Positionierung nutzen                                |
 | **Particle-System**             | Niedrig   | GPU-/CPU-Partikel für Effekte                                                |
 | **Netzwerk / Multiplayer**      | Niedrig   | Netzwerk-Synchronisation, Server/Client                                      |
+| **Renderer-Abstrahierung**      | Mittel    | Multi-Backend-Vorbereitung: Interfaces erweitern, UIManager entkoppeln, Build aufteilen → siehe `RENDERER_ABSTRACTION_PLAN.md` |
 | **DirectX 11/12 Backend**       | Niedrig   | Alternative Rendering-Backends (aktuell nur OpenGL 4.6)                      |
 | **Cross-Platform (Linux/macOS)**| Niedrig   | GCC/Clang-Support, Plattform-Abstraktion                                    |
 | **CI/CD + Tests**               | Niedrig   | Automatisierte Builds, Unit-Tests, Integrationstests                         |
@@ -1085,6 +1093,7 @@ Große Feature-Blöcke, die noch nicht existieren:
 - Keine Jolt-Constraints/Joints genutzt (Gelenke, Federn, etc.)
 - **Bugfix: PhysX HeightField Fall-Through** – `PhysXBackend::createBody()` behandelte `heightSampleCount` fälschlich als Gesamtzahl (√N), obwohl es die Per-Side-Anzahl ist. Zusätzlich fehlte die Anwendung des HeightField-Offsets als Shape-Local-Pose und Row/Column-Scales waren vertauscht. Behoben: Direktverwendung von `heightSampleCount`, Offset als `setLocalPose`, korrektes Scale-Mapping (Row=Z, Column=X).
 - **Bugfix: Jolt HeightField Stuck** – Jolt erfordert `sampleCount = 2^n + 1` (z.B. 3, 5, 9, 17). Der LandscapeManager erzeugte `sampleCount = gridSize + 1 = 4`, was Jolts `HeightFieldShapeSettings::Create()` zum Fehler veranlasste und ein winziges BoxShape-Fallback einsetzte. Behoben: (1) `JoltBackend` resampled per bilinearer Interpolation auf den nächsten gültigen Count, (2) `LandscapeManager` rundet gridSize auf die nächste Zweierpotenz auf.
+- **Bugfix: Crash bei Projekterstellung (Use-After-Free)** – Der temporäre `UIManager` (Projekt-Auswahl-Screen) registrierte einen `ActiveLevelChangedCallback` beim `DiagnosticsManager` mit `this`-Capture, wurde aber zerstört ohne den Callback abzumelden. Beim anschließenden `createProject()` → `setActiveLevel()` wurde der dangling Callback aufgerufen → Crash. Behoben: Callback-System auf Token-basierte `unordered_map` umgestellt (`registerActiveLevelChangedCallback` gibt `size_t`-Token zurück, `unregisterActiveLevelChangedCallback(token)` entfernt ihn). `UIManager::~UIManager()` meldet den Callback sauber ab.
 
 ---
 

@@ -5,35 +5,40 @@
 #include "glad/include/gl.h"
 
 #include "../../Core/EngineObject.h"
+#include "../IRenderObject3D.h"
 #include "OpenGLMaterial.h"
 
 class AssetData;
 class Texture;
 
-class OpenGLObject3D : public EngineObject
+class OpenGLObject3D : public EngineObject, public IRenderObject3D
 {
 public:
     explicit OpenGLObject3D(const std::shared_ptr<AssetData>& asset);
 
-    bool prepare();
-    void setMaterialCacheKeySuffix(const std::string& suffix) { m_materialCacheKeySuffix = suffix; }
-    void setFragmentShaderOverride(const std::string& name) { m_fragmentShaderOverride = name; }
+    bool prepare() override;
+    void setMaterialCacheKeySuffix(const std::string& suffix) override { m_materialCacheKeySuffix = suffix; }
+    void setFragmentShaderOverride(const std::string& name) override { m_fragmentShaderOverride = name; }
     void setMatrices(const glm::mat4& model, const glm::mat4& view, const glm::mat4& projection);
     void setLightData(const glm::vec3& position, const glm::vec3& color, float intensity);
     void setLights(const std::vector<OpenGLMaterial::LightData>& lights);
     void setShadowData(GLuint shadowMapArray, const glm::mat4* matrices, const int* lightIndices, int count);
     void setPointShadowData(GLuint cubeArray, const glm::vec3* positions, const float* farPlanes, const int* lightIndices, int count);
-    void render();
+    void render() override;
     void renderBatchContinuation();
-    void setTextures(const std::vector<std::shared_ptr<Texture>>& textures);
-    void setShininess(float shininess);
-    bool hasLocalBounds() const;
-    const glm::vec3& getLocalBoundsMin() const;
-    const glm::vec3& getLocalBoundsMax() const;
+    void setTextures(const std::vector<std::shared_ptr<Texture>>& textures) override;
+    void setShininess(float shininess) override;
+    bool hasLocalBounds() const override;
+    Vec3 getLocalBoundsMin() const override;
+    Vec3 getLocalBoundsMax() const override;
+    int  getVertexCount() const override;
+    int  getIndexCount() const override;
+
+    // GLM-typed accessors for internal OpenGL backend use
+    const glm::vec3& localBoundsMinGLM() const { return m_localBoundsMin; }
+    const glm::vec3& localBoundsMaxGLM() const { return m_localBoundsMax; }
     GLuint getProgram() const;
     GLuint getVao() const;
-    GLsizei getVertexCount() const;
-    GLsizei getIndexCount() const;
     OpenGLMaterial* getMaterial() const { return m_material.get(); }
 
     static void ClearCache();

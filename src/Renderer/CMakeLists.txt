@@ -2,6 +2,12 @@ add_library(Renderer SHARED
 
     Renderer.h
     Shader.h
+    RendererCapabilities.h
+    IRenderObject2D.h
+    IRenderObject3D.h
+    ITextRenderer.h
+    IShaderProgram.h
+    ITexture.h
     PopupWindow.h
     PopupWindow.cpp
     SplashWindow.h
@@ -72,6 +78,7 @@ target_include_directories(Renderer
         ${CMAKE_SOURCE_DIR}/src/Core
         ${CMAKE_SOURCE_DIR}/src/AssetManager
         ${CMAKE_SOURCE_DIR}/external/SDL3/include
+        ${CMAKE_SOURCE_DIR}/external
         ${CMAKE_SOURCE_DIR}/src/Landscape
 )
 

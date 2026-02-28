@@ -886,7 +886,7 @@ void UIManager::SetActiveInstance(UIManager* instance)
 UIManager::UIManager()
 {
     SetActiveInstance(this);
-    DiagnosticsManager::Instance().registerActiveLevelChangedCallback(
+    m_levelChangedCallbackToken = DiagnosticsManager::Instance().registerActiveLevelChangedCallback(
         [this](EngineLevel* level)
         {
             m_outlinerLevel = level;
@@ -899,6 +899,18 @@ UIManager::UIManager()
             }
             refreshWorldOutliner();
         });
+}
+
+UIManager::~UIManager()
+{
+    if (m_levelChangedCallbackToken != 0)
+    {
+        DiagnosticsManager::Instance().unregisterActiveLevelChangedCallback(m_levelChangedCallbackToken);
+    }
+    if (GetActiveInstance() == this)
+    {
+        SetActiveInstance(nullptr);
+    }
 }
 
 void UIManager::refreshWorldOutliner()
@@ -6738,13 +6750,9 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             };
 
             addEntryRow("PS.C.ProjName", "Project Name", state->newProjectName,
-                [state, updatePreviewText, sanitizeProjectName, &pMgr](const std::string& v)
+                [state, updatePreviewText](const std::string& v)
                 {
-                    state->newProjectName = sanitizeProjectName(v);
-                    if (auto* nameEl = pMgr.findElementById("PS.C.ProjName"))
-                    {
-                        nameEl->value = state->newProjectName;
-                    }
+                    state->newProjectName = v;
                     updatePreviewText();
                 });
 
@@ -6844,16 +6852,37 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 Vec4{ 0.22f, 0.62f, 0.35f, 1.0f },
                 [state, callbackPtr, closeScreen, sanitizeProjectName, screenMgr]()
                 {
-                    state->newProjectName = sanitizeProjectName(state->newProjectName);
-                    if (state->newProjectName.empty())
+                    const std::string sanitized = sanitizeProjectName(state->newProjectName);
+                    if (state->newProjectName.empty() || state->newProjectName != sanitized)
                     {
                         if (screenMgr)
                         {
-                            screenMgr->showToastMessage("Please enter a valid project name.", 3.0f);
+                            screenMgr->showToastMessage("Invalid project name (forbidden characters).", 3.0f);
                         }
                         return;
                     }
                     const std::string fullPath = (std::filesystem::path(state->newProjectLocation) / state->newProjectName).string();
+
+                    // Check if directory already exists to prevent crashes or unwanted overwrites
+                    std::error_code existsEc;
+                    if (std::filesystem::exists(std::filesystem::path(fullPath), existsEc))
+                    {
+                        if (screenMgr)
+                        {
+                            screenMgr->showConfirmDialog(
+                                "A folder with this name already exists at the target location:\n\n" + fullPath + "\n\nDo you want to load the project instead?",
+                                [callbackPtr, fullPath, state, closeScreen, screenMgr]()
+                                {
+                                    if (*callbackPtr)
+                                        (*callbackPtr)(fullPath, false, state->setAsDefault, state->includeDefaultContent);
+                                    if (screenMgr) screenMgr->unregisterWidget("ProjectScreen.Main");
+                                },
+                                []() { /* Cancel */ }
+                            );
+                        }
+                        return;
+                    }
+
                     if (*callbackPtr)
                         (*callbackPtr)(fullPath, true, state->setAsDefault, state->includeDefaultContent);
                     closeScreen();
