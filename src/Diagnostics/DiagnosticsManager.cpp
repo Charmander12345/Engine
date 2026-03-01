@@ -198,6 +198,7 @@ std::string DiagnosticsManager::rhiTypeToString(RHIType type)
     switch (type)
     {
     case RHIType::OpenGL: return "OpenGL";
+    case RHIType::Vulkan: return "Vulkan";
     case RHIType::DirectX11: return "DirectX11";
     case RHIType::DirectX12: return "DirectX12";
     default: return "Unknown";
@@ -286,6 +287,7 @@ bool DiagnosticsManager::loadConfig()
     {
         const auto& val = it->second;
         if (val == "OpenGL") m_rhiType = RHIType::OpenGL;
+        else if (val == "Vulkan") m_rhiType = RHIType::Vulkan;
         else if (val == "DirectX11") m_rhiType = RHIType::DirectX11;
         else if (val == "DirectX12") m_rhiType = RHIType::DirectX12;
         else m_rhiType = RHIType::Unknown;

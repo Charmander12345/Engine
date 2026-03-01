@@ -6170,7 +6170,7 @@ void UIManager::openEngineSettingsPopup()
 // ─────────────────────────────────────────────────────────────────────────────
 // Project Selection Screen
 // ─────────────────────────────────────────────────────────────────────────────
-void UIManager::openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent)> onProjectChosen)
+void UIManager::openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)> onProjectChosen)
 {
     if (!m_renderer)
         return;
@@ -6196,6 +6196,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         std::string newProjectLocation;
         bool setAsDefault{ false };
         bool includeDefaultContent{ true };
+        int selectedRHI{ 0 };
     };
     auto state = std::make_shared<PSState>();
 
@@ -6320,7 +6321,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
     constexpr float kCatBtnGap = 2.0f;
     constexpr float kCatBtnY0 = kTitleH + 10.0f;
 
-    auto callbackPtr = std::make_shared<std::function<void(const std::string&, bool, bool, bool)>>(std::move(onProjectChosen));
+    auto callbackPtr = std::make_shared<std::function<void(const std::string&, bool, bool, bool, DiagnosticsManager::RHIType)>>(std::move(onProjectChosen));
     auto closeScreen = [screenMgr]()
     {
         if (screenMgr)
@@ -6636,7 +6637,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                         row.onClicked = [callbackPtr, projPath, state, closeScreen]()
                         {
                             if (*callbackPtr)
-                                (*callbackPtr)(projPath, false, state->setAsDefault, state->includeDefaultContent);
+                                (*callbackPtr)(projPath, false, state->setAsDefault, state->includeDefaultContent, DiagnosticsManager::RHIType::OpenGL);
                             closeScreen();
                         };
                     }
@@ -6683,7 +6684,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
 
                     struct BrowseCtx
                     {
-                        std::shared_ptr<std::function<void(const std::string&, bool, bool, bool)>> callback;
+                        std::shared_ptr<std::function<void(const std::string&, bool, bool, bool, DiagnosticsManager::RHIType)>> callback;
                         std::shared_ptr<PSState> state;
                         std::function<void()> closeScreen;
                     };
@@ -6698,7 +6699,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                                 std::filesystem::path projFile(filelist[0]);
                                 std::string projDir = projFile.parent_path().string();
                                 if (*(c->callback))
-                                    (*(c->callback))(projDir, false, c->state->setAsDefault, c->state->includeDefaultContent);
+                                    (*(c->callback))(projDir, false, c->state->setAsDefault, c->state->includeDefaultContent, DiagnosticsManager::RHIType::OpenGL);
                                 if (c->closeScreen)
                                     c->closeScreen();
                             }
@@ -6847,6 +6848,47 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 entry->children.push_back(includeDefaultContentCb);
             }
 
+            // ── RHI Type dropdown ──────────────────────────────────────
+            {
+                WidgetElement rhiRow;
+                rhiRow.type        = WidgetElementType::StackPanel;
+                rhiRow.id          = "PS.C.RHI.Row";
+                rhiRow.orientation = StackOrientation::Horizontal;
+                rhiRow.minSize     = Vec2{ contentW - kContentPad * 2.0f, kRowH };
+                rhiRow.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                rhiRow.padding     = Vec2{ 6.0f, 2.0f };
+
+                WidgetElement rhiLbl;
+                rhiLbl.type      = WidgetElementType::Text;
+                rhiLbl.id        = "PS.C.RHI.Lbl";
+                rhiLbl.text      = "Graphics API";
+                rhiLbl.fontSize  = 13.0f;
+                rhiLbl.textColor = Vec4{ 0.80f, 0.82f, 0.88f, 1.0f };
+                rhiLbl.textAlignV = TextAlignV::Center;
+                rhiLbl.minSize   = Vec2{ 120.0f, kRowH };
+                rhiRow.children.push_back(rhiLbl);
+
+                WidgetElement rhiDd;
+                rhiDd.type          = WidgetElementType::DropDown;
+                rhiDd.id            = "PS.C.RHI";
+                rhiDd.items         = { "OpenGL" };
+                rhiDd.selectedIndex = state->selectedRHI;
+                rhiDd.fontSize      = 12.0f;
+                rhiDd.color         = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
+                rhiDd.hoverColor    = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
+                rhiDd.textColor     = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+                rhiDd.padding       = Vec2{ 6.0f, 4.0f };
+                rhiDd.isHitTestable = true;
+                rhiDd.minSize       = Vec2{ contentW - kContentPad * 2.0f - 120.0f - 12.0f, kRowH };
+                rhiDd.onSelectionChanged = [state](int idx)
+                {
+                    state->selectedRHI = idx;
+                };
+                rhiRow.children.push_back(rhiDd);
+
+                entry->children.push_back(rhiRow);
+            }
+
             addActionButton("PS.C.CreateBtn", "Create Project",
                 Vec4{ 0.18f, 0.50f, 0.28f, 1.0f },
                 Vec4{ 0.22f, 0.62f, 0.35f, 1.0f },
@@ -6874,7 +6916,11 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                                 [callbackPtr, fullPath, state, closeScreen, screenMgr]()
                                 {
                                     if (*callbackPtr)
-                                        (*callbackPtr)(fullPath, false, state->setAsDefault, state->includeDefaultContent);
+                                    {
+                                        constexpr DiagnosticsManager::RHIType rhiMap[] = { DiagnosticsManager::RHIType::OpenGL };
+                                        const auto rhi = (state->selectedRHI >= 0 && state->selectedRHI < static_cast<int>(std::size(rhiMap))) ? rhiMap[state->selectedRHI] : DiagnosticsManager::RHIType::OpenGL;
+                                        (*callbackPtr)(fullPath, false, state->setAsDefault, state->includeDefaultContent, rhi);
+                                    }
                                     if (screenMgr) screenMgr->unregisterWidget("ProjectScreen.Main");
                                 },
                                 []() { /* Cancel */ }
@@ -6884,7 +6930,11 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     }
 
                     if (*callbackPtr)
-                        (*callbackPtr)(fullPath, true, state->setAsDefault, state->includeDefaultContent);
+                    {
+                        constexpr DiagnosticsManager::RHIType rhiMap[] = { DiagnosticsManager::RHIType::OpenGL };
+                        const auto rhi = (state->selectedRHI >= 0 && state->selectedRHI < static_cast<int>(std::size(rhiMap))) ? rhiMap[state->selectedRHI] : DiagnosticsManager::RHIType::OpenGL;
+                        (*callbackPtr)(fullPath, true, state->setAsDefault, state->includeDefaultContent, rhi);
+                    }
                     closeScreen();
                 });
         }

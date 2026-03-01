@@ -977,6 +977,8 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | Debug-Postfix entfernt (kein "d")  | ✅     |
 | Debug-Python-Workaround             | ✅     |
 | Profiling-Flag (/PROFILE)           | ✅     |
+| **Renderer als Renderer.dll** (RendererCore OBJECT + OpenGL SHARED) | ✅ |
+| **Factory-Pattern** (Backend über `config.ini` wählbar) | ✅ |
 | GCC/Clang-Unterstützung             | ❌     |
 | Linux/macOS-Build                   | ❌     |
 | CI/CD-Pipeline                      | ❌     |
@@ -1013,7 +1015,7 @@ Große Feature-Blöcke, die noch nicht existieren:
 | **3D-Audio (Positional)**       | Niedrig   | OpenAL-Listener-/Source-Positionierung nutzen                                |
 | **Particle-System**             | Niedrig   | GPU-/CPU-Partikel für Effekte                                                |
 | **Netzwerk / Multiplayer**      | Niedrig   | Netzwerk-Synchronisation, Server/Client                                      |
-| **Renderer-Abstrahierung**      | Mittel    | Multi-Backend-Vorbereitung: Interfaces erweitern, UIManager entkoppeln, Build aufteilen → siehe `RENDERER_ABSTRACTION_PLAN.md` |
+| **Renderer-Abstrahierung**      | ✅     | Multi-Backend-Architektur: Abstrakte Interfaces (Renderer, Camera, Shader, IRenderObject2D/3D, ITexture, IShaderProgram, ITextRenderer, IRenderTarget, IRenderContext), UIManager entkoppelt, RendererCore OBJECT + Renderer.dll, Factory-Pattern mit Config-basierter Backend-Auswahl → siehe `RENDERER_ABSTRACTION_PLAN.md`. Offen: Integrationstest, Mock-Backend-Tests, Doku-Update |
 | **DirectX 11/12 Backend**       | Niedrig   | Alternative Rendering-Backends (aktuell nur OpenGL 4.6)                      |
 | **Cross-Platform (Linux/macOS)**| Niedrig   | GCC/Clang-Support, Plattform-Abstraktion                                    |
 | **CI/CD + Tests**               | Niedrig   | Automatisierte Builds, Unit-Tests, Integrationstests                         |

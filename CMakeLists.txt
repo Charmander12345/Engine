@@ -167,6 +167,13 @@ add_subdirectory(src/Scripting)
 add_subdirectory(src/Landscape)
 add_subdirectory(src/Physics)
 
+# ── Tests (GTest) ───────────────────────────────────────────────────────
+option(ENGINE_BUILD_TESTS "Build engine GTest suite" ON)
+if(ENGINE_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
 if (NOT TARGET OpenAL::OpenAL)
     message(FATAL_ERROR "OpenAL target not available from external/openal-soft.")
 endif()

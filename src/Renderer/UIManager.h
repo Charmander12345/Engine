@@ -9,6 +9,7 @@
 
 #include "../Core/MathTypes.h"
 #include "../AssetManager/AssetTypes.h"
+#include "../Diagnostics/DiagnosticsManager.h"
 #include "UIWidget.h"
 
 class EngineLevel;
@@ -90,7 +91,7 @@ public:
 
     void openLandscapeManagerPopup();
     void openEngineSettingsPopup();
-    void openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent)> onProjectChosen);
+    void openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)> onProjectChosen);
 
     static UIManager* GetActiveInstance();
     static void SetActiveInstance(UIManager* instance);

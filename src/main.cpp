@@ -74,10 +74,23 @@ int main()
         return true; // default to normal (splash)
     }();
 
+    // Determine renderer backend from config (default: OpenGL)
+    const RendererBackend activeBackend = [&]() {
+        switch (diagnostics.getRHIType())
+        {
+        case DiagnosticsManager::RHIType::OpenGL:    return RendererBackend::OpenGL;
+        case DiagnosticsManager::RHIType::Vulkan:    return RendererBackend::Vulkan;
+        case DiagnosticsManager::RHIType::DirectX12: return RendererBackend::DirectX12;
+        default:                                     return RendererBackend::OpenGL;
+        }
+    }();
+    logTimed(Logger::Category::Engine, std::string("Selected renderer backend: ") + DiagnosticsManager::rhiTypeToString(diagnostics.getRHIType()), Logger::LogLevel::INFO);
+
     std::string chosenPath;
     bool chosenIsNew = false;
     bool chosenSetDefault = false;
     bool chosenIncludeDefaultContent = true;
+    DiagnosticsManager::RHIType chosenRHI = DiagnosticsManager::RHIType::OpenGL;
     bool projectChosen = false;
     bool startupSelectionCancelled = false;
 
@@ -94,7 +107,7 @@ int main()
     {
         logTimed(Logger::Category::Engine, "No valid default project found. Opening project selection...", Logger::LogLevel::INFO);
 
-        auto* tempRenderer = RendererFactory::createRenderer(RendererBackend::OpenGL);
+        auto* tempRenderer = RendererFactory::createRenderer(activeBackend);
         if (tempRenderer->initialize())
         {
             SDL_WindowID tempWindowId = 0;
@@ -113,12 +126,13 @@ int main()
             }
 
             tempRenderer->getUIManager().openProjectScreen(
-                [&](const std::string& path, bool isNew, bool setAsDefault, bool includeDefaultContent)
+                [&](const std::string& path, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)
                 {
                     chosenPath = path;
                     chosenIsNew = isNew;
                     chosenSetDefault = setAsDefault;
                     chosenIncludeDefaultContent = includeDefaultContent;
+                    chosenRHI = selectedRHI;
                     projectChosen = true;
                 });
 
@@ -261,7 +275,7 @@ int main()
     }
 
     // Now we have a project to load/create. Show SplashWindow.
-    auto splash = RendererFactory::createSplashWindow(RendererBackend::OpenGL);
+    auto splash = RendererFactory::createSplashWindow(activeBackend);
     if (useSplash)
     {
         if (splash->create())
@@ -271,8 +285,8 @@ int main()
         }
     }
 
-    logTimed(Logger::Category::Rendering, "Initialising Renderer (OpenGL)...", Logger::LogLevel::INFO);
-    Renderer* renderer = RendererFactory::createRenderer(RendererBackend::OpenGL);
+    logTimed(Logger::Category::Rendering, std::string("Initialising Renderer (") + DiagnosticsManager::rhiTypeToString(diagnostics.getRHIType()) + ")...", Logger::LogLevel::INFO);
+    Renderer* renderer = RendererFactory::createRenderer(activeBackend);
 
     if (!renderer->initialize())
     {
@@ -414,7 +428,7 @@ int main()
         const std::string parentDir = std::filesystem::path(chosenPath).parent_path().string();
         const std::string projName = std::filesystem::path(chosenPath).filename().string();
         logTimed(Logger::Category::Engine, "Creating new project: " + projName + " at " + parentDir, Logger::LogLevel::INFO);
-        if (assetManager.createProject(parentDir, projName, { projName, "1.0", "1.0", "", DiagnosticsManager::RHIType::OpenGL }, AssetManager::Sync, chosenIncludeDefaultContent))
+        if (assetManager.createProject(parentDir, projName, { projName, "1.0", "1.0", "", chosenRHI }, AssetManager::Sync, chosenIncludeDefaultContent))
         {
             projectLoaded = true;
         }

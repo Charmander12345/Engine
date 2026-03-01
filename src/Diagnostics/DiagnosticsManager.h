@@ -22,6 +22,7 @@ public:
     {
         Unknown,
         OpenGL,
+        Vulkan,
         DirectX11,
         DirectX12
     };

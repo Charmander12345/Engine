@@ -13,6 +13,44 @@ class MeshViewerWindow;
 class Widget;
 class AssetData;
 
+/// @brief Abstract renderer base class – the primary interface every graphics backend must implement.
+///
+/// ## How to add a new backend
+///   1. Create a sub-folder under `src/Renderer/` (e.g. `VulkanRenderer/`).
+///   2. Derive a concrete class from `Renderer` and implement **all** pure-virtual methods.
+///      Non-pure methods have safe defaults but should be overridden where the backend
+///      provides the functionality (shadows, gizmos, picking, etc.).
+///   3. Register the backend in `RendererFactory` so that `createRenderer()` /
+///      `createSplashWindow()` can instantiate it via the `RendererBackend` enum.
+///   4. Provide concrete implementations of the related abstract interfaces:
+///      - `IRenderObject2D` / `IRenderObject3D` (scene objects)
+///      - `ITexture`, `IShaderProgram`, `ITextRenderer` (GPU resources)
+///      - `IRenderTarget`, `IRenderContext` (off-screen targets & context)
+///   5. Add the new source files to `src/Renderer/CMakeLists.txt` under a
+///      backend-specific `if()` block so builds stay modular.
+///
+/// ## Lifetime & threading
+///   - `initialize()` creates the window and GPU context; `shutdown()` tears them down.
+///   - All virtual methods are called from the **main thread** only.
+///   - The renderer instance is owned by `main()` and deleted after `shutdown()`.
+///
+/// ## Method categories (see section comments below)
+///   | Tag           | Obligation          | Notes                               |
+///   |---------------|---------------------|-------------------------------------|
+///   | Core          | **must** override   | init / shutdown / render loop        |
+///   | Camera        | **must** override   | editor & runtime camera              |
+///   | UIManager     | **must** override   | every renderer owns a UIManager      |
+///   | Capabilities  | *should* override   | report GPU / driver info             |
+///   | Toggles       | *may* override      | shadows, vsync, wireframe, etc.      |
+///   | Debug         | *may* override      | UI-debug / bounds-debug overlays     |
+///   | Picking       | *may* override      | entity picking via colour buffer     |
+///   | Gizmo         | *may* override      | translate / rotate / scale gizmo     |
+///   | Tabs          | *may* override      | editor multi-tab support             |
+///   | Popups        | *may* override      | popup / child windows                |
+///   | MeshViewer    | *may* override      | standalone mesh preview windows      |
+///   | Viewport      | *may* override      | clear colour, skybox, text overlay   |
+///   | Scene         | *may* override      | entity refresh after ECS changes     |
+///   | Metrics       | *may* override      | per-frame GPU/CPU timing counters    |
 class Renderer
 {
 public:

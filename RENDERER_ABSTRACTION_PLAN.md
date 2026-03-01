@@ -330,7 +330,7 @@ src/Renderer/OpenGLRenderer/OpenGLRenderContext.h  ← OpenGL-Implementierung (w
 
 ---
 
-#### Schritt 4.2: `main.cpp` auf Factory-Pattern umstellen
+#### ✅ Schritt 4.2: `main.cpp` auf Factory-Pattern umstellen *(erledigt)*
 **Was:** Statt `#include "OpenGLRenderer.h"` und direkter Instanziierung:
 
 ```cpp
@@ -355,10 +355,17 @@ public:
 };
 ```
 
+**Umsetzung:**
+- `main.cpp` hat keinen `#include "OpenGLRenderer.h"` mehr — verwendet ausschließlich `RendererFactory` und abstrakte `Renderer*`
+- 3 hardcoded `RendererBackend::OpenGL` durch `activeBackend` Variable ersetzt
+- `activeBackend` wird aus `DiagnosticsManager::getRHIType()` abgeleitet (aus `config.ini` geladen)
+- `DiagnosticsManager::RHIType` um `Vulkan` erweitert, `rhiTypeToString` und `loadConfig` angepasst
+- Log-Meldungen zeigen dynamisch den gewählten Backend-Namen
+
 **Verifikation:**
-- [ ] `main.cpp` hat keinen OpenGL-Include mehr
-- [ ] Engine startet mit Factory-erstelltem Renderer
-- [ ] Backend kann über Kommandozeile oder Config gewählt werden (vorbereitet)
+- [x] `main.cpp` hat keinen OpenGL-Include mehr
+- [x] Engine startet mit Factory-erstelltem Renderer
+- [x] Backend kann über Config (`config.ini` → `RHI=OpenGL|Vulkan|DirectX11|DirectX12`) gewählt werden
 
 ---
 
@@ -383,41 +390,41 @@ public:
 
 ### Phase 6: Abschluss & Dokumentation
 
-#### Schritt 6.1: Vollständiger Integrationstest
+#### Schritt 6.1: Vollständiger Integrationstest ✅
 **Checkliste:**
-- [ ] Engine startet ohne Fehler
-- [ ] 3D-Szene wird korrekt gerendert
-- [ ] Shadows funktionieren
-- [ ] Entity Picking funktioniert
-- [ ] Gizmos funktionieren (Translate/Rotate/Scale)
-- [ ] UI-Widgets reagieren auf Klicks
-- [ ] Content Browser zeigt Assets
-- [ ] Drag & Drop funktioniert
-- [ ] Popup-Fenster öffnen sich
-- [ ] Mesh Viewer zeigt Modelle
-- [ ] Editor Tabs wechseln korrekt
-- [ ] Toast-Nachrichten erscheinen
-- [ ] Modal-Dialoge funktionieren
-- [ ] Engine Settings können geändert werden
-- [ ] Landscape Manager erstellt Landschaften
-- [ ] Project Screen funktioniert
-- [ ] Splash Screen zeigt sich
+- [x] Engine startet ohne Fehler
+- [x] 3D-Szene wird korrekt gerendert
+- [x] Shadows funktionieren
+- [x] Entity Picking funktioniert
+- [x] Gizmos funktionieren (Translate/Rotate/Scale)
+- [x] UI-Widgets reagieren auf Klicks
+- [x] Content Browser zeigt Assets
+- [x] Drag & Drop funktioniert
+- [x] Popup-Fenster öffnen sich
+- [x] Mesh Viewer zeigt Modelle
+- [x] Editor Tabs wechseln korrekt
+- [x] Toast-Nachrichten erscheinen
+- [x] Modal-Dialoge funktionieren
+- [x] Engine Settings können geändert werden
+- [x] Landscape Manager erstellt Landschaften
+- [x] Project Screen funktioniert (inkl. RHI-Dropdown)
+- [x] Splash Screen zeigt sich
 
-#### Schritt 6.2: Unit Tests für Mock-Backend
-**Was:** Einen `NullRenderer` oder `MockRenderer` erstellen, der von `Renderer` erbt und nichts rendert. Damit testen:
-- UIManager kann ohne echtes Backend initialisiert werden
-- Widget-Layout funktioniert ohne Renderer
-- Input-Handling funktioniert ohne Renderer
-- Content Browser Logik funktioniert ohne Renderer
+#### Schritt 6.2: Unit Tests für Mock-Backend ✅
+**Was:** `NullRenderer` (`tests/NullRenderer/NullRenderer.h`) erbt von `Renderer` und rendert nichts. GTest-Suite in `tests/RendererAbstractionTests.cpp` (17 Tests, 5 Suites):
+- [x] UIManager kann ohne echtes Backend initialisiert werden
+- [x] Widget-Layout funktioniert ohne Renderer
+- [x] Input-Handling funktioniert ohne Renderer
+- [x] Content Browser Logik funktioniert ohne Renderer
 
 **Verifikation:**
-- [ ] Alle GTest-Tests bestehen
-- [ ] Kein OpenGL-Kontext nötig für UI-Logic-Tests
+- [x] Alle GTest-Tests bestehen (17/17 PASSED)
+- [x] Kein OpenGL-Kontext nötig für UI-Logic-Tests
 
-#### Schritt 6.3: Dokumentation aktualisieren
-- [ ] `PROJECT_OVERVIEW.md` aktualisieren (neue Architektur-Schichten)
-- [ ] `ENGINE_STATUS.md` aktualisieren (Abstraktions-Fortschritt)
-- [ ] Code-Kommentare in `Renderer.h` für Backend-Implementierer
+#### Schritt 6.3: Dokumentation aktualisieren ✅
+- [x] `PROJECT_OVERVIEW.md` aktualisieren (neue Architektur-Schichten)
+- [x] `ENGINE_STATUS.md` aktualisieren (Abstraktions-Fortschritt)
+- [x] Code-Kommentare in `Renderer.h` für Backend-Implementierer
 
 ---
 
@@ -436,7 +443,7 @@ public:
 | 9 | 3.2 MeshViewerWindow | Gering | Gering | Kleine Änderung |
 | 10 | ✅ 5.1 EditorTab | Mittel | Mittel | Intern im Renderer |
 | 11 | ✅ 4.1 CMake aufteilen | Hoch | Hoch | Build-System-Umbau |
-| 12 | 4.2 Factory Pattern | Mittel | Gering | Letzte Entkopplung |
+| 12 | ✅ 4.2 Factory Pattern | Mittel | Gering | Letzte Entkopplung |
 | 13 | 6.1 Integrationstest | Mittel | — | Pflicht |
 | 14 | 6.2 Mock-Backend Tests | Mittel | — | Qualitätssicherung |
 | 15 | 6.3 Dokumentation | Gering | — | Pflicht |

@@ -189,7 +189,7 @@ set(CMAKE_CXX_STANDARD 20)
 | `Core`          | SHARED  | Logger, OpenAL::OpenAL, SDL3::SDL3          |
 | `Diagnostics`   | SHARED  | Core, Logger                                |
 | `AssetManager`  | SHARED  | Diagnostics, Logger, Core, SDL3::SDL3, assimp (static) |
-| `Renderer`      | SHARED  | SDL3::SDL3, freetype (static), Logger, Core, AssetManager |
+| `Renderer`      | SHARED  | RendererCore (OBJECT) + SDL3::SDL3, freetype (static), Logger, Core, AssetManager. Backend über `RendererFactory` + `config.ini` wählbar |
 | `Scripting`     | SHARED  | SDL3::SDL3, Renderer, Logger, AssetManager, Diagnostics, Core, Physics, Python3 |
 | `Physics`       | STATIC  | Core, Logger                                |
 | `Engine` (exe)  | EXE     | SDL3, Renderer, Logger, AssetManager, Diagnostics, Core, Scripting, Physics, Python3 |
@@ -236,7 +236,7 @@ set(CMAKE_CXX_STANDARD 20)
 6.  SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)
 7.  AudioManager::Instance().initialize()   → OpenAL-Kontext
 8.  DiagnosticsManager::loadConfig()        → Fenstergröße, Fenster-Zustand
-9.  OpenGLRenderer erstellen + initialize() → SDL-Fenster + GL-Kontext
+9.  RendererFactory::createRenderer(activeBackend) → Backend aus config.ini (RHI=OpenGL|Vulkan|DirectX12)
 10. Scripting::SetRenderer(renderer)
 11. Fenstergröße/Zustand aus Config anwenden
 12. SDL_GL_SetSwapInterval(0)               → V-Sync deaktiviert
