@@ -9,6 +9,16 @@
 
 - `OpenGLRenderer`: Das Compositing der Szenen-FBO in `render()` blitted jetzt gezielt nur den `ViewportContentRect` statt immer die komplette Fläche. Dadurch wird die 3D-Ansicht nur im verfügbaren Viewport-Bereich (abzüglich UI-Docks) dargestellt.
 - `OpenGLRenderer`: In `renderWorld()` wird nach den Shadow-Pässen der Viewport jetzt wieder inklusive Content-Rect-Offset gesetzt (nicht mehr auf `(0,0)`), damit die Welt nicht in die linke untere Ecke rutscht.
+- `ViewportUI`: Start der Umsetzung mit neuer Klasse `ViewportUIManager` (Dateien `src/Renderer/ViewportUIManager.h/.cpp`) und erster Integration in `OpenGLRenderer` (Übergabe des `ViewportContentRect` pro Frame).
+- `ViewportUI`: Nächster Schritt umgesetzt: `renderViewportUI()` rendert jetzt das Root-Widget viewport-lokal in den aktiven Viewport-Tab-FBO (mit `glViewport`/`glScissor`-Clipping) vor dem finalen Blit.
+- `ViewportUI`: Input-Routing im Main-Loop erweitert: Nach Editor-UI werden jetzt Viewport-UI-Ereignisse (`MouseDown/Up`, Scroll, Text, KeyDown) verarbeitet; `isOverUI` berücksichtigt Editor-UI **oder** Viewport-UI.
+- `Scripting/UI`: `engine.ui` unterstützt jetzt dynamisches Spawnen/Ersetzen und Entfernen von Widgets zur Laufzeit über `spawn_widget(widget_id, asset_path, tab_id="")` und `remove_widget(widget_id)`.
+- `Widget Editor`: Content-Browser-Integration erweitert – neuer Kontextmenüpunkt **New Widget** erzeugt ein Widget-Asset (Typ `AssetType::Widget`) im Projekt-Content und öffnet es direkt in einem eigenen Editor-Tab.
+- `Widget Editor`: Doppelklick auf Widget-Assets im Content Browser öffnet jetzt einen dedizierten Widget-Editor-Tab und lädt das Widget zur Bearbeitung/Vorschau.
+- `Widget Editor`: Tab-Workspace ausgebaut – linker Dock-Bereich zeigt verfügbare Steuerelemente + Element-Hierarchie, rechter Dock-Bereich zeigt Asset/Widget-Details, die Mitte enthält eine dedizierte Preview-Canvas mit Fill-Color-Rahmen.
+- `Widget Editor`: Für Widget-Editor-Tabs wird im Renderer die 3D-Weltpass-Ausgabe unterdrückt; der tab-eigene Framebuffer wird als reine Widget-Workspace-Fläche genutzt.
+- `Widget Editor`: TitleBar-Tabs werden jetzt beim Hinzufügen/Entfernen zentral neu aufgebaut, damit neue Widget-Editor-Tabs immer sichtbar sind wie beim Mesh Viewer.
+- `Build/CMake`: Multi-Config-Ausgabeverzeichnisse werden nun pro Konfiguration getrennt (`${CMAKE_BINARY_DIR}/Debug|Release|...`) statt zusammengeführt, um Debug/Release-Lib-Kollisionen (MSVC `LNK2038`) zu vermeiden.
 
 ## Inhaltsverzeichnis
 

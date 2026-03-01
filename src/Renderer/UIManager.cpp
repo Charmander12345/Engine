@@ -2782,6 +2782,7 @@ static const char* iconForAssetType(AssetType type)
     case AssetType::Audio:    return "sound.png";
     case AssetType::Script:   return "script.png";
     case AssetType::Shader:   return "shader.png";
+    case AssetType::Widget:   return "texture.png";
     case AssetType::Skybox:   return "texture.png";
     default:                  return "texture.png";
     }
@@ -3562,6 +3563,11 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
                 if (assetType == AssetType::Model3D && uiMgr->getRenderer())
                 {
                     uiMgr->getRenderer()->openMeshViewer(relPath);
+                    return;
+                }
+                if (assetType == AssetType::Widget)
+                {
+                    uiMgr->openWidgetEditorPopup(relPath);
                     return;
                 }
                 Logger::Instance().log(Logger::Category::UI,
@@ -5443,6 +5449,288 @@ bool UIManager::isOverContentBrowserGrid(const Vec2& screenPos) const
             return true;
     }
     return false;
+}
+
+void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
+{
+    if (!m_renderer || relativeAssetPath.empty())
+    {
+        return;
+    }
+
+    std::string tabId = "WidgetEditor." + relativeAssetPath;
+    std::replace_if(tabId.begin(), tabId.end(), [](char c)
+        {
+            return c == '/' || c == '\\' || c == ':' || c == ' ' || c == '.';
+        }, '_');
+
+    const std::string fileName = std::filesystem::path(relativeAssetPath).filename().string();
+    const std::string tabName = fileName.empty() ? "Widget Editor" : ("Widget: " + fileName);
+    m_renderer->addTab(tabId, tabName, true);
+    m_renderer->setActiveTab(tabId);
+
+    auto& assetManager = AssetManager::Instance();
+    const int assetId = assetManager.loadAsset(relativeAssetPath, AssetType::Widget, AssetManager::Sync);
+    if (assetId == 0)
+    {
+        showToastMessage("Failed to load widget: " + relativeAssetPath, 3.0f);
+        return;
+    }
+
+    auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(assetId));
+    if (!asset)
+    {
+        showToastMessage("Widget asset missing after load: " + relativeAssetPath, 3.0f);
+        return;
+    }
+
+    auto widget = m_renderer->createWidgetFromAsset(asset);
+    if (!widget)
+    {
+        showToastMessage("Failed to create widget from asset: " + relativeAssetPath, 3.0f);
+        return;
+    }
+
+    const std::string contentWidgetId = "WidgetEditor.Content." + tabId;
+    const std::string leftWidgetId = "WidgetEditor.Left." + tabId;
+    const std::string rightWidgetId = "WidgetEditor.Right." + tabId;
+    const std::string canvasWidgetId = "WidgetEditor.Canvas." + tabId;
+
+    unregisterWidget(contentWidgetId);
+    unregisterWidget(leftWidgetId);
+    unregisterWidget(rightWidgetId);
+    unregisterWidget(canvasWidgetId);
+
+    auto makeText = [](const std::string& id, const std::string& text, float fontSize, const Vec4& color, float minH = 20.0f)
+    {
+        WidgetElement line{};
+        line.id = id;
+        line.type = WidgetElementType::Text;
+        line.text = text;
+        line.font = "default.ttf";
+        line.fontSize = fontSize;
+        line.textColor = color;
+        line.textAlignH = TextAlignH::Left;
+        line.textAlignV = TextAlignV::Center;
+        line.fillX = true;
+        line.minSize = Vec2{ 0.0f, minH };
+        line.runtimeOnly = true;
+        return line;
+    };
+
+    // Left panel: available controls + hierarchy
+    {
+        std::vector<std::string> hierarchyLines;
+        const std::function<void(const std::vector<WidgetElement>&, int)> collectHierarchy =
+            [&](const std::vector<WidgetElement>& elements, int depth)
+        {
+            for (const auto& el : elements)
+            {
+                std::string label(depth * 2, ' ');
+                label += !el.id.empty() ? el.id : std::string("<unnamed>");
+                hierarchyLines.push_back(std::move(label));
+                collectHierarchy(el.children, depth + 1);
+            }
+        };
+        collectHierarchy(widget->getElements(), 0);
+
+        auto leftWidget = std::make_shared<Widget>();
+        leftWidget->setName(leftWidgetId);
+        leftWidget->setAnchor(WidgetAnchor::TopLeft);
+        leftWidget->setFillY(true);
+        leftWidget->setSizePixels(Vec2{ 280.0f, 0.0f });
+        leftWidget->setZOrder(2);
+
+        WidgetElement root{};
+        root.id = "WidgetEditor.Left.Root";
+        root.type = WidgetElementType::StackPanel;
+        root.from = Vec2{ 0.0f, 0.0f };
+        root.to = Vec2{ 1.0f, 1.0f };
+        root.fillX = true;
+        root.fillY = true;
+        root.orientation = StackOrientation::Vertical;
+        root.padding = Vec2{ 10.0f, 8.0f };
+        root.color = Vec4{ 0.12f, 0.13f, 0.17f, 0.96f };
+        root.runtimeOnly = true;
+
+        root.children.push_back(makeText("WidgetEditor.Left.Title", "Verfuegbare Steuerelemente", 14.0f, Vec4{ 0.95f, 0.95f, 0.98f, 1.0f }, 24.0f));
+
+        const std::vector<std::string> controls = {
+            "Panel", "Text", "Button", "Image", "EntryBar", "StackPanel", "Grid", "Slider", "CheckBox", "DropDown", "ColorPicker"
+        };
+        for (size_t i = 0; i < controls.size(); ++i)
+        {
+            root.children.push_back(makeText("WidgetEditor.Left.Control." + std::to_string(i), "- " + controls[i], 12.0f, Vec4{ 0.78f, 0.80f, 0.85f, 1.0f }, 18.0f));
+        }
+
+        WidgetElement sep{};
+        sep.id = "WidgetEditor.Left.Sep";
+        sep.type = WidgetElementType::Panel;
+        sep.fillX = true;
+        sep.minSize = Vec2{ 0.0f, 1.0f };
+        sep.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.8f };
+        sep.runtimeOnly = true;
+        root.children.push_back(std::move(sep));
+
+        root.children.push_back(makeText("WidgetEditor.Left.TreeTitle", "Hierarchie", 14.0f, Vec4{ 0.95f, 0.95f, 0.98f, 1.0f }, 24.0f));
+
+        WidgetElement hierarchyStack{};
+        hierarchyStack.id = "WidgetEditor.Left.Tree";
+        hierarchyStack.type = WidgetElementType::StackPanel;
+        hierarchyStack.fillX = true;
+        hierarchyStack.fillY = true;
+        hierarchyStack.scrollable = true;
+        hierarchyStack.orientation = StackOrientation::Vertical;
+        hierarchyStack.padding = Vec2{ 2.0f, 2.0f };
+        hierarchyStack.color = Vec4{ 0.08f, 0.09f, 0.12f, 0.75f };
+        hierarchyStack.runtimeOnly = true;
+        for (size_t i = 0; i < hierarchyLines.size(); ++i)
+        {
+            hierarchyStack.children.push_back(makeText("WidgetEditor.Left.TreeLine." + std::to_string(i), hierarchyLines[i], 11.0f, Vec4{ 0.75f, 0.78f, 0.84f, 1.0f }, 16.0f));
+        }
+        root.children.push_back(std::move(hierarchyStack));
+
+        leftWidget->setElements({ std::move(root) });
+        registerWidget(leftWidgetId, leftWidget, tabId);
+    }
+
+    // Right panel: details
+    {
+        auto rightWidget = std::make_shared<Widget>();
+        rightWidget->setName(rightWidgetId);
+        rightWidget->setAnchor(WidgetAnchor::TopRight);
+        rightWidget->setFillY(true);
+        rightWidget->setSizePixels(Vec2{ 300.0f, 0.0f });
+        rightWidget->setZOrder(2);
+
+        const Vec2 widgetSize = widget->getSizePixels();
+
+        WidgetElement root{};
+        root.id = "WidgetEditor.Right.Root";
+        root.type = WidgetElementType::StackPanel;
+        root.from = Vec2{ 0.0f, 0.0f };
+        root.to = Vec2{ 1.0f, 1.0f };
+        root.fillX = true;
+        root.fillY = true;
+        root.orientation = StackOrientation::Vertical;
+        root.padding = Vec2{ 10.0f, 8.0f };
+        root.color = Vec4{ 0.12f, 0.13f, 0.17f, 0.96f };
+        root.scrollable = true;
+        root.runtimeOnly = true;
+
+        root.children.push_back(makeText("WidgetEditor.Right.Title", "Details", 14.0f, Vec4{ 0.95f, 0.95f, 0.98f, 1.0f }, 24.0f));
+        root.children.push_back(makeText("WidgetEditor.Right.Asset", "Asset: " + relativeAssetPath, 12.0f, Vec4{ 0.78f, 0.80f, 0.85f, 1.0f }));
+        root.children.push_back(makeText("WidgetEditor.Right.Name", "Name: " + widget->getName(), 12.0f, Vec4{ 0.78f, 0.80f, 0.85f, 1.0f }));
+        root.children.push_back(makeText("WidgetEditor.Right.Size", "Size: " + std::to_string(static_cast<int>(widgetSize.x)) + " x " + std::to_string(static_cast<int>(widgetSize.y)), 12.0f, Vec4{ 0.78f, 0.80f, 0.85f, 1.0f }));
+        root.children.push_back(makeText("WidgetEditor.Right.Hint", "Waehle Elemente links aus, um spaeter Property-Editing zu erweitern.", 11.0f, Vec4{ 0.62f, 0.66f, 0.75f, 1.0f }, 36.0f));
+
+        rightWidget->setElements({ std::move(root) });
+        registerWidget(rightWidgetId, rightWidget, tabId);
+    }
+
+    // Center canvas background / fill area
+    {
+        auto canvasWidget = std::make_shared<Widget>();
+        canvasWidget->setName(canvasWidgetId);
+        canvasWidget->setAnchor(WidgetAnchor::TopLeft);
+        canvasWidget->setFillX(true);
+        canvasWidget->setFillY(true);
+        canvasWidget->setZOrder(1);
+
+        WidgetElement root{};
+        root.id = "WidgetEditor.Canvas.Root";
+        root.type = WidgetElementType::Panel;
+        root.from = Vec2{ 0.0f, 0.0f };
+        root.to = Vec2{ 1.0f, 1.0f };
+        root.fillX = true;
+        root.fillY = true;
+        root.color = Vec4{ 0.08f, 0.09f, 0.12f, 1.0f };
+        root.runtimeOnly = true;
+
+        WidgetElement previewArea{};
+        previewArea.id = "WidgetEditor.Canvas.PreviewArea";
+        previewArea.type = WidgetElementType::Panel;
+        previewArea.from = Vec2{ 0.24f, 0.08f };
+        previewArea.to = Vec2{ 0.76f, 0.92f };
+        previewArea.color = Vec4{ 0.16f, 0.17f, 0.22f, 1.0f };
+        previewArea.runtimeOnly = true;
+        root.children.push_back(std::move(previewArea));
+
+        canvasWidget->setElements({ std::move(root) });
+        registerWidget(canvasWidgetId, canvasWidget, tabId);
+    }
+
+    if (SDL_Window* w = m_renderer->window())
+    {
+        int ww = 0;
+        int wh = 0;
+        SDL_GetWindowSizeInPixels(w, &ww, &wh);
+        const float leftW = 280.0f;
+        const float rightW = 300.0f;
+        const float margin = 24.0f;
+        const float contentX = leftW + margin;
+        const float contentY = 74.0f;
+        const float contentW = std::max(320.0f, static_cast<float>(ww) - leftW - rightW - margin * 2.0f);
+        const float contentH = std::max(220.0f, static_cast<float>(wh) - 120.0f);
+
+        Vec2 previewSize = widget->getSizePixels();
+        if (previewSize.x <= 0.0f) previewSize.x = contentW * 0.8f;
+        if (previewSize.y <= 0.0f) previewSize.y = contentH * 0.8f;
+        previewSize.x = std::min(previewSize.x, contentW);
+        previewSize.y = std::min(previewSize.y, contentH);
+
+        widget->setAnchor(WidgetAnchor::TopLeft);
+        widget->setAbsolutePosition(true);
+        widget->setSizePixels(previewSize);
+        widget->setPositionPixels(Vec2{
+            contentX + std::max(0.0f, (contentW - previewSize.x) * 0.5f),
+            contentY + std::max(0.0f, (contentH - previewSize.y) * 0.5f)
+        });
+        widget->setZOrder(4);
+    }
+
+    const std::string tabBtnId = "TitleBar.Tab." + tabId;
+    const std::string closeBtnId = "TitleBar.TabClose." + tabId;
+
+    registerClickEvent(tabBtnId, [this, tabId]()
+    {
+        if (m_renderer)
+        {
+            m_renderer->setActiveTab(tabId);
+        }
+        markAllWidgetsDirty();
+    });
+
+    registerClickEvent(closeBtnId, [this, tabId, tabBtnId, closeBtnId, contentWidgetId, leftWidgetId, rightWidgetId, canvasWidgetId]()
+    {
+        if (!m_renderer)
+        {
+            return;
+        }
+        if (m_renderer->getActiveTabId() == tabId)
+        {
+            m_renderer->setActiveTab("Viewport");
+        }
+
+        unregisterWidget(contentWidgetId);
+        unregisterWidget(leftWidgetId);
+        unregisterWidget(rightWidgetId);
+        unregisterWidget(canvasWidgetId);
+
+        if (auto* tabsStack = findElementById("TitleBar.Tabs"))
+        {
+            tabsStack->children.erase(
+                std::remove_if(tabsStack->children.begin(), tabsStack->children.end(),
+                    [&](const WidgetElement& el) { return el.id == tabBtnId || el.id == closeBtnId; }),
+                tabsStack->children.end());
+        }
+
+        m_renderer->removeTab(tabId);
+        markAllWidgetsDirty();
+    });
+
+    registerWidget(contentWidgetId, widget, tabId);
+    markAllWidgetsDirty();
 }
 
 void UIManager::openLandscapeManagerPopup()

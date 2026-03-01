@@ -551,6 +551,10 @@ void OpenGLRenderer::render()
         if (activeTab)
         {
             renderWorld();
+            if (activeTab->id == "Viewport")
+            {
+                renderViewportUI();
+            }
         }
     }
     const uint64_t worldEnd = SDL_GetPerformanceCounter();
@@ -663,6 +667,14 @@ void OpenGLRenderer::renderWorld()
         );
         m_lastProjectionWidth = width;
         m_lastProjectionHeight = height;
+    }
+
+    // Widget editor tabs render only their UI workspace in the center canvas.
+    // The tab framebuffer is still cleared each frame to provide the fill color
+    // around the preview area, but no 3D world content is drawn.
+    if (m_activeTabId.rfind("WidgetEditor_", 0) == 0)
+    {
+        return;
     }
 
     auto& diagnostics = DiagnosticsManager::Instance();
@@ -2285,53 +2297,6 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
     // Create a new editor tab for this mesh viewer
     addTab(assetPath, displayName, true);
 
-    // Create a dynamic tab button in the TitleBar.Tabs StackPanel
-    {
-        auto* tabsStack = m_uiManager.findElementById("TitleBar.Tabs");
-        if (tabsStack)
-        {
-            // Tab button
-            WidgetElement tabBtn{};
-            tabBtn.type = WidgetElementType::Button;
-            tabBtn.id = "TitleBar.Tab." + assetPath;
-            tabBtn.clickEvent = "TitleBar.Tab." + assetPath;
-            tabBtn.text = displayName;
-            tabBtn.font = "default.ttf";
-            tabBtn.fontSize = 12.0f;
-            tabBtn.textAlignH = TextAlignH::Center;
-            tabBtn.textAlignV = TextAlignV::Center;
-            tabBtn.fillY = true;
-            tabBtn.color = Vec4{ 0.14f, 0.14f, 0.14f, 1.0f };
-            tabBtn.hoverColor = Vec4{ 0.2f, 0.2f, 0.2f, 1.0f };
-            tabBtn.textColor = Vec4{ 0.9f, 0.9f, 0.9f, 1.0f };
-            tabBtn.minSize = Vec2{ 90.0f, 0.0f };
-            tabBtn.padding = Vec2{ 6.0f, 0.0f };
-            tabBtn.isHitTestable = true;
-            tabBtn.runtimeOnly = true;
-            tabsStack->children.push_back(std::move(tabBtn));
-
-            // Close button (×) next to the tab
-            WidgetElement closeBtn{};
-            closeBtn.type = WidgetElementType::Button;
-            closeBtn.id = "TitleBar.TabClose." + assetPath;
-            closeBtn.clickEvent = "TitleBar.TabClose." + assetPath;
-            closeBtn.text = "x";
-            closeBtn.font = "default.ttf";
-            closeBtn.fontSize = 12.0f;
-            closeBtn.textAlignH = TextAlignH::Center;
-            closeBtn.textAlignV = TextAlignV::Center;
-            closeBtn.fillY = true;
-            closeBtn.color = Vec4{ 0.14f, 0.14f, 0.14f, 1.0f };
-            closeBtn.hoverColor = Vec4{ 0.6f, 0.15f, 0.15f, 1.0f };
-            closeBtn.textColor = Vec4{ 0.7f, 0.7f, 0.7f, 1.0f };
-            closeBtn.minSize = Vec2{ 24.0f, 0.0f };
-            closeBtn.padding = Vec2{ 2.0f, 0.0f };
-            closeBtn.isHitTestable = true;
-            closeBtn.runtimeOnly = true;
-            tabsStack->children.push_back(std::move(closeBtn));
-        }
-    }
-
     // Register click events for the tab button and close button
     m_uiManager.registerClickEvent("TitleBar.Tab." + assetPath, [this, assetPath]()
     {
@@ -2687,6 +2652,157 @@ MeshViewerWindow* OpenGLRenderer::getMeshViewer(const std::string& assetPath)
     return (it != m_meshViewers.end()) ? it->second.get() : nullptr;
 }
 
+void OpenGLRenderer::renderViewportUI()
+{
+    if (!m_viewportUIManager.isVisible())
+    {
+        return;
+    }
+
+    auto rootWidget = m_viewportUIManager.getRootWidget();
+    if (!rootWidget)
+    {
+        return;
+    }
+
+    const Vec4 vpRect = m_viewportUIManager.getViewportRect();
+    if (vpRect.z <= 0.0f || vpRect.w <= 0.0f)
+    {
+        return;
+    }
+
+    if (!m_textRenderer)
+    {
+        m_textRenderer = std::static_pointer_cast<OpenGLTextRenderer>(m_resourceManager.prepareTextRenderer());
+    }
+
+    if (!m_textRenderer || !ensureUIQuadRenderer())
+    {
+        return;
+    }
+
+    if (m_viewportUIManager.needsLayoutUpdate())
+    {
+        m_viewportUIManager.updateLayout([this](const std::string& text, float scale)
+            {
+                return m_textRenderer ? m_textRenderer->measureText(text, scale) : Vec2{};
+            });
+    }
+
+    ensureUIShaderDefaults();
+
+    const GLint viewportX = static_cast<GLint>(vpRect.x);
+    const GLint viewportY = static_cast<GLint>(m_cachedWindowHeight - vpRect.y - vpRect.w);
+    const GLsizei viewportW = static_cast<GLsizei>(vpRect.z);
+    const GLsizei viewportH = static_cast<GLsizei>(vpRect.w);
+
+    GLint previousViewport[4]{};
+    glGetIntegerv(GL_VIEWPORT, previousViewport);
+
+    const GLboolean depthEnabled = glIsEnabled(GL_DEPTH_TEST);
+    const GLboolean blendEnabled = glIsEnabled(GL_BLEND);
+    const GLboolean scissorEnabled = glIsEnabled(GL_SCISSOR_TEST);
+
+    glDisable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(viewportX, viewportY, viewportW, viewportH);
+    glViewport(viewportX, viewportY, viewportW, viewportH);
+
+    m_textRenderer->setScreenSize(static_cast<int>(vpRect.z), static_cast<int>(vpRect.w));
+    const glm::mat4 uiProjection = glm::ortho(0.0f, vpRect.z, vpRect.w, 0.0f);
+
+    const auto renderElement = [&](const auto& self, const WidgetElement& element,
+        float parentX, float parentY, float parentW, float parentH) -> void
+    {
+        const float x0 = element.hasComputedPosition ? element.computedPositionPixels.x : (parentX + element.from.x * parentW);
+        const float y0 = element.hasComputedPosition ? element.computedPositionPixels.y : (parentY + element.from.y * parentH);
+        const float widthPx = element.hasComputedSize ? element.computedSizePixels.x : (parentW * (element.to.x - element.from.x));
+        const float heightPx = element.hasComputedSize ? element.computedSizePixels.y : (parentH * (element.to.y - element.from.y));
+        const float x1 = x0 + widthPx;
+        const float y1 = y0 + heightPx;
+
+        if (element.type == WidgetElementType::Panel)
+        {
+            const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+            const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+            drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, getUIQuadProgram(vertexPath, fragmentPath), element.hoverColor, element.isHovered);
+            return;
+        }
+
+        if (element.type == WidgetElementType::Text)
+        {
+            const float scale = (element.fontSize > 0.0f) ? (element.fontSize / 48.0f) : (14.0f / 48.0f);
+            m_textRenderer->drawText(element.text, Vec2{ x0 + element.padding.x, y0 + element.padding.y }, scale, element.textColor);
+            return;
+        }
+
+        if (element.type == WidgetElementType::Button)
+        {
+            const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
+            const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);
+            drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, getUIQuadProgram(vertexPath, fragmentPath), element.hoverColor, element.isHovered);
+
+            if (!element.text.empty())
+            {
+                const float scale = (element.fontSize > 0.0f) ? (element.fontSize / 48.0f) : (14.0f / 48.0f);
+                m_textRenderer->drawText(element.text, Vec2{ x0 + element.padding.x, y0 + element.padding.y }, scale, element.textColor);
+            }
+            return;
+        }
+
+        if (element.type == WidgetElementType::Image)
+        {
+            const GLuint tex = (element.textureId != 0)
+                ? static_cast<GLuint>(element.textureId)
+                : getOrLoadUITexture(element.imagePath);
+            if (tex != 0)
+            {
+                drawUIImage(x0, y0, x1, y1, tex, uiProjection, element.color, true);
+            }
+            return;
+        }
+
+        for (const auto& child : element.children)
+        {
+            self(self, child, x0, y0, widthPx, heightPx);
+        }
+    };
+
+    Vec2 widgetSize = rootWidget->getSizePixels();
+    if (widgetSize.x <= 0.0f)
+    {
+        widgetSize.x = vpRect.z;
+    }
+    if (widgetSize.y <= 0.0f)
+    {
+        widgetSize.y = vpRect.w;
+    }
+
+    for (const auto& element : rootWidget->getElements())
+    {
+        renderElement(renderElement, element, 0.0f, 0.0f, widgetSize.x, widgetSize.y);
+    }
+
+    m_viewportUIManager.clearRenderDirty();
+
+    if (!scissorEnabled)
+    {
+        glDisable(GL_SCISSOR_TEST);
+    }
+    if (!blendEnabled)
+    {
+        glDisable(GL_BLEND);
+    }
+    if (depthEnabled)
+    {
+        glEnable(GL_DEPTH_TEST);
+    }
+    glViewport(previousViewport[0], previousViewport[1], previousViewport[2], previousViewport[3]);
+}
+
 void OpenGLRenderer::renderUI()
 {
     const uint64_t freq = SDL_GetPerformanceFrequency();
@@ -2727,6 +2843,11 @@ void OpenGLRenderer::renderUI()
     // use in renderWorld() on the next frame so projection uses the correct
     // aspect ratio and the scene is not distorted by editor panel sizes.
     m_cachedViewportContentRect = m_uiManager.getViewportContentRect();
+    m_viewportUIManager.setViewportRect(
+        m_cachedViewportContentRect.x,
+        m_cachedViewportContentRect.y,
+        m_cachedViewportContentRect.z,
+        m_cachedViewportContentRect.w);
 
     const bool debugToggled = (m_uiDebugEnabled != m_uiDebugEnabledPrev);
     m_uiDebugEnabledPrev = m_uiDebugEnabled;
@@ -6074,6 +6195,8 @@ void OpenGLRenderer::addTab(const std::string& id, const std::string& tabName, b
         m_activeTabId = id;
     }
     m_editorTabs.push_back(std::move(tab));
+
+    rebuildTitleBarTabs();
 }
 
 void OpenGLRenderer::removeTab(const std::string& id)
@@ -6092,6 +6215,87 @@ void OpenGLRenderer::removeTab(const std::string& id)
         m_editorTabs.front().active = true;
         m_activeTabId = m_editorTabs.front().id;
     }
+
+    rebuildTitleBarTabs();
+}
+
+void OpenGLRenderer::rebuildTitleBarTabs()
+{
+    auto* tabsStack = m_uiManager.findElementById("TitleBar.Tabs");
+    if (!tabsStack)
+    {
+        return;
+    }
+
+    const auto isDynamicTabButton = [](const WidgetElement& el)
+    {
+        if (!el.runtimeOnly)
+            return false;
+        const bool isTab = el.id.rfind("TitleBar.Tab.", 0) == 0;
+        const bool isClose = el.id.rfind("TitleBar.TabClose.", 0) == 0;
+        if (!isTab && !isClose)
+            return false;
+        if (el.id == "TitleBar.Tab.Viewport" || el.id == "TitleBar.TabClose.Viewport")
+            return false;
+        return true;
+    };
+
+    tabsStack->children.erase(
+        std::remove_if(tabsStack->children.begin(), tabsStack->children.end(), isDynamicTabButton),
+        tabsStack->children.end());
+
+    for (const auto& tab : m_editorTabs)
+    {
+        if (tab.id == "Viewport")
+        {
+            continue;
+        }
+
+        const std::string tabBtnId = "TitleBar.Tab." + tab.id;
+        WidgetElement tabBtn{};
+        tabBtn.type = WidgetElementType::Button;
+        tabBtn.id = tabBtnId;
+        tabBtn.clickEvent = tabBtnId;
+        tabBtn.text = tab.name;
+        tabBtn.font = "default.ttf";
+        tabBtn.fontSize = 12.0f;
+        tabBtn.textAlignH = TextAlignH::Center;
+        tabBtn.textAlignV = TextAlignV::Center;
+        tabBtn.fillY = true;
+        tabBtn.color = Vec4{ 0.14f, 0.14f, 0.14f, 1.0f };
+        tabBtn.hoverColor = Vec4{ 0.2f, 0.2f, 0.2f, 1.0f };
+        tabBtn.textColor = Vec4{ 0.9f, 0.9f, 0.9f, 1.0f };
+        tabBtn.minSize = Vec2{ 90.0f, 0.0f };
+        tabBtn.padding = Vec2{ 6.0f, 0.0f };
+        tabBtn.isHitTestable = true;
+        tabBtn.runtimeOnly = true;
+        tabsStack->children.push_back(std::move(tabBtn));
+
+        if (tab.closable)
+        {
+            const std::string closeBtnId = "TitleBar.TabClose." + tab.id;
+            WidgetElement closeBtn{};
+            closeBtn.type = WidgetElementType::Button;
+            closeBtn.id = closeBtnId;
+            closeBtn.clickEvent = closeBtnId;
+            closeBtn.text = "x";
+            closeBtn.font = "default.ttf";
+            closeBtn.fontSize = 12.0f;
+            closeBtn.textAlignH = TextAlignH::Center;
+            closeBtn.textAlignV = TextAlignV::Center;
+            closeBtn.fillY = true;
+            closeBtn.color = Vec4{ 0.14f, 0.14f, 0.14f, 1.0f };
+            closeBtn.hoverColor = Vec4{ 0.6f, 0.15f, 0.15f, 1.0f };
+            closeBtn.textColor = Vec4{ 0.7f, 0.7f, 0.7f, 1.0f };
+            closeBtn.minSize = Vec2{ 24.0f, 0.0f };
+            closeBtn.padding = Vec2{ 2.0f, 0.0f };
+            closeBtn.isHitTestable = true;
+            closeBtn.runtimeOnly = true;
+            tabsStack->children.push_back(std::move(closeBtn));
+        }
+    }
+
+    m_uiManager.markAllWidgetsDirty();
 }
 
 void OpenGLRenderer::setActiveTab(const std::string& id)

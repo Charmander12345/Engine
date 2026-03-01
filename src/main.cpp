@@ -15,6 +15,7 @@
 
 #include "Renderer/Renderer.h"
 #include "Renderer/RendererFactory.h"
+#include "Renderer/ViewportUIManager.h"
 #include "Renderer/SplashWindow.h"
 #include "Renderer/UIWidget.h"
 #include "Renderer/EditorWindows/PopupWindow.h"
@@ -1805,7 +1806,15 @@ int main()
             {
                 auto& uiManager = renderer->getUIManager();
                 uiManager.setMousePosition(mousePosPixels);
-                isOverUI = uiManager.isPointerOverUI(mousePosPixels);
+                if (auto* viewportUI = renderer->getViewportUIManagerPtr())
+                {
+                    viewportUI->setMousePosition(mousePosPixels);
+                    isOverUI = uiManager.isPointerOverUI(mousePosPixels) || viewportUI->isPointerOverViewportUI(mousePosPixels);
+                }
+                else
+                {
+                    isOverUI = uiManager.isPointerOverUI(mousePosPixels);
+                }
             }
         }
 
@@ -1837,7 +1846,15 @@ int main()
                     {
                         auto& uiManager = renderer->getUIManager();
                         uiManager.setMousePosition(mousePosPixels);
-                        isOverUI = uiManager.isPointerOverUI(mousePosPixels);
+                        if (auto* viewportUI = renderer->getViewportUIManagerPtr())
+                        {
+                            viewportUI->setMousePosition(mousePosPixels);
+                            isOverUI = uiManager.isPointerOverUI(mousePosPixels) || viewportUI->isPointerOverViewportUI(mousePosPixels);
+                        }
+                        else
+                        {
+                            isOverUI = uiManager.isPointerOverUI(mousePosPixels);
+                        }
 
                         // Update gizmo drag if active
                         if (renderer->isGizmoDragging())
@@ -1861,9 +1878,21 @@ int main()
                     hasMousePos = true;
                     auto& uiManager = renderer->getUIManager();
                     uiManager.setMousePosition(mousePos);
-                    isOverUI = uiManager.isPointerOverUI(mousePos);
+                    ViewportUIManager* viewportUI = renderer->getViewportUIManagerPtr();
+                    if (viewportUI)
+                    {
+                        viewportUI->setMousePosition(mousePos);
+                    }
+                    const bool overEditorUI = uiManager.isPointerOverUI(mousePos);
+                    const bool overViewportUI = viewportUI ? viewportUI->isPointerOverViewportUI(mousePos) : false;
+                    isOverUI = overEditorUI || overViewportUI;
                     if (uiManager.handleMouseDown(mousePos, event.button.button))
                     {
+                        continue;
+                    }
+                    if (viewportUI && viewportUI->handleMouseDown(mousePos, event.button.button))
+                    {
+                        isOverUI = true;
                         continue;
                     }
                     if (!isOverUI)
@@ -1900,6 +1929,11 @@ int main()
                 {
                     const Vec2 mousePos{ static_cast<float>(event.button.x), static_cast<float>(event.button.y) };
                     auto& uiManager = renderer->getUIManager();
+                    ViewportUIManager* viewportUI = renderer->getViewportUIManagerPtr();
+                    if (viewportUI)
+                    {
+                        viewportUI->setMousePosition(mousePos);
+                    }
                     if (uiManager.isDragging())
                     {
                         uiManager.handleMouseUp(mousePos, event.button.button);
@@ -1908,6 +1942,10 @@ int main()
                     {
                         // Always forward mouse-up so deferred clicks on draggable elements fire
                         uiManager.handleMouseUp(mousePos, event.button.button);
+                        if (viewportUI && viewportUI->handleMouseUp(mousePos, event.button.button))
+                        {
+                            continue;
+                        }
                         if (renderer->isGizmoDragging())
                         {
                             renderer->endGizmoDrag();
@@ -1928,7 +1966,15 @@ int main()
                     hasMousePos = true;
                     auto& uiManager = renderer->getUIManager();
                     uiManager.setMousePosition(mousePos);
-                    isOverUI = uiManager.isPointerOverUI(mousePos);
+                    if (auto* viewportUI = renderer->getViewportUIManagerPtr())
+                    {
+                        viewportUI->setMousePosition(mousePos);
+                        isOverUI = uiManager.isPointerOverUI(mousePos) || viewportUI->isPointerOverViewportUI(mousePos);
+                    }
+                    else
+                    {
+                        isOverUI = uiManager.isPointerOverUI(mousePos);
+                    }
 
                     // Right-click context menu on Content Browser grid
                     if (isOverUI && uiManager.isOverContentBrowserGrid(mousePos))
@@ -2066,6 +2112,93 @@ int main()
                                     uiMgr.refreshContentBrowser();
                                     uiMgr.showToastMessage("Created: " + fileName, 3.0f);
                                 }
+                            }});
+
+                        items.push_back({ "New Widget", [&renderer]()
+                            {
+                                auto& uiMgr = renderer->getUIManager();
+                                const auto& folder = uiMgr.getSelectedBrowserFolder();
+                                if (folder == "__Shaders__") return;
+
+                                auto& diagnostics = DiagnosticsManager::Instance();
+                                auto& assetMgr = AssetManager::Instance();
+                                const std::filesystem::path contentDir =
+                                    std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content";
+                                const std::filesystem::path targetDir = folder.empty() ? contentDir : contentDir / folder;
+                                std::error_code ec;
+                                std::filesystem::create_directories(targetDir, ec);
+
+                                std::string baseName = "NewWidget";
+                                std::string fileName = baseName + ".asset";
+                                int counter = 1;
+                                while (std::filesystem::exists(targetDir / fileName))
+                                {
+                                    fileName = baseName + std::to_string(counter++) + ".asset";
+                                }
+
+                                const std::string displayName = std::filesystem::path(fileName).stem().string();
+                                const std::string relPath = std::filesystem::relative(targetDir / fileName, contentDir).generic_string();
+
+                                auto widgetAsset = std::make_shared<AssetData>();
+                                widgetAsset->setName(displayName);
+                                widgetAsset->setAssetType(AssetType::Widget);
+                                widgetAsset->setType(AssetType::Widget);
+                                widgetAsset->setPath(relPath);
+
+                                auto defaultWidget = std::make_shared<Widget>();
+                                defaultWidget->setName(displayName);
+                                defaultWidget->setSizePixels(Vec2{ 640.0f, 360.0f });
+
+                                WidgetElement panel{};
+                                panel.id = displayName + ".RootPanel";
+                                panel.type = WidgetElementType::Panel;
+                                panel.from = Vec2{ 0.0f, 0.0f };
+                                panel.to = Vec2{ 1.0f, 1.0f };
+                                panel.color = Vec4{ 0.08f, 0.08f, 0.10f, 0.75f };
+                                panel.isHitTestable = true;
+
+                                WidgetElement label{};
+                                label.id = displayName + ".Label";
+                                label.type = WidgetElementType::Text;
+                                label.from = Vec2{ 0.05f, 0.05f };
+                                label.to = Vec2{ 0.95f, 0.20f };
+                                label.text = "New Widget";
+                                label.font = "default.ttf";
+                                label.fontSize = 18.0f;
+                                label.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+                                panel.children.push_back(std::move(label));
+
+                                std::vector<WidgetElement> elements;
+                                elements.push_back(std::move(panel));
+                                defaultWidget->setElements(std::move(elements));
+                                widgetAsset->setData(defaultWidget->toJson());
+
+                                const unsigned int id = assetMgr.registerLoadedAsset(widgetAsset);
+                                if (id == 0)
+                                {
+                                    uiMgr.showToastMessage("Failed to create widget asset.", 3.0f);
+                                    return;
+                                }
+
+                                widgetAsset->setId(id);
+                                Asset asset;
+                                asset.ID = id;
+                                asset.type = AssetType::Widget;
+                                if (!assetMgr.saveAsset(asset, AssetManager::Sync))
+                                {
+                                    uiMgr.showToastMessage("Failed to save widget asset.", 3.0f);
+                                    return;
+                                }
+
+                                AssetRegistryEntry entry;
+                                entry.name = displayName;
+                                entry.path = relPath;
+                                entry.type = AssetType::Widget;
+                                assetMgr.registerAssetInRegistry(entry);
+
+                                uiMgr.refreshContentBrowser();
+                                uiMgr.showToastMessage("Created: " + fileName, 3.0f);
+                                uiMgr.openWidgetEditorPopup(relPath);
                             }});
 
                         items.push_back({ "New Material", [&renderer]()
@@ -2362,6 +2495,13 @@ int main()
                     {
                         continue;
                     }
+                    if (auto* viewportUI = renderer->getViewportUIManagerPtr())
+                    {
+                        if (viewportUI->handleScroll(mousePosPixels, event.wheel.y))
+                        {
+                            continue;
+                        }
+                    }
                 }
 
                 if (rightMouseDown)
@@ -2395,6 +2535,13 @@ int main()
                     if (uiManager.handleTextInput(event.text.text))
                     {
                         continue;
+                    }
+                    if (auto* viewportUI = renderer->getViewportUIManagerPtr())
+                    {
+                        if (viewportUI->handleTextInput(event.text.text))
+                        {
+                            continue;
+                        }
                     }
                 }
             }
@@ -2550,6 +2697,13 @@ int main()
                     if (uiManager.handleKeyDown(event.key.key))
                     {
                         continue;
+                    }
+                    if (auto* viewportUI = renderer->getViewportUIManagerPtr())
+                    {
+                        if (viewportUI->handleKeyDown(event.key.key))
+                        {
+                            continue;
+                        }
                     }
                 }
                 diagnostics.dispatchKeyDown(event.key.key);

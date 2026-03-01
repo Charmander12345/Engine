@@ -692,6 +692,88 @@ namespace
         Py_RETURN_TRUE;
     }
 
+    PyObject* py_spawn_widget(PyObject*, PyObject* args)
+    {
+        const char* widgetId = nullptr;
+        const char* assetPath = nullptr;
+        const char* tabId = "";
+        if (!PyArg_ParseTuple(args, "ss|s", &widgetId, &assetPath, &tabId))
+        {
+            return nullptr;
+        }
+
+        if (!s_renderer)
+        {
+            PyErr_SetString(PyExc_RuntimeError, "Renderer not available.");
+            return nullptr;
+        }
+
+        if (!widgetId || !*widgetId || !assetPath || !*assetPath)
+        {
+            PyErr_SetString(PyExc_ValueError, "widget_id and asset_path must be non-empty.");
+            return nullptr;
+        }
+
+        auto& assetManager = AssetManager::Instance();
+        const int assetId = assetManager.loadAsset(assetPath, AssetType::Widget, AssetManager::Sync);
+        if (assetId == 0)
+        {
+            Py_RETURN_FALSE;
+        }
+
+        auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(assetId));
+        if (!asset)
+        {
+            Py_RETURN_FALSE;
+        }
+
+        auto widget = s_renderer->createWidgetFromAsset(asset);
+        if (!widget)
+        {
+            Py_RETURN_FALSE;
+        }
+
+        auto& uiManager = s_renderer->getUIManager();
+        uiManager.unregisterWidget(widgetId);
+        if (tabId && *tabId)
+        {
+            uiManager.registerWidget(widgetId, widget, tabId);
+        }
+        else
+        {
+            uiManager.registerWidget(widgetId, widget);
+        }
+        uiManager.markAllWidgetsDirty();
+
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_remove_widget(PyObject*, PyObject* args)
+    {
+        const char* widgetId = nullptr;
+        if (!PyArg_ParseTuple(args, "s", &widgetId))
+        {
+            return nullptr;
+        }
+
+        if (!s_renderer)
+        {
+            PyErr_SetString(PyExc_RuntimeError, "Renderer not available.");
+            return nullptr;
+        }
+
+        if (!widgetId || !*widgetId)
+        {
+            PyErr_SetString(PyExc_ValueError, "widget_id must be non-empty.");
+            return nullptr;
+        }
+
+        auto& uiManager = s_renderer->getUIManager();
+        uiManager.unregisterWidget(widgetId);
+        uiManager.markAllWidgetsDirty();
+        Py_RETURN_TRUE;
+    }
+
     PyObject* py_set_audio_volume(PyObject*, PyObject* args)
     {
         unsigned long handle = 0;
@@ -1957,6 +2039,8 @@ namespace
         { "show_modal_message", py_show_modal_message, METH_VARARGS, "Show a blocking modal message." },
         { "close_modal_message", py_close_modal_message, METH_NOARGS, "Close the active modal message." },
         { "show_toast_message", py_show_toast_message, METH_VARARGS, "Show a toast message." },
+        { "spawn_widget", py_spawn_widget, METH_VARARGS, "Spawn or replace a UI widget from a widget asset path." },
+        { "remove_widget", py_remove_widget, METH_VARARGS, "Remove a UI widget by id." },
         { nullptr, nullptr, 0, nullptr }
     };
 

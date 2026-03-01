@@ -9,6 +9,16 @@
 
 - ✅ `OpenGLRenderer`: Viewport-Compositing verwendet jetzt den tatsächlichen Content-Rect beim Blit auf den Backbuffer. Ergebnis: Die 3D-Szene wird im verfügbaren Viewport-Bereich angezeigt statt in eine Ecke gequetscht zu wirken.
 - ✅ `OpenGLRenderer`: Nach Shadow-Rendering wird der Content-Rect-Viewport (inkl. Offset) wiederhergestellt. Dadurch bleibt die Welt an der korrekten Position im Viewport-Bereich.
+- 🟡 `ViewportUI`: Grundgerüst `ViewportUIManager` erstellt und an `OpenGLRenderer` angebunden (Viewport-Rect-Übergabe implementiert). Rendering/Input des Viewport-UI folgt in den nächsten Schritten.
+- 🟡 `ViewportUI`: Erster Renderpfad vorhanden (`renderViewportUI()` im `OpenGLRenderer`) und nur für den `Viewport`-Tab aktiv. Der Input-Routing-Teil folgt als nächster Schritt.
+- 🟡 `ViewportUI`: Input-Routing ist jetzt im Haupt-Eventloop integriert (Editor-UI → Viewport-UI → 3D). Basis-HitTest und Klick-Callbacks für hit-testable Elemente im `ViewportUIManager` sind aktiv.
+- ✅ `Scripting/UI`: Runtime-Widget-Steuerung erweitert – `engine.ui.spawn_widget(...)` und `engine.ui.remove_widget(...)` sind verfügbar; `engine.pyi` wurde synchronisiert.
+- ✅ `Widget Editor`: Widget-Assets können jetzt im Content Browser über **New Widget** erzeugt werden (`AssetType::Widget`) und erscheinen danach direkt in Tree/Grid.
+- ✅ `Widget Editor`: Doppelklick auf ein Widget-Asset öffnet nun einen eigenen Widget-Editor-Tab; das Asset wird geladen und tab-scoped dargestellt.
+- ✅ `Widget Editor`: Tab-Layout jetzt im Editor-Stil (links Controls+Hierarchie, rechts Details, Mitte Preview-Center mit Fill-Color-Hintergrund).
+- ✅ `Widget Editor`: Widget-Editor-Tabs nutzen den tab-spezifischen Framebuffer als reine Workspace-Fläche (kein 3D-Welt-Renderpass in diesen Tabs).
+- ✅ `Widget Editor`: TitleBar-Tab-Leiste wird beim Hinzufügen/Entfernen automatisch neu aufgebaut, sodass neue Widget-Editor-Tabs sofort sichtbar sind (analog Mesh Viewer).
+- ✅ `Build-System`: Debug/Release-Artefakt-Kollisionen bei Multi-Config-Builds behoben (konfigurationsgetrennte Output-Verzeichnisse), dadurch `LNK2038` Runtime-/Iterator-Mismatch beseitigt.
 
 ## Legende
 

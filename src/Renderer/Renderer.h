@@ -8,6 +8,7 @@
 #include "RendererCapabilities.h"
 
 class UIManager;
+class ViewportUIManager;
 class PopupWindow;
 class MeshViewerWindow;
 class Widget;
@@ -88,6 +89,8 @@ public:
     // --- UIManager access (pure virtual — every renderer owns a UIManager) ---
     virtual UIManager& getUIManager() = 0;
     virtual const UIManager& getUIManager() const = 0;
+    virtual ViewportUIManager* getViewportUIManagerPtr() { return nullptr; }
+    virtual const ViewportUIManager* getViewportUIManagerPtr() const { return nullptr; }
 
     // --- Capabilities ---
     virtual RendererCapabilities getCapabilities() const { return {}; }

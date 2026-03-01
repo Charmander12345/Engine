@@ -40,13 +40,13 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
-# For multi-config generators (Visual Studio), flatten per-config subdirectories
-# so that .lib/.dll/.exe files are always found in the same directory.
+# For multi-config generators (Visual Studio), keep per-config output
+# directories separate to avoid Debug/Release artifact collisions.
 foreach(_cfg DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
     string(TOUPPER ${_cfg} _cfg_upper)
-    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${_cfg_upper} "${CMAKE_BINARY_DIR}")
-    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${_cfg_upper} "${CMAKE_BINARY_DIR}")
-    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${_cfg_upper} "${CMAKE_BINARY_DIR}")
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${_cfg_upper} "${CMAKE_BINARY_DIR}/${_cfg}")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${_cfg_upper} "${CMAKE_BINARY_DIR}/${_cfg}")
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${_cfg_upper} "${CMAKE_BINARY_DIR}/${_cfg}")
 endforeach()
 
 # Build SDL as a shared library.
@@ -54,20 +54,37 @@ set(SDL_SHARED ON CACHE BOOL "Build SDL as shared library" FORCE)
 set(SDL_STATIC OFF CACHE BOOL "Build SDL as static library" FORCE)
 add_subdirectory(external/SDL3 EXCLUDE_FROM_ALL)
 set(ASSIMP_BUILD_SHARED_LIBS OFF CACHE BOOL "Build assimp as shared library" FORCE)
-set(ASSIMP_INJECT_DEBUG_POSTFIX OFF CACHE BOOL "No debug postfix for assimp" FORCE)
+set(ASSIMP_INJECT_DEBUG_POSTFIX ON CACHE BOOL "Use debug postfix for assimp to avoid multi-config artifact collisions" FORCE)
 set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "Disable assimp tests" FORCE)
 
 # Build Assimp and freetype as static libraries so they are embedded in their consumers.
 set(ASSIMP_BUILD_SHARED_LIBS OFF CACHE BOOL "Build assimp as shared" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Prefer static for assimp/freetype" FORCE)
 add_subdirectory(external/assimp EXCLUDE_FROM_ALL)
+if (MSVC AND TARGET assimp)
+    # Force DLL CRT selection per-config for assimp so it matches engine targets
+    # when using multi-config generators.
+    set_property(TARGET assimp PROPERTY
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    target_compile_options(assimp PRIVATE
+        $<$<CONFIG:Debug>:/MDd>
+        $<$<CONFIG:Release>:/MD>
+        $<$<CONFIG:RelWithDebInfo>:/MD>
+        $<$<CONFIG:MinSizeRel>:/MD>)
+endif()
 add_subdirectory(external/freetype)
 set(BUILD_SHARED_LIBS ON CACHE BOOL "Prefer shared libraries for subprojects" FORCE)
 set(ALSOFT_UTILS OFF CACHE BOOL "" FORCE)
 set(ALSOFT_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(ALSOFT_TESTS OFF CACHE BOOL "" FORCE)
 set(ALSOFT_INSTALL OFF CACHE BOOL "" FORCE)
+
+# Avoid Debug/Release static-lib name collisions for OpenAL on multi-config
+# generators when outputs are flattened into a single directory.
+set(_engine_saved_debug_postfix "${CMAKE_DEBUG_POSTFIX}")
+set(CMAKE_DEBUG_POSTFIX "d" CACHE STRING "" FORCE)
 add_subdirectory(external/openal-soft EXCLUDE_FROM_ALL)
+set(CMAKE_DEBUG_POSTFIX "${_engine_saved_debug_postfix}" CACHE STRING "" FORCE)
 
 # Build Jolt Physics as a static library.
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build Jolt as static" FORCE)

@@ -4,6 +4,7 @@
 #include "../Camera.h"
 #include "../RenderResourceManager.h"
 #include "../UIManager.h"
+#include "../ViewportUIManager.h"
 #include "../EditorWindows/PopupWindow.h"
 #include "../EditorWindows/MeshViewerWindow.h"
 #include "../IRenderTarget.h"
@@ -85,6 +86,10 @@ public:
     Vec2 getViewportSize() const override;
     UIManager& getUIManager() override;
     const UIManager& getUIManager() const override;
+    ViewportUIManager* getViewportUIManagerPtr() override { return &m_viewportUIManager; }
+    const ViewportUIManager* getViewportUIManagerPtr() const override { return &m_viewportUIManager; }
+    ViewportUIManager& getViewportUIManager() { return m_viewportUIManager; }
+    const ViewportUIManager& getViewportUIManager() const { return m_viewportUIManager; }
     std::shared_ptr<Widget> createWidgetFromAsset(const std::shared_ptr<AssetData>& asset) override;
     unsigned int preloadUITexture(const std::string& path) override;
 
@@ -108,10 +113,12 @@ public:
 
 private:
     void renderWorld();
+    void renderViewportUI();
     void renderUI();
     bool ensureUIQuadRenderer();
     GLuint getUIQuadProgram(const std::string& vertexShaderPath, const std::string& fragmentShaderPath);
     void ensureUIShaderDefaults();
+    void rebuildTitleBarTabs();
     const std::string& resolveUIShaderPath(const std::string& value, const std::string& fallback);
     bool ensureUiFbo(int width, int height);
     void releaseUiFbo();
@@ -174,6 +181,7 @@ private:
     Vec4 m_clearColor{ 0.0f, 0.0f, 0.0f, 1.0f };
 
     UIManager m_uiManager;
+    ViewportUIManager m_viewportUIManager;
 
     std::shared_ptr<OpenGLTextRenderer> m_textRenderer;
     std::vector<TextCommand> m_textQueue;

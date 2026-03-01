@@ -17,6 +17,8 @@ add_library(RendererCore OBJECT
 
     UIManager.cpp
     UIManager.h
+    ViewportUIManager.cpp
+    ViewportUIManager.h
     UIWidget.cpp
     UIWidget.h
     UIWidgets/ButtonWidget.cpp

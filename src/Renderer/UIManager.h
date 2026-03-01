@@ -92,6 +92,7 @@ public:
 
     void openLandscapeManagerPopup();
     void openEngineSettingsPopup();
+    void openWidgetEditorPopup(const std::string& relativeAssetPath);
     void openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)> onProjectChosen);
 
     static UIManager* GetActiveInstance();

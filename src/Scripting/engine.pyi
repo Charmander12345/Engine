@@ -393,6 +393,16 @@ class ui:
         """Show a toast message."""
         ...
 
+    @staticmethod
+    def spawn_widget(widget_id: str, asset_path: str, tab_id: str = "") -> bool:
+        """Spawn or replace a UI widget from a widget asset path."""
+        ...
+
+    @staticmethod
+    def remove_widget(widget_id: str) -> bool:
+        """Remove a UI widget by id."""
+        ...
+
 # ---------------------------------------------------------------------------
 # engine.physics
 # ---------------------------------------------------------------------------
