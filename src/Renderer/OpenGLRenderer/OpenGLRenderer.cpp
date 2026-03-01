@@ -556,13 +556,33 @@ void OpenGLRenderer::render()
     const uint64_t worldEnd = SDL_GetPerformanceCounter();
     m_cpuRenderWorldMs = (freq > 0) ? (static_cast<double>(worldEnd - worldStart) * 1000.0 / static_cast<double>(freq)) : 0.0;
 
-    // Composite: blit world content to default framebuffer
+    // Composite: blit world content to default framebuffer.
+    // Keep source/destination restricted to the viewport content rect so the
+    // scene is shown only in the available viewport area (excluding UI docks).
     if (activeTab && activeTab->renderTarget && activeTab->renderTarget->isValid())
     {
         auto* glRT = static_cast<OpenGLRenderTarget*>(activeTab->renderTarget.get());
         glBindFramebuffer(GL_READ_FRAMEBUFFER, glRT->getGLFramebuffer());
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-        glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+        const Vec4 vpRect = m_cachedViewportContentRect;
+        const bool hasContentRect = (vpRect.z > 0.0f && vpRect.w > 0.0f);
+        if (hasContentRect)
+        {
+            const int srcX0 = static_cast<int>(vpRect.x);
+            const int srcY0 = height - static_cast<int>(vpRect.y) - static_cast<int>(vpRect.w);
+            const int srcX1 = srcX0 + static_cast<int>(vpRect.z);
+            const int srcY1 = srcY0 + static_cast<int>(vpRect.w);
+            glBlitFramebuffer(srcX0, srcY0, srcX1, srcY1,
+                              srcX0, srcY0, srcX1, srcY1,
+                              GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        }
+        else
+        {
+            glBlitFramebuffer(0, 0, width, height,
+                              0, 0, width, height,
+                              GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        }
         glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
     }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -599,8 +619,19 @@ void OpenGLRenderer::renderWorld()
     m_lastTotalCount = 0;
 
     const Vec2 viewportSize = getViewportSize();
-    const int width = static_cast<int>(viewportSize.x);
-    const int height = static_cast<int>(viewportSize.y);
+    const int fullWidth = static_cast<int>(viewportSize.x);
+    const int fullHeight = static_cast<int>(viewportSize.y);
+
+    // Use the viewport content rect (area not covered by editor panels) for
+    // projection and glViewport so resizing the window acts like zoom (showing
+    // more or less of the scene) instead of stretching the image.
+    const Vec4 vpRect = m_cachedViewportContentRect;
+    const bool hasContentRect = (vpRect.z > 0.0f && vpRect.w > 0.0f);
+    const int vpX = hasContentRect ? static_cast<int>(vpRect.x) : 0;
+    const int vpY = hasContentRect ? static_cast<int>(vpRect.y) : 0;
+    const int width = hasContentRect ? static_cast<int>(vpRect.z) : fullWidth;
+    const int height = hasContentRect ? static_cast<int>(vpRect.w) : fullHeight;
+    const int viewportY = fullHeight - vpY - height;
 
     // Render into the active tab's FBO
     {
@@ -611,9 +642,11 @@ void OpenGLRenderer::renderWorld()
         }
     }
 
-    glViewport(0, 0, width, height);
+    // Clear the full FBO, then set glViewport to the content rect area
+    glViewport(0, 0, fullWidth, fullHeight);
     glClearColor(m_clearColor.x, m_clearColor.y, m_clearColor.z, m_clearColor.w);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glViewport(vpX, viewportY, width, height);
 
     // Update projection matrix with current aspect ratio (default, may be overridden by entity camera)
     float activeFov = 45.0f;
@@ -1153,7 +1186,7 @@ void OpenGLRenderer::renderWorld()
 			renderShadowMap(m_shadowCasterList);
 
 			// Restore main viewport
-			glViewport(0, 0, width, height);
+			glViewport(vpX, viewportY, width, height);
 		}
 	}
 
@@ -1167,7 +1200,7 @@ void OpenGLRenderer::renderWorld()
 			renderPointShadowMaps(m_shadowCasterList);
 
 			// Restore main viewport
-			glViewport(0, 0, width, height);
+			glViewport(vpX, viewportY, width, height);
 		}
 	}
 
@@ -1229,7 +1262,7 @@ void OpenGLRenderer::renderWorld()
 	// Pick pass: full scene render only on actual click; single-entity for outline
 	if (m_pickRequested)
 	{
-		if (ensurePickFbo(width, height))
+		if (ensurePickFbo(fullWidth, fullHeight))
 		{
 			renderPickBuffer(view, m_projectionMatrix);
 		}
@@ -1245,7 +1278,7 @@ void OpenGLRenderer::renderWorld()
 	// Draw selection outline: render only the selected entity into pick buffer (1 draw call)
 	if (m_selectedEntity != 0 && !diagnostics.isPIEActive())
 	{
-		if (ensurePickFbo(width, height))
+		if (ensurePickFbo(fullWidth, fullHeight))
 		{
 			renderPickBufferSingleEntity(view, m_projectionMatrix, m_selectedEntity);
 		}
@@ -2689,6 +2722,11 @@ void OpenGLRenderer::renderUI()
                 return m_textRenderer ? m_textRenderer->measureText(text, scale) : Vec2{};
             });
     }
+
+    // Cache the viewport content rect (area not covered by editor panels) for
+    // use in renderWorld() on the next frame so projection uses the correct
+    // aspect ratio and the scene is not distorted by editor panel sizes.
+    m_cachedViewportContentRect = m_uiManager.getViewportContentRect();
 
     const bool debugToggled = (m_uiDebugEnabled != m_uiDebugEnabledPrev);
     m_uiDebugEnabledPrev = m_uiDebugEnabled;
@@ -5671,9 +5709,19 @@ void OpenGLRenderer::renderPickBuffer(const glm::mat4& view, const glm::mat4& pr
         return;
 
     glBindFramebuffer(GL_FRAMEBUFFER, m_pickFbo);
+    glViewport(0, 0, m_pickWidth, m_pickHeight);
     const GLuint clearId = 0;
     glClearBufferuiv(GL_COLOR, 0, &clearId);
     glClear(GL_DEPTH_BUFFER_BIT);
+
+    // Restrict pick rendering to the viewport content rect area
+    const Vec4 vpRect = m_cachedViewportContentRect;
+    if (vpRect.z > 0.0f && vpRect.w > 0.0f)
+    {
+        glViewport(static_cast<int>(vpRect.x),
+                   m_pickHeight - static_cast<int>(vpRect.y) - static_cast<int>(vpRect.w),
+                   static_cast<int>(vpRect.z), static_cast<int>(vpRect.w));
+    }
 
     glUseProgram(m_pickProgram);
     if (m_pickLocView >= 0)
@@ -5705,15 +5753,24 @@ void OpenGLRenderer::renderPickBuffer(const glm::mat4& view, const glm::mat4& pr
     glUseProgram(0);
     // Restore viewport tab FBO so selection outline draws into the tab
     GLuint vpFbo = 0;
+    int vpFboH = 0;
     for (const auto& tab : m_editorTabs)
     {
         if (tab.active && tab.renderTarget && tab.renderTarget->isValid())
         {
             vpFbo = static_cast<const OpenGLRenderTarget*>(tab.renderTarget.get())->getGLFramebuffer();
+            vpFboH = tab.renderTarget->getHeight();
             break;
         }
     }
     glBindFramebuffer(GL_FRAMEBUFFER, vpFbo);
+    // Restore content-rect viewport so subsequent passes (outline, gizmo) draw in the right area
+    {
+        const Vec4 vr = m_cachedViewportContentRect;
+        if (vr.z > 0.0f && vr.w > 0.0f && vpFboH > 0)
+            glViewport(static_cast<int>(vr.x), vpFboH - static_cast<int>(vr.y) - static_cast<int>(vr.w),
+                       static_cast<int>(vr.z), static_cast<int>(vr.w));
+    }
 }
 
 void OpenGLRenderer::renderPickBufferSingleEntity(const glm::mat4& view, const glm::mat4& projection, unsigned int entityId)
@@ -5722,9 +5779,19 @@ void OpenGLRenderer::renderPickBufferSingleEntity(const glm::mat4& view, const g
         return;
 
     glBindFramebuffer(GL_FRAMEBUFFER, m_pickFbo);
+    glViewport(0, 0, m_pickWidth, m_pickHeight);
     const GLuint clearId = 0;
     glClearBufferuiv(GL_COLOR, 0, &clearId);
     glClear(GL_DEPTH_BUFFER_BIT);
+
+    // Restrict pick rendering to the viewport content rect area
+    const Vec4 vpRect = m_cachedViewportContentRect;
+    if (vpRect.z > 0.0f && vpRect.w > 0.0f)
+    {
+        glViewport(static_cast<int>(vpRect.x),
+                   m_pickHeight - static_cast<int>(vpRect.y) - static_cast<int>(vpRect.w),
+                   static_cast<int>(vpRect.z), static_cast<int>(vpRect.w));
+    }
 
     glUseProgram(m_pickProgram);
     if (m_pickLocView >= 0)
@@ -5756,15 +5823,24 @@ void OpenGLRenderer::renderPickBufferSingleEntity(const glm::mat4& view, const g
     glBindVertexArray(0);
     glUseProgram(0);
     GLuint vpFbo = 0;
+    int vpFboH2 = 0;
     for (const auto& tab : m_editorTabs)
     {
         if (tab.active && tab.renderTarget && tab.renderTarget->isValid())
         {
             vpFbo = static_cast<const OpenGLRenderTarget*>(tab.renderTarget.get())->getGLFramebuffer();
+            vpFboH2 = tab.renderTarget->getHeight();
             break;
         }
     }
     glBindFramebuffer(GL_FRAMEBUFFER, vpFbo);
+    // Restore content-rect viewport
+    {
+        const Vec4 vr = m_cachedViewportContentRect;
+        if (vr.z > 0.0f && vr.w > 0.0f && vpFboH2 > 0)
+            glViewport(static_cast<int>(vr.x), vpFboH2 - static_cast<int>(vr.y) - static_cast<int>(vr.w),
+                       static_cast<int>(vr.z), static_cast<int>(vr.w));
+    }
 }
 
 unsigned int OpenGLRenderer::pickEntityAt(int x, int y)
@@ -5840,8 +5916,22 @@ bool OpenGLRenderer::screenToWorldPos(int screenX, int screenY, Vec3& outWorldPo
         return false;
 
     // Unproject: NDC -> world
-    const float ndcX = (2.0f * static_cast<float>(screenX) / static_cast<float>(fboW)) - 1.0f;
-    const float ndcY = (2.0f * static_cast<float>(glY) / static_cast<float>(fboH)) - 1.0f;
+    // The projection uses the viewport content rect, so NDC must be computed
+    // relative to that area rather than the full FBO.
+    const Vec4 vpRect = m_cachedViewportContentRect;
+    float vpX = 0.0f, vpY = 0.0f, vpW = static_cast<float>(fboW), vpH = static_cast<float>(fboH);
+    if (vpRect.z > 0.0f && vpRect.w > 0.0f)
+    {
+        vpX = vpRect.x;
+        vpY = vpRect.y;
+        vpW = vpRect.z;
+        vpH = vpRect.w;
+    }
+
+    const float localX = static_cast<float>(screenX) - vpX;
+    const float localY = static_cast<float>(screenY) - vpY;
+    const float ndcX = (2.0f * localX / vpW) - 1.0f;
+    const float ndcY = 1.0f - (2.0f * localY / vpH); // top-down screen Y → GL NDC Y
     const float ndcZ = 2.0f * depth - 1.0f;
 
     const glm::mat4 invViewProj = glm::inverse(m_projectionMatrix * m_lastViewMatrix);
@@ -6385,14 +6475,23 @@ OpenGLRenderer::GizmoAxis OpenGLRenderer::pickGizmoAxis(const glm::mat4& view, c
     const int w = m_cachedWindowWidth > 0 ? m_cachedWindowWidth : 1;
     const int h = m_cachedWindowHeight > 0 ? m_cachedWindowHeight : 1;
 
+    // When the viewport content rect is available, NDC maps to the content
+    // rect area (not the full window) because the projection uses the
+    // content rect aspect ratio and glViewport is set to that area.
+    const Vec4 gvp = m_cachedViewportContentRect;
+    const float gvpX = (gvp.z > 0.0f && gvp.w > 0.0f) ? gvp.x : 0.0f;
+    const float gvpY = (gvp.z > 0.0f && gvp.w > 0.0f) ? gvp.y : 0.0f;
+    const float gvpW = (gvp.z > 0.0f && gvp.w > 0.0f) ? gvp.z : static_cast<float>(w);
+    const float gvpH = (gvp.z > 0.0f && gvp.w > 0.0f) ? gvp.w : static_cast<float>(h);
+
     const auto project = [&](const glm::vec3& worldPos) -> glm::vec2
     {
         const glm::vec4 clip = projection * view * glm::vec4(worldPos, 1.0f);
         if (clip.w <= 0.0001f) return { -9999.0f, -9999.0f };
         const glm::vec3 ndc = glm::vec3(clip) / clip.w;
         return {
-            (ndc.x * 0.5f + 0.5f) * static_cast<float>(w),
-            (1.0f - (ndc.y * 0.5f + 0.5f)) * static_cast<float>(h)
+            gvpX + (ndc.x * 0.5f + 0.5f) * gvpW,
+            gvpY + (1.0f - (ndc.y * 0.5f + 0.5f)) * gvpH
         };
     };
 
@@ -6544,11 +6643,14 @@ bool OpenGLRenderer::beginGizmoDrag(int screenX, int screenY)
     m_gizmoDragOldTransform = *tc;
 
     // Compute the initial parameter along the axis ray
-    const int w = m_cachedWindowWidth > 0 ? m_cachedWindowWidth : 1;
-    const int h = m_cachedWindowHeight > 0 ? m_cachedWindowHeight : 1;
+    const Vec4 bgvp = m_cachedViewportContentRect;
+    const int bw = (bgvp.z > 0.0f && bgvp.w > 0.0f) ? static_cast<int>(bgvp.z) : (m_cachedWindowWidth > 0 ? m_cachedWindowWidth : 1);
+    const int bh = (bgvp.z > 0.0f && bgvp.w > 0.0f) ? static_cast<int>(bgvp.w) : (m_cachedWindowHeight > 0 ? m_cachedWindowHeight : 1);
+    const int bsx = screenX - static_cast<int>((bgvp.z > 0.0f) ? bgvp.x : 0.0f);
+    const int bsy = screenY - static_cast<int>((bgvp.w > 0.0f) ? bgvp.y : 0.0f);
     const glm::mat4 invVP = glm::inverse(m_projectionMatrix * view);
     glm::vec3 rayO, rayD;
-    screenToRay(screenX, screenY, w, h, invVP, rayO, rayD);
+    screenToRay(bsx, bsy, bw, bh, invVP, rayO, rayD);
     m_gizmoDragStartT = closestTOnAxis(rayO, rayD, entityPos, worldAxis);
 
     return true;
@@ -6568,15 +6670,18 @@ void OpenGLRenderer::updateGizmoDrag(int screenX, int screenY)
     const Mat4 engineView = m_camera->getViewMatrixColumnMajor();
     const glm::mat4 view = glm::make_mat4(engineView.m);
 
-    const int w = m_cachedWindowWidth > 0 ? m_cachedWindowWidth : 1;
-    const int h = m_cachedWindowHeight > 0 ? m_cachedWindowHeight : 1;
+    const Vec4 ugvp = m_cachedViewportContentRect;
+    const int w = (ugvp.z > 0.0f && ugvp.w > 0.0f) ? static_cast<int>(ugvp.z) : (m_cachedWindowWidth > 0 ? m_cachedWindowWidth : 1);
+    const int h = (ugvp.z > 0.0f && ugvp.w > 0.0f) ? static_cast<int>(ugvp.w) : (m_cachedWindowHeight > 0 ? m_cachedWindowHeight : 1);
+    const int localScreenX = screenX - static_cast<int>((ugvp.z > 0.0f) ? ugvp.x : 0.0f);
+    const int localScreenY = screenY - static_cast<int>((ugvp.w > 0.0f) ? ugvp.y : 0.0f);
 
     if (m_gizmoMode == GizmoMode::Translate)
     {
         // Ray-plane intersection for 1:1 movement
         const glm::mat4 invVP = glm::inverse(m_projectionMatrix * view);
         glm::vec3 rayO, rayD;
-        screenToRay(screenX, screenY, w, h, invVP, rayO, rayD);
+        screenToRay(localScreenX, localScreenY, w, h, invVP, rayO, rayD);
 
         const float currentT = closestTOnAxis(rayO, rayD, m_gizmoDragEntityStart, m_gizmoDragWorldAxis);
         const float deltaT = currentT - m_gizmoDragStartT;
@@ -6591,14 +6696,16 @@ void OpenGLRenderer::updateGizmoDrag(int screenX, int screenY)
     {
         // Compute screen-space delta angle from mouse movement perpendicular
         // to the projected rotation axis.
+        const float rpX = (ugvp.z > 0.0f) ? ugvp.x : 0.0f;
+        const float rpY = (ugvp.w > 0.0f) ? ugvp.y : 0.0f;
         const auto project = [&](const glm::vec3& worldPos) -> glm::vec2
         {
             const glm::vec4 clip = m_projectionMatrix * view * glm::vec4(worldPos, 1.0f);
             if (clip.w <= 0.0001f) return { 0.0f, 0.0f };
             const glm::vec3 ndc = glm::vec3(clip) / clip.w;
             return {
-                (ndc.x * 0.5f + 0.5f) * static_cast<float>(w),
-                (1.0f - (ndc.y * 0.5f + 0.5f)) * static_cast<float>(h)
+                rpX + (ndc.x * 0.5f + 0.5f) * static_cast<float>(w),
+                rpY + (1.0f - (ndc.y * 0.5f + 0.5f)) * static_cast<float>(h)
             };
         };
 
@@ -6649,14 +6756,16 @@ void OpenGLRenderer::updateGizmoDrag(int screenX, int screenY)
     else if (m_gizmoMode == GizmoMode::Scale)
     {
         // Use screen-space pixel delta projected onto the screen-space axis direction
+        const float spX = (ugvp.z > 0.0f) ? ugvp.x : 0.0f;
+        const float spY = (ugvp.w > 0.0f) ? ugvp.y : 0.0f;
         const auto project = [&](const glm::vec3& worldPos) -> glm::vec2
         {
             const glm::vec4 clip = m_projectionMatrix * view * glm::vec4(worldPos, 1.0f);
             if (clip.w <= 0.0001f) return { 0.0f, 0.0f };
             const glm::vec3 ndc = glm::vec3(clip) / clip.w;
             return {
-                (ndc.x * 0.5f + 0.5f) * static_cast<float>(w),
-                (1.0f - (ndc.y * 0.5f + 0.5f)) * static_cast<float>(h)
+                spX + (ndc.x * 0.5f + 0.5f) * static_cast<float>(w),
+                spY + (1.0f - (ndc.y * 0.5f + 0.5f)) * static_cast<float>(h)
             };
         };
 

@@ -17,7 +17,7 @@
 #include "Renderer/RendererFactory.h"
 #include "Renderer/SplashWindow.h"
 #include "Renderer/UIWidget.h"
-#include "Renderer/PopupWindow.h"
+#include "Renderer/EditorWindows/PopupWindow.h"
 #include "Logger/Logger.h"
 #include "Diagnostics/DiagnosticsManager.h"
 #include "AssetManager/AssetManager.h"
@@ -468,13 +468,17 @@ int main()
     // PIE input capture state (declared here so lambdas can capture by reference)
     bool pieMouseCaptured = false;
     bool pieInputPaused = false;
+    // Mouse position saved before any capture (right-click or PIE) so the cursor
+    // can be warped back on release, keeping it visually fixed in the viewport.
+    float preCaptureMouseX = 0.0f;
+    float preCaptureMouseY = 0.0f;
 
     if (renderer)
     {
         const unsigned int playTexId = renderer->preloadUITexture("Play.tga");
         const unsigned int stopTexId = renderer->preloadUITexture("Stop.tga");
 
-        stopPIE = [&renderer, playTexId, &pieMouseCaptured, &pieInputPaused]()
+        stopPIE = [&renderer, playTexId, &pieMouseCaptured, &pieInputPaused, &preCaptureMouseX, &preCaptureMouseY]()
             {
                 auto& diag = DiagnosticsManager::Instance();
                 if (!diag.isPIEActive())
@@ -497,6 +501,8 @@ int main()
                 if (auto* w = renderer->window())
                 {
                     SDL_SetWindowRelativeMouseMode(w, false);
+                    SDL_SetWindowMouseGrab(w, false);
+                    SDL_WarpMouseInWindow(w, preCaptureMouseX, preCaptureMouseY);
                 }
                 SDL_ShowCursor();
                 auto& uiMgr = renderer->getUIManager();
@@ -622,7 +628,7 @@ int main()
                 uiMgr.showDropdownMenu(anchor, items);
             });
 
-        renderer->getUIManager().registerClickEvent("ViewportOverlay.PIE", [&renderer, playTexId, stopTexId, stopPIE, &pieMouseCaptured, &pieInputPaused]()
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.PIE", [&renderer, playTexId, stopTexId, stopPIE, &pieMouseCaptured, &pieInputPaused, &preCaptureMouseX, &preCaptureMouseY]()
             {
                 auto& diag = DiagnosticsManager::Instance();
                 const bool wasActive = diag.isPIEActive();
@@ -697,9 +703,11 @@ int main()
                     // Capture mouse for PIE: hide cursor, enable relative mouse mode
                     pieMouseCaptured = true;
                     pieInputPaused = false;
+                    SDL_GetMouseState(&preCaptureMouseX, &preCaptureMouseY);
                     if (auto* w = renderer->window())
                     {
                         SDL_SetWindowRelativeMouseMode(w, true);
+                        SDL_SetWindowMouseGrab(w, true);
                     }
                     SDL_HideCursor();
 
@@ -1793,7 +1801,7 @@ int main()
             SDL_GetMouseState(&mouseX, &mouseY);
             mousePosPixels = Vec2{ mouseX, mouseY };
             hasMousePos = true;
-            if (renderer)
+            if (renderer && !(diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused))
             {
                 auto& uiManager = renderer->getUIManager();
                 uiManager.setMousePosition(mousePosPixels);
@@ -1823,20 +1831,29 @@ int main()
                 {
                     mousePosPixels = Vec2{ event.motion.x, event.motion.y };
                     hasMousePos = true;
-                    auto& uiManager = renderer->getUIManager();
-                    uiManager.setMousePosition(mousePosPixels);
-                    isOverUI = uiManager.isPointerOverUI(mousePosPixels);
 
-                    // Update gizmo drag if active
-                    if (renderer->isGizmoDragging())
+                    // During active PIE capture, skip UI updates so editor stays inert (no hover effects)
+                    if (!(diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused))
                     {
-                        renderer->updateGizmoDrag(static_cast<int>(event.motion.x), static_cast<int>(event.motion.y));
+                        auto& uiManager = renderer->getUIManager();
+                        uiManager.setMousePosition(mousePosPixels);
+                        isOverUI = uiManager.isPointerOverUI(mousePosPixels);
+
+                        // Update gizmo drag if active
+                        if (renderer->isGizmoDragging())
+                        {
+                            renderer->updateGizmoDrag(static_cast<int>(event.motion.x), static_cast<int>(event.motion.y));
+                        }
                     }
                 }
             }
 
             if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT)
             {
+                // During active PIE capture, ignore left-click so editor UI stays inert
+                if (diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused)
+                    continue;
+
                 if (renderer)
                 {
                     const Vec2 mousePos{ static_cast<float>(event.button.x), static_cast<float>(event.button.y) };
@@ -1855,9 +1872,11 @@ int main()
                         if (diagnostics.isPIEActive() && pieInputPaused)
                         {
                             pieInputPaused = false;
+                            SDL_GetMouseState(&preCaptureMouseX, &preCaptureMouseY);
                             if (auto* w = renderer->window())
                             {
                                 SDL_SetWindowRelativeMouseMode(w, true);
+                                SDL_SetWindowMouseGrab(w, true);
                             }
                             SDL_HideCursor();
                             logTimed(Logger::Category::Input, "PIE: input resumed (viewport click), mouse captured.", Logger::LogLevel::INFO);
@@ -1874,6 +1893,9 @@ int main()
 
             if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT)
             {
+                if (diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused)
+                    continue;
+
                 if (renderer)
                 {
                     const Vec2 mousePos{ static_cast<float>(event.button.x), static_cast<float>(event.button.y) };
@@ -1896,6 +1918,9 @@ int main()
 
             if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_RIGHT)
             {
+                if (diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused)
+                    continue;
+
                 if (renderer)
                 {
                     const Vec2 mousePos{ static_cast<float>(event.button.x), static_cast<float>(event.button.y) };
@@ -2304,9 +2329,11 @@ int main()
                 if (!isOverUI && !diagnostics.isPIEActive())
                 {
                     rightMouseDown = true;
+                    SDL_GetMouseState(&preCaptureMouseX, &preCaptureMouseY);
                     if (auto* w = renderer->window())
                     {
                         SDL_SetWindowRelativeMouseMode(w, true);
+                        SDL_SetWindowMouseGrab(w, true);
                     }
                     SDL_HideCursor();
                 }
@@ -2314,19 +2341,21 @@ int main()
             else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_RIGHT)
             {
                 if (rightMouseDown)
-                {
-                    rightMouseDown = false;
-                    if (auto* w = renderer->window())
                     {
-                        SDL_SetWindowRelativeMouseMode(w, false);
+                        rightMouseDown = false;
+                        if (auto* w = renderer->window())
+                        {
+                            SDL_SetWindowRelativeMouseMode(w, false);
+                            SDL_SetWindowMouseGrab(w, false);
+                            SDL_WarpMouseInWindow(w, preCaptureMouseX, preCaptureMouseY);
+                        }
+                        SDL_ShowCursor();
                     }
-                    SDL_ShowCursor();
-                }
             }
 
             if (event.type == SDL_EVENT_MOUSE_WHEEL)
             {
-                if (renderer)
+                if (renderer && !(diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused))
                 {
                     auto& uiManager = renderer->getUIManager();
                     if (uiManager.handleScroll(mousePosPixels, event.wheel.y))
@@ -2418,6 +2447,8 @@ int main()
                         if (auto* w = renderer->window())
                         {
                             SDL_SetWindowRelativeMouseMode(w, false);
+                            SDL_SetWindowMouseGrab(w, false);
+                            SDL_WarpMouseInWindow(w, preCaptureMouseX, preCaptureMouseY);
                         }
                         SDL_ShowCursor();
                         logTimed(Logger::Category::Input, "PIE: input paused (Shift+F1), mouse released.", Logger::LogLevel::INFO);

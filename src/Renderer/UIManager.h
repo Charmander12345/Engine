@@ -56,6 +56,7 @@ public:
 
     void updateLayouts(const std::function<Vec2(const std::string&, float)>& measureText);
     bool needsLayoutUpdate() const;
+    Vec4 getViewportContentRect() const { return m_viewportContentRect; }
     bool handleMouseDown(const Vec2& screenPos, int button);
     bool handleMouseUp(const Vec2& screenPos, int button);
     bool handleScroll(const Vec2& screenPos, float delta);
@@ -112,6 +113,7 @@ private:
 
     Renderer* m_renderer{ nullptr };
     Vec2 m_availableViewportSize{};
+    Vec4 m_viewportContentRect{};
     Vec2 m_mousePosition{};
     bool m_hasMousePosition{ false };
     std::unordered_map<std::string, std::function<void()>> m_clickEvents;

@@ -5,6 +5,11 @@
 
 ---
 
+## Letzte Änderung (Viewport)
+
+- ✅ `OpenGLRenderer`: Viewport-Compositing verwendet jetzt den tatsächlichen Content-Rect beim Blit auf den Backbuffer. Ergebnis: Die 3D-Szene wird im verfügbaren Viewport-Bereich angezeigt statt in eine Ecke gequetscht zu wirken.
+- ✅ `OpenGLRenderer`: Nach Shadow-Rendering wird der Content-Rect-Viewport (inkl. Offset) wiederhergestellt. Dadurch bleibt die Welt an der korrekten Position im Viewport-Bereich.
+
 ## Legende
 
 | Symbol | Bedeutung                          |
@@ -76,7 +81,7 @@
 | RHI-Auswahl (Enum: OpenGL/DX11/DX12)| 🟡     |
 | Fenster-Konfiguration (Größe, Zustand)| ✅    |
 | PIE-Modus (Play In Editor)           | ✅     |
-| PIE Maus-Capture + Shift+F1 Pause   | ✅     |
+| PIE Maus-Capture + Shift+F1 Pause + Cursor-Restore + Window-Grab + UI-Blocking | ✅     |
 | Aktives Level verwalten (`setActiveLevel` / `getActiveLevelSoft` / `swapActiveLevel`) | ✅ |
 | Token-basierte Level-Changed-Callbacks (register/unregister) | ✅ |
 | Action-Tracking (Loading, Saving…)   | ✅     |
@@ -308,6 +313,7 @@
 | Model-Matrix-Berechnung dedupliziert (shared Lambda) | ✅ |
 | Cached Active Tab (m_cachedActiveTab, kein linearer Scan) | ✅ |
 | Projection Guard (Rebuild nur bei Größenänderung) | ✅ |
+| Viewport-Content-Rect-basierte Projektion (keine Verzerrung) | ✅ |
 | Toter Code entfernt (isRenderEntryRelevant) | ✅ |
 | Shadow Mapping (Multi-Light, Directional/Spot) | ✅     |
 | Shadow Mapping (Point Light Cube Maps)      | ✅     |
@@ -754,7 +760,7 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 
 | Feature                                          | Status |
 |--------------------------------------------------|--------|
-| `PopupWindow`-Klasse (`src/Renderer/PopupWindow.h/.cpp`) | ✅ |
+| `PopupWindow`-Klasse (`src/Renderer/EditorWindows/PopupWindow.h/.cpp`) | ✅ |
 | **Abstraktion: `IRenderContext` statt `SDL_GLContext`** | ✅ |
 | Shared OpenGL-Context (SDL3 SHARE_WITH_CURRENT_CONTEXT) | ✅ |
 | Eigener `UIManager` pro Popup                    | ✅ |

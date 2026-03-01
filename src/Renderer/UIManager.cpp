@@ -25,7 +25,7 @@
 #include "../AssetManager/AssetManager.h"
 #include "../AssetManager/AssetTypes.h"
 #include "Renderer.h"
-#include "PopupWindow.h"
+#include "EditorWindows/PopupWindow.h"
 #include "../Landscape/LandscapeManager.h"
 
 namespace
@@ -3900,6 +3900,10 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
 
         widget->setLayoutDirty(false);
     }
+
+    // Store the remaining rect as the viewport content area (used by the renderer
+    // to set up projection / glViewport so the 3D scene is not distorted).
+    m_viewportContentRect = Vec4{ available.x, available.y, available.w, available.h };
 
     {
         const auto* outlinerEntry = findWidgetEntry("WorldOutliner");

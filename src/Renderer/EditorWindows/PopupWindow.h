@@ -4,7 +4,7 @@
 #include <memory>
 #include <SDL3/SDL.h>
 
-#include "UIManager.h"
+#include "../UIManager.h"
 
 class IRenderContext;
 

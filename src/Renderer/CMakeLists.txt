@@ -11,8 +11,6 @@ add_library(RendererCore OBJECT
     IRenderContext.h
     IRenderTarget.h
     RendererFactory.h
-    PopupWindow.h
-    PopupWindow.cpp
     SplashWindow.h
     RenderResourceManager.h
     RenderResourceManager.cpp
@@ -48,6 +46,8 @@ add_library(RendererCore OBJECT
     UIWidgets/TabViewWidget.h
     EditorWindows/MeshViewerWindow.cpp
     EditorWindows/MeshViewerWindow.h
+    EditorWindows/PopupWindow.cpp
+    EditorWindows/PopupWindow.h
 )
 set_target_properties(RendererCore PROPERTIES
     CXX_STANDARD 20

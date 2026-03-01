@@ -4,7 +4,7 @@
 #include "../Camera.h"
 #include "../RenderResourceManager.h"
 #include "../UIManager.h"
-#include "../PopupWindow.h"
+#include "../EditorWindows/PopupWindow.h"
 #include "../EditorWindows/MeshViewerWindow.h"
 #include "../IRenderTarget.h"
 #include "OpenGLRenderTarget.h"
@@ -223,6 +223,7 @@ private:
     int m_cachedWindowHeight{0};
     int m_lastProjectionWidth{0};
     int m_lastProjectionHeight{0};
+    Vec4 m_cachedViewportContentRect{}; // {x, y, w, h} viewport area after editor panels dock
     bool m_uiDebugEnabled{false};
     bool m_uiDebugEnabledPrev{false};
     WindowHitTestContext m_hitTestContext{};

@@ -5,6 +5,11 @@
 
 ---
 
+## Aktuelle Änderung (Viewport)
+
+- `OpenGLRenderer`: Das Compositing der Szenen-FBO in `render()` blitted jetzt gezielt nur den `ViewportContentRect` statt immer die komplette Fläche. Dadurch wird die 3D-Ansicht nur im verfügbaren Viewport-Bereich (abzüglich UI-Docks) dargestellt.
+- `OpenGLRenderer`: In `renderWorld()` wird nach den Shadow-Pässen der Viewport jetzt wieder inklusive Content-Rect-Offset gesetzt (nicht mehr auf `(0,0)`), damit die Welt nicht in die linke untere Ecke rutscht.
+
 ## Inhaltsverzeichnis
 
 1. [Projektstruktur](#1-projektstruktur)
@@ -110,7 +115,6 @@ Engine/
 │   │   ├── UIWidget.h/.cpp         # Widget + WidgetElement Datenmodell
 │   │   ├── IRenderContext.h         # Abstrakte Render-Context-Schnittstelle
 │   │   ├── IRenderTarget.h          # Abstrakte Render-Target-Schnittstelle (FBO-Abstraktion für Editor-Tabs)
-│   │   ├── PopupWindow.h/.cpp      # Multi-Window Popup-System (backend-agnostisch, nutzt IRenderContext)
 │   │   ├── SplashWindow.h          # Abstrakte Splash-Fenster-Basisklasse (6 reine virtuelle Methoden)
 │   │   ├── OpenGLRenderer/         # OpenGL-spezifische Implementierung
 │   │   │   ├── OpenGLRenderer.h/.cpp
@@ -152,7 +156,8 @@ Engine/
 │   │   │   ├── TreeViewWidget.h/.cpp
 │   │   │   └── TabViewWidget.h/.cpp
 │   │   ├── EditorWindows/           # Editor-Fenster (FBO-Override, 3D-Vorschau)
-│   │   │   └── MeshViewerWindow.h/.cpp  # Mesh-Viewer: Orbit-Kamera, dedizierter FBO
+│   │   │   ├── MeshViewerWindow.h/.cpp  # Mesh-Viewer: Orbit-Kamera, dedizierter FBO
+│   │   │   └── PopupWindow.h/.cpp       # Multi-Window Popup-System (backend-agnostisch, nutzt IRenderContext)
 │   │   └── CMakeLists.txt          # RendererCore OBJECT-Lib (abstrakte Schicht, eingebettet in Renderer.dll)
 ├── RENDERER_ABSTRACTION_PLAN.md     # Detaillierter Plan zur Backend-Abstrahierung des Renderers
 │   └── Scripting/                  # Eingebettetes Python-Scripting
@@ -774,6 +779,14 @@ present()
 - **Cached Active Tab**: `m_cachedActiveTab` vermeidet wiederholte lineare Suche über die Tab-Liste pro Frame.
 - **Projection Guard**: Projektionsmatrix wird nur bei tatsächlicher Größenänderung neu berechnet (`m_lastProjectionWidth`/`m_lastProjectionHeight`).
 - **Toter Code entfernt**: `isRenderEntryRelevant()`-Lambda (immer `true`) aus der Render-Pipeline entfernt.
+
+#### 9.2.9 Viewport-Content-Rect-basierte Projektion
+- **Problem**: Bei Fenstergrößenänderung wurde das 3D-Bild verzerrt, da die Projektion die gesamte Fenstergröße nutzte, der sichtbare Bereich aber nur der Viewport-Content-Bereich (nach Abzug der Editor-Panels) war.
+- **Lösung**: `UIManager::updateLayouts()` speichert das finale `available`-Rect (nach dem Dock-Layout der Editor-Panels) als `m_viewportContentRect`. Dieses Rect wird pro Frame vom Renderer gecacht (`m_cachedViewportContentRect`).
+- **Rendering**: `renderWorld()` setzt `glViewport` auf den Viewport-Content-Bereich innerhalb des Tab-FBO (statt auf die volle Fenstergröße). Das volle FBO wird zunächst gecleart, dann wird der Viewport auf das Content-Rect gesetzt.
+- **Projektion**: Die Projektionsmatrix nutzt das Seitenverhältnis des Viewport-Content-Rects. Fenstergrößenänderungen wirken wie Zoomen (mehr/weniger Szene sichtbar) statt Verzerrung.
+- **Pick-Buffer**: Das Pick-FBO bleibt in voller Fenstergröße (Window-Koordinaten funktionieren direkt). `renderPickBuffer` und `renderPickBufferSingleEntity` setzen ihren `glViewport` ebenfalls auf das Content-Rect.
+- **NDC-Mapping**: `screenToWorldPos()`, `pickGizmoAxis()`, `beginGizmoDrag()` und `updateGizmoDrag()` rechnen Screen-Koordinaten relativ zum Content-Rect in NDC um.
 
 #### 9.2.7 Editor-Tab-Framebuffer
 - Jeder Editor-Tab besitzt einen eigenen FBO (`EditorTab`-Struct: colorTex + depthRbo + snapshotTex)
@@ -1541,14 +1554,14 @@ while (running) {
     // ═══ Event-Verarbeitung ═══
     SDL_PollEvent:
     - QUIT → running = false
-    - MOUSE_MOTION → UI-Hover + Kamera-Rotation (bei Rechtsklick oder PIE-Maus-Capture)
-    - MOUSE_BUTTON_DOWN (Links) → PIE-Recapture oder UI-Hit-Test oder Entity-Picking
-    - MOUSE_BUTTON_DOWN (Rechts) → Kamera-Steuerung aktivieren (nur außerhalb PIE)
-    - MOUSE_BUTTON_UP (Rechts) → Kamera-Steuerung deaktivieren
-    - MOUSE_WHEEL → UI-Scroll oder Kamera-Geschwindigkeit ändern
+    - MOUSE_MOTION → UI-Hover + Kamera-Rotation (bei Rechtsklick oder PIE-Maus-Capture; UI-Updates deaktiviert während aktivem PIE-Capture)
+    - MOUSE_BUTTON_DOWN (Links) → während PIE-Capture ignoriert; sonst PIE-Recapture (Position speichern + Grab) oder UI-Hit-Test oder Entity-Picking
+    - MOUSE_BUTTON_DOWN (Rechts) → während PIE-Capture ignoriert; sonst Kamera-Steuerung aktivieren (nur außerhalb PIE), Mausposition speichern + Window-Grab
+    - MOUSE_BUTTON_UP (Rechts) → Kamera-Steuerung deaktivieren, Maus zurück an gespeicherte Position warpen
+    - MOUSE_WHEEL → während PIE-Capture ignoriert; sonst UI-Scroll oder Kamera-Geschwindigkeit ändern
     - TEXT_INPUT → UI-Texteingabe
     - KEY_UP:
-        Shift+F1 → PIE-Maus freigeben / Input pausieren
+        Shift+F1 → PIE-Maus freigeben / Input pausieren, Cursor an gespeicherte Position zurücksetzen
         F8  → Bounds-Debug toggle
         F9  → Occlusion-Stats toggle
         F10 → Metriken toggle
