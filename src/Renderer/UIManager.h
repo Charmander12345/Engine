@@ -12,7 +12,7 @@
 #include "UIWidget.h"
 
 class EngineLevel;
-class OpenGLRenderer;
+class Renderer;
 class PopupWindow;
 
 class UIManager
@@ -34,8 +34,8 @@ public:
     UIManager();
     ~UIManager();
 
-    void setRenderer(OpenGLRenderer* renderer) { m_renderer = renderer; }
-    OpenGLRenderer* getRenderer() const { return m_renderer; }
+    void setRenderer(Renderer* renderer) { m_renderer = renderer; }
+    Renderer* getRenderer() const { return m_renderer; }
 
     Vec2 getAvailableViewportSize() const;
     void setAvailableViewportSize(const Vec2& size);
@@ -109,7 +109,7 @@ private:
     std::shared_ptr<Widget> createToastWidget(const std::string& message, const std::string& name) const;
     void updateToastStackLayout();
 
-    OpenGLRenderer* m_renderer{ nullptr };
+    Renderer* m_renderer{ nullptr };
     Vec2 m_availableViewportSize{};
     Vec2 m_mousePosition{};
     bool m_hasMousePosition{ false };

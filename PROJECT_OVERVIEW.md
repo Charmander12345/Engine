@@ -106,10 +106,12 @@ Engine/
 │   │   ├── Material.h              # CPU-seitige Material-Basisklasse
 │   │   ├── Texture.h/.cpp          # CPU-seitige Textur-Daten
 │   │   ├── RenderResourceManager.h/.cpp  # Caching, Level-Vorbereitung
-│   │   ├── UIManager.h/.cpp        # Kompletter UI-Manager
+│   │   ├── UIManager.h/.cpp        # Kompletter UI-Manager (nutzt nur Renderer*, kein OpenGL)
 │   │   ├── UIWidget.h/.cpp         # Widget + WidgetElement Datenmodell
-│   │   ├── PopupWindow.h/.cpp      # Multi-Window Popup-System (Shared GL-Context)
-│   │   ├── SplashWindow.h/.cpp     # Splash-Fenster beim Engine-Start (eigenes SDL-Fenster + GL-Context)
+│   │   ├── IRenderContext.h         # Abstrakte Render-Context-Schnittstelle
+│   │   ├── IRenderTarget.h          # Abstrakte Render-Target-Schnittstelle (FBO-Abstraktion für Editor-Tabs)
+│   │   ├── PopupWindow.h/.cpp      # Multi-Window Popup-System (backend-agnostisch, nutzt IRenderContext)
+│   │   ├── SplashWindow.h          # Abstrakte Splash-Fenster-Basisklasse (6 reine virtuelle Methoden)
 │   │   ├── OpenGLRenderer/         # OpenGL-spezifische Implementierung
 │   │   │   ├── OpenGLRenderer.h/.cpp
 │   │   │   ├── OpenGLCamera.h/.cpp
@@ -120,8 +122,11 @@ Engine/
 │   │   │   ├── OpenGLObject2D.h/.cpp
 │   │   │   ├── OpenGLObject3D.h/.cpp
 │   │   │   ├── OpenGLTextRenderer.h/.cpp
+│   │   │   ├── OpenGLRenderContext.h    # OpenGL-Implementierung von IRenderContext
+│   │   │   ├── OpenGLRenderTarget.h/.cpp # OpenGL-FBO-Implementierung von IRenderTarget (Editor-Tab-FBOs)
+│   │   │   ├── OpenGLSplashWindow.h/.cpp # OpenGL-Implementierung des Splash-Fensters (Shader, VAOs, FreeType-Atlas)
 │   │   │   ├── glad/               # OpenGL-Loader (GLAD)
-│   │   │   └── shaders/            # GLSL-Shader-Dateien
+│   │   │   ├── shaders/            # GLSL-Shader-Dateien
 │   │   │       ├── vertex.glsl / fragment.glsl       # 3D-Welt (Beleuchtung, Texturen)
 │   │   │       ├── grid_fragment.glsl                # Prozedurales Grid-Material (Multi-Light, Schatten, Blinn-Phong)
 │   │   │       ├── light_fragment.glsl               # Beleuchtung
@@ -131,7 +136,8 @@ Engine/
 │   │   │       ├── ui_vertex/fragment.glsl           # UI-Bild/Textur
 │   │   │       ├── progress_fragment.glsl            # Fortschrittsbalken
 │   │   │       └── slider_fragment.glsl              # Schieberegler
-│   │   ├── UIWidgets/              # Einzelne UI-Control-Klassen
+│   │   │   └── CMakeLists.txt       # Renderer Target (OpenGL-Backend, wird zu Renderer.dll)
+│   │   ├── UIWidgets/
 │   │   │   ├── ButtonWidget.h/.cpp
 │   │   │   ├── TextWidget.h/.cpp
 │   │   │   ├── StackPanelWidget.h/.cpp
@@ -147,7 +153,7 @@ Engine/
 │   │   │   └── TabViewWidget.h/.cpp
 │   │   ├── EditorWindows/           # Editor-Fenster (FBO-Override, 3D-Vorschau)
 │   │   │   └── MeshViewerWindow.h/.cpp  # Mesh-Viewer: Orbit-Kamera, dedizierter FBO
-│   │   └── CMakeLists.txt
+│   │   └── CMakeLists.txt          # RendererCore OBJECT-Lib (abstrakte Schicht, eingebettet in Renderer.dll)
 ├── RENDERER_ABSTRACTION_PLAN.md     # Detaillierter Plan zur Backend-Abstrahierung des Renderers
 │   └── Scripting/                  # Eingebettetes Python-Scripting
 │       ├── PythonScripting.h/.cpp
@@ -857,15 +863,22 @@ virtual Mat4 getViewMatrixColumnMajor() const = 0;
 
 ### 9.7 2D-/3D-Objekte
 
+**Abstrakte Interfaces:** `IRenderObject2D` (`src/Renderer/IRenderObject2D.h`), `IRenderObject3D` (`src/Renderer/IRenderObject3D.h`)
+- Definieren backend-agnostische Schnittstellen für Render-Objekte
+- `IRenderObject3D`: `hasLocalBounds()`, `getLocalBoundsMin/Max()` (Vec3), `getVertexCount()`, `getIndexCount()`
+- Andere Subsysteme (z.B. `MeshViewerWindow`, `RenderResourceManager`) verwenden ausschließlich die abstrakten Interfaces
+
 #### OpenGLObject2D
+- Erbt von `IRenderObject2D` und `EngineObject`
 - Erstellt aus `AssetData` + Texturen
 - `prepare()` → Material aufbauen
 - `setMatrices()` + `render()`
 
 #### OpenGLObject3D
+- Erbt von `IRenderObject3D` und `EngineObject`
 - Erstellt aus `AssetData` (Mesh-Daten) + Texturen
 - `prepare()` → Material + VAO/VBO aufbauen
-- Lokale Bounding Box (`getLocalBoundsMin/Max`)
+- Lokale Bounding Box (`getLocalBoundsMin/Max` via Interface, `localBoundsMinGLM/MaxGLM` für GL-Backend)
 - Batch-Rendering: `renderBatchContinuation()`
 - Statischer Cache: `ClearCache()`
 
@@ -891,16 +904,22 @@ Verwaltet das Caching und die Erstellung von Render-Ressourcen:
 
 - `prepareActiveLevel()` → Lädt alle Assets des aktiven Levels in GPU-Ressourcen
 - `buildRenderablesForSchema(schema)` → Erstellt `RenderableAsset`-Liste für ein ECS-Schema
-- `getOrCreateObject2D/3D()` → Cache-basierte Objekt-Erstellung
-- `prepareTextRenderer()` → Lazy-Init des Text-Renderers
+- `getOrCreateObject2D/3D()` → Cache-basierte Objekt-Erstellung (gibt abstrakte `shared_ptr<IRenderObject2D/3D>` zurück)
+- `prepareTextRenderer()` → Lazy-Init des Text-Renderers (gibt abstrakten `shared_ptr<ITextRenderer>` zurück)
 - `buildWidgetAsset(asset)` → Erstellt Widget aus Asset-Daten
 - `refreshEntityRenderable(entity, defaultFragmentShader)` → Baut Render-Daten für eine einzelne Entität neu auf, nutzt bestehende GPU-Caches (Object3D, Material, Texturen); lädt nur fehlende Assets nach
 - `resolveContentPath(rawPath)` → Löst relative Asset-Pfade in absolute Dateipfade auf (Content-Ordner und Engine-Content als Fallback). **Öffentlich** (`public`), damit andere Subsysteme (z.B. `openMeshViewer`) Registry-relative Pfade vor AssetManager-Lookups auflösen können.
 - `clearCaches()` → Alle Caches leeren
 
+**Abstraktion:**
+- Öffentliche API verwendet ausschließlich abstrakte Interface-Typen (`IRenderObject2D`, `IRenderObject3D`, `ITextRenderer`)
+- `RenderableAsset` Struct enthält `shared_ptr<IRenderObject3D>` und `shared_ptr<IRenderObject2D>`
+- Intern werden weiterhin konkrete OpenGL-Objekte erstellt (impliziter Upcast bei Rückgabe)
+- `OpenGLRenderer` castet bei Bedarf über `std::static_pointer_cast` auf konkrete Typen zurück
+
 Caches:
-- `m_object2DCache` → `weak_ptr<OpenGLObject2D>` nach Asset-ID
-- `m_object3DCache` → `weak_ptr<OpenGLObject3D>` nach Pfad-String
+- `m_object2DCache` → `weak_ptr<IRenderObject2D>` nach Asset-ID
+- `m_object3DCache` → `weak_ptr<IRenderObject3D>` nach Pfad-String
 - `m_materialDataCache` → Textur + Shininess nach Pfad
 - `m_widgetCache` → `weak_ptr<Widget>` nach Asset-ID
 

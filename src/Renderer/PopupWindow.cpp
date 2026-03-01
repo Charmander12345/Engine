@@ -1,4 +1,5 @@
 #include "PopupWindow.h"
+#include "IRenderContext.h"
 
 #include "Logger.h"
 
@@ -7,13 +8,14 @@ PopupWindow::~PopupWindow()
     destroy();
 }
 
-bool PopupWindow::create(const std::string& title, int width, int height)
+bool PopupWindow::create(const std::string& title, int width, int height,
+                         SDL_WindowFlags extraFlags, std::unique_ptr<IRenderContext> context)
 {
     m_width  = width;
     m_height = height;
 
     m_window = SDL_CreateWindow(title.c_str(), width, height,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+        SDL_WINDOW_RESIZABLE | extraFlags);
     if (!m_window)
     {
         Logger::Instance().log(Logger::Category::Rendering,
@@ -22,19 +24,18 @@ bool PopupWindow::create(const std::string& title, int width, int height)
         return false;
     }
 
-    // Request a context that shares resources with the currently-current context.
-    SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
-    m_context = SDL_GL_CreateContext(m_window);
-    SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 0);
-
-    if (!m_context)
+    if (context)
     {
-        Logger::Instance().log(Logger::Category::Rendering,
-            std::string("PopupWindow: SDL_GL_CreateContext failed: ") + SDL_GetError(),
-            Logger::LogLevel::ERROR);
-        SDL_DestroyWindow(m_window);
-        m_window = nullptr;
-        return false;
+        if (!context->initialize(m_window))
+        {
+            Logger::Instance().log(Logger::Category::Rendering,
+                std::string("PopupWindow: render context initialization failed"),
+                Logger::LogLevel::ERROR);
+            SDL_DestroyWindow(m_window);
+            m_window = nullptr;
+            return false;
+        }
+        m_renderContext = std::move(context);
     }
 
     m_open = true;
@@ -45,10 +46,10 @@ bool PopupWindow::create(const std::string& title, int width, int height)
 
 void PopupWindow::destroy()
 {
-    if (m_context)
+    if (m_renderContext)
     {
-        SDL_GL_DestroyContext(m_context);
-        m_context = nullptr;
+        m_renderContext->destroy();
+        m_renderContext.reset();
     }
     if (m_window)
     {

@@ -16,6 +16,9 @@
 #include "OpenGLRenderer/OpenGLObject3D.h"
 #include "OpenGLRenderer/OpenGLMaterial.h"
 #include "OpenGLRenderer/OpenGLTextRenderer.h"
+#include "IRenderObject2D.h"
+#include "IRenderObject3D.h"
+#include "ITextRenderer.h"
 #include "UIWidget.h"
 
 bool RenderResourceManager::prepareActiveLevel()
@@ -483,7 +486,7 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
     return renderables;
 }
 
-std::shared_ptr<OpenGLObject2D> RenderResourceManager::getOrCreateObject2D(const std::shared_ptr<AssetData>& asset,
+std::shared_ptr<IRenderObject2D> RenderResourceManager::getOrCreateObject2D(const std::shared_ptr<AssetData>& asset,
     const std::vector<std::shared_ptr<Texture>>& textures)
 {
     if (!asset)
@@ -520,7 +523,7 @@ std::shared_ptr<OpenGLObject2D> RenderResourceManager::getOrCreateObject2D(const
     return obj;
 }
 
-std::shared_ptr<OpenGLObject3D> RenderResourceManager::getOrCreateObject3D(const std::shared_ptr<AssetData>& asset,
+std::shared_ptr<IRenderObject3D> RenderResourceManager::getOrCreateObject3D(const std::shared_ptr<AssetData>& asset,
     const std::vector<std::shared_ptr<Texture>>& textures)
 {
     if (!asset)
@@ -565,7 +568,7 @@ void RenderResourceManager::clearCaches()
     m_textRenderer.reset();
 }
 
-std::shared_ptr<OpenGLTextRenderer> RenderResourceManager::prepareTextRenderer()
+std::shared_ptr<ITextRenderer> RenderResourceManager::prepareTextRenderer()
 {
     if (auto existing = m_textRenderer.lock())
     {

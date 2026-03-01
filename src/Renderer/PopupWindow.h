@@ -1,31 +1,36 @@
 #pragma once
 
 #include <string>
+#include <memory>
 #include <SDL3/SDL.h>
 
 #include "UIManager.h"
 
-// A secondary OS window with a shared OpenGL context and its own UIManager.
-// Owned by OpenGLRenderer; created via openPopupWindow().
+class IRenderContext;
+
+// A secondary OS window with a backend-agnostic render context and its own UIManager.
+// Owned by the Renderer implementation; created via openPopupWindow().
 class PopupWindow
 {
 public:
     PopupWindow() = default;
     ~PopupWindow();
 
-    // Create the SDL window and a shared GL context (main context must be current).
+    // Create the SDL window with the given extra flags (e.g. SDL_WINDOW_OPENGL)
+    // and initialize the provided render context.
     // Returns false on failure.
-    bool create(const std::string& title, int width, int height);
+    bool create(const std::string& title, int width, int height,
+                SDL_WindowFlags extraFlags, std::unique_ptr<IRenderContext> context);
 
-    // Destroy SDL window and GL context.
+    // Destroy SDL window and render context.
     void destroy();
 
     bool isOpen() const { return m_open; }
     void close() { m_open = false; }
 
-    SDL_Window*    sdlWindow() const { return m_window; }
-    SDL_GLContext  glContext()  const { return m_context; }
-    SDL_WindowID   windowId()  const { return m_window ? SDL_GetWindowID(m_window) : 0; }
+    SDL_Window*     sdlWindow()     const { return m_window; }
+    IRenderContext* renderContext() const { return m_renderContext.get(); }
+    SDL_WindowID    windowId()      const { return m_window ? SDL_GetWindowID(m_window) : 0; }
 
     UIManager&       uiManager()       { return m_uiManager; }
     const UIManager& uiManager() const { return m_uiManager; }
@@ -37,10 +42,10 @@ public:
     void refreshSize();
 
 private:
-    SDL_Window*   m_window  { nullptr };
-    SDL_GLContext m_context { nullptr };
-    UIManager     m_uiManager;
-    bool          m_open   { false };
-    int           m_width  { 0 };
-    int           m_height { 0 };
+    SDL_Window*                     m_window { nullptr };
+    std::unique_ptr<IRenderContext> m_renderContext;
+    UIManager                       m_uiManager;
+    bool                            m_open   { false };
+    int                             m_width  { 0 };
+    int                             m_height { 0 };
 };

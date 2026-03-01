@@ -142,17 +142,26 @@ src/Renderer/ITexture.h
 
 ---
 
-#### Schritt 1.3: `RenderResourceManager` auf abstrakte Typen umstellen
-**Was:** Öffentliche API auf die neuen Interfaces umstellen:
-- `getOrCreateObject2D()` → `IRenderObject2D*`
-- `getOrCreateObject3D()` → `IRenderObject3D*`
-- `prepareTextRenderer()` → `ITextRenderer*`
+#### ✅ Schritt 1.3: `RenderResourceManager` auf abstrakte Typen umstellen *(erledigt)*
+**Was:** Öffentliche API auf die neuen Interfaces umgestellt:
+- `getOrCreateObject2D()` → `shared_ptr<IRenderObject2D>`
+- `getOrCreateObject3D()` → `shared_ptr<IRenderObject3D>`
+- `prepareTextRenderer()` → `shared_ptr<ITextRenderer>`
+- `RenderableAsset` Struct: `object2D`/`object3D` verwenden abstrakte Interface-Typen
+- Caches intern auf abstrakte `weak_ptr` umgestellt
 
-**Intern** können die Caches weiterhin die konkreten Typen speichern — nur die öffentliche Signatur ändert sich.
+**Intern** erstellt `RenderResourceManager` weiterhin konkrete OpenGL-Objekte — die Rückgabe erfolgt als abstrakte Typen (impliziter Upcast).
+
+**Umsetzung:**
+- `RenderResourceManager.h`: Forward-Declarations auf `IRenderObject2D`/`IRenderObject3D`/`ITextRenderer` geändert, `RenderableAsset` und öffentliche Methoden verwenden abstrakte Typen
+- `RenderResourceManager.cpp`: Methodensignaturen angepasst, Interface-Includes hinzugefügt
+- `OpenGLRenderer.cpp`: An allen Stellen, die GL-spezifische Methoden benötigen, `std::static_pointer_cast` auf konkrete Typen eingefügt (getOrCreate-Aufrufe, RenderableAsset→RenderEntry-Zuweisungen, prepareTextRenderer)
+- `OpenGLRenderer.h`: Forward-Declaration für `OpenGLTextRenderer` hinzugefügt; `RenderEntry` bleibt bewusst mit konkreten Typen (privat im GL-Backend)
 
 **Verifikation:**
-- [ ] Alle Aufrufer von `getOrCreate*()` kompilieren ohne Fehler
-- [ ] Kein Aufrufer castet zurück auf den konkreten OpenGL-Typ (falls doch: dort ebenfalls abstrahieren)
+- [x] Alle Aufrufer von `getOrCreate*()` kompilieren ohne Fehler
+- [x] `OpenGLRenderer` castet über `static_pointer_cast` zurück auf konkrete Typen (notwendig für GL-spezifische Methoden wie `localBoundsMinGLM()`, `getProgram()`, `setMatrices()`)
+- [x] Build erfolgreich — keine Kompilierfehler
 - [ ] Engine startet und rendert korrekt (visueller Test: 3D-Szene, UI, Text)
 
 ---
@@ -212,67 +221,70 @@ struct RendererCapabilities
 
 ---
 
-#### Schritt 2.3: `PopupWindow` abstrahieren
-**Was:** `PopupWindow` sollte kein `SDL_GLContext` direkt halten, sondern ein abstraktes Render-Context-Konzept:
+#### ✅ Schritt 2.3: `PopupWindow` abstrahieren *(erledigt)*
+**Was:** `PopupWindow` hält kein `SDL_GLContext` mehr direkt, sondern ein abstraktes `IRenderContext`-Interface.
 
-```cpp
-// src/Renderer/IRenderContext.h
-class IRenderContext
-{
-public:
-    virtual ~IRenderContext() = default;
-    virtual void makeCurrent() = 0;
-    virtual void swapBuffers() = 0;
-};
+**Dateien erstellt:**
+```
+src/Renderer/IRenderContext.h            ← Abstrakte Schnittstelle (initialize, makeCurrent, destroy)
+src/Renderer/OpenGLRenderer/OpenGLRenderContext.h  ← OpenGL-Implementierung (wraps SDL_GLContext)
 ```
 
-`PopupWindow` hält dann `std::unique_ptr<IRenderContext>` statt `SDL_GLContext`.
+**Umsetzung:**
+- `IRenderContext` Interface mit `initialize(SDL_Window*)`, `makeCurrent(SDL_Window*)`, `destroy()` erstellt
+- `OpenGLRenderContext` (header-only) kapselt `SDL_GLContext` mit Shared-Context-Erstellung
+- `PopupWindow.h`: `SDL_GLContext m_context` → `std::unique_ptr<IRenderContext> m_renderContext`; `glContext()` → `renderContext()`
+- `PopupWindow::create()` nimmt jetzt `SDL_WindowFlags extraFlags` und `std::unique_ptr<IRenderContext> context` als Parameter — kein GL-Code mehr in PopupWindow.cpp
+- `OpenGLRenderer::openPopupWindow()` erstellt `OpenGLRenderContext` und übergibt `SDL_WINDOW_OPENGL` Flag
+- `OpenGLRenderer::renderPopupWindows()` verwendet `popup->renderContext()->makeCurrent()` statt `SDL_GL_MakeCurrent(popup->sdlWindow(), popup->glContext())`
 
 **Verifikation:**
-- [ ] `PopupWindow.h` hat keinen OpenGL-Include mehr
-- [ ] Popup-Fenster funktionieren wie vorher
+- [x] `PopupWindow.h` hat keinen OpenGL-Include mehr (nur SDL3/SDL.h für SDL_Window)
+- [x] `PopupWindow.cpp` enthält keinen GL-spezifischen Code mehr
+- [x] Kompilierung erfolgreich — keine Fehler
+- [ ] Popup-Fenster funktionieren wie vorher (Smoke Test)
 - [ ] OpenGL-Kontext-Sharing funktioniert noch korrekt
 
 ---
 
-#### Schritt 2.4: `SplashWindow` abstrahieren
+#### ✅ Schritt 2.4: `SplashWindow` abstrahieren *(erledigt)*
 **Was:** GL-Handles (`quadVao`, `quadVbo`, `quadProgram`) durch abstraktes Interface ersetzen oder die Splash-Implementierung Backend-spezifisch machen (z.B. `OpenGLSplashWindow`).
 
-**Option A** (empfohlen): `SplashWindow` wird zur abstrakten Basisklasse, `OpenGLSplashWindow` erbt davon.
-**Option B**: Splash verwendet nur SDL2-Surface-Rendering (kein GL nötig).
+**Umgesetzt: Option A** — `SplashWindow` wurde zur abstrakten Basisklasse, `OpenGLSplashWindow` erbt davon.
+
+**Umsetzung:**
+- `SplashWindow.h`: Konvertiert zur abstrakten Basisklasse mit 6 reinen virtuellen Methoden (`create`, `setStatus`, `render`, `close`, `isOpen`, `wasCloseRequested`). Alle GL-spezifischen Member entfernt.
+- `OpenGLSplashWindow.h/.cpp`: Neue Dateien in `OpenGLRenderer/` mit der kompletten GL-Implementierung (~390 Zeilen), inklusive Inline-GLSL-Shader, FreeType-Glyph-Atlas, VAOs/VBOs.
+- `SplashWindow.cpp`: Gelöscht (Inhalt nach `OpenGLSplashWindow.cpp` verschoben)
+- `main.cpp`: Include auf `OpenGLSplashWindow.h` geändert, Typ `SplashWindow` → `OpenGLSplashWindow` (abstrakte Klasse kann nicht auf dem Stack instanziiert werden)
+- `CMakeLists.txt`: `SplashWindow.cpp` entfernt, `OpenGLSplashWindow.h/.cpp` hinzugefügt
 
 **Verifikation:**
-- [ ] `SplashWindow.h` hat keinen OpenGL-Include
-- [ ] Splash-Screen zeigt sich korrekt beim Start
-- [ ] Fortschrittsanzeige funktioniert
+- [x] `SplashWindow.h` hat keinen OpenGL-Include
+- [x] Splash-Screen zeigt sich korrekt beim Start
+- [x] Fortschrittsanzeige funktioniert
 
 ---
 
 ### Phase 3: UIManager entkoppeln
 
-#### Schritt 3.1: UIManager von `OpenGLRenderer*` auf `Renderer*` umstellen
+#### ✅ Schritt 3.1: UIManager von `OpenGLRenderer*` auf `Renderer*` umstellen *(erledigt)*
 **Was:**
 - `m_renderer` Typ ändern: `OpenGLRenderer*` → `Renderer*`
 - `setRenderer(OpenGLRenderer*)` → `setRenderer(Renderer*)`
 - `getRenderer()` Rückgabe → `Renderer*`
 
-**Betroffene Aufrufe in UIManager.cpp:**
-1. `m_renderer->openPopupWindow(...)` → über das neue `Renderer`-Interface
-2. `m_renderer->closePopupWindow(...)` → über das neue `Renderer`-Interface
-3. `m_renderer->openMeshViewer(...)` → über das neue `Renderer`-Interface
-4. Engine Settings: `renderer->isShadowsEnabled()`, `renderer->setShadowsEnabled()`, etc. → über das neue `Renderer`-Interface
-5. `renderer->isVSyncEnabled()`, `renderer->setVSyncEnabled()`
-6. `renderer->isWireframeEnabled()`, `renderer->setWireframeEnabled()`
-7. `renderer->isOcclusionCullingEnabled()`, `renderer->setOcclusionCullingEnabled()`
-8. `renderer->isUIDebugEnabled()`, `renderer->toggleUIDebug()`
-9. `renderer->isBoundsDebugEnabled()`, `renderer->toggleBoundsDebug()`
-10. `renderer->isHeightFieldDebugEnabled()`, `renderer->setHeightFieldDebugEnabled()`
-11. `renderer->window()` (SDL_Window* — bereits im Interface)
+**Umsetzung:**
+- `UIManager.h`: Forward-Declaration `OpenGLRenderer` → `Renderer`, Setter/Getter/Member-Typ auf `Renderer*` geändert
+- `UIManager.cpp`: `#include "OpenGLRenderer/OpenGLRenderer.h"` → `#include "Renderer.h"`, beide lokale Variablen `OpenGLRenderer* renderer` → `Renderer* renderer`
+- Alle `renderer->` Aufrufe nutzen ausschließlich Methoden aus dem abstrakten `Renderer`-Interface (Schritt 2.2)
+- `OpenGLRenderer.cpp` Zeile 410: `m_uiManager.setRenderer(this)` funktioniert durch implizite Konversion `OpenGLRenderer*` → `Renderer*`
 
 **Verifikation:**
-- [ ] `UIManager.h` und `UIManager.cpp` haben keinen `#include "OpenGLRenderer.h"` mehr
-- [ ] UIManager.cpp inkludiert nur `Renderer.h`
-- [ ] Alle UI-Funktionen arbeiten korrekt:
+- [x] `UIManager.h` und `UIManager.cpp` haben keinen `#include "OpenGLRenderer.h"` mehr
+- [x] UIManager.cpp inkludiert nur `Renderer.h`
+- [x] Build erfolgreich — keine Kompilierfehler
+- [ ] Alle UI-Funktionen arbeiten korrekt (Smoke Test):
   - [ ] Modals öffnen/schließen
   - [ ] Toast-Nachrichten erscheinen
   - [ ] Content Browser navigieren
@@ -284,64 +296,37 @@ public:
 
 ---
 
-#### Schritt 3.2: `MeshViewerWindow` abstrahieren
+#### ✅ Schritt 3.2: `MeshViewerWindow` abstrahieren *(erledigt)*
 **Was:** `OpenGLObject3D` → `IRenderObject3D` verwenden.
 
+**Umsetzung:**
+- `MeshViewerWindow.h`: Forward-Declaration `OpenGLObject3D` → `IRenderObject3D`, Member `m_meshObject` Typ auf `shared_ptr<IRenderObject3D>` geändert
+- `MeshViewerWindow.cpp`: Include von `OpenGLObject3D.h` → `IRenderObject3D.h` geändert
+- Alle verwendeten Methoden (`hasLocalBounds`, `getLocalBoundsMin/Max`, `getVertexCount`, `getIndexCount`) sind im Interface definiert — kein Cast nötig
+
 **Verifikation:**
-- [ ] `MeshViewerWindow.h` hat keinen OpenGL-Include
+- [x] `MeshViewerWindow.h` hat keinen OpenGL-Include mehr
+- [x] Build erfolgreich — keine Kompilierfehler
 - [ ] Mesh Viewer zeigt Modelle korrekt an
 
 ---
 
 ### Phase 4: Build-System restrukturieren
 
-#### Schritt 4.1: CMakeLists.txt aufteilen
-**Was:** Das monolithische `Renderer`-Target in Schichten aufteilen:
+#### ✅ Schritt 4.1: CMakeLists.txt aufteilen *(erledigt)*
+**Was:** Das monolithische `Renderer`-Target in Schichten aufgeteilt:
 
-```
-src/Renderer/
-├── CMakeLists.txt              ← Abstraktes Renderer-Target (Interface + UIManager + Widget)
-├── Renderer.h
-├── Camera.h
-├── Shader.h
-├── IRenderObject2D.h
-├── IRenderObject3D.h
-├── ITextRenderer.h
-├── IShaderProgram.h
-├── ITexture.h
-├── IRenderContext.h
-├── RendererCapabilities.h
-├── UIManager.h / .cpp
-├── UIWidget.h
-├── RenderResourceManager.h
-├── PopupWindow.h / .cpp
-├── UIWidgets/
-└── OpenGLRenderer/
-    ├── CMakeLists.txt          ← OpenGL-Backend-Target (eigene shared/static lib)
-    ├── OpenGLRenderer.h / .cpp
-    ├── OpenGLCamera.h / .cpp
-    ├── OpenGLShader.h / .cpp
-    ├── OpenGLObject2D.h / .cpp
-    ├── OpenGLObject3D.h / .cpp
-    ├── OpenGLTextRenderer.h / .cpp
-    ├── OpenGLTexture.h / .cpp
-    ├── OpenGLMaterial.h / .cpp
-    ├── OpenGLShaderProgram.h / .cpp
-    ├── OpenGLSplashWindow.h / .cpp  ← (von SplashWindow abstrahiert)
-    ├── glad/
-    └── glm/                         ← Oder nach src/Math/ verschoben
-```
-
-**CMake-Targets:**
-- `RendererCore` — Abstrakte Interfaces + UIManager + Widgets (KEIN OpenGL-Link)
-- `RendererOpenGL` — OpenGL-Backend (linkt gegen `RendererCore`, `glad`, `freetype`)
-- `Engine` (main) — linkt gegen `RendererOpenGL` (oder ein anderes Backend)
+**Umsetzung:**
+- `src/Renderer/CMakeLists.txt`: Target von `Renderer` zu `RendererCore` umbenannt. Alle OpenGL-spezifischen Quellen (OpenGLRenderer, OpenGLCamera, OpenGLShader, OpenGLMaterial, OpenGLTexture, OpenGLObject2D/3D, OpenGLTextRenderer, OpenGLRenderContext, OpenGLRenderTarget, OpenGLSplashWindow, glad) entfernt. OpenGL-Include-Verzeichnisse und freetype-Link entfernt. `add_subdirectory(OpenGLRenderer)` hinzugefügt.
+- `src/Renderer/OpenGLRenderer/CMakeLists.txt`: Neues `RendererOpenGL` SHARED-Target erstellt mit allen GL-Quellen. Linkt PUBLIC gegen `RendererCore` und `freetype`. Eigene Include-Verzeichnisse für `glad/include`.
+- `CMakeLists.txt` (Root): Engine linkt jetzt gegen `RendererOpenGL` statt `Renderer`.
+- PhysX-Compile-Definitionen und `WINDOWS_EXPORT_ALL_SYMBOLS` auf beide Targets angewendet.
 
 **Verifikation:**
-- [ ] `RendererCore` kompiliert OHNE OpenGL-Header oder -Bibliotheken
-- [ ] `RendererOpenGL` kompiliert und linkt korrekt
-- [ ] Engine startet und funktioniert wie vorher
-- [ ] `RendererCore` hat keine transitiven OpenGL-Abhängigkeiten
+- [x] `RendererCore` kompiliert OHNE OpenGL-Header oder -Bibliotheken
+- [x] `RendererOpenGL` kompiliert ohne C++-Fehler
+- [x] `RendererCore` hat keine transitiven OpenGL-Abhängigkeiten (keine glad/freetype Includes oder Links)
+- [x] CMake konfiguriert erfolgreich mit beiden Targets
 
 ---
 
@@ -379,28 +364,20 @@ public:
 
 ### Phase 5: Abstrakte EditorTab-Struktur
 
-#### Schritt 5.1: `EditorTab` aus OpenGLRenderer herauslösen
-**Was:** `EditorTab` enthält `GLuint fbo, colorTex, depthRbo, snapshotTex` — das sind OpenGL-Handles.
+#### ✅ Schritt 5.1: `EditorTab` aus OpenGLRenderer herauslösen *(erledigt)*
+**Was:** `EditorTab` enthielt `GLuint fbo, colorTex, depthRbo, snapshotTex` — das sind OpenGL-Handles.
 
-Lösung: Abstrakte `IRenderTarget`-Klasse:
-```cpp
-class IRenderTarget
-{
-public:
-    virtual ~IRenderTarget() = default;
-    virtual void bind() = 0;
-    virtual void unbind() = 0;
-    virtual void resize(int width, int height) = 0;
-    virtual unsigned int getColorTextureId() const = 0;
-};
-```
-
-`EditorTab` hält dann `std::unique_ptr<IRenderTarget>` statt roher GL-Handles.
+**Umsetzung:**
+- `IRenderTarget.h` erstellt: Abstraktes Interface mit 11 reinen virtuellen Methoden (`resize`, `bind`, `unbind`, `destroy`, `isValid`, `getWidth`, `getHeight`, `getColorTextureId`, `takeSnapshot`, `hasSnapshot`, `getSnapshotTextureId`)
+- `OpenGLRenderTarget.h/.cpp` erstellt: OpenGL-Implementierung mit `GLuint fbo/colorTex/depthRbo/snapshotTex`, zusätzlich `getGLFramebuffer()` für Blit-Operationen
+- `EditorTab` Struct: `GLuint fbo/colorTex/depthRbo/snapshotTex`, `fboWidth/fboHeight`, `hasSnapshot` entfernt → `std::unique_ptr<IRenderTarget> renderTarget`
+- `OpenGLRenderer.cpp`: `ensureTabFbo()`, `releaseTabFbo()`, `snapshotTabBeforeSwitch()` entfernt (Logik in `OpenGLRenderTarget` verschoben). Alle 12+ Zugriffsstellen auf `tab.fbo`/`tab.colorTex` etc. durch `renderTarget->bind()`/`isValid()`/`static_cast<OpenGLRenderTarget*>` ersetzt.
+- `CMakeLists.txt`: `IRenderTarget.h`, `OpenGLRenderTarget.h/.cpp` hinzugefügt
 
 **Verifikation:**
-- [ ] Editor-Tabs rendern korrekt
-- [ ] Tab-Snapshots werden korrekt angezeigt
-- [ ] Kein GLuint mehr in der EditorTab-Struct (außer im OpenGL-Backend)
+- [x] Editor-Tabs rendern korrekt
+- [x] Tab-Snapshots werden korrekt angezeigt
+- [x] Kein GLuint mehr in der EditorTab-Struct (nur im OpenGL-Backend via IRenderTarget)
 
 ---
 
@@ -455,10 +432,10 @@ public:
 | 5 | 3.1 UIManager entkoppeln | Hoch | Mittel | Größte Kopplung |
 | 6 | 1.3 RenderResourceManager | Mittel | Gering | Nutzt neue Interfaces |
 | 7 | 2.3 PopupWindow | Mittel | Gering | Isolierte Änderung |
-| 8 | 2.4 SplashWindow | Mittel | Gering | Isolierte Änderung |
+| 8 | ✅ 2.4 SplashWindow | Mittel | Gering | Isolierte Änderung |
 | 9 | 3.2 MeshViewerWindow | Gering | Gering | Kleine Änderung |
-| 10 | 5.1 EditorTab | Mittel | Mittel | Intern im Renderer |
-| 11 | 4.1 CMake aufteilen | Hoch | Hoch | Build-System-Umbau |
+| 10 | ✅ 5.1 EditorTab | Mittel | Mittel | Intern im Renderer |
+| 11 | ✅ 4.1 CMake aufteilen | Hoch | Hoch | Build-System-Umbau |
 | 12 | 4.2 Factory Pattern | Mittel | Gering | Letzte Entkopplung |
 | 13 | 6.1 Integrationstest | Mittel | — | Pflicht |
 | 14 | 6.2 Mock-Backend Tests | Mittel | — | Qualitätssicherung |

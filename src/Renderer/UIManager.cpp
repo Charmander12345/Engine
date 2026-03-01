@@ -24,7 +24,7 @@
 #include "UIWidgets/ColorPickerWidget.h"
 #include "../AssetManager/AssetManager.h"
 #include "../AssetManager/AssetTypes.h"
-#include "OpenGLRenderer/OpenGLRenderer.h"
+#include "Renderer.h"
 #include "PopupWindow.h"
 #include "../Landscape/LandscapeManager.h"
 
@@ -5774,7 +5774,7 @@ void UIManager::openEngineSettingsPopup()
     constexpr float kCatBtnGap = 2.0f;
     constexpr float kCatBtnY0 = kTitleH + 8.0f;
 
-    OpenGLRenderer* renderer = m_renderer;
+    Renderer* renderer = m_renderer;
     auto rebuildContent = [state, popup, categories, nx, ny, W, H, kSidebarW, kTitleH, renderer]()
     {
         auto& pMgr = popup->uiManager();
@@ -6180,7 +6180,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
 
     constexpr float kScreenW = 720.0f;
     constexpr float kScreenH = 540.0f;
-    OpenGLRenderer* renderer = m_renderer;
+    Renderer* renderer = m_renderer;
     UIManager* screenMgr = this;
     SDL_Window* hostWindow = renderer ? renderer->window() : nullptr;
 

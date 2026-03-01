@@ -6,6 +6,8 @@
 #include "../UIManager.h"
 #include "../PopupWindow.h"
 #include "../EditorWindows/MeshViewerWindow.h"
+#include "../IRenderTarget.h"
+#include "OpenGLRenderTarget.h"
 
 #include "../../Core/MathTypes.h"
 #include "../../Core/EngineLevel.h"
@@ -21,6 +23,7 @@
 
 class OpenGLObject2D;
 class OpenGLObject3D;
+class OpenGLTextRenderer;
 
 struct WindowHitTestContext
 {
@@ -37,13 +40,7 @@ struct EditorTab
     std::string name;
     bool closable{ true };
     bool active{ false };
-    GLuint fbo{ 0 };
-    GLuint colorTex{ 0 };
-    GLuint depthRbo{ 0 };
-    GLuint snapshotTex{ 0 };
-    int fboWidth{ 0 };
-    int fboHeight{ 0 };
-    bool hasSnapshot{ false };
+    std::unique_ptr<IRenderTarget> renderTarget;
 };
 
 class OpenGLRenderer : public Renderer
@@ -418,10 +415,7 @@ private:
     ECS::TransformComponent m_gizmoDragOldTransform{};  // full transform snapshot for undo
 
     // Editor tab system
-    bool ensureTabFbo(EditorTab& tab, int width, int height);
-    void releaseTabFbo(EditorTab& tab);
     void releaseAllTabFbos();
-    void snapshotTabBeforeSwitch(EditorTab& tab);
     std::vector<EditorTab> m_editorTabs;
     std::string m_activeTabId{ "Viewport" };
     EditorTab* m_cachedActiveTab{ nullptr };

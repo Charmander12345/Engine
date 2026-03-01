@@ -1,6 +1,6 @@
 #include "MeshViewerWindow.h"
 
-#include "../OpenGLRenderer/OpenGLObject3D.h"
+#include "../IRenderObject3D.h"
 #include "../RenderResourceManager.h"
 #include "../../AssetManager/AssetManager.h"
 #include "../../Core/Asset.h"

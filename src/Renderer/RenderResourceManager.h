@@ -10,9 +10,9 @@
 class EngineLevel;
 class AssetData;
 class Texture;
-class OpenGLObject2D;
-class OpenGLObject3D;
-class OpenGLTextRenderer;
+class IRenderObject2D;
+class IRenderObject3D;
+class ITextRenderer;
 class Widget;
 
 class RenderResourceManager
@@ -33,8 +33,8 @@ public:
         ECS::TransformComponent transform{};
         std::shared_ptr<AssetData> asset;
         std::vector<std::shared_ptr<Texture>> textures;
-        std::shared_ptr<OpenGLObject2D> object2D;
-        std::shared_ptr<OpenGLObject3D> object3D;
+        std::shared_ptr<IRenderObject2D> object2D;
+        std::shared_ptr<IRenderObject3D> object3D;
         AssetType assetType{ AssetType::Unknown };
         float shininess{32.0f};
         std::string fragmentShaderOverride;
@@ -46,12 +46,12 @@ public:
     // Returns a valid RenderableAsset on success; entity==0 on failure.
     RenderableAsset refreshEntityRenderable(ECS::Entity entity, const std::string& defaultFragmentShader = "");
 
-    std::shared_ptr<OpenGLObject2D> getOrCreateObject2D(const std::shared_ptr<AssetData>& asset,
+    std::shared_ptr<IRenderObject2D> getOrCreateObject2D(const std::shared_ptr<AssetData>& asset,
         const std::vector<std::shared_ptr<Texture>>& textures);
-    std::shared_ptr<OpenGLObject3D> getOrCreateObject3D(const std::shared_ptr<AssetData>& asset,
+    std::shared_ptr<IRenderObject3D> getOrCreateObject3D(const std::shared_ptr<AssetData>& asset,
         const std::vector<std::shared_ptr<Texture>>& textures);
     void clearCaches();
-    std::shared_ptr<OpenGLTextRenderer> prepareTextRenderer();
+    std::shared_ptr<ITextRenderer> prepareTextRenderer();
     void prepareAssets(const std::vector<AssetPrepKind>& kinds);
 	std::shared_ptr<Widget> buildWidgetAsset(const std::shared_ptr<AssetData>& asset);
 	std::string resolveContentPath(const std::string& rawPath) const;
@@ -61,8 +61,8 @@ private:
 	bool prepareOpenGLObject2D(const std::shared_ptr<AssetData>& asset, const std::vector<std::shared_ptr<Texture>>& textures);
 	bool prepareOpenGLObject3D(const std::shared_ptr<AssetData>& asset, const std::vector<std::shared_ptr<Texture>>& textures);
 
-    std::unordered_map<unsigned int, std::weak_ptr<OpenGLObject2D>> m_object2DCache;
-    std::unordered_map<std::string, std::weak_ptr<OpenGLObject3D>> m_object3DCache;
+    std::unordered_map<unsigned int, std::weak_ptr<IRenderObject2D>> m_object2DCache;
+    std::unordered_map<std::string, std::weak_ptr<IRenderObject3D>> m_object3DCache;
 
     struct CachedMaterialData
     {
@@ -71,6 +71,6 @@ private:
         std::string shaderFragment;
     };
     std::unordered_map<std::string, CachedMaterialData> m_materialDataCache;
-    std::weak_ptr<OpenGLTextRenderer> m_textRenderer;
+    std::weak_ptr<ITextRenderer> m_textRenderer;
     std::unordered_map<unsigned int, std::weak_ptr<Widget>> m_widgetCache;
 };

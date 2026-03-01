@@ -328,11 +328,18 @@
 - Transparenz nur eingeschränkt (kein korrektes Order-Independent-Transparency)
 - Instancing existiert auf CPU-/Level-Seite, aber kein GPU-Instanced-Rendering
 - Keine Alternative zu OpenGL (DirectX / Vulkan nicht implementiert, nur als Enum-Placeholder)
-- **Renderer-Abstrahierung geplant:** Detaillierter 15-Schritte-Plan in `RENDERER_ABSTRACTION_PLAN.md` erstellt. Bereits abstrahiert: `Renderer`, `Camera`, `Shader` (dünne Interfaces), `UIWidget` (backend-agnostisch). Noch zu entkoppeln: `UIManager` (referenziert `OpenGLRenderer*` direkt), `RenderResourceManager` (OpenGL-Typen in Public API), `PopupWindow` (`SDL_GLContext`), `SplashWindow` (raw GL handles), `MeshViewerWindow` (`OpenGLObject3D`), `EditorTab` (`GLuint` FBO/Tex), `main.cpp` (direkte Instanziierung), `CMakeLists.txt` (monolithisches Target).
+CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) eingebettet in `Renderer` (SHARED, Renderer.dll). Noch zu entkoppeln: `main.cpp` (direkte Instanziierung).
 - **Schritt 1.1 erledigt:** GLM von `src/Renderer/OpenGLRenderer/glm/` nach `external/glm/` verschoben. Include-Pfad `${CMAKE_SOURCE_DIR}/external` als PUBLIC in `src/Renderer/CMakeLists.txt` hinzugefügt. Build verifiziert ✅.
-- **Schritt 1.2 erledigt:** Abstrakte Render-Ressourcen-Interfaces erstellt: `IRenderObject2D`, `IRenderObject3D`, `ITextRenderer`, `IShaderProgram`, `ITexture`. Alle OpenGL-Klassen erben korrekt davon. Build verifiziert ✅.
-- **Schritt 2.1 erledigt:** `RendererCapabilities.h` erstellt — Backend-Fähigkeiten-Struct (Shadows, Occlusion, Wireframe, VSync, EntityPicking, Gizmos, Skybox, PopupWindows). Build verifiziert ✅.
+- **Schritt 1.2 erledigt:** 5 abstrakte Render-Ressourcen-Interfaces erstellt: `IRenderObject2D`, `IRenderObject3D`, `ITextRenderer`, `IShaderProgram`, `ITexture`. OpenGL-Klassen erben jeweils davon. Build verifiziert ✅.
+- **Schritt 2.1 erledigt:**
 - **Schritt 2.2 erledigt:** `Renderer.h` von ~36 auf ~130 Zeilen erweitert mit ~60 virtuellen Methoden. GizmoMode/GizmoAxis Enums in Renderer definiert. OpenGLRenderer: ~45 Methoden mit `override` markiert, `getCapabilities()` implementiert (alle Caps = true). Build verifiziert ✅.
+- **Schritt 3.1 erledigt:** `UIManager` vollständig von `OpenGLRenderer*` auf `Renderer*` umgestellt. Kein `#include "OpenGLRenderer.h"` mehr in UIManager.h/.cpp — nur noch `Renderer.h`. Alle Aufrufe nutzen das abstrakte Interface. Build verifiziert ✅.
+- **Schritt 1.3 erledigt:** `RenderResourceManager` öffentliche API auf abstrakte Typen umgestellt: `getOrCreateObject2D/3D()` → `shared_ptr<IRenderObject2D/3D>`, `prepareTextRenderer()` → `shared_ptr<ITextRenderer>`, `RenderableAsset` Struct mit abstrakten Interfaces, Caches auf abstrakte `weak_ptr`. `OpenGLRenderer.cpp` nutzt `std::static_pointer_cast` für GL-spezifische Methoden. Build verifiziert ✅.
+- **Schritt 3.2 erledigt:** `MeshViewerWindow` von `OpenGLObject3D` auf `IRenderObject3D` umgestellt. Kein OpenGL-Include mehr in MeshViewerWindow.h/.cpp. Alle verwendeten Methoden (`hasLocalBounds`, `getLocalBoundsMin/Max`, `getVertexCount`, `getIndexCount`) sind im abstrakten Interface definiert — kein Cast nötig. Build verifiziert ✅.
+- **Schritt 2.3 erledigt:** `PopupWindow` abstrahiert: `SDL_GLContext` → `IRenderContext` Interface. `IRenderContext.h` (abstract) und `OpenGLRenderContext.h` (OpenGL-Impl.) erstellt. `PopupWindow::create()` nimmt `SDL_WindowFlags` + `unique_ptr<IRenderContext>`. Kein GL-Code mehr in PopupWindow.h/.cpp. Build verifiziert ✅.
+- **Schritt 2.4 erledigt:** `SplashWindow` abstrahiert: Konvertiert zur abstrakten Basisklasse mit 6 reinen virtuellen Methoden. `OpenGLSplashWindow.h/.cpp` erstellt mit kompletter GL-Implementierung (~390 Zeilen, Inline-GLSL-Shader, FreeType-Glyph-Atlas, VAOs/VBOs). Alte `SplashWindow.cpp` gelöscht. `main.cpp` nutzt `OpenGLSplashWindow` direkt. Build verifiziert ✅.
+- **Schritt 5.1 erledigt:** `EditorTab` FBO-Abstraktion: `IRenderTarget.h` (11 reine virtuelle Methoden: resize, bind, unbind, destroy, isValid, getWidth/Height, getColorTextureId, takeSnapshot, hasSnapshot, getSnapshotTextureId) und `OpenGLRenderTarget.h/.cpp` (~100 Zeilen GL-FBO-Implementierung) erstellt. `EditorTab`-Struct von 7 GL-spezifischen Feldern auf `unique_ptr<IRenderTarget> renderTarget` reduziert. 12+ Zugriffsstellen in `OpenGLRenderer.cpp` aktualisiert. `ensureTabFbo`/`releaseTabFbo`/`snapshotTabBeforeSwitch` (~100 Zeilen) entfernt. Build verifiziert ✅.
+- **Schritt 4.1 erledigt → konsolidiert:** CMake-Targets `RendererCore` (OBJECT, abstrakte Schicht + UIManager + Widgets + RenderResourceManager + PopupWindow + EditorWindows) und `Renderer` (SHARED → Renderer.dll, alle GL-Dateien + glad + RendererCore-Objekte, links PUBLIC gegen freetype). Engine links gegen `Renderer`. Ergebnis: Eine einzige Renderer.dll statt zwei getrennter DLLs. Build verifiziert ✅.
 
 ---
 
@@ -443,6 +450,7 @@
 |--------------------------------------|--------|
 | OpenGLObject2D (Sprites)            | ✅     |
 | OpenGLObject3D (Meshes)             | ✅     |
+| **Abstrakte Interfaces (IRenderObject2D/3D)** | ✅ |
 | Material-Verknüpfung                | ✅     |
 | Lokale Bounding Box (AABB)          | ✅     |
 | Batch-Rendering                      | ✅     |
@@ -453,9 +461,7 @@
 | LOD-System (Level of Detail)        | ❌     |
 | Skeletal Meshes / Animation         | ❌     |
 
-**Offene Punkte:**
-- Kein LOD-System
-- Keine Skeletal-Animation
+**Abstraktion:** `IRenderObject2D` und `IRenderObject3D` definieren backend-agnostische Interfaces. OpenGL-Klassen erben davon. `MeshViewerWindow` und `RenderResourceManager` nutzen ausschließlich die abstrakten Interfaces.
 
 ---
 
@@ -493,8 +499,9 @@
 | Cache-Invalidierung                      | ✅     |
 | Per-Entity Render Refresh (refreshEntityRenderable) | ✅ |
 | Content-Pfad-Auflösung (resolveContentPath, **public**) | ✅ |
+| **Abstrakte Interface-Typen in Public API** | ✅ |
 
-**Keine offenen Punkte** – vollständig für den aktuellen Anwendungsfall.
+**Abstraktion:** Öffentliche API (`getOrCreateObject2D/3D`, `prepareTextRenderer`, `RenderableAsset`) verwendet ausschließlich abstrakte Interface-Typen (`IRenderObject2D`, `IRenderObject3D`, `ITextRenderer`). Caches intern auf abstrakte `weak_ptr` umgestellt. `OpenGLRenderer` castet bei Bedarf über `std::static_pointer_cast` auf konkrete Typen zurück.
 
 ---
 
@@ -748,6 +755,7 @@
 | Feature                                          | Status |
 |--------------------------------------------------|--------|
 | `PopupWindow`-Klasse (`src/Renderer/PopupWindow.h/.cpp`) | ✅ |
+| **Abstraktion: `IRenderContext` statt `SDL_GLContext`** | ✅ |
 | Shared OpenGL-Context (SDL3 SHARE_WITH_CURRENT_CONTEXT) | ✅ |
 | Eigener `UIManager` pro Popup                    | ✅ |
 | `OpenGLRenderer::openPopupWindow(id, title, w, h)` | ✅ |
@@ -805,6 +813,7 @@
 | Feature                                          | Status |
 |--------------------------------------------------|--------|
 | `MeshViewerWindow`-Klasse (`src/Renderer/EditorWindows/MeshViewerWindow.h/.cpp`) | ✅ |
+| **Abstraktion: nutzt `IRenderObject3D` statt `OpenGLObject3D`** | ✅ |
 | **Tab-basiertes System** (eigener EditorTab pro Mesh Viewer mit eigenem FBO) | ✅ |
 | **Runtime-EngineLevel** pro Mesh-Viewer (isolierte Szene) | ✅ |
 | **Per-Tab-FBO**: Jeder Tab rendert in eigenen Framebuffer, Tab-Wechsel tauscht FBO | ✅ |

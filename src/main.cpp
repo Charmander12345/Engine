@@ -1,4 +1,4 @@
-﻿#include <iostream>
+#include <iostream>
 #include <filesystem>
 #include <fstream>
 #include <cstdlib>
@@ -9,14 +9,15 @@
 #include <SDL3/SDL.h>
 
 #if defined(_WIN32)
+#define NOMINMAX
 #include <Windows.h>
 #endif
 
 #include "Renderer/Renderer.h"
-#include "Renderer/OpenGLRenderer/OpenGLRenderer.h"
+#include "Renderer/RendererFactory.h"
+#include "Renderer/SplashWindow.h"
 #include "Renderer/UIWidget.h"
 #include "Renderer/PopupWindow.h"
-#include "Renderer/SplashWindow.h"
 #include "Logger/Logger.h"
 #include "Diagnostics/DiagnosticsManager.h"
 #include "AssetManager/AssetManager.h"
@@ -93,7 +94,7 @@ int main()
     {
         logTimed(Logger::Category::Engine, "No valid default project found. Opening project selection...", Logger::LogLevel::INFO);
 
-        auto* tempRenderer = new OpenGLRenderer();
+        auto* tempRenderer = RendererFactory::createRenderer(RendererBackend::OpenGL);
         if (tempRenderer->initialize())
         {
             SDL_WindowID tempWindowId = 0;
@@ -260,19 +261,18 @@ int main()
     }
 
     // Now we have a project to load/create. Show SplashWindow.
-    SplashWindow splash;
+    auto splash = RendererFactory::createSplashWindow(RendererBackend::OpenGL);
     if (useSplash)
     {
-        if (splash.create())
+        if (splash->create())
         {
-            splash.setStatus("Initializing renderer...");
-            splash.render();
+            splash->setStatus("Initializing renderer...");
+            splash->render();
         }
     }
 
     logTimed(Logger::Category::Rendering, "Initialising Renderer (OpenGL)...", Logger::LogLevel::INFO);
-    auto* glRenderer = new OpenGLRenderer();
-    Renderer* renderer = glRenderer;
+    Renderer* renderer = RendererFactory::createRenderer(RendererBackend::OpenGL);
 
     if (!renderer->initialize())
     {
@@ -310,31 +310,31 @@ int main()
     }
 
     logTimed(Logger::Category::Rendering, std::string("Renderer initialised successfully: ") + renderer->name(), Logger::LogLevel::INFO);
-    SDL_GL_SetSwapInterval(0);
+    renderer->setVSyncEnabled(false);
 
     // Apply persisted engine settings
     {
         auto& diag = DiagnosticsManager::Instance();
         if (auto v = diag.getState("ShadowsEnabled"))
-            glRenderer->setShadowsEnabled(*v != "0");
+            renderer->setShadowsEnabled(*v != "0");
         if (auto v = diag.getState("OcclusionCullingEnabled"))
-            glRenderer->setOcclusionCullingEnabled(*v != "0");
+            renderer->setOcclusionCullingEnabled(*v != "0");
         if (auto v = diag.getState("UIDebugEnabled"))
         {
-            if ((*v == "1") != glRenderer->isUIDebugEnabled())
-                glRenderer->toggleUIDebug();
+            if ((*v == "1") != renderer->isUIDebugEnabled())
+                renderer->toggleUIDebug();
         }
         if (auto v = diag.getState("BoundsDebugEnabled"))
         {
-            if ((*v == "1") != glRenderer->isBoundsDebugEnabled())
-                glRenderer->toggleBoundsDebug();
+            if ((*v == "1") != renderer->isBoundsDebugEnabled())
+                renderer->toggleBoundsDebug();
         }
         if (auto v = diag.getState("HeightFieldDebugEnabled"))
-            glRenderer->setHeightFieldDebugEnabled(*v == "1");
+            renderer->setHeightFieldDebugEnabled(*v == "1");
         if (auto v = diag.getState("VSyncEnabled"))
-            glRenderer->setVSyncEnabled(*v == "1");
+            renderer->setVSyncEnabled(*v == "1");
         if (auto v = diag.getState("WireframeEnabled"))
-            glRenderer->setWireframeEnabled(*v == "1");
+            renderer->setWireframeEnabled(*v == "1");
     }
 
     // In fast mode, show the main window immediately (splash mode keeps it hidden until ready).
@@ -349,21 +349,21 @@ int main()
     // Helper: show progress during subsystem init.
     auto showProgress = [&](const std::string& msg)
     {
-        if (splash.isOpen())
+        if (splash->isOpen())
         {
-            splash.setStatus(msg);
-            splash.render();
+            splash->setStatus(msg);
+            splash->render();
         }
-        else if (glRenderer)
+        else if (renderer)
         {
-            glRenderer->getUIManager().showToastMessage(msg, 3.0f);
+            renderer->getUIManager().showToastMessage(msg, 3.0f);
             SDL_Event ev;
             while (SDL_PollEvent(&ev))
             {
                 if (ev.type == SDL_EVENT_QUIT)
                     continue; // ignore – may be leftover from popup destruction
             }
-            glRenderer->getUIManager().updateNotifications(0.016f);
+            renderer->getUIManager().updateNotifications(0.016f);
             renderer->render();
             renderer->present();
         }
@@ -455,12 +455,12 @@ int main()
     bool pieMouseCaptured = false;
     bool pieInputPaused = false;
 
-    if (glRenderer)
+    if (renderer)
     {
-        const GLuint playTexId = glRenderer->preloadUITexture("Play.tga");
-        const GLuint stopTexId = glRenderer->preloadUITexture("Stop.tga");
+        const unsigned int playTexId = renderer->preloadUITexture("Play.tga");
+        const unsigned int stopTexId = renderer->preloadUITexture("Stop.tga");
 
-        stopPIE = [&glRenderer, playTexId, &pieMouseCaptured, &pieInputPaused, &renderer]()
+        stopPIE = [&renderer, playTexId, &pieMouseCaptured, &pieInputPaused]()
             {
                 auto& diag = DiagnosticsManager::Instance();
                 if (!diag.isPIEActive())
@@ -468,7 +468,7 @@ int main()
                     return;
                 }
                 diag.setPIEActive(false);
-                glRenderer->clearActiveCameraEntity();
+                renderer->clearActiveCameraEntity();
                 AudioManager::Instance().stopAll();
                 PhysicsWorld::Instance().shutdown();
                 Scripting::ReloadScripts();
@@ -485,7 +485,7 @@ int main()
                     SDL_SetWindowRelativeMouseMode(w, false);
                 }
                 SDL_ShowCursor();
-                auto& uiMgr = glRenderer->getUIManager();
+                auto& uiMgr = renderer->getUIManager();
                 if (auto* el = uiMgr.findElementById("ViewportOverlay.PIE"))
                 {
                     el->textureId = playTexId;
@@ -495,13 +495,13 @@ int main()
                 Logger::Instance().log(Logger::Category::Engine, "PIE: stopped.", Logger::LogLevel::INFO);
             };
 
-        glRenderer->getUIManager().registerClickEvent("TitleBar.Close", []()
+        renderer->getUIManager().registerClickEvent("TitleBar.Close", []()
             {
                 Logger::Instance().log(Logger::Category::Input, "TitleBar close button clicked.", Logger::LogLevel::INFO);
                 DiagnosticsManager::Instance().requestShutdown();
             });
 
-        glRenderer->getUIManager().registerClickEvent("TitleBar.Minimize", [&renderer]()
+        renderer->getUIManager().registerClickEvent("TitleBar.Minimize", [&renderer]()
             {
                 Logger::Instance().log(Logger::Category::Input, "TitleBar minimize button clicked.", Logger::LogLevel::INFO);
                 if (auto* w = renderer->window())
@@ -510,7 +510,7 @@ int main()
                 }
             });
 
-        glRenderer->getUIManager().registerClickEvent("TitleBar.Maximize", [&renderer]()
+        renderer->getUIManager().registerClickEvent("TitleBar.Maximize", [&renderer]()
             {
                 Logger::Instance().log(Logger::Category::Input, "TitleBar maximize button clicked.", Logger::LogLevel::INFO);
                 if (auto* w = renderer->window())
@@ -526,61 +526,61 @@ int main()
                 }
             });
 
-        glRenderer->getUIManager().registerClickEvent("TitleBar.Menu.File", []()
+        renderer->getUIManager().registerClickEvent("TitleBar.Menu.File", []()
             {
                 Logger::Instance().log(Logger::Category::Input, "Menu: File clicked.", Logger::LogLevel::INFO);
             });
 
-        glRenderer->getUIManager().registerClickEvent("TitleBar.Menu.Edit", []()
+        renderer->getUIManager().registerClickEvent("TitleBar.Menu.Edit", []()
             {
                 Logger::Instance().log(Logger::Category::Input, "Menu: Edit clicked.", Logger::LogLevel::INFO);
             });
 
-        glRenderer->getUIManager().registerClickEvent("TitleBar.Menu.Window", []()
+        renderer->getUIManager().registerClickEvent("TitleBar.Menu.Window", []()
             {
                 Logger::Instance().log(Logger::Category::Input, "Menu: Window clicked.", Logger::LogLevel::INFO);
             });
 
-        glRenderer->getUIManager().registerClickEvent("WorldSettings.Tools.Landscape", [&glRenderer]()
+        renderer->getUIManager().registerClickEvent("WorldSettings.Tools.Landscape", [&renderer]()
             {
-                glRenderer->getUIManager().openLandscapeManagerPopup();
+                renderer->getUIManager().openLandscapeManagerPopup();
             });
 
-        glRenderer->getUIManager().registerClickEvent("TitleBar.Menu.Build", []()
+        renderer->getUIManager().registerClickEvent("TitleBar.Menu.Build", []()
             {
                 Logger::Instance().log(Logger::Category::Input, "Menu: Build clicked.", Logger::LogLevel::INFO);
             });
 
-        glRenderer->getUIManager().registerClickEvent("TitleBar.Menu.Help", []()
+        renderer->getUIManager().registerClickEvent("TitleBar.Menu.Help", []()
             {
                 Logger::Instance().log(Logger::Category::Input, "Menu: Help clicked.", Logger::LogLevel::INFO);
             });
 
-        glRenderer->getUIManager().registerClickEvent("ViewportOverlay.Select", []()
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.Select", []()
             {
                 Logger::Instance().log(Logger::Category::Input, "Toolbar: Select mode.", Logger::LogLevel::INFO);
             });
 
-        glRenderer->getUIManager().registerClickEvent("ViewportOverlay.Move", []()
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.Move", []()
             {
                 Logger::Instance().log(Logger::Category::Input, "Toolbar: Move mode.", Logger::LogLevel::INFO);
             });
 
-        glRenderer->getUIManager().registerClickEvent("ViewportOverlay.Rotate", []()
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.Rotate", []()
             {
                 Logger::Instance().log(Logger::Category::Input, "Toolbar: Rotate mode.", Logger::LogLevel::INFO);
             });
 
-        glRenderer->getUIManager().registerClickEvent("ViewportOverlay.Scale", []()
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.Scale", []()
             {
                 Logger::Instance().log(Logger::Category::Input, "Toolbar: Scale mode.", Logger::LogLevel::INFO);
             });
 
-        glRenderer->getUIManager().registerClickEvent("ViewportOverlay.Settings", [&glRenderer]()
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.Settings", [&renderer]()
             {
                 Logger::Instance().log(Logger::Category::Input, "Toolbar: Settings clicked.", Logger::LogLevel::INFO);
 
-                auto& uiMgr = glRenderer->getUIManager();
+                auto& uiMgr = renderer->getUIManager();
 
                 // Toggle dropdown menu
                 if (uiMgr.isDropdownMenuOpen())
@@ -599,16 +599,16 @@ int main()
                 }
 
                 std::vector<UIManager::DropdownMenuItem> items;
-                items.push_back({ "Engine Settings", [&glRenderer]()
+                items.push_back({ "Engine Settings", [&renderer]()
                     {
-                        glRenderer->getUIManager().openEngineSettingsPopup();
+                        renderer->getUIManager().openEngineSettingsPopup();
                     }
                 });
 
                 uiMgr.showDropdownMenu(anchor, items);
             });
 
-        glRenderer->getUIManager().registerClickEvent("ViewportOverlay.PIE", [&glRenderer, playTexId, stopTexId, stopPIE, &pieMouseCaptured, &pieInputPaused, &renderer]()
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.PIE", [&renderer, playTexId, stopTexId, stopPIE, &pieMouseCaptured, &pieInputPaused]()
             {
                 auto& diag = DiagnosticsManager::Instance();
                 const bool wasActive = diag.isPIEActive();
@@ -675,7 +675,7 @@ int main()
                         }
                         if (activeCamEntity != 0)
                         {
-                            glRenderer->setActiveCameraEntity(activeCamEntity);
+                            renderer->setActiveCameraEntity(activeCamEntity);
                             Logger::Instance().log(Logger::Category::Engine, "PIE: using entity camera " + std::to_string(activeCamEntity), Logger::LogLevel::INFO);
                         }
                     }
@@ -689,7 +689,7 @@ int main()
                     }
                     SDL_HideCursor();
 
-                    auto& uiMgr = glRenderer->getUIManager();
+                    auto& uiMgr = renderer->getUIManager();
                     if (auto* el = uiMgr.findElementById("ViewportOverlay.PIE"))
                     {
                         el->textureId = stopTexId;
@@ -711,20 +711,20 @@ int main()
             {
                 if (auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(widgetId)))
                 {
-                    if (auto widget = glRenderer->createWidgetFromAsset(asset))
+                    if (auto widget = renderer->createWidgetFromAsset(asset))
                     {
-                                    glRenderer->getUIManager().registerWidget("TitleBar", widget);
+                                    renderer->getUIManager().registerWidget("TitleBar", widget);
                                     }
                                 }
                             }
                         }
 
-                        glRenderer->addTab("Viewport", "Viewport", false);
+                        renderer->addTab("Viewport", "Viewport", false);
 
-                        glRenderer->getUIManager().registerClickEvent("TitleBar.Tab.Viewport", [&glRenderer]()
+                        renderer->getUIManager().registerClickEvent("TitleBar.Tab.Viewport", [&renderer]()
                             {
-                                glRenderer->setActiveTab("Viewport");
-                                glRenderer->getUIManager().markAllWidgetsDirty();
+                                renderer->setActiveTab("Viewport");
+                                renderer->getUIManager().markAllWidgetsDirty();
                             });
 
                         const std::string toolbarPath = assetManager.getEditorWidgetPath("ViewportOverlay.asset");
@@ -735,9 +735,9 @@ int main()
             {
                 if (auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(widgetId)))
                 {
-                    if (auto widget = glRenderer->createWidgetFromAsset(asset))
+                    if (auto widget = renderer->createWidgetFromAsset(asset))
                     {
-                        glRenderer->getUIManager().registerWidget("ViewportOverlay", widget, "Viewport");
+                        renderer->getUIManager().registerWidget("ViewportOverlay", widget, "Viewport");
                     }
                 }
             }
@@ -751,7 +751,7 @@ int main()
             {
                 if (auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(widgetId)))
                 {
-                    if (auto widget = glRenderer->createWidgetFromAsset(asset))
+                    if (auto widget = renderer->createWidgetFromAsset(asset))
                     {
                         auto findElementById = [](std::vector<WidgetElement>& elements, const std::string& id) -> WidgetElement*
                         {
@@ -784,10 +784,10 @@ int main()
 
                         if (auto* picker = findElementById(widget->getElementsMutable(), "WorldSettings.ClearColor"))
                         {
-                            picker->color = glRenderer->getClearColor();
-                            picker->onColorChanged = [glRenderer](const Vec4& color)
+                            picker->color = renderer->getClearColor();
+                            picker->onColorChanged = [renderer](const Vec4& color)
                                 {
-                                    glRenderer->setClearColor(color);
+                                    renderer->setClearColor(color);
                                 };
 
                             auto& children = picker->children;
@@ -862,31 +862,31 @@ int main()
                         // Skybox asset path entry
                         if (auto* skyboxEntry = findElementById(widget->getElementsMutable(), "WorldSettings.SkyboxPath"))
                         {
-                            skyboxEntry->value = glRenderer->getSkyboxPath();
-                            skyboxEntry->onValueChanged = [glRenderer](const std::string& value)
+                            skyboxEntry->value = renderer->getSkyboxPath();
+                            skyboxEntry->onValueChanged = [renderer](const std::string& value)
                                 {
-                                    glRenderer->setSkyboxPath(value);
+                                    renderer->setSkyboxPath(value);
                                     auto& diag = DiagnosticsManager::Instance();
                                     if (auto* level = diag.getActiveLevelSoft())
                                     {
                                         level->setSkyboxPath(value);
                                     }
-                                    glRenderer->getUIManager().refreshStatusBar();
+                                    renderer->getUIManager().refreshStatusBar();
                                 };
 
                             // Bind Clear button if it exists
                             if (auto* clearBtn = findElementById(widget->getElementsMutable(), "WorldSettings.SkyboxClear"))
                             {
-                                clearBtn->onClicked = [glRenderer]()
+                                clearBtn->onClicked = [renderer]()
                                     {
-                                        glRenderer->setSkyboxPath("");
+                                        renderer->setSkyboxPath("");
                                         auto& diag = DiagnosticsManager::Instance();
                                         if (auto* level = diag.getActiveLevelSoft())
                                         {
                                             level->setSkyboxPath("");
                                         }
-                                        glRenderer->getUIManager().refreshStatusBar();
-                                        glRenderer->getUIManager().showToastMessage("Skybox cleared", 2.5f);
+                                        renderer->getUIManager().refreshStatusBar();
+                                        renderer->getUIManager().showToastMessage("Skybox cleared", 2.5f);
                                     };
                             }
                         }
@@ -921,7 +921,7 @@ int main()
                                 WidgetElement skyEntry{};
                                 skyEntry.id = "WorldSettings.SkyboxPath";
                                 skyEntry.type = WidgetElementType::EntryBar;
-                                skyEntry.value = glRenderer->getSkyboxPath();
+                                skyEntry.value = renderer->getSkyboxPath();
                                 skyEntry.font = "default.ttf";
                                 skyEntry.fontSize = 13.0f;
                                 skyEntry.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
@@ -931,15 +931,15 @@ int main()
                                 skyEntry.padding = Vec2{ 6.0f, 4.0f };
                                 skyEntry.isHitTestable = true;
                                 skyEntry.runtimeOnly = true;
-                                skyEntry.onValueChanged = [glRenderer](const std::string& value)
+                                skyEntry.onValueChanged = [renderer](const std::string& value)
                                     {
-                                        glRenderer->setSkyboxPath(value);
+                                        renderer->setSkyboxPath(value);
                                         auto& diag = DiagnosticsManager::Instance();
                                         if (auto* level = diag.getActiveLevelSoft())
                                         {
                                             level->setSkyboxPath(value);
                                         }
-                                        glRenderer->getUIManager().refreshStatusBar();
+                                        renderer->getUIManager().refreshStatusBar();
                                     };
                                 rootStack->children.push_back(std::move(skyEntry));
 
@@ -961,22 +961,22 @@ int main()
                                 clearBtn.padding = Vec2{ 4.0f, 2.0f };
                                 clearBtn.isHitTestable = true;
                                 clearBtn.runtimeOnly = true;
-                                clearBtn.onClicked = [glRenderer]()
+                                clearBtn.onClicked = [renderer]()
                                     {
-                                        glRenderer->setSkyboxPath("");
+                                        renderer->setSkyboxPath("");
                                         auto& diag = DiagnosticsManager::Instance();
                                         if (auto* level = diag.getActiveLevelSoft())
                                         {
                                             level->setSkyboxPath("");
                                         }
-                                        glRenderer->getUIManager().refreshStatusBar();
-                                        glRenderer->getUIManager().showToastMessage("Skybox cleared", 2.5f);
+                                        renderer->getUIManager().refreshStatusBar();
+                                        renderer->getUIManager().showToastMessage("Skybox cleared", 2.5f);
                                     };
                                 rootStack->children.push_back(std::move(clearBtn));
                             }
                         }
 
-                        glRenderer->getUIManager().registerWidget("WorldSettings", widget, "Viewport");
+                        renderer->getUIManager().registerWidget("WorldSettings", widget, "Viewport");
                     }
                 }
             }
@@ -990,9 +990,9 @@ int main()
             {
                 if (auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(widgetId)))
                 {
-                    if (auto widget = glRenderer->createWidgetFromAsset(asset))
+                    if (auto widget = renderer->createWidgetFromAsset(asset))
                     {
-                        glRenderer->getUIManager().registerWidget("WorldOutliner", widget, "Viewport");
+                        renderer->getUIManager().registerWidget("WorldOutliner", widget, "Viewport");
                     }
                 }
             }
@@ -1006,9 +1006,9 @@ int main()
             {
                 if (auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(widgetId)))
                 {
-                    if (auto widget = glRenderer->createWidgetFromAsset(asset))
+                    if (auto widget = renderer->createWidgetFromAsset(asset))
                     {
-                        glRenderer->getUIManager().registerWidget("EntityDetails", widget, "Viewport");
+                        renderer->getUIManager().registerWidget("EntityDetails", widget, "Viewport");
                     }
                 }
             }
@@ -1024,9 +1024,9 @@ int main()
             {
                 if (auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(widgetId)))
                 {
-                    if (auto widget = glRenderer->createWidgetFromAsset(asset))
+                    if (auto widget = renderer->createWidgetFromAsset(asset))
                     {
-                        glRenderer->getUIManager().registerWidget("StatusBar", widget);
+                        renderer->getUIManager().registerWidget("StatusBar", widget);
                     }
                 }
             }
@@ -1043,29 +1043,29 @@ int main()
                 if (auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(widgetId)))
                 {
                     logTimed(Logger::Category::UI, "[ContentBrowser] main: asset loaded name='" + asset->getName() + "' type=" + std::to_string(static_cast<int>(asset->getAssetType())), Logger::LogLevel::INFO);
-                    if (auto widget = glRenderer->createWidgetFromAsset(asset))
+                    if (auto widget = renderer->createWidgetFromAsset(asset))
                     {
                         logTimed(Logger::Category::UI, "[ContentBrowser] main: widget created name='" + widget->getName() + "' elements=" + std::to_string(widget->getElements().size()), Logger::LogLevel::INFO);
-                        glRenderer->getUIManager().registerWidget("ContentBrowser", widget, "Viewport");
+                        renderer->getUIManager().registerWidget("ContentBrowser", widget, "Viewport");
                         logTimed(Logger::Category::UI, "[ContentBrowser] main: registerWidget('ContentBrowser') completed", Logger::LogLevel::INFO);
 
-                        glRenderer->getUIManager().registerClickEvent("ContentBrowser.PathBar.Import", [&renderer]()
+                        renderer->getUIManager().registerClickEvent("ContentBrowser.PathBar.Import", [&renderer]()
                             {
                                 Logger::Instance().log(Logger::Category::AssetManagement, "Import button clicked.", Logger::LogLevel::INFO);
                                 auto* window = renderer ? renderer->window() : nullptr;
                                 AssetManager::Instance().OpenImportDialog(window, AssetType::Unknown, AssetManager::Async);
                             });
 
-                        assetManager.setOnImportCompleted([&glRenderer]()
+                        assetManager.setOnImportCompleted([&renderer]()
                             {
-                                if (glRenderer)
+                                if (renderer)
                                 {
-                                    glRenderer->getUIManager().refreshContentBrowser();
+                                    renderer->getUIManager().refreshContentBrowser();
                                 }
                             });
 
                         // --- Drag & Drop: asset dropped on viewport → spawn entity ---
-                        glRenderer->getUIManager().setOnDropOnViewport([&glRenderer](const std::string& payload, const Vec2& screenPos)
+                        renderer->getUIManager().setOnDropOnViewport([&renderer](const std::string& payload, const Vec2& screenPos)
                             {
                                 const auto sep = payload.find('|');
                                 if (sep == std::string::npos) return;
@@ -1078,14 +1078,14 @@ int main()
                                 auto& diagnostics = DiagnosticsManager::Instance();
 
                                 // Pick the entity under the cursor (fresh pick buffer render)
-                                const unsigned int targetEntity = glRenderer->pickEntityAtImmediate(
+                                const unsigned int targetEntity = renderer->pickEntityAtImmediate(
                                     static_cast<int>(screenPos.x), static_cast<int>(screenPos.y));
                                 const auto target = static_cast<ECS::Entity>(targetEntity);
 
                                 // --- Skybox: set as level skybox, no entity needed ---
                                 if (assetType == AssetType::Skybox)
                                 {
-                                    glRenderer->setSkyboxPath(relPath);
+                                    renderer->setSkyboxPath(relPath);
                                     auto* level = diagnostics.getActiveLevelSoft();
                                     if (level)
                                     {
@@ -1093,10 +1093,10 @@ int main()
                                     }
                                     Logger::Instance().log(Logger::Category::Engine,
                                         "Set skybox from drag: " + relPath, Logger::LogLevel::INFO);
-                                    if (glRenderer)
+                                    if (renderer)
                                     {
-                                        glRenderer->getUIManager().refreshStatusBar();
-                                        glRenderer->getUIManager().showToastMessage("Skybox: " + assetName, 2.5f);
+                                        renderer->getUIManager().refreshStatusBar();
+                                        renderer->getUIManager().showToastMessage("Skybox: " + assetName, 2.5f);
                                     }
                                     return;
                                 }
@@ -1141,19 +1141,19 @@ int main()
                                         Logger::Instance().log(Logger::Category::Engine,
                                             "Applied '" + assetName + "' to entity " + std::to_string(targetEntity),
                                             Logger::LogLevel::INFO);
-                                        if (glRenderer)
+                                        if (renderer)
                                         {
-                                            glRenderer->getUIManager().selectEntity(targetEntity);
-                                            glRenderer->getUIManager().showToastMessage(
+                                            renderer->getUIManager().selectEntity(targetEntity);
+                                            renderer->getUIManager().showToastMessage(
                                                 "Applied " + assetName + " → Entity " + std::to_string(targetEntity), 2.5f);
                                         }
                                     }
                                     else
                                     {
                                         // No entity under cursor — cannot apply, show hint
-                                        if (glRenderer)
+                                        if (renderer)
                                         {
-                                            glRenderer->getUIManager().showToastMessage(
+                                            renderer->getUIManager().showToastMessage(
                                                 "No entity under cursor to apply " + assetName, 2.5f);
                                         }
                                     }
@@ -1162,10 +1162,10 @@ int main()
 
                                 // --- Model3D: always spawn a new entity ---
                                 Vec3 spawnPos{ 0.0f, 0.0f, 0.0f };
-                                if (!glRenderer->screenToWorldPos(static_cast<int>(screenPos.x), static_cast<int>(screenPos.y), spawnPos))
+                                if (!renderer->screenToWorldPos(static_cast<int>(screenPos.x), static_cast<int>(screenPos.y), spawnPos))
                                 {
-                                    const Vec3 camPos = glRenderer->getCameraPosition();
-                                    const Vec2 camRot = glRenderer->getCameraRotationDegrees();
+                                    const Vec3 camPos = renderer->getCameraPosition();
+                                    const Vec2 camRot = renderer->getCameraRotationDegrees();
                                     const float yaw = camRot.x * 3.14159265f / 180.0f;
                                     const float pitch = camRot.y * 3.14159265f / 180.0f;
                                     spawnPos.x = camPos.x + cosf(yaw) * cosf(pitch) * 5.0f;
@@ -1226,11 +1226,11 @@ int main()
                                     + std::to_string(spawnPos.x) + ", " + std::to_string(spawnPos.y) + ", " + std::to_string(spawnPos.z) + ")",
                                     Logger::LogLevel::INFO);
 
-                                if (glRenderer)
+                                if (renderer)
                                 {
-                                    glRenderer->getUIManager().refreshWorldOutliner();
-                                    glRenderer->getUIManager().selectEntity(static_cast<unsigned int>(entity));
-                                    glRenderer->getUIManager().showToastMessage("Spawned: " + assetName, 2.5f);
+                                    renderer->getUIManager().refreshWorldOutliner();
+                                    renderer->getUIManager().selectEntity(static_cast<unsigned int>(entity));
+                                    renderer->getUIManager().showToastMessage("Spawned: " + assetName, 2.5f);
                                 }
 
                                 // Snapshot components for spawn undo/redo
@@ -1276,7 +1276,7 @@ int main()
                             });
 
                         // --- Drag & Drop: asset dropped on content browser folder → move asset ---
-                        glRenderer->getUIManager().setOnDropOnFolder([&glRenderer](const std::string& payload, const std::string& folderPath)
+                        renderer->getUIManager().setOnDropOnFolder([&renderer](const std::string& payload, const std::string& folderPath)
                             {
                                 const auto sep = payload.find('|');
                                 if (sep == std::string::npos) return;
@@ -1297,15 +1297,15 @@ int main()
                                 }
 
                                 DiagnosticsManager::Instance().setScenePrepared(false);
-                                if (glRenderer)
+                                if (renderer)
                                 {
-                                    glRenderer->getUIManager().refreshContentBrowser();
-                                    glRenderer->getUIManager().showToastMessage("Moved: " + fileName, 2.5f);
+                                    renderer->getUIManager().refreshContentBrowser();
+                                    renderer->getUIManager().showToastMessage("Moved: " + fileName, 2.5f);
                                 }
                             });
 
                         // --- Drag & Drop: asset dropped on Outliner entity → apply to entity ---
-                        glRenderer->getUIManager().setOnDropOnEntity([&glRenderer](const std::string& payload, unsigned int entityId)
+                        renderer->getUIManager().setOnDropOnEntity([&renderer](const std::string& payload, unsigned int entityId)
                             {
                                 const auto sep = payload.find('|');
                                 if (sep == std::string::npos) return;
@@ -1392,9 +1392,9 @@ int main()
                                 Logger::Instance().log(Logger::Category::Engine,
                                     "Applied '" + assetName + "' to entity " + std::to_string(entityId),
                                     Logger::LogLevel::INFO);
-                                if (glRenderer)
+                                if (renderer)
                                 {
-                                    glRenderer->getUIManager().showToastMessage(
+                                    renderer->getUIManager().showToastMessage(
                                         "Applied " + assetName + " → Entity " + std::to_string(entityId), 2.5f);
                                 }
                             });
@@ -1420,7 +1420,7 @@ int main()
         }
 
         // --- UndoRedo onChange → mark level dirty + refresh StatusBar ---
-        UndoRedoManager::Instance().setOnChanged([&glRenderer]()
+        UndoRedoManager::Instance().setOnChanged([&renderer]()
             {
                 auto& diag = DiagnosticsManager::Instance();
                 auto* level = diag.getActiveLevelSoft();
@@ -1428,33 +1428,33 @@ int main()
                 {
                     level->setIsSaved(false);
                 }
-                if (glRenderer)
+                if (renderer)
                 {
-                    glRenderer->getUIManager().refreshStatusBar();
+                    renderer->getUIManager().refreshStatusBar();
                 }
             });
 
-        glRenderer->getUIManager().registerClickEvent("StatusBar.Undo", [&glRenderer]()
+        renderer->getUIManager().registerClickEvent("StatusBar.Undo", [&renderer]()
             {
                 auto& undo = UndoRedoManager::Instance();
                 if (undo.canUndo())
                 {
                     undo.undo();
-                    glRenderer->getUIManager().markAllWidgetsDirty();
+                    renderer->getUIManager().markAllWidgetsDirty();
                 }
             });
 
-        glRenderer->getUIManager().registerClickEvent("StatusBar.Redo", [&glRenderer]()
+        renderer->getUIManager().registerClickEvent("StatusBar.Redo", [&renderer]()
             {
                 auto& undo = UndoRedoManager::Instance();
                 if (undo.canRedo())
                 {
                     undo.redo();
-                    glRenderer->getUIManager().markAllWidgetsDirty();
+                    renderer->getUIManager().markAllWidgetsDirty();
                 }
             });
 
-        glRenderer->getUIManager().registerClickEvent("StatusBar.Save", [&glRenderer, &renderer]()
+        renderer->getUIManager().registerClickEvent("StatusBar.Save", [&renderer]()
             {
                 // Capture editor camera into the active level before saving
                 auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
@@ -1469,10 +1469,10 @@ int main()
                 const size_t total = am.getUnsavedAssetCount();
                 if (total == 0)
                 {
-                    glRenderer->getUIManager().showToastMessage("Nothing to save.", 2.0f);
+                    renderer->getUIManager().showToastMessage("Nothing to save.", 2.0f);
                     return;
                 }
-                auto& uiMgr = glRenderer->getUIManager();
+                auto& uiMgr = renderer->getUIManager();
                 uiMgr.showSaveProgressModal(total);
                 am.saveAllAssetsAsync(
                     [&uiMgr](size_t saved, size_t total)
@@ -1490,19 +1490,19 @@ int main()
 
     // All subsystems initialised — render the first frame while the splash is
     // still visible so the main window never appears white / empty.
-    if (glRenderer)
+    if (renderer)
     {
         // Ensure all loaded widgets are marked dirty so the UI FBO is fully redrawn.
-        glRenderer->getUIManager().markAllWidgetsDirty();
+        renderer->getUIManager().markAllWidgetsDirty();
 
-        glRenderer->getUIManager().showToastMessage("Engine ready!", 3.0f);
+        renderer->getUIManager().showToastMessage("Engine ready!", 3.0f);
         SDL_Event ev;
         while (SDL_PollEvent(&ev))
         {
             if (ev.type == SDL_EVENT_QUIT)
                 continue; // ignore – may be leftover from popup destruction
         }
-        glRenderer->getUIManager().updateNotifications(0.016f);
+        renderer->getUIManager().updateNotifications(0.016f);
         renderer->render();
         renderer->present();
     }
@@ -1514,9 +1514,9 @@ int main()
         SDL_ShowWindow(w);
         SDL_RaiseWindow(w);
     }
-    if (splash.isOpen())
+    if (splash->isOpen())
     {
-        splash.close();
+        splash->close();
     }
 
     // Ensure no stale shutdown flag from intermediate event pumps.
@@ -1548,8 +1548,8 @@ int main()
         });
 
     diagnostics.registerKeyUpHandler(SDLK_DELETE, [&]() {
-        if (!glRenderer) return false;
-        auto& uiManager = glRenderer->getUIManager();
+        if (!renderer) return false;
+        auto& uiManager = renderer->getUIManager();
 
         // Check for selected asset in Content Browser grid first
         const std::string selectedAsset = uiManager.getSelectedGridAsset();
@@ -1557,10 +1557,10 @@ int main()
         {
             uiManager.showConfirmDialog(
                 "Are you sure you want to delete this asset?\nThis cannot be undone.",
-                [&glRenderer, selectedAsset]()
+                [&renderer, selectedAsset]()
                 {
                     auto& assetMgr = AssetManager::Instance();
-                    auto& uiMgr = glRenderer->getUIManager();
+                    auto& uiMgr = renderer->getUIManager();
                     if (assetMgr.deleteAsset(selectedAsset, true))
                     {
                         const std::string name = std::filesystem::path(selectedAsset).stem().string();
@@ -1615,7 +1615,7 @@ int main()
 
         // Clear selection and deselect in renderer
         uiManager.selectEntity(0);
-        glRenderer->setSelectedEntity(0);
+        renderer->setSelectedEntity(0);
 
         uiManager.refreshWorldOutliner();
         uiManager.showToastMessage("Deleted: " + entityName, 2.5f);
@@ -1779,9 +1779,9 @@ int main()
             SDL_GetMouseState(&mouseX, &mouseY);
             mousePosPixels = Vec2{ mouseX, mouseY };
             hasMousePos = true;
-            if (glRenderer)
+            if (renderer)
             {
-                auto& uiManager = glRenderer->getUIManager();
+                auto& uiManager = renderer->getUIManager();
                 uiManager.setMousePosition(mousePosPixels);
                 isOverUI = uiManager.isPointerOverUI(mousePosPixels);
             }
@@ -1792,7 +1792,7 @@ int main()
 		while (SDL_PollEvent(&event))
 		{
 			// Route events belonging to popup windows first.
-			if (glRenderer && glRenderer->routeEventToPopup(event))
+			if (renderer && renderer->routeEventToPopup(event))
 			{
 				continue;
 			}
@@ -1805,30 +1805,30 @@ int main()
 
             if (event.type == SDL_EVENT_MOUSE_MOTION)
             {
-                if (glRenderer)
+                if (renderer)
                 {
                     mousePosPixels = Vec2{ event.motion.x, event.motion.y };
                     hasMousePos = true;
-                    auto& uiManager = glRenderer->getUIManager();
+                    auto& uiManager = renderer->getUIManager();
                     uiManager.setMousePosition(mousePosPixels);
                     isOverUI = uiManager.isPointerOverUI(mousePosPixels);
 
                     // Update gizmo drag if active
-                    if (glRenderer->isGizmoDragging())
+                    if (renderer->isGizmoDragging())
                     {
-                        glRenderer->updateGizmoDrag(static_cast<int>(event.motion.x), static_cast<int>(event.motion.y));
+                        renderer->updateGizmoDrag(static_cast<int>(event.motion.x), static_cast<int>(event.motion.y));
                     }
                 }
             }
 
             if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT)
             {
-                if (glRenderer)
+                if (renderer)
                 {
                     const Vec2 mousePos{ static_cast<float>(event.button.x), static_cast<float>(event.button.y) };
                     mousePosPixels = mousePos;
                     hasMousePos = true;
-                    auto& uiManager = glRenderer->getUIManager();
+                    auto& uiManager = renderer->getUIManager();
                     uiManager.setMousePosition(mousePos);
                     isOverUI = uiManager.isPointerOverUI(mousePos);
                     if (uiManager.handleMouseDown(mousePos, event.button.button))
@@ -1850,9 +1850,9 @@ int main()
                             continue;
                         }
                         // Try gizmo interaction first; only pick entity if gizmo not hit
-                        if (!glRenderer->beginGizmoDrag(static_cast<int>(event.button.x), static_cast<int>(event.button.y)))
+                        if (!renderer->beginGizmoDrag(static_cast<int>(event.button.x), static_cast<int>(event.button.y)))
                         {
-                            glRenderer->requestPick(static_cast<int>(event.button.x), static_cast<int>(event.button.y));
+                            renderer->requestPick(static_cast<int>(event.button.x), static_cast<int>(event.button.y));
                         }
                     }
                 }
@@ -1860,10 +1860,10 @@ int main()
 
             if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT)
             {
-                if (glRenderer)
+                if (renderer)
                 {
                     const Vec2 mousePos{ static_cast<float>(event.button.x), static_cast<float>(event.button.y) };
-                    auto& uiManager = glRenderer->getUIManager();
+                    auto& uiManager = renderer->getUIManager();
                     if (uiManager.isDragging())
                     {
                         uiManager.handleMouseUp(mousePos, event.button.button);
@@ -1872,9 +1872,9 @@ int main()
                     {
                         // Always forward mouse-up so deferred clicks on draggable elements fire
                         uiManager.handleMouseUp(mousePos, event.button.button);
-                        if (glRenderer->isGizmoDragging())
+                        if (renderer->isGizmoDragging())
                         {
-                            glRenderer->endGizmoDrag();
+                            renderer->endGizmoDrag();
                         }
                     }
                 }
@@ -1882,12 +1882,12 @@ int main()
 
             if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_RIGHT)
             {
-                if (glRenderer)
+                if (renderer)
                 {
                     const Vec2 mousePos{ static_cast<float>(event.button.x), static_cast<float>(event.button.y) };
                     mousePosPixels = mousePos;
                     hasMousePos = true;
-                    auto& uiManager = glRenderer->getUIManager();
+                    auto& uiManager = renderer->getUIManager();
                     uiManager.setMousePosition(mousePos);
                     isOverUI = uiManager.isPointerOverUI(mousePos);
 
@@ -1901,9 +1901,9 @@ int main()
 
                         std::vector<UIManager::DropdownMenuItem> items;
 
-                        items.push_back({ "New Folder", [&glRenderer]()
+                        items.push_back({ "New Folder", [&renderer]()
                             {
-                                auto& uiMgr = glRenderer->getUIManager();
+                                auto& uiMgr = renderer->getUIManager();
                                 const auto& folder = uiMgr.getSelectedBrowserFolder();
                                 if (folder == "__Shaders__") return;
 
@@ -1936,9 +1936,9 @@ int main()
 
                         items.push_back({ "", {}, true });
 
-                        items.push_back({ "New Script", [&glRenderer]()
+                        items.push_back({ "New Script", [&renderer]()
                             {
-                                auto& uiMgr = glRenderer->getUIManager();
+                                auto& uiMgr = renderer->getUIManager();
                                 const auto& folder = uiMgr.getSelectedBrowserFolder();
                                 if (folder == "__Shaders__") return;
 
@@ -1986,9 +1986,9 @@ int main()
                                 }
                             }});
 
-                        items.push_back({ "New Level", [&glRenderer]()
+                        items.push_back({ "New Level", [&renderer]()
                             {
-                                auto& uiMgr = glRenderer->getUIManager();
+                                auto& uiMgr = renderer->getUIManager();
                                 const auto& folder = uiMgr.getSelectedBrowserFolder();
                                 if (folder == "__Shaders__") return;
 
@@ -2029,15 +2029,15 @@ int main()
                                 }
                             }});
 
-                        items.push_back({ "New Material", [&glRenderer]()
+                        items.push_back({ "New Material", [&renderer]()
                             {
-                                auto& uiMgr = glRenderer->getUIManager();
+                                auto& uiMgr = renderer->getUIManager();
                                 const auto& folder = uiMgr.getSelectedBrowserFolder();
                                 if (folder == "__Shaders__") return;
 
                                 constexpr int kPopupW = 460;
                                 constexpr int kPopupH = 400;
-                                PopupWindow* popup = glRenderer->openPopupWindow(
+                                PopupWindow* popup = renderer->openPopupWindow(
                                     "NewMaterial", "New Material", kPopupW, kPopupH);
                                 if (!popup) return;
                                 if (!popup->uiManager().getRegisteredWidgets().empty()) return;
@@ -2189,7 +2189,7 @@ int main()
                                     createBtn.shaderVertex = "button_vertex.glsl";
                                     createBtn.shaderFragment = "button_fragment.glsl";
                                     createBtn.isHitTestable = true;
-                                    createBtn.onClicked = [state, &glRenderer, popup]()
+                                    createBtn.onClicked = [state, &renderer, popup]()
                                     {
                                         auto& diagnostics = DiagnosticsManager::Instance();
                                         auto& assetMgr = AssetManager::Instance();
@@ -2246,7 +2246,7 @@ int main()
                                             assetMgr.registerAssetInRegistry(entry);
                                         }
 
-                                        auto& uiMgr = glRenderer->getUIManager();
+                                        auto& uiMgr = renderer->getUIManager();
                                         uiMgr.refreshContentBrowser();
                                         uiMgr.showToastMessage("Created: " + fileName, 3.0f);
 
@@ -2312,9 +2312,9 @@ int main()
 
             if (event.type == SDL_EVENT_MOUSE_WHEEL)
             {
-                if (glRenderer)
+                if (renderer)
                 {
-                    auto& uiManager = glRenderer->getUIManager();
+                    auto& uiManager = renderer->getUIManager();
                     if (uiManager.handleScroll(mousePosPixels, event.wheel.y))
                     {
                         continue;
@@ -2346,9 +2346,9 @@ int main()
 
             if (event.type == SDL_EVENT_TEXT_INPUT)
             {
-                if (glRenderer)
+                if (renderer)
                 {
-                    auto& uiManager = glRenderer->getUIManager();
+                    auto& uiManager = renderer->getUIManager();
                     if (uiManager.handleTextInput(event.text.text))
                     {
                         continue;
@@ -2360,22 +2360,22 @@ int main()
             {
                 if (event.key.key == SDLK_F11)
                 {
-                    if (glRenderer)
+                    if (renderer)
                     {
-                        glRenderer->toggleUIDebug();
+                        renderer->toggleUIDebug();
 						logTimed(Logger::Category::Input,
-                            std::string("UI debug bounds: ") + (glRenderer->isUIDebugEnabled() ? "ON" : "OFF"),
+                            std::string("UI debug bounds: ") + (renderer->isUIDebugEnabled() ? "ON" : "OFF"),
                             Logger::LogLevel::INFO);
                     }
                     continue;
                 }
                 if (event.key.key == SDLK_F8)
                 {
-                    if (glRenderer)
+                    if (renderer)
                     {
-                        glRenderer->toggleBoundsDebug();
+                        renderer->toggleBoundsDebug();
                         logTimed(Logger::Category::Input,
-                            std::string("Bounds debug boxes: ") + (glRenderer->isBoundsDebugEnabled() ? "ON" : "OFF"),
+                            std::string("Bounds debug boxes: ") + (renderer->isBoundsDebugEnabled() ? "ON" : "OFF"),
                             Logger::LogLevel::INFO);
                     }
                     continue;
@@ -2411,26 +2411,26 @@ int main()
                     continue;
                 }
                 // Gizmo mode shortcuts (W/E/R) – only in editor mode, not when holding right-click, and not when a text entry is focused
-                if (!diagnostics.isPIEActive() && !rightMouseDown && glRenderer && !glRenderer->getUIManager().hasEntryFocused())
+                if (!diagnostics.isPIEActive() && !rightMouseDown && renderer && !renderer->getUIManager().hasEntryFocused())
                 {
                     if (event.key.key == SDLK_W)
                     {
-                        glRenderer->setGizmoMode(OpenGLRenderer::GizmoMode::Translate);
+                        renderer->setGizmoMode(Renderer::GizmoMode::Translate);
                         continue;
                     }
                     if (event.key.key == SDLK_E)
                     {
-                        glRenderer->setGizmoMode(OpenGLRenderer::GizmoMode::Rotate);
+                        renderer->setGizmoMode(Renderer::GizmoMode::Rotate);
                         continue;
                     }
                     if (event.key.key == SDLK_R)
                     {
-                        glRenderer->setGizmoMode(OpenGLRenderer::GizmoMode::Scale);
+                        renderer->setGizmoMode(Renderer::GizmoMode::Scale);
                         continue;
                     }
                 }
                 // Skip registered key handlers (F2/DELETE) when a text entry is focused
-                if (!glRenderer || !glRenderer->getUIManager().hasEntryFocused())
+                if (!renderer || !renderer->getUIManager().hasEntryFocused())
                 {
                     diagnostics.dispatchKeyUp(event.key.key);
                 }
@@ -2446,7 +2446,7 @@ int main()
             else if (event.type == SDL_EVENT_KEY_DOWN)
             {
                 // Ctrl+Z = Undo, Ctrl+Y = Redo (skip when a text entry is focused)
-                if (glRenderer && !diagnostics.isPIEActive() && (event.key.mod & SDL_KMOD_CTRL) && !glRenderer->getUIManager().hasEntryFocused())
+                if (renderer && !diagnostics.isPIEActive() && (event.key.mod & SDL_KMOD_CTRL) && !renderer->getUIManager().hasEntryFocused())
                 {
                     if (event.key.key == SDLK_Z)
                     {
@@ -2454,7 +2454,7 @@ int main()
                         if (undo.canUndo())
                         {
                             undo.undo();
-                            glRenderer->getUIManager().markAllWidgetsDirty();
+                            renderer->getUIManager().markAllWidgetsDirty();
                         }
                         continue;
                     }
@@ -2464,7 +2464,7 @@ int main()
                         if (undo.canRedo())
                         {
                             undo.redo();
-                            glRenderer->getUIManager().markAllWidgetsDirty();
+                            renderer->getUIManager().markAllWidgetsDirty();
                         }
                         continue;
                     }
@@ -2483,25 +2483,25 @@ int main()
                         const size_t total = am.getUnsavedAssetCount();
                         if (total > 0)
                         {
-                            auto& uiMgr = glRenderer->getUIManager();
+                            auto& uiMgr = renderer->getUIManager();
                             uiMgr.showSaveProgressModal(total);
                             am.saveAllAssetsAsync(
-                                [&uiMgr = glRenderer->getUIManager()](size_t saved, size_t t) { uiMgr.updateSaveProgress(saved, t); },
-                                [&uiMgr = glRenderer->getUIManager()](bool ok) {
+                                [&uiMgr = renderer->getUIManager()](size_t saved, size_t t) { uiMgr.updateSaveProgress(saved, t); },
+                                [&uiMgr = renderer->getUIManager()](bool ok) {
                                     UndoRedoManager::Instance().clear();
                                     uiMgr.closeSaveProgressModal(ok);
                                 });
                         }
                         else
                         {
-                            glRenderer->getUIManager().showToastMessage("Nothing to save.", 2.0f);
+                            renderer->getUIManager().showToastMessage("Nothing to save.", 2.0f);
                         }
                         continue;
                     }
                 }
-                if (glRenderer)
+                if (renderer)
                 {
-                    auto& uiManager = glRenderer->getUIManager();
+                    auto& uiManager = renderer->getUIManager();
                     if (uiManager.handleKeyDown(event.key.key))
                     {
                         continue;
@@ -2532,15 +2532,15 @@ int main()
             Scripting::UpdateScripts(static_cast<float>(dt));
         }
 
-        if (glRenderer)
+        if (renderer)
         {
-            glRenderer->getUIManager().updateNotifications(static_cast<float>(dt));
+            renderer->getUIManager().updateNotifications(static_cast<float>(dt));
         }
 
-        if (glRenderer)
+        if (renderer)
         {
             // Only show performance stats on the Viewport tab, not in Mesh Viewer tabs
-            const bool isViewportTab = (glRenderer->getActiveTabId() == "Viewport");
+            const bool isViewportTab = (renderer->getActiveTabId() == "Viewport");
 
             if (metricsUpdatePending)
             {
@@ -2553,12 +2553,12 @@ int main()
 
             if (isViewportTab)
             {
-                glRenderer->queueText(fpsText,
+                renderer->queueText(fpsText,
                     Vec2{ 0.02f, 0.05f },
                     0.6f,
                     Vec4{ 1.0f, 1.0f, 1.0f, 1.0f });
 
-                glRenderer->queueText(speedText,
+                renderer->queueText(speedText,
                     Vec2{ 0.02f, 0.09f },
                     0.4f,
                     Vec4{ 0.9f, 0.9f, 0.9f, 1.0f });
@@ -2574,24 +2574,24 @@ int main()
         const uint64_t frameEndCounter = SDL_GetPerformanceCounter();
         const double cpuFrameMs = (freq > 0.0) ? (static_cast<double>(frameEndCounter - frameStartCounter) / freq * 1000.0) : 0.0;
         cpuOtherMs = std::max(0.0, cpuFrameMs - cpuInputMs - cpuRenderMs);
-        if (glRenderer)
+        if (renderer)
         {
-            const bool isViewportTab = (glRenderer->getActiveTabId() == "Viewport");
+            const bool isViewportTab = (renderer->getActiveTabId() == "Viewport");
 
             if (metricsUpdatePending)
             {
                 char buf[128];
 
                 std::snprintf(buf, sizeof(buf), "CPU: %.3f ms | GPU: %.3f ms",
-                    cpuFrameMs, glRenderer->getLastGpuFrameMs());
+                    cpuFrameMs, renderer->getLastGpuFrameMs());
                 cpuText = buf;
 
                 std::snprintf(buf, sizeof(buf), "World: %.3f ms | UI: %.3f ms",
-                    glRenderer->getLastCpuRenderWorldMs(), glRenderer->getLastCpuRenderUiMs());
+                    renderer->getLastCpuRenderWorldMs(), renderer->getLastCpuRenderUiMs());
                 renderText = buf;
 
                 std::snprintf(buf, sizeof(buf), "UI Layout: %.3f ms | UI Draw: %.3f ms",
-                    glRenderer->getLastCpuUiLayoutMs(), glRenderer->getLastCpuUiDrawMs());
+                    renderer->getLastCpuUiLayoutMs(), renderer->getLastCpuUiDrawMs());
                 uiText = buf;
 
                 std::snprintf(buf, sizeof(buf), "Input: %.3f ms | Events: %.3f ms",
@@ -2607,15 +2607,15 @@ int main()
                 gcText = buf;
 
                 std::snprintf(buf, sizeof(buf), "ECS: %.3f ms",
-                    glRenderer->getLastCpuEcsMs());
+                    renderer->getLastCpuEcsMs());
                 ecsText = buf;
 
                 std::snprintf(buf, sizeof(buf), "Frame: %.3f ms", cpuFrameMs);
                 frameText = buf;
 
                 std::snprintf(buf, sizeof(buf), "Visible: %u | Hidden: %u | Total: %u",
-                    glRenderer->getLastVisibleCount(), glRenderer->getLastHiddenCount(),
-                    glRenderer->getLastTotalCount());
+                    renderer->getLastVisibleCount(), renderer->getLastHiddenCount(),
+                    renderer->getLastTotalCount());
                 occlusionText = buf;
             }
 
@@ -2623,40 +2623,40 @@ int main()
             {
                 if (!cpuText.empty())
                 {
-                    glRenderer->queueText(cpuText, Vec2{ 0.02f, 0.13f }, 0.4f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
+                    renderer->queueText(cpuText, Vec2{ 0.02f, 0.13f }, 0.4f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
                 }
                 if (!renderText.empty())
                 {
-                    glRenderer->queueText(renderText, Vec2{ 0.02f, 0.17f }, 0.35f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
+                    renderer->queueText(renderText, Vec2{ 0.02f, 0.17f }, 0.35f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
                 }
                 if (!uiText.empty())
                 {
-                    glRenderer->queueText(uiText, Vec2{ 0.02f, 0.21f }, 0.35f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
+                    renderer->queueText(uiText, Vec2{ 0.02f, 0.21f }, 0.35f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
                 }
                 if (!inputText.empty())
                 {
-                    glRenderer->queueText(inputText, Vec2{ 0.02f, 0.25f }, 0.35f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
+                    renderer->queueText(inputText, Vec2{ 0.02f, 0.25f }, 0.35f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
                 }
                 if (!otherText.empty())
                 {
-                    glRenderer->queueText(otherText, Vec2{ 0.02f, 0.29f }, 0.35f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
+                    renderer->queueText(otherText, Vec2{ 0.02f, 0.29f }, 0.35f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
                 }
                 if (!gcText.empty())
                 {
-                    glRenderer->queueText(gcText, Vec2{ 0.02f, 0.33f }, 0.35f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
+                    renderer->queueText(gcText, Vec2{ 0.02f, 0.33f }, 0.35f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
                 }
                 if (!ecsText.empty())
                 {
-                    glRenderer->queueText(ecsText, Vec2{ 0.02f, 0.37f }, 0.35f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
+                    renderer->queueText(ecsText, Vec2{ 0.02f, 0.37f }, 0.35f, Vec4{ 0.8f, 0.9f, 1.0f, 1.0f });
                 }
                 if (!frameText.empty())
                 {
-                    glRenderer->queueText(frameText, Vec2{ 0.02f, 0.41f }, 0.35f, Vec4{ 0.7f, 1.0f, 0.7f, 1.0f });
+                    renderer->queueText(frameText, Vec2{ 0.02f, 0.41f }, 0.35f, Vec4{ 0.7f, 1.0f, 0.7f, 1.0f });
                 }
             }
             if (showOcclusionStats && isViewportTab && !occlusionText.empty())
             {
-                glRenderer->queueText(occlusionText, Vec2{ 0.02f, 0.45f }, 0.35f, Vec4{ 1.0f, 0.85f, 0.4f, 1.0f });
+                renderer->queueText(occlusionText, Vec2{ 0.02f, 0.45f }, 0.35f, Vec4{ 1.0f, 0.85f, 0.4f, 1.0f });
             }
         }
 

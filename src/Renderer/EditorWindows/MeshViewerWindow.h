@@ -6,7 +6,7 @@
 #include "../../Core/MathTypes.h"
 #include "../../Core/ECS/ECS.h"
 
-class OpenGLObject3D;
+class IRenderObject3D;
 class RenderResourceManager;
 class EngineLevel;
 
@@ -43,7 +43,7 @@ private:
     std::string  m_assetPath;
 
     // Mesh (kept only for vertex/index count queries)
-    std::shared_ptr<OpenGLObject3D> m_meshObject;
+    std::shared_ptr<IRenderObject3D> m_meshObject;
 
     // Initial camera derived from mesh AABB
     Vec3 m_initialCamPos{};

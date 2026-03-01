@@ -1,4 +1,4 @@
-add_library(Renderer SHARED
+add_library(RendererCore OBJECT
 
     Renderer.h
     Shader.h
@@ -8,29 +8,15 @@ add_library(Renderer SHARED
     ITextRenderer.h
     IShaderProgram.h
     ITexture.h
+    IRenderContext.h
+    IRenderTarget.h
+    RendererFactory.h
     PopupWindow.h
     PopupWindow.cpp
     SplashWindow.h
-    SplashWindow.cpp
-
-    OpenGLRenderer/OpenGLRenderer.cpp
-    OpenGLRenderer/OpenGLRenderer.h
-    OpenGLRenderer/OpenGLShader.cpp
-    OpenGLRenderer/OpenGLShader.h
-    OpenGLRenderer/OpenGLMaterial.cpp
-    OpenGLRenderer/OpenGLMaterial.h
-    OpenGLRenderer/OpenGLTexture.cpp
-    OpenGLRenderer/OpenGLTexture.h
-    OpenGLRenderer/glad/src/gl.c
+    RenderResourceManager.h
     RenderResourceManager.cpp
-    OpenGLRenderer/OpenGLObject2D.cpp
-    OpenGLRenderer/OpenGLObject2D.h
-    OpenGLRenderer/OpenGLObject3D.cpp
-    OpenGLRenderer/OpenGLObject3D.h
-    OpenGLRenderer/OpenGLCamera.cpp
-    OpenGLRenderer/OpenGLCamera.h
-    OpenGLRenderer/OpenGLTextRenderer.cpp
-    OpenGLRenderer/OpenGLTextRenderer.h
+
     UIManager.cpp
     UIManager.h
     UIWidget.cpp
@@ -63,29 +49,28 @@ add_library(Renderer SHARED
     EditorWindows/MeshViewerWindow.cpp
     EditorWindows/MeshViewerWindow.h
 )
-set_target_properties(Renderer PROPERTIES
+set_target_properties(RendererCore PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
     C_STANDARD 99
     C_STANDARD_REQUIRED ON
+    POSITION_INDEPENDENT_CODE ON
 )
 
-target_include_directories(Renderer
+target_include_directories(RendererCore
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}/OpenGLRenderer
-        ${CMAKE_CURRENT_SOURCE_DIR}/OpenGLRenderer/glad/include
         ${CMAKE_SOURCE_DIR}/src/Core
         ${CMAKE_SOURCE_DIR}/src/AssetManager
         ${CMAKE_SOURCE_DIR}/external/SDL3/include
         ${CMAKE_SOURCE_DIR}/external
         ${CMAKE_SOURCE_DIR}/src/Landscape
+        ${CMAKE_CURRENT_SOURCE_DIR}/OpenGLRenderer/glad/include
 )
 
-target_link_libraries(Renderer
+target_link_libraries(RendererCore
     PUBLIC
         SDL3::SDL3
-        freetype
         Logger
         Core
         AssetManager
@@ -93,11 +78,10 @@ target_link_libraries(Renderer
         ${Python3_LIBRARY_RELEASE}
 )
 
+add_subdirectory(OpenGLRenderer)
+
 # Expose PhysX availability so UIManager can show the backend dropdown option.
 if(ENGINE_PHYSX_AVAILABLE)
+    target_compile_definitions(RendererCore PRIVATE ENGINE_PHYSX_BACKEND_AVAILABLE=1)
     target_compile_definitions(Renderer PRIVATE ENGINE_PHYSX_BACKEND_AVAILABLE=1)
-endif()
-
-if (WIN32)
-    set_target_properties(Renderer PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()

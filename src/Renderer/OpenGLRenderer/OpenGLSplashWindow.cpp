@@ -1,7 +1,7 @@
-#include "SplashWindow.h"
+#include "OpenGLSplashWindow.h"
 
 #include <SDL3/SDL.h>
-#include "OpenGLRenderer/glad/include/gl.h"
+#include "glad/include/gl.h"
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -86,16 +86,16 @@ static void setOrtho(GLuint prog, float w, float h)
     glUniformMatrix4fv(glGetUniformLocation(prog, "uProj"), 1, GL_FALSE, proj);
 }
 
-// ── SplashWindow ────────────────────────────────────────────────────
+// ── OpenGLSplashWindow ─────────────────────────────────────────────
 
-SplashWindow::SplashWindow() = default;
+OpenGLSplashWindow::OpenGLSplashWindow() = default;
 
-SplashWindow::~SplashWindow()
+OpenGLSplashWindow::~OpenGLSplashWindow()
 {
     close();
 }
 
-bool SplashWindow::create()
+bool OpenGLSplashWindow::create()
 {
     if (m_window) return true;
 
@@ -147,12 +147,12 @@ bool SplashWindow::create()
     return true;
 }
 
-void SplashWindow::setStatus(const std::string& text)
+void OpenGLSplashWindow::setStatus(const std::string& text)
 {
     m_statusText = text;
 }
 
-void SplashWindow::render()
+void OpenGLSplashWindow::render()
 {
     if (!m_window) return;
 
@@ -212,7 +212,7 @@ void SplashWindow::render()
     }
 }
 
-void SplashWindow::close()
+void OpenGLSplashWindow::close()
 {
     if (!m_window) return;
 
@@ -237,7 +237,7 @@ void SplashWindow::close()
 
 // ── GL resource management ──────────────────────────────────────────
 
-void SplashWindow::initGLResources()
+void OpenGLSplashWindow::initGLResources()
 {
     // Quad shader + VAO
     m_quadProgram = linkProgram(kQuadVert, kQuadFrag);
@@ -328,7 +328,7 @@ void SplashWindow::initGLResources()
     m_glResourcesReady = true;
 }
 
-void SplashWindow::releaseGLResources()
+void OpenGLSplashWindow::releaseGLResources()
 {
     if (m_fontAtlas)  { glDeleteTextures(1, &m_fontAtlas); m_fontAtlas = 0; }
     if (m_textVbo)    { glDeleteBuffers(1, &m_textVbo);    m_textVbo = 0; }
@@ -340,7 +340,7 @@ void SplashWindow::releaseGLResources()
     m_glResourcesReady = false;
 }
 
-void SplashWindow::drawQuad(float x0, float y0, float x1, float y1, float r, float g, float b, float a)
+void OpenGLSplashWindow::drawQuad(float x0, float y0, float x1, float y1, float r, float g, float b, float a)
 {
     float verts[] = { x0,y0, x1,y0, x0,y1, x1,y0, x1,y1, x0,y1 };
     glUseProgram(m_quadProgram);
@@ -352,7 +352,7 @@ void SplashWindow::drawQuad(float x0, float y0, float x1, float y1, float r, flo
     glBindVertexArray(0);
 }
 
-void SplashWindow::drawText(const std::string& text, float x, float y, float scale, float r, float g, float b)
+void OpenGLSplashWindow::drawText(const std::string& text, float x, float y, float scale, float r, float g, float b)
 {
     glUseProgram(m_textProgram);
     glUniform3f(glGetUniformLocation(m_textProgram, "uColor"), r, g, b);

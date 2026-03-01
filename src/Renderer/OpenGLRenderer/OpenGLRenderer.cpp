@@ -18,6 +18,7 @@
 #include "OpenGLObject3D.h"
 #include "OpenGLTextRenderer.h"
 #include "OpenGLShader.h"
+#include "OpenGLRenderContext.h"
 
 #include "../../Diagnostics/DiagnosticsManager.h"
 #include "../../Core/EngineLevel.h"
@@ -430,8 +431,8 @@ bool OpenGLRenderer::initialize()
             RenderEntry entry;
             entry.entity = renderable.entity;
             entry.transform = renderable.transform;
-            entry.object3D = renderable.object3D;
-            entry.object2D = renderable.object2D;
+            entry.object3D = std::static_pointer_cast<OpenGLObject3D>(renderable.object3D);
+            entry.object2D = std::static_pointer_cast<OpenGLObject2D>(renderable.object2D);
             if (!entry.object3D && !entry.object2D)
             {
                 continue;
@@ -535,7 +536,9 @@ void OpenGLRenderer::render()
     {
         if (tab.active)
         {
-            ensureTabFbo(tab, width, height);
+            if (!tab.renderTarget)
+                tab.renderTarget = std::make_unique<OpenGLRenderTarget>();
+            tab.renderTarget->resize(width, height);
             m_cachedActiveTab = &tab;
             break;
         }
@@ -554,9 +557,10 @@ void OpenGLRenderer::render()
     m_cpuRenderWorldMs = (freq > 0) ? (static_cast<double>(worldEnd - worldStart) * 1000.0 / static_cast<double>(freq)) : 0.0;
 
     // Composite: blit world content to default framebuffer
-    if (activeTab && activeTab->fbo != 0)
+    if (activeTab && activeTab->renderTarget && activeTab->renderTarget->isValid())
     {
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, activeTab->fbo);
+        auto* glRT = static_cast<OpenGLRenderTarget*>(activeTab->renderTarget.get());
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, glRT->getGLFramebuffer());
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
         glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
         glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
@@ -601,9 +605,9 @@ void OpenGLRenderer::renderWorld()
     // Render into the active tab's FBO
     {
         EditorTab* activeTab = m_cachedActiveTab;
-        if (activeTab && activeTab->fbo != 0)
+        if (activeTab && activeTab->renderTarget && activeTab->renderTarget->isValid())
         {
-            glBindFramebuffer(GL_FRAMEBUFFER, activeTab->fbo);
+            activeTab->renderTarget->bind();
         }
     }
 
@@ -673,8 +677,8 @@ void OpenGLRenderer::renderWorld()
             RenderEntry entry;
             entry.entity = renderable.entity;
             entry.transform = renderable.transform;
-            entry.object3D = renderable.object3D;
-            entry.object2D = renderable.object2D;
+            entry.object3D = std::static_pointer_cast<OpenGLObject3D>(renderable.object3D);
+            entry.object2D = std::static_pointer_cast<OpenGLObject2D>(renderable.object2D);
             if (!entry.object3D && !entry.object2D)
             {
                 continue;
@@ -707,8 +711,8 @@ void OpenGLRenderer::renderWorld()
             RenderEntry entry;
             entry.entity = renderable.entity;
             entry.transform = renderable.transform;
-            entry.object3D = renderable.object3D;
-            entry.object2D = renderable.object2D;
+            entry.object3D = std::static_pointer_cast<OpenGLObject3D>(renderable.object3D);
+            entry.object2D = std::static_pointer_cast<OpenGLObject2D>(renderable.object2D);
             if (!entry.object3D && !entry.object2D)
             {
                 continue;
@@ -963,7 +967,7 @@ void OpenGLRenderer::renderWorld()
 
 		if (objType == AssetType::Model3D || objType == AssetType::PointLight)
 		{
-			auto glObj = m_resourceManager.getOrCreateObject3D(asset, {});
+			auto glObj = std::static_pointer_cast<OpenGLObject3D>(m_resourceManager.getOrCreateObject3D(asset, {}));
 			if (!glObj)
 				continue;
 
@@ -1004,7 +1008,7 @@ void OpenGLRenderer::renderWorld()
 			}
 			else if (objType == AssetType::Model2D)
 			{
-				auto glObj = m_resourceManager.getOrCreateObject2D(asset, {});
+				auto glObj = std::static_pointer_cast<OpenGLObject2D>(m_resourceManager.getOrCreateObject2D(asset, {}));
 				if (!glObj)
 					continue;
 
@@ -1033,7 +1037,7 @@ void OpenGLRenderer::renderWorld()
 
 			if (groupObjType == AssetType::Model3D)
 			{
-				auto glObj = m_resourceManager.getOrCreateObject3D(asset, {});
+				auto glObj = std::static_pointer_cast<OpenGLObject3D>(m_resourceManager.getOrCreateObject3D(asset, {}));
 				if (!glObj || !t)
 					continue;
 
@@ -1068,7 +1072,7 @@ void OpenGLRenderer::renderWorld()
 			}
 			else if (groupObjType == AssetType::Model2D)
 			{
-				auto glObj = m_resourceManager.getOrCreateObject2D(asset, {});
+				auto glObj = std::static_pointer_cast<OpenGLObject2D>(m_resourceManager.getOrCreateObject2D(asset, {}));
 				if (!glObj || !t)
 					continue;
 
@@ -1295,8 +1299,8 @@ void OpenGLRenderer::refreshEntity(ECS::Entity entity)
 				return true;
 			}
 
-			it->object3D = renderable.object3D;
-			it->object2D = renderable.object2D;
+			it->object3D = std::static_pointer_cast<OpenGLObject3D>(renderable.object3D);
+			it->object2D = std::static_pointer_cast<OpenGLObject2D>(renderable.object2D);
 			it->transform = renderable.transform;
 			return true;
 		}
@@ -1324,8 +1328,8 @@ void OpenGLRenderer::refreshEntity(ECS::Entity entity)
 					RenderEntry entry;
 					entry.entity = renderable.entity;
 					entry.transform = renderable.transform;
-					entry.object3D = renderable.object3D;
-					entry.object2D = renderable.object2D;
+					entry.object3D = std::static_pointer_cast<OpenGLObject3D>(renderable.object3D);
+					entry.object2D = std::static_pointer_cast<OpenGLObject2D>(renderable.object2D);
 					m_meshEntries.push_back(std::move(entry));
 				}
 			}
@@ -1352,8 +1356,8 @@ void OpenGLRenderer::refreshEntity(ECS::Entity entity)
 					RenderEntry entry;
 					entry.entity = renderable.entity;
 					entry.transform = renderable.transform;
-					entry.object3D = renderable.object3D;
-					entry.object2D = renderable.object2D;
+					entry.object3D = std::static_pointer_cast<OpenGLObject3D>(renderable.object3D);
+					entry.object2D = std::static_pointer_cast<OpenGLObject2D>(renderable.object2D);
 					m_renderEntries.push_back(std::move(entry));
 				}
 			}
@@ -1371,8 +1375,8 @@ void OpenGLRenderer::refreshEntity(ECS::Entity entity)
 			RenderEntry entry;
 			entry.entity = renderable.entity;
 			entry.transform = renderable.transform;
-			entry.object3D = renderable.object3D;
-			entry.object2D = renderable.object2D;
+			entry.object3D = std::static_pointer_cast<OpenGLObject3D>(renderable.object3D);
+			entry.object2D = std::static_pointer_cast<OpenGLObject2D>(renderable.object2D);
 			if (hasMat)
 				m_renderEntries.push_back(std::move(entry));
 			else
@@ -1999,9 +2003,9 @@ void OpenGLRenderer::renderPopupWindows()
     for (auto& [id, popup] : m_popupWindows)
     {
         if (!popup || !popup->isOpen()) continue;
-        if (!popup->sdlWindow() || !popup->glContext()) continue;
+        if (!popup->sdlWindow() || !popup->renderContext()) continue;
 
-        SDL_GL_MakeCurrent(popup->sdlWindow(), popup->glContext());
+        popup->renderContext()->makeCurrent(popup->sdlWindow());
 
         // Create context-local VAOs on first use (VAOs are not shared between GL contexts).
         ensurePopupUIVao();
@@ -2058,7 +2062,8 @@ PopupWindow* OpenGLRenderer::openPopupWindow(const std::string& id, const std::s
     SDL_GL_MakeCurrent(m_window, m_glContext);
 
     auto popup = std::make_unique<PopupWindow>();
-    if (!popup->create(title, width, height))
+    auto context = std::make_unique<OpenGLRenderContext>();
+    if (!popup->create(title, width, height, SDL_WINDOW_OPENGL, std::move(context)))
         return nullptr;
 
     // Restore main context after popup creation.
@@ -2658,7 +2663,7 @@ void OpenGLRenderer::renderUI()
 
     if (!m_textRenderer)
     {
-        m_textRenderer = m_resourceManager.prepareTextRenderer();
+        m_textRenderer = std::static_pointer_cast<OpenGLTextRenderer>(m_resourceManager.prepareTextRenderer());
     }
 
     if (!m_textRenderer)
@@ -4880,9 +4885,9 @@ void OpenGLRenderer::buildHzb()
     GLuint viewportFbo = 0;
     for (const auto& tab : m_editorTabs)
     {
-        if (tab.id == "Viewport")
+        if (tab.id == "Viewport" && tab.renderTarget && tab.renderTarget->isValid())
         {
-            viewportFbo = tab.fbo;
+            viewportFbo = static_cast<const OpenGLRenderTarget*>(tab.renderTarget.get())->getGLFramebuffer();
             break;
         }
     }
@@ -5702,9 +5707,9 @@ void OpenGLRenderer::renderPickBuffer(const glm::mat4& view, const glm::mat4& pr
     GLuint vpFbo = 0;
     for (const auto& tab : m_editorTabs)
     {
-        if (tab.active)
+        if (tab.active && tab.renderTarget && tab.renderTarget->isValid())
         {
-            vpFbo = tab.fbo;
+            vpFbo = static_cast<const OpenGLRenderTarget*>(tab.renderTarget.get())->getGLFramebuffer();
             break;
         }
     }
@@ -5753,9 +5758,9 @@ void OpenGLRenderer::renderPickBufferSingleEntity(const glm::mat4& view, const g
     GLuint vpFbo = 0;
     for (const auto& tab : m_editorTabs)
     {
-        if (tab.active)
+        if (tab.active && tab.renderTarget && tab.renderTarget->isValid())
         {
-            vpFbo = tab.fbo;
+            vpFbo = static_cast<const OpenGLRenderTarget*>(tab.renderTarget.get())->getGLFramebuffer();
             break;
         }
     }
@@ -5801,11 +5806,11 @@ bool OpenGLRenderer::screenToWorldPos(int screenX, int screenY, Vec3& outWorldPo
     int fboW = 0, fboH = 0;
     for (const auto& tab : m_editorTabs)
     {
-        if (tab.active && tab.fbo != 0)
+        if (tab.active && tab.renderTarget && tab.renderTarget->isValid())
         {
-            fbo = tab.fbo;
-            fboW = tab.fboWidth;
-            fboH = tab.fboHeight;
+            fbo = static_cast<const OpenGLRenderTarget*>(tab.renderTarget.get())->getGLFramebuffer();
+            fboW = tab.renderTarget->getWidth();
+            fboH = tab.renderTarget->getHeight();
             break;
         }
     }
@@ -5990,7 +5995,7 @@ void OpenGLRenderer::removeTab(const std::string& id)
         return;
     }
     const bool wasActive = it->active;
-    releaseTabFbo(*it);
+    it->renderTarget.reset();
     m_editorTabs.erase(it);
     if (wasActive && !m_editorTabs.empty())
     {
@@ -6112,9 +6117,9 @@ void OpenGLRenderer::setActiveTab(const std::string& id)
     // Snapshot the current active tab so it can be displayed as a cached image later
     for (auto& tab : m_editorTabs)
     {
-        if (tab.active && tab.colorTex != 0)
+        if (tab.active && tab.renderTarget && tab.renderTarget->isValid())
         {
-            snapshotTabBeforeSwitch(tab);
+            tab.renderTarget->takeSnapshot();
         }
         tab.active = (tab.id == id);
         if (tab.active)
@@ -6137,111 +6142,12 @@ const std::vector<EditorTab>& OpenGLRenderer::getTabs() const
     return m_editorTabs;
 }
 
-bool OpenGLRenderer::ensureTabFbo(EditorTab& tab, int width, int height)
-{
-    if (tab.fbo != 0 && tab.fboWidth == width && tab.fboHeight == height)
-    {
-        return true;
-    }
-    releaseTabFbo(tab);
-    tab.fboWidth = width;
-    tab.fboHeight = height;
-
-    glGenFramebuffers(1, &tab.fbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, tab.fbo);
-
-    glGenTextures(1, &tab.colorTex);
-    glBindTexture(GL_TEXTURE_2D, tab.colorTex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tab.colorTex, 0);
-
-    glGenRenderbuffers(1, &tab.depthRbo);
-    glBindRenderbuffer(GL_RENDERBUFFER, tab.depthRbo);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, tab.depthRbo);
-
-    const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glBindRenderbuffer(GL_RENDERBUFFER, 0);
-
-    if (status != GL_FRAMEBUFFER_COMPLETE)
-    {
-        releaseTabFbo(tab);
-        return false;
-    }
-    return true;
-}
-
-void OpenGLRenderer::releaseTabFbo(EditorTab& tab)
-{
-    if (tab.colorTex) { glDeleteTextures(1, &tab.colorTex); tab.colorTex = 0; }
-    if (tab.depthRbo) { glDeleteRenderbuffers(1, &tab.depthRbo); tab.depthRbo = 0; }
-    if (tab.fbo) { glDeleteFramebuffers(1, &tab.fbo); tab.fbo = 0; }
-    if (tab.snapshotTex) { glDeleteTextures(1, &tab.snapshotTex); tab.snapshotTex = 0; }
-    tab.fboWidth = 0;
-    tab.fboHeight = 0;
-    tab.hasSnapshot = false;
-}
-
 void OpenGLRenderer::releaseAllTabFbos()
 {
     for (auto& tab : m_editorTabs)
     {
-        releaseTabFbo(tab);
+        tab.renderTarget.reset();
     }
-}
-
-void OpenGLRenderer::snapshotTabBeforeSwitch(EditorTab& tab)
-{
-    if (tab.colorTex == 0 || tab.fboWidth <= 0 || tab.fboHeight <= 0)
-    {
-        return;
-    }
-
-    // Create or resize snapshot texture
-    if (tab.snapshotTex == 0)
-    {
-        glGenTextures(1, &tab.snapshotTex);
-        glBindTexture(GL_TEXTURE_2D, tab.snapshotTex);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, tab.fboWidth, tab.fboHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    }
-    else
-    {
-        glBindTexture(GL_TEXTURE_2D, tab.snapshotTex);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, tab.fboWidth, tab.fboHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-    }
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    // Copy colorTex -> snapshotTex via FBO blit
-    GLuint srcFbo = 0, dstFbo = 0;
-    glGenFramebuffers(1, &srcFbo);
-    glGenFramebuffers(1, &dstFbo);
-
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, srcFbo);
-    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tab.colorTex, 0);
-
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, dstFbo);
-    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tab.snapshotTex, 0);
-
-    glBlitFramebuffer(0, 0, tab.fboWidth, tab.fboHeight,
-        0, 0, tab.fboWidth, tab.fboHeight,
-        GL_COLOR_BUFFER_BIT, GL_NEAREST);
-
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    glDeleteFramebuffers(1, &srcFbo);
-    glDeleteFramebuffers(1, &dstFbo);
-
-    tab.hasSnapshot = true;
 }
 
 // ============================================================================
