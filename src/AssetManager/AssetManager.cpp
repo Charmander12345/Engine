@@ -6,20 +6,33 @@
 #include <filesystem>
 #include <fstream>
 #include <cstdint>
+#include <cctype>
+#include <exception>
 #include "AssetTypes.h"
 
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_audio.h>
 #include <SDL3/SDL_dialog.h>
 
-#include "../Basics/Material.h"
+#include "../Renderer/Material.h"
+#include "../Core/AudioManager.h"
+
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+
+#include "../Core/ECS/ECS.h"
 
 namespace fs = std::filesystem;
+
+int AssetManager::s_nextAssetID = 1;
 
 namespace
 {
     struct ImportDialogContext
     {
-        AssetType preferredType{ AssetType::Texture };
+        AssetType preferredType{ AssetType::Unknown };
+		unsigned int ActionID{ 0 };
     };
 
     // Map file extension -> asset type (extensible)
@@ -30,20 +43,32 @@ namespace
         {
             if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
         }
-
         // Textures
-        if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga")
+        if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga" || ext == ".hdr")
             return AssetType::Texture;
 
-        // Future: models/audio/shaders/scripts...
-        // if (ext == ".obj" || ext == ".fbx" ... ) return AssetType::Model3D;
-        // if (ext == ".wav" || ext == ".ogg" ... ) return AssetType::Audio;
-        // if (ext == ".glsl" || ext == ".vert" || ext == ".frag") return AssetType::Shader;
+        if (ext == ".wav")
+            return AssetType::Audio;
+
+        // 3D Models (Assimp-supported)
+        if (ext == ".obj" || ext == ".fbx" || ext == ".gltf" || ext == ".glb" ||
+            ext == ".dae" || ext == ".3ds" || ext == ".blend" || ext == ".stl" ||
+            ext == ".ply" || ext == ".x3d")
+            return AssetType::Model3D;
+
+        // Shaders
+        if (ext == ".glsl" || ext == ".vert" || ext == ".frag" || ext == ".geom" || ext == ".comp")
+            return AssetType::Shader;
+
+        // Scripts
+        if (ext == ".py")
+            return AssetType::Script;
 
         return AssetType::Unknown;
     }
 
-    static void SDLCALL OnImportDialogClosed(void* userdata, const char* const* filelist, int /*filter_index*/)
+
+    static void SDLCALL OnImportDialogClosed(void* userdata, const char* const* filelist, int filter)
     {
 		Logger::Instance().log(Logger::Category::AssetManagement, "Import dialog closed callback invoked.", Logger::LogLevel::INFO);
         auto* ctx = static_cast<ImportDialogContext*>(userdata);
@@ -56,13 +81,14 @@ namespace
         if (!filelist || !filelist[0])
         {
             Logger::Instance().log(Logger::Category::AssetManagement, "Import dialog cancelled or no file selected.", Logger::LogLevel::INFO);
+			DiagnosticsManager::Instance().updateActionProgress(ctx->ActionID, false);
             delete ctx;
             return;
         }
 
         const std::string selectedPath = filelist[0];
         Logger::Instance().log(Logger::Category::AssetManagement, "Queueing import job for file: " + selectedPath, Logger::LogLevel::INFO);
-        AssetManager::Instance().importAssetFromFileAsync(ctx->preferredType, selectedPath);
+        AssetManager::Instance().importAssetFromPath(selectedPath, ctx->preferredType, ctx->ActionID);
         delete ctx;
     }
 
@@ -102,46 +128,242 @@ static bool readString(std::ifstream& in, std::string& outStr)
     return true;
 }
 
+
 static fs::path getRegistryPath(const std::string& projectRoot)
 {
     return fs::path(projectRoot) / "Config" / "AssetRegistry.bin";
 }
 
+static fs::path getEditorWidgetsRootPath()
+{
+    return fs::current_path() / "Editor" / "Widgets";
+}
+
 static bool readAssetHeaderType(const fs::path& absoluteAssetPath, AssetType& outType)
 {
-    std::ifstream in(absoluteAssetPath, std::ios::binary);
-    if (!in.is_open()) return false;
+	std::ifstream in(absoluteAssetPath, std::ios::binary);
+	if (!in.is_open()) return false;
 
-    uint32_t magic = 0;
-    uint32_t version = 0;
-    if (!in.read(reinterpret_cast<char*>(&magic), sizeof(magic))) return false;
-    if (!in.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
-    if (magic != 0x41535453 || version != 2) return false;
+	char first = 0;
+	if (!in.get(first)) return false;
+	if (first == '{')
+	{
+		in.unget();
+		json j = json::parse(in, nullptr, false);
+		if (j.is_discarded()) return false;
+		if (!j.is_object() || !j.contains("type")) return false;
+		outType = static_cast<AssetType>(j.at("type").get<int>());
+		return true;
+	}
 
-    int32_t typeInt = 0;
-    if (!in.read(reinterpret_cast<char*>(&typeInt), sizeof(typeInt))) return false;
-    outType = static_cast<AssetType>(typeInt);
-    return true;
+	in.unget();
+	uint32_t magic = 0;
+	uint32_t version = 0;
+	if (!in.read(reinterpret_cast<char*>(&magic), sizeof(magic))) return false;
+	if (!in.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
+	if (magic != 0x41535453 || version != 2) return false;
+
+	int32_t typeInt = 0;
+	if (!in.read(reinterpret_cast<char*>(&typeInt), sizeof(typeInt))) return false;
+	outType = static_cast<AssetType>(typeInt);
+	return true;
 }
 
 static bool readAssetHeaderName(const fs::path& absoluteAssetPath, std::string& outName)
 {
-    std::ifstream in(absoluteAssetPath, std::ios::binary);
-    if (!in.is_open()) return false;
+	std::ifstream in(absoluteAssetPath, std::ios::binary);
+	if (!in.is_open()) return false;
 
-    uint32_t magic = 0;
-    uint32_t version = 0;
-    if (!in.read(reinterpret_cast<char*>(&magic), sizeof(magic))) return false;
-    if (!in.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
-    if (magic != 0x41535453 || version != 2) return false;
+	char first = 0;
+	if (!in.get(first)) return false;
+	if (first == '{')
+	{
+		in.unget();
+		json j = json::parse(in, nullptr, false);
+		if (j.is_discarded()) return false;
+		if (!j.is_object() || !j.contains("name")) return false;
+		outName = j.at("name").get<std::string>();
+		return true;
+	}
 
-    int32_t typeInt = 0;
-    if (!in.read(reinterpret_cast<char*>(&typeInt), sizeof(typeInt))) return false;
+	in.unget();
+	uint32_t magic = 0;
+	uint32_t version = 0;
+	if (!in.read(reinterpret_cast<char*>(&magic), sizeof(magic))) return false;
+	if (!in.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
+	if (magic != 0x41535453 || version != 2) return false;
 
-    std::string name;
-    if (!readString(in, name)) return false;
-    outName = std::move(name);
-    return true;
+	int32_t typeInt = 0;
+	if (!in.read(reinterpret_cast<char*>(&typeInt), sizeof(typeInt))) return false;
+
+	std::string name;
+	if (!readString(in, name)) return false;
+	outName = std::move(name);
+	return true;
+}
+
+static bool readAssetHeader(std::ifstream& in, AssetType& outType, std::string& outName, bool& outIsJson)
+{
+	outIsJson = false;
+	char first = 0;
+	if (!in.get(first)) return false;
+	if (first == '{')
+	{
+		in.unget();
+		json j = json::parse(in, nullptr, false);
+		if (j.is_discarded()) return false;
+		if (!j.is_object() || !j.contains("type") || !j.contains("name")) return false;
+		outType = static_cast<AssetType>(j.at("type").get<int>());
+		outName = j.at("name").get<std::string>();
+		outIsJson = true;
+		return true;
+	}
+
+	in.unget();
+	uint32_t magic = 0;
+	uint32_t version = 0;
+	if (!in.read(reinterpret_cast<char*>(&magic), sizeof(magic))) return false;
+	if (!in.read(reinterpret_cast<char*>(&version), sizeof(version))) return false;
+	if (magic != 0x41535453 || version != 2) return false;
+
+	int32_t typeInt = 0;
+	if (!in.read(reinterpret_cast<char*>(&typeInt), sizeof(typeInt))) return false;
+	outType = static_cast<AssetType>(typeInt);
+
+	std::string name;
+	if (!readString(in, name)) return false;
+	outName = std::move(name);
+	return true;
+}
+
+static bool readAssetJson(std::ifstream& in, json& outJson, std::string& errorMessage, bool isJsonFormat)
+{
+	if (isJsonFormat)
+	{
+		in.clear();
+		in.seekg(0, std::ios::beg);
+	}
+
+	std::string jsonText((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	if (jsonText.empty())
+	{
+		outJson = json::object();
+		return true;
+	}
+
+	outJson = json::parse(jsonText, nullptr, false);
+	if (outJson.is_discarded())
+	{
+		errorMessage = "Failed to parse asset JSON.";
+		return false;
+	}
+	if (outJson.is_object() && outJson.contains("data"))
+	{
+		outJson = outJson.at("data");
+	}
+	return true;
+}
+
+static bool readAssetHeaderFromMemory(const std::vector<char>& buffer, AssetType& outType, std::string& outName, bool& outIsJson, size_t& headerEndPos)
+{
+	outIsJson = false;
+	if (buffer.empty()) return false;
+
+	// Check for JSON start
+	size_t i = 0;
+	while (i < buffer.size() && std::isspace(static_cast<unsigned char>(buffer[i]))) i++;
+	if (i < buffer.size() && buffer[i] == '{')
+	{
+		outIsJson = true;
+		// Parse the whole buffer to get header info
+		try {
+			json j = json::parse(buffer.begin() + i, buffer.end(), nullptr, false);
+			if (j.is_discarded()) return false;
+			if (!j.is_object() || !j.contains("type") || !j.contains("name")) return false;
+			outType = static_cast<AssetType>(j.at("type").get<int>());
+			outName = j.at("name").get<std::string>();
+			headerEndPos = 0; // JSON format logic usually just parses the whole thing
+			return true;
+		} catch (...) {
+			return false;
+		}
+	}
+
+	// Binary format check
+	if (buffer.size() < 12) return false; // Magic(4) + Version(4) + Type(4)
+
+	const char* ptr = buffer.data();
+	uint32_t magic = *reinterpret_cast<const uint32_t*>(ptr); ptr += 4;
+	uint32_t version = *reinterpret_cast<const uint32_t*>(ptr); ptr += 4;
+
+	if (magic != 0x41535453 || version != 2) return false;
+
+	int32_t typeInt = *reinterpret_cast<const int32_t*>(ptr); ptr += 4;
+	outType = static_cast<AssetType>(typeInt);
+
+	// Read string name length
+	if (ptr + 4 > buffer.data() + buffer.size()) return false;
+	uint32_t nameLen = *reinterpret_cast<const uint32_t*>(ptr); ptr += 4;
+
+	if (ptr + nameLen > buffer.data() + buffer.size()) return false;
+	outName.assign(ptr, nameLen);
+	ptr += nameLen;
+
+	headerEndPos = ptr - buffer.data();
+	return true;
+}
+
+static bool readAssetJsonFromMemory(const std::vector<char>& buffer, json& outJson, std::string& errorMessage, bool isJsonFormat, size_t headerEndPos)
+{
+	if (isJsonFormat)
+	{
+		// Find start of JSON
+		size_t i = 0;
+		while (i < buffer.size() && std::isspace(static_cast<unsigned char>(buffer[i]))) i++;
+		if (i >= buffer.size()) {
+			 outJson = json::object();
+			 return true;
+		}
+		outJson = json::parse(buffer.begin() + i, buffer.end(), nullptr, false);
+	}
+	else
+	{
+		// Binary format: headerEndPos is where JSON body starts
+		if (headerEndPos >= buffer.size()) {
+			 outJson = json::object(); // Empty body is valid?
+			 return true; 
+		}
+		const char* start = buffer.data() + headerEndPos;
+		const char* end = buffer.data() + buffer.size();
+		outJson = json::parse(start, end, nullptr, false);
+	}
+
+	if (outJson.is_discarded())
+	{
+		errorMessage = "Failed to parse asset JSON from memory.";
+		return false;
+	}
+
+	if (outJson.is_object() && outJson.contains("data"))
+	{
+		outJson = outJson.at("data");
+	}
+	return true;
+}
+
+std::vector<std::shared_ptr<AssetData>> AssetManager::getAssetsByType(AssetType type) const
+{
+	std::vector<std::shared_ptr<AssetData>> results;
+	std::lock_guard<std::mutex> lock(m_stateMutex);
+	results.reserve(m_loadedAssets.size());
+	for (const auto& [id, asset] : m_loadedAssets)
+	{
+		if (asset && asset->getAssetType() == type)
+		{
+			results.push_back(asset);
+		}
+	}
+	return results;
 }
 
 AssetManager& AssetManager::Instance()
@@ -243,35 +465,420 @@ void AssetManager::registerAssetInRegistry(const AssetRegistryEntry& entry)
     {
         m_registryByName[entry.name] = idx;
     }
+
+    m_registryVersion.fetch_add(1, std::memory_order_relaxed);
+
+    // Persist the updated registry to disk (skipped during batch operations)
+    if (!m_suppressRegistrySave)
+    {
+        auto& diagnostics = DiagnosticsManager::Instance();
+        if (diagnostics.isProjectLoaded() && !diagnostics.getProjectInfo().projectPath.empty())
+        {
+            saveAssetRegistry(diagnostics.getProjectInfo().projectPath);
+        }
+    }
 }
 
-bool AssetManager::discoverAssetsAndBuildRegistry(const std::string& projectRoot)
+bool AssetManager::deleteAsset(const std::string& relPath, bool deleteFromDisk)
 {
-    m_registry.clear();
-    m_registryByPath.clear();
-    m_registryByName.clear();
+    auto& logger = Logger::Instance();
+    auto& diagnostics = DiagnosticsManager::Instance();
 
-    fs::path contentRoot = fs::path(projectRoot) / "Content";
-    if (!fs::exists(contentRoot))
+    if (relPath.empty())
     {
         return false;
     }
 
+    // Remove from registry
+    bool found = false;
+    for (auto it = m_registry.begin(); it != m_registry.end(); ++it)
+    {
+        if (it->path == relPath)
+        {
+            logger.log(Logger::Category::AssetManagement,
+                "Deleting asset from registry: " + relPath, Logger::LogLevel::INFO);
+            m_registryByPath.erase(it->path);
+            m_registryByName.erase(it->name);
+            m_registry.erase(it);
+            found = true;
+            break;
+        }
+    }
+
+    if (found)
+    {
+        // Rebuild index maps since indices shifted
+        m_registryByPath.clear();
+        m_registryByName.clear();
+        for (size_t i = 0; i < m_registry.size(); ++i)
+        {
+            if (!m_registry[i].path.empty())
+                m_registryByPath[m_registry[i].path] = i;
+            if (!m_registry[i].name.empty())
+                m_registryByName[m_registry[i].name] = i;
+        }
+
+        // Persist
+        if (diagnostics.isProjectLoaded() && !diagnostics.getProjectInfo().projectPath.empty())
+        {
+            saveAssetRegistry(diagnostics.getProjectInfo().projectPath);
+        }
+
+        m_registryVersion.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    // Delete file from disk
+    if (deleteFromDisk && diagnostics.isProjectLoaded())
+    {
+        const fs::path contentDir = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+        const fs::path absPath = contentDir / fs::path(relPath);
+        std::error_code ec;
+        if (fs::exists(absPath, ec))
+        {
+            if (fs::remove(absPath, ec))
+            {
+                logger.log(Logger::Category::AssetManagement,
+                    "Deleted asset file: " + absPath.string(), Logger::LogLevel::INFO);
+            }
+            else
+            {
+                logger.log(Logger::Category::AssetManagement,
+                    "Failed to delete asset file: " + absPath.string() + " ec=" + ec.message(),
+                    Logger::LogLevel::WARNING);
+                return false;
+            }
+        }
+    }
+
+    return found;
+}
+
+size_t AssetManager::validateRegistry()
+{
+    auto& logger = Logger::Instance();
+    auto& diagnostics = DiagnosticsManager::Instance();
+
+    if (!diagnostics.isProjectLoaded() || diagnostics.getProjectInfo().projectPath.empty())
+    {
+        return 0;
+    }
+
+    const fs::path contentDir = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+    if (!fs::exists(contentDir))
+    {
+        return 0;
+    }
+
+    std::vector<std::string> staleEntries;
+    for (const auto& entry : m_registry)
+    {
+        const fs::path absPath = contentDir / fs::path(entry.path);
+        std::error_code ec;
+        if (!fs::exists(absPath, ec))
+        {
+            staleEntries.push_back(entry.path);
+        }
+    }
+
+    if (staleEntries.empty())
+    {
+        return 0;
+    }
+
+    for (const auto& relPath : staleEntries)
+    {
+        logger.log(Logger::Category::AssetManagement,
+            "[Integrity] Stale registry entry (file missing): " + relPath, Logger::LogLevel::WARNING);
+
+        for (auto it = m_registry.begin(); it != m_registry.end(); ++it)
+        {
+            if (it->path == relPath)
+            {
+                m_registry.erase(it);
+                break;
+            }
+        }
+    }
+
+    // Rebuild index maps
+    m_registryByPath.clear();
+    m_registryByName.clear();
+    for (size_t i = 0; i < m_registry.size(); ++i)
+    {
+        if (!m_registry[i].path.empty())
+            m_registryByPath[m_registry[i].path] = i;
+        if (!m_registry[i].name.empty())
+            m_registryByName[m_registry[i].name] = i;
+    }
+
+    saveAssetRegistry(diagnostics.getProjectInfo().projectPath);
+    m_registryVersion.fetch_add(1, std::memory_order_relaxed);
+
+    logger.log(Logger::Category::AssetManagement,
+        "[Integrity] Removed " + std::to_string(staleEntries.size()) + " stale registry entries.",
+        Logger::LogLevel::WARNING);
+
+    return staleEntries.size();
+}
+
+size_t AssetManager::validateEntityReferences(bool showToast)
+{
+    auto& logger = Logger::Instance();
+    auto& ecs = ECS::ECSManager::Instance();
+    size_t broken = 0;
+
+    // Helper: check registry + project Content + engine Content on disk
+    auto assetExistsOnDisk = [this](const std::string& relPath) -> bool
+    {
+        if (relPath.empty())
+            return false;
+        if (doesAssetExist(relPath))
+            return true;
+        const std::string absProject = getAbsoluteContentPath(relPath);
+        if (!absProject.empty() && fs::exists(absProject))
+            return true;
+        const std::string absEngine = getAbsoluteEngineContentPath(relPath);
+        if (!absEngine.empty() && fs::exists(absEngine))
+            return true;
+        return false;
+    };
+
+    // Validate MeshComponent references
+    {
+        ECS::Schema schema;
+        schema.require<ECS::MeshComponent>();
+        for (const auto e : ecs.getEntitiesMatchingSchema(schema))
+        {
+            const auto* mesh = ecs.getComponent<ECS::MeshComponent>(e);
+            if (mesh && !mesh->meshAssetPath.empty() && !assetExistsOnDisk(mesh->meshAssetPath))
+            {
+                logger.log(Logger::Category::AssetManagement,
+                    "[Integrity] Entity " + std::to_string(e) + " references missing mesh: " + mesh->meshAssetPath,
+                    Logger::LogLevel::WARNING);
+                ++broken;
+            }
+        }
+    }
+
+    // Validate MaterialComponent references
+    {
+        ECS::Schema schema;
+        schema.require<ECS::MaterialComponent>();
+        for (const auto e : ecs.getEntitiesMatchingSchema(schema))
+        {
+            const auto* mat = ecs.getComponent<ECS::MaterialComponent>(e);
+            if (mat && !mat->materialAssetPath.empty() && !assetExistsOnDisk(mat->materialAssetPath))
+            {
+                logger.log(Logger::Category::AssetManagement,
+                    "[Integrity] Entity " + std::to_string(e) + " references missing material: " + mat->materialAssetPath,
+                    Logger::LogLevel::WARNING);
+                ++broken;
+            }
+        }
+    }
+
+    // Validate ScriptComponent references
+    {
+        ECS::Schema schema;
+        schema.require<ECS::ScriptComponent>();
+        for (const auto e : ecs.getEntitiesMatchingSchema(schema))
+        {
+            const auto* sc = ecs.getComponent<ECS::ScriptComponent>(e);
+            if (sc && !sc->scriptPath.empty() && !assetExistsOnDisk(sc->scriptPath))
+            {
+                logger.log(Logger::Category::AssetManagement,
+                    "[Integrity] Entity " + std::to_string(e) + " references missing script: " + sc->scriptPath,
+                    Logger::LogLevel::WARNING);
+                ++broken;
+            }
+        }
+    }
+
+    if (broken > 0)
+    {
+        logger.log(Logger::Category::AssetManagement,
+            "[Integrity] Found " + std::to_string(broken) + " broken entity asset reference(s).",
+            Logger::LogLevel::WARNING);
+    }
+
+    return broken;
+}
+
+size_t AssetManager::repairEntityReferences()
+{
+    auto& logger = Logger::Instance();
+    auto& ecs = ECS::ECSManager::Instance();
+    size_t repaired = 0;
+
+    const std::string worldGridMaterialPath = "Materials/WorldGrid.asset";
+
+    // Helper: check whether a content-relative asset path actually resolves to a
+    // file on disk. We check both the project Content directory and the engine
+    // Content directory (for built-in assets like WorldGrid). This is more
+    // reliable than a registry-only check because the registry might not cover
+    // engine assets and path separators may differ.
+    auto assetExistsOnDisk = [this](const std::string& relPath) -> bool
+    {
+        if (relPath.empty())
+            return false;
+
+        // 1. Registry (fast, covers project assets)
+        if (doesAssetExist(relPath))
+            return true;
+
+        // 2. Project Content directory
+        const std::string absProject = getAbsoluteContentPath(relPath);
+        if (!absProject.empty() && fs::exists(absProject))
+            return true;
+
+        // 3. Engine Content directory (built-in assets next to the executable)
+        const std::string absEngine = getAbsoluteEngineContentPath(relPath);
+        if (!absEngine.empty() && fs::exists(absEngine))
+            return true;
+
+        return false;
+    };
+
+    // Repair missing MeshComponent references — remove the component entirely
+    {
+        ECS::Schema schema;
+        schema.require<ECS::MeshComponent>();
+        const auto entities = ecs.getEntitiesMatchingSchema(schema);
+        for (const auto e : entities)
+        {
+            const auto* mesh = ecs.getComponent<ECS::MeshComponent>(e);
+            if (mesh && !mesh->meshAssetPath.empty() && !assetExistsOnDisk(mesh->meshAssetPath))
+            {
+                logger.log(Logger::Category::AssetManagement,
+                    "[Repair] Entity " + std::to_string(e) + ": removing missing mesh '" + mesh->meshAssetPath + "'",
+                    Logger::LogLevel::WARNING);
+                ecs.removeComponent<ECS::MeshComponent>(e);
+                ++repaired;
+            }
+        }
+    }
+
+    // Repair missing MaterialComponent references — replace with WorldGrid material
+    {
+        ECS::Schema schema;
+        schema.require<ECS::MaterialComponent>();
+        const auto entities = ecs.getEntitiesMatchingSchema(schema);
+        for (const auto e : entities)
+        {
+            const auto* mat = ecs.getComponent<ECS::MaterialComponent>(e);
+            if (mat && !mat->materialAssetPath.empty() && !assetExistsOnDisk(mat->materialAssetPath))
+            {
+                logger.log(Logger::Category::AssetManagement,
+                    "[Repair] Entity " + std::to_string(e) + ": replacing missing material '" + mat->materialAssetPath
+                    + "' with WorldGrid",
+                    Logger::LogLevel::WARNING);
+                ECS::MaterialComponent fixed{};
+                fixed.materialAssetPath = worldGridMaterialPath;
+                ecs.setComponent<ECS::MaterialComponent>(e, fixed);
+                ++repaired;
+            }
+        }
+    }
+
+    if (repaired > 0)
+    {
+        logger.log(Logger::Category::AssetManagement,
+            "[Repair] Fixed " + std::to_string(repaired) + " broken entity reference(s).",
+            Logger::LogLevel::WARNING);
+    }
+
+    return repaired;
+}
+
+bool AssetManager::discoverAssetsAndBuildRegistry(const std::string& projectRoot)
+{
+    auto& log = Logger::Instance();
+    log.log(Logger::Category::AssetManagement, "[Registry] discoverAssetsAndBuildRegistry projectRoot='" + projectRoot + "'", Logger::LogLevel::INFO);
+
+    m_registry.clear();
+    m_registryByPath.clear();
+    m_registryByName.clear();
+
+    // Suppress per-entry registry saves during batch discovery
+    m_suppressRegistrySave = true;
+
+    fs::path contentRoot = fs::path(projectRoot) / "Content";
+    if (!fs::exists(contentRoot))
+    {
+        log.log(Logger::Category::AssetManagement, "[Registry] ABORT: Content directory does not exist: " + contentRoot.string(), Logger::LogLevel::WARNING);
+        return false;
+    }
+    log.log(Logger::Category::AssetManagement, "[Registry] scanning contentRoot='" + contentRoot.string() + "'", Logger::LogLevel::INFO);
+
+    int filesScanned = 0;
+    int filesSkippedNotRegular = 0;
+    int filesSkippedExtension = 0;
+    int filesSkippedHeaderType = 0;
+    int filesRegistered = 0;
+
     for (const auto& entry : fs::recursive_directory_iterator(contentRoot))
     {
         if (!entry.is_regular_file())
+        {
+            ++filesSkippedNotRegular;
             continue;
+        }
 
+        ++filesScanned;
         const fs::path p = entry.path();
-        if (p.extension() != ".asset" && p.extension() != ".map")
+        const std::string ext = p.extension().string();
+
+        // Standalone script/audio files: register by extension without reading asset header
+        if (ext == ".py")
+        {
+            AssetRegistryEntry e;
+            e.name = p.stem().string();
+            e.type = AssetType::Script;
+            e.path = fs::relative(p, contentRoot).generic_string();
+            log.log(Logger::Category::AssetManagement, "[Registry]   + registered (script) name='" + e.name + "' path='" + e.path + "'", Logger::LogLevel::INFO);
+            registerAssetInRegistry(e);
+            ++filesRegistered;
             continue;
+        }
+        if (ext == ".wav" || ext == ".mp3" || ext == ".ogg" || ext == ".flac")
+        {
+            AssetRegistryEntry e;
+            e.name = p.stem().string();
+            e.type = AssetType::Audio;
+            e.path = fs::relative(p, contentRoot).generic_string();
+            log.log(Logger::Category::AssetManagement, "[Registry]   + registered (audio) name='" + e.name + "' path='" + e.path + "'", Logger::LogLevel::INFO);
+            registerAssetInRegistry(e);
+            ++filesRegistered;
+            continue;
+        }
+
+        if (ext != ".asset" && ext != ".map")
+        {
+            ++filesSkippedExtension;
+            log.log(Logger::Category::AssetManagement, "[Registry]   skip (extension): " + p.string(), Logger::LogLevel::INFO);
+            continue;
+        }
 
         AssetType type = AssetType::Unknown;
         std::string name;
 
-        if (!readAssetHeaderType(p, type))
-            continue;
-        if (!readAssetHeaderName(p, name))
+        {
+            std::ifstream headerIn(p, std::ios::binary);
+            if (!headerIn.is_open())
+            {
+                ++filesSkippedHeaderType;
+                log.log(Logger::Category::AssetManagement, "[Registry]   skip (cannot open): " + p.string(), Logger::LogLevel::WARNING);
+                continue;
+            }
+            bool isJson = false;
+            if (!readAssetHeader(headerIn, type, name, isJson))
+            {
+                ++filesSkippedHeaderType;
+                log.log(Logger::Category::AssetManagement, "[Registry]   skip (header type failed): " + p.string(), Logger::LogLevel::WARNING);
+                continue;
+            }
+        }
+        if (name.empty())
             name = p.stem().string();
 
         AssetRegistryEntry e;
@@ -282,10 +889,133 @@ bool AssetManager::discoverAssetsAndBuildRegistry(const std::string& projectRoot
         fs::path rel = fs::relative(p, contentRoot);
         e.path = rel.generic_string();
 
+        log.log(Logger::Category::AssetManagement, "[Registry]   + registered name='" + e.name + "' path='" + e.path + "' type=" + std::to_string(static_cast<int>(e.type)), Logger::LogLevel::INFO);
         registerAssetInRegistry(e);
+        ++filesRegistered;
     }
 
+    // Re-enable per-entry saves now that batch discovery is done
+    m_suppressRegistrySave = false;
+
+    log.log(Logger::Category::AssetManagement, "[Registry] discovery complete: scanned=" + std::to_string(filesScanned)
+        + " registered=" + std::to_string(filesRegistered)
+        + " skippedExtension=" + std::to_string(filesSkippedExtension)
+        + " skippedHeaderType=" + std::to_string(filesSkippedHeaderType)
+        + " skippedNotRegular=" + std::to_string(filesSkippedNotRegular)
+        + " totalRegistry=" + std::to_string(m_registry.size()),
+        Logger::LogLevel::INFO);
+
     return true;
+}
+
+void AssetManager::discoverAssetsAndBuildRegistryAsync(const std::string& projectRoot)
+{
+    auto& diagnostics = DiagnosticsManager::Instance();
+    diagnostics.setAssetRegistryReady(false);
+
+    enqueueJob([this, projectRoot]()
+    {
+        auto& log = Logger::Instance();
+        auto& diagnostics = DiagnosticsManager::Instance();
+
+        log.log(Logger::Category::AssetManagement, "[Registry] async discovery started", Logger::LogLevel::INFO);
+
+        // Build into local containers on the worker thread
+        std::vector<AssetRegistryEntry> localRegistry;
+        std::unordered_map<std::string, size_t> localByPath;
+        std::unordered_map<std::string, size_t> localByName;
+
+        const fs::path contentRoot = fs::path(projectRoot) / "Content";
+        if (!fs::exists(contentRoot))
+        {
+            log.log(Logger::Category::AssetManagement, "[Registry] async ABORT: Content directory does not exist: " + contentRoot.string(), Logger::LogLevel::WARNING);
+            diagnostics.setAssetRegistryReady(true);
+            return;
+        }
+
+        int filesScanned = 0;
+        int filesRegistered = 0;
+
+        const auto registerLocal = [&](AssetRegistryEntry&& e)
+        {
+            const size_t idx = localRegistry.size();
+            if (!e.path.empty()) localByPath[e.path] = idx;
+            if (!e.name.empty()) localByName[e.name] = idx;
+            localRegistry.push_back(std::move(e));
+            ++filesRegistered;
+        };
+
+        for (const auto& entry : fs::recursive_directory_iterator(contentRoot))
+        {
+            if (!entry.is_regular_file()) continue;
+
+            ++filesScanned;
+            const fs::path p = entry.path();
+            const std::string ext = p.extension().string();
+
+            if (ext == ".py")
+            {
+                AssetRegistryEntry e;
+                e.name = p.stem().string();
+                e.type = AssetType::Script;
+                e.path = fs::relative(p, contentRoot).generic_string();
+                registerLocal(std::move(e));
+                continue;
+            }
+            if (ext == ".wav" || ext == ".mp3" || ext == ".ogg" || ext == ".flac")
+            {
+                AssetRegistryEntry e;
+                e.name = p.stem().string();
+                e.type = AssetType::Audio;
+                e.path = fs::relative(p, contentRoot).generic_string();
+                registerLocal(std::move(e));
+                continue;
+            }
+
+            if (ext != ".asset" && ext != ".map") continue;
+
+            AssetType type = AssetType::Unknown;
+            std::string name;
+            {
+                std::ifstream headerIn(p, std::ios::binary);
+                if (!headerIn.is_open()) continue;
+                bool isJson = false;
+                if (!readAssetHeader(headerIn, type, name, isJson)) continue;
+            }
+            if (name.empty()) name = p.stem().string();
+
+            AssetRegistryEntry e;
+            e.name = name;
+            e.type = type;
+            e.path = fs::relative(p, contentRoot).generic_string();
+            registerLocal(std::move(e));
+        }
+
+        log.log(Logger::Category::AssetManagement, "[Registry] async discovery complete: scanned=" + std::to_string(filesScanned)
+            + " registered=" + std::to_string(filesRegistered), Logger::LogLevel::INFO);
+
+        // Swap results into the shared registry under lock
+        {
+            std::lock_guard<std::mutex> lock(m_stateMutex);
+            m_registry = std::move(localRegistry);
+            m_registryByPath = std::move(localByPath);
+            m_registryByName = std::move(localByName);
+        }
+
+        // Save registry to disk
+        saveAssetRegistry(projectRoot);
+
+        diagnostics.setAssetRegistryReady(true);
+
+        // Validate registry entries against disk to catch externally deleted files
+        const size_t staleCount = validateRegistry();
+        if (staleCount > 0)
+        {
+            log.log(Logger::Category::AssetManagement, "[Registry] Cleaned " + std::to_string(staleCount) + " stale entries after discovery.", Logger::LogLevel::WARNING);
+        }
+
+        log.log(Logger::Category::AssetManagement, "[Registry] async registry ready. Total assets: " + std::to_string(m_registry.size()), Logger::LogLevel::INFO);
+    });
 }
 
 bool AssetManager::doesAssetExist(const std::string& pathOrName) const
@@ -309,57 +1039,1240 @@ const std::vector<AssetRegistryEntry>& AssetManager::getAssetRegistry() const
 
 bool AssetManager::initialize()
 {
-    startWorker();
-
-    // Create in-memory default assets immediately. Persisting them (and optionally importing wall.jpg)
-    // is handled later when a project is loaded.
     {
         std::lock_guard<std::mutex> lock(m_stateMutex);
-        if (!m_defaultTriangle2D)
+        m_initialized = true;
+    }
+    startWorkerPool();
+	s_nextAssetID = 1;
+    AudioManager::Instance().setAudioResolver([](unsigned int assetId) -> std::optional<AudioManager::AudioBufferData>
+    {
+        auto asset = AssetManager::Instance().getLoadedAssetByID(assetId);
+        if (!asset || asset->getType() != AssetType::Audio)
         {
-            auto tex = std::make_shared<Texture>();
-            tex->setName("DefaultDebugTexture");
-            tex->setPath((fs::path("Textures") / "default_debug.asset").generic_string());
-            tex->setAssetType(AssetType::Texture);
-            tex->setIsSaved(false);
-            tex->setWidth(2);
-            tex->setHeight(2);
-            tex->setChannels(4);
-            tex->setData({
-                255,   0,   0, 255,   0, 255,   0, 255,
-                  0,   0, 255, 255, 255, 255,   0, 255
-            });
-            m_garbageCollector.registerResource(tex);
+            return std::nullopt;
+        }
 
-			auto mat = std::make_shared<Material>();
-			mat->setName("DefaultDebugMaterial");
-			mat->setPath((fs::path("Materials") / "default_debug.asset").generic_string());
-			mat->setAssetType(AssetType::Material);
-			mat->setIsSaved(false);
-			mat->setTextureAssetPaths({ tex->getPath() });
-            m_garbageCollector.registerResource(mat);
+        const auto& data = asset->getData();
+        if (!data.is_object())
+        {
+            return std::nullopt;
+        }
 
-            auto quad = std::make_shared<Object2D>();
-            quad->setName("DefaultQuad2D");
-            quad->setPath("default_quad2d.asset");
-            quad->setAssetType(AssetType::Model2D);
-            quad->setIsSaved(false);
-			// Material assets/textures are handled by Material; Object2D only stores a runtime Material instance.
-            quad->setVertices({
-                // positions             // colors            // texcoords
-                -0.5f,  0.5f, 0.0f,      1.0f, 0.0f, 0.0f,     0.0f, 1.0f,
-                 0.5f,  0.5f, 0.0f,      0.0f, 1.0f, 0.0f,     1.0f, 1.0f,
-                 0.5f, -0.5f, 0.0f,      0.0f, 0.0f, 1.0f,     1.0f, 0.0f,
-                -0.5f, -0.5f, 0.0f,      1.0f, 1.0f, 0.0f,     0.0f, 0.0f
-            });
-            quad->setIndices({ 0, 1, 2, 2, 3, 0 });
-            m_garbageCollector.registerResource(quad);
+        AudioManager::AudioBufferData bufferData;
+        bufferData.channels = data.value("m_channels", 0);
+        bufferData.sampleRate = data.value("m_sampleRate", 0);
+        bufferData.format = data.value("m_format", 0);
+        bufferData.data = data.value("m_data", std::vector<unsigned char>{});
+        return bufferData;
+    });
+    AudioManager::Instance().setAudioReleaseCallback([](unsigned int assetId)
+    {
+        AssetManager::Instance().releaseAudioAsset(assetId);
+    });
+    ensureEditorWidgetsCreated();
+    return true;
+}
 
-            m_defaultTriangle2D = quad;
+void AssetManager::ensureEditorWidgetsCreated()
+{
+    auto& logger = Logger::Instance();
+
+    // Ensure Editor/Textures icons exist
+    {
+        const fs::path texturesDir = fs::current_path() / "Editor" / "Textures";
+        std::error_code ec;
+        fs::create_directories(texturesDir, ec);
+
+        auto writeTga = [&](const std::string& name, const std::vector<uint8_t>& rgba, int w, int h)
+        {
+            const fs::path path = texturesDir / name;
+            if (fs::exists(path))
+            {
+                return;
+            }
+            std::ofstream out(path, std::ios::binary);
+            if (!out.is_open())
+            {
+                return;
+            }
+            uint8_t header[18] = {};
+            header[2] = 2;
+            header[12] = static_cast<uint8_t>(w & 0xFF);
+            header[13] = static_cast<uint8_t>((w >> 8) & 0xFF);
+            header[14] = static_cast<uint8_t>(h & 0xFF);
+            header[15] = static_cast<uint8_t>((h >> 8) & 0xFF);
+            header[16] = 32;
+            header[17] = 0x28;
+            out.write(reinterpret_cast<const char*>(header), 18);
+            for (int y = 0; y < h; ++y)
+            {
+                for (int x = 0; x < w; ++x)
+                {
+                    const int idx = (y * w + x) * 4;
+                    const uint8_t bgra[4] = { rgba[idx + 2], rgba[idx + 1], rgba[idx], rgba[idx + 3] };
+                    out.write(reinterpret_cast<const char*>(bgra), 4);
+                }
+            }
+        };
+
+        constexpr int sz = 24;
+        {
+            std::vector<uint8_t> play(sz * sz * 4, 0);
+            for (int y = 0; y < sz; ++y)
+            {
+                const float fy = static_cast<float>(y) / static_cast<float>(sz - 1);
+                const float halfH = 0.5f - std::abs(fy - 0.5f);
+                const int maxX = static_cast<int>(halfH * 2.0f * static_cast<float>(sz) * 0.85f);
+                for (int x = 0; x < sz; ++x)
+                {
+                    const int idx = (y * sz + x) * 4;
+                    if (x >= 4 && x < 4 + maxX)
+                    {
+                        play[idx] = 220; play[idx + 1] = 220; play[idx + 2] = 220; play[idx + 3] = 255;
+                    }
+                }
+            }
+            writeTga("Play.tga", play, sz, sz);
+        }
+        {
+            std::vector<uint8_t> stop(sz * sz * 4, 0);
+            for (int y = 0; y < sz; ++y)
+            {
+                for (int x = 0; x < sz; ++x)
+                {
+                    const int idx = (y * sz + x) * 4;
+                    if (x >= 4 && x < sz - 4 && y >= 4 && y < sz - 4)
+                    {
+                        stop[idx] = 220; stop[idx + 1] = 100; stop[idx + 2] = 100; stop[idx + 3] = 255;
+                    }
+                }
+            }
+            writeTga("Stop.tga", stop, sz, sz);
         }
     }
 
-    return true;
+    const std::string defaultWidgetRel = "TitleBar.asset";
+    {
+        json widgetJson = json::object();
+        widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 100.0f} };
+        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        widgetJson["m_anchor"] = "TopLeft";
+        widgetJson["m_fillX"] = true;
+        widgetJson["m_zOrder"] = 0;
+
+        json elements = json::array();
+
+        // Full-area dark background
+        json bgPanel = json::object();
+        bgPanel["id"] = "TitleBar.Background";
+        bgPanel["type"] = "Panel";
+        bgPanel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        bgPanel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        bgPanel["fillX"] = true;
+        bgPanel["color"] = json{ {"x", 0.1f}, {"y", 0.1f}, {"z", 0.1f}, {"w", 1.0f} };
+        bgPanel["shaderVertex"] = "panel_vertex.glsl";
+        bgPanel["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(bgPanel);
+
+        // Slightly darker strip behind tab row (bottom 50%)
+        json tabRowBg = json::object();
+        tabRowBg["id"] = "TitleBar.TabRowBg";
+        tabRowBg["type"] = "Panel";
+        tabRowBg["from"] = json{ {"x", 0.0f}, {"y", 0.5f} };
+        tabRowBg["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        tabRowBg["fillX"] = true;
+        tabRowBg["color"] = json{ {"x", 0.08f}, {"y", 0.08f}, {"z", 0.08f}, {"w", 1.0f} };
+        tabRowBg["shaderVertex"] = "panel_vertex.glsl";
+        tabRowBg["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(tabRowBg);
+
+        // ---- Row 1: Title row (top portion, y=0..0.5, 50px) ----
+
+        // App title "HorizonEngine" on the left
+        json label = json::object();
+        label["id"] = "TitleBar.Label";
+        label["type"] = "Text";
+        label["from"] = json{ {"x", 0.01f}, {"y", 0.0f} };
+        label["to"] = json{ {"x", 0.2f}, {"y", 0.5f} };
+        label["color"] = json{ {"x", 0.85f}, {"y", 0.85f}, {"z", 0.85f}, {"w", 1.0f} };
+        label["text"] = "HorizonEngine";
+        label["font"] = "default.ttf";
+        label["fontSize"] = 14.0f;
+        label["textAlignH"] = "Left";
+        label["textAlignV"] = "Center";
+        label["sizeToContent"] = true;
+        label["shaderVertex"] = "text_vertex.glsl";
+        label["shaderFragment"] = "text_fragment.glsl";
+        elements.push_back(label);
+
+        // Project name in the center
+        json projectLabel = json::object();
+        projectLabel["id"] = "TitleBar.ProjectName";
+        projectLabel["type"] = "Text";
+        projectLabel["from"] = json{ {"x", 0.3f}, {"y", 0.0f} };
+        projectLabel["to"] = json{ {"x", 0.7f}, {"y", 0.5f} };
+        projectLabel["color"] = json{ {"x", 0.6f}, {"y", 0.6f}, {"z", 0.6f}, {"w", 1.0f} };
+        projectLabel["text"] = "Project";
+        projectLabel["font"] = "default.ttf";
+        projectLabel["fontSize"] = 12.0f;
+        projectLabel["textAlignH"] = "Center";
+        projectLabel["textAlignV"] = "Center";
+        projectLabel["sizeToContent"] = true;
+        projectLabel["shaderVertex"] = "text_vertex.glsl";
+        projectLabel["shaderFragment"] = "text_fragment.glsl";
+        elements.push_back(projectLabel);
+
+        // Window controls (Minimize, Maximize, Close) on the far right
+        json buttonStack = json::object();
+        buttonStack["id"] = "TitleBar.Buttons";
+        buttonStack["type"] = "StackPanel";
+        buttonStack["from"] = json{ {"x", 0.88f}, {"y", 0.0f} };
+        buttonStack["to"] = json{ {"x", 1.0f}, {"y", 0.5f} };
+        buttonStack["orientation"] = "Horizontal";
+        buttonStack["padding"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        buttonStack["sizeToContent"] = true;
+
+        json btnMin = json::object();
+        btnMin["id"] = "TitleBar.Minimize";
+        btnMin["type"] = "Button";
+        btnMin["clickEvent"] = "TitleBar.Minimize";
+        btnMin["fillX"] = true;
+        btnMin["fillY"] = true;
+        btnMin["color"] = json{ {"x", 0.1f}, {"y", 0.1f}, {"z", 0.1f}, {"w", 1.0f} };
+        btnMin["hoverColor"] = json{ {"x", 0.2f}, {"y", 0.2f}, {"z", 0.2f}, {"w", 1.0f} };
+        btnMin["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        btnMin["text"] = "_";
+        btnMin["font"] = "default.ttf";
+        btnMin["fontSize"] = 14.0f;
+        btnMin["textAlignH"] = "Center";
+        btnMin["textAlignV"] = "Center";
+        btnMin["minSize"] = json{ {"x", 46.0f}, {"y", 0.0f} };
+        btnMin["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
+        btnMin["shaderVertex"] = "button_vertex.glsl";
+        btnMin["shaderFragment"] = "button_fragment.glsl";
+
+        json btnMax = json::object();
+        btnMax["id"] = "TitleBar.Maximize";
+        btnMax["type"] = "Button";
+        btnMax["clickEvent"] = "TitleBar.Maximize";
+        btnMax["fillX"] = true;
+        btnMax["fillY"] = true;
+        btnMax["color"] = json{ {"x", 0.1f}, {"y", 0.1f}, {"z", 0.1f}, {"w", 1.0f} };
+        btnMax["hoverColor"] = json{ {"x", 0.2f}, {"y", 0.2f}, {"z", 0.2f}, {"w", 1.0f} };
+        btnMax["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        btnMax["text"] = "[ ]";
+        btnMax["font"] = "default.ttf";
+        btnMax["fontSize"] = 14.0f;
+        btnMax["textAlignH"] = "Center";
+        btnMax["textAlignV"] = "Center";
+        btnMax["minSize"] = json{ {"x", 46.0f}, {"y", 0.0f} };
+        btnMax["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
+        btnMax["shaderVertex"] = "button_vertex.glsl";
+        btnMax["shaderFragment"] = "button_fragment.glsl";
+
+        json btnClose = json::object();
+        btnClose["id"] = "TitleBar.Close";
+        btnClose["type"] = "Button";
+        btnClose["clickEvent"] = "TitleBar.Close";
+        btnClose["fillX"] = true;
+        btnClose["fillY"] = true;
+        btnClose["color"] = json{ {"x", 0.1f}, {"y", 0.1f}, {"z", 0.1f}, {"w", 1.0f} };
+        btnClose["hoverColor"] = json{ {"x", 0.7f}, {"y", 0.15f}, {"z", 0.15f}, {"w", 1.0f} };
+        btnClose["textColor"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        btnClose["text"] = "X";
+        btnClose["font"] = "default.ttf";
+        btnClose["fontSize"] = 14.0f;
+        btnClose["textAlignH"] = "Center";
+        btnClose["textAlignV"] = "Center";
+        btnClose["minSize"] = json{ {"x", 46.0f}, {"y", 0.0f} };
+        btnClose["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
+        btnClose["shaderVertex"] = "button_vertex.glsl";
+        btnClose["shaderFragment"] = "button_fragment.glsl";
+
+        buttonStack["children"] = json::array({ btnMin, btnMax, btnClose });
+        elements.push_back(buttonStack);
+
+        // ---- Row 2: Tab strip (bottom portion, y=0.5..1.0, 50px) ----
+
+        json tabBar = json::object();
+        tabBar["id"] = "TitleBar.Tabs";
+        tabBar["type"] = "StackPanel";
+        tabBar["from"] = json{ {"x", 0.0f}, {"y", 0.5f} };
+        tabBar["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        tabBar["orientation"] = "Horizontal";
+        tabBar["fillX"] = true;
+        tabBar["fillY"] = true;
+        tabBar["padding"] = json{ {"x", 4.0f}, {"y", 0.0f} };
+        tabBar["sizeToContent"] = true;
+
+        json tabViewport = json::object();
+        tabViewport["id"] = "TitleBar.Tab.Viewport";
+        tabViewport["type"] = "Button";
+        tabViewport["clickEvent"] = "TitleBar.Tab.Viewport";
+        tabViewport["fillY"] = true;
+        tabViewport["color"] = json{ {"x", 0.14f}, {"y", 0.14f}, {"z", 0.14f}, {"w", 1.0f} };
+        tabViewport["hoverColor"] = json{ {"x", 0.2f}, {"y", 0.2f}, {"z", 0.2f}, {"w", 1.0f} };
+        tabViewport["textColor"] = json{ {"x", 0.9f}, {"y", 0.9f}, {"z", 0.9f}, {"w", 1.0f} };
+        tabViewport["text"] = "Viewport";
+        tabViewport["font"] = "default.ttf";
+        tabViewport["fontSize"] = 12.0f;
+        tabViewport["textAlignH"] = "Center";
+        tabViewport["textAlignV"] = "Center";
+        tabViewport["minSize"] = json{ {"x", 90.0f}, {"y", 0.0f} };
+        tabViewport["padding"] = json{ {"x", 10.0f}, {"y", 0.0f} };
+        tabViewport["shaderVertex"] = "button_vertex.glsl";
+        tabViewport["shaderFragment"] = "button_fragment.glsl";
+
+        tabBar["children"] = json::array({ tabViewport });
+        elements.push_back(tabBar);
+
+        widgetJson["m_elements"] = elements;
+
+        auto widget = std::make_shared<AssetData>();
+        widget->setName("TitleBar");
+        widget->setData(std::move(widgetJson));
+
+        const fs::path widgetsRoot = getEditorWidgetsRootPath();
+        std::error_code ec;
+        fs::create_directories(widgetsRoot, ec);
+        const fs::path abs = widgetsRoot / fs::path(defaultWidgetRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+            if (existsAndOk)
+            {
+                std::ifstream check(abs, std::ios::in);
+                if (check.is_open())
+                {
+                    const std::string content((std::istreambuf_iterator<char>(check)), std::istreambuf_iterator<char>());
+                    if (content.find("HorizonEngine") == std::string::npos
+                        || content.find("\"y\": 100.0") == std::string::npos)
+                    {
+                        existsAndOk = false;
+                    }
+                }
+            }
+        }
+        if (!existsAndOk)
+        {
+            std::ofstream out(abs, std::ios::out | std::ios::trunc);
+            if (out.is_open())
+            {
+                json fileJson = json::object();
+                fileJson["magic"] = 0x41535453;
+                fileJson["version"] = 2;
+                fileJson["type"] = static_cast<int>(AssetType::Widget);
+                fileJson["name"] = widget->getName();
+                fileJson["data"] = widget->getData();
+                out << fileJson.dump(4);
+                if (!out.good())
+                {
+                    logger.log(Logger::Category::AssetManagement, "Failed to write editor widget asset.", Logger::LogLevel::ERROR);
+                }
+            }
+            else
+            {
+                logger.log(Logger::Category::AssetManagement, "Failed to open editor widget asset for writing.", Logger::LogLevel::ERROR);
+            }
+        }
+    }
+
+    const std::string toolbarWidgetRel = "ViewportOverlay.asset";
+    {
+        json widgetJson = json::object();
+        widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 34.0f} };
+        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        widgetJson["m_anchor"] = "TopLeft";
+        widgetJson["m_fillX"] = true;
+        widgetJson["m_zOrder"] = 0;
+
+        json elements = json::array();
+
+        // Dark toolbar background
+        json bg = json::object();
+        bg["id"] = "ViewportOverlay.Background";
+        bg["type"] = "Panel";
+        bg["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        bg["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        bg["fillX"] = true;
+        bg["color"] = json{ {"x", 0.12f}, {"y", 0.12f}, {"z", 0.12f}, {"w", 1.0f} };
+        bg["shaderVertex"] = "panel_vertex.glsl";
+        bg["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(bg);
+
+        // Center section: PIE controls (spacer + play + spacer)
+        json centerStack = json::object();
+        centerStack["id"] = "ViewportOverlay.Center";
+        centerStack["type"] = "StackPanel";
+        centerStack["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        centerStack["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        centerStack["orientation"] = "Horizontal";
+        centerStack["fillX"] = true;
+        centerStack["fillY"] = true;
+        centerStack["padding"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+
+        json spacerLeft = json::object();
+        spacerLeft["id"] = "ViewportOverlay.SpacerL";
+        spacerLeft["type"] = "Panel";
+        spacerLeft["fillX"] = true;
+        spacerLeft["fillY"] = true;
+        spacerLeft["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+
+        json btnPIE = json::object();
+        btnPIE["id"] = "ViewportOverlay.PIE";
+        btnPIE["type"] = "Button";
+        btnPIE["clickEvent"] = "ViewportOverlay.PIE";
+        btnPIE["color"] = json{ {"x", 0.12f}, {"y", 0.12f}, {"z", 0.12f}, {"w", 1.0f} };
+        btnPIE["hoverColor"] = json{ {"x", 0.22f}, {"y", 0.22f}, {"z", 0.22f}, {"w", 1.0f} };
+        btnPIE["imagePath"] = "Play.tga";
+        btnPIE["minSize"] = json{ {"x", 32.0f}, {"y", 24.0f} };
+        btnPIE["sizeToContent"] = true;
+        btnPIE["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
+        btnPIE["shaderVertex"] = "button_vertex.glsl";
+        btnPIE["shaderFragment"] = "button_fragment.glsl";
+
+        json spacerRight = json::object();
+        spacerRight["id"] = "ViewportOverlay.SpacerR";
+        spacerRight["type"] = "Panel";
+        spacerRight["fillX"] = true;
+        spacerRight["fillY"] = true;
+        spacerRight["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+
+        centerStack["children"] = json::array({ spacerLeft, btnPIE, spacerRight });
+        elements.push_back(centerStack);
+
+        // Right section: Settings button
+        json rightStack = json::object();
+        rightStack["id"] = "ViewportOverlay.Right";
+        rightStack["type"] = "StackPanel";
+        rightStack["from"] = json{ {"x", 0.88f}, {"y", 0.0f} };
+        rightStack["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        rightStack["orientation"] = "Horizontal";
+        rightStack["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
+        rightStack["sizeToContent"] = true;
+
+        json btnSettings = json::object();
+        btnSettings["id"] = "ViewportOverlay.Settings";
+        btnSettings["type"] = "Button";
+        btnSettings["clickEvent"] = "ViewportOverlay.Settings";
+        btnSettings["color"] = json{ {"x", 0.12f}, {"y", 0.12f}, {"z", 0.12f}, {"w", 1.0f} };
+        btnSettings["hoverColor"] = json{ {"x", 0.22f}, {"y", 0.22f}, {"z", 0.22f}, {"w", 1.0f} };
+        btnSettings["textColor"] = json{ {"x", 0.85f}, {"y", 0.85f}, {"z", 0.85f}, {"w", 1.0f} };
+        btnSettings["text"] = "Settings";
+        btnSettings["font"] = "default.ttf";
+        btnSettings["fontSize"] = 12.0f;
+        btnSettings["textAlignH"] = "Center";
+        btnSettings["textAlignV"] = "Center";
+        btnSettings["minSize"] = json{ {"x", 70.0f}, {"y", 0.0f} };
+        btnSettings["padding"] = json{ {"x", 8.0f}, {"y", 2.0f} };
+        btnSettings["shaderVertex"] = "button_vertex.glsl";
+        btnSettings["shaderFragment"] = "button_fragment.glsl";
+
+        rightStack["children"] = json::array({ btnSettings });
+        elements.push_back(rightStack);
+
+        widgetJson["m_elements"] = elements;
+
+        auto widget = std::make_shared<AssetData>();
+        widget->setName("ViewportOverlay");
+        widget->setData(std::move(widgetJson));
+
+        const fs::path widgetsRoot = getEditorWidgetsRootPath();
+        std::error_code ec;
+        fs::create_directories(widgetsRoot, ec);
+        const fs::path abs = widgetsRoot / fs::path(toolbarWidgetRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+            if (existsAndOk)
+            {
+                std::ifstream check(abs, std::ios::in);
+                if (check.is_open())
+                {
+                    const std::string content((std::istreambuf_iterator<char>(check)), std::istreambuf_iterator<char>());
+                    if (content.find("ViewportOverlay.Center") == std::string::npos
+                        || content.find("ViewportOverlay.Left") != std::string::npos)
+                    {
+                        existsAndOk = false;
+                    }
+                }
+            }
+        }
+        if (!existsAndOk)
+        {
+            std::ofstream out(abs, std::ios::out | std::ios::trunc);
+            if (out.is_open())
+            {
+                json fileJson = json::object();
+                fileJson["magic"] = 0x41535453;
+                fileJson["version"] = 2;
+                fileJson["type"] = static_cast<int>(AssetType::Widget);
+                fileJson["name"] = widget->getName();
+                fileJson["data"] = widget->getData();
+                out << fileJson.dump(4);
+            }
+        }
+    }
+
+    createWorldSettingsWidgetAsset();
+
+    const std::string outlinerWidgetRel = "WorldOutliner.asset";
+    {
+        json widgetJson = json::object();
+        widgetJson["m_sizePixels"] = json{ {"x", 280.0f}, {"y", 0.0f} };
+        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        widgetJson["m_anchor"] = "TopRight";
+        widgetJson["m_fillY"] = true;
+        widgetJson["m_zOrder"] = 1;
+
+        json elements = json::array();
+        json panel = json::object();
+        panel["id"] = "Outliner.Background";
+        panel["type"] = "Panel";
+        panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        panel["fillX"] = true;
+        panel["fillY"] = true;
+        panel["color"] = json{ {"x", 0.07f}, {"y", 0.08f}, {"z", 0.1f}, {"w", 0.88f} };
+        panel["shaderVertex"] = "panel_vertex.glsl";
+        panel["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(panel);
+
+        json label = json::object();
+        label["id"] = "Outliner.Title";
+        label["type"] = "Text";
+        label["from"] = json{ {"x", 0.05f}, {"y", 0.02f} };
+        label["to"] = json{ {"x", 0.95f}, {"y", 0.1f} };
+        label["color"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        label["text"] = "Outliner";
+        label["font"] = "default.ttf";
+        label["fontSize"] = 18.0f;
+        label["sizeToContent"] = true;
+        label["shaderVertex"] = "text_vertex.glsl";
+        label["shaderFragment"] = "text_fragment.glsl";
+        elements.push_back(label);
+
+        json listPanel = json::object();
+        listPanel["id"] = "Outliner.EntityList";
+        listPanel["type"] = "StackPanel";
+        listPanel["from"] = json{ {"x", 0.05f}, {"y", 0.12f} };
+        listPanel["to"] = json{ {"x", 0.95f}, {"y", 0.44f} };
+        listPanel["orientation"] = "Vertical";
+        listPanel["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
+        listPanel["fillX"] = true;
+        listPanel["sizeToContent"] = false;
+        listPanel["scrollable"] = true;
+        elements.push_back(listPanel);
+
+        widgetJson["m_elements"] = elements;
+
+        auto widget = std::make_shared<AssetData>();
+        widget->setName("WorldOutliner");
+        widget->setData(std::move(widgetJson));
+
+        const fs::path widgetsRoot = getEditorWidgetsRootPath();
+        std::error_code ec;
+        fs::create_directories(widgetsRoot, ec);
+        const fs::path abs = widgetsRoot / fs::path(outlinerWidgetRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+            if (existsAndOk)
+            {
+                std::ifstream in(abs, std::ios::in | std::ios::binary);
+                if (in.is_open())
+                {
+                    json fileJson = json::parse(in, nullptr, false);
+                    bool hasList = false;
+                    bool hasNoDetails = true;
+                    bool hasFillY = false;
+                    if (!fileJson.is_discarded() && fileJson.is_object() && fileJson.contains("data"))
+                    {
+                        const auto& data = fileJson.at("data");
+                        if (data.is_object())
+                        {
+                            if (data.contains("m_fillY") && data.at("m_fillY").is_boolean() && data.at("m_fillY").get<bool>())
+                            {
+                                hasFillY = true;
+                            }
+                            if (data.contains("m_elements"))
+                            {
+                                const auto& elems = data.at("m_elements");
+                                if (elems.is_array())
+                                {
+                                    for (const auto& elem : elems)
+                                    {
+                                        if (elem.is_object() && elem.value("id", "") == "Outliner.EntityList")
+                                        {
+                                            hasList = true;
+                                        }
+                                        if (elem.is_object() && elem.value("id", "") == "Outliner.Details")
+                                        {
+                                            hasNoDetails = false;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    bool hasCorrectWidth = false;
+                    if (!fileJson.is_discarded() && fileJson.contains("data"))
+                    {
+                        const auto& dw = fileJson.at("data");
+                        if (dw.is_object() && dw.contains("m_sizePixels") && dw.at("m_sizePixels").is_object())
+                        {
+                            const auto& sz = dw.at("m_sizePixels");
+                            if (sz.contains("x") && sz.at("x").is_number() && sz.at("x").get<float>() >= 280.0f)
+                                hasCorrectWidth = true;
+                        }
+                    }
+                    existsAndOk = existsAndOk && hasList && hasNoDetails && hasFillY && hasCorrectWidth;
+                }
+            }
+        }
+        if (!existsAndOk)
+        {
+            std::ofstream out(abs, std::ios::out | std::ios::trunc);
+            if (out.is_open())
+            {
+                json fileJson = json::object();
+                fileJson["magic"] = 0x41535453;
+                fileJson["version"] = 2;
+                fileJson["type"] = static_cast<int>(AssetType::Widget);
+                fileJson["name"] = widget->getName();
+                fileJson["data"] = widget->getData();
+                out << fileJson.dump(4);
+                if (!out.good())
+                {
+                    logger.log(Logger::Category::AssetManagement, "Failed to write editor widget asset.", Logger::LogLevel::ERROR);
+                }
+            }
+            else
+            {
+                logger.log(Logger::Category::AssetManagement, "Failed to open editor widget asset for writing.", Logger::LogLevel::ERROR);
+            }
+        }
+    }
+
+    const std::string entityDetailsWidgetRel = "EntityDetails.asset";
+    {
+        json widgetJson = json::object();
+        widgetJson["m_sizePixels"] = json{ {"x", 280.0f}, {"y", 0.0f} };
+        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        widgetJson["m_anchor"] = "TopRight";
+        widgetJson["m_zOrder"] = 2;
+
+        json elements = json::array();
+        json panel = json::object();
+        panel["id"] = "Details.Background";
+        panel["type"] = "Panel";
+        panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        panel["fillX"] = true;
+        panel["fillY"] = true;
+        panel["color"] = json{ {"x", 0.07f}, {"y", 0.08f}, {"z", 0.1f}, {"w", 0.9f} };
+        panel["shaderVertex"] = "panel_vertex.glsl";
+        panel["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(panel);
+
+        json label = json::object();
+        label["id"] = "Details.Title";
+        label["type"] = "Text";
+        label["from"] = json{ {"x", 0.05f}, {"y", 0.0f} };
+        label["to"] = json{ {"x", 0.95f}, {"y", 0.1f} };
+        label["color"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        label["text"] = "Details";
+        label["font"] = "default.ttf";
+        label["fontSize"] = 16.0f;
+        label["sizeToContent"] = true;
+        label["shaderVertex"] = "text_vertex.glsl";
+        label["shaderFragment"] = "text_fragment.glsl";
+        elements.push_back(label);
+
+        json contentPanel = json::object();
+        contentPanel["id"] = "Details.Content";
+        contentPanel["type"] = "StackPanel";
+        contentPanel["from"] = json{ {"x", 0.02f}, {"y", 0.12f} };
+        contentPanel["to"] = json{ {"x", 0.98f}, {"y", 0.98f} };
+        contentPanel["orientation"] = "Vertical";
+        contentPanel["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
+        contentPanel["fillX"] = true;
+        contentPanel["sizeToContent"] = false;
+        contentPanel["scrollable"] = true;
+        contentPanel["color"] = json{ {"x", 0.08f}, {"y", 0.09f}, {"z", 0.12f}, {"w", 0.65f} };
+        elements.push_back(contentPanel);
+
+        widgetJson["m_elements"] = elements;
+
+        auto widget = std::make_shared<AssetData>();
+        widget->setName("EntityDetails");
+        widget->setData(std::move(widgetJson));
+
+        const fs::path widgetsRoot = getEditorWidgetsRootPath();
+        std::error_code ec;
+        fs::create_directories(widgetsRoot, ec);
+        const fs::path abs = widgetsRoot / fs::path(entityDetailsWidgetRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+            if (existsAndOk)
+            {
+                std::ifstream in(abs, std::ios::in | std::ios::binary);
+                if (in.is_open())
+                {
+                    json fileJson = json::parse(in, nullptr, false);
+                    bool hasContent = false;
+                    bool contentScrollable = false;
+                    if (!fileJson.is_discarded() && fileJson.is_object() && fileJson.contains("data"))
+                    {
+                        const auto& data = fileJson.at("data");
+                        if (data.is_object() && data.contains("m_elements"))
+                        {
+                            const auto& elems = data.at("m_elements");
+                            if (elems.is_array())
+                            {
+                                for (const auto& elem : elems)
+                                {
+                                    if (elem.is_object() && elem.value("id", "") == "Details.Content")
+                                    {
+                                        hasContent = true;
+                                        if (elem.contains("scrollable") && elem.at("scrollable").is_boolean() && elem.at("scrollable").get<bool>())
+                                        {
+                                            contentScrollable = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    bool hasCorrectWidth = false;
+                    if (!fileJson.is_discarded() && fileJson.contains("data"))
+                    {
+                        const auto& dw = fileJson.at("data");
+                        if (dw.is_object() && dw.contains("m_sizePixels") && dw.at("m_sizePixels").is_object())
+                        {
+                            const auto& sz = dw.at("m_sizePixels");
+                            if (sz.contains("x") && sz.at("x").is_number() && sz.at("x").get<float>() >= 280.0f)
+                                hasCorrectWidth = true;
+                        }
+                    }
+                    existsAndOk = existsAndOk && hasContent && contentScrollable && hasCorrectWidth;
+                }
+            }
+        }
+        if (!existsAndOk)
+        {
+            std::ofstream out(abs, std::ios::out | std::ios::trunc);
+            if (out.is_open())
+            {
+                json fileJson = json::object();
+                fileJson["magic"] = 0x41535453;
+                fileJson["version"] = 2;
+                fileJson["type"] = static_cast<int>(AssetType::Widget);
+                fileJson["name"] = widget->getName();
+                fileJson["data"] = widget->getData();
+                out << fileJson.dump(4);
+            }
+        }
+    }
+
+    const std::string contentBrowserWidgetRel = "ContentBrowser.asset";
+    {
+        logger.log(Logger::Category::AssetManagement, "[ContentBrowser] ensureEditorWidgetsCreated: building ContentBrowser widget asset definition", Logger::LogLevel::INFO);
+
+        json widgetJson = json::object();
+        widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 220.0f} };
+        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        widgetJson["m_anchor"] = "BottomLeft";
+        widgetJson["m_fillX"] = true;
+        widgetJson["m_zOrder"] = 2;
+
+        json elements = json::array();
+        json panel = json::object();
+        panel["id"] = "ContentBrowser.Background";
+        panel["type"] = "Panel";
+        panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        panel["fillX"] = true;
+        panel["fillY"] = true;
+        panel["color"] = json{ {"x", 0.08f}, {"y", 0.09f}, {"z", 0.12f}, {"w", 0.9f} };
+        panel["shaderVertex"] = "panel_vertex.glsl";
+        panel["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(panel);
+
+        json label = json::object();
+        label["id"] = "ContentBrowser.Title";
+        label["type"] = "Text";
+        label["from"] = json{ {"x", 0.02f}, {"y", 0.05f} };
+        label["to"] = json{ {"x", 0.6f}, {"y", 0.2f} };
+        label["color"] = json{ {"x", 1.0f}, {"y", 1.0f}, {"z", 1.0f}, {"w", 1.0f} };
+        label["text"] = "Content Browser";
+        label["font"] = "default.ttf";
+        label["fontSize"] = 18.0f;
+        label["sizeToContent"] = true;
+        label["shaderVertex"] = "text_vertex.glsl";
+        label["shaderFragment"] = "text_fragment.glsl";
+        elements.push_back(label);
+
+        // Path bar (breadcrumb) between title row and grid
+        json pathBar = json::object();
+        pathBar["id"] = "ContentBrowser.PathBar";
+        pathBar["type"] = "StackPanel";
+        pathBar["from"] = json{ {"x", 0.25f}, {"y", 0.01f} };
+        pathBar["to"] = json{ {"x", 0.98f}, {"y", 0.14f} };
+        pathBar["orientation"] = "Horizontal";
+        pathBar["padding"] = json{ {"x", 2.0f}, {"y", 0.0f} };
+        pathBar["color"] = json{ {"x", 0.09f}, {"y", 0.10f}, {"z", 0.13f}, {"w", 0.9f} };
+        pathBar["shaderVertex"] = "panel_vertex.glsl";
+        pathBar["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(pathBar);
+
+        json treePanel = json::object();
+        treePanel["id"] = "ContentBrowser.Tree";
+        treePanel["type"] = "TreeView";
+        treePanel["from"] = json{ {"x", 0.0f}, {"y", 0.22f} };
+        treePanel["to"] = json{ {"x", 0.22f}, {"y", 0.95f} };
+        treePanel["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
+        treePanel["fillY"] = false;
+        treePanel["sizeToContent"] = false;
+        treePanel["scrollable"] = true;
+        treePanel["color"] = json{ {"x", 0.07f}, {"y", 0.08f}, {"z", 0.10f}, {"w", 0.95f} };
+        elements.push_back(treePanel);
+
+        json grid = json::object();
+        grid["id"] = "ContentBrowser.Grid";
+        grid["type"] = "Grid";
+        grid["from"] = json{ {"x", 0.25f}, {"y", 0.16f} };
+        grid["to"] = json{ {"x", 0.98f}, {"y", 0.95f} };
+        grid["padding"] = json{ {"x", 8.0f}, {"y", 8.0f} };
+        grid["scrollable"] = true;
+        grid["color"] = json{ {"x", 0.06f}, {"y", 0.07f}, {"z", 0.09f}, {"w", 0.0f} };
+        elements.push_back(grid);
+
+        widgetJson["m_elements"] = elements;
+
+        logger.log(Logger::Category::AssetManagement, "[ContentBrowser] widget JSON has " + std::to_string(elements.size()) + " top-level elements (Background, Title, Tree, Grid)", Logger::LogLevel::INFO);
+
+        auto widget = std::make_shared<AssetData>();
+        widget->setName("ContentBrowser");
+        widget->setData(std::move(widgetJson));
+
+        const fs::path widgetsRoot = getEditorWidgetsRootPath();
+        std::error_code ec;
+        fs::create_directories(widgetsRoot, ec);
+        const fs::path abs = widgetsRoot / fs::path(contentBrowserWidgetRel);
+        logger.log(Logger::Category::AssetManagement, "[ContentBrowser] widget asset path: " + abs.string(), Logger::LogLevel::INFO);
+
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            if (readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget)
+            {
+                // Verify the file contains the expected TreeView tree panel
+                std::ifstream check(abs, std::ios::in);
+                if (check.is_open())
+                {
+                    const std::string content((std::istreambuf_iterator<char>(check)),
+                                              std::istreambuf_iterator<char>());
+                    existsAndOk = content.find("ContentBrowser.Tree") != std::string::npos
+                               && content.find("TreeView") != std::string::npos;
+                }
+            }
+            logger.log(Logger::Category::AssetManagement, "[ContentBrowser] existing file validated: existsAndOk=" + std::to_string(existsAndOk), Logger::LogLevel::INFO);
+        }
+        else
+        {
+            logger.log(Logger::Category::AssetManagement, "[ContentBrowser] widget asset file does not exist yet, will create", Logger::LogLevel::INFO);
+        }
+        if (!existsAndOk)
+        {
+            std::ofstream out(abs, std::ios::out | std::ios::trunc);
+            if (out.is_open())
+            {
+                json fileJson = json::object();
+                fileJson["magic"] = 0x41535453;
+                fileJson["version"] = 2;
+                fileJson["type"] = static_cast<int>(AssetType::Widget);
+                fileJson["name"] = widget->getName();
+                fileJson["data"] = widget->getData();
+                out << fileJson.dump(4);
+                if (!out.good())
+                {
+                    logger.log(Logger::Category::AssetManagement, "[ContentBrowser] Failed to write editor widget asset.", Logger::LogLevel::ERROR);
+                }
+                else
+                {
+                    logger.log(Logger::Category::AssetManagement, "[ContentBrowser] widget asset written successfully", Logger::LogLevel::INFO);
+                }
+            }
+            else
+            {
+                logger.log(Logger::Category::AssetManagement, "[ContentBrowser] Failed to open editor widget asset for writing: " + abs.string(), Logger::LogLevel::ERROR);
+            }
+        }
+    }
+
+    const std::string statusBarWidgetRel = "StatusBar.asset";
+    {
+        json widgetJson = json::object();
+        widgetJson["m_sizePixels"] = json{ {"x", 0.0f}, {"y", 32.0f} };
+        widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        widgetJson["m_anchor"] = "BottomLeft";
+        widgetJson["m_fillX"] = true;
+        widgetJson["m_zOrder"] = 3;
+
+        json elements = json::array();
+
+        json bg = json::object();
+        bg["id"] = "StatusBar.Background";
+        bg["type"] = "Panel";
+        bg["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        bg["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        bg["fillX"] = true;
+        bg["fillY"] = true;
+        bg["color"] = json{ {"x", 0.1f}, {"y", 0.1f}, {"z", 0.13f}, {"w", 0.95f} };
+        bg["shaderVertex"] = "panel_vertex.glsl";
+        bg["shaderFragment"] = "panel_fragment.glsl";
+        elements.push_back(bg);
+
+        json row = json::object();
+        row["id"] = "StatusBar.Row";
+        row["type"] = "StackPanel";
+        row["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        row["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        row["orientation"] = "Horizontal";
+        row["fillX"] = true;
+        row["fillY"] = true;
+        row["padding"] = json{ {"x", 4.0f}, {"y", 2.0f} };
+        row["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+
+        json undoBtn = json::object();
+        undoBtn["id"] = "StatusBar.Undo";
+        undoBtn["type"] = "Button";
+        undoBtn["text"] = "Undo";
+        undoBtn["font"] = "default.ttf";
+        undoBtn["fontSize"] = 12.0f;
+        undoBtn["textAlignH"] = "Center";
+        undoBtn["textAlignV"] = "Center";
+        undoBtn["padding"] = json{ {"x", 8.0f}, {"y", 4.0f} };
+        undoBtn["minSize"] = json{ {"x", 60.0f}, {"y", 26.0f} };
+        undoBtn["color"] = json{ {"x", 0.16f}, {"y", 0.16f}, {"z", 0.2f}, {"w", 0.95f} };
+        undoBtn["hoverColor"] = json{ {"x", 0.24f}, {"y", 0.24f}, {"z", 0.3f}, {"w", 0.98f} };
+        undoBtn["textColor"] = json{ {"x", 0.7f}, {"y", 0.7f}, {"z", 0.75f}, {"w", 1.0f} };
+        undoBtn["shaderVertex"] = "button_vertex.glsl";
+        undoBtn["shaderFragment"] = "button_fragment.glsl";
+        undoBtn["isHitTestable"] = true;
+        undoBtn["clickEvent"] = "StatusBar.Undo";
+
+        json redoBtn = json::object();
+        redoBtn["id"] = "StatusBar.Redo";
+        redoBtn["type"] = "Button";
+        redoBtn["text"] = "Redo";
+        redoBtn["font"] = "default.ttf";
+        redoBtn["fontSize"] = 12.0f;
+        redoBtn["textAlignH"] = "Center";
+        redoBtn["textAlignV"] = "Center";
+        redoBtn["padding"] = json{ {"x", 8.0f}, {"y", 4.0f} };
+        redoBtn["minSize"] = json{ {"x", 60.0f}, {"y", 26.0f} };
+        redoBtn["color"] = json{ {"x", 0.16f}, {"y", 0.16f}, {"z", 0.2f}, {"w", 0.95f} };
+        redoBtn["hoverColor"] = json{ {"x", 0.24f}, {"y", 0.24f}, {"z", 0.3f}, {"w", 0.98f} };
+        redoBtn["textColor"] = json{ {"x", 0.7f}, {"y", 0.7f}, {"z", 0.75f}, {"w", 1.0f} };
+        redoBtn["shaderVertex"] = "button_vertex.glsl";
+        redoBtn["shaderFragment"] = "button_fragment.glsl";
+        redoBtn["isHitTestable"] = true;
+        redoBtn["clickEvent"] = "StatusBar.Redo";
+
+        json spacer = json::object();
+        spacer["id"] = "StatusBar.Spacer";
+        spacer["type"] = "Panel";
+        spacer["fillX"] = true;
+        spacer["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+
+        json dirtyLabel = json::object();
+        dirtyLabel["id"] = "StatusBar.DirtyLabel";
+        dirtyLabel["type"] = "Text";
+        dirtyLabel["text"] = "No unsaved changes";
+        dirtyLabel["font"] = "default.ttf";
+        dirtyLabel["fontSize"] = 12.0f;
+        dirtyLabel["textAlignH"] = "Center";
+        dirtyLabel["textAlignV"] = "Center";
+        dirtyLabel["textColor"] = json{ {"x", 0.6f}, {"y", 0.6f}, {"z", 0.65f}, {"w", 1.0f} };
+        dirtyLabel["minSize"] = json{ {"x", 0.0f}, {"y", 26.0f} };
+        dirtyLabel["padding"] = json{ {"x", 8.0f}, {"y", 0.0f} };
+
+        json saveBtn = json::object();
+        saveBtn["id"] = "StatusBar.Save";
+        saveBtn["type"] = "Button";
+        saveBtn["text"] = "Save All";
+        saveBtn["font"] = "default.ttf";
+        saveBtn["fontSize"] = 12.0f;
+        saveBtn["textAlignH"] = "Center";
+        saveBtn["textAlignV"] = "Center";
+        saveBtn["padding"] = json{ {"x", 10.0f}, {"y", 4.0f} };
+        saveBtn["minSize"] = json{ {"x", 80.0f}, {"y", 26.0f} };
+        saveBtn["color"] = json{ {"x", 0.15f}, {"y", 0.35f}, {"z", 0.15f}, {"w", 0.95f} };
+        saveBtn["hoverColor"] = json{ {"x", 0.2f}, {"y", 0.5f}, {"z", 0.2f}, {"w", 0.98f} };
+        saveBtn["textColor"] = json{ {"x", 0.95f}, {"y", 0.95f}, {"z", 0.95f}, {"w", 1.0f} };
+        saveBtn["shaderVertex"] = "button_vertex.glsl";
+        saveBtn["shaderFragment"] = "button_fragment.glsl";
+        saveBtn["isHitTestable"] = true;
+        saveBtn["clickEvent"] = "StatusBar.Save";
+
+        row["children"] = json::array({ undoBtn, redoBtn, spacer, dirtyLabel, saveBtn });
+        elements.push_back(row);
+
+        widgetJson["m_elements"] = elements;
+
+        auto widget = std::make_shared<AssetData>();
+        widget->setName("StatusBar");
+        widget->setData(std::move(widgetJson));
+
+        const fs::path widgetsRoot = getEditorWidgetsRootPath();
+        const fs::path abs = widgetsRoot / fs::path(statusBarWidgetRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+            if (existsAndOk)
+            {
+                std::ifstream in(abs, std::ios::in | std::ios::binary);
+                if (in.is_open())
+                {
+                    json fileJson = json::parse(in, nullptr, false);
+                    existsAndOk = !fileJson.is_discarded() && fileJson.is_object() && fileJson.contains("data");
+                    if (existsAndOk)
+                    {
+                        const auto& data = fileJson.at("data");
+                        existsAndOk = data.is_object() && data.contains("m_elements");
+                    }
+                }
+            }
+        }
+        if (!existsAndOk)
+        {
+            std::ofstream out(abs, std::ios::out | std::ios::trunc);
+            if (out.is_open())
+            {
+                json fileJson = json::object();
+                fileJson["magic"] = 0x41535453;
+                fileJson["version"] = 2;
+                fileJson["type"] = static_cast<int>(AssetType::Widget);
+                fileJson["name"] = widget->getName();
+                fileJson["data"] = widget->getData();
+                            out << fileJson.dump(4);
+                            }
+                        }
+                    }
+
+                    // WorldGrid material – stored in engine Content/Materials (not project Content)
+                    {
+                        const fs::path materialsDir = fs::current_path() / "Content" / "Materials";
+                        std::error_code ec;
+                        fs::create_directories(materialsDir, ec);
+                        const fs::path abs = materialsDir / "WorldGrid.asset";
+                        bool existsAndOk = false;
+                        if (fs::exists(abs))
+                        {
+                            AssetType headerType{ AssetType::Unknown };
+                            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Material;
+                        }
+                        if (!existsAndOk)
+                        {
+                            std::ofstream out(abs, std::ios::out | std::ios::trunc);
+                            if (out.is_open())
+                            {
+                                json matData = json::object();
+                                matData["m_shaderFragment"] = "grid_fragment.glsl";
+
+                                json fileJson = json::object();
+                                fileJson["magic"] = 0x41535453;
+                                fileJson["version"] = 2;
+                                fileJson["type"] = static_cast<int>(AssetType::Material);
+                                fileJson["name"] = "WorldGrid";
+                                fileJson["data"] = matData;
+                                out << fileJson.dump(4);
+                            }
+                        }
+                    }
+                }
+
+                void AssetManager::createWorldSettingsWidgetAsset()
+{
+    auto& logger = Logger::Instance();
+    const std::string worldSettingsWidgetRel = "WorldSettings.asset";
+
+    json widgetJson = json::object();
+    widgetJson["m_sizePixels"] = json{ {"x", 260.0f}, {"y", 0.0f} };
+    widgetJson["m_positionPixels"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+    widgetJson["m_anchor"] = "TopLeft";
+    widgetJson["m_fillY"] = true;
+    widgetJson["m_zOrder"] = 1;
+
+    json elements = json::array();
+
+    json panel = json::object();
+    panel["id"] = "WorldSettings.Background";
+    panel["type"] = "Panel";
+    panel["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+    panel["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+    panel["fillX"] = true;
+    panel["fillY"] = true;
+    panel["color"] = json{ {"x", 0.09f}, {"y", 0.1f}, {"z", 0.12f}, {"w", 0.95f} };
+    panel["shaderVertex"] = "panel_vertex.glsl";
+    panel["shaderFragment"] = "panel_fragment.glsl";
+    elements.push_back(panel);
+
+    json stack = json::object();
+    stack["id"] = "WorldSettings.Stack";
+    stack["type"] = "StackPanel";
+    stack["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+    stack["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+    stack["fillX"] = true;
+    stack["fillY"] = true;
+    stack["sizeToContent"] = true;
+    stack["padding"] = json{ {"x", 12.0f}, {"y", 12.0f} };
+    stack["orientation"] = "Vertical";
+    stack["scrollable"] = true;
+    stack["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+
+    json title = json::object();
+    title["id"] = "WorldSettings.Title";
+    title["type"] = "Text";
+    title["text"] = "World Settings";
+    title["font"] = "default.ttf";
+    title["fontSize"] = 18.0f;
+    title["textAlignH"] = "Left";
+    title["textAlignV"] = "Center";
+    title["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
+    title["textColor"] = json{ {"x", 0.95f}, {"y", 0.95f}, {"z", 0.95f}, {"w", 1.0f} };
+    title["minSize"] = json{ {"x", 0.0f}, {"y", 26.0f} };
+
+    json clearLabel = json::object();
+    clearLabel["id"] = "WorldSettings.ClearColor.Label";
+    clearLabel["type"] = "Text";
+    clearLabel["text"] = "Clear Color";
+    clearLabel["font"] = "default.ttf";
+    clearLabel["fontSize"] = 14.0f;
+    clearLabel["textAlignH"] = "Left";
+    clearLabel["textAlignV"] = "Center";
+    clearLabel["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
+    clearLabel["textColor"] = json{ {"x", 0.85f}, {"y", 0.85f}, {"z", 0.85f}, {"w", 1.0f} };
+    clearLabel["minSize"] = json{ {"x", 0.0f}, {"y", 20.0f} };
+
+    json colorPicker = json::object();
+    colorPicker["id"] = "WorldSettings.ClearColor";
+    colorPicker["type"] = "ColorPicker";
+    colorPicker["compact"] = false;
+    colorPicker["minSize"] = json{ {"x", 200.0f}, {"y", 80.0f} };
+
+    json separator = json::object();
+    separator["id"] = "WorldSettings.Tools.Sep";
+    separator["type"] = "Panel";
+    separator["color"] = json{ {"x", 0.2f}, {"y", 0.2f}, {"z", 0.22f}, {"w", 1.0f} };
+    separator["minSize"] = json{ {"x", 0.0f}, {"y", 1.0f} };
+    separator["padding"] = json{ {"x", 0.0f}, {"y", 12.0f} };
+
+    json toolsLabel = json::object();
+    toolsLabel["id"] = "WorldSettings.Tools.Label";
+    toolsLabel["type"] = "Text";
+    toolsLabel["text"] = "Tools";
+    toolsLabel["font"] = "default.ttf";
+    toolsLabel["fontSize"] = 16.0f;
+    toolsLabel["textAlignH"] = "Left";
+    toolsLabel["textAlignV"] = "Center";
+    toolsLabel["padding"] = json{ {"x", 4.0f}, {"y", 4.0f} };
+    toolsLabel["textColor"] = json{ {"x", 0.9f}, {"y", 0.9f}, {"z", 0.92f}, {"w", 1.0f} };
+    toolsLabel["minSize"] = json{ {"x", 0.0f}, {"y", 24.0f} };
+
+    json landscapeBtn = json::object();
+    landscapeBtn["id"] = "WorldSettings.Tools.Landscape";
+    landscapeBtn["type"] = "Button";
+    landscapeBtn["text"] = "Landscape Manager...";
+    landscapeBtn["font"] = "default.ttf";
+    landscapeBtn["fontSize"] = 13.0f;
+    landscapeBtn["textAlignH"] = "Center";
+    landscapeBtn["textAlignV"] = "Center";
+    landscapeBtn["padding"] = json{ {"x", 8.0f}, {"y", 4.0f} };
+    landscapeBtn["minSize"] = json{ {"x", 0.0f}, {"y", 28.0f} };
+    landscapeBtn["color"] = json{ {"x", 0.15f}, {"y", 0.15f}, {"z", 0.18f}, {"w", 1.0f} };
+    landscapeBtn["hoverColor"] = json{ {"x", 0.2f}, {"y", 0.2f}, {"z", 0.24f}, {"w", 1.0f} };
+    landscapeBtn["textColor"] = json{ {"x", 0.8f}, {"y", 0.8f}, {"z", 0.85f}, {"w", 1.0f} };
+    landscapeBtn["shaderVertex"] = "button_vertex.glsl";
+    landscapeBtn["shaderFragment"] = "button_fragment.glsl";
+    landscapeBtn["isHitTestable"] = true;
+    landscapeBtn["clickEvent"] = "WorldSettings.Tools.Landscape";
+
+    stack["children"] = json::array({ title, clearLabel, colorPicker, separator, toolsLabel, landscapeBtn });
+
+    elements.push_back(stack);
+    widgetJson["m_elements"] = elements;
+
+    auto widget = std::make_shared<AssetData>();
+    widget->setName("WorldSettings");
+    widget->setData(std::move(widgetJson));
+
+    const fs::path widgetsRoot = getEditorWidgetsRootPath();
+    std::error_code ec;
+    fs::create_directories(widgetsRoot, ec);
+    const fs::path abs = widgetsRoot / fs::path(worldSettingsWidgetRel);
+    bool existsAndOk = false;
+    if (fs::exists(abs))
+    {
+        AssetType headerType{ AssetType::Unknown };
+        existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Widget;
+        if (existsAndOk)
+        {
+            std::ifstream in(abs, std::ios::in | std::ios::binary);
+            if (in.is_open())
+            {
+                json fileJson = json::parse(in, nullptr, false);
+                bool hasFillY = false;
+                if (!fileJson.is_discarded() && fileJson.is_object() && fileJson.contains("data"))
+                {
+                    const auto& data = fileJson.at("data");
+                    if (data.is_object() && data.contains("m_fillY") &&
+                        data.at("m_fillY").is_boolean() && data.at("m_fillY").get<bool>())
+                    {
+                        hasFillY = true;
+                    }
+                }
+                existsAndOk = existsAndOk && hasFillY;
+            }
+        }
+    }
+    if (!existsAndOk)
+    {
+        std::ofstream out(abs, std::ios::out | std::ios::trunc);
+        if (out.is_open())
+        {
+            json fileJson = json::object();
+            fileJson["magic"] = 0x41535453;
+            fileJson["version"] = 2;
+            fileJson["type"] = static_cast<int>(AssetType::Widget);
+            fileJson["name"] = widget->getName();
+            fileJson["data"] = widget->getData();
+            out << fileJson.dump(4);
+            if (!out.good())
+            {
+                logger.log(Logger::Category::AssetManagement, "Failed to write editor widget asset.", Logger::LogLevel::ERROR);
+            }
+        }
+        else
+        {
+            logger.log(Logger::Category::AssetManagement, "Failed to open editor widget asset for writing.", Logger::LogLevel::ERROR);
+        }
+    }
 }
 
 void AssetManager::ensureDefaultAssetsCreated()
@@ -378,7 +2291,7 @@ void AssetManager::ensureDefaultAssetsCreated()
 
     const fs::path contentRoot = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
 
-    const auto ensureOnDisk = [&](const std::string& relPath, AssetType expectedType, const std::shared_ptr<EngineObject>& obj) -> bool
+    const auto ensureOnDisk = [&](const std::string& relPath, AssetType expectedType, const std::shared_ptr<AssetData>& obj, bool forceOverwrite = false) -> bool
     {
         const fs::path abs = contentRoot / fs::path(relPath);
 
@@ -387,6 +2300,11 @@ void AssetManager::ensureDefaultAssetsCreated()
         {
             AssetType headerType{ AssetType::Unknown };
             existsAndOk = readAssetHeaderType(abs, headerType) && headerType == expectedType;
+        }
+
+        if (forceOverwrite && existsAndOk)
+        {
+            existsAndOk = false;
         }
 
         if (existsAndOk)
@@ -408,56 +2326,169 @@ void AssetManager::ensureDefaultAssetsCreated()
 
         obj->setPath(relPath);
         obj->setAssetType(expectedType);
+        obj->setType(expectedType);
         obj->setIsSaved(false);
-        return saveAsset(obj);
+		auto id = registerLoadedAsset(obj);
+        if (id != 0)
+        {
+            obj->setId(id);
+        }
+		Asset asset;
+		asset.ID = id;
+		asset.type = expectedType;
+        return saveAsset(asset);
     };
 
     // 1) wall texture
     const std::string wallTexRel = (fs::path("Textures") / "wall.asset").generic_string();
     {
-        auto tex = std::make_shared<Texture>();
+        auto tex = std::make_shared<AssetData>();
         tex->setName("wall");
-        // Default debug texture (2x2 RGBA)
-        tex->setWidth(2);
-        tex->setHeight(2);
-        tex->setChannels(4);
-        tex->setData({
-            255,   0,   0, 255,   0, 255,   0, 255,
-              0,   0, 255, 255, 255, 255,   0, 255
-        });
-        ensureOnDisk(wallTexRel, AssetType::Texture, tex);
-    }
-
-    // 2) wall material
-    const std::string wallMatRel = (fs::path("Materials") / "wall.asset").generic_string();
-    {
-		auto mat = std::make_shared<Material>();
-        mat->setName("DefaultDebugMaterial");
-        mat->setTextureAssetPaths({ wallTexRel });
-        ensureOnDisk(wallMatRel, AssetType::Material, mat);
-    }
-
-    // 3) default 3D quad model
-    const std::string quad3dRel = "default_quad3d.asset";
-    {
-        const fs::path abs = contentRoot / fs::path(quad3dRel);
-        bool existsAndOk = false;
-        if (fs::exists(abs))
+        json texData = json::object();
+        const fs::path wallPngPath = fs::current_path() / "Content" / "Textures" / "wall.jpg";
+        if (fs::exists(wallPngPath))
         {
-            AssetType headerType{ AssetType::Unknown };
-            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Model3D;
-        }
-
-        if (existsAndOk)
-        {
-            logger.log(Logger::Category::AssetManagement, "Default asset OK: " + quad3dRel, Logger::LogLevel::INFO);
+            texData["m_sourcePath"] = (fs::path("Content") / "Textures" / "wall.jpg").generic_string();
         }
         else
         {
-            auto quad = std::make_shared<Object3D>();
-            quad->setName("DefaultQuad3D");
-				// Material assets/textures are handled by Material; Object3D only stores a runtime Material instance.
-            quad->setVertices({
+            int width = 2;
+            int height = 2;
+            int channels = 4;
+            std::vector<unsigned char> pixels{
+                255,   0,   0, 255,   0, 255,   0, 255,
+                  0,   0, 255, 255, 255, 255,   0, 255
+            };
+            texData["m_width"] = width;
+            texData["m_height"] = height;
+            texData["m_channels"] = channels;
+            texData["m_data"] = std::move(pixels);
+        }
+        tex->setData(std::move(texData));
+        const bool forceOverwrite = fs::exists(wallPngPath);
+        ensureOnDisk(wallTexRel, AssetType::Texture, tex, forceOverwrite);
+    }
+
+	// 2) wall material
+	const std::string wallMatRel = (fs::path("Materials") / "wall.asset").generic_string();
+	{
+		auto mat = std::make_shared<AssetData>();
+		mat->setName("DefaultDebugMaterial");
+		json matData = json::object();
+		matData["m_textureAssetPaths"] = std::vector<std::string>{ wallTexRel };
+		mat->setData(std::move(matData));
+		ensureOnDisk(wallMatRel, AssetType::Material, mat);
+	}
+
+	// 2b) container2 textures + material (diffuse + specular)
+	const std::string container2TexRel = (fs::path("Textures") / "container2.asset").generic_string();
+	{
+		auto tex = std::make_shared<AssetData>();
+		tex->setName("container2");
+		json texData = json::object();
+		const fs::path container2PngPath = fs::current_path() / "Content" / "Textures" / "container2.png";
+		if (fs::exists(container2PngPath))
+		{
+			texData["m_sourcePath"] = (fs::path("Content") / "Textures" / "container2.png").generic_string();
+		}
+		else
+		{
+			int width = 2;
+			int height = 2;
+			int channels = 4;
+			std::vector<unsigned char> pixels{
+				200, 150, 100, 255, 180, 130,  80, 255,
+				160, 110,  60, 255, 140,  90,  40, 255
+			};
+			texData["m_width"] = width;
+			texData["m_height"] = height;
+			texData["m_channels"] = channels;
+			texData["m_data"] = std::move(pixels);
+		}
+		tex->setData(std::move(texData));
+		const bool forceOverwrite = fs::exists(container2PngPath);
+		ensureOnDisk(container2TexRel, AssetType::Texture, tex, forceOverwrite);
+	}
+
+	const std::string container2SpecTexRel = (fs::path("Textures") / "container2_specular.asset").generic_string();
+	{
+		auto tex = std::make_shared<AssetData>();
+		tex->setName("container2_specular");
+		json texData = json::object();
+		const fs::path container2SpecPath = fs::current_path() / "Content" / "Textures" / "container2_specular.png";
+		if (fs::exists(container2SpecPath))
+		{
+			texData["m_sourcePath"] = (fs::path("Content") / "Textures" / "container2_specular.png").generic_string();
+		}
+		else
+		{
+			int width = 2;
+			int height = 2;
+			int channels = 4;
+			std::vector<unsigned char> pixels{
+				128, 128, 128, 255, 200, 200, 200, 255,
+				200, 200, 200, 255, 128, 128, 128, 255
+			};
+			texData["m_width"] = width;
+			texData["m_height"] = height;
+			texData["m_channels"] = channels;
+			texData["m_data"] = std::move(pixels);
+		}
+		tex->setData(std::move(texData));
+		const bool forceOverwrite = fs::exists(fs::current_path() / "Content" / "Textures" / "container2_specular.png");
+		ensureOnDisk(container2SpecTexRel, AssetType::Texture, tex, forceOverwrite);
+	}
+
+	const std::string containerMatRel = (fs::path("Materials") / "container.asset").generic_string();
+	{
+		auto mat = std::make_shared<AssetData>();
+		mat->setName("ContainerMaterial");
+		json matData = json::object();
+		matData["m_textureAssetPaths"] = std::vector<std::string>{ container2TexRel, container2SpecTexRel };
+		matData["m_shininess"] = 64.0f;
+		mat->setData(std::move(matData));
+		ensureOnDisk(containerMatRel, AssetType::Material, mat);
+	}
+
+	const std::string defaultCubeScripts[] =
+    {
+        (fs::path("Scripts") / "DefaultCube1.py").generic_string(),
+        (fs::path("Scripts") / "DefaultCube2.py").generic_string(),
+        (fs::path("Scripts") / "DefaultCube3.py").generic_string(),
+        (fs::path("Scripts") / "DefaultCube4.py").generic_string(),
+        (fs::path("Scripts") / "DefaultCube5.py").generic_string()
+    };
+    for (const auto& scriptRel : defaultCubeScripts)
+    {
+        const fs::path absScript = contentRoot / fs::path(scriptRel);
+        if (fs::exists(absScript))
+        {
+            continue;
+        }
+        std::error_code ec;
+        fs::create_directories(absScript.parent_path(), ec);
+        std::ofstream out(absScript, std::ios::out | std::ios::trunc);
+        if (out.is_open())
+        {
+            out << "import engine\n\n";
+            out << "def onloaded(entity):\n";
+            out << "    pass\n\n";
+            out << "def tick(entity, dt):\n";
+            out << "    pass\n";
+            if (!out.good())
+            {
+                logger.log(Logger::Category::AssetManagement, "Failed to write default cube script.", Logger::LogLevel::ERROR);
+            }
+        }
+        else
+        {
+            logger.log(Logger::Category::AssetManagement, "Failed to open default cube script for writing.", Logger::LogLevel::ERROR);
+        }
+    }
+
+    // 3) default 3D quad model
+
+    const std::vector<float> cubeVertices{
     -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,
      0.5f, -0.5f, -0.5f,  1.0f, 0.0f,
      0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
@@ -499,72 +2530,433 @@ void AssetManager::ensureDefaultAssetsCreated()
      0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
     -0.5f,  0.5f,  0.5f,  0.0f, 0.0f,
     -0.5f,  0.5f, -0.5f,  0.0f, 1.0f
-            });
-            quad->setIndices({});
+    };
+    const std::string quad3dRel = "default_quad3d.asset";
+    const std::string pointLightRel = (fs::path("Lights") / "PointLight.asset").generic_string();
+    {
+
+        const fs::path abs = contentRoot / fs::path(quad3dRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Model3D;
+        }
+
+        if (existsAndOk)
+        {
+            logger.log(Logger::Category::AssetManagement, "Default asset OK: " + quad3dRel, Logger::LogLevel::INFO);
+        }
+        else
+        {
+            auto quad = std::make_shared<AssetData>();
+            quad->setName("DefaultQuad3D");
+				// Material assets/textures are handled by Material; Object3D only stores a runtime Material instance.
+            json quadData = json::object();
+            quadData["m_vertices"] = cubeVertices;
+            quadData["m_indices"] = std::vector<uint32_t>{};
+            quad->setData(std::move(quadData));
 
             ensureOnDisk(quad3dRel, AssetType::Model3D, quad);
         }
     }
 
-    // NOTE: Levels are ensured/loaded by loadProject(). This function only creates/saves default asset files.
+    {
+        const fs::path abs = contentRoot / fs::path(pointLightRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::PointLight;
+        }
+
+        if (!existsAndOk)
+        {
+            auto lightAsset = std::make_shared<AssetData>();
+            lightAsset->setName("PointLight");
+            json lightData = json::object();
+            lightData["m_vertices"] = cubeVertices;
+            lightData["m_indices"] = std::vector<uint32_t>{};
+            lightData["m_shaderVertex"] = "vertex.glsl";
+            lightData["m_shaderFragment"] = "light_fragment.glsl";
+            lightAsset->setData(std::move(lightData));
+            ensureOnDisk(pointLightRel, AssetType::PointLight, lightAsset);
+        }
+    }
+
+    const std::string defaultLevelRel = (fs::path("Levels") / "DefaultLevel.map").generic_string();
+    {
+        std::error_code ec;
+        const fs::path scriptsRoot = contentRoot / "Scripts";
+        fs::create_directories(scriptsRoot, ec);
+        const fs::path defaultScriptAbs = scriptsRoot / "DefaultCubeScript.py";
+        if (!fs::exists(defaultScriptAbs))
+        {
+            std::ofstream scriptOut(defaultScriptAbs, std::ios::out | std::ios::trunc);
+            if (scriptOut.is_open())
+            {
+                scriptOut << "def onloaded(entity):\n";
+                scriptOut << "    print('Default script loaded for', entity)\n\n";
+                scriptOut << "def tick(entity, dt):\n";
+                scriptOut << "    pass\n";
+            }
+        }
+
+        const std::string defaultLevelScriptRel = (fs::path("Scripts") / "LevelScript.py").generic_string();
+        const fs::path defaultLevelScriptAbs = scriptsRoot / "LevelScript.py";
+        if (!fs::exists(defaultLevelScriptAbs))
+        {
+            std::ofstream scriptOut(defaultLevelScriptAbs, std::ios::out | std::ios::trunc);
+            if (scriptOut.is_open())
+            {
+                scriptOut << "def on_level_loaded():\n";
+                scriptOut << "    pass\n\n";
+                scriptOut << "def on_level_unloaded():\n";
+                scriptOut << "    pass\n";
+            }
+        }
+
+        json levelJson = json::object();
+        levelJson["Objects"] = json::array();
+        levelJson["Groups"] = json::array();
+
+        json entities = json::array();
+        json entity = json::object();
+        entity["id"] = 1;
+
+        json components = json::object();
+        components["Transform"] = json{
+            {"position", json::array({ 0.0f, 0.0f, 0.0f })},
+            {"rotation", json::array({ 0.0f, 0.0f, 0.0f })},
+            {"scale", json::array({ 1.0f, 1.0f, 1.0f })}
+        };
+        components["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
+        components["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        components["Name"] = json{ {"displayName", "Cube A"} };
+        components["Script"] = json{ {"scriptPath", defaultCubeScripts[0]}};
+        entity["components"] = components;
+        entities.push_back(entity);
+
+        json entity2 = json::object();
+        entity2["id"] = 2;
+
+        json components2 = json::object();
+        components2["Transform"] = json{
+            {"position", json::array({ 2.0f, 0.0f, 0.0f })},
+            {"rotation", json::array({ 0.0f, 45.0f, 0.0f })},
+            {"scale", json::array({ 1.0f, 1.0f, 1.0f })}
+        };
+        components2["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
+        components2["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        components2["Script"] = json{ {"scriptPath", defaultCubeScripts[1]} };
+        components2["Name"] = json{ {"displayName", "Cube B"} };
+        entity2["components"] = components2;
+        entities.push_back(entity2);
+
+        json entity3 = json::object();
+        entity3["id"] = 3;
+
+        json components3 = json::object();
+        components3["Transform"] = json{
+            {"position", json::array({ -2.0f, 0.0f, 0.0f })},
+            {"rotation", json::array({ 0.0f, -30.0f, 0.0f })},
+            {"scale", json::array({ 1.0f, 1.0f, 1.0f })}
+        };
+        components3["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
+        components3["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        components3["Script"] = json{ {"scriptPath", defaultCubeScripts[2]} };
+        components3["Name"] = json{ {"displayName", "Cube C"} };
+        entity3["components"] = components3;
+        entities.push_back(entity3);
+
+        json entity4 = json::object();
+        entity4["id"] = 4;
+
+        json components4 = json::object();
+        components4["Transform"] = json{
+            {"position", json::array({ 0.0f, 0.0f, 2.5f })},
+            {"rotation", json::array({ 0.0f, 90.0f, 0.0f })},
+            {"scale", json::array({ 1.0f, 1.0f, 1.0f })}
+        };
+        components4["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
+        components4["Material"] = json{ {"materialAssetPath", containerMatRel} };
+        components4["Script"] = json{ {"scriptPath", defaultCubeScripts[3]} };
+        components4["Name"] = json{ {"displayName", "Cube D"} };
+        entity4["components"] = components4;
+        entities.push_back(entity4);
+
+        json entity5 = json::object();
+        entity5["id"] = 5;
+
+        json components5 = json::object();
+        components5["Transform"] = json{
+            {"position", json::array({ 0.0f, 0.0f, -2.5f })},
+            {"rotation", json::array({ 0.0f, 0.0f, 0.0f })},
+            {"scale", json::array({ 1.0f, 1.0f, 1.0f })}
+        };
+        components5["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
+        components5["Material"] = json{ {"materialAssetPath", containerMatRel} };
+        components5["Script"] = json{ {"scriptPath", defaultCubeScripts[4]} };
+        components5["Name"] = json{ {"displayName", "Cube E"} };
+        entity5["components"] = components5;
+        entities.push_back(entity5);
+
+        json lightEntity = json::object();
+        lightEntity["id"] = 6;
+
+        json lightComponents = json::object();
+        lightComponents["Transform"] = json{
+            {"position", json::array({ 1.0f, 1.2f, 2.5f })},
+            {"rotation", json::array({ 0.0f, 0.0f, 0.0f })},
+            {"scale", json::array({ 0.25f, 0.25f, 0.25f })}
+        };
+        lightComponents["Mesh"] = json{ {"meshAssetPath", pointLightRel} };
+        lightComponents["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        lightComponents["Name"] = json{ {"displayName", "Point Light"} };
+        lightComponents["Light"] = json{
+            {"type", static_cast<int>(ECS::LightComponent::LightType::Point)},
+            {"color", json::array({ 1.0f, 1.0f, 1.0f })},
+            {"intensity", 1.0f},
+            {"range", 10.0f},
+            {"spotAngle", 30.0f}
+        };
+        lightEntity["components"] = lightComponents;
+        entities.push_back(lightEntity);
+
+        json dirLightEntity = json::object();
+        dirLightEntity["id"] = 7;
+
+        json dirLightComponents = json::object();
+        dirLightComponents["Transform"] = json{
+            {"position", json::array({ 0.0f, 5.0f, 0.0f })},
+            {"rotation", json::array({ 50.0f, -30.0f, 0.0f })},
+            {"scale", json::array({ 0.15f, 0.15f, 0.15f })}
+        };
+        dirLightComponents["Mesh"] = json{ {"meshAssetPath", pointLightRel} };
+        dirLightComponents["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        dirLightComponents["Name"] = json{ {"displayName", "Directional Light"} };
+        dirLightComponents["Light"] = json{
+            {"type", static_cast<int>(ECS::LightComponent::LightType::Directional)},
+            {"color", json::array({ 0.9f, 0.85f, 0.7f })},
+            {"intensity", 0.4f},
+            {"range", 0.0f},
+            {"spotAngle", 0.0f}
+        };
+        dirLightEntity["components"] = dirLightComponents;
+        entities.push_back(dirLightEntity);
+
+        json spotLightEntity = json::object();
+        spotLightEntity["id"] = 8;
+
+        json spotLightComponents = json::object();
+        spotLightComponents["Transform"] = json{
+            {"position", json::array({ 2.0f, 2.5f, 0.0f })},
+            {"rotation", json::array({ 60.0f, 0.0f, 0.0f })},
+            {"scale", json::array({ 0.15f, 0.15f, 0.15f })}
+        };
+        spotLightComponents["Mesh"] = json{ {"meshAssetPath", pointLightRel} };
+        spotLightComponents["Material"] = json{ {"materialAssetPath", wallMatRel} };
+        spotLightComponents["Name"] = json{ {"displayName", "Spot Light"} };
+        spotLightComponents["Light"] = json{
+            {"type", static_cast<int>(ECS::LightComponent::LightType::Spot)},
+            {"color", json::array({ 0.2f, 0.8f, 1.0f })},
+            {"intensity", 3.5f},
+            {"range", 25.0f},
+            {"spotAngle", 25.0f}
+        };
+        spotLightEntity["components"] = spotLightComponents;
+        entities.push_back(spotLightEntity);
+
+        levelJson["Entities"] = entities;
+
+        auto defaultLevel = std::make_unique<EngineLevel>();
+        defaultLevel->setName("DefaultLevel");
+        defaultLevel->setPath(defaultLevelRel);
+        defaultLevel->setAssetType(AssetType::Level);
+        defaultLevel->setLevelData(levelJson);
+        const fs::path abs = contentRoot / fs::path(defaultLevelRel);
+        bool existsAndOk = false;
+        if (fs::exists(abs))
+        {
+            AssetType headerType{ AssetType::Unknown };
+            existsAndOk = readAssetHeaderType(abs, headerType) && headerType == AssetType::Level;
+        }
+        if (!existsAndOk)
+        {
+            logger.log(Logger::Category::AssetManagement, "Default level missing/invalid, creating: " + defaultLevelRel, Logger::LogLevel::WARNING);
+            if (!saveLevelAsset(defaultLevel).success)
+            {
+                logger.log(Logger::Category::AssetManagement, "Failed to save default level asset.", Logger::LogLevel::ERROR);
+            }
+            diagnostics.setActiveLevel(std::move(defaultLevel));
+        }
+        else
+        {
+            logger.log(Logger::Category::AssetManagement, "Default level OK, loading from disk: " + defaultLevelRel, Logger::LogLevel::INFO);
+            auto loadResult = loadLevelAsset(abs.string());
+            if (!loadResult.success)
+            {
+                logger.log(Logger::Category::AssetManagement, "Failed to load existing level from disk, falling back to defaults: " + loadResult.errorMessage, Logger::LogLevel::WARNING);
+                diagnostics.setActiveLevel(std::move(defaultLevel));
+            }
+        }
+		diagnostics.setScenePrepared(false);
+	}
+
+	// Default Skybox assets — generate from engine-bundled skybox texture sets
+	{
+		const fs::path engineSkyboxRoot = fs::current_path() / "Content" / "Textures" / "SkyBoxes";
+		const std::string skyboxNames[] = { "Sunrise", "Daytime" };
+		// Each canonical face name maps to alternative file names (e.g. top/up, bottom/down)
+		struct FaceAlias { std::string canonical; std::vector<std::string> names; };
+		const FaceAlias faceAliases[] = {
+			{ "right",  { "right" } },
+			{ "left",   { "left" } },
+			{ "top",    { "top", "up" } },
+			{ "bottom", { "bottom", "down" } },
+			{ "front",  { "front" } },
+			{ "back",   { "back" } }
+		};
+		const std::string faceExts[] = { ".jpg", ".png", ".bmp" };
+
+		for (const auto& skyboxName : skyboxNames)
+		{
+			const fs::path engineSkyboxDir = engineSkyboxRoot / skyboxName;
+			if (!fs::exists(engineSkyboxDir) || !fs::is_directory(engineSkyboxDir))
+			{
+				continue;
+			}
+
+			// Check that at least one face image exists
+			bool hasAnyFace = false;
+			for (const auto& fa : faceAliases)
+			{
+				for (const auto& name : fa.names)
+				{
+					for (const auto& ext : faceExts)
+					{
+						if (fs::exists(engineSkyboxDir / (name + ext)))
+						{
+							hasAnyFace = true;
+							break;
+						}
+					}
+					if (hasAnyFace) break;
+				}
+				if (hasAnyFace) break;
+			}
+			if (!hasAnyFace)
+			{
+				logger.log(Logger::Category::AssetManagement,
+					"Skybox '" + skyboxName + "' folder exists but contains no face images, skipping.",
+					Logger::LogLevel::WARNING);
+				continue;
+			}
+
+			// Copy face images to project Content/Skyboxes/<name>/
+			const fs::path projectSkyboxDir = contentRoot / "Skyboxes" / skyboxName;
+			std::error_code ec;
+			fs::create_directories(projectSkyboxDir, ec);
+
+			json facesJson = json::object();
+			for (const auto& fa : faceAliases)
+			{
+				bool found = false;
+				for (const auto& name : fa.names)
+				{
+					for (const auto& ext : faceExts)
+					{
+						const fs::path srcFace = engineSkyboxDir / (name + ext);
+						if (fs::exists(srcFace))
+						{
+							// Copy with the original filename so the renderer can find it
+							const fs::path destFace = projectSkyboxDir / (name + ext);
+							fs::copy_file(srcFace, destFace, fs::copy_options::skip_existing, ec);
+							facesJson[fa.canonical] = fs::relative(destFace, contentRoot).generic_string();
+							found = true;
+							break;
+						}
+					}
+					if (found) break;
+				}
+			}
+
+			// Create the .asset file
+			const std::string skyboxAssetRel = (fs::path("Skyboxes") / (skyboxName + ".asset")).generic_string();
+			auto skybox = std::make_shared<AssetData>();
+			skybox->setName(skyboxName);
+			json skyboxData = json::object();
+			skyboxData["faces"] = facesJson;
+			skyboxData["folderPath"] = fs::relative(projectSkyboxDir, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
+			skybox->setData(std::move(skyboxData));
+			ensureOnDisk(skyboxAssetRel, AssetType::Skybox, skybox);
+		}
+	}
 
 	logger.log(Logger::Category::AssetManagement, "Default assets ensured.", Logger::LogLevel::INFO);
 }
 
-void AssetManager::startWorker()
+void AssetManager::startWorkerPool()
 {
-    if (m_workerRunning)
+    if (m_poolRunning)
         return;
 
-    m_workerStopRequested = false;
-    m_workerRunning = true;
+    m_poolStopRequested = false;
+    m_poolRunning = true;
 
-    m_worker = std::thread([this]()
+    m_poolSize = std::max(2u, std::thread::hardware_concurrency());
+
+    auto& logger = Logger::Instance();
+    logger.log(Logger::Category::AssetManagement,
+        "Starting asset thread pool with " + std::to_string(m_poolSize) + " threads (hardware_concurrency=" + std::to_string(std::thread::hardware_concurrency()) + ")",
+        Logger::LogLevel::INFO);
+
+    m_workerPool.reserve(m_poolSize);
+    for (unsigned int i = 0; i < m_poolSize; ++i)
     {
-        auto& logger = Logger::Instance();
-        logger.log(Logger::Category::AssetManagement, "Asset worker thread started.", Logger::LogLevel::INFO);
-
-        for (;;)
+        m_workerPool.emplace_back([this, i]()
         {
-            std::function<void()> job;
+            for (;;)
             {
-                std::unique_lock<std::mutex> lock(m_jobMutex);
-                m_jobCv.wait(lock, [this]() { return m_workerStopRequested || !m_jobs.empty(); });
+                std::function<void()> job;
+                {
+                    std::unique_lock<std::mutex> lock(m_jobMutex);
+                    m_jobCv.wait(lock, [this]() { return m_poolStopRequested || !m_jobs.empty(); });
 
-                if (m_workerStopRequested && m_jobs.empty())
-                    break;
+                    if (m_poolStopRequested && m_jobs.empty())
+                        break;
 
-                job = std::move(m_jobs.front());
-                m_jobs.pop();
+                    job = std::move(m_jobs.front());
+                    m_jobs.pop();
+                }
+
+                if (job)
+                {
+                    job();
+                }
             }
-
-            if (job)
-            {
-                job();
-            }
-        }
-
-        logger.log(Logger::Category::AssetManagement, "Asset worker thread exiting.", Logger::LogLevel::INFO);
-    });
+        });
+    }
 }
 
-void AssetManager::stopWorker()
+void AssetManager::stopWorkerPool()
 {
-    if (!m_workerRunning)
+    if (!m_poolRunning)
         return;
 
     {
         std::lock_guard<std::mutex> lock(m_jobMutex);
-        m_workerStopRequested = true;
+        m_poolStopRequested = true;
     }
     m_jobCv.notify_all();
 
-    if (m_worker.joinable())
+    for (auto& t : m_workerPool)
     {
-        m_worker.join();
+        if (t.joinable())
+            t.join();
     }
-
-    m_workerRunning = false;
+    m_workerPool.clear();
+    m_poolRunning = false;
 }
 
 void AssetManager::enqueueJob(std::function<void()> job)
@@ -576,57 +2968,225 @@ void AssetManager::enqueueJob(std::function<void()> job)
     m_jobCv.notify_one();
 }
 
-void AssetManager::pump()
-{
-    // currently no main-thread-only work is required.
-}
-
 void AssetManager::collectGarbage()
 {
+    std::vector<unsigned int> toUnload;
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        m_garbageCollector.collect();
+
+        for (const auto id : m_gcEligibleAssets)
+        {
+            auto it = m_loadedAssets.find(id);
+            if (it == m_loadedAssets.end() || !it->second)
+            {
+                toUnload.push_back(id);
+                continue;
+            }
+
+            if (it->second.use_count() > 1)
+            {
+                continue;
+            }
+
+            if (it->second->getType() == AssetType::Audio && AudioManager::Instance().isAssetPlaying(id))
+            {
+                continue;
+            }
+
+            toUnload.push_back(id);
+        }
+    }
+
+    for (const auto id : toUnload)
+    {
+        unloadAsset(id);
+    }
+}
+
+bool AssetManager::unloadAsset(unsigned int assetId)
+{
+    if (assetId == 0)
+    {
+        return false;
+    }
     std::lock_guard<std::mutex> lock(m_stateMutex);
+    auto it = m_loadedAssets.find(assetId);
+    if (it == m_loadedAssets.end())
+    {
+        return false;
+    }
+    if (it->second && !it->second->getPath().empty())
+    {
+        m_loadedAssetsByPath.erase(it->second->getPath());
+    }
+    m_loadedAssets.erase(it);
+    m_gcEligibleAssets.erase(assetId);
     m_garbageCollector.collect();
+    return true;
 }
 
-void AssetManager::importAssetFromFileAsync(AssetType type, std::string sourceFilePath)
+bool AssetManager::registerRuntimeResource(const std::shared_ptr<EngineObject>& resource)
 {
-    auto& diagnostics = DiagnosticsManager::Instance();
-    diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingAsset, true);
-
-    enqueueJob([this, type, source = std::move(sourceFilePath)]()
-    {
-        {
-            std::lock_guard<std::mutex> lock(m_stateMutex);
-            importAssetFromFile(type, source);
-        }
-
-        auto& diagnosticsLocal = DiagnosticsManager::Instance();
-        diagnosticsLocal.setActionInProgress(DiagnosticsManager::ActionType::LoadingAsset, false);
-    });
-}
-
-void AssetManager::saveAllAssetsAsync()
-{
-    auto& diagnostics = DiagnosticsManager::Instance();
-    diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingAsset, true);
-
-    enqueueJob([this]()
-    {
-        {
-            std::lock_guard<std::mutex> lock(m_stateMutex);
-            saveAllAssets();
-        }
-
-        auto& diagnosticsLocal = DiagnosticsManager::Instance();
-        diagnosticsLocal.setActionInProgress(DiagnosticsManager::ActionType::SavingAsset, false);
-    });
+	std::lock_guard<std::mutex> lock(m_stateMutex);
+	if (!m_initialized)
+	{
+		return false;
+	}
+	return m_garbageCollector.registerResource(resource);
 }
 
 AssetManager::~AssetManager()
 {
-    stopWorker();
+    stopWorkerPool();
 }
 
-bool AssetManager::saveAllAssets()
+unsigned int AssetManager::registerLoadedAsset(const std::shared_ptr<AssetData>& object)
+{
+	std::lock_guard<std::mutex> lock(m_stateMutex);
+	for (const auto& [id, obj] : m_loadedAssets)
+	{
+		if (obj == object)
+		{
+			return 0;
+		}
+	}
+	auto id = s_nextAssetID;
+	m_loadedAssets[id] = object;
+	if (object && !object->getPath().empty())
+	{
+		m_loadedAssetsByPath[object->getPath()] = id;
+	}
+	s_nextAssetID++;
+	return id;
+}
+
+int AssetManager::loadAssetAsync(const std::string& path, AssetType type, bool allowGc)
+{
+	if (path.empty())
+	{
+		Logger::Instance().log(Logger::Category::AssetManagement, "loadAssetAsync() called with empty path.", Logger::LogLevel::WARNING);
+		return 0;
+	}
+
+	const std::string normalizedPath = fs::path(path).lexically_normal().string();
+	int existingId = 0;
+	{
+		std::lock_guard<std::mutex> lock(m_stateMutex);
+		auto pathIt = m_loadedAssetsByPath.find(path);
+		if (pathIt == m_loadedAssetsByPath.end())
+		{
+			pathIt = m_loadedAssetsByPath.find(normalizedPath);
+		}
+		if (pathIt != m_loadedAssetsByPath.end())
+		{
+			existingId = static_cast<int>(pathIt->second);
+			if (allowGc)
+			{
+				m_gcEligibleAssets.insert(pathIt->second);
+			}
+		}
+	}
+
+	int jobId = 0;
+	{
+		std::lock_guard<std::mutex> lock(m_asyncJobMutex);
+		jobId = m_nextAsyncJobId++;
+		if (existingId != 0)
+		{
+			m_finishedAssetJobs[jobId] = existingId;
+			return jobId;
+		}
+		m_runningAssetJobs.insert(jobId);
+	}
+
+	enqueueJob([this, normalizedPath, type, allowGc, jobId]()
+		{
+			const int loadedId = loadAsset(normalizedPath, type, Sync);
+			if (allowGc && loadedId != 0)
+			{
+				markAssetGcEligible(static_cast<unsigned int>(loadedId), true);
+			}
+			{
+				std::lock_guard<std::mutex> lock(m_asyncJobMutex);
+				m_runningAssetJobs.erase(jobId);
+				m_finishedAssetJobs[jobId] = loadedId;
+			}
+		});
+
+	return jobId;
+}
+
+bool AssetManager::tryConsumeAssetLoadResult(int jobId, int& outAssetId)
+{
+	std::lock_guard<std::mutex> lock(m_asyncJobMutex);
+	auto it = m_finishedAssetJobs.find(jobId);
+	if (it == m_finishedAssetJobs.end())
+	{
+		return false;
+	}
+	outAssetId = it->second;
+	m_finishedAssetJobs.erase(it);
+	return true;
+}
+
+std::vector<int> AssetManager::getRunningAssetLoadJobs() const
+{
+	std::lock_guard<std::mutex> lock(m_asyncJobMutex);
+	return std::vector<int>(m_runningAssetJobs.begin(), m_runningAssetJobs.end());
+}
+
+std::shared_ptr<AssetData> AssetManager::getLoadedAssetByID(unsigned int id) const
+{
+	auto it = m_loadedAssets.find(id);
+	if (it == m_loadedAssets.end())
+	{
+		return nullptr;
+	}
+	return it->second;
+}
+
+std::shared_ptr<AssetData> AssetManager::getLoadedAssetByPath(const std::string& path) const
+{
+	if (path.empty())
+		return nullptr;
+	std::lock_guard<std::mutex> lock(m_stateMutex);
+	auto pathIt = m_loadedAssetsByPath.find(path);
+	if (pathIt != m_loadedAssetsByPath.end())
+	{
+		auto assetIt = m_loadedAssets.find(pathIt->second);
+		if (assetIt != m_loadedAssets.end())
+			return assetIt->second;
+	}
+	return nullptr;
+}
+
+bool AssetManager::isAssetLoaded(const std::string& path) const
+{
+	if (path.empty())
+	{
+		return false;
+	}
+
+	std::lock_guard<std::mutex> lock(m_stateMutex);
+	if (m_loadedAssetsByPath.count(path))
+	{
+		return true;
+	}
+	const std::string relPathString = fs::path(path).lexically_normal().generic_string();
+	if (m_loadedAssetsByPath.count(relPathString))
+	{
+		return true;
+	}
+	const std::string absPath = getAbsoluteContentPath(path);
+	if (!absPath.empty() && m_loadedAssetsByPath.count(absPath))
+	{
+		return true;
+	}
+	return false;
+}
+
+bool AssetManager::saveAllAssets(SyncState syncState)
 {
     std::lock_guard<std::mutex> lock(m_stateMutex);
 
@@ -640,35 +3200,32 @@ bool AssetManager::saveAllAssets()
     // ensure we don't keep stale entries
     m_garbageCollector.collect();
 
-    const auto alive = m_garbageCollector.getAliveResources();
+    //const auto alive = m_garbageCollector.getAliveResources();
 
     size_t toSaveCount = 0;
-    for (const auto& res : alive)
+    for (const auto& res : m_loadedAssets)
     {
-        if (res && !res->getIsSaved())
+        if (res.first != 0 && !res.second->getIsSaved())
         {
             ++toSaveCount;
         }
     }
 
-    logger.log(Logger::Category::AssetManagement, "Saving assets... Pending: " + std::to_string(toSaveCount) + ", Tracked: " + std::to_string(alive.size()), Logger::LogLevel::INFO);
+    logger.log(Logger::Category::AssetManagement, "Saving assets... Pending: " + std::to_string(toSaveCount) + ", Tracked: " + std::to_string(m_loadedAssets.size()), Logger::LogLevel::INFO);
 
     size_t savedCount = 0;
-    for (const auto& res : alive)
+    for (const auto& res : m_loadedAssets)
     {
-        if (!res)
+        if (res.second->getIsSaved())
         {
             continue;
         }
-
-        if (res->getIsSaved())
+		Asset asset;
+        asset.ID = res.first;
+        asset.type = res.second->getAssetType();
+        if (!saveAsset(asset))
         {
-            continue;
-        }
-
-        if (!saveAsset(res))
-        {
-            logger.log(Logger::Category::AssetManagement, "Failed to auto-save asset: " + res->getName(), Logger::LogLevel::ERROR);
+            logger.log(Logger::Category::AssetManagement, "Failed to auto-save asset: " + res.second->getName(), Logger::LogLevel::ERROR);
             diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingAsset, false);
             return false;
         }
@@ -676,11 +3233,12 @@ bool AssetManager::saveAllAssets()
         ++savedCount;
     }
 
-	auto level = diagnostics.getActiveLevel();
+	auto* level = diagnostics.getActiveLevelSoft();
 	if (level)
 	{
 		logger.log(Logger::Category::AssetManagement, "Saving active level...", Logger::LogLevel::INFO);
-		if (!saveAsset(std::shared_ptr<EngineObject>(level, [](EngineObject*) {})))
+
+		if (!saveLevelAsset(level).success)
 		{
 			logger.log(Logger::Category::AssetManagement, "Failed to save active level: " + level->getName(), Logger::LogLevel::ERROR);
 			diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingAsset, false);
@@ -698,6 +3256,112 @@ bool AssetManager::saveAllAssets()
     return true;
 }
 
+bool AssetManager::saveActiveLevel()
+{
+    auto* level = DiagnosticsManager::Instance().getActiveLevelSoft();
+    if (!level)
+    {
+        return false;
+    }
+    return saveLevelAsset(level).success;
+}
+
+size_t AssetManager::getUnsavedAssetCount() const
+{
+    std::lock_guard<std::mutex> lock(m_stateMutex);
+    size_t count = 0;
+    for (const auto& res : m_loadedAssets)
+    {
+        if (res.first != 0 && res.second && !res.second->getIsSaved())
+        {
+            ++count;
+        }
+    }
+    auto& diagnostics = DiagnosticsManager::Instance();
+    auto* level = diagnostics.getActiveLevelSoft();
+    if (level && !level->getIsSaved())
+    {
+        ++count;
+    }
+    return count;
+}
+
+void AssetManager::saveAllAssetsAsync(std::function<void(size_t saved, size_t total)> onProgress, std::function<void(bool success)> onFinished)
+{
+    enqueueJob([this, onProgress = std::move(onProgress), onFinished = std::move(onFinished)]()
+    {
+        auto& logger = Logger::Instance();
+        auto& diagnostics = DiagnosticsManager::Instance();
+        diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingAsset, true);
+
+        std::vector<std::pair<unsigned int, AssetType>> toSave;
+        {
+            std::lock_guard<std::mutex> lock(m_stateMutex);
+            for (const auto& res : m_loadedAssets)
+            {
+                if (res.first != 0 && res.second && !res.second->getIsSaved())
+                {
+                    toSave.push_back({ res.first, res.second->getAssetType() });
+                }
+            }
+        }
+
+        bool hasLevel = false;
+        {
+            auto* level = diagnostics.getActiveLevelSoft();
+            if (level && !level->getIsSaved())
+            {
+                hasLevel = true;
+            }
+        }
+
+        const size_t total = toSave.size() + (hasLevel ? 1 : 0);
+        size_t saved = 0;
+        bool allOk = true;
+
+        for (const auto& [id, type] : toSave)
+        {
+            Asset asset;
+            asset.ID = id;
+            asset.type = type;
+            if (!saveAsset(asset))
+            {
+                logger.log(Logger::Category::AssetManagement, "saveAllAssetsAsync: failed asset ID=" + std::to_string(id), Logger::LogLevel::ERROR);
+                allOk = false;
+            }
+            ++saved;
+            if (onProgress)
+            {
+                onProgress(saved, total);
+            }
+        }
+
+        if (hasLevel)
+        {
+            auto* level = diagnostics.getActiveLevelSoft();
+            if (level)
+            {
+                if (!saveLevelAsset(level).success)
+                {
+                    logger.log(Logger::Category::AssetManagement, "saveAllAssetsAsync: failed to save active level", Logger::LogLevel::ERROR);
+                    allOk = false;
+                }
+            }
+            ++saved;
+            if (onProgress)
+            {
+                onProgress(saved, total);
+            }
+        }
+
+        diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingAsset, false);
+        if (onFinished)
+        {
+            onFinished(allOk);
+        }
+    });
+}
+
 std::string AssetManager::getAbsoluteContentPath(const std::string& relativeToContent) const
 {
     const auto& diagnostics = DiagnosticsManager::Instance();
@@ -706,668 +3370,373 @@ std::string AssetManager::getAbsoluteContentPath(const std::string& relativeToCo
         return {};
     }
 
-    fs::path p = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relativeToContent);
+    fs::path inputPath(relativeToContent);
+    if (inputPath.is_absolute())
+    {
+        return inputPath.lexically_normal().string();
+    }
+
+    const fs::path projectRoot(diagnostics.getProjectInfo().projectPath);
+    if (!relativeToContent.empty())
+    {
+        auto it = inputPath.begin();
+        if (it != inputPath.end() && *it == "Content")
+        {
+            return (projectRoot / inputPath).lexically_normal().string();
+        }
+    }
+
+    return (projectRoot / "Content" / inputPath).lexically_normal().string();
+}
+
+std::string AssetManager::getAbsoluteEngineContentPath(const std::string& relativeToContent) const
+{
+    fs::path inputPath(relativeToContent);
+    if (inputPath.is_absolute())
+    {
+        return inputPath.lexically_normal().string();
+    }
+    return (fs::current_path() / "Content" / inputPath).lexically_normal().string();
+}
+
+std::string AssetManager::getEditorWidgetPath(const std::string& relativeToEditorWidgets) const
+{
+    fs::path p = getEditorWidgetsRootPath() / fs::path(relativeToEditorWidgets);
     return p.lexically_normal().string();
 }
 
-std::shared_ptr<EngineObject> AssetManager::loadAssetObject(const std::string& path)
+int AssetManager::loadAudioFromContentPath(const std::string& relativeToContent, bool allowGc)
 {
-    // Fast path: already loaded
+    if (relativeToContent.empty())
     {
-		Logger::Instance().log(Logger::Category::AssetManagement, "loadAssetObject(): checking for already loaded asset: " + path, Logger::LogLevel::INFO);
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        for (const auto& alive : m_garbageCollector.getAliveResources())
-        {
-            if (alive && fs::path(alive->getPath()).generic_string() == fs::path(path).generic_string())
-            {
-                return alive;
-            }
-        }
+        return 0;
     }
-	Logger::Instance().log(Logger::Category::AssetManagement, "loadAssetObject(): asset not already loaded, proceeding to load: " + path, Logger::LogLevel::INFO);
-	auto object = loadAsset(path);
-    if (!object)
+
+    const std::string absPath = getAbsoluteContentPath(relativeToContent);
+    if (absPath.empty())
     {
-		Logger::Instance().log(Logger::Category::AssetManagement, "loadAssetObject(): loadAsset() failed for path: " + path, Logger::LogLevel::ERROR);
-        return nullptr;
+        Logger::Instance().log(Logger::Category::AssetManagement, "Audio load failed: project not loaded.", Logger::LogLevel::ERROR);
+        return 0;
     }
-    return object;
+
+    fs::path relPath = fs::path(relativeToContent).lexically_normal();
+    const std::string relPathString = relPath.generic_string();
+    const std::string extension = relPath.extension().string();
+
+    if (extension == ".asset")
+    {
+        return loadAsset(absPath, AssetType::Audio, Sync);
+    }
+
+    if (extension != ".wav")
+    {
+        Logger::Instance().log(Logger::Category::AssetManagement, "Audio load failed: unsupported extension for " + relPathString, Logger::LogLevel::ERROR);
+        return 0;
+    }
+
+    SDL_AudioSpec spec{};
+    Uint8* buffer = nullptr;
+    Uint32 length = 0;
+    if (!SDL_LoadWAV(absPath.c_str(), &spec, &buffer, &length))
+    {
+        Logger::Instance().log(Logger::Category::AssetManagement, "Audio load failed: " + absPath, Logger::LogLevel::ERROR);
+        return 0;
+    }
+
+    auto audio = std::make_shared<AssetData>();
+    json audioData = json::object();
+    audioData["m_channels"] = static_cast<int>(spec.channels);
+    audioData["m_sampleRate"] = static_cast<int>(spec.freq);
+    audioData["m_format"] = static_cast<int>(spec.format);
+    audioData["m_data"] = std::vector<unsigned char>(buffer, buffer + length);
+    SDL_free(buffer);
+
+    audio->setName(relPath.stem().string());
+    audio->setPath(relPathString);
+    audio->setAssetType(AssetType::Audio);
+    audio->setType(AssetType::Audio);
+    audio->setData(std::move(audioData));
+    audio->setIsSaved(true);
+
+    auto id = registerLoadedAsset(audio);
+    if (id != 0)
+    {
+        audio->setId(id);
+    }
+    m_garbageCollector.registerResource(audio);
+    if (allowGc && id != 0)
+    {
+        markAssetGcEligible(id, true);
+    }
+    return static_cast<int>(id);
 }
 
-std::shared_ptr<Material> AssetManager::loadMaterialAsset(const std::string& materialAssetPath)
+void AssetManager::markAssetGcEligible(unsigned int id, bool eligible)
 {
-    if (materialAssetPath.empty())
+    if (id == 0)
     {
-        return nullptr;
+        return;
     }
-
-    auto obj = loadAssetObject(materialAssetPath);
-    return std::dynamic_pointer_cast<Material>(obj);
-}
-
-std::vector<std::shared_ptr<Texture>> AssetManager::loadTexturesForMaterial(const Material& material)
-{
-    std::vector<std::shared_ptr<Texture>> out;
-
-    for (const auto& texPath : material.getTextureAssetPaths())
-    {
-        if (texPath.empty())
-            continue;
-
-        auto obj = loadAssetObject(texPath);
-        if (auto tex = std::dynamic_pointer_cast<Texture>(obj))
-        {
-            out.push_back(std::move(tex));
-        }
-    }
-
-    return out;
-}
-
-std::shared_ptr<EngineObject> AssetManager::loadAsset(const std::string& path)
-{
-     auto& logger = Logger::Instance();
-     logger.log(Logger::Category::AssetManagement, "Loading asset: " + path, Logger::LogLevel::INFO);
-
-     auto logReadFail = [&](const char* what)
-     {
-         logger.log(Logger::Category::AssetManagement, std::string("Asset load failed while reading ") + what + " (asset: " + path + ")", Logger::LogLevel::ERROR);
-     };
-
-     auto& diagnostics = DiagnosticsManager::Instance();
-     bool loaded = diagnostics.isProjectLoaded();
-     if (!loaded || diagnostics.getProjectInfo().projectPath.empty())
-     {
-         logger.log(Logger::Category::AssetManagement, "Asset load failed (no project loaded)", Logger::LogLevel::ERROR);
-         return nullptr;
-     }
-
-    fs::path contentRoot = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
-    logger.log(Logger::Category::AssetManagement, "Content root: " + contentRoot.lexically_normal().string(), Logger::LogLevel::INFO);
-
-    // 'path' is expected to be the relative path inside Content.
-    fs::path relPath = fs::path(path);
-    if (relPath.is_absolute())
-    {
-        logger.log(Logger::Category::AssetManagement, "Asset load failed (path must be relative to Content): " + relPath.string(), Logger::LogLevel::ERROR);
-        return nullptr;
-    }
-    logger.log(Logger::Category::AssetManagement, "Relative asset path: " + relPath.generic_string(), Logger::LogLevel::INFO);
-
-    fs::path absolutePath = contentRoot / relPath;
-    logger.log(Logger::Category::AssetManagement, "Absolute asset path: " + absolutePath.lexically_normal().string(), Logger::LogLevel::INFO);
-    if (!fs::exists(absolutePath))
-    {
-        logger.log(Logger::Category::AssetManagement, "Asset load failed (missing file): " + absolutePath.string(), Logger::LogLevel::ERROR);
-        return nullptr;
-    }
-
-    std::ifstream in(absolutePath, std::ios::binary);
-    if (!in.is_open())
-    {
-        logger.log(Logger::Category::AssetManagement, "Failed to open asset file: " + absolutePath.string(), Logger::LogLevel::ERROR);
-        return nullptr;
-    }
-
-    // Avoid re-loading the same asset while we parse (reduces recursive loops)
-    const std::string requestedKey = relPath.generic_string();
-    {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        for (const auto& alive : m_garbageCollector.getAliveResources())
-        {
-            if (alive && fs::path(alive->getPath()).generic_string() == requestedKey)
-            {
-                logger.log(Logger::Category::AssetManagement, "Asset already loaded: " + requestedKey, Logger::LogLevel::INFO);
-                return alive;
-            }
-        }
-    }
-
-    uint32_t magic = 0;
-    uint32_t version = 0;
-    if (!in.read(reinterpret_cast<char*>(&magic), sizeof(magic))) { logReadFail("magic"); return nullptr; }
-    if (!in.read(reinterpret_cast<char*>(&version), sizeof(version))) { logReadFail("version"); return nullptr; }
-    logger.log(Logger::Category::AssetManagement, "Asset header: magic=0x" + std::to_string(magic) + ", version=" + std::to_string(version), Logger::LogLevel::INFO);
-    if (magic != 0x41535453 || version != 2) // 'ASTS'
-    {
-        logger.log(Logger::Category::AssetManagement, "Invalid asset file format (expected magic=0x41535453, version=2)", Logger::LogLevel::ERROR);
-        return nullptr;
-    }
-
-    int32_t typeInt = 0;
-    if (!in.read(reinterpret_cast<char*>(&typeInt), sizeof(typeInt))) { logReadFail("type"); return nullptr; }
-    AssetType type = static_cast<AssetType>(typeInt);
-    logger.log(Logger::Category::AssetManagement, "Asset type int: " + std::to_string(typeInt), Logger::LogLevel::INFO);
-
-    std::string name;
-    std::string storedRelPath;
-    std::string materialAssetPath;
-    if (!readString(in, name)) { logReadFail("name"); return nullptr; }
-    if (!readString(in, storedRelPath)) { logReadFail("storedRelPath"); return nullptr; }
-    if (!readString(in, materialAssetPath)) { logReadFail("materialAssetPath"); return nullptr; }
-
-    logger.log(Logger::Category::AssetManagement,
-        "Asset meta: name='" + name + "', storedRelPath='" + storedRelPath + "', materialAssetPath='" + materialAssetPath + "'",
-        Logger::LogLevel::INFO);
-
-    std::shared_ptr<EngineObject> obj;
-    switch (type)
-    {
-    case AssetType::Model2D:
-        obj = std::make_shared<Object2D>();
-        break;
-    case AssetType::Model3D:
-        obj = std::make_shared<Object3D>();
-        break;
-    case AssetType::Texture:
-        obj = std::make_shared<Texture>();
-        break;
-    case AssetType::Material:
-        obj = std::make_shared<Material>();
-        break;
-    case AssetType::Level:
-        obj = std::make_shared<EngineLevel>();
-        break;
-    default:
-        obj = std::make_shared<EngineObject>();
-        break;
-    }
-
-    obj->setName(name);
-    // Use storedRelPath as canonical key if it exists; otherwise use requested path.
-    const std::string canonicalKey = fs::path(storedRelPath.empty() ? requestedKey : storedRelPath).generic_string();
-    obj->setPath(canonicalKey);
-    obj->setAssetType(type);
-    obj->setIsSaved(true);
-
-    std::vector<std::string> levelDepPaths;
-
-    if (type == AssetType::Texture)
-    {
-        auto tex = std::static_pointer_cast<Texture>(obj);
-        int32_t w = 0, h = 0, c = 0;
-        uint32_t dataSize = 0;
-        if (!in.read(reinterpret_cast<char*>(&w), sizeof(w))) { logReadFail("texture width"); return nullptr; }
-        if (!in.read(reinterpret_cast<char*>(&h), sizeof(h))) { logReadFail("texture height"); return nullptr; }
-        if (!in.read(reinterpret_cast<char*>(&c), sizeof(c))) { logReadFail("texture channels"); return nullptr; }
-        if (!in.read(reinterpret_cast<char*>(&dataSize), sizeof(dataSize))) { logReadFail("texture dataSize"); return nullptr; }
-
-        logger.log(Logger::Category::AssetManagement,
-            "Texture payload: w=" + std::to_string(w) + ", h=" + std::to_string(h) + ", c=" + std::to_string(c) + ", dataSize=" + std::to_string(dataSize),
-            Logger::LogLevel::INFO);
-
-        std::vector<unsigned char> data;
-        data.resize(dataSize);
-        if (dataSize > 0)
-        {
-            if (!in.read(reinterpret_cast<char*>(data.data()), dataSize)) { logReadFail("texture data blob"); return nullptr; }
-        }
-
-        tex->setWidth(w);
-        tex->setHeight(h);
-        tex->setChannels(c);
-        tex->setData(std::move(data));
-    }
-
-    if (type == AssetType::Model2D)
-    {
-        auto obj2d = std::static_pointer_cast<Object2D>(obj);
-        // Create a runtime Material instance and populate it from the referenced material asset.
-        // Object2D should only reference Material, not MaterialAsset.
-        {
-            auto runtimeMat = std::make_shared<Material>();
-            runtimeMat->setPath(materialAssetPath);
-            runtimeMat->setAssetType(AssetType::Material);
-            runtimeMat->setIsSaved(true);
-
-            if (!materialAssetPath.empty())
-            {
-                logger.log(Logger::Category::AssetManagement, "Model2D: loading material asset '" + materialAssetPath + "'", Logger::LogLevel::INFO);
-                if (auto matAsset = loadMaterialAsset(materialAssetPath))
-                {
-                    runtimeMat->setTextureAssetPaths(std::vector<std::string>(matAsset->getTextureAssetPaths()));
-                    auto textures = loadTexturesForMaterial(*matAsset);
-                    runtimeMat->setTextures(textures);
-                }
-            }
-
-            obj2d->setMaterial(runtimeMat);
-        }
-
-        uint32_t vertCount = 0;
-        if (!in.read(reinterpret_cast<char*>(&vertCount), sizeof(vertCount))) { logReadFail("model2d vertCount"); return nullptr; }
-        logger.log(Logger::Category::AssetManagement, "Model2D payload: vertCount=" + std::to_string(vertCount), Logger::LogLevel::INFO);
-        std::vector<float> verts(vertCount);
-        if (vertCount > 0)
-        {
-            if (!in.read(reinterpret_cast<char*>(verts.data()), vertCount * sizeof(float))) { logReadFail("model2d verts"); return nullptr; }
-        }
-        obj2d->setVertices(verts);
-
-        uint32_t indexCount = 0;
-        if (!in.read(reinterpret_cast<char*>(&indexCount), sizeof(indexCount))) { logReadFail("model2d indexCount"); return nullptr; }
-        logger.log(Logger::Category::AssetManagement, "Model2D payload: indexCount=" + std::to_string(indexCount), Logger::LogLevel::INFO);
-        std::vector<uint32_t> indices(indexCount);
-        if (indexCount > 0)
-        {
-            if (!in.read(reinterpret_cast<char*>(indices.data()), indexCount * sizeof(uint32_t))) { logReadFail("model2d indices"); return nullptr; }
-        }
-        obj2d->setIndices(indices);
-
-        // Material handling is done by runtime Material instances; asset paths are not stored on Object2D.
-    }
-
-    if (type == AssetType::Model3D)
-    {
-        auto obj3d = std::static_pointer_cast<Object3D>(obj);
-
-        // Create a runtime Material instance and populate it from the referenced material asset.
-        // Object3D should only reference Material, not MaterialAsset.
-        {
-            auto runtimeMat = std::make_shared<Material>();
-            runtimeMat->setPath(materialAssetPath);
-            runtimeMat->setAssetType(AssetType::Material);
-            runtimeMat->setIsSaved(true);
-
-            if (!materialAssetPath.empty())
-            {
-                logger.log(Logger::Category::AssetManagement, "Model3D: loading material asset '" + materialAssetPath + "'", Logger::LogLevel::INFO);
-                if (auto matAsset = loadMaterialAsset(materialAssetPath))
-                {
-                    runtimeMat->setTextureAssetPaths(std::vector<std::string>(matAsset->getTextureAssetPaths()));
-                    auto textures = loadTexturesForMaterial(*matAsset);
-                    runtimeMat->setTextures(textures);
-                }
-            }
-
-            obj3d->setMaterial(runtimeMat);
-        }
-
-        uint32_t vertCount = 0;
-        if (!in.read(reinterpret_cast<char*>(&vertCount), sizeof(vertCount))) { logReadFail("model3d vertCount"); return nullptr; }
-        logger.log(Logger::Category::AssetManagement, "Model3D payload: vertCount=" + std::to_string(vertCount), Logger::LogLevel::INFO);
-        std::vector<float> verts(vertCount);
-        if (vertCount > 0)
-        {
-            if (!in.read(reinterpret_cast<char*>(verts.data()), vertCount * sizeof(float))) { logReadFail("model3d verts"); return nullptr; }
-        }
-        obj3d->setVertices(verts);
-
-        uint32_t indexCount = 0;
-        if (!in.read(reinterpret_cast<char*>(&indexCount), sizeof(indexCount))) { logReadFail("model3d indexCount"); return nullptr; }
-        logger.log(Logger::Category::AssetManagement, "Model3D payload: indexCount=" + std::to_string(indexCount), Logger::LogLevel::INFO);
-        std::vector<uint32_t> indices(indexCount);
-        if (indexCount > 0)
-        {
-            if (!in.read(reinterpret_cast<char*>(indices.data()), indexCount * sizeof(uint32_t))) { logReadFail("model3d indices"); return nullptr; }
-        }
-        obj3d->setIndices(indices);
-
-        // Material handling is done by runtime Material instances; asset paths are not stored on Object3D.
-    }
-
-    if (type == AssetType::Level)
-    {
-        auto level = std::static_pointer_cast<EngineLevel>(obj);
-        level->clearLoadedDependencies();
-
-        uint32_t depCount = 0;
-        if (!in.read(reinterpret_cast<char*>(&depCount), sizeof(depCount))) { logReadFail("level depCount"); return nullptr; }
-        logger.log(Logger::Category::AssetManagement, "Level payload: depCount=" + std::to_string(depCount), Logger::LogLevel::INFO);
-        for (uint32_t i = 0; i < depCount; ++i)
-        {
-            std::string objPath;
-            if (!readString(in, objPath)) { logReadFail("level object path"); return nullptr; }
-
-            logger.log(Logger::Category::AssetManagement, "Level dep[" + std::to_string(i) + "]: path='" + objPath + "'", Logger::LogLevel::INFO);
-
-            fs::path p(objPath);
-            if (p.is_absolute())
-            {
-                logger.log("Invalid asset path (should be relative to Content): " + objPath, Logger::LogLevel::ERROR);
-                return nullptr;
-            }
-
-            Vec3 pos{}, rot{}, scl{};
-            if (!in.read(reinterpret_cast<char*>(&pos), sizeof(pos))) { logReadFail("level object position"); return nullptr; }
-            if (!in.read(reinterpret_cast<char*>(&rot), sizeof(rot))) { logReadFail("level object rotation"); return nullptr; }
-            if (!in.read(reinterpret_cast<char*>(&scl), sizeof(scl))) { logReadFail("level object scale"); return nullptr; }
-
-            Transform t;
-            t.setPosition(pos);
-            t.setRotation(rot);
-            t.setScale(scl);
-
-			std::string groupID;
-			if (!readString(in, groupID)) { logReadFail("level object groupID"); return nullptr; }
-
-            if (!p.empty())
-            {
-                const std::string depRelPath = p.generic_string();
-                logger.log(Logger::Category::AssetManagement, "Level: loading object asset '" + depRelPath + "'", Logger::LogLevel::INFO);
-
-                auto depObj = loadAssetObject(depRelPath);
-                if (depObj)
-                {
-					level->registerObject(depObj, t, groupID);
-                    logger.log(Logger::Category::AssetManagement, "Level: object attached '" + depRelPath + "'", Logger::LogLevel::INFO);
-                }
-                else
-                {
-                    logger.log(Logger::Category::AssetManagement, "Level: object failed to load '" + depRelPath + "'", Logger::LogLevel::WARNING);
-					// transform cannot be stored without an object instance
-                }
-            }
-        }
-    }
-
-    if (type == AssetType::Material)
-    {
-        auto mat = std::static_pointer_cast<Material>(obj);
-
-        uint32_t texRefCount = 0;
-        if (!in.read(reinterpret_cast<char*>(&texRefCount), sizeof(texRefCount))) { logReadFail("material texRefCount"); return nullptr; }
-        logger.log(Logger::Category::AssetManagement, "Material payload: texRefCount=" + std::to_string(texRefCount), Logger::LogLevel::INFO);
-
-        std::vector<std::string> refs;
-        refs.reserve(texRefCount);
-
-        for (uint32_t i = 0; i < texRefCount; ++i)
-        {
-            std::string ref;
-            if (!readString(in, ref)) { logReadFail("material texture ref"); return nullptr; }
-            logger.log(Logger::Category::AssetManagement, "Material texRef[" + std::to_string(i) + "]: '" + ref + "'", Logger::LogLevel::INFO);
-            refs.push_back(std::move(ref));
-        }
-
-        mat->setTextureAssetPaths(std::move(refs));
-    }
-
-    // Register main object in GC before resolving dependencies
-    {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        m_garbageCollector.registerResource(obj);
-    }
-
-    // Level dependencies are resolved inline during parsing.
-
-    logger.log(Logger::Category::AssetManagement, "Asset loaded: " + name + " (" + obj->getPath() + ")", Logger::LogLevel::INFO);
-    return obj;
-}
-
-bool AssetManager::saveAsset(const std::shared_ptr<EngineObject>& object)
-{
     std::lock_guard<std::mutex> lock(m_stateMutex);
-
-    auto& logger = Logger::Instance();
-    if (!object)
+    if (eligible)
     {
-        logger.log(Logger::Category::AssetManagement, "saveAsset failed: object is null", Logger::LogLevel::ERROR);
+        m_gcEligibleAssets.insert(id);
+    }
+    else
+    {
+        m_gcEligibleAssets.erase(id);
+    }
+}
+
+void AssetManager::releaseAudioAsset(unsigned int assetId)
+{
+    if (assetId == 0)
+    {
+        return;
+    }
+
+    if (AudioManager::Instance().isAssetPlaying(assetId))
+    {
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        if (m_gcEligibleAssets.find(assetId) == m_gcEligibleAssets.end())
+        {
+            return;
+        }
+    }
+
+    unloadAsset(assetId);
+}
+
+bool AssetManager::isAudioPlayingContentPath(const std::string& relativeToContent) const
+{
+    if (relativeToContent.empty())
+    {
         return false;
     }
 
-    const auto& diagnostics = DiagnosticsManager::Instance();
-    const auto& projInfo = diagnostics.getProjectInfo();
-    if (projInfo.projectPath.empty())
+    const std::string absPath = getAbsoluteContentPath(relativeToContent);
+    fs::path relPath = fs::path(relativeToContent).lexically_normal();
+    const std::string relPathString = relPath.generic_string();
+
+    unsigned int assetId = 0;
     {
-        logger.log(Logger::Category::AssetManagement, "saveAsset failed: no project loaded (projectPath is empty)", Logger::LogLevel::ERROR);
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        for (const auto& [id, asset] : m_loadedAssets)
+        {
+            if (!asset || asset->getType() != AssetType::Audio)
+            {
+                continue;
+            }
+            const std::string& assetPath = asset->getPath();
+            if (assetPath == relPathString || (!absPath.empty() && assetPath == absPath))
+            {
+                assetId = id;
+                break;
+            }
+        }
+    }
+
+    if (assetId == 0)
+    {
         return false;
     }
 
-    // The object stores only a relative path inside the Content folder.
-    fs::path relAssetPath = fs::path(object->getPath());
-    if (relAssetPath.is_absolute())
-    {
-        logger.log(Logger::Category::AssetManagement, "saveAsset failed: object path must be relative to Content: " + relAssetPath.string(), Logger::LogLevel::ERROR);
-        return false;
-    }
+    return AudioManager::Instance().isAssetPlaying(assetId);
+}
 
-    fs::path contentRoot = fs::path(projInfo.projectPath) / "Content";
-    std::error_code ec;
-    fs::create_directories(contentRoot, ec);
+int AssetManager::loadAsset(const std::string& path, AssetType type, SyncState syncState)
+{
+	if (path.empty())
+	{
+		return 0;
+	}
 
-    fs::path finalAssetPath = contentRoot / relAssetPath;
-    fs::create_directories(finalAssetPath.parent_path(), ec);
-
-    logger.log(Logger::Category::AssetManagement, "Saving asset: " + object->getName() + " at " + finalAssetPath.string(), Logger::LogLevel::INFO);
-
-    std::ofstream out(finalAssetPath, std::ios::binary | std::ios::trunc);
-    if (!out.is_open())
-    {
-        logger.log(Logger::Category::AssetManagement, "Failed to open asset file for writing: " + finalAssetPath.string(), Logger::LogLevel::FATAL);
-        return false;
-    }
-
-    uint32_t magic = 0x41535453; // 'ASTS'
-    uint32_t version = 2;
-    out.write(reinterpret_cast<const char*>(&magic), sizeof(magic));
-    out.write(reinterpret_cast<const char*>(&version), sizeof(version));
-
-    int32_t typeInt = static_cast<int32_t>(object->getAssetType());
-    out.write(reinterpret_cast<const char*>(&typeInt), sizeof(typeInt));
-
-    writeString(out, object->getName());
-    // persist relative path inside Content
-    writeString(out, relAssetPath.generic_string());
-
-    std::string materialAssetPath;
-    switch (object->getAssetType())
-    {
-    case AssetType::Texture:
-    {
-        // keep string slot for format compatibility
-        writeString(out, materialAssetPath);
-
-        auto tex = std::dynamic_pointer_cast<Texture>(object);
-        int32_t w = 0, h = 0, c = 0;
-        uint32_t dataSize = 0;
-        const unsigned char* dataPtr = nullptr;
-
-        if (tex)
-        {
-            w = tex->getWidth();
-            h = tex->getHeight();
-            c = tex->getChannels();
-            const auto& data = tex->getData();
-            dataSize = static_cast<uint32_t>(data.size());
-            dataPtr = data.data();
-        }
-
-        out.write(reinterpret_cast<const char*>(&w), sizeof(w));
-        out.write(reinterpret_cast<const char*>(&h), sizeof(h));
-        out.write(reinterpret_cast<const char*>(&c), sizeof(c));
-        out.write(reinterpret_cast<const char*>(&dataSize), sizeof(dataSize));
-        if (dataSize > 0 && dataPtr)
-        {
-            out.write(reinterpret_cast<const char*>(dataPtr), dataSize);
-        }
-        break;
-    }
-    case AssetType::Material:
-    {
-        // keep string slot for format compatibility
-        writeString(out, materialAssetPath);
-
-        auto mat = std::dynamic_pointer_cast<Material>(object);
-        uint32_t texRefCount = 0;
-        if (mat)
-        {
-            texRefCount = static_cast<uint32_t>(mat->getTextureAssetPaths().size());
-        }
-
-        out.write(reinterpret_cast<const char*>(&texRefCount), sizeof(texRefCount));
-        if (mat)
-        {
-            for (const auto& ref : mat->getTextureAssetPaths())
-            {
-                writeString(out, ref);
-            }
-        }
-        break;
-    }
-    case AssetType::Model2D:
-    {
-        auto obj2d = std::dynamic_pointer_cast<Object2D>(object);
-
-        // Keep string slot for format compatibility; Object2D no longer stores material asset paths.
-        writeString(out, std::string{});
-
-        if (obj2d)
-        {
-            const auto& verts = obj2d->getVertices();
-            uint32_t vertCount = static_cast<uint32_t>(verts.size());
-            out.write(reinterpret_cast<const char*>(&vertCount), sizeof(vertCount));
-            if (vertCount > 0)
-            {
-                out.write(reinterpret_cast<const char*>(verts.data()), vertCount * sizeof(float));
-            }
-
-            const auto& indices = obj2d->getIndices();
-            uint32_t indexCount = static_cast<uint32_t>(indices.size());
-            out.write(reinterpret_cast<const char*>(&indexCount), sizeof(indexCount));
-            if (indexCount > 0)
-            {
-                out.write(reinterpret_cast<const char*>(indices.data()), indexCount * sizeof(uint32_t));
-            }
-        }
-        else
-        {
-            uint32_t zero = 0;
-            out.write(reinterpret_cast<const char*>(&zero), sizeof(zero));
-            out.write(reinterpret_cast<const char*>(&zero), sizeof(zero));
-        }
-        break;
-    }
-    case AssetType::Model3D:
-    {
-        auto obj3d = std::dynamic_pointer_cast<Object3D>(object);
-        // Keep string slot for format compatibility; Object3D no longer stores material asset paths.
-        writeString(out, std::string{});
-
-        if (obj3d)
-        {
-            const auto& verts = obj3d->getVertices();
-            uint32_t vertCount = static_cast<uint32_t>(verts.size());
-            out.write(reinterpret_cast<const char*>(&vertCount), sizeof(vertCount));
-            if (vertCount > 0)
-            {
-                out.write(reinterpret_cast<const char*>(verts.data()), vertCount * sizeof(float));
-            }
-
-            const auto& indices = obj3d->getIndices();
-            uint32_t indexCount = static_cast<uint32_t>(indices.size());
-            out.write(reinterpret_cast<const char*>(&indexCount), sizeof(indexCount));
-            if (indexCount > 0)
-            {
-                out.write(reinterpret_cast<const char*>(indices.data()), indexCount * sizeof(uint32_t));
-            }
-        }
-        else
-        {
-            uint32_t zero = 0;
-            out.write(reinterpret_cast<const char*>(&zero), sizeof(zero));
-            out.write(reinterpret_cast<const char*>(&zero), sizeof(zero));
-        }
-        break;
-    }
-    case AssetType::Level:
-    {
-        auto level = std::dynamic_pointer_cast<EngineLevel>(object);
-        // keep string slot for format compatibility
-        writeString(out, materialAssetPath);
-
-        uint32_t depCount = 0;
-        if (level)
-        {
-			const auto& deps = level->getWorldObjects();
-            depCount = static_cast<uint32_t>(deps.size());
-        }
-
-        out.write(reinterpret_cast<const char*>(&depCount), sizeof(depCount));
-
-		if (level)
+	{
+		std::lock_guard<std::mutex> lock(m_stateMutex);
+		auto pathIt = m_loadedAssetsByPath.find(path);
+		if (pathIt != m_loadedAssetsByPath.end())
 		{
-			const auto& deps = level->getWorldObjects();
-			for (uint32_t i = 0; i < depCount; ++i)
-			{
-				const auto& inst = deps[i];
-				const std::string path = (inst && inst->object ? inst->object->getPath() : std::string{});
-				writeString(out, path);
+			return static_cast<int>(pathIt->second);
+		}
+	}
 
-				Vec3 p{}, r{}, s{};
-				if (inst)
+	if (syncState == Async)
+	{
+		enqueueJob([this, path, type]()
+			{
+				switch (type)
 				{
-					p = inst->transform.getPosition();
-					r = inst->transform.getRotation();
-					s = inst->transform.getScale();
+				case AssetType::Model3D:
+				case AssetType::PointLight:
+					loadObject3DAsset(path);
+					break;
+				case AssetType::Model2D:
+					loadObject2DAsset(path);
+					break;
+				case AssetType::Texture:
+					loadTextureAsset(path);
+					break;
+			case AssetType::Audio:
+				loadAudioAsset(path);
+				break;
+				case AssetType::Material:
+					loadMaterialAsset(path);
+					break;
+						case AssetType::Level:
+								loadLevelAsset(path);
+								break;
+							case AssetType::Skybox:
+								loadSkyboxAsset(path);
+								break;
+							default:
+								break;
+							}
+						});
+					return 0;
 				}
 
-				out.write(reinterpret_cast<const char*>(&p), sizeof(p));
-				out.write(reinterpret_cast<const char*>(&r), sizeof(r));
-				out.write(reinterpret_cast<const char*>(&s), sizeof(s));
+	LoadResult result;
+	switch (type)
+	{
+	case AssetType::Model3D:
+	case AssetType::PointLight:
+		result = loadObject3DAsset(path);
+		break;
+	case AssetType::Model2D:
+		result = loadObject2DAsset(path);
+		break;
+	case AssetType::Texture:
+		result = loadTextureAsset(path);
+		break;
+	case AssetType::Audio:
+		result = loadAudioAsset(path);
+		break;
+	case AssetType::Material:
+		result = loadMaterialAsset(path);
+		break;
+	case AssetType::Level:
+		result = loadLevelAsset(path);
+		break;
+	case AssetType::Widget:
+		result = loadWidgetAsset(path);
+		break;
+	case AssetType::Skybox:
+		result = loadSkyboxAsset(path);
+		break;
+	default:
+		return 0;
+	}
 
-				// Persist group membership for non-instanced world objects.
-				const std::string gid = (inst ? inst->groupID : std::string{});
-				writeString(out, gid);
-			}
+	if (!result.success)
+	{
+		return 0;
+	}
+	{
+		std::lock_guard<std::mutex> lock(m_stateMutex);
+		auto pathIt = m_loadedAssetsByPath.find(path);
+		if (pathIt != m_loadedAssetsByPath.end())
+		{
+			return static_cast<int>(pathIt->second);
 		}
+	}
 
-        // --- Groups (appended for backward compatibility) ---
-        uint32_t groupCount = 0;
-        if (level)
-        {
-            groupCount = static_cast<uint32_t>(level->getGroups().size());
-        }
+	return 0;
+}
 
-        out.write(reinterpret_cast<const char*>(&groupCount), sizeof(groupCount));
-
-        if (level)
-        {
-            const auto& groups = level->getGroups();
-            for (uint32_t gi = 0; gi < groupCount; ++gi)
-            {
-                const auto& g = groups[gi];
-
-                writeString(out, g.id);
-                const uint8_t instanced = g.isInstanced ? 1u : 0u;
-                out.write(reinterpret_cast<const char*>(&instanced), sizeof(instanced));
-
-                const uint32_t instCount = static_cast<uint32_t>(std::min(g.objects.size(), g.transforms.size()));
-                out.write(reinterpret_cast<const char*>(&instCount), sizeof(instCount));
-
-                for (uint32_t ii = 0; ii < instCount; ++ii)
-                {
-                    const auto& entryObj = g.objects[ii];
-                    const std::string path = (entryObj ? entryObj->getPath() : std::string{});
-                    writeString(out, path);
-
-                    const Transform& t = g.transforms[ii];
-                    Vec3 p = t.getPosition();
-                    Vec3 r = t.getRotation();
-                    Vec3 s = t.getScale();
-
-                    out.write(reinterpret_cast<const char*>(&p), sizeof(p));
-                    out.write(reinterpret_cast<const char*>(&r), sizeof(r));
-                    out.write(reinterpret_cast<const char*>(&s), sizeof(s));
-                }
-            }
-        }
-        break;
-    }
-    default:
-        writeString(out, materialAssetPath);
-        break;
-    }
-
-    if (!out.good())
+bool AssetManager::saveAsset(const Asset& asset, SyncState syncState, DiagnosticsManager::Action action)
+{
+	auto& diagnostics = DiagnosticsManager::Instance();
+    if (asset.ID == 0)
     {
-        logger.log(Logger::Category::AssetManagement, "Error writing asset file: " + finalAssetPath.string(), Logger::LogLevel::ERROR);
+        Logger::Instance().log(Logger::Category::AssetManagement, "saveAsset(): dummy save for asset with ID 0.");
+        return true;
+    }
+	std::shared_ptr<AssetData> assetData;
+	{
+		std::lock_guard<std::mutex> lock(m_stateMutex);
+		auto it = m_loadedAssets.find(asset.ID);
+		if (it != m_loadedAssets.end())
+		{
+			assetData = it->second;
+		}
+	}
+	if (!assetData)
+    {
+        Logger::Instance().log(
+            Logger::Category::AssetManagement,
+            "saveAsset(): Asset with ID " + std::to_string(asset.ID) + " not found among loaded assets.",
+            Logger::LogLevel::ERROR);
         return false;
     }
-
-    object->setIsSaved(true);
-    return true;
-}
+        auto newAction = diagnostics.registerAction(DiagnosticsManager::ActionType::SavingAsset);
+        SaveResult result;
+        switch (asset.type)
+        {
+        case AssetType::Model2D:
+            if (syncState == Async)
+            {
+                enqueueJob([this, asset, newAction]()
+                    {
+						std::shared_ptr<AssetData> queuedAssetData;
+						{
+							std::lock_guard<std::mutex> lock(m_stateMutex);
+							auto it = m_loadedAssets.find(asset.ID);
+							if (it != m_loadedAssets.end())
+							{
+								queuedAssetData = it->second;
+							}
+						}
+						saveObject2DAsset(queuedAssetData);
+						DiagnosticsManager::Instance().updateActionProgress(newAction.ID, false);
+                    });
+                return true;
+            }
+			result = saveObject2DAsset(assetData);
+            break;
+	case AssetType::Model3D:
+	case AssetType::PointLight:
+			result = saveObject3DAsset(assetData);
+			break;
+        case AssetType::Texture:
+			result = saveTextureAsset(assetData);
+            break;
+        case AssetType::Material:
+			result = saveMaterialAsset(assetData);
+            break;
+	case AssetType::Widget:
+		result = saveWidgetAsset(assetData);
+		break;
+	case AssetType::Audio:
+		result = saveAudioAsset(assetData);
+		break;
+	case AssetType::Skybox:
+		result = saveSkyboxAsset(assetData);
+		break;
+		case AssetType::Script:
+        case AssetType::Shader:
+        case AssetType::Unknown:
+        default:
+            Logger::Instance().log(
+                Logger::Category::AssetManagement,
+				"saveAsset(): Unsupported asset type for asset: " + assetData->getName(),
+                Logger::LogLevel::ERROR);
+            return false;
+        }
+        if (!result.success)
+        {
+            Logger::Instance().log(
+                Logger::Category::AssetManagement,
+				"saveAsset(): Failed to save asset: " + assetData->getName() + ". Error: " + result.errorMessage,
+                Logger::LogLevel::ERROR);
+            return false;
+        }
+		diagnostics.updateActionProgress(action.ID, false);
+        return result.success;
+    }
 
 static std::string normalizeAssetRelPath(AssetType type, std::string relPath)
 {
@@ -1400,209 +3769,1029 @@ static std::string normalizeAssetRelPath(AssetType type, std::string relPath)
     return p.generic_string();
 }
 
-void AssetManager::ensureDefaultTriangleAssetSaved()
-{
-    auto& logger = Logger::Instance();
-
-    // Lazily create defaults (requires a project to be loaded for importing/saving).
-    ensureDefaultAssetsCreated();
-
-    std::shared_ptr<EngineObject> tri;
-    bool needsSave = false;
-    {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        tri = m_defaultTriangle2D;
-        needsSave = (tri != nullptr) && !tri->getIsSaved();
-    }
-
-    if (!tri)
-    {
-        logger.log(Logger::Category::AssetManagement, "Default triangle asset missing; cannot initialize level content.", Logger::LogLevel::WARNING);
-        return;
-    }
-
-    // Object2D no longer owns/persists material asset references; runtime Material handles that.
-
-    if (needsSave)
-    {
-        if (!saveAsset(tri))
-        {
-            logger.log(Logger::Category::AssetManagement, "Failed to persist default triangle asset.", Logger::LogLevel::ERROR);
-        }
-    }
-}
-
-std::unique_ptr<EngineLevel> AssetManager::createLevelWithDefaultTriangle(const std::string& levelPath, const std::string& levelName)
-{
-    auto& logger = Logger::Instance();
-    auto& diagnostics = DiagnosticsManager::Instance();
-
-    if (!diagnostics.isProjectLoaded() || diagnostics.getProjectInfo().projectPath.empty())
-    {
-        logger.log(Logger::Category::AssetManagement, "createLevelWithDefaultTriangle: no project loaded.", Logger::LogLevel::ERROR);
-        return nullptr;
-    }
-
-    // Ensure default assets exist on disk.
-    ensureDefaultAssetsCreated();
-
-    // Load default model so level can reference it.
-    auto quadObj = loadAssetObject("default_quad3d.asset");
-    auto quad = std::dynamic_pointer_cast<Object3D>(quadObj);
-    if (!quad)
-    {
-        logger.log(Logger::Category::AssetManagement, "createLevelWithDefaultTriangle: failed to load default_quad3d.asset", Logger::LogLevel::ERROR);
-        return nullptr;
-    }
-
-    auto level = std::make_unique<EngineLevel>();
-    level->setName(levelName);
-    level->setPath(fs::path(levelPath).generic_string());
-    level->setAssetType(AssetType::Level);
-    level->setIsSaved(false);
-
-	Transform t{};
-	t.setPosition(Vec3{ 0.25f, 0.0f, 0.0f });
-	t.setRotation(Vec3{ 20.0f, 50.0f, 70.0f });
-	t.setScale(Vec3{ 1.0f, 1.0f, 1.0f });
-	level->registerObject(quad, t, std::string{});
-
-    // Save via aliasing shared_ptr (non-owning).
-    std::shared_ptr<EngineObject> base;
-    std::shared_ptr<EngineObject> alias(base, static_cast<EngineObject*>(level.get()));
-    if (!saveAsset(alias))
-    {
-        logger.log(Logger::Category::AssetManagement, "createLevelWithDefaultTriangle: failed to save level asset: " + level->getPath(), Logger::LogLevel::ERROR);
-        return nullptr;
-    }
-
-    return level;
-}
-
-std::shared_ptr<EngineObject> AssetManager::createAsset(AssetType type, const std::string& path, const std::string& name, const std::string& sourcePath)
+int AssetManager::createAsset(AssetType type, const std::string& path, const std::string& name, const std::string& sourcePath, SyncState syncState)
 {
     auto& logger = Logger::Instance();
     logger.log(Logger::Category::AssetManagement, "Creating asset with name: " + name + " at " + path, Logger::LogLevel::INFO);
 
-    std::shared_ptr<EngineObject> obj;
-    std::string normalizedRel;
-    {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-
-        switch (type)
-        {
-        case AssetType::Model2D:
-            obj = std::make_shared<Object2D>();
-            break;
-        case AssetType::Model3D:
-            obj = std::make_shared<Object3D>();
-            break;
-        case AssetType::Texture:
-            obj = std::make_shared<Texture>();
-            break;
-        case AssetType::Material:
-            obj = std::make_shared<Material>();
-            break;
-        case AssetType::Audio:
-        case AssetType::Script:
-        case AssetType::Shader:
-        case AssetType::Unknown:
-        default:
-            obj = std::make_shared<EngineObject>();
-            break;
-        }
-
-        fs::path rel = fs::path(path);
-        if (rel.is_absolute())
-        {
-            rel = rel.filename();
-        }
-
-        normalizedRel = normalizeAssetRelPath(type, rel.generic_string());
-
-        obj->setPath(normalizedRel);
-        obj->setName(name);
-        obj->setAssetType(type);
-        obj->setIsSaved(false);
-
-        if (type == AssetType::Texture)
-        {
-            auto tex = std::dynamic_pointer_cast<Texture>(obj);
-            if (tex)
-            {
-                if (sourcePath.empty())
-                {
-                    logger.log("Texture asset creation requires a sourcePath to import image data.", Logger::LogLevel::ERROR);
-                    return nullptr;
-                }
-
-                int w = 0, h = 0, c = 0;
-                unsigned char* data = stbi_load(sourcePath.c_str(), &w, &h, &c, 0);
-                if (!data)
-                {
-                    logger.log("Failed to load texture source image: " + sourcePath, Logger::LogLevel::ERROR);
-                    return nullptr;
-                }
-
-                const size_t total = static_cast<size_t>(w) * static_cast<size_t>(h) * static_cast<size_t>(c);
-                std::vector<unsigned char> bytes;
-                bytes.assign(data, data + total);
-                stbi_image_free(data);
-
-                tex->setWidth(w);
-                tex->setHeight(h);
-                tex->setChannels(c);
-                tex->setData(std::move(bytes));
-            }
-        }
-
-        if (type == AssetType::Material)
-        {
-            auto mat = std::dynamic_pointer_cast<Material>(obj);
-            if (mat)
-            {
-                std::vector<std::string> refs;
-                if (!sourcePath.empty())
-                {
-                    refs.push_back(sourcePath);
-                }
-                mat->setTextureAssetPaths(std::move(refs));
-            }
-        }
-
-        // ALWAYS register in GC when created
-        m_garbageCollector.registerResource(obj);
-    }
-
-    if (!saveAsset(obj))
-    {
-        logger.log("Failed to save newly created asset: " + name, Logger::LogLevel::ERROR);
-        return nullptr;
-    }
-
-    // Update registry and persist it (only if a project is loaded)
-    {
-        auto& diagnostics = DiagnosticsManager::Instance();
-        const auto info = diagnostics.getProjectInfo();
-        if (!info.projectPath.empty() && diagnostics.isProjectLoaded())
-        {
-            AssetRegistryEntry e;
-            e.name = name;
-            e.path = obj->getPath();
-            e.type = type;
-            registerAssetInRegistry(e);
-
-            if (!saveAssetRegistry(info.projectPath))
-            {
-                logger.log("Failed to update asset registry.", Logger::LogLevel::WARNING);
-            }
-        }
-    }
-
-    return obj;
+    return -1;
 }
 
-bool AssetManager::loadProject(const std::string& projectPath)
+bool AssetManager::OpenImportDialog(SDL_Window* parentWindow /* = nullptr */, AssetType forcedType /* = AssetType::Unknown */, SyncState syncState /* = Sync */)
+{
+    auto& logger = Logger::Instance();
+    auto& diagnostics = DiagnosticsManager::Instance();
+	auto action = diagnostics.registerAction(DiagnosticsManager::ActionType::ImportingAsset);
+    if (parentWindow)
+    {
+        ImportDialogContext* ctx = new ImportDialogContext();
+        ctx->preferredType = forcedType;
+		ctx->ActionID = action.ID;
+
+        // SDL3: Filter als SDL_DialogFileFilter-Array
+        SDL_DialogFileFilter filters[] = {
+            { "All Supported", "png;jpg;jpeg;bmp;tga;hdr;wav;obj;fbx;gltf;glb;dae;3ds;blend;stl;ply;x3d;glsl;vert;frag;geom;comp;py" },
+            { "Image Files", "png;jpg;jpeg;bmp;tga;hdr" },
+            { "3D Models", "obj;fbx;gltf;glb;dae;3ds;blend;stl;ply;x3d" },
+            { "Audio Files", "wav" },
+            { "Shaders", "glsl;vert;frag;geom;comp" },
+            { "Scripts", "py" },
+            { "All Files", "*" }
+        };
+
+        logger.log(Logger::Category::AssetManagement, "Opening import asset dialog with SDL...", Logger::LogLevel::INFO);
+
+        // Korrekte SDL3-Funktion verwenden
+        SDL_ShowOpenFileDialog(
+            OnImportDialogClosed, // Callback (bereits im File definiert)
+            ctx,                  // Userdata
+            parentWindow,         // Window
+            filters,              // Filter-Array
+            SDL_arraysize(filters), // Anzahl Filter
+            nullptr,              // Default Location
+            false                 // allow_many: nur eine Datei
+        );
+        return true;
+    }
+    logger.log(Logger::Category::AssetManagement, "Opening import asset dialog...", Logger::LogLevel::INFO);
+    return false;
+}
+
+void AssetManager::importAssetFromPath(std::string path, AssetType preferredType, unsigned int ActionID)
+{
+	auto& logger = Logger::Instance();
+	auto& diagnostics = DiagnosticsManager::Instance();
+	logger.log(Logger::Category::AssetManagement, "Importing asset from path: " + path, Logger::LogLevel::INFO);
+
+	if (!diagnostics.isProjectLoaded())
+	{
+		logger.log(Logger::Category::AssetManagement, "Import failed: no project loaded.", Logger::LogLevel::ERROR);
+		diagnostics.enqueueToastNotification("Import failed: no project loaded.", 4.0f);
+		diagnostics.updateActionProgress(ActionID, false);
+		return;
+	}
+
+	if (!fs::exists(path))
+	{
+		logger.log(Logger::Category::AssetManagement, "Import asset failed: file does not exist: " + path, Logger::LogLevel::ERROR);
+		diagnostics.enqueueToastNotification("Import failed: file not found.", 4.0f);
+		diagnostics.updateActionProgress(ActionID, false);
+		return;
+	}
+
+	const fs::path sourcePath(path);
+	const AssetType detectedType = (preferredType != AssetType::Unknown)
+		? preferredType
+		: DetectAssetTypeFromPath(sourcePath);
+
+	if (detectedType == AssetType::Unknown)
+	{
+		logger.log(Logger::Category::AssetManagement, "Import failed: unsupported file format: " + sourcePath.extension().string(), Logger::LogLevel::ERROR);
+		diagnostics.enqueueToastNotification("Import failed: unsupported format " + sourcePath.extension().string(), 4.0f);
+		diagnostics.updateActionProgress(ActionID, false);
+		return;
+	}
+
+	const std::string assetName = sanitizeName(sourcePath.stem().string());
+	const fs::path contentDir = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+	const fs::path destAssetPath = contentDir / (assetName + ".asset");
+	const std::string relPath = fs::relative(destAssetPath, contentDir).generic_string();
+
+	json data = json::object();
+	bool success = false;
+
+	switch (detectedType)
+	{
+	case AssetType::Texture:
+	{
+		int width = 0, height = 0, channels = 0;
+		unsigned char* imgData = stbi_load(path.c_str(), &width, &height, &channels, 4);
+		if (!imgData)
+		{
+			logger.log(Logger::Category::AssetManagement, "Import failed: stb_image could not load: " + path, Logger::LogLevel::ERROR);
+			break;
+		}
+		channels = 4;
+
+		// Copy source file to Content folder
+		const fs::path destSourcePath = contentDir / sourcePath.filename();
+		std::error_code ec;
+		fs::copy_file(sourcePath, destSourcePath, fs::copy_options::overwrite_existing, ec);
+
+		const std::string relSourcePath = fs::relative(destSourcePath, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
+		data["m_sourcePath"] = relSourcePath;
+		data["m_width"] = width;
+		data["m_height"] = height;
+		data["m_channels"] = channels;
+
+		stbi_image_free(imgData);
+		success = true;
+		break;
+	}
+
+	case AssetType::Audio:
+	{
+		// Copy source .wav to Content folder
+		const fs::path destSourcePath = contentDir / sourcePath.filename();
+		std::error_code ec;
+		fs::copy_file(sourcePath, destSourcePath, fs::copy_options::overwrite_existing, ec);
+
+		const std::string relSourcePath = fs::relative(destSourcePath, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
+		data["m_sourcePath"] = relSourcePath;
+		data["m_format"] = "wav";
+		success = true;
+		break;
+	}
+
+	case AssetType::Model3D:
+	{
+		Assimp::Importer importer;
+		const aiScene* scene = importer.ReadFile(path,
+			aiProcess_Triangulate |
+			aiProcess_GenNormals |
+			aiProcess_FlipUVs |
+			aiProcess_JoinIdenticalVertices |
+			aiProcess_OptimizeMeshes);
+
+		if (!scene || !scene->mRootNode || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE))
+		{
+			logger.log(Logger::Category::AssetManagement, "Import failed: Assimp error: " + std::string(importer.GetErrorString()), Logger::LogLevel::ERROR);
+			break;
+		}
+
+		// ── Log scene contents ──
+		logger.log(Logger::Category::AssetManagement,
+			"Import 3D model '" + assetName + "': " + std::to_string(scene->mNumMeshes) + " mesh(es), "
+			+ std::to_string(scene->mNumMaterials) + " material(s), "
+			+ std::to_string(scene->mNumTextures) + " embedded texture(s), "
+			+ std::to_string(scene->mNumAnimations) + " animation(s)",
+			Logger::LogLevel::INFO);
+
+		for (unsigned int mi = 0; mi < scene->mNumMeshes; ++mi)
+		{
+			const aiMesh* m = scene->mMeshes[mi];
+			std::string meshName = m->mName.length > 0 ? m->mName.C_Str() : ("Mesh_" + std::to_string(mi));
+			int uvChannels = 0;
+			for (int ch = 0; ch < AI_MAX_NUMBER_OF_TEXTURECOORDS; ++ch)
+			{
+				if (m->mTextureCoords[ch]) ++uvChannels; else break;
+			}
+			logger.log(Logger::Category::AssetManagement,
+				"  Mesh[" + std::to_string(mi) + "] '" + meshName + "': "
+				+ std::to_string(m->mNumVertices) + " vertices, "
+				+ std::to_string(m->mNumFaces) + " faces, "
+				+ std::to_string(uvChannels) + " UV channel(s), "
+				+ (m->HasNormals() ? "normals" : "no normals") + ", "
+				+ (m->HasTangentsAndBitangents() ? "tangents" : "no tangents") + ", "
+				+ "materialIndex=" + std::to_string(m->mMaterialIndex),
+				Logger::LogLevel::INFO);
+		}
+
+		for (unsigned int mi = 0; mi < scene->mNumMaterials; ++mi)
+		{
+			const aiMaterial* mat = scene->mMaterials[mi];
+			aiString matNameLog;
+			mat->Get(AI_MATKEY_NAME, matNameLog);
+			std::string mName = matNameLog.length > 0 ? matNameLog.C_Str() : ("Material_" + std::to_string(mi));
+
+			auto countTex = [&](aiTextureType t) { return mat->GetTextureCount(t); };
+			logger.log(Logger::Category::AssetManagement,
+				"  Material[" + std::to_string(mi) + "] '" + mName + "': "
+				+ std::to_string(countTex(aiTextureType_DIFFUSE)) + " diffuse, "
+				+ std::to_string(countTex(aiTextureType_SPECULAR)) + " specular, "
+				+ std::to_string(countTex(aiTextureType_NORMALS)) + " normal, "
+				+ std::to_string(countTex(aiTextureType_HEIGHT)) + " height, "
+				+ std::to_string(countTex(aiTextureType_AMBIENT)) + " ambient, "
+				+ std::to_string(countTex(aiTextureType_EMISSIVE)) + " emissive",
+				Logger::LogLevel::INFO);
+		}
+
+		// Collect all meshes into a single vertex/index buffer (pos3 + uv2 layout)
+		std::vector<float> vertices;
+		std::vector<uint32_t> indices;
+		uint32_t indexOffset = 0;
+
+		for (unsigned int m = 0; m < scene->mNumMeshes; ++m)
+		{
+			const aiMesh* mesh = scene->mMeshes[m];
+			for (unsigned int v = 0; v < mesh->mNumVertices; ++v)
+			{
+				vertices.push_back(mesh->mVertices[v].x);
+				vertices.push_back(mesh->mVertices[v].y);
+				vertices.push_back(mesh->mVertices[v].z);
+
+				if (mesh->mTextureCoords[0])
+				{
+					vertices.push_back(mesh->mTextureCoords[0][v].x);
+					vertices.push_back(mesh->mTextureCoords[0][v].y);
+				}
+				else
+				{
+					vertices.push_back(0.0f);
+					vertices.push_back(0.0f);
+				}
+			}
+
+			for (unsigned int f = 0; f < mesh->mNumFaces; ++f)
+			{
+				const aiFace& face = mesh->mFaces[f];
+				for (unsigned int i = 0; i < face.mNumIndices; ++i)
+				{
+					indices.push_back(indexOffset + face.mIndices[i]);
+				}
+			}
+
+			indexOffset += mesh->mNumVertices;
+		}
+
+		data["m_vertices"] = vertices;
+		data["m_indices"] = indices;
+
+		logger.log(Logger::Category::AssetManagement,
+			"Import 3D model: " + std::to_string(vertices.size() / 5) + " vertices, " + std::to_string(indices.size()) + " indices",
+			Logger::LogLevel::INFO);
+
+		// ── Extract materials and textures from the Assimp scene ──
+		if (scene->HasMaterials())
+		{
+			const fs::path sourceDir = sourcePath.parent_path();
+			const fs::path texturesDir = contentDir / "Textures";
+			const fs::path materialsDir = contentDir / "Materials";
+			std::error_code dirEc;
+			fs::create_directories(texturesDir, dirEc);
+			fs::create_directories(materialsDir, dirEc);
+
+			json createdMaterials = json::array();
+
+			for (unsigned int mi = 0; mi < scene->mNumMaterials; ++mi)
+			{
+				const aiMaterial* aiMat = scene->mMaterials[mi];
+				std::string matName = (scene->mNumMaterials == 1)
+					? assetName
+					: (assetName + "_Material_" + std::to_string(mi));
+
+				json matData = json::object();
+				json textureAssetPaths = json::array();
+
+				// Helper: import a texture of a given Assimp type
+				auto importTexture = [&](aiTextureType texType, const std::string& label) -> std::string
+				{
+					if (aiMat->GetTextureCount(texType) == 0)
+						return {};
+
+					aiString aiTexPath;
+					if (aiMat->GetTexture(texType, 0, &aiTexPath) != AI_SUCCESS)
+						return {};
+
+					std::string texPathStr(aiTexPath.C_Str());
+					if (texPathStr.empty())
+						return {};
+
+					// Check for embedded textures (path starts with '*')
+					const aiTexture* embeddedTex = scene->GetEmbeddedTexture(texPathStr.c_str());
+					fs::path destImagePath;
+					std::string texAssetName;
+
+					if (embeddedTex)
+					{
+						// Embedded texture – write to disk
+						std::string embeddedExt = ".png";
+						if (embeddedTex->achFormatHint[0] != '\0')
+						{
+							embeddedExt = std::string(".") + embeddedTex->achFormatHint;
+						}
+						texAssetName = sanitizeName(assetName + "_" + label);
+						destImagePath = texturesDir / (texAssetName + embeddedExt);
+
+						if (embeddedTex->mHeight == 0)
+						{
+							// Compressed data (e.g. PNG/JPG stored as-is)
+							std::ofstream imgOut(destImagePath, std::ios::binary);
+							if (imgOut.is_open())
+							{
+								imgOut.write(reinterpret_cast<const char*>(embeddedTex->pcData), embeddedTex->mWidth);
+							}
+						}
+						else
+						{
+							// Raw RGBA pixel data – write as TGA
+							destImagePath.replace_extension(".tga");
+							std::ofstream imgOut(destImagePath, std::ios::binary);
+							if (imgOut.is_open())
+							{
+								const int w = static_cast<int>(embeddedTex->mWidth);
+								const int h = static_cast<int>(embeddedTex->mHeight);
+								uint8_t header[18] = {};
+								header[2] = 2;
+								header[12] = static_cast<uint8_t>(w & 0xFF);
+								header[13] = static_cast<uint8_t>((w >> 8) & 0xFF);
+								header[14] = static_cast<uint8_t>(h & 0xFF);
+								header[15] = static_cast<uint8_t>((h >> 8) & 0xFF);
+								header[16] = 32;
+								header[17] = 0x28;
+								imgOut.write(reinterpret_cast<const char*>(header), 18);
+								for (int y = 0; y < h; ++y)
+								{
+									for (int x = 0; x < w; ++x)
+									{
+										const auto& px = embeddedTex->pcData[y * w + x];
+										const uint8_t bgra[4] = { px.b, px.g, px.r, px.a };
+										imgOut.write(reinterpret_cast<const char*>(bgra), 4);
+									}
+								}
+							}
+						}
+					}
+					else
+					{
+						// External texture file – resolve relative to source model directory
+						fs::path externalPath = fs::path(texPathStr);
+						if (!externalPath.is_absolute())
+						{
+							externalPath = sourceDir / externalPath;
+						}
+						if (!fs::exists(externalPath))
+						{
+							logger.log(Logger::Category::AssetManagement,
+								"Import: texture file not found: " + externalPath.string(),
+								Logger::LogLevel::WARNING);
+							return {};
+						}
+						texAssetName = sanitizeName(assetName + "_" + label);
+						destImagePath = texturesDir / externalPath.filename();
+						std::error_code cpEc;
+						fs::copy_file(externalPath, destImagePath, fs::copy_options::skip_existing, cpEc);
+					}
+
+					if (texAssetName.empty() || !fs::exists(destImagePath))
+						return {};
+
+					// Create texture .asset file
+					const std::string texRelSourcePath = fs::relative(destImagePath, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
+					const fs::path texAssetPath = texturesDir / (texAssetName + ".asset");
+					const std::string texRelPath = fs::relative(texAssetPath, contentDir).generic_string();
+
+					// Skip if texture asset already exists
+					if (!fs::exists(texAssetPath))
+					{
+						int width = 0, height = 0, channels = 0;
+						unsigned char* imgData = stbi_load(destImagePath.string().c_str(), &width, &height, &channels, 4);
+						if (imgData)
+						{
+							channels = 4;
+							json texData = json::object();
+							texData["m_sourcePath"] = texRelSourcePath;
+							texData["m_width"] = width;
+							texData["m_height"] = height;
+							texData["m_channels"] = channels;
+
+							json texFileJson = json::object();
+							texFileJson["magic"] = 0x41535453;
+							texFileJson["version"] = 2;
+							texFileJson["type"] = static_cast<int>(AssetType::Texture);
+							texFileJson["name"] = texAssetName;
+							texFileJson["data"] = texData;
+
+							std::ofstream texOut(texAssetPath, std::ios::out | std::ios::trunc);
+							if (texOut.is_open())
+							{
+								texOut << texFileJson.dump(4);
+								texOut.close();
+
+								AssetRegistryEntry texRegEntry;
+								texRegEntry.name = texAssetName;
+								texRegEntry.path = texRelPath;
+								texRegEntry.type = AssetType::Texture;
+								registerAssetInRegistry(texRegEntry);
+
+								logger.log(Logger::Category::AssetManagement,
+									"Import: created texture asset: " + texAssetName,
+									Logger::LogLevel::INFO);
+							}
+							stbi_image_free(imgData);
+						}
+					}
+
+					return texRelPath;
+				};
+
+				// Import diffuse texture
+				std::string diffuseTexPath = importTexture(aiTextureType_DIFFUSE, "Diffuse");
+				if (!diffuseTexPath.empty())
+				{
+					textureAssetPaths.push_back(diffuseTexPath);
+				}
+
+				// Import specular texture
+				std::string specularTexPath = importTexture(aiTextureType_SPECULAR, "Specular");
+				if (!specularTexPath.empty())
+				{
+					textureAssetPaths.push_back(specularTexPath);
+				}
+
+				// Import normal map
+				std::string normalTexPath = importTexture(aiTextureType_NORMALS, "Normal");
+				if (normalTexPath.empty())
+				{
+					normalTexPath = importTexture(aiTextureType_HEIGHT, "Normal");
+				}
+				if (!normalTexPath.empty())
+				{
+					textureAssetPaths.push_back(normalTexPath);
+				}
+
+				if (!textureAssetPaths.empty())
+				{
+					matData["m_textureAssetPaths"] = textureAssetPaths;
+				}
+
+				// Extract material properties
+				aiColor3D diffuseColor(1.0f, 1.0f, 1.0f);
+				if (aiMat->Get(AI_MATKEY_COLOR_DIFFUSE, diffuseColor) == AI_SUCCESS)
+				{
+					matData["m_diffuseColor"] = json{ {"x", diffuseColor.r}, {"y", diffuseColor.g}, {"z", diffuseColor.b} };
+				}
+
+				aiColor3D specularColor(0.0f, 0.0f, 0.0f);
+				if (aiMat->Get(AI_MATKEY_COLOR_SPECULAR, specularColor) == AI_SUCCESS)
+				{
+					matData["m_specularColor"] = json{ {"x", specularColor.r}, {"y", specularColor.g}, {"z", specularColor.b} };
+				}
+
+				float shininess = 32.0f;
+				if (aiMat->Get(AI_MATKEY_SHININESS, shininess) == AI_SUCCESS)
+				{
+					matData["m_shininess"] = shininess;
+				}
+
+				// Write material .asset file
+				const fs::path matAssetPath = materialsDir / (matName + ".asset");
+				const std::string matRelPath = fs::relative(matAssetPath, contentDir).generic_string();
+
+				if (!fs::exists(matAssetPath))
+				{
+					json matFileJson = json::object();
+					matFileJson["magic"] = 0x41535453;
+					matFileJson["version"] = 2;
+					matFileJson["type"] = static_cast<int>(AssetType::Material);
+					matFileJson["name"] = matName;
+					matFileJson["data"] = matData;
+
+					std::ofstream matOut(matAssetPath, std::ios::out | std::ios::trunc);
+					if (matOut.is_open())
+					{
+						matOut << matFileJson.dump(4);
+						matOut.close();
+
+						AssetRegistryEntry matRegEntry;
+						matRegEntry.name = matName;
+						matRegEntry.path = matRelPath;
+						matRegEntry.type = AssetType::Material;
+						registerAssetInRegistry(matRegEntry);
+
+						logger.log(Logger::Category::AssetManagement,
+							"Import: created material asset: " + matName,
+							Logger::LogLevel::INFO);
+					}
+				}
+
+				createdMaterials.push_back(matRelPath);
+			}
+
+			if (!createdMaterials.empty())
+			{
+				data["m_materialAssetPaths"] = createdMaterials;
+				logger.log(Logger::Category::AssetManagement,
+					"Import: created " + std::to_string(createdMaterials.size()) + " material(s) for model " + assetName,
+					Logger::LogLevel::INFO);
+			}
+		}
+
+		success = true;
+		break;
+	}
+
+	case AssetType::Shader:
+	{
+		// Copy shader source to Content folder
+		const fs::path destSourcePath = contentDir / sourcePath.filename();
+		std::error_code ec;
+		fs::copy_file(sourcePath, destSourcePath, fs::copy_options::overwrite_existing, ec);
+
+		const std::string relSourcePath = fs::relative(destSourcePath, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
+		data["m_sourcePath"] = relSourcePath;
+		data["m_shaderType"] = sourcePath.extension().string();
+		success = true;
+		break;
+	}
+
+	case AssetType::Script:
+	{
+		// Copy script to Content folder
+		const fs::path destSourcePath = contentDir / sourcePath.filename();
+		std::error_code ec;
+		fs::copy_file(sourcePath, destSourcePath, fs::copy_options::overwrite_existing, ec);
+
+		const std::string relSourcePath = fs::relative(destSourcePath, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
+		data["m_sourcePath"] = relSourcePath;
+		data["m_scriptPath"] = relSourcePath;
+		success = true;
+		break;
+	}
+
+	default:
+		logger.log(Logger::Category::AssetManagement, "Import: unhandled asset type for: " + path, Logger::LogLevel::WARNING);
+		break;
+	}
+
+	if (!success)
+	{
+		const std::string failName = sourcePath.filename().string();
+		diagnostics.enqueueToastNotification("Import failed: " + failName, 4.0f);
+		diagnostics.updateActionProgress(ActionID, false);
+		return;
+	}
+
+	// Write the .asset file
+	std::error_code ec;
+	fs::create_directories(destAssetPath.parent_path(), ec);
+
+	std::ofstream out(destAssetPath, std::ios::out | std::ios::trunc);
+	if (!out.is_open())
+	{
+		logger.log(Logger::Category::AssetManagement, "Import failed: could not create .asset file: " + destAssetPath.string(), Logger::LogLevel::ERROR);
+		diagnostics.enqueueToastNotification("Import failed: could not write asset file.", 4.0f);
+		diagnostics.updateActionProgress(ActionID, false);
+		return;
+	}
+
+	json fileJson = json::object();
+	fileJson["magic"] = 0x41535453;
+	fileJson["version"] = 2;
+	fileJson["type"] = static_cast<int>(detectedType);
+	fileJson["name"] = assetName;
+	fileJson["data"] = data;
+
+	out << fileJson.dump(4);
+	out.close();
+
+	// Register in asset registry
+	AssetRegistryEntry regEntry;
+	regEntry.name = assetName;
+	regEntry.path = relPath;
+	regEntry.type = detectedType;
+	registerAssetInRegistry(regEntry);
+
+	diagnostics.updateActionProgress(ActionID, false);
+	logger.log(Logger::Category::AssetManagement,
+		"Import successful: " + assetName + " (" + relPath + ")",
+		Logger::LogLevel::INFO);
+	diagnostics.enqueueToastNotification("Imported: " + assetName, 3.0f);
+
+	if (m_onImportCompleted)
+	{
+		m_onImportCompleted();
+	}
+}
+
+bool AssetManager::moveAsset(const std::string& oldRelPath, const std::string& newRelPath)
+{
+	auto& logger = Logger::Instance();
+	auto& diagnostics = DiagnosticsManager::Instance();
+
+	if (!diagnostics.isProjectLoaded())
+	{
+		logger.log(Logger::Category::AssetManagement, "moveAsset: no project loaded.", Logger::LogLevel::ERROR);
+		return false;
+	}
+
+	if (oldRelPath == newRelPath)
+	{
+		return true;
+	}
+
+	const fs::path contentDir = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+	const fs::path srcAbs = contentDir / oldRelPath;
+	const fs::path destAbs = contentDir / newRelPath;
+
+	// Move the file
+	std::error_code ec;
+	fs::create_directories(destAbs.parent_path(), ec);
+	fs::rename(srcAbs, destAbs, ec);
+	if (ec)
+	{
+		logger.log(Logger::Category::AssetManagement, "moveAsset: rename failed: " + ec.message(), Logger::LogLevel::ERROR);
+		return false;
+	}
+
+	// Also move the source file if it was copied alongside the .asset (e.g. textures, scripts)
+	// Read the .asset and check for m_sourcePath
+	{
+		std::ifstream in(destAbs);
+		if (in.is_open())
+		{
+			try
+			{
+				json fileJson = json::parse(in);
+				in.close();
+				if (fileJson.contains("data") && fileJson["data"].is_object() && fileJson["data"].contains("m_sourcePath"))
+				{
+					const std::string oldSourceRel = fileJson["data"]["m_sourcePath"].get<std::string>();
+					// The m_sourcePath is relative to the project root (e.g. "Content/Textures/wall.jpg")
+					// Update it to match the new location's folder
+					const fs::path oldSourceAbs = fs::path(diagnostics.getProjectInfo().projectPath) / oldSourceRel;
+					if (fs::exists(oldSourceAbs))
+					{
+						const fs::path newSourceAbs = destAbs.parent_path() / fs::path(oldSourceRel).filename();
+						if (oldSourceAbs != newSourceAbs)
+						{
+							fs::rename(oldSourceAbs, newSourceAbs, ec);
+						}
+						const std::string newSourceRel = fs::relative(newSourceAbs, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
+						fileJson["data"]["m_sourcePath"] = newSourceRel;
+
+						// Write updated .asset
+						std::ofstream out(destAbs, std::ios::out | std::ios::trunc);
+						if (out.is_open())
+						{
+							out << fileJson.dump(4);
+						}
+					}
+				}
+			}
+			catch (...)
+			{
+				// Not valid JSON, skip
+			}
+		}
+	}
+
+	// Update registry entry
+	{
+		std::lock_guard<std::mutex> lock(m_stateMutex);
+		auto it = m_registryByPath.find(oldRelPath);
+		if (it != m_registryByPath.end())
+		{
+			const size_t idx = it->second;
+			m_registry[idx].path = newRelPath;
+			m_registryByPath.erase(it);
+			m_registryByPath[newRelPath] = idx;
+		}
+	}
+
+	// Update loaded asset paths
+	for (auto& [id, asset] : m_loadedAssets)
+	{
+		if (asset && asset->getPath() == oldRelPath)
+		{
+			asset->setPath(newRelPath);
+		}
+	}
+
+	// Update ECS component references
+	auto& ecs = ECS::ECSManager::Instance();
+	{
+		ECS::Schema meshSchema;
+		meshSchema.require<ECS::MeshComponent>();
+		for (const auto e : ecs.getEntitiesMatchingSchema(meshSchema))
+		{
+			if (auto* mesh = ecs.getComponent<ECS::MeshComponent>(e))
+			{
+				if (mesh->meshAssetPath == oldRelPath)
+					mesh->meshAssetPath = newRelPath;
+			}
+		}
+	}
+	{
+		ECS::Schema matSchema;
+		matSchema.require<ECS::MaterialComponent>();
+		for (const auto e : ecs.getEntitiesMatchingSchema(matSchema))
+		{
+			if (auto* mat = ecs.getComponent<ECS::MaterialComponent>(e))
+			{
+				if (mat->materialAssetPath == oldRelPath)
+					mat->materialAssetPath = newRelPath;
+			}
+		}
+	}
+	{
+		ECS::Schema scriptSchema;
+		scriptSchema.require<ECS::ScriptComponent>();
+		for (const auto e : ecs.getEntitiesMatchingSchema(scriptSchema))
+		{
+			if (auto* script = ecs.getComponent<ECS::ScriptComponent>(e))
+			{
+				if (script->scriptPath == oldRelPath)
+					script->scriptPath = newRelPath;
+			}
+		}
+	}
+
+	m_registryVersion.fetch_add(1, std::memory_order_relaxed);
+
+	logger.log(Logger::Category::AssetManagement,
+		"moveAsset: " + oldRelPath + " → " + newRelPath + " (references updated)",
+		Logger::LogLevel::INFO);
+
+	// Scan all .asset files on disk for references to the old path and update them.
+	// This catches cross-asset dependencies (e.g. Material → Texture, Level → Entity components).
+	updateAssetFileReferences(contentDir, oldRelPath, newRelPath);
+
+	return true;
+}
+
+bool AssetManager::renameAsset(const std::string& relPath, const std::string& newName)
+{
+	auto& logger = Logger::Instance();
+	auto& diagnostics = DiagnosticsManager::Instance();
+
+	if (relPath.empty() || newName.empty())
+	{
+		logger.log(Logger::Category::AssetManagement, "renameAsset: empty relPath or newName.", Logger::LogLevel::ERROR);
+		return false;
+	}
+
+	if (!diagnostics.isProjectLoaded())
+	{
+		logger.log(Logger::Category::AssetManagement, "renameAsset: no project loaded.", Logger::LogLevel::ERROR);
+		return false;
+	}
+
+	// Build new relative path: same parent folder, new filename with same extension
+	const fs::path oldRel(relPath);
+	const std::string ext = oldRel.extension().string();
+	const fs::path parentDir = oldRel.parent_path();
+	const std::string newRelPath = (parentDir / (newName + ext)).generic_string();
+
+	if (relPath == newRelPath)
+	{
+		return true; // no change needed
+	}
+
+	// Check the new path doesn't already exist in the registry
+	{
+		std::lock_guard<std::mutex> lock(m_stateMutex);
+		if (m_registryByPath.count(newRelPath))
+		{
+			logger.log(Logger::Category::AssetManagement, "renameAsset: target path already exists in registry: " + newRelPath, Logger::LogLevel::ERROR);
+			return false;
+		}
+	}
+
+	const fs::path contentDir = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+	const fs::path srcAbs = contentDir / relPath;
+	const fs::path destAbs = contentDir / newRelPath;
+
+	// Check source file exists
+	if (!fs::exists(srcAbs))
+	{
+		logger.log(Logger::Category::AssetManagement, "renameAsset: source file does not exist: " + srcAbs.string(), Logger::LogLevel::ERROR);
+		return false;
+	}
+
+	// Check destination doesn't already exist on disk
+	if (fs::exists(destAbs))
+	{
+		logger.log(Logger::Category::AssetManagement, "renameAsset: destination file already exists: " + destAbs.string(), Logger::LogLevel::ERROR);
+		return false;
+	}
+
+	// Rename the .asset file on disk
+	std::error_code ec;
+	fs::rename(srcAbs, destAbs, ec);
+	if (ec)
+	{
+		logger.log(Logger::Category::AssetManagement, "renameAsset: rename failed: " + ec.message(), Logger::LogLevel::ERROR);
+		return false;
+	}
+
+	// Also rename the source file if it sits alongside the .asset (e.g. textures, scripts)
+	{
+		std::ifstream in(destAbs);
+		if (in.is_open())
+		{
+			try
+			{
+				json fileJson = json::parse(in);
+				in.close();
+				if (fileJson.contains("data") && fileJson["data"].is_object() && fileJson["data"].contains("m_sourcePath"))
+				{
+					const std::string oldSourceRel = fileJson["data"]["m_sourcePath"].get<std::string>();
+					const fs::path oldSourceAbs = fs::path(diagnostics.getProjectInfo().projectPath) / oldSourceRel;
+					if (fs::exists(oldSourceAbs))
+					{
+						const fs::path sourceExt = fs::path(oldSourceRel).extension();
+						const fs::path newSourceAbs = oldSourceAbs.parent_path() / (newName + sourceExt.string());
+						if (oldSourceAbs != newSourceAbs)
+						{
+							fs::rename(oldSourceAbs, newSourceAbs, ec);
+						}
+						const std::string newSourceRel = fs::relative(newSourceAbs, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
+						fileJson["data"]["m_sourcePath"] = newSourceRel;
+
+						std::ofstream out(destAbs, std::ios::out | std::ios::trunc);
+						if (out.is_open())
+						{
+							out << fileJson.dump(4);
+						}
+					}
+				}
+
+				// Update the name field inside the asset file
+				if (fileJson.contains("name"))
+				{
+					fileJson["name"] = newName;
+					std::ofstream out(destAbs, std::ios::out | std::ios::trunc);
+					if (out.is_open())
+					{
+						out << fileJson.dump(4);
+					}
+				}
+			}
+			catch (...)
+			{
+				// Not valid JSON, skip
+			}
+		}
+	}
+
+	// Update registry entry
+	{
+		std::lock_guard<std::mutex> lock(m_stateMutex);
+		auto it = m_registryByPath.find(relPath);
+		if (it != m_registryByPath.end())
+		{
+			const size_t idx = it->second;
+			const std::string oldName = m_registry[idx].name;
+			m_registry[idx].path = newRelPath;
+			m_registry[idx].name = newName;
+			m_registryByPath.erase(it);
+			m_registryByPath[newRelPath] = idx;
+			m_registryByName.erase(oldName);
+			m_registryByName[newName] = idx;
+		}
+	}
+
+	// Update loaded asset paths
+	for (auto& [id, asset] : m_loadedAssets)
+	{
+		if (asset && asset->getPath() == relPath)
+		{
+			asset->setPath(newRelPath);
+			asset->setName(newName);
+		}
+	}
+
+	// Update ECS component references
+	auto& ecs = ECS::ECSManager::Instance();
+	{
+		ECS::Schema meshSchema;
+		meshSchema.require<ECS::MeshComponent>();
+		for (const auto e : ecs.getEntitiesMatchingSchema(meshSchema))
+		{
+			if (auto* mesh = ecs.getComponent<ECS::MeshComponent>(e))
+			{
+				if (mesh->meshAssetPath == relPath)
+					mesh->meshAssetPath = newRelPath;
+			}
+		}
+	}
+	{
+		ECS::Schema matSchema;
+		matSchema.require<ECS::MaterialComponent>();
+		for (const auto e : ecs.getEntitiesMatchingSchema(matSchema))
+		{
+			if (auto* mat = ecs.getComponent<ECS::MaterialComponent>(e))
+			{
+				if (mat->materialAssetPath == relPath)
+					mat->materialAssetPath = newRelPath;
+			}
+		}
+	}
+	{
+		ECS::Schema scriptSchema;
+		scriptSchema.require<ECS::ScriptComponent>();
+		for (const auto e : ecs.getEntitiesMatchingSchema(scriptSchema))
+		{
+			if (auto* script = ecs.getComponent<ECS::ScriptComponent>(e))
+			{
+				if (script->scriptPath == relPath)
+					script->scriptPath = newRelPath;
+			}
+		}
+	}
+
+	// Persist registry
+	if (diagnostics.isProjectLoaded() && !diagnostics.getProjectInfo().projectPath.empty())
+	{
+		saveAssetRegistry(diagnostics.getProjectInfo().projectPath);
+	}
+
+	m_registryVersion.fetch_add(1, std::memory_order_relaxed);
+
+	logger.log(Logger::Category::AssetManagement,
+		"renameAsset: " + relPath + " → " + newRelPath + " (references updated)",
+		Logger::LogLevel::INFO);
+
+	// Scan all .asset files for cross-references
+	updateAssetFileReferences(contentDir, relPath, newRelPath);
+
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Recursively walk a JSON value and replace any string that equals oldVal with newVal.
+// Returns true if at least one replacement was made.
+// ---------------------------------------------------------------------------
+static bool replaceJsonStringValues(json& node, const std::string& oldVal, const std::string& newVal)
+{
+	bool changed = false;
+	if (node.is_string())
+	{
+		if (node.get<std::string>() == oldVal)
+		{
+			node = newVal;
+			changed = true;
+		}
+	}
+	else if (node.is_array())
+	{
+		for (auto& element : node)
+		{
+			changed |= replaceJsonStringValues(element, oldVal, newVal);
+		}
+	}
+	else if (node.is_object())
+	{
+		for (auto& [key, value] : node.items())
+		{
+			changed |= replaceJsonStringValues(value, oldVal, newVal);
+		}
+	}
+	return changed;
+}
+
+void AssetManager::updateAssetFileReferences(const std::filesystem::path& contentDir,
+	const std::string& oldRelPath, const std::string& newRelPath)
+{
+	auto& logger = Logger::Instance();
+	std::error_code ec;
+
+	for (auto it = fs::recursive_directory_iterator(contentDir, fs::directory_options::skip_permission_denied, ec);
+		it != fs::recursive_directory_iterator(); ++it)
+	{
+		if (it->is_directory()) continue;
+		if (it->path().extension() != ".asset") continue;
+
+		// Skip the moved file itself (already at newRelPath)
+		const std::string fileRelPath = fs::relative(it->path(), contentDir).generic_string();
+		if (fileRelPath == newRelPath) continue;
+
+		std::ifstream in(it->path(), std::ios::in | std::ios::binary);
+		if (!in.is_open()) continue;
+
+		json fileJson;
+		try
+		{
+			fileJson = json::parse(in);
+		}
+		catch (...)
+		{
+			continue;
+		}
+		in.close();
+
+		if (!fileJson.is_object()) continue;
+
+		bool changed = false;
+
+		// Scan "data" block (Material textures, source paths, etc.)
+		if (fileJson.contains("data"))
+		{
+			changed |= replaceJsonStringValues(fileJson["data"], oldRelPath, newRelPath);
+		}
+
+		// Scan "Entities" array (Level files with Entity component paths)
+		if (fileJson.contains("Entities"))
+		{
+			changed |= replaceJsonStringValues(fileJson["Entities"], oldRelPath, newRelPath);
+		}
+
+		if (changed)
+		{
+			std::ofstream out(it->path(), std::ios::out | std::ios::trunc);
+			if (out.is_open())
+			{
+				out << fileJson.dump(4);
+				logger.log(Logger::Category::AssetManagement,
+					"moveAsset: updated references in " + fileRelPath,
+					Logger::LogLevel::INFO);
+			}
+		}
+	}
+}
+
+bool AssetManager::loadProject(const std::string& projectPath, SyncState syncState, bool ensureDefaultContent)
 {
     auto& logger = Logger::Instance();
     auto& diagnostics = DiagnosticsManager::Instance();
@@ -1701,80 +4890,43 @@ bool AssetManager::loadProject(const std::string& projectPath)
     // New project/level context: force re-prepare of renderer resources.
     diagnostics.setScenePrepared(false);
 
-    // Ensure default assets exist, but do not create/override the active level here.
-    ensureDefaultAssetsCreated();
+	{
+		const fs::path scriptsRoot = fs::path(info.projectPath) / "Content" / "Scripts";
+		std::error_code scriptsEc;
+		fs::create_directories(scriptsRoot, scriptsEc);
+		const fs::path stubPath = scriptsRoot / "engine.pyi";
+		const fs::path srcStub = fs::current_path() / "Content" / "Scripting" / "engine.pyi";
+		fs::copy_file(srcStub, stubPath, fs::copy_options::overwrite_existing, scriptsEc);
+	}
 
-    auto createAndSetFallbackLevel = [&]()
+    // Ensure default assets if requested (new-project flow may opt out for blank projects).
+    if (ensureDefaultContent)
     {
-        const std::string fallbackPath = (fs::path("Levels") / "DefaultLevel.map").generic_string();
-        logger.log(Logger::Category::Project, "Creating fallback level: " + fallbackPath, Logger::LogLevel::WARNING);
-
-        auto level = createLevelWithDefaultTriangle(fallbackPath, fs::path(fallbackPath).stem().string());
-        if (level)
+        try
         {
-            diagnostics.setActiveLevel(std::move(level));
-            diagnostics.setScenePrepared(false);
-            saveProject(info.projectPath);
+            ensureDefaultAssetsCreated();
         }
-        else
+        catch (const std::exception& ex)
         {
-            logger.log(Logger::Category::Project, "Failed to create fallback level.", Logger::LogLevel::ERROR);
+            logger.log(Logger::Category::Project,
+                std::string("Exception while ensuring default assets during project load: ") + ex.what(),
+                Logger::LogLevel::ERROR);
+            diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingProject, false);
+            return false;
         }
-    };
-
-    if (!LevelPath.empty())
-    {
-		logger.log(Logger::Category::Project, "Loading active level from project file: " + LevelPath, Logger::LogLevel::INFO);
-        const std::string relLevelPath = fs::path(LevelPath).generic_string();
-        auto loadedObj = loadAssetObject(relLevelPath);
-        if (auto loadedLevel = std::dynamic_pointer_cast<EngineLevel>(loadedObj))
+        catch (...)
         {
-			logger.log(Logger::Category::Project, "Active level loaded: " + loadedLevel->getName(), Logger::LogLevel::INFO);
-			// Create a runtime level instance but keep resolved world object references.
-			auto runtimeLevel = std::make_unique<EngineLevel>();
-			runtimeLevel->setName(loadedLevel->getName());
-			runtimeLevel->setPath(loadedLevel->getPath());
-			runtimeLevel->setAssetType(loadedLevel->getAssetType());
-			runtimeLevel->setIsSaved(true);
-
-			// Copy resolved world objects (shared_ptr) and transforms.
-			runtimeLevel->getWorldObjects() = loadedLevel->getWorldObjects();
-			runtimeLevel->getGroups() = loadedLevel->getGroups();
-			logger.log(Logger::Category::Project, "Active level initialized: " + runtimeLevel->getName(), Logger::LogLevel::INFO);
-			diagnostics.setActiveLevel(std::move(runtimeLevel));
-        }
-        else
-        {
-            logger.log(Logger::Category::AssetManagement, "Failed to load configured level asset: " + relLevelPath, Logger::LogLevel::WARNING);
-            createAndSetFallbackLevel();
+            logger.log(Logger::Category::Project,
+                "Unknown exception while ensuring default assets during project load.",
+                Logger::LogLevel::ERROR);
+            diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingProject, false);
+            return false;
         }
     }
-    else
-    {
-		logger.log(Logger::Category::Project, "No active level set in project file.", Logger::LogLevel::WARNING);
-		createAndSetFallbackLevel();
-    }
 
-    // Registry handling: build at the very end, so it includes any ensured default assets.
-	logger.log(Logger::Category::Project, "Building asset registry for project: " + info.projectName, Logger::LogLevel::INFO);
-    {
-        const bool registryLoaded = loadAssetRegistry(info.projectPath);
-        if (!registryLoaded)
-        {
-            logger.log(Logger::Category::AssetManagement, "Asset registry missing/invalid; will rebuild.", Logger::LogLevel::INFO);
-        }
-
-        if (!discoverAssetsAndBuildRegistry(info.projectPath))
-        {
-            logger.log(Logger::Category::AssetManagement, "Asset discovery failed.", Logger::LogLevel::ERROR);
-        }
-
-        if (!saveAssetRegistry(info.projectPath))
-        {
-            logger.log(Logger::Category::AssetManagement, "Failed to save asset registry.", Logger::LogLevel::WARNING);
-        }
-    }
-	logger.log(Logger::Category::AssetManagement, "Asset registry ready. Total assets: " + std::to_string(m_registry.size()), Logger::LogLevel::INFO);
+	// Registry handling: build asynchronously so project loading is not blocked.
+	logger.log(Logger::Category::Project, "Starting async asset registry build for project: " + info.projectName, Logger::LogLevel::INFO);
+	discoverAssetsAndBuildRegistryAsync(info.projectPath);
 
     if (!diagnostics.loadProjectConfig())
     {
@@ -1786,7 +4938,21 @@ bool AssetManager::loadProject(const std::string& projectPath)
     return true;
 }
 
-bool AssetManager::saveProject(const std::string& projectPath)
+void AssetManager::unloadAllAssets()
+{
+	auto& logger = Logger::Instance();
+	logger.log(Logger::Category::AssetManagement, "Unloading all cached assets.", Logger::LogLevel::INFO);
+	{
+		std::lock_guard<std::mutex> lock(m_stateMutex);
+		m_loadedAssets.clear();
+		m_loadedAssetsByPath.clear();
+		m_gcEligibleAssets.clear();
+		s_nextAssetID = 1;
+	}
+	m_garbageCollector.clear();
+}
+
+bool AssetManager::saveProject(const std::string& projectPath, SyncState syncState)
 {
     auto& logger = Logger::Instance();
     auto& diagnostics = DiagnosticsManager::Instance();
@@ -1808,6 +4974,8 @@ bool AssetManager::saveProject(const std::string& projectPath)
     fs::create_directories(root / "Config", ec);
     fs::create_directories(root / "Content", ec);
     fs::create_directories(root / "Content" / "Levels");
+    fs::create_directories(root / "Content" / "Scripts", ec);
+    fs::create_directories(root / "Content" / "Scripts");
 
     if (ec)
     {
@@ -1855,7 +5023,7 @@ bool AssetManager::saveProject(const std::string& projectPath)
     return true;
 }
 
-bool AssetManager::createProject(const std::string& parentDir, const std::string& projectName, const DiagnosticsManager::ProjectInfo& info)
+bool AssetManager::createProject(const std::string& parentDir, const std::string& projectName, const DiagnosticsManager::ProjectInfo& info, SyncState syncState, bool includeDefaultContent)
 {
     auto& logger = Logger::Instance();
     auto& diagnostics = DiagnosticsManager::Instance();
@@ -1877,6 +5045,15 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
         return false;
     }
 
+	{
+		const fs::path scriptsDir = root / "Content" / "Scripts";
+		fs::create_directories(scriptsDir, ec);
+		const fs::path stubPath = scriptsDir / "engine.pyi";
+		const fs::path srcStub = fs::current_path() / "Content" / "Scripting" / "engine.pyi";
+		std::error_code copyEc;
+		fs::copy_file(srcStub, stubPath, fs::copy_options::overwrite_existing, copyEc);
+	}
+
     auto infoWithPath = info;
     infoWithPath.projectPath = fs::absolute(root, ec).string();
     if (ec)
@@ -1888,14 +5065,20 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
 
     const std::string defaultLevelPath = (fs::path("Levels") / "DefaultLevel.map").generic_string();
     auto defaultlevel = std::make_unique<EngineLevel>();
+    defaultlevel->setName("DefaultLevel");
+    defaultlevel->setPath(defaultLevelPath);
+    defaultlevel->setAssetType(AssetType::Level);
     diagnostics.setActiveLevel(std::move(defaultlevel));
 
     // ensure defaults.ini exists for the new project
     diagnostics.loadProjectConfig();
 
-    if (auto* level = diagnostics.getActiveLevel())
+    if (!includeDefaultContent)
     {
-        saveAsset(std::shared_ptr<EngineObject>(level, [](EngineObject*) {}));
+        if (auto level = diagnostics.getActiveLevel())
+        {
+            saveLevelAsset(level);
+        }
     }
 
     bool saved = saveProject(root.string());
@@ -1904,7 +5087,7 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
     {
         logger.log("Project created at: " + root.string(), Logger::LogLevel::INFO);
     }
-	bool loaded = loadProject(root.string());
+	bool loaded = loadProject(root.string(), syncState, includeDefaultContent);
     if (!loaded)
     {
         logger.log("Failed to load newly created project: " + root.string(), Logger::LogLevel::ERROR);
@@ -1913,97 +5096,1261 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
     return loaded;
 }
 
-void AssetManager::importAssetWithDialog(SDL_Window* parentWindow, AssetType preferredType)
+AssetManager::LoadResult AssetManager::loadTextureAsset(const std::string& path)
 {
-    auto& logger = Logger::Instance();
-
-    const auto& diagnostics = DiagnosticsManager::Instance();
-    if (!diagnostics.isProjectLoaded() || diagnostics.getProjectInfo().projectPath.empty())
-    {
-        logger.log(Logger::Category::AssetManagement, "Import failed: no project loaded.", Logger::LogLevel::ERROR);
-        return;
-    }
-
-    auto* ctx = new ImportDialogContext();
-    ctx->preferredType = preferredType;
-
-    SDL_DialogFileFilter filters[] = {
-        { "Images", "png;jpg;jpeg;bmp;tga" },
-        { "All files", "*" }
-    };
-
-    SDL_ShowOpenFileDialog(
-        OnImportDialogClosed,
-        ctx,
-        parentWindow,
-        filters,
-        SDL_arraysize(filters),
-        nullptr,
-        false);
-
-    logger.log(Logger::Category::AssetManagement, "Import dialog opened.", Logger::LogLevel::INFO);
+	LoadResult result;
+	auto raw = readAssetFromDisk(path, AssetType::Texture);
+	if (!raw.success)
+	{
+		result.errorMessage = raw.errorMessage;
+		return result;
+	}
+	result.j = raw.data;
+	auto id = finalizeAssetLoad(std::move(raw));
+	result.success = (id != 0);
+	if (!result.success)
+	{
+		result.errorMessage = "Failed to register texture asset.";
+	}
+	return result;
 }
 
-// NOTE: File dialogs should be handled by the SDL/UI layer and then call importAssetFromFile(...).
-
-std::shared_ptr<EngineObject> AssetManager::importAssetFromFile(AssetType type, const std::string& sourceFilePath)
+AssetManager::LoadResult AssetManager::loadAudioAsset(const std::string& path)
 {
+	LoadResult result;
+	auto raw = readAssetFromDisk(path, AssetType::Audio);
+	if (!raw.success)
+	{
+		result.errorMessage = raw.errorMessage;
+		return result;
+	}
+	result.j = raw.data;
+	auto id = finalizeAssetLoad(std::move(raw));
+	result.success = (id != 0);
+	if (!result.success)
+	{
+		result.errorMessage = "Failed to register audio asset.";
+	}
+	return result;
+}
+
+AssetManager::LoadResult AssetManager::loadWidgetAsset(const std::string& path)
+{
+	LoadResult result;
+	auto raw = readAssetFromDisk(path, AssetType::Widget);
+	if (!raw.success)
+	{
+		result.errorMessage = raw.errorMessage;
+		return result;
+	}
+	result.j = raw.data;
+	auto id = finalizeAssetLoad(std::move(raw));
+	result.success = (id != 0);
+	if (!result.success)
+	{
+		result.errorMessage = "Failed to register widget asset.";
+	}
+	return result;
+}
+
+AssetManager::LoadResult AssetManager::loadMaterialAsset(const std::string& path)
+{
+	LoadResult result;
+	auto raw = readAssetFromDisk(path, AssetType::Material);
+	if (!raw.success)
+	{
+		result.errorMessage = raw.errorMessage;
+		return result;
+	}
+	result.j = raw.data;
+	auto id = finalizeAssetLoad(std::move(raw));
+	result.success = (id != 0);
+	if (!result.success)
+	{
+		result.errorMessage = "Failed to register material asset.";
+	}
+	return result;
+}
+
+AssetManager::LoadResult AssetManager::loadObject2DAsset(const std::string& path)
+{
+	LoadResult result;
+	auto raw = readAssetFromDisk(path, AssetType::Model2D);
+	if (!raw.success)
+	{
+		result.errorMessage = raw.errorMessage;
+		return result;
+	}
+	result.j = raw.data;
+	auto id = finalizeAssetLoad(std::move(raw));
+	result.success = (id != 0);
+	if (!result.success)
+	{
+		result.errorMessage = "Failed to register Object2D asset.";
+	}
+	return result;
+}
+
+AssetManager::LoadResult AssetManager::loadObject3DAsset(const std::string& path)
+{
+	LoadResult result;
+	auto raw = readAssetFromDisk(path, AssetType::Model3D);
+	if (!raw.success)
+	{
+		result.errorMessage = raw.errorMessage;
+		return result;
+	}
+	result.j = raw.data;
+	auto id = finalizeAssetLoad(std::move(raw));
+	result.success = (id != 0);
+	if (!result.success)
+	{
+		result.errorMessage = "Failed to register Object3D asset.";
+	}
+	return result;
+}
+
+AssetManager::LoadResult AssetManager::loadLevelAsset(const std::string& path)
+{
+	LoadResult result;
+	std::ifstream in(path, std::ios::binary);
+	if (!in.is_open())
+	{
+		result.errorMessage = "Failed to open level asset file.";
+		return result;
+	}
+
+    AssetType headerType{ AssetType::Unknown };
+    std::string name;
+    bool isJson = false;
+    if (!readAssetHeader(in, headerType, name, isJson))
+	{
+		result.errorMessage = "Invalid level asset header.";
+		return result;
+	}
+
+	if (headerType != AssetType::Level)
+	{
+		result.errorMessage = "Asset type mismatch for level.";
+		return result;
+	}
+
+    if (!readAssetJson(in, result.j, result.errorMessage, isJson))
+	{
+		return result;
+	}
+
+	if (name.empty())
+	{
+		name = fs::path(path).stem().string();
+	}
+
+	auto level = std::make_unique<EngineLevel>();
+	level->setName(name);
+	level->setAssetType(headerType);
+	level->setIsSaved(true);
+	level->setLevelData(result.j);
+
+	// Store a Content-relative path so saveLevelAsset can reconstruct the
+	// absolute path from projectPath / "Content" / relPath.
+	auto& diagnostics = DiagnosticsManager::Instance();
+	const fs::path contentRoot = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+	fs::path absLevel = fs::absolute(fs::path(path));
+	std::error_code relEc;
+	fs::path relPath = fs::relative(absLevel, contentRoot, relEc);
+	if (relEc || relPath.empty() || relPath.string().find("..") == 0)
+	{
+		level->setPath(path);
+	}
+	else
+	{
+		level->setPath(relPath.generic_string());
+	}
+
+	diagnostics.setActiveLevel(std::move(level));
+	diagnostics.setScenePrepared(false);
+	result.success = true;
+	return result;
+}
+
+AssetManager::SaveResult AssetManager::saveTextureAsset(const std::shared_ptr<AssetData>& texture)
+{
+    SaveResult result;
+    if (!texture)
+    {
+        result.errorMessage = "Texture asset is null.";
+        return result;
+    }
+
+    auto& diagnostics = DiagnosticsManager::Instance();
+    if (!diagnostics.isProjectLoaded())
+    {
+        result.errorMessage = "No project loaded for texture save.";
+        return result;
+    }
+
+    std::string name = texture->getName();
+    if (name.empty())
+    {
+        name = "Texture";
+        texture->setName(name);
+    }
+
+    std::string relPath = texture->getPath();
+    if (relPath.empty())
+    {
+        relPath = name + ".asset";
+        texture->setPath(relPath);
+    }
+
+    fs::path rel = fs::path(relPath);
+    if (rel.extension().empty())
+    {
+        rel.replace_extension(".asset");
+        relPath = rel.generic_string();
+        texture->setPath(relPath);
+    }
+
+    const fs::path absPath = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relPath);
+    std::error_code ec;
+    fs::create_directories(absPath.parent_path(), ec);
+
+    std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+    if (!out.is_open())
+    {
+        result.errorMessage = "Failed to open texture asset file for writing.";
+        return result;
+    }
+
+    json data = texture->getData();
+    if (data.is_null())
+    {
+        data = json::object();
+    }
+
+    json dataToSave = data;
+    if (dataToSave.is_object() && dataToSave.contains("m_sourcePath"))
+    {
+        dataToSave.erase("m_data");
+    }
+
+    json fileJson = json::object();
+    fileJson["magic"] = 0x41535453;
+    fileJson["version"] = 2;
+    fileJson["type"] = static_cast<int>(AssetType::Texture);
+    fileJson["name"] = name;
+    fileJson["data"] = dataToSave;
+
+    out << fileJson.dump(4);
+    if (!out.good())
+    {
+        result.errorMessage = "Failed to write texture asset data.";
+        return result;
+    }
+
+    texture->setIsSaved(true);
+    result.success = true;
+    return result;
+}
+
+AssetManager::SaveResult AssetManager::saveAudioAsset(const std::shared_ptr<AssetData>& audio)
+{
+	SaveResult result;
+	if (!audio)
+	{
+		result.errorMessage = "Audio asset is null.";
+		return result;
+	}
+
+	auto& diagnostics = DiagnosticsManager::Instance();
+	if (!diagnostics.isProjectLoaded())
+	{
+		result.errorMessage = "No project loaded for audio save.";
+		return result;
+	}
+
+	std::string name = audio->getName();
+	if (name.empty())
+	{
+		name = "Audio";
+		audio->setName(name);
+	}
+
+	std::string relPath = audio->getPath();
+	if (relPath.empty())
+	{
+		relPath = name + ".asset";
+		audio->setPath(relPath);
+	}
+
+	fs::path rel = fs::path(relPath);
+	if (rel.extension().empty())
+	{
+		rel.replace_extension(".asset");
+		relPath = rel.generic_string();
+		audio->setPath(relPath);
+	}
+
+	const fs::path absPath = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relPath);
+	std::error_code ec;
+	fs::create_directories(absPath.parent_path(), ec);
+
+	std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+	if (!out.is_open())
+	{
+		result.errorMessage = "Failed to open audio asset file for writing.";
+		return result;
+	}
+
+	json data = audio->getData();
+	if (data.is_null())
+	{
+		data = json::object();
+	}
+
+	json dataToSave = data;
+	if (dataToSave.is_object() && dataToSave.contains("m_sourcePath"))
+	{
+		dataToSave.erase("m_data");
+	}
+
+	json fileJson = json::object();
+	fileJson["magic"] = 0x41535453;
+	fileJson["version"] = 2;
+	fileJson["type"] = static_cast<int>(AssetType::Audio);
+	fileJson["name"] = name;
+	fileJson["data"] = dataToSave;
+
+	out << fileJson.dump(4);
+	if (!out.good())
+	{
+		result.errorMessage = "Failed to write audio asset data.";
+		return result;
+	}
+
+	audio->setIsSaved(true);
+	result.success = true;
+	return result;
+}
+
+AssetManager::SaveResult AssetManager::saveMaterialAsset(const std::shared_ptr<AssetData>& material)
+{
+    SaveResult result;
+    if (!material)
+    {
+        result.errorMessage = "Material asset is null.";
+        return result;
+    }
+
+    auto& diagnostics = DiagnosticsManager::Instance();
+    if (!diagnostics.isProjectLoaded())
+    {
+        result.errorMessage = "No project loaded for material save.";
+        return result;
+    }
+
+    std::string name = material->getName();
+    if (name.empty())
+    {
+        name = "Material";
+        material->setName(name);
+    }
+
+    std::string relPath = material->getPath();
+    if (relPath.empty())
+    {
+        relPath = name + ".asset";
+    }
+    relPath = normalizeAssetRelPath(AssetType::Material, relPath);
+    material->setPath(relPath);
+
+    const fs::path absPath = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relPath);
+    std::error_code ec;
+    fs::create_directories(absPath.parent_path(), ec);
+
+    std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+    if (!out.is_open())
+    {
+        result.errorMessage = "Failed to open material asset file for writing.";
+        return result;
+    }
+
+    json data = material->getData();
+    if (data.is_null())
+    {
+        data = json::object();
+    }
+
+    json fileJson = json::object();
+    fileJson["magic"] = 0x41535453;
+    fileJson["version"] = 2;
+    fileJson["type"] = static_cast<int>(AssetType::Material);
+    fileJson["name"] = name;
+    fileJson["data"] = data;
+
+    out << fileJson.dump(4);
+    if (!out.good())
+    {
+        result.errorMessage = "Failed to write material asset data.";
+        return result;
+    }
+
+    material->setIsSaved(true);
+    result.success = true;
+    return result;
+}
+
+AssetManager::SaveResult AssetManager::saveObject2DAsset(const std::shared_ptr<AssetData>& object2D)
+{
+    SaveResult result;
+    if (!object2D)
+    {
+        result.errorMessage = "Object2D asset is null.";
+        return result;
+    }
+
+    auto& diagnostics = DiagnosticsManager::Instance();
+    if (!diagnostics.isProjectLoaded())
+    {
+        result.errorMessage = "No project loaded for Object2D save.";
+        return result;
+    }
+
+    std::string name = object2D->getName();
+    if (name.empty())
+    {
+        name = "Object2D";
+        object2D->setName(name);
+    }
+
+    std::string relPath = object2D->getPath();
+    if (relPath.empty())
+    {
+        relPath = name + ".asset";
+        object2D->setPath(relPath);
+    }
+
+    fs::path rel = fs::path(relPath);
+    if (rel.extension().empty())
+    {
+        rel.replace_extension(".asset");
+        relPath = rel.generic_string();
+        object2D->setPath(relPath);
+    }
+
+    const fs::path absPath = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relPath);
+    std::error_code ec;
+    fs::create_directories(absPath.parent_path(), ec);
+
+    std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+    if (!out.is_open())
+    {
+        result.errorMessage = "Failed to open Object2D asset file for writing.";
+        return result;
+    }
+
+    json data = object2D->getData();
+    if (data.is_null())
+    {
+        data = json::object();
+    }
+
+    json fileJson = json::object();
+    fileJson["magic"] = 0x41535453;
+    fileJson["version"] = 2;
+    fileJson["type"] = static_cast<int>(AssetType::Model2D);
+    fileJson["name"] = name;
+    fileJson["data"] = data;
+
+    out << fileJson.dump(4);
+    if (!out.good())
+    {
+        result.errorMessage = "Failed to write Object2D asset data.";
+        return result;
+    }
+
+    object2D->setIsSaved(true);
+    result.success = true;
+    return result;
+}
+
+AssetManager::SaveResult AssetManager::saveObject3DAsset(const std::shared_ptr<AssetData>& object3D)
+{
+    SaveResult result;
+    if (!object3D)
+    {
+        result.errorMessage = "Object3D asset is null.";
+        return result;
+    }
+
+    auto& diagnostics = DiagnosticsManager::Instance();
+    if (!diagnostics.isProjectLoaded())
+    {
+        result.errorMessage = "No project loaded for Object3D save.";
+        return result;
+    }
+
+    std::string name = object3D->getName();
+    if (name.empty())
+    {
+        name = "Object3D";
+        object3D->setName(name);
+    }
+
+    std::string relPath = object3D->getPath();
+    if (relPath.empty())
+    {
+        relPath = name + ".asset";
+        object3D->setPath(relPath);
+    }
+
+    fs::path rel = fs::path(relPath);
+    if (rel.extension().empty())
+    {
+        rel.replace_extension(".asset");
+        relPath = rel.generic_string();
+        object3D->setPath(relPath);
+    }
+
+    const fs::path absPath = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relPath);
+    std::error_code ec;
+    fs::create_directories(absPath.parent_path(), ec);
+
+    std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+    if (!out.is_open())
+    {
+        result.errorMessage = "Failed to open Object3D asset file for writing.";
+        return result;
+    }
+
+    json data = object3D->getData();
+    if (data.is_null())
+    {
+        data = json::object();
+    }
+
+    json fileJson = json::object();
+    fileJson["magic"] = 0x41535453;
+    fileJson["version"] = 2;
+    AssetType objectType = object3D->getAssetType();
+    if (objectType != AssetType::PointLight)
+    {
+        objectType = AssetType::Model3D;
+    }
+    fileJson["type"] = static_cast<int>(objectType);
+    fileJson["name"] = name;
+    fileJson["data"] = data;
+
+    out << fileJson.dump(4);
+    if (!out.good())
+    {
+        result.errorMessage = "Failed to write Object3D asset data.";
+        return result;
+    }
+
+    object3D->setIsSaved(true);
+    result.success = true;
+    return result;
+}
+
+AssetManager::SaveResult AssetManager::saveLevelAsset(const std::unique_ptr<EngineLevel>& level)
+{
+	return saveLevelAsset(level.get());
+}
+
+AssetManager::SaveResult AssetManager::saveLevelAsset(EngineLevel* level)
+{
+	SaveResult result;
+	if (!level)
+	{
+		result.errorMessage = "Level asset is null.";
+		return result;
+	}
+
+	// Skip runtime-only levels (e.g. Mesh Viewer preview scenes)
+	if (level->getName().rfind("__MeshViewer__", 0) == 0)
+	{
+		result.success = true;
+		return result;
+	}
+
+	auto& diagnostics = DiagnosticsManager::Instance();
+	if (!diagnostics.isProjectLoaded())
+	{
+		result.errorMessage = "No project loaded for level save.";
+		return result;
+	}
+
+	std::string name = level->getName();
+	if (name.empty())
+	{
+		name = "DefaultLevel";
+		level->setName(name);
+	}
+
+	std::string relPath = level->getPath();
+	if (relPath.empty())
+	{
+		relPath = (fs::path("Levels") / (name + ".map")).generic_string();
+		level->setPath(relPath);
+	}
+
+	const fs::path absPath = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relPath);
+	std::error_code ec;
+	fs::create_directories(absPath.parent_path(), ec);
+
+	std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+	if (!out.is_open())
+	{
+		result.errorMessage = "Failed to open level asset file for writing.";
+		return result;
+	}
+
+	json levelJson;
+	std::vector<std::string> objectPaths;
+	for (const auto& objInstance : level->getWorldObjects())
+	{
+		if (objInstance && objInstance->object)
+		{
+			objectPaths.push_back(objInstance->object->getPath());
+		}
+	}
+
+	std::vector<json> groupsJson;
+	for (const auto& grp : level->getGroups())
+	{
+		json g;
+		g["id"] = grp.id;
+		std::vector<std::string> groupObjectPaths;
+		for (const auto& obj : grp.objects)
+		{
+			if (obj)
+			{
+				groupObjectPaths.push_back(obj->getPath());
+			}
+		}
+		g["objects"] = groupObjectPaths;
+		g["isInstanced"] = grp.isInstanced;
+		groupsJson.push_back(g);
+	}
+
+	levelJson["Objects"] = objectPaths;
+	levelJson["Groups"] = groupsJson;
+	levelJson["Entities"] = level->serializeEcsEntities();
+	if (!level->getLevelScriptPath().empty())
+	{
+		levelJson["Script"] = level->getLevelScriptPath();
+	}
+	if (level->hasEditorCamera())
+	{
+		json camJson = json::object();
+		const auto& pos = level->getEditorCameraPosition();
+		camJson["position"] = json::array({ pos.x, pos.y, pos.z });
+		const auto& rot = level->getEditorCameraRotation();
+		camJson["rotation"] = json::array({ rot.x, rot.y });
+		levelJson["EditorCamera"] = camJson;
+	}
+	if (!level->getSkyboxPath().empty())
+	{
+		levelJson["Skybox"] = level->getSkyboxPath();
+	}
+
+	json fileJson = json::object();
+	fileJson["magic"] = 0x41535453;
+	fileJson["version"] = 2;
+	fileJson["type"] = static_cast<int>(AssetType::Level);
+	fileJson["name"] = name;
+	fileJson["data"] = levelJson;
+
+	out << fileJson.dump(4);
+	if (!out.good())
+	{
+		result.errorMessage = "Failed to write level asset data.";
+		return result;
+	}
+
+	level->setIsSaved(true);
+	result.success = true;
+	return result;
+}
+
+AssetManager::SaveResult AssetManager::saveWidgetAsset(const std::shared_ptr<AssetData>& widget)
+{
+    SaveResult result;
+    if (!widget)
+    {
+        result.errorMessage = "Widget asset is null.";
+        return result;
+    }
+
+    auto& diagnostics = DiagnosticsManager::Instance();
+    if (!diagnostics.isProjectLoaded())
+    {
+        result.errorMessage = "No project loaded for widget save.";
+        return result;
+    }
+
+    std::string name = widget->getName();
+    if (name.empty())
+    {
+        name = "Widget";
+        widget->setName(name);
+    }
+
+    std::string relPath = widget->getPath();
+    if (relPath.empty())
+    {
+        relPath = name + ".asset";
+        widget->setPath(relPath);
+    }
+
+    fs::path rel = fs::path(relPath);
+    if (rel.extension().empty())
+    {
+        rel.replace_extension(".asset");
+        relPath = rel.generic_string();
+        widget->setPath(relPath);
+    }
+
+    const fs::path absPath = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relPath);
+    std::error_code ec;
+    fs::create_directories(absPath.parent_path(), ec);
+
+    std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+    if (!out.is_open())
+    {
+        result.errorMessage = "Failed to open widget asset file for writing.";
+        return result;
+    }
+
+    json data = widget->getData();
+    if (data.is_null())
+    {
+        data = json::object();
+    }
+
+    json fileJson = json::object();
+    fileJson["magic"] = 0x41535453;
+    fileJson["version"] = 2;
+    fileJson["type"] = static_cast<int>(AssetType::Widget);
+    fileJson["name"] = name;
+    fileJson["data"] = data;
+
+    out << fileJson.dump(4);
+    if (!out.good())
+    {
+        result.errorMessage = "Failed to write widget asset data.";
+        return result;
+    }
+
+    widget->setIsSaved(true);
+    result.success = true;
+    return result;
+}
+
+AssetManager::SaveResult AssetManager::saveSkyboxAsset(const std::shared_ptr<AssetData>& skybox)
+{
+    SaveResult result;
+    if (!skybox)
+    {
+        result.errorMessage = "Skybox asset is null.";
+        return result;
+    }
+
+    auto& diagnostics = DiagnosticsManager::Instance();
+    if (!diagnostics.isProjectLoaded())
+    {
+        result.errorMessage = "No project loaded for skybox save.";
+        return result;
+    }
+
+    std::string name = skybox->getName();
+    if (name.empty())
+    {
+        name = "Skybox";
+        skybox->setName(name);
+    }
+
+    std::string relPath = skybox->getPath();
+    if (relPath.empty())
+    {
+        relPath = "Skyboxes/" + name + ".asset";
+        skybox->setPath(relPath);
+    }
+
+    fs::path rel = fs::path(relPath);
+    if (rel.extension().empty())
+    {
+        rel.replace_extension(".asset");
+        relPath = rel.generic_string();
+        skybox->setPath(relPath);
+    }
+
+    const fs::path absPath = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relPath);
+    std::error_code ec;
+    fs::create_directories(absPath.parent_path(), ec);
+
+    std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+    if (!out.is_open())
+    {
+        result.errorMessage = "Failed to open skybox asset file for writing.";
+        return result;
+    }
+
+    json data = skybox->getData();
+    if (data.is_null())
+    {
+        data = json::object();
+    }
+
+    json fileJson = json::object();
+    fileJson["magic"] = 0x41535453;
+    fileJson["version"] = 2;
+    fileJson["type"] = static_cast<int>(AssetType::Skybox);
+    fileJson["name"] = name;
+    fileJson["data"] = data;
+
+    out << fileJson.dump(4);
+    if (!out.good())
+    {
+        result.errorMessage = "Failed to write skybox asset data.";
+        return result;
+    }
+
+    skybox->setIsSaved(true);
+    result.success = true;
+    return result;
+}
+
+AssetManager::LoadResult AssetManager::loadSkyboxAsset(const std::string& path)
+{
+    LoadResult result;
+    auto raw = readAssetFromDisk(path, AssetType::Skybox);
+    if (!raw.success)
+    {
+        result.errorMessage = raw.errorMessage;
+        return result;
+    }
+    result.j = raw.data;
+    auto id = finalizeAssetLoad(std::move(raw));
+    result.success = (id != 0);
+    if (!result.success)
+    {
+        result.errorMessage = "Failed to register skybox asset.";
+    }
+    return result;
+}
+
+AssetManager::CreateResult AssetManager::createSkyboxAsset(const std::string& path, const std::string& name, const std::string& sourcePath)
+{
+    CreateResult result;
+    auto& diagnostics = DiagnosticsManager::Instance();
+    if (!diagnostics.isProjectLoaded())
+    {
+        result.errorMessage = "No project loaded.";
+        return result;
+    }
+
+    auto skybox = std::make_shared<AssetData>();
+    skybox->setName(name);
+    skybox->setAssetType(AssetType::Skybox);
+    skybox->setType(AssetType::Skybox);
+
+    json data = json::object();
+    data["faces"] = json::object();
+    data["faces"]["right"]  = "";
+    data["faces"]["left"]   = "";
+    data["faces"]["top"]    = "";
+    data["faces"]["bottom"] = "";
+    data["faces"]["front"]  = "";
+    data["faces"]["back"]   = "";
+
+    if (!sourcePath.empty())
+    {
+        // sourcePath is a directory containing face images
+        const fs::path srcDir(sourcePath);
+        const fs::path contentDir = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+        const fs::path skyboxDir = contentDir / "Skyboxes" / name;
+        std::error_code ec;
+        fs::create_directories(skyboxDir, ec);
+
+        struct FaceAlias { std::string canonical; std::vector<std::string> names; };
+        const FaceAlias faceAliases[6] = {
+            { "right",  { "right" } },
+            { "left",   { "left" } },
+            { "top",    { "top", "up" } },
+            { "bottom", { "bottom", "down" } },
+            { "front",  { "front" } },
+            { "back",   { "back" } }
+        };
+        const std::string extensions[3] = { ".jpg", ".png", ".bmp" };
+
+        for (const auto& fa : faceAliases)
+        {
+            bool found = false;
+            for (const auto& name : fa.names)
+            {
+                for (const auto& ext : extensions)
+                {
+                    const fs::path srcFile = srcDir / (name + ext);
+                    if (fs::exists(srcFile))
+                    {
+                        const fs::path destFile = skyboxDir / (name + ext);
+                        fs::copy_file(srcFile, destFile, fs::copy_options::overwrite_existing, ec);
+                        const std::string relFace = fs::relative(destFile, contentDir).generic_string();
+                        data["faces"][fa.canonical] = relFace;
+                        found = true;
+                        break;
+                    }
+                }
+                if (found) break;
+            }
+        }
+
+        // Store the folder path relative to Content for the renderer
+        data["folderPath"] = fs::relative(skyboxDir, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
+    }
+
+    skybox->setData(data);
+    skybox->setPath(path);
+    skybox->setIsSaved(false);
+
+    auto saveResult = saveSkyboxAsset(skybox);
+    if (!saveResult.success)
+    {
+        result.errorMessage = saveResult.errorMessage;
+        return result;
+    }
+
+    auto id = registerLoadedAsset(skybox);
+    if (id != 0)
+    {
+        skybox->setId(id);
+    }
+    m_garbageCollector.registerResource(skybox);
+
+    result.object = skybox;
+    result.success = true;
+    return result;
+}
+
+unsigned char* AssetManager::loadRawImageData(const std::string& path, int& width, int& height, int& channels)
+{
+    width = 0;
+    height = 0;
+    channels = 0;
+
+    // Normalize the path to use consistent separators
+    std::filesystem::path normalized = std::filesystem::path(path).lexically_normal();
+    std::string normalizedStr = normalized.string();
+
+    unsigned char* data = stbi_load(normalizedStr.c_str(), &width, &height, &channels, 0);
+    if (!data)
+    {
+        Logger::Instance().log(Logger::Category::AssetManagement,
+            "Failed to load raw image: " + normalizedStr, Logger::LogLevel::ERROR);
+    }
+    return data;
+}
+
+void AssetManager::freeRawImageData(unsigned char* data)
+{
+    if (data)
+    {
+        stbi_image_free(data);
+    }
+}
+
+bool AssetManager::saveNewLevelAsset(EngineLevel* level)
+{
+    return saveLevelAsset(level).success;
+}
+
+// ---------------------------------------------------------------------------
+// Parallel loading: disk-only read (no shared state), finalize, batch API
+// ---------------------------------------------------------------------------
+
+RawAssetData AssetManager::readAssetFromDisk(const std::string& path, AssetType expectedType)
+{
+    RawAssetData raw;
+    raw.path = path;
+
+    // Special case: raw WAV files loaded directly via SDL
+    if (expectedType == AssetType::Audio)
+    {
+        const fs::path inputPath(path);
+        std::string ext = inputPath.extension().string();
+        for (auto& c : ext)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+        if (ext == ".wav")
+        {
+            SDL_AudioSpec spec{};
+            Uint8* buffer = nullptr;
+            Uint32 length = 0;
+            if (!SDL_LoadWAV(path.c_str(), &spec, &buffer, &length))
+            {
+                raw.errorMessage = "Failed to load WAV data.";
+                return raw;
+            }
+            json audioData = json::object();
+            audioData["m_channels"] = static_cast<int>(spec.channels);
+            audioData["m_sampleRate"] = static_cast<int>(spec.freq);
+            audioData["m_format"] = static_cast<int>(spec.format);
+            audioData["m_data"] = std::vector<unsigned char>(buffer, buffer + length);
+            SDL_free(buffer);
+
+            raw.data = std::move(audioData);
+            raw.name = inputPath.stem().string();
+            raw.type = AssetType::Audio;
+            raw.success = true;
+            return raw;
+        }
+    }
+
+    std::ifstream in(path, std::ios::binary);
+    if (!in.is_open())
+    {
+        raw.errorMessage = "Failed to open asset file: " + path;
+        return raw;
+    }
+
+    AssetType headerType{ AssetType::Unknown };
+    std::string name;
+    bool isJson = false;
+    if (!readAssetHeader(in, headerType, name, isJson))
+    {
+        raw.errorMessage = "Invalid asset header: " + path;
+        return raw;
+    }
+
+    // Type validation (Model3D assets may also be PointLight)
+    bool typeOk = false;
+    if (expectedType == AssetType::Model3D || expectedType == AssetType::PointLight)
+    {
+        typeOk = (headerType == AssetType::Model3D || headerType == AssetType::PointLight);
+    }
+    else
+    {
+        typeOk = (headerType == expectedType);
+    }
+    if (!typeOk)
+    {
+        raw.errorMessage = "Asset type mismatch for: " + path;
+        return raw;
+    }
+
+    json j;
+    if (!readAssetJson(in, j, raw.errorMessage, isJson))
+    {
+        return raw;
+    }
+    in.close();
+
+    // For textures: decode source image on this thread (CPU-intensive)
+    if (headerType == AssetType::Texture && j.is_object() && j.contains("m_sourcePath"))
+    {
+        const auto& sourceValue = j.at("m_sourcePath");
+        if (sourceValue.is_string())
+        {
+            fs::path sourcePath = sourceValue.get<std::string>();
+            if (!sourcePath.is_absolute())
+            {
+                const auto& projPath = DiagnosticsManager::Instance().getProjectInfo().projectPath;
+                fs::path resolved;
+                if (!projPath.empty())
+                    resolved = fs::path(projPath) / sourcePath;
+                if (resolved.empty() || !fs::exists(resolved))
+                    resolved = fs::current_path() / sourcePath;
+                sourcePath = resolved;
+            }
+            if (fs::exists(sourcePath))
+            {
+                int width = 0, height = 0, channels = 0;
+                unsigned char* data = stbi_load(sourcePath.string().c_str(), &width, &height, &channels, 4);
+                if (data)
+                {
+                    channels = 4;
+                    j["m_width"] = width;
+                    j["m_height"] = height;
+                    j["m_channels"] = channels;
+                    j["m_data"] = std::vector<unsigned char>(data, data + (static_cast<size_t>(width) * height * channels));
+                    stbi_image_free(data);
+                }
+            }
+        }
+    }
+
+    // For audio .asset files with m_sourcePath: decode WAV source
+    if (headerType == AssetType::Audio && j.is_object() && j.contains("m_sourcePath"))
+    {
+        const auto& sourceValue = j.at("m_sourcePath");
+        if (sourceValue.is_string())
+        {
+            fs::path sourcePath = sourceValue.get<std::string>();
+            if (!sourcePath.is_absolute())
+            {
+                const auto& projPath = DiagnosticsManager::Instance().getProjectInfo().projectPath;
+                fs::path resolved;
+                if (!projPath.empty())
+                    resolved = fs::path(projPath) / sourcePath;
+                if (resolved.empty() || !fs::exists(resolved))
+                    resolved = fs::current_path() / sourcePath;
+                sourcePath = resolved;
+            }
+            if (fs::exists(sourcePath))
+            {
+                SDL_AudioSpec spec{};
+                Uint8* buffer = nullptr;
+                Uint32 length = 0;
+                if (SDL_LoadWAV(sourcePath.string().c_str(), &spec, &buffer, &length))
+                {
+                    j["m_channels"] = static_cast<int>(spec.channels);
+                    j["m_sampleRate"] = static_cast<int>(spec.freq);
+                    j["m_format"] = static_cast<int>(spec.format);
+                    j["m_data"] = std::vector<unsigned char>(buffer, buffer + length);
+                    SDL_free(buffer);
+                }
+            }
+        }
+    }
+
+    if (name.empty())
+    {
+        name = fs::path(path).stem().string();
+    }
+
+    raw.data = std::move(j);
+    raw.name = std::move(name);
+    raw.type = headerType;
+    raw.success = true;
+    return raw;
+}
+
+unsigned int AssetManager::finalizeAssetLoad(RawAssetData&& raw)
+{
+    if (!raw.success)
+    {
+        return 0;
+    }
+
+    auto asset = std::make_shared<AssetData>();
+    asset->setData(std::move(raw.data));
+    asset->setName(raw.name);
+    asset->setPath(raw.path);
+    asset->setAssetType(raw.type);
+    asset->setType(raw.type);
+    asset->setIsSaved(true);
+
+    auto id = registerLoadedAsset(asset);
+    if (id != 0)
+    {
+        asset->setId(id);
+    }
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        m_garbageCollector.registerResource(asset);
+    }
+    return id;
+}
+
+std::unordered_map<std::string, int> AssetManager::loadBatchParallel(
+    const std::vector<std::pair<std::string, AssetType>>& requests)
+{
+    std::unordered_map<std::string, int> results;
+    if (requests.empty())
+    {
+        return results;
+    }
+
     auto& logger = Logger::Instance();
 
-    const auto& diagnostics = DiagnosticsManager::Instance();
-    if (!diagnostics.isProjectLoaded() || diagnostics.getProjectInfo().projectPath.empty())
+    // Deduplicate and skip already-loaded assets
+    struct PendingLoad
     {
-        logger.log(Logger::Category::AssetManagement, "Import failed: no project loaded.", Logger::LogLevel::ERROR);
-        return nullptr;
-    }
-
-    fs::path src(sourceFilePath);
-    if (sourceFilePath.empty() || !fs::exists(src))
+        std::string path;
+        AssetType type;
+    };
+    std::vector<PendingLoad> pending;
     {
-        logger.log(Logger::Category::AssetManagement, "Import failed: source file missing: " + sourceFilePath, Logger::LogLevel::ERROR);
-        return nullptr;
-    }
-
-    if (type == AssetType::Unknown)
-    {
-        type = DetectAssetTypeFromPath(src);
-        if (type == AssetType::Unknown)
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        for (const auto& [path, type] : requests)
         {
-            logger.log(Logger::Category::AssetManagement,
-                "Import failed: couldn't detect asset type from extension: " + src.extension().string() + " (file: " + src.string() + ")",
-                Logger::LogLevel::ERROR);
-            return nullptr;
+            if (path.empty())
+                continue;
+            if (results.count(path))
+                continue;
+
+            auto pathIt = m_loadedAssetsByPath.find(path);
+            if (pathIt != m_loadedAssetsByPath.end())
+            {
+                results[path] = static_cast<int>(pathIt->second);
+                continue;
+            }
+            pending.push_back({ path, type });
         }
     }
 
-    // Dispatch by asset type (extensible)
-    switch (type)
+    if (pending.empty())
     {
-    case AssetType::Texture:
+        return results;
+    }
+
+    const size_t count = pending.size();
+    logger.log(Logger::Category::AssetManagement,
+        "loadBatchParallel: dispatching " + std::to_string(count) + " jobs to pool (" + std::to_string(m_poolSize) + " threads)",
+        Logger::LogLevel::INFO);
+
+    // Shared results vector for the batch; each slot written by exactly one thread
+    std::vector<RawAssetData> rawResults(count);
+    m_batchPending.store(static_cast<int>(count), std::memory_order_relaxed);
+
+    // Enqueue all jobs into the global pool
+    for (size_t i = 0; i < count; ++i)
     {
-        // Destination: Content/Textures/<stem>.asset
-        const std::string baseName = sanitizeName(src.stem().string());
-        const std::string relAssetPath = (fs::path("Textures") / (baseName + ".asset")).generic_string();
-
-        // If already exists, add a suffix.
-        std::string finalRelAssetPath = relAssetPath;
-        int suffix = 1;
-        while (doesAssetExist(finalRelAssetPath))
+        enqueueJob([this, i, path = pending[i].path, type = pending[i].type, &rawResults]()
         {
-            finalRelAssetPath = (fs::path("Textures") / (baseName + "_" + std::to_string(suffix) + ".asset")).generic_string();
-            ++suffix;
-        }
+            rawResults[i] = AssetManager::readAssetFromDisk(path, type);
 
-        logger.log(Logger::Category::AssetManagement, "Importing texture from: " + src.string(), Logger::LogLevel::INFO);
-        auto created = createAsset(AssetType::Texture, finalRelAssetPath, baseName, src.string());
-        if (created)
+            // Decrement batch counter and notify waiter
+            if (m_batchPending.fetch_sub(1, std::memory_order_acq_rel) == 1)
+            {
+                std::lock_guard<std::mutex> lk(m_batchMutex);
+                m_batchCv.notify_one();
+            }
+        });
+    }
+
+    // Wait for the entire batch to finish
+    {
+        std::unique_lock<std::mutex> lk(m_batchMutex);
+        m_batchCv.wait(lk, [this]() { return m_batchPending.load(std::memory_order_acquire) <= 0; });
+    }
+
+    // Finalize sequentially on the calling thread
+    for (size_t i = 0; i < count; ++i)
+    {
+        auto& raw = rawResults[i];
+        if (!raw.success)
         {
-            logger.log(Logger::Category::AssetManagement, "Imported texture asset: " + finalRelAssetPath, Logger::LogLevel::INFO);
+            if (!raw.errorMessage.empty())
+            {
+                logger.log(Logger::Category::AssetManagement,
+                    "loadBatchParallel: " + raw.errorMessage, Logger::LogLevel::WARNING);
+            }
+            continue;
         }
-        return created;
+        const std::string loadedPath = raw.path;
+        unsigned int id = finalizeAssetLoad(std::move(raw));
+        if (id != 0)
+        {
+            results[loadedPath] = static_cast<int>(id);
+        }
     }
-    default:
-        logger.log(Logger::Category::AssetManagement, "Import not implemented for this asset type yet.", Logger::LogLevel::WARNING);
-        return nullptr;
-    }
+
+    logger.log(Logger::Category::AssetManagement,
+        "loadBatchParallel: completed. loaded=" + std::to_string(results.size()),
+        Logger::LogLevel::INFO);
+
+    return results;
 }

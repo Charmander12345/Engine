@@ -4,8 +4,6 @@
 
 #include "gl.h"
 
-#include "Texture.h"
-
 OpenGLTexture::OpenGLTexture(const Texture& texture)
 {
     initialize(texture);

@@ -17,7 +17,7 @@ OpenGLShaderProgram::~OpenGLShaderProgram()
 
 bool OpenGLShaderProgram::attach(const std::shared_ptr<Shader>& shader)
 {
-    auto glShader = std::dynamic_pointer_cast<OpenGLShader>(shader);
+    auto glShader = std::static_pointer_cast<OpenGLShader>(shader);
     if (!glShader || glShader->id() == 0)
     {
         Logger::Instance().log("Attach fehlgeschlagen: Shader nicht kompiliert oder falscher Typ", Logger::LogLevel::ERROR);

@@ -4,7 +4,7 @@
 #include <memory>
 #include <unordered_map>
 #include <cstdint>
-#include "../../Basics/Material.h"
+#include "../Material.h"
 #include "OpenGLShader.h"
 #include "glad/include/gl.h"
 #include <glm/glm.hpp>
@@ -15,6 +15,20 @@ class OpenGLTexture;
 class OpenGLMaterial : public Material
 {
 public:
+    static constexpr int kMaxLights = 8;
+
+    struct LightData
+    {
+        glm::vec3 position{0.0f};
+        glm::vec3 direction{0.0f, -1.0f, 0.0f};
+        glm::vec3 color{1.0f};
+        float intensity{1.0f};
+        float range{10.0f};
+        float spotCutoff{0.0f};
+        float spotOuterCutoff{0.0f};
+        int type{0}; // 0=point, 1=directional, 2=spot
+    };
+
     struct LayoutElement
     {
         GLuint index;
@@ -41,11 +55,33 @@ public:
     void bind() override;
     void unbind() override;
     void render() override;
+    void renderBatchContinuation();
+
+    GLuint getProgram() const { return m_program; }
+    GLuint getVao() const { return m_vao; }
+    GLsizei getVertexCount() const { return m_vertexCount; }
+    GLsizei getIndexCount() const { return m_indexCount; }
 
     // Matrix uniform setters
     void setModelMatrix(const glm::mat4& matrix) { m_modelMatrix = matrix; }
     void setViewMatrix(const glm::mat4& matrix) { m_viewMatrix = matrix; }
     void setProjectionMatrix(const glm::mat4& matrix) { m_projectionMatrix = matrix; }
+    void setLightData(const glm::vec3& position, const glm::vec3& color, float intensity)
+    {
+        m_lightPosition = position;
+        m_lightColor = color;
+        m_lightIntensity = intensity;
+    }
+    void setLights(const std::vector<LightData>& lights) { m_lights = lights; }
+    void setShininess(float shininess) { m_shininess = shininess; }
+
+    // Shadow mapping (multi-light)
+    static constexpr int kMaxShadowLights = 4;
+    void setShadowData(GLuint texArray, const glm::mat4* matrices, const int* lightIndices, int count);
+
+    // Point light shadow mapping (cube maps)
+    static constexpr int kMaxPointShadowLights = 4;
+    void setPointShadowData(GLuint cubeArray, const glm::vec3* positions, const float* farPlanes, const int* lightIndices, int count);
 
 private:
     void bindTextures();
@@ -68,4 +104,69 @@ private:
     glm::mat4 m_modelMatrix{1.0f};
     glm::mat4 m_viewMatrix{1.0f};
     glm::mat4 m_projectionMatrix{1.0f};
+    glm::vec3 m_lightPosition{0.0f, 1.0f, 0.0f};
+    glm::vec3 m_lightColor{1.0f, 1.0f, 1.0f};
+    float m_lightIntensity{1.0f};
+    float m_shininess{32.0f};
+    std::vector<LightData> m_lights;
+
+    // Shadow mapping (multi-light)
+    GLuint m_shadowMapArray{0};
+    int m_shadowCount{0};
+    glm::mat4 m_shadowMatrices[kMaxShadowLights]{};
+    int m_shadowLightIndices[kMaxShadowLights]{};
+
+    // Cached uniform locations (queried once at build time)
+    GLint m_locModel{-1};
+    GLint m_locView{-1};
+    GLint m_locProjection{-1};
+    GLint m_locLightPos{-1};
+    GLint m_locLightColor{-1};
+    GLint m_locLightIntensity{-1};
+    GLint m_locViewPos{-1};
+    GLint m_locMaterialShininess{-1};
+    GLint m_locHasSpecularMap{-1};
+    GLint m_locHasDiffuseMap{-1};
+    GLint m_locLightCount{-1};
+    struct LightUniformLocs
+    {
+        GLint position{-1};
+        GLint direction{-1};
+        GLint color{-1};
+        GLint intensity{-1};
+        GLint range{-1};
+        GLint spotCutoff{-1};
+        GLint spotOuterCutoff{-1};
+        GLint type{-1};
+    };
+    LightUniformLocs m_lightLocs[kMaxLights]{};
+    std::vector<GLint> m_texUniformLocs;
+
+    // Point light shadow data
+    GLuint m_pointShadowCubeArray{0};
+    int m_pointShadowCount{0};
+    glm::vec3 m_pointShadowPositions[kMaxPointShadowLights]{};
+    float m_pointShadowFarPlanes[kMaxPointShadowLights]{};
+    int m_pointShadowLightIndices[kMaxPointShadowLights]{};
+
+    // Shadow uniform locations
+    GLint m_locShadowMaps{-1};
+    GLint m_locShadowCount{-1};
+    struct ShadowUniformLocs
+    {
+        GLint lightSpaceMatrix{-1};
+        GLint lightIndex{-1};
+    };
+    ShadowUniformLocs m_shadowLocs[kMaxShadowLights]{};
+
+    // Point shadow uniform locations
+    GLint m_locPointShadowMaps{-1};
+    GLint m_locPointShadowCount{-1};
+    struct PointShadowUniformLocs
+    {
+        GLint position{-1};
+        GLint farPlane{-1};
+        GLint lightIndex{-1};
+    };
+    PointShadowUniformLocs m_pointShadowLocs[kMaxPointShadowLights]{};
 };

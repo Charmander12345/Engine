@@ -2,9 +2,12 @@
 
 #include <cstdint>
 
+#include "../Texture.h"
+#include "../ITexture.h"
+
 class Texture;
 
-class OpenGLTexture
+class OpenGLTexture : public ITexture
 {
 public:
     OpenGLTexture() = default;
@@ -16,15 +19,15 @@ public:
     OpenGLTexture(OpenGLTexture&& other) noexcept;
     OpenGLTexture& operator=(OpenGLTexture&& other) noexcept;
 
-    ~OpenGLTexture();
+    ~OpenGLTexture() override;
 
-    bool initialize(const Texture& texture);
-    void shutdown();
+    bool initialize(const Texture& texture) override;
+    void shutdown() override;
 
-    void bind(uint32_t unit = 0) const;
-    void unbind() const;
+    void bind(uint32_t unit = 0) const override;
+    void unbind() const override;
 
-    uint32_t getHandle() const { return m_textureId; }
+    uint32_t getHandle() const override { return m_textureId; }
 
 private:
     uint32_t m_textureId{ 0 };

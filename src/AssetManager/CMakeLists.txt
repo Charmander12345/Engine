@@ -5,6 +5,7 @@ add_library(AssetManager SHARED
     GarbageCollector.h
     AssetTypes.h
     stb_image.h
+    json.hpp
 )
 
 set_target_properties(AssetManager PROPERTIES
@@ -17,15 +18,16 @@ target_include_directories(AssetManager
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/src/Diagnostics
         ${CMAKE_SOURCE_DIR}/src/Logger
-        ${CMAKE_SOURCE_DIR}/src/Basics
+        ${CMAKE_SOURCE_DIR}/src/Core
 )
 
 target_link_libraries(AssetManager
     PUBLIC
         Diagnostics
         Logger
-        Basics
+        Core
         SDL3::SDL3
+        assimp
 )
 
 if (WIN32)

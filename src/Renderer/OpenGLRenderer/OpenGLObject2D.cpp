@@ -7,9 +7,9 @@
 #include "OpenGLShader.h"
 #include "Logger.h"
 
-#include "../../Basics/Object2D.h"
-#include "../../Basics/Texture.h"
-#include "../../AssetManager/AssetManager.h"
+#include "../../Core/Asset.h"
+
+#include <unordered_map>
 
 namespace
 {
@@ -23,21 +23,67 @@ namespace
         }
         return {};
     }
+
+    std::vector<float> ReadFloatArray(const json& data, const char* key)
+    {
+        if (!data.is_object())
+        {
+            return {};
+        }
+        auto it = data.find(key);
+        if (it == data.end() || !it->is_array())
+        {
+            return {};
+        }
+        return it->get<std::vector<float>>();
+    }
+
+    std::vector<uint32_t> ReadIndexArray(const json& data, const char* key)
+    {
+        if (!data.is_object())
+        {
+            return {};
+        }
+        auto it = data.find(key);
+        if (it == data.end() || !it->is_array())
+        {
+            return {};
+        }
+        return it->get<std::vector<uint32_t>>();
+    }
+
+    std::unordered_map<std::string, std::shared_ptr<OpenGLMaterial>> s_materialCache;
 }
 
-OpenGLObject2D::OpenGLObject2D(std::shared_ptr<Object2D> cpuObject)
-    : m_cpuObject(std::move(cpuObject))
+OpenGLObject2D::OpenGLObject2D(std::shared_ptr<AssetData> asset)
+    : m_asset(std::move(asset))
 {
+}
+
+void OpenGLObject2D::ClearCache()
+{
+    s_materialCache.clear();
 }
 
 bool OpenGLObject2D::prepare()
 {
     auto& logger = Logger::Instance();
-    if (!m_cpuObject)
+    if (!m_asset)
         return false;
 
     if (m_material)
         return true;
+
+    const std::string path = m_asset->getPath();
+    if (!path.empty())
+    {
+        auto it = s_materialCache.find(path);
+        if (it != s_materialCache.end())
+        {
+            m_material = it->second;
+            return true;
+        }
+    }
 
     const std::string vertexPath = ResolveShaderPath("vertex.glsl");
     const std::string fragmentPath = ResolveShaderPath("fragment.glsl");
@@ -67,17 +113,22 @@ bool OpenGLObject2D::prepare()
     mat->addShader(vertexShader);
     mat->addShader(fragmentShader);
 
+    const auto& data = m_asset->getData();
+    auto vertices = ReadFloatArray(data, "m_vertices");
+    auto indices = ReadIndexArray(data, "m_indices");
+
     logger.log(Logger::Category::Rendering,
-        "OpenGLObject2D: vertexFloats=" + std::to_string(m_cpuObject->getVertices().size()) +
-        ", indexCount=" + std::to_string(m_cpuObject->getIndices().size()),
+        "OpenGLObject2D: vertexFloats=" + std::to_string(vertices.size()) +
+        ", indexCount=" + std::to_string(indices.size()),
         Logger::LogLevel::INFO);
-    if (m_cpuObject->getVertices().empty())
+    if (vertices.empty())
     {
         logger.log(Logger::Category::Rendering, "OpenGLObject2D: WARNING: vertices are empty.", Logger::LogLevel::WARNING);
+        return false;
     }
 
-    mat->setVertexData(m_cpuObject->getVertices());
-    mat->setIndexData(m_cpuObject->getIndices());
+    mat->setVertexData(vertices);
+    mat->setIndexData(indices);
 
     // Default layout: positions (x,y,z) + texcoords (u,v)
     const GLsizei stride = static_cast<GLsizei>(5 * sizeof(float));
@@ -86,12 +137,6 @@ bool OpenGLObject2D::prepare()
     layout.push_back(OpenGLMaterial::LayoutElement{ 2, 2, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(3 * sizeof(float)) });
     mat->setLayout(layout);
 
-    // Propagate textures from the runtime material (loaded by AssetManager) into the OpenGL material.
-    if (auto cpuMat = m_cpuObject->getMaterial())
-    {
-        mat->setTextures(cpuMat->getTextures());
-    }
-
     if (!mat->build())
     {
         logger.log(Logger::Category::Rendering, "OpenGLObject2D: Failed to build OpenGL material.", Logger::LogLevel::ERROR);
@@ -99,7 +144,10 @@ bool OpenGLObject2D::prepare()
     }
 
     m_material = mat;
-    m_cpuObject->setMaterial(m_material);
+    if (!path.empty())
+    {
+        s_materialCache[path] = m_material;
+    }
     return true;
 }
 
@@ -115,8 +163,16 @@ void OpenGLObject2D::setMatrices(const glm::mat4& model, const glm::mat4& view, 
 
 void OpenGLObject2D::render()
 {
-    if (m_cpuObject)
+    if (m_material)
     {
-        m_cpuObject->render();
+        m_material->render();
+    }
+}
+
+void OpenGLObject2D::setTextures(const std::vector<std::shared_ptr<Texture>>& textures)
+{
+    if (m_material)
+    {
+        m_material->setTextures(textures);
     }
 }

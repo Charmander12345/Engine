@@ -2,7 +2,7 @@
 #include <vector>
 #include <memory>
 #include <mutex>
-#include "../Basics/EngineObject.h"
+#include "../Core/EngineObject.h"
 
 class GarbageCollector
 {
@@ -11,6 +11,7 @@ public:
     ~GarbageCollector() = default;
 
     void collect();
+    void clear();
     bool registerResource(const std::shared_ptr<EngineObject>& resource);
 
     std::vector<std::shared_ptr<EngineObject>> getAliveResources() const;

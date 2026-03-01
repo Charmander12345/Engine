@@ -6,29 +6,181 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 project ("Engine" LANGUAGES C CXX)
 
+# Prefer shared libraries for subprojects by default.
+set(BUILD_SHARED_LIBS ON CACHE BOOL "Prefer shared libraries for subprojects" FORCE)
+
+# Remove the default debug postfix ("d") from DLL names.
+set(CMAKE_DEBUG_POSTFIX "" CACHE STRING "" FORCE)
+
+set(Python3_USE_DEBUG_LIBS OFF CACHE BOOL "" FORCE)
+find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+if (Python3_LIBRARY_RELEASE)
+    set(Python3_LIBRARY_DEBUG ${Python3_LIBRARY_RELEASE} CACHE FILEPATH "" FORCE)
+endif()
+
 # Ensure consistent MSVC runtime across all targets (prevents CRT/linker unresolved externals)
 if (MSVC)
     # Use the DLL runtime (/MD, /MDd)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
+    # Force synchronous PDB writes so parallel CL.EXE processes don't conflict.
+    add_compile_options(/FS)
+
     # Prefer 64-bit tools/libraries when generating with Ninja inside Visual Studio.
     # This avoids accidental linkage against x86 Windows SDK libs.
     set(CMAKE_VS_PLATFORM_NAME "x64" CACHE STRING "" FORCE)
+
+    if (CMAKE_CONFIGURATION_TYPES)
+        set(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO} /PROFILE")
+        set(CMAKE_EXE_LINKER_FLAGS_DEBUG "${CMAKE_EXE_LINKER_FLAGS_DEBUG} /PROFILE")
+    endif()
 endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# For multi-config generators (Visual Studio), flatten per-config subdirectories
+# so that .lib/.dll/.exe files are always found in the same directory.
+foreach(_cfg DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+    string(TOUPPER ${_cfg} _cfg_upper)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${_cfg_upper} "${CMAKE_BINARY_DIR}")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${_cfg_upper} "${CMAKE_BINARY_DIR}")
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${_cfg_upper} "${CMAKE_BINARY_DIR}")
+endforeach()
+
+# Build SDL as a shared library.
+set(SDL_SHARED ON CACHE BOOL "Build SDL as shared library" FORCE)
+set(SDL_STATIC OFF CACHE BOOL "Build SDL as static library" FORCE)
 add_subdirectory(external/SDL3 EXCLUDE_FROM_ALL)
+set(ASSIMP_BUILD_SHARED_LIBS OFF CACHE BOOL "Build assimp as shared library" FORCE)
+set(ASSIMP_INJECT_DEBUG_POSTFIX OFF CACHE BOOL "No debug postfix for assimp" FORCE)
+set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "Disable assimp tests" FORCE)
+
+# Build Assimp and freetype as static libraries so they are embedded in their consumers.
+set(ASSIMP_BUILD_SHARED_LIBS OFF CACHE BOOL "Build assimp as shared" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Prefer static for assimp/freetype" FORCE)
+add_subdirectory(external/assimp EXCLUDE_FROM_ALL)
+add_subdirectory(external/freetype)
+set(BUILD_SHARED_LIBS ON CACHE BOOL "Prefer shared libraries for subprojects" FORCE)
+set(ALSOFT_UTILS OFF CACHE BOOL "" FORCE)
+set(ALSOFT_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(ALSOFT_TESTS OFF CACHE BOOL "" FORCE)
+set(ALSOFT_INSTALL OFF CACHE BOOL "" FORCE)
+add_subdirectory(external/openal-soft EXCLUDE_FROM_ALL)
+
+# Build Jolt Physics as a static library.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build Jolt as static" FORCE)
+set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "Use DLL MSVC runtime for Jolt" FORCE)
+set(OVERRIDE_CXX_FLAGS OFF CACHE BOOL "Let parent project control CXX flags" FORCE)
+set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "Disable LTO for Jolt" FORCE)
+set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "Disable warnings-as-errors for Jolt" FORCE)
+set(ENABLE_INSTALL OFF CACHE BOOL "Disable Jolt install target" FORCE)
+set(FLOATING_POINT_EXCEPTIONS_ENABLED OFF CACHE BOOL "Disable FP exceptions in Jolt" FORCE)
+set(GENERATE_DEBUG_SYMBOLS OFF CACHE BOOL "Disable extra debug symbols for Jolt" FORCE)
+set(JPH_USE_DX12 OFF CACHE BOOL "Disable DX12 compute for Jolt" FORCE)
+set(JPH_USE_VK OFF CACHE BOOL "Disable Vulkan compute for Jolt" FORCE)
+set(JPH_USE_MTL OFF CACHE BOOL "Disable Metal compute for Jolt" FORCE)
+set(JPH_USE_CPU_COMPUTE OFF CACHE BOOL "Disable CPU compute for Jolt" FORCE)
+add_subdirectory(external/jolt/Build EXCLUDE_FROM_ALL)
+set(BUILD_SHARED_LIBS ON CACHE BOOL "Prefer shared libraries for subprojects" FORCE)
+
+# ── PhysX 5.x (optional, static library) ────────────────────────────────
+option(ENGINE_PHYSX_BACKEND "Build the PhysX backend (requires external/PhysX)" ON)
+if(ENGINE_PHYSX_BACKEND AND EXISTS "${CMAKE_SOURCE_DIR}/external/PhysX/physx")
+    message(STATUS "PhysX backend enabled – configuring external/PhysX …")
+
+    # Save CMAKE_CONFIGURATION_TYPES before PhysX overrides them.
+    set(_engine_saved_config_types "${CMAKE_CONFIGURATION_TYPES}")
+
+    # Required by PhysX build system.
+    set(PHYSX_ROOT_DIR "${CMAKE_SOURCE_DIR}/external/PhysX/physx" CACHE PATH "" FORCE)
+    set(TARGET_BUILD_PLATFORM "windows" CACHE STRING "" FORCE)
+    set(PX_GENERATE_STATIC_LIBRARIES ON CACHE BOOL "Build PhysX as static libs" FORCE)
+    set(PX_BUILDSNIPPETS OFF CACHE BOOL "" FORCE)
+    set(PX_BUILDPVDRUNTIME OFF CACHE BOOL "" FORCE)
+    set(PX_CMAKE_SUPPRESS_REGENERATION ON CACHE BOOL "" FORCE)
+    set(PX_OUTPUT_LIB_DIR "${CMAKE_BINARY_DIR}/physx_lib" CACHE PATH "" FORCE)
+    set(PX_OUTPUT_BIN_DIR "${CMAKE_BINARY_DIR}/physx_bin" CACHE PATH "" FORCE)
+    set(PX_COPY_EXTERNAL_DLL OFF CACHE BOOL "Disable PhysX external DLL copy" FORCE)
+    set(NV_USE_STATIC_WINCRT OFF CACHE BOOL "Use DLL CRT for PhysX" FORCE)
+    set(NV_USE_DEBUG_WINCRT ON CACHE BOOL "Use debug CRT for PhysX debug builds" FORCE)
+
+    # Ensure CMP0091 is NEW so CMAKE_MSVC_RUNTIME_LIBRARY controls the CRT.
+    # PhysX replaces CMAKE_CXX_FLAGS_<CONFIG> without explicit /MD or /MT flags,
+    # so without this policy the MSVC default (/MT) is silently used.
+    cmake_policy(SET CMP0091 NEW)
+
+    # PhysX public cmake sets PUBLIC_RELEASE=1 which skips internal NVIDIA files,
+    # but also triggers a freeglut DLL copy.  Provide stub files so FILE(COPY) succeeds.
+    set(_physx_freeglut_stub "${CMAKE_BINARY_DIR}/_physx_freeglut_stub/win64")
+    file(MAKE_DIRECTORY "${_physx_freeglut_stub}")
+    file(TOUCH "${_physx_freeglut_stub}/freeglut.dll" "${_physx_freeglut_stub}/freeglutd.dll")
+    set(PHYSX_SLN_FREEGLUT_PATH "${CMAKE_BINARY_DIR}/_physx_freeglut_stub" CACHE INTERNAL "" FORCE)
+
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build PhysX as static" FORCE)
+    add_subdirectory(external/PhysX/physx/compiler/public EXCLUDE_FROM_ALL)
+    set(BUILD_SHARED_LIBS ON CACHE BOOL "Prefer shared libraries for subprojects" FORCE)
+
+    # Disable warnings-as-errors (/WX) for PhysX targets – our newer MSVC generates
+    # conversion warnings inside PhysX that do not affect correctness.
+    # Force DLL CRT (/MD, /MDd) on all PhysX targets to match the engine runtime.
+    # PhysX replaces CMAKE_CXX_FLAGS_<CONFIG> wholesale, stripping the default CRT flag,
+    # so we add it back explicitly (MSVC uses the last flag when duplicates appear).
+    foreach(_px_target PhysX PhysXFoundation PhysXCommon PhysXExtensions PhysXCooking
+                       PhysXPvdSDK PhysXTask PhysXCharacterKinematic PhysXVehicle2
+                       LowLevel LowLevelAABB LowLevelDynamics
+                       SceneQuery SimulationController)
+        if(TARGET ${_px_target})
+            target_compile_options(${_px_target} PRIVATE
+                /WX-
+                $<$<CONFIG:Debug>:/MDd>
+                $<$<CONFIG:Release>:/MD>
+                $<$<CONFIG:RelWithDebInfo>:/MD>
+                $<$<CONFIG:MinSizeRel>:/MD>
+            )
+            set_property(TARGET ${_px_target} PROPERTY
+                         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+        endif()
+    endforeach()
+
+    # Restore configuration types that PhysX force-overrode.
+    if(_engine_saved_config_types)
+        set(CMAKE_CONFIGURATION_TYPES "${_engine_saved_config_types}" CACHE STRING "" FORCE)
+    endif()
+
+    set(ENGINE_PHYSX_AVAILABLE TRUE)
+    message(STATUS "PhysX targets available: PhysX, PhysXFoundation, PhysXCommon, PhysXExtensions")
+else()
+    set(ENGINE_PHYSX_AVAILABLE FALSE)
+    if(ENGINE_PHYSX_BACKEND)
+        message(WARNING "ENGINE_PHYSX_BACKEND=ON but external/PhysX not found – PhysX backend disabled.")
+    endif()
+endif()
+
 add_subdirectory(src/AssetManager)
 add_subdirectory(src/Diagnostics)
-add_subdirectory(src/Basics)
-add_subdirectory(src/Renderer)
 add_subdirectory(src/Logger)
+add_subdirectory(src/Core)
+add_subdirectory(src/Renderer)
+add_subdirectory(src/Scripting)
+add_subdirectory(src/Landscape)
+add_subdirectory(src/Physics)
+
+# ── Tests (GTest) ───────────────────────────────────────────────────────
+option(ENGINE_BUILD_TESTS "Build engine GTest suite" ON)
+if(ENGINE_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
+if (NOT TARGET OpenAL::OpenAL)
+    message(FATAL_ERROR "OpenAL target not available from external/openal-soft.")
+endif()
 
 add_executable(Engine
     src/main.cpp
-)
+    )
 
 # Engine is a console executable
 set_target_properties(Engine PROPERTIES WIN32_EXECUTABLE OFF)
@@ -40,7 +192,10 @@ target_include_directories(Engine
         ${CMAKE_SOURCE_DIR}/src/Logger
         ${CMAKE_SOURCE_DIR}/src/AssetManager
         ${CMAKE_SOURCE_DIR}/src/Diagnostics
-        ${CMAKE_SOURCE_DIR}/src/Basics
+        ${CMAKE_SOURCE_DIR}/src/Core
+        ${CMAKE_SOURCE_DIR}/src/Landscape
+        ${CMAKE_SOURCE_DIR}/src/Physics
+        ${Python3_INCLUDE_DIRS}
 )
 
 target_link_libraries(Engine
@@ -50,23 +205,56 @@ target_link_libraries(Engine
         Logger
         AssetManager
         Diagnostics
-        Basics
+        Core
+        Scripting
+        Landscape
+        Physics
+        ${Python3_LIBRARY_RELEASE}
 )
+
+if (Python3_LIBRARY_RELEASE)
+    get_filename_component(PYTHON_LIB_BASENAME ${Python3_LIBRARY_RELEASE} NAME_WE)
+    set(PYTHON_DEBUG_LIB_DIR "${CMAKE_BINARY_DIR}/python")
+    set(PYTHON_DEBUG_LIB "${PYTHON_DEBUG_LIB_DIR}/${PYTHON_LIB_BASENAME}_d.lib")
+    target_link_directories(Engine PRIVATE "${PYTHON_DEBUG_LIB_DIR}")
+    add_custom_command(TARGET Engine PRE_LINK
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${PYTHON_DEBUG_LIB_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${Python3_LIBRARY_RELEASE}" "${PYTHON_DEBUG_LIB}"
+    )
+endif()
 
 set(ENGINE_DEPLOY_DIR "C:/Users/conno/source/repos/EngineBuild")
 
 # Build outputs (exe + DLLs) should go directly to the deploy directory.
 # This is more reliable than post-build copying, especially with Ninja.
+# For multi-config generators, flatten per-config subdirectories.
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}")
+set(CMAKE_PDB_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}")
+foreach(_cfg DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+    string(TOUPPER ${_cfg} _cfg_upper)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${_cfg_upper} "${ENGINE_DEPLOY_DIR}")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${_cfg_upper} "${ENGINE_DEPLOY_DIR}")
+    set(CMAKE_PDB_OUTPUT_DIRECTORY_${_cfg_upper} "${ENGINE_DEPLOY_DIR}")
+endforeach()
+
+set_target_properties(Engine PROPERTIES
+    PDB_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}"
+    PDB_OUTPUT_DIRECTORY_DEBUG "${ENGINE_DEPLOY_DIR}"
+    PDB_OUTPUT_DIRECTORY_RELWITHDEBINFO "${ENGINE_DEPLOY_DIR}"
+    PDB_OUTPUT_DIRECTORY_RELEASE "${ENGINE_DEPLOY_DIR}"
+    PDB_OUTPUT_DIRECTORY_MINSIZEREL "${ENGINE_DEPLOY_DIR}"
+)
 
 # Always copy from the source tree to avoid stale files in the build directory.
 # NOTE: There are two shader directories in the repo; use Renderer/OpenGLRenderer/shaders as the authoritative one.
 set(SHADERS_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/OpenGLRenderer/shaders")
+set(CONTENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Content")
 
 add_custom_command(TARGET Engine POST_BUILD
     # Ensure deploy directory exists
     COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/Content/Textures"
 
     # Copy Engine exe to deploy directory
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:Engine>" "${ENGINE_DEPLOY_DIR}/$<TARGET_FILE_NAME:Engine>"
@@ -79,6 +267,15 @@ add_custom_command(TARGET Engine POST_BUILD
 
     # Copy shaders to deploy directory
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${SHADERS_SOURCE_DIR}" "${ENGINE_DEPLOY_DIR}/shaders"
+
+    # Copy engine Content directory (textures, skyboxes, etc.) to deploy directory
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CONTENT_SOURCE_DIR}" "${ENGINE_DEPLOY_DIR}/Content"
+
+    # Copy static engine.pyi type stub to deploy directory for project distribution
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/Content/Scripting"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/src/Scripting/engine.pyi" "${ENGINE_DEPLOY_DIR}/Content/Scripting/engine.pyi"
+
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${Python3_RUNTIME_LIBRARY_RELEASE}" "${ENGINE_DEPLOY_DIR}"
 
     COMMAND_EXPAND_LISTS
 )

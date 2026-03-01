@@ -4,6 +4,8 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <algorithm>
+#include <vector>
 
 namespace
 {
@@ -41,6 +43,11 @@ void Logger::setMinimumLogLevel(LogLevel level)
     minimumLevel = level;
 }
 
+void Logger::setSuppressStdout(bool suppress)
+{
+    suppressStdout = suppress;
+}
+
 const char* Logger::toString(LogLevel level)
 {
     switch (level)
@@ -59,12 +66,14 @@ const char* Logger::toString(Category category)
     {
     case Category::General: return "General";
     case Category::Engine: return "Engine";
+    case Category::Scripting: return "Scripting";
     case Category::AssetManagement: return "AssetManagement";
     case Category::Diagnostics: return "Diagnostics";
     case Category::Rendering: return "Rendering";
     case Category::Input: return "Input";
     case Category::Project: return "Project";
     case Category::IO: return "IO";
+    case Category::UI: return "UI";
     default: return "General";
     }
 }
@@ -98,6 +107,33 @@ void Logger::initialize()
         initialized = true;
     }
 
+    if (initialized)
+    {
+        std::vector<std::filesystem::directory_entry> logFiles;
+        for (const auto& entry : std::filesystem::directory_iterator(logDir, ec))
+        {
+            if (!entry.is_regular_file())
+            {
+                continue;
+            }
+            const auto& path = entry.path();
+            if (path.extension() == ".log")
+            {
+                logFiles.push_back(entry);
+            }
+        }
+
+        std::sort(logFiles.begin(), logFiles.end(), [](const auto& a, const auto& b)
+            {
+                return a.last_write_time() > b.last_write_time();
+            });
+
+        for (size_t i = 5; i < logFiles.size(); ++i)
+        {
+            std::filesystem::remove(logFiles[i].path(), ec);
+        }
+    }
+
     log(Category::Engine, std::string("Logger initialised. Output file: ") + filename, LogLevel::INFO);
 }
 
@@ -121,14 +157,48 @@ void Logger::log(Category category, const std::string& message, LogLevel level)
         return;
     }
 
+    std::lock_guard<std::mutex> lock(logMutex);
+
+    if (level == LogLevel::ERROR)
+    {
+        loggedError = true;
+    }
+    else if (level == LogLevel::FATAL)
+    {
+        loggedFatal = true;
+    }
+
     const std::string ts = nowTimestamp();
     const char* levelStr = toString(level);
     const char* catStr = toString(category);
 
     if (logFile.is_open())
     {
-        logFile << "[" << ts << "][" << catStr << "][" << levelStr << "] " << message << std::endl;
+        logFile << "[" << ts << "][" << catStr << "][" << levelStr << "] " << message << '\n';
     }
 
-    std::cout << "[" << ts << "][" << catStr << "][" << levelStr << "] " << message << std::endl;
+    if (!suppressStdout)
+    {
+        std::cout << "[" << ts << "][" << catStr << "][" << levelStr << "] " << message << '\n';
+    }
+}
+
+bool Logger::hasErrors() const
+{
+    return loggedError;
+}
+
+bool Logger::hasFatal() const
+{
+    return loggedFatal;
+}
+
+bool Logger::hasErrorsOrFatal() const
+{
+    return loggedError || loggedFatal;
+}
+
+const std::string& Logger::getLogFilename() const
+{
+    return filename;
 }

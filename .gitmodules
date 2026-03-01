@@ -1,3 +1,18 @@
 [submodule "external/SDL3"]
 	path = external/SDL3
 	url = https://github.com/libsdl-org/SDL.git
+[submodule "external/freetype"]
+	path = external/freetype
+	url = https://github.com/freetype/freetype
+[submodule "external/openal-soft"]
+	path = external/openal-soft
+	url = https://github.com/kcat/openal-soft.git
+[submodule "external/assimp"]
+	path = external/assimp
+	url = https://github.com/assimp/assimp.git
+[submodule "external/Jolt"]
+	path = external/Jolt
+	url = https://github.com/jrouwe/JoltPhysics
+[submodule "external/PhysX"]
+	path = external/PhysX
+	url = https://github.com/NVIDIA-Omniverse/PhysX.git

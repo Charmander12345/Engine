@@ -4,7 +4,7 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include "OpenGLTexture.h"
-#include "Texture.h"
+#include "../Texture.h"
 
 OpenGLMaterial::~OpenGLMaterial()
 {
@@ -33,6 +33,29 @@ OpenGLMaterial::~OpenGLMaterial()
 void OpenGLMaterial::addShader(const std::shared_ptr<OpenGLShader>& shader)
 {
     m_shaders.push_back(shader);
+}
+
+void OpenGLMaterial::setShadowData(GLuint texArray, const glm::mat4* matrices, const int* lightIndices, int count)
+{
+    m_shadowMapArray = texArray;
+    m_shadowCount = std::min(count, kMaxShadowLights);
+    for (int i = 0; i < m_shadowCount; ++i)
+    {
+        m_shadowMatrices[i] = matrices[i];
+        m_shadowLightIndices[i] = lightIndices[i];
+    }
+}
+
+void OpenGLMaterial::setPointShadowData(GLuint cubeArray, const glm::vec3* positions, const float* farPlanes, const int* lightIndices, int count)
+{
+    m_pointShadowCubeArray = cubeArray;
+    m_pointShadowCount = std::min(count, kMaxPointShadowLights);
+    for (int i = 0; i < m_pointShadowCount; ++i)
+    {
+        m_pointShadowPositions[i] = positions[i];
+        m_pointShadowFarPlanes[i] = farPlanes[i];
+        m_pointShadowLightIndices[i] = lightIndices[i];
+    }
 }
 
 bool OpenGLMaterial::build()
@@ -145,6 +168,74 @@ bool OpenGLMaterial::build()
     }
     m_vertexCount = static_cast<GLsizei>((m_vertexData.size() * sizeof(float)) / stride);
 
+    // Cache uniform locations once
+    m_locModel = glGetUniformLocation(m_program, "uModel");
+    m_locView = glGetUniformLocation(m_program, "uView");
+    m_locProjection = glGetUniformLocation(m_program, "uProjection");
+    m_locLightPos = glGetUniformLocation(m_program, "uLightPos");
+    m_locLightColor = glGetUniformLocation(m_program, "uLightColor");
+    m_locLightIntensity = glGetUniformLocation(m_program, "uLightIntensity");
+    m_locViewPos = glGetUniformLocation(m_program, "uViewPos");
+    m_locMaterialShininess = glGetUniformLocation(m_program, "material.shininess");
+    m_locHasSpecularMap = glGetUniformLocation(m_program, "uHasSpecularMap");
+    m_locHasDiffuseMap = glGetUniformLocation(m_program, "uHasDiffuseMap");
+    m_locLightCount = glGetUniformLocation(m_program, "uLightCount");
+    m_locShadowMaps = glGetUniformLocation(m_program, "uShadowMaps");
+    m_locShadowCount = glGetUniformLocation(m_program, "uShadowCount");
+    for (int i = 0; i < kMaxShadowLights; ++i)
+    {
+        const std::string idx = "[" + std::to_string(i) + "]";
+        m_shadowLocs[i].lightSpaceMatrix = glGetUniformLocation(m_program, ("uLightSpaceMatrices" + idx).c_str());
+        m_shadowLocs[i].lightIndex       = glGetUniformLocation(m_program, ("uShadowLightIndices" + idx).c_str());
+    }
+    // Point shadow uniform locations
+    m_locPointShadowMaps = glGetUniformLocation(m_program, "uPointShadowMaps");
+    m_locPointShadowCount = glGetUniformLocation(m_program, "uPointShadowCount");
+    for (int i = 0; i < kMaxPointShadowLights; ++i)
+    {
+        const std::string idx = "[" + std::to_string(i) + "]";
+        m_pointShadowLocs[i].position  = glGetUniformLocation(m_program, ("uPointShadowPositions" + idx).c_str());
+        m_pointShadowLocs[i].farPlane  = glGetUniformLocation(m_program, ("uPointShadowFarPlanes" + idx).c_str());
+        m_pointShadowLocs[i].lightIndex = glGetUniformLocation(m_program, ("uPointShadowLightIndices" + idx).c_str());
+    }
+    for (int i = 0; i < kMaxLights; ++i)
+    {
+        const std::string prefix = "uLights[" + std::to_string(i) + "].";
+        m_lightLocs[i].position       = glGetUniformLocation(m_program, (prefix + "position").c_str());
+        m_lightLocs[i].direction      = glGetUniformLocation(m_program, (prefix + "direction").c_str());
+        m_lightLocs[i].color          = glGetUniformLocation(m_program, (prefix + "color").c_str());
+        m_lightLocs[i].intensity      = glGetUniformLocation(m_program, (prefix + "intensity").c_str());
+        m_lightLocs[i].range          = glGetUniformLocation(m_program, (prefix + "range").c_str());
+        m_lightLocs[i].spotCutoff     = glGetUniformLocation(m_program, (prefix + "spotCutoff").c_str());
+        m_lightLocs[i].spotOuterCutoff = glGetUniformLocation(m_program, (prefix + "spotOuterCutoff").c_str());
+        m_lightLocs[i].type           = glGetUniformLocation(m_program, (prefix + "type").c_str());
+    }
+
+    // Cache texture sampler locations.
+    // Try material struct names first (material.diffuse, material.specular),
+    // then fall back to textureN for backward compatibility.
+    m_texUniformLocs.clear();
+    static const char* kMaterialSamplerNames[] = { "material.diffuse", "material.specular" };
+    static constexpr int kMaterialSamplerCount = 2;
+    for (int i = 0; i < 16; ++i)
+    {
+        GLint loc = -1;
+        if (i < kMaterialSamplerCount)
+        {
+            loc = glGetUniformLocation(m_program, kMaterialSamplerNames[i]);
+        }
+        if (loc < 0)
+        {
+            const std::string name = "texture" + std::to_string(i);
+            loc = glGetUniformLocation(m_program, name.c_str());
+        }
+        if (loc < 0)
+        {
+            break;
+        }
+        m_texUniformLocs.push_back(loc);
+    }
+
     return true;
 }
 
@@ -154,9 +245,6 @@ void OpenGLMaterial::bindTextures()
     {
         return;
     }
-
-    // Must have the program bound before calling glUniform*
-    glUseProgram(m_program);
 
     uint32_t unit = 0;
     for (const auto& texCpu : m_textures)
@@ -181,20 +269,16 @@ void OpenGLMaterial::bindTextures()
             it = m_textureCache.emplace(key, std::move(glTex)).first;
         }
 
-        // Bind texture to unit first
         it->second->bind(unit);
 
-        const std::string uniformName = "texture" + std::to_string(unit);
-        GLint loc = glGetUniformLocation(m_program, uniformName.c_str());
-        if (loc >= 0)
+        if (unit < static_cast<uint32_t>(m_texUniformLocs.size()) && m_texUniformLocs[unit] >= 0)
         {
-            glUniform1i(loc, static_cast<GLint>(unit));
+            glUniform1i(m_texUniformLocs[unit], static_cast<GLint>(unit));
         }
 
         ++unit;
     }
 
-    // Ensure we return to texture unit 0
     glActiveTexture(GL_TEXTURE0);
 }
 
@@ -203,23 +287,108 @@ void OpenGLMaterial::bind()
     glUseProgram(m_program);
     glBindVertexArray(m_vao);
 
-    // Set matrix uniforms
-    GLint modelLoc = glGetUniformLocation(m_program, "uModel");
-    if (modelLoc >= 0)
+    if (m_locModel >= 0)
     {
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(m_modelMatrix));
+        glUniformMatrix4fv(m_locModel, 1, GL_FALSE, glm::value_ptr(m_modelMatrix));
+    }
+    if (m_locView >= 0)
+    {
+        glUniformMatrix4fv(m_locView, 1, GL_FALSE, glm::value_ptr(m_viewMatrix));
+    }
+    if (m_locProjection >= 0)
+    {
+        glUniformMatrix4fv(m_locProjection, 1, GL_FALSE, glm::value_ptr(m_projectionMatrix));
+    }
+    if (m_locLightPos >= 0)
+    {
+        glUniform3fv(m_locLightPos, 1, glm::value_ptr(m_lightPosition));
+    }
+    if (m_locLightColor >= 0)
+    {
+        glUniform3fv(m_locLightColor, 1, glm::value_ptr(m_lightColor));
+    }
+    if (m_locLightIntensity >= 0)
+    {
+        glUniform1f(m_locLightIntensity, m_lightIntensity);
+    }
+    if (m_locViewPos >= 0)
+    {
+        const glm::mat4 invView = glm::inverse(m_viewMatrix);
+        glUniform3f(m_locViewPos, invView[3][0], invView[3][1], invView[3][2]);
+    }
+    if (m_locMaterialShininess >= 0)
+    {
+        glUniform1f(m_locMaterialShininess, m_shininess);
+    }
+    if (m_locHasSpecularMap >= 0)
+    {
+        glUniform1i(m_locHasSpecularMap, (m_textures.size() >= 2 && m_textures[1]) ? 1 : 0);
+    }
+    if (m_locHasDiffuseMap >= 0)
+    {
+        glUniform1i(m_locHasDiffuseMap, (!m_textures.empty() && m_textures[0]) ? 1 : 0);
     }
 
-    GLint viewLoc = glGetUniformLocation(m_program, "uView");
-    if (viewLoc >= 0)
+    // Multi-light uniforms
+    const int lightCount = static_cast<int>(std::min(m_lights.size(), static_cast<size_t>(kMaxLights)));
+    if (m_locLightCount >= 0)
     {
-        glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(m_viewMatrix));
+        glUniform1i(m_locLightCount, lightCount);
+    }
+    for (int i = 0; i < lightCount; ++i)
+    {
+        const auto& l = m_lights[i];
+        const auto& loc = m_lightLocs[i];
+        if (loc.position >= 0)       glUniform3fv(loc.position, 1, glm::value_ptr(l.position));
+        if (loc.direction >= 0)      glUniform3fv(loc.direction, 1, glm::value_ptr(l.direction));
+        if (loc.color >= 0)          glUniform3fv(loc.color, 1, glm::value_ptr(l.color));
+        if (loc.intensity >= 0)      glUniform1f(loc.intensity, l.intensity);
+        if (loc.range >= 0)          glUniform1f(loc.range, l.range);
+        if (loc.spotCutoff >= 0)     glUniform1f(loc.spotCutoff, l.spotCutoff);
+        if (loc.spotOuterCutoff >= 0) glUniform1f(loc.spotOuterCutoff, l.spotOuterCutoff);
+        if (loc.type >= 0)           glUniform1i(loc.type, l.type);
     }
 
-    GLint projectionLoc = glGetUniformLocation(m_program, "uProjection");
-    if (projectionLoc >= 0)
+    // Multi-light shadow uniforms
+    if (m_locShadowCount >= 0)
     {
-        glUniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(m_projectionMatrix));
+        glUniform1i(m_locShadowCount, m_shadowCount);
+    }
+    for (int i = 0; i < m_shadowCount; ++i)
+    {
+        if (m_shadowLocs[i].lightSpaceMatrix >= 0)
+            glUniformMatrix4fv(m_shadowLocs[i].lightSpaceMatrix, 1, GL_FALSE, glm::value_ptr(m_shadowMatrices[i]));
+        if (m_shadowLocs[i].lightIndex >= 0)
+            glUniform1i(m_shadowLocs[i].lightIndex, m_shadowLightIndices[i]);
+    }
+    if (m_locShadowMaps >= 0 && m_shadowMapArray != 0)
+    {
+        constexpr int kShadowTexUnit = 4;
+        glActiveTexture(GL_TEXTURE0 + kShadowTexUnit);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, m_shadowMapArray);
+        glUniform1i(m_locShadowMaps, kShadowTexUnit);
+    }
+
+    // Point shadow uniforms
+    if (m_locPointShadowCount >= 0)
+    {
+        glUniform1i(m_locPointShadowCount, m_pointShadowCount);
+    }
+    for (int i = 0; i < m_pointShadowCount; ++i)
+    {
+        if (m_pointShadowLocs[i].position >= 0)
+            glUniform3fv(m_pointShadowLocs[i].position, 1, glm::value_ptr(m_pointShadowPositions[i]));
+        if (m_pointShadowLocs[i].farPlane >= 0)
+            glUniform1f(m_pointShadowLocs[i].farPlane, m_pointShadowFarPlanes[i]);
+        if (m_pointShadowLocs[i].lightIndex >= 0)
+            glUniform1i(m_pointShadowLocs[i].lightIndex, m_pointShadowLightIndices[i]);
+    }
+    if (m_locPointShadowMaps >= 0 && m_pointShadowCubeArray != 0)
+    {
+        constexpr int kPointShadowTexUnit = 5;
+        glActiveTexture(GL_TEXTURE0 + kPointShadowTexUnit);
+        glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, m_pointShadowCubeArray);
+        glUniform1i(m_locPointShadowMaps, kPointShadowTexUnit);
     }
 
     bindTextures();
@@ -227,19 +396,6 @@ void OpenGLMaterial::bind()
 
 void OpenGLMaterial::unbind()
 {
-    // Unbind textures (by unit)
-    uint32_t unit = 0;
-    for (const auto& texCpu : m_textures)
-    {
-        (void)texCpu;
-        glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + unit));
-        glBindTexture(GL_TEXTURE_2D, 0);
-        ++unit;
-    }
-    glActiveTexture(GL_TEXTURE0);
-
-    glBindVertexArray(0);
-    glUseProgram(0);
 }
 
 void OpenGLMaterial::render()
@@ -254,4 +410,37 @@ void OpenGLMaterial::render()
         glDrawArrays(GL_TRIANGLES, 0, m_vertexCount);
     }
     unbind();
+}
+
+void OpenGLMaterial::renderBatchContinuation()
+{
+    glBindVertexArray(m_vao);
+
+    if (m_locModel >= 0)
+    {
+        glUniformMatrix4fv(m_locModel, 1, GL_FALSE, glm::value_ptr(m_modelMatrix));
+    }
+    if (m_locHasSpecularMap >= 0)
+    {
+        glUniform1i(m_locHasSpecularMap, (m_textures.size() >= 2 && m_textures[1]) ? 1 : 0);
+    }
+    if (m_locHasDiffuseMap >= 0)
+    {
+        glUniform1i(m_locHasDiffuseMap, (!m_textures.empty() && m_textures[0]) ? 1 : 0);
+    }
+    if (m_locMaterialShininess >= 0)
+    {
+        glUniform1f(m_locMaterialShininess, m_shininess);
+    }
+
+    bindTextures();
+
+    if (m_indexCount > 0)
+    {
+        glDrawElements(GL_TRIANGLES, m_indexCount, GL_UNSIGNED_INT, nullptr);
+    }
+    else
+    {
+        glDrawArrays(GL_TRIANGLES, 0, m_vertexCount);
+    }
 }

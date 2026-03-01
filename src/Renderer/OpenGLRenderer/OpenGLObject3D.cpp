@@ -2,50 +2,247 @@
 
 #include <filesystem>
 #include <vector>
+#include <limits>
 
 #include "OpenGLMaterial.h"
 #include "OpenGLShader.h"
 #include "Logger.h"
 
-#include "../../Basics/Object3D.h"
-#include "../../AssetManager/AssetManager.h"
+#include "../../Core/Asset.h"
+
+#include <unordered_map>
+#include <glm/glm.hpp>
 
 namespace
 {
     std::string ResolveShaderPath(const std::string& filename)
     {
+        static std::unordered_map<std::string, std::string> s_shaderPathCache;
+        auto it = s_shaderPathCache.find(filename);
+        if (it != s_shaderPathCache.end())
+        {
+            return it->second;
+        }
         std::filesystem::path base = std::filesystem::current_path();
         std::filesystem::path shadersfolder = base / "shaders" / filename;
+        std::string result;
         if (std::filesystem::exists(shadersfolder))
         {
-            return shadersfolder.string();
+            result = shadersfolder.string();
         }
-        return {};
+        s_shaderPathCache[filename] = result;
+        return result;
     }
+
+    std::vector<float> ReadFloatArray(const json& data, const char* key)
+    {
+        if (!data.is_object())
+        {
+            return {};
+        }
+        auto it = data.find(key);
+        if (it == data.end() || !it->is_array())
+        {
+            return {};
+        }
+        return it->get<std::vector<float>>();
+    }
+
+    std::vector<uint32_t> ReadIndexArray(const json& data, const char* key)
+    {
+        if (!data.is_object())
+        {
+            return {};
+        }
+        auto it = data.find(key);
+        if (it == data.end() || !it->is_array())
+        {
+            return {};
+        }
+        return it->get<std::vector<uint32_t>>();
+    }
+
+    std::vector<float> BuildVerticesWithFlatNormals(const std::vector<float>& vertices, const std::vector<uint32_t>& indices)
+    {
+        constexpr size_t inputStride = 5;
+        if (vertices.empty() || (vertices.size() % inputStride) != 0)
+        {
+            return {};
+        }
+
+        const size_t vertexCount = vertices.size() / inputStride;
+        glm::vec3 meshCenter(0.0f);
+        for (size_t i = 0; i < vertexCount; ++i)
+        {
+            const size_t base = i * inputStride;
+            meshCenter += glm::vec3(vertices[base + 0], vertices[base + 1], vertices[base + 2]);
+        }
+        if (vertexCount > 0)
+        {
+            meshCenter /= static_cast<float>(vertexCount);
+        }
+        std::vector<float> result;
+        result.reserve((indices.empty() ? vertexCount : indices.size()) * 8);
+
+        const auto addTriangle = [&](uint32_t i0, uint32_t i1, uint32_t i2)
+        {
+            if (i0 >= vertexCount || i1 >= vertexCount || i2 >= vertexCount)
+            {
+                return;
+            }
+
+            const size_t base0 = static_cast<size_t>(i0) * inputStride;
+            const size_t base1 = static_cast<size_t>(i1) * inputStride;
+            const size_t base2 = static_cast<size_t>(i2) * inputStride;
+
+            const glm::vec3 p0(vertices[base0 + 0], vertices[base0 + 1], vertices[base0 + 2]);
+            const glm::vec3 p1(vertices[base1 + 0], vertices[base1 + 1], vertices[base1 + 2]);
+            const glm::vec3 p2(vertices[base2 + 0], vertices[base2 + 1], vertices[base2 + 2]);
+
+            const glm::vec3 edge1 = p1 - p0;
+            const glm::vec3 edge2 = p2 - p0;
+            glm::vec3 faceNormal = glm::cross(edge2, edge1);
+            if (glm::length(faceNormal) > 0.0f)
+            {
+                faceNormal = glm::normalize(faceNormal);
+            }
+
+            const glm::vec3 faceCenter = (p0 + p1 + p2) / 3.0f;
+            if (glm::dot(faceNormal, faceCenter - meshCenter) < 0.0f)
+            {
+                faceNormal = -faceNormal;
+            }
+
+            auto appendVertex = [&](size_t base)
+            {
+                result.push_back(vertices[base + 0]);
+                result.push_back(vertices[base + 1]);
+                result.push_back(vertices[base + 2]);
+                result.push_back(faceNormal.x);
+                result.push_back(faceNormal.y);
+                result.push_back(faceNormal.z);
+                result.push_back(vertices[base + 3]);
+                result.push_back(vertices[base + 4]);
+            };
+
+            appendVertex(base0);
+            appendVertex(base1);
+            appendVertex(base2);
+        };
+
+        if (!indices.empty())
+        {
+            for (size_t i = 0; i + 2 < indices.size(); i += 3)
+            {
+                addTriangle(indices[i], indices[i + 1], indices[i + 2]);
+            }
+        }
+        else
+        {
+            for (size_t i = 0; i + 2 < vertexCount; i += 3)
+            {
+                addTriangle(static_cast<uint32_t>(i), static_cast<uint32_t>(i + 1), static_cast<uint32_t>(i + 2));
+            }
+        }
+
+        return result;
+    }
+
+    std::unordered_map<std::string, std::shared_ptr<OpenGLMaterial>> s_materialCache;
 }
 
-OpenGLObject3D::OpenGLObject3D(const std::shared_ptr<Object3D>& obj)
-    : m_obj(obj)
+OpenGLObject3D::OpenGLObject3D(const std::shared_ptr<AssetData>& asset)
+    : m_asset(asset)
 {
+}
+
+bool OpenGLObject3D::hasLocalBounds() const
+{
+    return m_hasLocalBounds;
+}
+
+Vec3 OpenGLObject3D::getLocalBoundsMin() const
+{
+    return Vec3{ m_localBoundsMin.x, m_localBoundsMin.y, m_localBoundsMin.z };
+}
+
+Vec3 OpenGLObject3D::getLocalBoundsMax() const
+{
+    return Vec3{ m_localBoundsMax.x, m_localBoundsMax.y, m_localBoundsMax.z };
+}
+
+GLuint OpenGLObject3D::getProgram() const
+{
+    return m_material ? m_material->getProgram() : 0;
+}
+
+GLuint OpenGLObject3D::getVao() const
+{
+    return m_material ? m_material->getVao() : 0;
+}
+
+int OpenGLObject3D::getVertexCount() const
+{
+    return m_material ? m_material->getVertexCount() : 0;
+}
+
+int OpenGLObject3D::getIndexCount() const
+{
+    return m_material ? m_material->getIndexCount() : 0;
+}
+
+void OpenGLObject3D::ClearCache()
+{
+    s_materialCache.clear();
 }
 
 bool OpenGLObject3D::prepare()
 {
     auto& logger = Logger::Instance();
-    if (!m_obj)
+    if (!m_asset)
         return false;
 
-    // If already prepared (material backend-specific), nothing to do.
+    if (m_material)
+        return true;
+
+    const std::string path = m_asset->getPath();
+    std::string cacheKeySuffix = m_materialCacheKeySuffix;
+    if (!m_fragmentShaderOverride.empty())
     {
-        auto existing = m_obj->getMaterial();
-        if (std::dynamic_pointer_cast<OpenGLMaterial>(existing))
+        if (!cacheKeySuffix.empty()) cacheKeySuffix += "|";
+        cacheKeySuffix += m_fragmentShaderOverride;
+    }
+    const std::string cacheKey = cacheKeySuffix.empty() ? path : (path + "|" + cacheKeySuffix);
+    if (!cacheKey.empty())
+    {
+        auto it = s_materialCache.find(cacheKey);
+        if (it != s_materialCache.end())
         {
+            m_material = it->second;
             return true;
         }
     }
 
-    const std::string vertexPath = ResolveShaderPath("vertex.glsl");
-    const std::string fragmentPath = ResolveShaderPath("fragment.glsl");
+    const auto& data = m_asset->getData();
+    std::string vertexOverride;
+    std::string fragmentOverride;
+    if (data.is_object())
+    {
+        if (data.contains("m_shaderVertex"))
+        {
+            vertexOverride = data.at("m_shaderVertex").get<std::string>();
+        }
+        if (data.contains("m_shaderFragment"))
+        {
+            fragmentOverride = data.at("m_shaderFragment").get<std::string>();
+        }
+    }
+
+    const std::string vertexPath = ResolveShaderPath(vertexOverride.empty() ? "vertex.glsl" : vertexOverride);
+    const std::string fragmentName = !m_fragmentShaderOverride.empty() ? m_fragmentShaderOverride
+                                   : !fragmentOverride.empty()       ? fragmentOverride
+                                   :                                   "fragment.glsl";
+    const std::string fragmentPath = ResolveShaderPath(fragmentName);
     if (vertexPath.empty() || fragmentPath.empty())
     {
         logger.log(Logger::Category::Rendering, "OpenGLObject3D: Couldn't locate vertex.glsl and/or fragment.glsl.", Logger::LogLevel::ERROR);
@@ -70,8 +267,10 @@ bool OpenGLObject3D::prepare()
     mat->addShader(vertexShader);
     mat->addShader(fragmentShader);
 
-    const auto vCount = m_obj->getVertices().size();
-    const auto iCount = m_obj->getIndices().size();
+    auto vertices = ReadFloatArray(data, "m_vertices");
+    auto indices = ReadIndexArray(data, "m_indices");
+    const auto vCount = vertices.size();
+    const auto iCount = indices.size();
     logger.log(Logger::Category::Rendering,
         "OpenGLObject3D: vertexFloats=" + std::to_string(vCount) +
         ", indexCount=" + std::to_string(iCount),
@@ -88,21 +287,44 @@ bool OpenGLObject3D::prepare()
             Logger::LogLevel::WARNING);
     }
 
-    mat->setVertexData(m_obj->getVertices());
-    mat->setIndexData(m_obj->getIndices());
+    if (vCount == 0)
+    {
+        return false;
+    }
 
-    // Default layout: positions (x,y,z) + texcoords (u,v)
-    const GLsizei stride = static_cast<GLsizei>(5 * sizeof(float));
+    if ((vCount % 5) == 0)
+    {
+        glm::vec3 minPos(std::numeric_limits<float>::max());
+        glm::vec3 maxPos(std::numeric_limits<float>::lowest());
+        for (size_t i = 0; i + 4 < vCount; i += 5)
+        {
+            glm::vec3 pos(vertices[i + 0], vertices[i + 1], vertices[i + 2]);
+            minPos = glm::min(minPos, pos);
+            maxPos = glm::max(maxPos, pos);
+        }
+
+        m_localBoundsMin = minPos;
+        m_localBoundsMax = maxPos;
+        m_hasLocalBounds = true;
+    }
+
+    auto verticesWithNormals = BuildVerticesWithFlatNormals(vertices, indices);
+    if (verticesWithNormals.empty())
+    {
+        logger.log(Logger::Category::Rendering, "OpenGLObject3D: Failed to build vertex normals.", Logger::LogLevel::ERROR);
+        return false;
+    }
+
+    mat->setVertexData(verticesWithNormals);
+    mat->setIndexData({});
+
+    // Default layout: positions (x,y,z) + normals (x,y,z) + texcoords (u,v)
+    const GLsizei stride = static_cast<GLsizei>(8 * sizeof(float));
     std::vector<OpenGLMaterial::LayoutElement> layout;
     layout.push_back(OpenGLMaterial::LayoutElement{ 0, 3, GL_FLOAT, GL_FALSE, stride, 0 });
-    layout.push_back(OpenGLMaterial::LayoutElement{ 2, 2, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(3 * sizeof(float)) });
+    layout.push_back(OpenGLMaterial::LayoutElement{ 1, 3, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(3 * sizeof(float)) });
+    layout.push_back(OpenGLMaterial::LayoutElement{ 2, 2, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(6 * sizeof(float)) });
     mat->setLayout(layout);
-
-    // Propagate textures from the runtime material (loaded by AssetManager) into the OpenGL material.
-    if (auto cpuMat = m_obj->getMaterial())
-    {
-        mat->setTextures(cpuMat->getTextures());
-    }
 
     if (!mat->build())
     {
@@ -110,6 +332,88 @@ bool OpenGLObject3D::prepare()
         return false;
     }
 
-    m_obj->setMaterial(mat);
+    m_material = mat;
+    if (!cacheKey.empty())
+    {
+        s_materialCache[cacheKey] = m_material;
+    }
     return true;
+}
+
+void OpenGLObject3D::setLightData(const glm::vec3& position, const glm::vec3& color, float intensity)
+{
+    if (!m_material)
+    {
+        return;
+    }
+    m_material->setLightData(position, color, intensity);
+}
+
+void OpenGLObject3D::setLights(const std::vector<OpenGLMaterial::LightData>& lights)
+{
+    if (!m_material)
+    {
+        return;
+    }
+    m_material->setLights(lights);
+}
+
+void OpenGLObject3D::setShadowData(GLuint shadowMapArray, const glm::mat4* matrices, const int* lightIndices, int count)
+{
+    if (!m_material)
+    {
+        return;
+    }
+    m_material->setShadowData(shadowMapArray, matrices, lightIndices, count);
+}
+
+void OpenGLObject3D::setPointShadowData(GLuint cubeArray, const glm::vec3* positions, const float* farPlanes, const int* lightIndices, int count)
+{
+    if (!m_material)
+    {
+        return;
+    }
+    m_material->setPointShadowData(cubeArray, positions, farPlanes, lightIndices, count);
+}
+
+void OpenGLObject3D::setMatrices(const glm::mat4& model, const glm::mat4& view, const glm::mat4& projection)
+{
+    if (!m_material)
+        return;
+
+    m_material->setModelMatrix(model);
+    m_material->setViewMatrix(view);
+    m_material->setProjectionMatrix(projection);
+}
+
+void OpenGLObject3D::render()
+{
+    if (m_material)
+    {
+        m_material->render();
+    }
+}
+
+void OpenGLObject3D::renderBatchContinuation()
+{
+    if (m_material)
+    {
+        m_material->renderBatchContinuation();
+    }
+}
+
+void OpenGLObject3D::setTextures(const std::vector<std::shared_ptr<Texture>>& textures)
+{
+    if (m_material)
+    {
+        m_material->setTextures(textures);
+    }
+}
+
+void OpenGLObject3D::setShininess(float shininess)
+{
+    if (m_material)
+    {
+        m_material->setShininess(shininess);
+    }
 }
