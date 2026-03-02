@@ -24,6 +24,8 @@
 - ✅ `Widget Editor`: `WidgetEditorState`-Tracking pro offenem Editor-Tab (tabId, assetPath, editedWidget, selectedElementId) in `UIManager`.
 - ✅ `Widget Editor`: Bereits offene Widget-Editor-Tabs werden bei erneutem Doppelklick nur aktiviert (kein Doppel-Öffnen).
 - ✅ `Build-System`: Debug/Release-Artefakt-Kollisionen bei Multi-Config-Builds behoben (konfigurationsgetrennte Output-Verzeichnisse), dadurch `LNK2038` Runtime-/Iterator-Mismatch beseitigt.
+- ✅ `OpenGLRenderer`: Default-Framebuffer wird jetzt vor dem Tab-FBO-Blit explizit mit `m_clearColor` gecleart. Verhindert undefinierte Back-Buffer-Inhalte bei Nicht-Viewport-Tabs (z. B. Widget Editor).
+- ✅ `OpenGLTextRenderer`: Blend-State wird jetzt in `drawTextWithProgram()` per `glGetIntegerv`/`glBlendFuncSeparate` gesichert und nach dem Text-Rendering wiederhergestellt. Behebt das Überschreiben der separaten Alpha-Blend-Funktion des UI-FBO durch `glBlendFunc`.
 
 ## Legende
 
@@ -299,6 +301,7 @@
 | OpenGL 4.6 Core-Kontext                    | ✅     |
 | GLAD-Loader                                | ✅     |
 | Render-Pipeline (render → present, kein redundantes Clear) | ✅     |
+| Default-Framebuffer-Clear vor Tab-FBO-Blit                 | ✅     |
 | Welt-Rendering (3D-Objekte)               | ✅     |
 | UI-Rendering (FBO-cached, Dirty-Flag)     | ✅     |
 | Tab-FBO Hardware-Blit (glBlitFramebuffer) | ✅     |
@@ -494,6 +497,7 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | drawText + measureText              | ✅     |
 | Zeilenhöhe-Berechnung               | ✅     |
 | Shader-Cache                        | ✅     |
+| Blend-State Save/Restore            | ✅     |
 | Multi-Font-Unterstützung            | 🟡     |
 | Rich-Text (Farbe, Bold, Italic)    | ❌     |
 | Text-Wrapping / Layout              | ❌     |

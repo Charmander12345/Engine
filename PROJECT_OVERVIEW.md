@@ -733,6 +733,7 @@ render()
      → Hierarchical Z-Buffer (HZB) Occlusion Culling (liest Tiefe aus Tab-FBO)
      → Sortierung + Batch-Rendering
      → Pick-Buffer + Selection-Outline nur bei Bedarf (On-Demand)
+  → Default-Framebuffer mit m_clearColor leeren (verhindert undefinierte Inhalte bei Nicht-Viewport-Tabs)
   → Aktiven Tab-FBO per glBlitFramebuffer auf Bildschirm (Hardware-Blit, kein Shader)
   → renderUI()
      → UIManager-Layouts aktualisieren
@@ -917,6 +918,7 @@ virtual Mat4 getViewMatrixColumnMajor() const = 0;
 - `measureText(text, scale)` → Gibt Textgröße zurück (für Layout)
 - `getLineHeight(scale)` → Zeilenhöhe
 - Shader-Cache: `getProgramForShaders()` cacht verknüpfte Programme
+- Blend-State Save/Restore: `drawTextWithProgram()` sichert den aktuellen `glBlendFuncSeparate`-Zustand vor dem Rendering und stellt ihn danach wieder her, damit der UI-FBO-Alpha-Kanal nicht korrumpiert wird
 - Popup-Unterstützung: `ensurePopupVao()` / `swapVao()` erzeugen und wechseln ein kontext-lokales VAO für sekundäre GL-Kontexte (VAOs werden zwischen Kontexten nicht geteilt)
 
 ---

@@ -563,6 +563,13 @@ void OpenGLRenderer::render()
     // Composite: blit world content to default framebuffer.
     // Keep source/destination restricted to the viewport content rect so the
     // scene is shown only in the available viewport area (excluding UI docks).
+    // First, clear the default framebuffer so non-Viewport tabs (e.g. Widget
+    // Editor) that only partially blit don't show undefined back-buffer content.
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, width, height);
+    glClearColor(m_clearColor.x, m_clearColor.y, m_clearColor.z, m_clearColor.w);
+    glClear(GL_COLOR_BUFFER_BIT);
+
     if (activeTab && activeTab->renderTarget && activeTab->renderTarget->isValid())
     {
         auto* glRT = static_cast<OpenGLRenderTarget*>(activeTab->renderTarget.get());

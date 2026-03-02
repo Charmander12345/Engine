@@ -183,6 +183,13 @@ void OpenGLTextRenderer::drawTextWithProgram(const std::string& text, const Vec2
         baseline += m_fontAscent * scale;
     }
 
+    GLint prevBlendSrcRGB = 0, prevBlendDstRGB = 0, prevBlendSrcAlpha = 0, prevBlendDstAlpha = 0;
+    GLboolean blendWasEnabled = glIsEnabled(GL_BLEND);
+    glGetIntegerv(GL_BLEND_SRC_RGB, &prevBlendSrcRGB);
+    glGetIntegerv(GL_BLEND_DST_RGB, &prevBlendDstRGB);
+    glGetIntegerv(GL_BLEND_SRC_ALPHA, &prevBlendSrcAlpha);
+    glGetIntegerv(GL_BLEND_DST_ALPHA, &prevBlendDstAlpha);
+
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -227,6 +234,12 @@ void OpenGLTextRenderer::drawTextWithProgram(const std::string& text, const Vec2
 
     glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
+
+    glBlendFuncSeparate(prevBlendSrcRGB, prevBlendDstRGB, prevBlendSrcAlpha, prevBlendDstAlpha);
+    if (!blendWasEnabled)
+    {
+        glDisable(GL_BLEND);
+    }
 }
 
 Vec2 OpenGLTextRenderer::measureText(const std::string& text, float scale) const
