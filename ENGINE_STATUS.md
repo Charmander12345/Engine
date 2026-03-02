@@ -7,7 +7,12 @@
 
 ## Letzte Änderung (Viewport)
 
-- ✅ `OpenGLRenderer`: Viewport-Compositing verwendet jetzt den tatsächlichen Content-Rect beim Blit auf den Backbuffer. Ergebnis: Die 3D-Szene wird im verfügbaren Viewport-Bereich angezeigt statt in eine Ecke gequetscht zu wirken.
+- ✅ `OpenGLTextRenderer`: Bugfix – Horizontale Text-Spiegelung im Viewport behoben. `renderViewportUI()` verwendet jetzt `setProjectionMatrix()` um exakt dieselbe `glm::mat4` im Text-Renderer wie beim UI-Quad-Renderer zu setzen.
+- ✅ `UIWidget`: Neue `WidgetElement`-Properties: `borderColor`, `borderThickness`, `borderRadius`, `opacity`, `isVisible`, `tooltipText`, `isBold`, `isItalic`, `gradientColor`, `maxSize`, `spacing`, `radioGroup`. JSON-Serialisierung vollständig.
+- ✅ `UIWidget`: Neue Widget-Typen: `Label`, `Separator`, `ScrollView`, `ToggleButton`, `RadioButton`. Rendering in `renderUI()` und `renderViewportUI()` vollständig.
+- ✅ `UIWidgets`: Neue Helper-Header: `LabelWidget.h`, `ToggleButtonWidget.h`, `ScrollViewWidget.h`, `RadioButtonWidget.h`.
+- ✅ `UIManager`: Layout-Berechnung/Anordnung für neue Widget-Typen und `spacing`-Property erweitert.
+- ✅ `Scripting`: Neues Python-Modul `engine.viewport_ui` mit 17 Methoden für Viewport-UI aus Scripts. `engine.pyi` aktualisiert.
 - ✅ `OpenGLRenderer`: Nach Shadow-Rendering wird der Content-Rect-Viewport (inkl. Offset) wiederhergestellt. Dadurch bleibt die Welt an der korrekten Position im Viewport-Bereich.
 - 🟡 `ViewportUI`: Grundgerüst `ViewportUIManager` erstellt und an `OpenGLRenderer` angebunden (Viewport-Rect-Übergabe implementiert). Rendering/Input des Viewport-UI folgt in den nächsten Schritten.
 - 🟡 `ViewportUI`: Erster Renderpfad vorhanden (`renderViewportUI()` im `OpenGLRenderer`) und nur für den `Viewport`-Tab aktiv. Der Input-Routing-Teil folgt als nächster Schritt.

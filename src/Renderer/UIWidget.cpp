@@ -7,6 +7,7 @@ namespace
         switch (type)
         {
         case WidgetElementType::Text: return "Text";
+        case WidgetElementType::Label: return "Label";
         case WidgetElementType::Button: return "Button";
         case WidgetElementType::Panel: return "Panel";
         case WidgetElementType::StackPanel: return "StackPanel";
@@ -21,6 +22,10 @@ namespace
         case WidgetElementType::DropdownButton: return "DropdownButton";
         case WidgetElementType::TreeView: return "TreeView";
         case WidgetElementType::TabView: return "TabView";
+        case WidgetElementType::Separator: return "Separator";
+        case WidgetElementType::ScrollView: return "ScrollView";
+        case WidgetElementType::ToggleButton: return "ToggleButton";
+        case WidgetElementType::RadioButton: return "RadioButton";
         default: return "Unknown";
         }
     }
@@ -28,6 +33,7 @@ namespace
     WidgetElementType fromString(const std::string& value)
     {
         if (value == "Text") return WidgetElementType::Text;
+        if (value == "Label") return WidgetElementType::Label;
         if (value == "Button") return WidgetElementType::Button;
         if (value == "Panel") return WidgetElementType::Panel;
         if (value == "StackPanel") return WidgetElementType::StackPanel;
@@ -42,6 +48,10 @@ namespace
         if (value == "DropdownButton") return WidgetElementType::DropdownButton;
         if (value == "TreeView") return WidgetElementType::TreeView;
         if (value == "TabView") return WidgetElementType::TabView;
+        if (value == "Separator") return WidgetElementType::Separator;
+        if (value == "ScrollView") return WidgetElementType::ScrollView;
+        if (value == "ToggleButton") return WidgetElementType::ToggleButton;
+        if (value == "RadioButton") return WidgetElementType::RadioButton;
         return WidgetElementType::Unknown;
     }
 
@@ -181,7 +191,8 @@ namespace
         {
             element.color = readVec4(entry.at("color"));
         }
-        else if (element.type == WidgetElementType::StackPanel || element.type == WidgetElementType::Grid)
+        else if (element.type == WidgetElementType::StackPanel || element.type == WidgetElementType::Grid
+            || element.type == WidgetElementType::ScrollView)
         {
             element.color = Vec4{ 0.1f, 0.1f, 0.12f, 0.65f };
         }
@@ -290,6 +301,8 @@ namespace
         else
         {
             element.isHitTestable = (element.type == WidgetElementType::Button ||
+                element.type == WidgetElementType::ToggleButton ||
+                element.type == WidgetElementType::RadioButton ||
                 element.type == WidgetElementType::ColorPicker ||
                 element.type == WidgetElementType::EntryBar ||
                 element.type == WidgetElementType::Slider ||
@@ -376,6 +389,54 @@ namespace
                 }
             }
         }
+        if (entry.contains("borderColor"))
+        {
+            element.borderColor = readVec4(entry.at("borderColor"));
+        }
+        if (entry.contains("borderThickness"))
+        {
+            element.borderThickness = entry.at("borderThickness").get<float>();
+        }
+        if (entry.contains("borderRadius"))
+        {
+            element.borderRadius = entry.at("borderRadius").get<float>();
+        }
+        if (entry.contains("opacity"))
+        {
+            element.opacity = entry.at("opacity").get<float>();
+        }
+        if (entry.contains("isVisible"))
+        {
+            element.isVisible = entry.at("isVisible").get<bool>();
+        }
+        if (entry.contains("tooltipText"))
+        {
+            element.tooltipText = entry.at("tooltipText").get<std::string>();
+        }
+        if (entry.contains("isBold"))
+        {
+            element.isBold = entry.at("isBold").get<bool>();
+        }
+        if (entry.contains("isItalic"))
+        {
+            element.isItalic = entry.at("isItalic").get<bool>();
+        }
+        if (entry.contains("gradientColor"))
+        {
+            element.gradientColor = readVec4(entry.at("gradientColor"));
+        }
+        if (entry.contains("maxSize"))
+        {
+            element.maxSize = readVec2(entry.at("maxSize"));
+        }
+        if (entry.contains("spacing"))
+        {
+            element.spacing = entry.at("spacing").get<float>();
+        }
+        if (entry.contains("radioGroup"))
+        {
+            element.radioGroup = entry.at("radioGroup").get<std::string>();
+        }
         return element;
     }
 
@@ -447,13 +508,25 @@ namespace
         {
             entry["fillY"] = element.fillY;
         }
-        if (element.type == WidgetElementType::StackPanel)
+        if (element.type == WidgetElementType::StackPanel || element.type == WidgetElementType::ScrollView)
         {
             entry["orientation"] = toString(element.orientation);
             entry["sizeToContent"] = element.sizeToContent;
-            if (element.scrollable)
+            if (element.scrollable || element.type == WidgetElementType::ScrollView)
             {
-                entry["scrollable"] = element.scrollable;
+                entry["scrollable"] = true;
+            }
+            if (element.spacing > 0.0f)
+            {
+                entry["spacing"] = element.spacing;
+            }
+        }
+        else if (element.type == WidgetElementType::ToggleButton || element.type == WidgetElementType::RadioButton)
+        {
+            entry["isChecked"] = element.isChecked;
+            if (!element.radioGroup.empty())
+            {
+                entry["radioGroup"] = element.radioGroup;
             }
         }
         else if (element.type == WidgetElementType::Grid)
@@ -535,6 +608,44 @@ namespace
         if (!element.imagePath.empty())
         {
             entry["imagePath"] = element.imagePath;
+        }
+        // Extended styling properties
+        if (element.borderThickness > 0.0f)
+        {
+            entry["borderThickness"] = element.borderThickness;
+            entry["borderColor"] = writeVec4(element.borderColor);
+        }
+        if (element.borderRadius > 0.0f)
+        {
+            entry["borderRadius"] = element.borderRadius;
+        }
+        if (element.opacity < 1.0f)
+        {
+            entry["opacity"] = element.opacity;
+        }
+        if (!element.isVisible)
+        {
+            entry["isVisible"] = element.isVisible;
+        }
+        if (!element.tooltipText.empty())
+        {
+            entry["tooltipText"] = element.tooltipText;
+        }
+        if (element.isBold)
+        {
+            entry["isBold"] = element.isBold;
+        }
+        if (element.isItalic)
+        {
+            entry["isItalic"] = element.isItalic;
+        }
+        if (element.gradientColor.w > 0.0f)
+        {
+            entry["gradientColor"] = writeVec4(element.gradientColor);
+        }
+        if (element.maxSize.x > 0.0f || element.maxSize.y > 0.0f)
+        {
+            entry["maxSize"] = writeVec2(element.maxSize);
         }
         if (!element.children.empty())
         {

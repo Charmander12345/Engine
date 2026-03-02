@@ -181,6 +181,7 @@ namespace
         switch (element.type)
         {
         case WidgetElementType::Text:
+        case WidgetElementType::Label:
         {
             float scale = (element.fontSize > 0.0f) ? (element.fontSize / 48.0f) : 1.0f;
             const Vec2 textSize = measureText ? measureText(element.text, scale) : Vec2{};
@@ -204,6 +205,8 @@ namespace
         }
 
         case WidgetElementType::Button:
+        case WidgetElementType::ToggleButton:
+        case WidgetElementType::RadioButton:
         {
             float scale = (element.fontSize > 0.0f) ? (element.fontSize / 48.0f) : 1.0f;
             const Vec2 textSize = (!element.text.empty() && measureText) ? measureText(element.text, scale) : Vec2{};
@@ -368,6 +371,7 @@ namespace
             return size;
         }
         case WidgetElementType::StackPanel:
+        case WidgetElementType::ScrollView:
         case WidgetElementType::Grid:
         {
             childSizes.reserve(element.children.size());
@@ -388,7 +392,7 @@ namespace
             break;
         }
 
-        if (element.type == WidgetElementType::StackPanel)
+        if (element.type == WidgetElementType::StackPanel || element.type == WidgetElementType::ScrollView)
         {
             if (element.orientation == StackOrientation::Horizontal)
             {
@@ -517,12 +521,14 @@ namespace
 
         if (element.sizeToContent && element.hasContentSize)
         {
-            if (element.type == WidgetElementType::StackPanel && element.orientation == StackOrientation::Horizontal && baseH > 0.0f)
+            if ((element.type == WidgetElementType::StackPanel || element.type == WidgetElementType::ScrollView)
+                && element.orientation == StackOrientation::Horizontal && baseH > 0.0f)
             {
                 width = element.contentSizePixels.x;
                 height = baseH;
             }
-            else if (element.type == WidgetElementType::StackPanel && element.orientation == StackOrientation::Vertical && baseW > 0.0f)
+            else if ((element.type == WidgetElementType::StackPanel || element.type == WidgetElementType::ScrollView)
+                && element.orientation == StackOrientation::Vertical && baseW > 0.0f)
             {
                 width = baseW;
                 height = element.contentSizePixels.y;
@@ -533,7 +539,9 @@ namespace
                 height = element.contentSizePixels.y;
             }
         }
-        else if ((element.type == WidgetElementType::Text || element.type == WidgetElementType::Button || element.type == WidgetElementType::DropdownButton) && element.hasContentSize)
+        else if ((element.type == WidgetElementType::Text || element.type == WidgetElementType::Label
+            || element.type == WidgetElementType::Button || element.type == WidgetElementType::ToggleButton
+            || element.type == WidgetElementType::RadioButton || element.type == WidgetElementType::DropdownButton) && element.hasContentSize)
         {
             if (baseW <= 0.0f)
             {
@@ -547,7 +555,7 @@ namespace
 
         float x0 = parentX + element.from.x * parentW;
         float y0 = parentY + element.from.y * parentH;
-        if (element.sizeToContent && element.type == WidgetElementType::StackPanel && element.to.x > element.from.x)
+        if (element.sizeToContent && (element.type == WidgetElementType::StackPanel || element.type == WidgetElementType::ScrollView) && element.to.x > element.from.x)
         {
             x0 = parentX + element.to.x * parentW - width;
         }
@@ -593,9 +601,10 @@ namespace
             return;
         }
 
-        if (element.type == WidgetElementType::StackPanel && element.orientation == StackOrientation::Horizontal)
+        if ((element.type == WidgetElementType::StackPanel || element.type == WidgetElementType::ScrollView)
+            && element.orientation == StackOrientation::Horizontal)
         {
-            float spacing = element.padding.x;
+            float spacing = (element.spacing > 0.0f) ? element.spacing : element.padding.x;
             float totalSpacing = spacing * static_cast<float>(element.children.size() > 0 ? (element.children.size() - 1) : 0);
             float fixedWidth = 0.0f;
             size_t fillCount = 0;
@@ -659,9 +668,9 @@ namespace
                 cursorX += slotW + spacing;
             }
         }
-        else if (element.type == WidgetElementType::StackPanel)
+        else if (element.type == WidgetElementType::StackPanel || element.type == WidgetElementType::ScrollView)
         {
-            float spacing = element.padding.y;
+            float spacing = (element.spacing > 0.0f) ? element.spacing : element.padding.y;
             float totalSpacing = spacing * static_cast<float>(element.children.size() > 0 ? (element.children.size() - 1) : 0);
             float fixedHeight = 0.0f;
             size_t fillCount = 0;
@@ -704,7 +713,7 @@ namespace
                 totalHeight += totalSpacing;
             }
 
-            if (element.scrollable)
+            if (element.scrollable || element.type == WidgetElementType::ScrollView)
             {
                 const float maxScroll = std::max(0.0f, totalHeight - contentH);
                 element.scrollOffset = std::clamp(element.scrollOffset, 0.0f, maxScroll);
