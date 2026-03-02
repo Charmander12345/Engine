@@ -2052,6 +2052,11 @@ namespace
         auto* vp = getViewportUI();
         if (!vp) { PyErr_SetString(PyExc_RuntimeError, "ViewportUIManager not available."); return nullptr; }
         if (!widgetId || !*widgetId) { PyErr_SetString(PyExc_ValueError, "widget_id must be non-empty."); return nullptr; }
+        if (vp->getRootWidget())
+        {
+            Logger::Instance().log(Logger::Category::Engine,
+                "viewport_ui.create_widget: replacing existing root widget", Logger::LogLevel::WARNING);
+        }
         auto widget = std::make_shared<Widget>();
         widget->setName(widgetId);
         vp->setRootWidget(widget);
@@ -2204,6 +2209,7 @@ namespace
         WidgetElement* el = findVpElement(elementId);
         if (!el) { PyErr_SetString(PyExc_KeyError, "Element not found."); return nullptr; }
         el->color = Vec4{ r, g, b, a };
+        if (auto* vp = getViewportUI()) vp->markLayoutDirty();
         Py_RETURN_TRUE;
     }
 
@@ -2215,6 +2221,7 @@ namespace
         WidgetElement* el = findVpElement(elementId);
         if (!el) { PyErr_SetString(PyExc_KeyError, "Element not found."); return nullptr; }
         el->textColor = Vec4{ r, g, b, a };
+        if (auto* vp = getViewportUI()) vp->markLayoutDirty();
         Py_RETURN_TRUE;
     }
 

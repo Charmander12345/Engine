@@ -59,7 +59,6 @@ public:
         el.scrollable = true;
         el.sizeToContent = false;
         el.children = m_children;
-        el.cachedChildren = m_children;
         return el;
     }
 

@@ -639,7 +639,10 @@ namespace
         {
             entry["isItalic"] = element.isItalic;
         }
-        if (element.gradientColor.w > 0.0f)
+        if (element.gradientColor.x != 0.0f ||
+            element.gradientColor.y != 0.0f ||
+            element.gradientColor.z != 0.0f ||
+            element.gradientColor.w != 0.0f)
         {
             entry["gradientColor"] = writeVec4(element.gradientColor);
         }

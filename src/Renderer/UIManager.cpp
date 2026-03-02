@@ -5752,7 +5752,8 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
         }
 
         const std::vector<std::string> controls = {
-            "Panel", "Text", "Button", "Image", "EntryBar", "StackPanel",
+            "Panel", "Text", "Label", "Button", "ToggleButton", "RadioButton",
+            "Image", "EntryBar", "StackPanel", "ScrollView",
             "Grid", "Slider", "CheckBox", "DropDown", "ColorPicker", "ProgressBar", "Separator"
         };
         for (size_t i = 0; i < controls.size(); ++i)
@@ -6620,10 +6621,61 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
     }
     else if (elementType == "Separator")
     {
-        newEl.type = WidgetElementType::Panel;
+        newEl.type = WidgetElementType::Separator;
         newEl.from = Vec2{ 0.05f, 0.49f };
         newEl.to = Vec2{ 0.95f, 0.51f };
         newEl.color = Vec4{ 0.3f, 0.32f, 0.38f, 0.8f };
+    }
+    else if (elementType == "Label")
+    {
+        newEl.type = WidgetElementType::Label;
+        newEl.from = Vec2{ 0.05f, 0.05f };
+        newEl.to = Vec2{ 0.95f, 0.15f };
+        newEl.text = "Label";
+        newEl.font = "default.ttf";
+        newEl.fontSize = 14.0f;
+        newEl.textColor = Vec4{ 0.85f, 0.85f, 0.90f, 1.0f };
+        newEl.isHitTestable = false;
+    }
+    else if (elementType == "ToggleButton")
+    {
+        newEl.type = WidgetElementType::ToggleButton;
+        newEl.from = Vec2{ 0.3f, 0.4f };
+        newEl.to = Vec2{ 0.7f, 0.55f };
+        newEl.text = "Toggle";
+        newEl.font = "default.ttf";
+        newEl.fontSize = 14.0f;
+        newEl.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+        newEl.textAlignH = TextAlignH::Center;
+        newEl.textAlignV = TextAlignV::Center;
+        newEl.color = Vec4{ 0.2f, 0.2f, 0.3f, 0.95f };
+        newEl.hoverColor = Vec4{ 0.3f, 0.3f, 0.4f, 1.0f };
+        newEl.fillColor = Vec4{ 0.2f, 0.5f, 0.8f, 0.95f };
+    }
+    else if (elementType == "RadioButton")
+    {
+        newEl.type = WidgetElementType::RadioButton;
+        newEl.from = Vec2{ 0.3f, 0.4f };
+        newEl.to = Vec2{ 0.7f, 0.55f };
+        newEl.text = "Radio";
+        newEl.font = "default.ttf";
+        newEl.fontSize = 14.0f;
+        newEl.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+        newEl.textAlignH = TextAlignH::Center;
+        newEl.textAlignV = TextAlignV::Center;
+        newEl.color = Vec4{ 0.2f, 0.2f, 0.3f, 0.95f };
+        newEl.hoverColor = Vec4{ 0.3f, 0.3f, 0.4f, 1.0f };
+        newEl.fillColor = Vec4{ 0.2f, 0.5f, 0.8f, 0.95f };
+        newEl.radioGroup = "default";
+    }
+    else if (elementType == "ScrollView")
+    {
+        newEl.type = WidgetElementType::ScrollView;
+        newEl.from = Vec2{ 0.05f, 0.05f };
+        newEl.to = Vec2{ 0.95f, 0.95f };
+        newEl.orientation = StackOrientation::Vertical;
+        newEl.color = Vec4{ 0.08f, 0.08f, 0.10f, 0.6f };
+        newEl.scrollable = true;
     }
     else
     {
@@ -6896,6 +6948,11 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         case WidgetElementType::DropdownButton: typeName = "DropdownButton"; break;
         case WidgetElementType::TreeView:    typeName = "TreeView"; break;
         case WidgetElementType::TabView:     typeName = "TabView"; break;
+        case WidgetElementType::Label:       typeName = "Label"; break;
+        case WidgetElementType::Separator:   typeName = "Separator"; break;
+        case WidgetElementType::ScrollView:  typeName = "ScrollView"; break;
+        case WidgetElementType::ToggleButton: typeName = "ToggleButton"; break;
+        case WidgetElementType::RadioButton: typeName = "RadioButton"; break;
         default:                             typeName = "Unknown"; break;
         }
         rootPanel->children.push_back(makeLabel("WE.Det.Type", "Type: " + typeName));
@@ -6997,26 +7054,84 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
                 markAllWidgetsDirty();
             }));
 
-        // FillX / FillY checkboxes
+        // Horizontal alignment dropdown
         {
-            CheckBoxWidget fillXCb;
-            fillXCb.setLabel("Fill X");
-            fillXCb.setChecked(sel->fillX);
-            fillXCb.setOnCheckedChanged([sel, this](bool c) { sel->fillX = c; markAllWidgetsDirty(); });
-            WidgetElement fillXEl = fillXCb.toElement();
-            fillXEl.id = "WE.Det.FillX";
-            fillXEl.runtimeOnly = true;
-            rootPanel->children.push_back(std::move(fillXEl));
+            std::string hAlignName;
+            if (sel->fillX) hAlignName = "Fill";
+            else if (sel->textAlignH == TextAlignH::Center) hAlignName = "Center";
+            else if (sel->textAlignH == TextAlignH::Right) hAlignName = "Right";
+            else hAlignName = "Left";
+
+            rootPanel->children.push_back(makePropertyRow("WE.Det.HAlign", "H Align", hAlignName,
+                [sel, this](const std::string& v) {
+                    if (v == "Fill") { sel->fillX = true; }
+                    else {
+                        sel->fillX = false;
+                        if (v == "Center") sel->textAlignH = TextAlignH::Center;
+                        else if (v == "Right") sel->textAlignH = TextAlignH::Right;
+                        else sel->textAlignH = TextAlignH::Left;
+                    }
+                    markAllWidgetsDirty();
+                }));
+            rootPanel->children.push_back(makeLabel("WE.Det.HAlignHint", "  (Left / Center / Right / Fill)", 10.0f,
+                Vec4{ 0.55f, 0.58f, 0.65f, 0.8f }, 16.0f));
         }
+
+        // Vertical alignment dropdown
         {
-            CheckBoxWidget fillYCb;
-            fillYCb.setLabel("Fill Y");
-            fillYCb.setChecked(sel->fillY);
-            fillYCb.setOnCheckedChanged([sel, this](bool c) { sel->fillY = c; markAllWidgetsDirty(); });
-            WidgetElement fillYEl = fillYCb.toElement();
-            fillYEl.id = "WE.Det.FillY";
-            fillYEl.runtimeOnly = true;
-            rootPanel->children.push_back(std::move(fillYEl));
+            std::string vAlignName;
+            if (sel->fillY) vAlignName = "Fill";
+            else if (sel->textAlignV == TextAlignV::Center) vAlignName = "Center";
+            else if (sel->textAlignV == TextAlignV::Bottom) vAlignName = "Bottom";
+            else vAlignName = "Top";
+
+            rootPanel->children.push_back(makePropertyRow("WE.Det.VAlign", "V Align", vAlignName,
+                [sel, this](const std::string& v) {
+                    if (v == "Fill") { sel->fillY = true; }
+                    else {
+                        sel->fillY = false;
+                        if (v == "Center") sel->textAlignV = TextAlignV::Center;
+                        else if (v == "Bottom") sel->textAlignV = TextAlignV::Bottom;
+                        else sel->textAlignV = TextAlignV::Top;
+                    }
+                    markAllWidgetsDirty();
+                }));
+            rootPanel->children.push_back(makeLabel("WE.Det.VAlignHint", "  (Top / Center / Bottom / Fill)", 10.0f,
+                Vec4{ 0.55f, 0.58f, 0.65f, 0.8f }, 16.0f));
+        }
+
+        // Size to content
+        {
+            CheckBoxWidget stcCb;
+            stcCb.setLabel("Size to Content");
+            stcCb.setChecked(sel->sizeToContent);
+            stcCb.setOnCheckedChanged([sel, this](bool c) { sel->sizeToContent = c; markAllWidgetsDirty(); });
+            WidgetElement stcEl = stcCb.toElement();
+            stcEl.id = "WE.Det.SizeToContent";
+            stcEl.runtimeOnly = true;
+            rootPanel->children.push_back(std::move(stcEl));
+        }
+
+        // Max size constraints
+        rootPanel->children.push_back(makePropertyRow("WE.Det.MaxW", "Max Width", fmtF(sel->maxSize.x),
+            [sel, this](const std::string& v) {
+                try { sel->maxSize.x = std::stof(v); } catch (...) {}
+                markAllWidgetsDirty();
+            }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.MaxH", "Max Height", fmtF(sel->maxSize.y),
+            [sel, this](const std::string& v) {
+                try { sel->maxSize.y = std::stof(v); } catch (...) {}
+                markAllWidgetsDirty();
+            }));
+
+        // Spacing (for containers)
+        if (sel->type == WidgetElementType::StackPanel || sel->type == WidgetElementType::ScrollView)
+        {
+            rootPanel->children.push_back(makePropertyRow("WE.Det.Spacing", "Spacing", fmtF(sel->spacing),
+                [sel, this](const std::string& v) {
+                    try { sel->spacing = std::stof(v); } catch (...) {}
+                    markAllWidgetsDirty();
+                }));
         }
     }
 
@@ -7042,11 +7157,39 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             [sel, this](const std::string& v) { try { sel->color.z = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
         rootPanel->children.push_back(makePropertyRow("WE.Det.ColA", "Color A", fmtF(sel->color.w),
             [sel, this](const std::string& v) { try { sel->color.w = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+
+        // Opacity
+        rootPanel->children.push_back(makePropertyRow("WE.Det.Opacity", "Opacity", fmtF(sel->opacity),
+            [sel, this](const std::string& v) { try { sel->opacity = std::max(0.0f, std::min(1.0f, std::stof(v))); } catch (...) {} markAllWidgetsDirty(); }));
+
+        // Visibility
+        {
+            CheckBoxWidget visCb;
+            visCb.setLabel("Visible");
+            visCb.setChecked(sel->isVisible);
+            visCb.setOnCheckedChanged([sel, this](bool c) { sel->isVisible = c; markAllWidgetsDirty(); });
+            WidgetElement visEl = visCb.toElement();
+            visEl.id = "WE.Det.Visible";
+            visEl.runtimeOnly = true;
+            rootPanel->children.push_back(std::move(visEl));
+        }
+
+        // Border
+        rootPanel->children.push_back(makePropertyRow("WE.Det.BorderW", "Border Width", fmtF(sel->borderThickness),
+            [sel, this](const std::string& v) { try { sel->borderThickness = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.BorderR", "Border Radius", fmtF(sel->borderRadius),
+            [sel, this](const std::string& v) { try { sel->borderRadius = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+
+        // Tooltip
+        rootPanel->children.push_back(makePropertyRow("WE.Det.Tooltip", "Tooltip", sel->tooltipText,
+            [sel, this](const std::string& v) { sel->tooltipText = v; markAllWidgetsDirty(); }));
     }
 
     // --- Section: Text (for elements with text) ---
     if (sel->type == WidgetElementType::Text || sel->type == WidgetElementType::Button ||
-        sel->type == WidgetElementType::EntryBar || sel->type == WidgetElementType::DropdownButton)
+        sel->type == WidgetElementType::EntryBar || sel->type == WidgetElementType::DropdownButton ||
+        sel->type == WidgetElementType::Label || sel->type == WidgetElementType::ToggleButton ||
+        sel->type == WidgetElementType::RadioButton || sel->type == WidgetElementType::CheckBox)
     {
         WidgetElement sep{};
         sep.type = WidgetElementType::Panel;
@@ -7077,6 +7220,35 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             [sel, this](const std::string& v) { try { sel->textColor.z = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
         rootPanel->children.push_back(makePropertyRow("WE.Det.TColA", "Text A", fmtF(sel->textColor.w),
             [sel, this](const std::string& v) { try { sel->textColor.w = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+
+        // Bold / Italic
+        {
+            CheckBoxWidget boldCb;
+            boldCb.setLabel("Bold");
+            boldCb.setChecked(sel->isBold);
+            boldCb.setOnCheckedChanged([sel, this](bool c) { sel->isBold = c; markAllWidgetsDirty(); });
+            WidgetElement boldEl = boldCb.toElement();
+            boldEl.id = "WE.Det.Bold";
+            boldEl.runtimeOnly = true;
+            rootPanel->children.push_back(std::move(boldEl));
+        }
+        {
+            CheckBoxWidget italicCb;
+            italicCb.setLabel("Italic");
+            italicCb.setChecked(sel->isItalic);
+            italicCb.setOnCheckedChanged([sel, this](bool c) { sel->isItalic = c; markAllWidgetsDirty(); });
+            WidgetElement italicEl = italicCb.toElement();
+            italicEl.id = "WE.Det.Italic";
+            italicEl.runtimeOnly = true;
+            rootPanel->children.push_back(std::move(italicEl));
+        }
+
+        // RadioGroup for RadioButton
+        if (sel->type == WidgetElementType::RadioButton)
+        {
+            rootPanel->children.push_back(makePropertyRow("WE.Det.RadioGrp", "Radio Group", sel->radioGroup,
+                [sel, this](const std::string& v) { sel->radioGroup = v; markAllWidgetsDirty(); }));
+        }
     }
 
     // --- Section: Image ---
