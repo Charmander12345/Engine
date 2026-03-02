@@ -4614,6 +4614,34 @@ bool UIManager::handleMouseUp(const Vec2& screenPos, int button)
         }
     }
 
+    // Widget editor: hierarchy drag-and-drop reordering
+    const std::string weHierarchyPrefix = "WidgetHierarchy|";
+    if (payload.rfind(weHierarchyPrefix, 0) == 0)
+    {
+        if (auto* weState = getActiveWidgetEditorState())
+        {
+            const std::string draggedElId = payload.substr(weHierarchyPrefix.size());
+            WidgetElement* dropTarget = hitTest(screenPos, false);
+            if (dropTarget)
+            {
+                // Check if dropped on a hierarchy tree row
+                const std::string treeRowPrefix = "WidgetEditor.Left.TreeRow.";
+                if (dropTarget->id.rfind(treeRowPrefix, 0) == 0)
+                {
+                    // Resolve which element the drop target row represents
+                    // by finding the element whose label matches the row text
+                    const std::string targetElId = resolveHierarchyRowElementId(
+                        weState->tabId, dropTarget->id);
+                    if (!targetElId.empty() && targetElId != draggedElId)
+                    {
+                        moveWidgetEditorElement(weState->tabId, draggedElId, targetElId);
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
     // Check if dropped on a content browser folder (grid folder tile)
     WidgetElement* dropTarget = hitTest(screenPos, false);
     if (dropTarget)
@@ -6492,8 +6520,6 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
 
     auto& state = it->second;
     auto& elements = state.editedWidget->getElementsMutable();
-    if (elements.empty())
-        return;
 
     // Generate a unique element id
     static int s_newElementCounter = 0;
@@ -6624,11 +6650,15 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.color = Vec4{ 0.2f, 0.2f, 0.25f, 0.8f };
     }
 
-    // Add to first root element (the main container panel)
+    // Add to widget: if empty, add as root element; otherwise append to first root's children
     const std::string capturedTabId = tabId;
     const std::string capturedElId = newId;
+    const bool addedAsRoot = elements.empty();
     auto capturedElement = std::make_shared<WidgetElement>(newEl);
-    elements.front().children.push_back(std::move(newEl));
+    if (addedAsRoot)
+        elements.push_back(std::move(newEl));
+    else
+        elements.front().children.push_back(std::move(newEl));
     state.editedWidget->markLayoutDirty();
 
     markWidgetEditorDirty(tabId);
@@ -6640,18 +6670,28 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
     UndoRedoManager::Command cmd;
     cmd.description = "Add " + elementType;
 
-    cmd.undo = [this, capturedTabId, capturedElId]()
+    cmd.undo = [this, capturedTabId, capturedElId, addedAsRoot]()
     {
         auto it2 = m_widgetEditorStates.find(capturedTabId);
         if (it2 == m_widgetEditorStates.end() || !it2->second.editedWidget)
             return;
         auto& els = it2->second.editedWidget->getElementsMutable();
-        if (els.empty()) return;
-        auto& children = els.front().children;
-        children.erase(
-            std::remove_if(children.begin(), children.end(),
-                [&](const WidgetElement& e) { return e.id == capturedElId; }),
-            children.end());
+        if (addedAsRoot)
+        {
+            els.erase(
+                std::remove_if(els.begin(), els.end(),
+                    [&](const WidgetElement& e) { return e.id == capturedElId; }),
+                els.end());
+        }
+        else
+        {
+            if (els.empty()) return;
+            auto& children = els.front().children;
+            children.erase(
+                std::remove_if(children.begin(), children.end(),
+                    [&](const WidgetElement& e) { return e.id == capturedElId; }),
+                children.end());
+        }
         if (it2->second.selectedElementId == capturedElId)
             it2->second.selectedElementId.clear();
         it2->second.editedWidget->markLayoutDirty();
@@ -6661,14 +6701,19 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         markAllWidgetsDirty();
     };
 
-    cmd.execute = [this, capturedTabId, capturedElement]()
+    cmd.execute = [this, capturedTabId, capturedElement, addedAsRoot]()
     {
         auto it2 = m_widgetEditorStates.find(capturedTabId);
         if (it2 == m_widgetEditorStates.end() || !it2->second.editedWidget)
             return;
         auto& els = it2->second.editedWidget->getElementsMutable();
-        if (els.empty()) return;
-        els.front().children.push_back(*capturedElement);
+        if (addedAsRoot)
+            els.push_back(*capturedElement);
+        else
+        {
+            if (els.empty()) return;
+            els.front().children.push_back(*capturedElement);
+        }
         it2->second.editedWidget->markLayoutDirty();
         markWidgetEditorDirty(capturedTabId);
         refreshWidgetEditorHierarchy(capturedTabId);
@@ -6677,6 +6722,154 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
     };
 
     UndoRedoManager::Instance().pushCommand(std::move(cmd));
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: resolve which element a hierarchy tree row represents
+// ---------------------------------------------------------------------------
+std::string UIManager::resolveHierarchyRowElementId(const std::string& tabId, const std::string& rowId) const
+{
+    auto stateIt = m_widgetEditorStates.find(tabId);
+    if (stateIt == m_widgetEditorStates.end() || !stateIt->second.editedWidget)
+        return {};
+
+    // Row ids are "WidgetEditor.Left.TreeRow.<index>", extract the index
+    const std::string prefix = "WidgetEditor.Left.TreeRow.";
+    if (rowId.rfind(prefix, 0) != 0)
+        return {};
+    int targetIndex = -1;
+    try { targetIndex = std::stoi(rowId.substr(prefix.size())); }
+    catch (...) { return {}; }
+
+    // Walk the element tree in the same order as buildTree to find the element at that index
+    int currentIndex = 0;
+    std::string result;
+    const std::function<bool(const std::vector<WidgetElement>&)> findAtIndex =
+        [&](const std::vector<WidgetElement>& elements) -> bool
+    {
+        for (const auto& el : elements)
+        {
+            if (currentIndex == targetIndex)
+            {
+                result = el.id;
+                return true;
+            }
+            ++currentIndex;
+            if (findAtIndex(el.children))
+                return true;
+        }
+        return false;
+    };
+
+    findAtIndex(stateIt->second.editedWidget->getElements());
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: move an element to a new position in the hierarchy
+// (inserts as sibling after the target element, or as child if target is a container)
+// ---------------------------------------------------------------------------
+void UIManager::moveWidgetEditorElement(const std::string& tabId,
+    const std::string& draggedId, const std::string& targetId)
+{
+    auto stateIt = m_widgetEditorStates.find(tabId);
+    if (stateIt == m_widgetEditorStates.end() || !stateIt->second.editedWidget)
+        return;
+
+    auto& elements = stateIt->second.editedWidget->getElementsMutable();
+
+    // Helper: recursively remove an element by id from a vector, returning the removed element
+    WidgetElement removed{};
+    bool found = false;
+    const std::function<bool(std::vector<WidgetElement>&)> removeById =
+        [&](std::vector<WidgetElement>& els) -> bool
+    {
+        for (auto it = els.begin(); it != els.end(); ++it)
+        {
+            if (it->id == draggedId)
+            {
+                removed = std::move(*it);
+                els.erase(it);
+                found = true;
+                return true;
+            }
+            if (removeById(it->children))
+                return true;
+        }
+        return false;
+    };
+
+    // Helper: check if targetId is a descendant of an element
+    const std::function<bool(const WidgetElement&)> isDescendant =
+        [&](const WidgetElement& el) -> bool
+    {
+        for (const auto& child : el.children)
+        {
+            if (child.id == targetId)
+                return true;
+            if (isDescendant(child))
+                return true;
+        }
+        return false;
+    };
+
+    // Prevent dropping an element onto its own descendant
+    {
+        const std::function<const WidgetElement*(const std::vector<WidgetElement>&, const std::string&)> findEl =
+            [&](const std::vector<WidgetElement>& els, const std::string& id) -> const WidgetElement*
+        {
+            for (const auto& el : els)
+            {
+                if (el.id == id)
+                    return &el;
+                if (auto* r = findEl(el.children, id))
+                    return r;
+            }
+            return nullptr;
+        };
+        if (const auto* draggedEl = findEl(elements, draggedId))
+        {
+            if (isDescendant(*draggedEl))
+                return; // would create a cycle
+        }
+    }
+
+    // Remove the dragged element from its current position
+    removeById(elements);
+    if (!found)
+        return;
+
+    // Insert as sibling after the target element (same parent)
+    const std::function<bool(std::vector<WidgetElement>&)> insertAfter =
+        [&](std::vector<WidgetElement>& els) -> bool
+    {
+        for (auto it = els.begin(); it != els.end(); ++it)
+        {
+            if (it->id == targetId)
+            {
+                els.insert(it + 1, std::move(removed));
+                return true;
+            }
+            if (insertAfter(it->children))
+                return true;
+        }
+        return false;
+    };
+
+    if (!insertAfter(elements))
+    {
+        // Fallback: if target not found (shouldn't happen), put back as last root child
+        if (!elements.empty())
+            elements.front().children.push_back(std::move(removed));
+        else
+            elements.push_back(std::move(removed));
+    }
+
+    stateIt->second.editedWidget->markLayoutDirty();
+    markWidgetEditorDirty(tabId);
+    refreshWidgetEditorHierarchy(tabId);
+    refreshWidgetEditorDetails(tabId);
+    markAllWidgetsDirty();
 }
 
 // ---------------------------------------------------------------------------
@@ -6776,6 +6969,10 @@ void UIManager::refreshWidgetEditorHierarchy(const std::string& tabId)
             {
                 selectWidgetEditorElement(capturedTabId, elId);
             };
+
+            // Make row draggable for hierarchy reordering
+            row.isDraggable = true;
+            row.dragPayload = "WidgetHierarchy|" + elId;
 
             treePanel->children.push_back(std::move(row));
             ++lineIndex;
@@ -6898,6 +7095,15 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
     const std::string capturedTabId = tabId;
     WidgetElement* sel = selected;
 
+    // Helper to propagate property changes to the FBO preview
+    const auto applyChange = [this, capturedTabId]() {
+        markWidgetEditorDirty(capturedTabId);
+        auto it2 = m_widgetEditorStates.find(capturedTabId);
+        if (it2 != m_widgetEditorStates.end() && it2->second.editedWidget)
+            it2->second.editedWidget->markLayoutDirty();
+        markAllWidgetsDirty();
+    };
+
     const auto makePropertyRow = [&](const std::string& id, const std::string& label,
         const std::string& value, std::function<void(const std::string&)> onChange) -> WidgetElement
     {
@@ -6946,46 +7152,46 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
 
         rootPanel->children.push_back(makePropertyRow("WE.Det.FromX", "From X", fmtF(sel->from.x),
-            [sel, this, capturedTabId](const std::string& v) {
+            [sel, applyChange](const std::string& v) {
                 try { sel->from.x = std::stof(v); } catch (...) {}
-                markAllWidgetsDirty();
+                applyChange();
             }));
         rootPanel->children.push_back(makePropertyRow("WE.Det.FromY", "From Y", fmtF(sel->from.y),
-            [sel, this, capturedTabId](const std::string& v) {
+            [sel, applyChange](const std::string& v) {
                 try { sel->from.y = std::stof(v); } catch (...) {}
-                markAllWidgetsDirty();
+                applyChange();
             }));
         rootPanel->children.push_back(makePropertyRow("WE.Det.ToX", "To X", fmtF(sel->to.x),
-            [sel, this, capturedTabId](const std::string& v) {
+            [sel, applyChange](const std::string& v) {
                 try { sel->to.x = std::stof(v); } catch (...) {}
-                markAllWidgetsDirty();
+                applyChange();
             }));
         rootPanel->children.push_back(makePropertyRow("WE.Det.ToY", "To Y", fmtF(sel->to.y),
-            [sel, this, capturedTabId](const std::string& v) {
+            [sel, applyChange](const std::string& v) {
                 try { sel->to.y = std::stof(v); } catch (...) {}
-                markAllWidgetsDirty();
+                applyChange();
             }));
 
         rootPanel->children.push_back(makePropertyRow("WE.Det.MinW", "Min Width", fmtF(sel->minSize.x),
-            [sel, this](const std::string& v) {
+            [sel, applyChange](const std::string& v) {
                 try { sel->minSize.x = std::stof(v); } catch (...) {}
-                markAllWidgetsDirty();
+                applyChange();
             }));
         rootPanel->children.push_back(makePropertyRow("WE.Det.MinH", "Min Height", fmtF(sel->minSize.y),
-            [sel, this](const std::string& v) {
+            [sel, applyChange](const std::string& v) {
                 try { sel->minSize.y = std::stof(v); } catch (...) {}
-                markAllWidgetsDirty();
+                applyChange();
             }));
 
         rootPanel->children.push_back(makePropertyRow("WE.Det.PadX", "Padding X", fmtF(sel->padding.x),
-            [sel, this](const std::string& v) {
+            [sel, applyChange](const std::string& v) {
                 try { sel->padding.x = std::stof(v); } catch (...) {}
-                markAllWidgetsDirty();
+                applyChange();
             }));
         rootPanel->children.push_back(makePropertyRow("WE.Det.PadY", "Padding Y", fmtF(sel->padding.y),
-            [sel, this](const std::string& v) {
+            [sel, applyChange](const std::string& v) {
                 try { sel->padding.y = std::stof(v); } catch (...) {}
-                markAllWidgetsDirty();
+                applyChange();
             }));
 
         // FillX / FillY checkboxes
@@ -6993,7 +7199,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             CheckBoxWidget fillXCb;
             fillXCb.setLabel("Fill X");
             fillXCb.setChecked(sel->fillX);
-            fillXCb.setOnCheckedChanged([sel, this](bool c) { sel->fillX = c; markAllWidgetsDirty(); });
+            fillXCb.setOnCheckedChanged([sel, applyChange](bool c) { sel->fillX = c; applyChange(); });
             WidgetElement fillXEl = fillXCb.toElement();
             fillXEl.id = "WE.Det.FillX";
             fillXEl.runtimeOnly = true;
@@ -7003,7 +7209,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             CheckBoxWidget fillYCb;
             fillYCb.setLabel("Fill Y");
             fillYCb.setChecked(sel->fillY);
-            fillYCb.setOnCheckedChanged([sel, this](bool c) { sel->fillY = c; markAllWidgetsDirty(); });
+            fillYCb.setOnCheckedChanged([sel, applyChange](bool c) { sel->fillY = c; applyChange(); });
             WidgetElement fillYEl = fillYCb.toElement();
             fillYEl.id = "WE.Det.FillY";
             fillYEl.runtimeOnly = true;
@@ -7026,13 +7232,13 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
 
         // Color (RGBA as individual fields)
         rootPanel->children.push_back(makePropertyRow("WE.Det.ColR", "Color R", fmtF(sel->color.x),
-            [sel, this](const std::string& v) { try { sel->color.x = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            [sel, applyChange](const std::string& v) { try { sel->color.x = std::stof(v); } catch (...) {} applyChange(); }));
         rootPanel->children.push_back(makePropertyRow("WE.Det.ColG", "Color G", fmtF(sel->color.y),
-            [sel, this](const std::string& v) { try { sel->color.y = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            [sel, applyChange](const std::string& v) { try { sel->color.y = std::stof(v); } catch (...) {} applyChange(); }));
         rootPanel->children.push_back(makePropertyRow("WE.Det.ColB", "Color B", fmtF(sel->color.z),
-            [sel, this](const std::string& v) { try { sel->color.z = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            [sel, applyChange](const std::string& v) { try { sel->color.z = std::stof(v); } catch (...) {} applyChange(); }));
         rootPanel->children.push_back(makePropertyRow("WE.Det.ColA", "Color A", fmtF(sel->color.w),
-            [sel, this](const std::string& v) { try { sel->color.w = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            [sel, applyChange](const std::string& v) { try { sel->color.w = std::stof(v); } catch (...) {} applyChange(); }));
     }
 
     // --- Section: Text (for elements with text) ---
@@ -7051,23 +7257,23 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
 
         rootPanel->children.push_back(makePropertyRow("WE.Det.Text", "Text", sel->text,
-            [sel, this](const std::string& v) { sel->text = v; markAllWidgetsDirty(); }));
+            [sel, applyChange](const std::string& v) { sel->text = v; applyChange(); }));
 
         rootPanel->children.push_back(makePropertyRow("WE.Det.Font", "Font", sel->font,
-            [sel, this](const std::string& v) { sel->font = v; markAllWidgetsDirty(); }));
+            [sel, applyChange](const std::string& v) { sel->font = v; applyChange(); }));
 
         rootPanel->children.push_back(makePropertyRow("WE.Det.FontSz", "Font Size", fmtF(sel->fontSize),
-            [sel, this](const std::string& v) { try { sel->fontSize = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            [sel, applyChange](const std::string& v) { try { sel->fontSize = std::stof(v); } catch (...) {} applyChange(); }));
 
         // Text color
         rootPanel->children.push_back(makePropertyRow("WE.Det.TColR", "Text R", fmtF(sel->textColor.x),
-            [sel, this](const std::string& v) { try { sel->textColor.x = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            [sel, applyChange](const std::string& v) { try { sel->textColor.x = std::stof(v); } catch (...) {} applyChange(); }));
         rootPanel->children.push_back(makePropertyRow("WE.Det.TColG", "Text G", fmtF(sel->textColor.y),
-            [sel, this](const std::string& v) { try { sel->textColor.y = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            [sel, applyChange](const std::string& v) { try { sel->textColor.y = std::stof(v); } catch (...) {} applyChange(); }));
         rootPanel->children.push_back(makePropertyRow("WE.Det.TColB", "Text B", fmtF(sel->textColor.z),
-            [sel, this](const std::string& v) { try { sel->textColor.z = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            [sel, applyChange](const std::string& v) { try { sel->textColor.z = std::stof(v); } catch (...) {} applyChange(); }));
         rootPanel->children.push_back(makePropertyRow("WE.Det.TColA", "Text A", fmtF(sel->textColor.w),
-            [sel, this](const std::string& v) { try { sel->textColor.w = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            [sel, applyChange](const std::string& v) { try { sel->textColor.w = std::stof(v); } catch (...) {} applyChange(); }));
     }
 
     // --- Section: Image ---
@@ -7085,7 +7291,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
 
         rootPanel->children.push_back(makePropertyRow("WE.Det.ImgPath", "Image Path", sel->imagePath,
-            [sel, this](const std::string& v) { sel->imagePath = v; markAllWidgetsDirty(); }));
+            [sel, applyChange](const std::string& v) { sel->imagePath = v; applyChange(); }));
     }
 
     // --- Section: Slider ---
@@ -7103,11 +7309,11 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
 
         rootPanel->children.push_back(makePropertyRow("WE.Det.MinVal", "Min", fmtF(sel->minValue),
-            [sel, this](const std::string& v) { try { sel->minValue = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            [sel, applyChange](const std::string& v) { try { sel->minValue = std::stof(v); } catch (...) {} applyChange(); }));
         rootPanel->children.push_back(makePropertyRow("WE.Det.MaxVal", "Max", fmtF(sel->maxValue),
-            [sel, this](const std::string& v) { try { sel->maxValue = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            [sel, applyChange](const std::string& v) { try { sel->maxValue = std::stof(v); } catch (...) {} applyChange(); }));
         rootPanel->children.push_back(makePropertyRow("WE.Det.CurVal", "Value", fmtF(sel->valueFloat),
-            [sel, this](const std::string& v) { try { sel->valueFloat = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            [sel, applyChange](const std::string& v) { try { sel->valueFloat = std::stof(v); } catch (...) {} applyChange(); }));
     }
 
     rightEntry->widget->markLayoutDirty();

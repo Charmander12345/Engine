@@ -3,6 +3,8 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "../Core/MathTypes.h"
 #include "UIWidget.h"
@@ -49,6 +51,13 @@ public:
     void setVisible(bool visible);
     bool isVisible() const;
 
+    // --- Script-spawned widgets (viewport-only, auto-destroyed on PIE stop) ---
+    std::string registerScriptWidget(const std::shared_ptr<Widget>& widget);
+    bool unregisterScriptWidget(const std::string& widgetId);
+    void clearAllScriptWidgets();
+    const std::unordered_map<std::string, std::shared_ptr<Widget>>& getScriptWidgets() const;
+    bool hasScriptWidgets() const;
+
     nlohmann::json toJson() const;
     bool loadFromJson(const nlohmann::json& data);
 
@@ -68,4 +77,8 @@ private:
     bool m_layoutDirty{ true };
     bool m_renderDirty{ true };
     Vec2 m_mousePosition{};
+
+    // Script-spawned widgets keyed by auto-generated id
+    std::unordered_map<std::string, std::shared_ptr<Widget>> m_scriptWidgets;
+    int m_nextScriptWidgetId{ 1 };
 };

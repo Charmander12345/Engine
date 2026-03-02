@@ -2697,7 +2697,8 @@ void OpenGLRenderer::renderViewportUI()
     }
 
     auto rootWidget = m_viewportUIManager.getRootWidget();
-    if (!rootWidget)
+    const bool hasScriptWidgets = m_viewportUIManager.hasScriptWidgets();
+    if (!rootWidget && !hasScriptWidgets)
     {
         return;
     }
@@ -2809,19 +2810,41 @@ void OpenGLRenderer::renderViewportUI()
         }
     };
 
-    Vec2 widgetSize = rootWidget->getSizePixels();
-    if (widgetSize.x <= 0.0f)
+    // Render the root widget (if present)
+    if (rootWidget)
     {
-        widgetSize.x = vpRect.z;
-    }
-    if (widgetSize.y <= 0.0f)
-    {
-        widgetSize.y = vpRect.w;
+        Vec2 widgetSize = rootWidget->getSizePixels();
+        if (widgetSize.x <= 0.0f)
+        {
+            widgetSize.x = vpRect.z;
+        }
+        if (widgetSize.y <= 0.0f)
+        {
+            widgetSize.y = vpRect.w;
+        }
+
+        for (const auto& element : rootWidget->getElements())
+        {
+            renderElement(renderElement, element, 0.0f, 0.0f, widgetSize.x, widgetSize.y);
+        }
     }
 
-    for (const auto& element : rootWidget->getElements())
+    // Render script-spawned widgets
+    for (const auto& [swId, swWidget] : m_viewportUIManager.getScriptWidgets())
     {
-        renderElement(renderElement, element, 0.0f, 0.0f, widgetSize.x, widgetSize.y);
+        if (!swWidget)
+            continue;
+
+        Vec2 swSize = swWidget->getSizePixels();
+        if (swSize.x <= 0.0f)
+            swSize.x = vpRect.z;
+        if (swSize.y <= 0.0f)
+            swSize.y = vpRect.w;
+
+        for (const auto& element : swWidget->getElements())
+        {
+            renderElement(renderElement, element, 0.0f, 0.0f, swSize.x, swSize.y);
+        }
     }
 
     m_viewportUIManager.clearRenderDirty();
@@ -2928,6 +2951,12 @@ void OpenGLRenderer::renderUI()
                 const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
                 const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
                 drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.color, false);
+
+                for (const auto& child : element.children)
+                {
+                    self(self, child, x0, y0, widthPx, heightPx);
+                }
+
                 if (m_uiDebugEnabled)
                 {
                     drawUIOutline(x0, y0, x1, y1, Vec4{ 1.0f, 0.9f, 0.1f, 1.0f }, uiProjection, program);
@@ -3704,6 +3733,8 @@ void OpenGLRenderer::renderUI()
                     glViewport(0, 0, fboW, fboH);
                     glClearColor(0.18f, 0.19f, 0.23f, 1.0f);
                     glClear(GL_COLOR_BUFFER_BIT);
+                    glEnable(GL_BLEND);
+                    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
                     uiProjection = glm::ortho(0.0f, static_cast<float>(fboW), static_cast<float>(fboH), 0.0f);
                     m_textRenderer->setScreenSize(fboW, fboH);

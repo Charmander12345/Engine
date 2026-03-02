@@ -394,13 +394,19 @@ class ui:
         ...
 
     @staticmethod
-    def spawn_widget(widget_id: str, asset_path: str, tab_id: str = "") -> bool:
-        """Spawn or replace a UI widget from a widget asset path."""
+    def spawn_widget(content_path: str) -> Optional[str]:
+        """Spawn a viewport widget from a content-relative path.
+
+        The widget is rendered only within the viewport area and is
+        automatically destroyed when PIE stops.
+
+        Returns a widget id string on success, or None on failure.
+        """
         ...
 
     @staticmethod
     def remove_widget(widget_id: str) -> bool:
-        """Remove a UI widget by id."""
+        """Remove a viewport widget by the id returned from spawn_widget."""
         ...
 
 # ---------------------------------------------------------------------------

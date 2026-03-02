@@ -513,6 +513,11 @@ int main()
                 }
                 uiMgr.markAllWidgetsDirty();
                 uiMgr.refreshWorldOutliner();
+                // Destroy all script-spawned viewport widgets
+                if (auto* vpUI = renderer->getViewportUIManagerPtr())
+                {
+                    vpUI->clearAllScriptWidgets();
+                }
                 Logger::Instance().log(Logger::Category::Engine, "PIE: stopped.", Logger::LogLevel::INFO);
             };
 
