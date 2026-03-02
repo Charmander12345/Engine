@@ -185,6 +185,23 @@ private:
 	size_t m_saveProgressTotal{ 0 };
 	size_t m_saveProgressSaved{ 0 };
 
+	// Widget editor state (per open editor tab)
+	struct WidgetEditorState
+	{
+		std::string tabId;
+		std::string assetPath;
+		std::shared_ptr<Widget> editedWidget;          // the widget being edited
+		std::string selectedElementId;                  // id of the currently selected element
+		std::string contentWidgetId;
+		std::string leftWidgetId;
+		std::string rightWidgetId;
+		std::string canvasWidgetId;
+	};
+	std::unordered_map<std::string, WidgetEditorState> m_widgetEditorStates; // key = tabId
+	void refreshWidgetEditorHierarchy(const std::string& tabId);
+	void refreshWidgetEditorDetails(const std::string& tabId);
+	void selectWidgetEditorElement(const std::string& tabId, const std::string& elementId);
+
 public:
 	void refreshWorldOutliner();
 	void refreshContentBrowser(const std::string& subfolder = "");

@@ -283,6 +283,7 @@ Die Engine unterstützt ein Tab-basiertes Editor-Layout:
 - **Toolbar** (ViewportOverlay, 34px): PIE-Controls zentriert, Settings rechts (Select/Move/Rotate/Scale temporär entfernt)
 - **Viewport-Tab**: Immer geöffnet (nicht schließbar), zeigt die 3D-Szene
 - **Mesh-Viewer-Tabs**: Schließbare Tabs für 3D-Mesh-Vorschau mit Split-View (Viewport + Properties), geöffnet per Doppelklick auf Model3D im Content Browser. Jeder Tab besitzt ein eigenes Runtime-EngineLevel.
+- **Widget-Editor-Tabs**: Schließbare Tabs für Widget-Bearbeitung, geöffnet per Doppelklick auf Widget-Asset im Content Browser. Drei-Panel-Layout: Links Steuerelement-Liste + klickbare Hierarchie, Mitte Preview des Widgets (Elemente per Klick selektierbar), Rechts editierbares Details-Panel (Layout, Appearance, Text, Image, Value). `WidgetEditorState` pro Tab in `UIManager` verwaltet.
 - **Per-Tab-Framebuffer**: Jeder Tab besitzt einen eigenen FBO (Color-Texture + Depth-RBO)
 - **Tab-Umschaltung**: Click-Events auf TitleBar.Tab.* Buttons wechseln den aktiven Tab. `setActiveTab()` tauscht das aktive Level per `swapActiveLevel()` aus (Editor-Level ↔ Mesh-Viewer-Runtime-Level) und speichert/restauriert Kamera-State.
 - **Tab-Scoped UI**: Widgets können einem Tab zugeordnet werden (`registerWidget(id, widget, tabId)`). Viewport-Widgets (ViewportOverlay, WorldSettings, WorldOutliner, EntityDetails, ContentBrowser) sind zum Tab "Viewport" zugeordnet, Mesh-Viewer-Properties-Panels zum jeweiligen Asset-Tab. Globale Widgets (TitleBar, StatusBar) bleiben immer sichtbar.

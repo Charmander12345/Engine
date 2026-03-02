@@ -18,6 +18,11 @@
 - ✅ `Widget Editor`: Tab-Layout jetzt im Editor-Stil (links Controls+Hierarchie, rechts Details, Mitte Preview-Center mit Fill-Color-Hintergrund).
 - ✅ `Widget Editor`: Widget-Editor-Tabs nutzen den tab-spezifischen Framebuffer als reine Workspace-Fläche (kein 3D-Welt-Renderpass in diesen Tabs).
 - ✅ `Widget Editor`: TitleBar-Tab-Leiste wird beim Hinzufügen/Entfernen automatisch neu aufgebaut, sodass neue Widget-Editor-Tabs sofort sichtbar sind (analog Mesh Viewer).
+- ✅ `Widget Editor`: Klickbare Hierarchie im linken Panel – jedes Element ist als Button dargestellt mit Typ-Label und ID; Klick wählt das Element aus und aktualisiert das Details-Panel.
+- ✅ `Widget Editor`: Preview-Elemente im Center-Bereich sind hit-testable – Klick auf ein Element im Widget-Preview selektiert es direkt.
+- ✅ `Widget Editor`: Rechtes Details-Panel zeigt editierbare Properties des selektierten Elements: Layout (From/To, MinSize, Padding, FillX/Y), Appearance (Color RGBA), Text (Text, Font, FontSize, TextColor), Image (ImagePath), Slider/ProgressBar (Min/Max/Value).
+- ✅ `Widget Editor`: `WidgetEditorState`-Tracking pro offenem Editor-Tab (tabId, assetPath, editedWidget, selectedElementId) in `UIManager`.
+- ✅ `Widget Editor`: Bereits offene Widget-Editor-Tabs werden bei erneutem Doppelklick nur aktiviert (kein Doppel-Öffnen).
 - ✅ `Build-System`: Debug/Release-Artefakt-Kollisionen bei Multi-Config-Builds behoben (konfigurationsgetrennte Output-Verzeichnisse), dadurch `LNK2038` Runtime-/Iterator-Mismatch beseitigt.
 
 ## Legende
@@ -628,6 +633,7 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | Tab-Snapshot-Cache (kein Schwarzbild beim Wechsel) | ✅ |
 | Tab-Wechsel während PIE blockiert    | ✅     |
 | Mesh-Viewer-Tabs (Doppelklick auf Model3D) | ✅ |
+| Widget-Editor-Tabs (Doppelklick auf Widget, interaktiver Preview + Hierarchie + Details) | ✅ |
 | **Tab-Scoped UI** (Viewport-Widgets + ContentBrowser nur bei Viewport-Tab, Mesh-Viewer-Props nur bei deren Tab) | ✅ |
 | **Level-Swap bei Tab-Wechsel** (`swapActiveLevel` + Camera Save/Restore) | ✅ |
 | Weitere Tabs (z.B. Material-Editor) | ❌     |
