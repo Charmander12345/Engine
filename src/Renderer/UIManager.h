@@ -220,6 +220,9 @@ private:
 
 		// FBO preview dirty flag – set true whenever the preview needs re-rendering
 		bool previewDirty{ true };
+
+		// Hover tracking for canvas preview
+		std::string hoveredElementId;
 	};
 	std::unordered_map<std::string, WidgetEditorState> m_widgetEditorStates; // key = tabId
 	void refreshWidgetEditorHierarchy(const std::string& tabId);
@@ -245,6 +248,7 @@ public:
 	{
 		std::shared_ptr<Widget> editedWidget;
 		std::string selectedElementId;
+		std::string hoveredElementId;
 		float zoom{ 1.0f };
 		Vec2 panOffset{};
 		bool dirty{ false };
@@ -253,6 +257,7 @@ public:
 	bool getWidgetEditorPreviewInfo(WidgetEditorPreviewInfo& out) const;
 	void clearWidgetEditorPreviewDirty();
 	bool selectWidgetEditorElementAtPos(const Vec2& screenPos);
+	void updateWidgetEditorHover(const Vec2& screenPos);
 
 public:
 	void refreshWorldOutliner();

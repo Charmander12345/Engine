@@ -48,6 +48,13 @@
 - ✅ `Widget Editor`: Details-Panel-Werte werden sofort auf die FBO-Preview angewendet – alle onChange-Callbacks nutzen einen `applyChange`-Helper, der `markWidgetEditorDirty()` (setzt `previewDirty`) und `editedWidget->markLayoutDirty()` aufruft, sodass das FBO bei jeder Eigenschaftsänderung neu gerendert wird.
 - ✅ `Widget Editor`: Drag-&-Drop auf leere Widgets – Wenn ein Widget noch keine Elemente hat, wird das per Drag-&-Drop hinzugefügte Element als Root-Element eingefügt (statt früher stillschweigend ignoriert zu werden).
 - ✅ `Widget Editor`: Hierarchie-Drag-&-Drop – Elemente im linken Hierarchie-Panel können per Drag-&-Drop umsortiert werden. `moveWidgetEditorElement()` entfernt das Element aus seiner aktuellen Position und fügt es als Sibling nach dem Ziel-Element ein (mit Zyklus-Schutz gegen Drop auf eigene Kinder).
+- ✅ `Widget Editor`: Outline-Fix – `drawUIOutline` rendert Outlines jetzt als 4 dünne Kantenrechtecke statt per `glPolygonMode(GL_LINE)`, wodurch keine Dreiecks-Diagonalen mehr sichtbar sind.
+- ✅ `Widget Editor`: Preview-Klick-Fix – Hit-Test in `selectWidgetEditorElementAtPos` verwendet nun `computedPositionPixels/computedSizePixels` (eigenes visuelles Rect) statt `boundsMinPixels/boundsMaxPixels` (expandiert mit Kindern). Elemente ohne ID erhalten beim Laden automatisch generierte IDs.
+- ✅ `Widget Editor`: Alignment-Dropdowns – Horizontale und vertikale Ausrichtung im Details-Panel werden jetzt per DropDown-Widget (Left/Center/Right/Fill bzw. Top/Center/Bottom/Fill) statt per Texteingabe gesteuert.
+- ✅ `Widget Editor`: Details-Reorganisation – Properties sind nun in logische Sektionen gegliedert: Identity (Typ, editierbare ID) → Transform (From/To) → Layout (Alignment, Min/Max, Padding) → Appearance → typspezifische Sektionen.
+- ✅ `Widget Editor`: UX-Plan erstellt – `WIDGET_EDITOR_UX_PLAN.md` beschreibt 5 Phasen zur Verbesserung: Grundlegende Bedienbarkeit, WYSIWYG-Editing, Produktivität, fortgeschrittene Features und Polish.
+- ✅ `Widget Editor`: Hit-Test-Fix – `measureAllElements` stellt sicher, dass alle Elemente (auch Kinder von Panel-Elementen) korrekte `hasContentSize`-Werte erhalten. Die Hit-Test-Traversierung in `selectWidgetEditorElementAtPos` verwendet nun `std::function` statt rekursiver Auto-Lambdas für zuverlässigere Tiefensuche.
+- ✅ `Widget Editor`: Hover-Preview – Beim Überfahren eines Elements im Canvas-Preview wird dessen Bounding-Box als hellblaue Outline angezeigt (`updateWidgetEditorHover()`). Die Selection-Outline (orange) und Hover-Outline (blau) verwenden nun `computedPositionPixels/computedSizePixels` statt `boundsMinPixels/boundsMaxPixels`.
 
 ## Legende
 

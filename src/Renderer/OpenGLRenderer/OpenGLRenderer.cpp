@@ -3838,33 +3838,53 @@ void OpenGLRenderer::renderUI()
                         renderElement(renderElement, element, 0.0f, 0.0f, static_cast<float>(fboW), static_cast<float>(fboH));
                     }
 
-                    // Draw selection outline in the FBO
+                    // Helper to find an element by id in the widget tree
+                    const std::function<const WidgetElement*(const std::vector<WidgetElement>&, const std::string&)> findEl =
+                        [&](const std::vector<WidgetElement>& elements, const std::string& id) -> const WidgetElement*
+                    {
+                        for (const auto& el : elements)
+                        {
+                            if (el.id == id) return &el;
+                            if (!el.children.empty())
+                            {
+                                if (const auto* found = findEl(el.children, id))
+                                    return found;
+                            }
+                        }
+                        return nullptr;
+                    };
+
+                    // Draw hover outline in the FBO (light blue, below selection)
+                    if (!previewInfo.hoveredElementId.empty() &&
+                        previewInfo.hoveredElementId != previewInfo.selectedElementId)
+                    {
+                        const WidgetElement* hoverEl = findEl(widget->getElements(), previewInfo.hoveredElementId);
+                        if (hoverEl && hoverEl->hasComputedPosition && hoverEl->hasComputedSize)
+                        {
+                            const std::string& vp2 = resolveUIShaderPath("", m_defaultPanelVertex);
+                            const std::string& fp2 = resolveUIShaderPath("", m_defaultPanelFragment);
+                            const GLuint outlineProg = getUIQuadProgram(vp2, fp2);
+                            const Vec4 hoverColor{ 0.3f, 0.7f, 1.0f, 0.7f };
+                            drawUIOutline(hoverEl->computedPositionPixels.x, hoverEl->computedPositionPixels.y,
+                                hoverEl->computedPositionPixels.x + hoverEl->computedSizePixels.x,
+                                hoverEl->computedPositionPixels.y + hoverEl->computedSizePixels.y,
+                                hoverColor, uiProjection, outlineProg);
+                        }
+                    }
+
+                    // Draw selection outline in the FBO (orange, on top of hover)
                     if (!previewInfo.selectedElementId.empty())
                     {
-                        const std::function<const WidgetElement*(const std::vector<WidgetElement>&, const std::string&)> findEl =
-                            [&](const std::vector<WidgetElement>& elements, const std::string& id) -> const WidgetElement*
-                        {
-                            for (const auto& el : elements)
-                            {
-                                if (el.id == id) return &el;
-                                if (!el.children.empty())
-                                {
-                                    if (const auto* found = findEl(el.children, id))
-                                        return found;
-                                }
-                            }
-                            return nullptr;
-                        };
-
                         const WidgetElement* selEl = findEl(widget->getElements(), previewInfo.selectedElementId);
-                        if (selEl && selEl->hasBounds)
+                        if (selEl && selEl->hasComputedPosition && selEl->hasComputedSize)
                         {
                             const std::string& vp2 = resolveUIShaderPath("", m_defaultPanelVertex);
                             const std::string& fp2 = resolveUIShaderPath("", m_defaultPanelFragment);
                             const GLuint outlineProg = getUIQuadProgram(vp2, fp2);
                             const Vec4 outlineColor{ 1.0f, 0.6f, 0.0f, 0.9f };
-                            drawUIOutline(selEl->boundsMinPixels.x, selEl->boundsMinPixels.y,
-                                selEl->boundsMaxPixels.x, selEl->boundsMaxPixels.y,
+                            drawUIOutline(selEl->computedPositionPixels.x, selEl->computedPositionPixels.y,
+                                selEl->computedPositionPixels.x + selEl->computedSizePixels.x,
+                                selEl->computedPositionPixels.y + selEl->computedSizePixels.y,
                                 outlineColor, uiProjection, outlineProg);
                         }
                     }
@@ -5671,10 +5691,15 @@ void OpenGLRenderer::drawUIOutline(float x0, float y0, float x1, float y1, const
         return;
     }
 
-    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-    glLineWidth(1.0f);
-    drawUIPanel(x0, y0, x1, y1, color, projection, program, color, false);
-    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    const float t = 1.0f; // outline thickness in pixels
+    // Top edge
+    drawUIPanel(x0, y0, x1, y0 + t, color, projection, program, color, false);
+    // Bottom edge
+    drawUIPanel(x0, y1 - t, x1, y1, color, projection, program, color, false);
+    // Left edge
+    drawUIPanel(x0, y0 + t, x0 + t, y1 - t, color, projection, program, color, false);
+    // Right edge
+    drawUIPanel(x1 - t, y0 + t, x1, y1 - t, color, projection, program, color, false);
 }
 
 void OpenGLRenderer::setVSyncEnabled(bool enabled)

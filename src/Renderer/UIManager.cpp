@@ -462,6 +462,20 @@ namespace
         return size;
     }
 
+    // Recursively call measureElementSize on every element in the tree,
+    // including children of Panel elements that measureElementSize itself
+    // does not recurse into.  This ensures hasContentSize is set for all
+    // elements so that content-based sizing works in layoutElement.
+    void measureAllElements(WidgetElement& element,
+        const std::function<Vec2(const std::string&, float)>& measureText)
+    {
+        measureElementSize(element, measureText);
+        for (auto& child : element.children)
+        {
+            measureAllElements(child, measureText);
+        }
+    }
+
     Vec4 hsvToRgb(float hue, float saturation, float value)
     {
         hue = std::fmod(std::max(0.0f, hue), 1.0f) * 6.0f;
@@ -3992,7 +4006,7 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
 
         for (auto& element : state.editedWidget->getElementsMutable())
         {
-            measureElementSize(element, measureText);
+            measureAllElements(element, measureText);
         }
         for (auto& element : state.editedWidget->getElementsMutable())
         {
@@ -4526,6 +4540,9 @@ void UIManager::setMousePosition(const Vec2& screenPos)
     }
 
     updateHoverStates();
+
+    // Update widget editor hover preview
+    updateWidgetEditorHover(screenPos);
 }
 
 void UIManager::cancelDrag()
@@ -5945,6 +5962,45 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
         widget->setPositionPixels(Vec2{ 0.0f, 0.0f });
         widget->setZOrder(0);
 
+        // Auto-assign IDs to any elements that lack one so they are selectable
+        // in the widget editor preview.
+        {
+            static int s_autoIdCounter = 0;
+            const std::function<void(WidgetElement&)> assignIds =
+                [&](WidgetElement& el) {
+                    if (el.id.empty())
+                    {
+                        std::string typeName;
+                        switch (el.type)
+                        {
+                        case WidgetElementType::Panel:       typeName = "Panel"; break;
+                        case WidgetElementType::Text:        typeName = "Text"; break;
+                        case WidgetElementType::Button:      typeName = "Button"; break;
+                        case WidgetElementType::Image:       typeName = "Image"; break;
+                        case WidgetElementType::EntryBar:    typeName = "EntryBar"; break;
+                        case WidgetElementType::StackPanel:  typeName = "StackPanel"; break;
+                        case WidgetElementType::Grid:        typeName = "Grid"; break;
+                        case WidgetElementType::Slider:      typeName = "Slider"; break;
+                        case WidgetElementType::CheckBox:    typeName = "CheckBox"; break;
+                        case WidgetElementType::DropDown:    typeName = "DropDown"; break;
+                        case WidgetElementType::ColorPicker: typeName = "ColorPicker"; break;
+                        case WidgetElementType::ProgressBar: typeName = "ProgressBar"; break;
+                        case WidgetElementType::Separator:   typeName = "Separator"; break;
+                        case WidgetElementType::ScrollView:  typeName = "ScrollView"; break;
+                        case WidgetElementType::Label:       typeName = "Label"; break;
+                        case WidgetElementType::ToggleButton:typeName = "ToggleButton"; break;
+                        case WidgetElementType::RadioButton: typeName = "RadioButton"; break;
+                        default:                             typeName = "Element"; break;
+                        }
+                        el.id = typeName + "_auto_" + std::to_string(++s_autoIdCounter);
+                    }
+                    for (auto& child : el.children)
+                        assignIds(child);
+                };
+            for (auto& el : widget->getElementsMutable())
+                assignIds(el);
+        }
+
         auto& edState = m_widgetEditorStates[tabId];
         edState.basePreviewSize = designSize;
         edState.previewDirty = true;
@@ -6393,6 +6449,7 @@ bool UIManager::getWidgetEditorPreviewInfo(WidgetEditorPreviewInfo& out) const
     const auto& state = it->second;
     out.editedWidget = state.editedWidget;
     out.selectedElementId = state.selectedElementId;
+    out.hoveredElementId = state.hoveredElementId;
     out.zoom = state.zoom;
     out.panOffset = state.panOffset;
     out.dirty = state.previewDirty;
@@ -6449,29 +6506,145 @@ bool UIManager::selectWidgetEditorElementAtPos(const Vec2& screenPos)
         return true;
     }
 
-    // Walk elements in reverse to find topmost hit
+    // Walk the element tree to find the topmost (deepest child / last sibling)
+    // element whose visual rect contains the click point.
     std::string hitId;
-    const auto walkElements = [&](const auto& self, const std::vector<WidgetElement>& elements) -> void
+    const auto pointInElement = [&](const WidgetElement& el) -> bool
+    {
+        if (!el.hasComputedPosition || !el.hasComputedSize)
+            return false;
+        const float ex0 = el.computedPositionPixels.x;
+        const float ey0 = el.computedPositionPixels.y;
+        const float ex1 = ex0 + el.computedSizePixels.x;
+        const float ey1 = ey0 + el.computedSizePixels.y;
+        return localX >= ex0 && localX <= ex1 && localY >= ey0 && localY <= ey1;
+    };
+
+    // Depth-first, reverse-sibling-order traversal.  The LAST match wins,
+    // which corresponds to the topmost rendered element (later siblings and
+    // deeper children are rendered on top).
+    const std::function<void(const std::vector<WidgetElement>&)> walkElements =
+        [&](const std::vector<WidgetElement>& elements)
     {
         for (auto it2 = elements.rbegin(); it2 != elements.rend(); ++it2)
         {
             const auto& el = *it2;
+
+            // First check if the click is even inside this element's area
+            // (skip subtrees that can't contain the click).
+            const bool insideSelf = pointInElement(el);
+
+            // Recurse into children – a matching child takes priority over
+            // the parent so we check children first.
             if (!el.children.empty())
-                self(self, el.children);
-            if (!hitId.empty())
-                return;
-            if (el.hasBounds &&
-                localX >= el.boundsMinPixels.x && localX <= el.boundsMaxPixels.x &&
-                localY >= el.boundsMinPixels.y && localY <= el.boundsMaxPixels.y)
             {
-                if (!el.id.empty())
-                    hitId = el.id;
+                walkElements(el.children);
+                if (!hitId.empty())
+                    return;
+            }
+
+            // If no child was hit, check the element itself.
+            if (insideSelf && !el.id.empty())
+            {
+                hitId = el.id;
+                return;
             }
         }
     };
-    walkElements(walkElements, state->editedWidget->getElements());
+    walkElements(state->editedWidget->getElements());
     selectWidgetEditorElement(state->tabId, hitId);
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: update hovered element based on mouse position
+// ---------------------------------------------------------------------------
+void UIManager::updateWidgetEditorHover(const Vec2& screenPos)
+{
+    auto* state = getActiveWidgetEditorState();
+    if (!state || !state->editedWidget)
+        return;
+
+    Vec4 canvasRect{};
+    if (!getWidgetEditorCanvasRect(canvasRect))
+    {
+        if (!state->hoveredElementId.empty())
+        {
+            state->hoveredElementId.clear();
+            state->previewDirty = true;
+        }
+        return;
+    }
+
+    // Check if inside canvas
+    if (screenPos.x < canvasRect.x || screenPos.x > canvasRect.x + canvasRect.z ||
+        screenPos.y < canvasRect.y || screenPos.y > canvasRect.y + canvasRect.w)
+    {
+        if (!state->hoveredElementId.empty())
+        {
+            state->hoveredElementId.clear();
+            state->previewDirty = true;
+        }
+        return;
+    }
+
+    // Transform screen position to widget-local coordinates
+    const Vec2 wSize = state->editedWidget->getSizePixels();
+    const float fboW = (wSize.x > 0.0f) ? wSize.x : 400.0f;
+    const float fboH = (wSize.y > 0.0f) ? wSize.y : 300.0f;
+
+    const float displayW = fboW * state->zoom;
+    const float displayH = fboH * state->zoom;
+    const float cx = canvasRect.x + canvasRect.z * 0.5f;
+    const float cy = canvasRect.y + canvasRect.w * 0.5f;
+    const float dx0 = cx - displayW * 0.5f + state->panOffset.x;
+    const float dy0 = cy - displayH * 0.5f + state->panOffset.y;
+
+    const float localX = (screenPos.x - dx0) / state->zoom;
+    const float localY = (screenPos.y - dy0) / state->zoom;
+
+    std::string hoverId;
+    if (localX >= 0.0f && localX <= fboW && localY >= 0.0f && localY <= fboH)
+    {
+        const auto pointInElement = [&](const WidgetElement& el) -> bool
+        {
+            if (!el.hasComputedPosition || !el.hasComputedSize)
+                return false;
+            const float ex0 = el.computedPositionPixels.x;
+            const float ey0 = el.computedPositionPixels.y;
+            const float ex1 = ex0 + el.computedSizePixels.x;
+            const float ey1 = ey0 + el.computedSizePixels.y;
+            return localX >= ex0 && localX <= ex1 && localY >= ey0 && localY <= ey1;
+        };
+
+        const std::function<void(const std::vector<WidgetElement>&)> walk =
+            [&](const std::vector<WidgetElement>& elements)
+        {
+            for (auto it2 = elements.rbegin(); it2 != elements.rend(); ++it2)
+            {
+                const auto& el = *it2;
+                const bool insideSelf = pointInElement(el);
+                if (!el.children.empty())
+                {
+                    walk(el.children);
+                    if (!hoverId.empty())
+                        return;
+                }
+                if (insideSelf && !el.id.empty())
+                {
+                    hoverId = el.id;
+                    return;
+                }
+            }
+        };
+        walk(state->editedWidget->getElements());
+    }
+
+    if (hoverId != state->hoveredElementId)
+    {
+        state->hoveredElementId = hoverId;
+        state->previewDirty = true;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -7121,12 +7294,12 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         return;
     }
 
-    // --- Section: General ---
+    // --- Section: Identity ---
     {
-        rootPanel->children.push_back(makeLabel("WE.Det.SecGeneral", "General", 13.0f,
+        rootPanel->children.push_back(makeLabel("WE.Det.SecIdentity", "Identity", 13.0f,
             Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
 
-        // Type
+        // Type (read-only)
         std::string typeName;
         switch (selected->type)
         {
@@ -7153,8 +7326,6 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         default:                             typeName = "Unknown"; break;
         }
         rootPanel->children.push_back(makeLabel("WE.Det.Type", "Type: " + typeName));
-        rootPanel->children.push_back(makeLabel("WE.Det.Id", "ID: " + (selected->id.empty() ? "(none)" : selected->id)));
-        rootPanel->children.push_back(makeLabel("WE.Det.Children", "Children: " + std::to_string(selected->children.size())));
     }
 
     // Helper to build an editable entry row
@@ -7204,7 +7375,18 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         return row;
     };
 
-    // --- Section: Layout ---
+    // Editable ID field (part of Identity section)
+    rootPanel->children.push_back(makePropertyRow("WE.Det.Id", "ID", sel->id.empty() ? "" : sel->id,
+        [sel, applyChange, this, capturedTabId](const std::string& v) {
+            sel->id = v;
+            auto it2 = m_widgetEditorStates.find(capturedTabId);
+            if (it2 != m_widgetEditorStates.end())
+                it2->second.selectedElementId = v;
+            applyChange();
+            refreshWidgetEditorHierarchy(capturedTabId);
+        }));
+
+    // --- Section: Transform ---
     {
         WidgetElement sep{};
         sep.type = WidgetElementType::Panel;
@@ -7214,7 +7396,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
-        rootPanel->children.push_back(makeLabel("WE.Det.SecLayout", "Layout", 13.0f,
+        rootPanel->children.push_back(makeLabel("WE.Det.SecTransform", "Transform", 13.0f,
             Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
 
         rootPanel->children.push_back(makePropertyRow("WE.Det.FromX", "From X", fmtF(sel->from.x),
@@ -7237,6 +7419,20 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
                 try { sel->to.y = std::stof(v); } catch (...) {}
                 applyChange();
             }));
+    }
+
+    // --- Section: Layout ---
+    {
+        WidgetElement sep{};
+        sep.type = WidgetElementType::Panel;
+        sep.fillX = true;
+        sep.minSize = Vec2{ 0.0f, 1.0f };
+        sep.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.runtimeOnly = true;
+        rootPanel->children.push_back(std::move(sep));
+
+        rootPanel->children.push_back(makeLabel("WE.Det.SecLayout", "Layout", 13.0f,
+            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
 
         rootPanel->children.push_back(makePropertyRow("WE.Det.MinW", "Min Width", fmtF(sel->minSize.x),
             [sel, applyChange](const std::string& v) {
@@ -7262,48 +7458,104 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
 
         // Horizontal alignment dropdown
         {
-            std::string hAlignName;
-            if (sel->fillX) hAlignName = "Fill";
-            else if (sel->textAlignH == TextAlignH::Center) hAlignName = "Center";
-            else if (sel->textAlignH == TextAlignH::Right) hAlignName = "Right";
-            else hAlignName = "Left";
+            int hAlignIndex = 0;
+            if (sel->fillX) hAlignIndex = 3;
+            else if (sel->textAlignH == TextAlignH::Center) hAlignIndex = 1;
+            else if (sel->textAlignH == TextAlignH::Right) hAlignIndex = 2;
+            else hAlignIndex = 0;
 
-            rootPanel->children.push_back(makePropertyRow("WE.Det.HAlign", "H Align", hAlignName,
-                [sel, this](const std::string& v) {
-                    if (v == "Fill") { sel->fillX = true; }
-                    else {
-                        sel->fillX = false;
-                        if (v == "Center") sel->textAlignH = TextAlignH::Center;
-                        else if (v == "Right") sel->textAlignH = TextAlignH::Right;
-                        else sel->textAlignH = TextAlignH::Left;
-                    }
-                    markAllWidgetsDirty();
-                }));
-            rootPanel->children.push_back(makeLabel("WE.Det.HAlignHint", "  (Left / Center / Right / Fill)", 10.0f,
-                Vec4{ 0.55f, 0.58f, 0.65f, 0.8f }, 16.0f));
+            WidgetElement row{};
+            row.type = WidgetElementType::StackPanel;
+            row.orientation = StackOrientation::Horizontal;
+            row.fillX = true;
+            row.sizeToContent = true;
+            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.padding = Vec2{ 0.0f, 1.0f };
+            row.runtimeOnly = true;
+
+            WidgetElement lbl = makeLabel("WE.Det.HAlign.Lbl", "H Align");
+            lbl.minSize = Vec2{ 90.0f, 22.0f };
+            lbl.fillX = false;
+            row.children.push_back(std::move(lbl));
+
+            DropDownWidget hAlignDd;
+            hAlignDd.setItems({ "Left", "Center", "Right", "Fill" });
+            hAlignDd.setSelectedIndex(hAlignIndex);
+            hAlignDd.setFont("default.ttf");
+            hAlignDd.setFontSize(12.0f);
+            hAlignDd.setMinSize(Vec2{ 0.0f, 22.0f });
+            hAlignDd.setPadding(Vec2{ 4.0f, 2.0f });
+            hAlignDd.setBackgroundColor(Vec4{ 0.16f, 0.16f, 0.20f, 1.0f });
+            hAlignDd.setHoverColor(Vec4{ 0.22f, 0.22f, 0.27f, 1.0f });
+            hAlignDd.setTextColor(Vec4{ 0.92f, 0.92f, 0.95f, 1.0f });
+            hAlignDd.setOnSelectionChanged([sel, applyChange](int idx) {
+                if (idx == 3) { sel->fillX = true; }
+                else {
+                    sel->fillX = false;
+                    if (idx == 1) sel->textAlignH = TextAlignH::Center;
+                    else if (idx == 2) sel->textAlignH = TextAlignH::Right;
+                    else sel->textAlignH = TextAlignH::Left;
+                }
+                applyChange();
+            });
+            WidgetElement ddEl = hAlignDd.toElement();
+            ddEl.id = "WE.Det.HAlign.DD";
+            ddEl.fillX = true;
+            ddEl.runtimeOnly = true;
+            row.children.push_back(std::move(ddEl));
+
+            rootPanel->children.push_back(std::move(row));
         }
 
         // Vertical alignment dropdown
         {
-            std::string vAlignName;
-            if (sel->fillY) vAlignName = "Fill";
-            else if (sel->textAlignV == TextAlignV::Center) vAlignName = "Center";
-            else if (sel->textAlignV == TextAlignV::Bottom) vAlignName = "Bottom";
-            else vAlignName = "Top";
+            int vAlignIndex = 0;
+            if (sel->fillY) vAlignIndex = 3;
+            else if (sel->textAlignV == TextAlignV::Center) vAlignIndex = 1;
+            else if (sel->textAlignV == TextAlignV::Bottom) vAlignIndex = 2;
+            else vAlignIndex = 0;
 
-            rootPanel->children.push_back(makePropertyRow("WE.Det.VAlign", "V Align", vAlignName,
-                [sel, this](const std::string& v) {
-                    if (v == "Fill") { sel->fillY = true; }
-                    else {
-                        sel->fillY = false;
-                        if (v == "Center") sel->textAlignV = TextAlignV::Center;
-                        else if (v == "Bottom") sel->textAlignV = TextAlignV::Bottom;
-                        else sel->textAlignV = TextAlignV::Top;
-                    }
-                    markAllWidgetsDirty();
-                }));
-            rootPanel->children.push_back(makeLabel("WE.Det.VAlignHint", "  (Top / Center / Bottom / Fill)", 10.0f,
-                Vec4{ 0.55f, 0.58f, 0.65f, 0.8f }, 16.0f));
+            WidgetElement row{};
+            row.type = WidgetElementType::StackPanel;
+            row.orientation = StackOrientation::Horizontal;
+            row.fillX = true;
+            row.sizeToContent = true;
+            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.padding = Vec2{ 0.0f, 1.0f };
+            row.runtimeOnly = true;
+
+            WidgetElement lbl = makeLabel("WE.Det.VAlign.Lbl", "V Align");
+            lbl.minSize = Vec2{ 90.0f, 22.0f };
+            lbl.fillX = false;
+            row.children.push_back(std::move(lbl));
+
+            DropDownWidget vAlignDd;
+            vAlignDd.setItems({ "Top", "Center", "Bottom", "Fill" });
+            vAlignDd.setSelectedIndex(vAlignIndex);
+            vAlignDd.setFont("default.ttf");
+            vAlignDd.setFontSize(12.0f);
+            vAlignDd.setMinSize(Vec2{ 0.0f, 22.0f });
+            vAlignDd.setPadding(Vec2{ 4.0f, 2.0f });
+            vAlignDd.setBackgroundColor(Vec4{ 0.16f, 0.16f, 0.20f, 1.0f });
+            vAlignDd.setHoverColor(Vec4{ 0.22f, 0.22f, 0.27f, 1.0f });
+            vAlignDd.setTextColor(Vec4{ 0.92f, 0.92f, 0.95f, 1.0f });
+            vAlignDd.setOnSelectionChanged([sel, applyChange](int idx) {
+                if (idx == 3) { sel->fillY = true; }
+                else {
+                    sel->fillY = false;
+                    if (idx == 1) sel->textAlignV = TextAlignV::Center;
+                    else if (idx == 2) sel->textAlignV = TextAlignV::Bottom;
+                    else sel->textAlignV = TextAlignV::Top;
+                }
+                applyChange();
+            });
+            WidgetElement ddEl = vAlignDd.toElement();
+            ddEl.id = "WE.Det.VAlign.DD";
+            ddEl.fillX = true;
+            ddEl.runtimeOnly = true;
+            row.children.push_back(std::move(ddEl));
+
+            rootPanel->children.push_back(std::move(row));
         }
 
         // Size to content

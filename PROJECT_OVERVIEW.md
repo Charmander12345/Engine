@@ -28,6 +28,12 @@
 - `Widget Editor`: Für Widget-Editor-Tabs wird im Renderer die 3D-Weltpass-Ausgabe unterdrückt; der tab-eigene Framebuffer wird als reine Widget-Workspace-Fläche genutzt.
 - `Widget Editor`: TitleBar-Tabs werden jetzt beim Hinzufügen/Entfernen zentral neu aufgebaut, damit neue Widget-Editor-Tabs immer sichtbar sind wie beim Mesh Viewer.
 - `Widget Editor`: Bugfix – Erneutes Öffnen eines Widget-Assets schlug fehl, weil `loadWidgetAsset` Content-relative Pfade nicht gegen das Projekt-Content-Verzeichnis auflöste (Disk-Load scheiterte nach Neustart oder Cache-Miss). Außerdem wird bei Ladefehler der bereits hinzugefügte Tab entfernt, um verwaiste Tabs zu vermeiden.
+- `Widget Editor`: Outline-Rendering ohne Dreiecks-Diagonalen – `drawUIOutline` zeichnet nun 4 Kantenrechtecke statt GL_LINE-Wireframe.
+- `Widget Editor`: Preview-Klick-Selektion korrigiert – Hit-Test nutzt `computedPositionPixels/computedSizePixels` statt expandierter Bounding-Box. Auto-ID-Zuweisung für ID-lose Elemente beim Laden.
+- `Widget Editor`: H/V-Alignment im Details-Panel als DropDown-Widgets (Left/Center/Right/Fill, Top/Center/Bottom/Fill).
+- `Widget Editor`: Details-Panel neu organisiert – Sektionen: Identity → Transform → Layout → Appearance → typspezifisch. ID ist jetzt editierbar.
+- `Widget Editor`: Umfassender UX-Plan in `WIDGET_EDITOR_UX_PLAN.md` (5 Phasen, Priorisierungstabelle).
+- `Widget Editor`: Hit-Test-Fix – Rekursive Messung aller Elemente (`measureAllElements`) und robustere Tiefensuche. Hover-Preview mit hellblauer Outline beim Überfahren von Elementen im Canvas.
 - `Build/CMake`: Multi-Config-Ausgabeverzeichnisse werden nun pro Konfiguration getrennt (`${CMAKE_BINARY_DIR}/Debug|Release|...`) statt zusammengeführt, um Debug/Release-Lib-Kollisionen (MSVC `LNK2038`) zu vermeiden.
 
 ## Inhaltsverzeichnis
