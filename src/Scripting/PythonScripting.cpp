@@ -24,6 +24,7 @@
 #include <cctype>
 #include <cmath>
 #include "../Renderer/Renderer.h"
+#include "../Renderer/ViewportUIManager.h"
 #include "../Physics/PhysicsWorld.h"
 
 #include <filesystem>
@@ -696,10 +697,8 @@ namespace
 
     PyObject* py_spawn_widget(PyObject*, PyObject* args)
     {
-        const char* widgetId = nullptr;
-        const char* assetPath = nullptr;
-        const char* tabId = "";
-        if (!PyArg_ParseTuple(args, "ss|s", &widgetId, &assetPath, &tabId))
+        const char* contentPath = nullptr;
+        if (!PyArg_ParseTuple(args, "s", &contentPath))
         {
             return nullptr;
         }
@@ -710,44 +709,52 @@ namespace
             return nullptr;
         }
 
-        if (!widgetId || !*widgetId || !assetPath || !*assetPath)
+        if (!contentPath || !*contentPath)
         {
-            PyErr_SetString(PyExc_ValueError, "widget_id and asset_path must be non-empty.");
+            PyErr_SetString(PyExc_ValueError, "content_path must be non-empty.");
+            return nullptr;
+        }
+
+        auto* vpUI = s_renderer->getViewportUIManagerPtr();
+        if (!vpUI)
+        {
+            PyErr_SetString(PyExc_RuntimeError, "ViewportUIManager not available.");
             return nullptr;
         }
 
         auto& assetManager = AssetManager::Instance();
-        const int assetId = assetManager.loadAsset(assetPath, AssetType::Widget, AssetManager::Sync);
+        const std::string absolutePath = assetManager.getAbsoluteContentPath(contentPath);
+        if (absolutePath.empty())
+        {
+            PyErr_SetString(PyExc_FileNotFoundError, "Cannot resolve content path.");
+            return nullptr;
+        }
+
+        const int assetId = assetManager.loadAsset(absolutePath, AssetType::Widget, AssetManager::Sync);
         if (assetId == 0)
         {
-            Py_RETURN_FALSE;
+            Py_RETURN_NONE;
         }
 
         auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(assetId));
         if (!asset)
         {
-            Py_RETURN_FALSE;
+            Py_RETURN_NONE;
         }
 
         auto widget = s_renderer->createWidgetFromAsset(asset);
         if (!widget)
         {
-            Py_RETURN_FALSE;
+            Py_RETURN_NONE;
         }
 
-        auto& uiManager = s_renderer->getUIManager();
-        uiManager.unregisterWidget(widgetId);
-        if (tabId && *tabId)
+        const std::string widgetId = vpUI->registerScriptWidget(widget);
+        if (widgetId.empty())
         {
-            uiManager.registerWidget(widgetId, widget, tabId);
+            Py_RETURN_NONE;
         }
-        else
-        {
-            uiManager.registerWidget(widgetId, widget);
-        }
-        uiManager.markAllWidgetsDirty();
 
-        Py_RETURN_TRUE;
+        return PyUnicode_FromString(widgetId.c_str());
     }
 
     PyObject* py_remove_widget(PyObject*, PyObject* args)
@@ -770,10 +777,17 @@ namespace
             return nullptr;
         }
 
-        auto& uiManager = s_renderer->getUIManager();
-        uiManager.unregisterWidget(widgetId);
-        uiManager.markAllWidgetsDirty();
-        Py_RETURN_TRUE;
+        auto* vpUI = s_renderer->getViewportUIManagerPtr();
+        if (!vpUI)
+        {
+            Py_RETURN_FALSE;
+        }
+
+        if (vpUI->unregisterScriptWidget(widgetId))
+        {
+            Py_RETURN_TRUE;
+        }
+        Py_RETURN_FALSE;
     }
 
     PyObject* py_set_audio_volume(PyObject*, PyObject* args)
@@ -2349,8 +2363,8 @@ namespace
         { "show_modal_message", py_show_modal_message, METH_VARARGS, "Show a blocking modal message." },
         { "close_modal_message", py_close_modal_message, METH_NOARGS, "Close the active modal message." },
         { "show_toast_message", py_show_toast_message, METH_VARARGS, "Show a toast message." },
-        { "spawn_widget", py_spawn_widget, METH_VARARGS, "Spawn or replace a UI widget from a widget asset path." },
-        { "remove_widget", py_remove_widget, METH_VARARGS, "Remove a UI widget by id." },
+        { "spawn_widget", py_spawn_widget, METH_VARARGS, "Spawn a viewport widget from a content-relative path; returns widget id string." },
+        { "remove_widget", py_remove_widget, METH_VARARGS, "Remove a viewport widget by its id." },
         { nullptr, nullptr, 0, nullptr }
     };
 

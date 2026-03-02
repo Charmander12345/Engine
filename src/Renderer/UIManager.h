@@ -233,6 +233,8 @@ private:
 	void markWidgetEditorDirty(const std::string& tabId);
 	void refreshWidgetEditorToolbar(const std::string& tabId);
 	void deleteSelectedWidgetEditorElement(const std::string& tabId);
+	std::string resolveHierarchyRowElementId(const std::string& tabId, const std::string& rowId) const;
+	void moveWidgetEditorElement(const std::string& tabId, const std::string& draggedId, const std::string& targetId);
 
 public:
 	bool getWidgetEditorCanvasRect(Vec4& outRect) const;

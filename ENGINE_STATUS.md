@@ -19,7 +19,7 @@
 - 🟡 `ViewportUI`: Grundgerüst `ViewportUIManager` erstellt und an `OpenGLRenderer` angebunden (Viewport-Rect-Übergabe implementiert). Rendering/Input des Viewport-UI folgt in den nächsten Schritten.
 - 🟡 `ViewportUI`: Erster Renderpfad vorhanden (`renderViewportUI()` im `OpenGLRenderer`) und nur für den `Viewport`-Tab aktiv. Der Input-Routing-Teil folgt als nächster Schritt.
 - 🟡 `ViewportUI`: Input-Routing ist jetzt im Haupt-Eventloop integriert (Editor-UI → Viewport-UI → 3D). Basis-HitTest und Klick-Callbacks für hit-testable Elemente im `ViewportUIManager` sind aktiv.
-- ✅ `Scripting/UI`: Runtime-Widget-Steuerung erweitert – `engine.ui.spawn_widget(...)` und `engine.ui.remove_widget(...)` sind verfügbar; `engine.pyi` wurde synchronisiert.
+- ✅ `Scripting/UI`: Runtime-Widget-Steuerung erweitert – `engine.ui.spawn_widget(content_path)` lädt ein Widget-Asset per Content-relativem Pfad und gibt eine Widget-ID zurück; `engine.ui.remove_widget(widget_id)` entfernt das Widget. Widgets werden ausschließlich im Viewport-Bereich gerendert (via `ViewportUIManager::registerScriptWidget`/`unregisterScriptWidget`) und beim Beenden von PIE automatisch zerstört (`clearAllScriptWidgets`); `engine.pyi` wurde synchronisiert.
 - ✅ `Widget Editor`: Widget-Assets können jetzt im Content Browser über **New Widget** erzeugt werden (`AssetType::Widget`) und erscheinen danach direkt in Tree/Grid.
 - ✅ `Widget Editor`: Doppelklick auf ein Widget-Asset öffnet nun einen eigenen Widget-Editor-Tab; das Asset wird geladen und tab-scoped dargestellt.
 - ✅ `Widget Editor`: Tab-Layout jetzt im Editor-Stil (links Controls+Hierarchie, rechts Details, Mitte Preview-Center mit Fill-Color-Hintergrund).
@@ -45,6 +45,9 @@
 - ✅ `Widget Editor`: Tab-Level-Selektion – Die Delete-Taste löscht im Widget-Editor-Tab das selektierte Element (`deleteSelectedWidgetEditorElement`) statt das Asset im Content Browser. `tryDeleteWidgetEditorElement()` prüft ob ein Widget-Editor aktiv ist und leitet den Delete dorthin um.
 - ✅ `Widget Editor`: Undo/Redo – Hinzufügen und Löschen von Elementen werden als `UndoRedoManager::Command` registriert. Ctrl+Z macht die Aktion rückgängig (Element wird wiederhergestellt bzw. entfernt), Ctrl+Y wiederholt sie.
 - ✅ `Widget Editor`: FBO-basierte Preview – Das editierte Widget wird in einen eigenen OpenGLRenderTarget-FBO gerendert (bei (0,0) mit Design-Größe layoutet, nicht im UI-System registriert). Die FBO-Textur wird per `drawUIImage` als Quad im Canvas-Bereich angezeigt mit Zoom/Pan und Scissor-Clipping. Selektierte Elemente erhalten eine orangefarbene Outline (`drawUIOutline`). Linksklick im Canvas transformiert Screen→Widget-Koordinaten und selektiert das oberste Element per Bounds-Hit-Test. `previewDirty`-Flag steuert Neu-Rendering. FBO-Cleanup beim Tab-Schließen via `cleanupWidgetEditorPreview()`.
+- ✅ `Widget Editor`: Details-Panel-Werte werden sofort auf die FBO-Preview angewendet – alle onChange-Callbacks nutzen einen `applyChange`-Helper, der `markWidgetEditorDirty()` (setzt `previewDirty`) und `editedWidget->markLayoutDirty()` aufruft, sodass das FBO bei jeder Eigenschaftsänderung neu gerendert wird.
+- ✅ `Widget Editor`: Drag-&-Drop auf leere Widgets – Wenn ein Widget noch keine Elemente hat, wird das per Drag-&-Drop hinzugefügte Element als Root-Element eingefügt (statt früher stillschweigend ignoriert zu werden).
+- ✅ `Widget Editor`: Hierarchie-Drag-&-Drop – Elemente im linken Hierarchie-Panel können per Drag-&-Drop umsortiert werden. `moveWidgetEditorElement()` entfernt das Element aus seiner aktuellen Position und fügt es als Sibling nach dem Ziel-Element ein (mit Zyklus-Schutz gegen Drop auf eigene Kinder).
 
 ## Legende
 

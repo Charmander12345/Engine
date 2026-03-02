@@ -473,3 +473,50 @@ const WidgetElement* ViewportUIManager::hitTestConst(const Vec2& viewportLocalPo
 
     return HitTestRecursiveConst(elements, viewportLocalPos, 0.0f, 0.0f, rootSize.x, rootSize.y);
 }
+
+// ---------------------------------------------------------------------------
+// Script-spawned widgets
+// ---------------------------------------------------------------------------
+
+std::string ViewportUIManager::registerScriptWidget(const std::shared_ptr<Widget>& widget)
+{
+    if (!widget)
+        return {};
+
+    const std::string id = "sw_" + std::to_string(m_nextScriptWidgetId++);
+    m_scriptWidgets[id] = widget;
+    m_layoutDirty = true;
+    m_renderDirty = true;
+    return id;
+}
+
+bool ViewportUIManager::unregisterScriptWidget(const std::string& widgetId)
+{
+    auto it = m_scriptWidgets.find(widgetId);
+    if (it == m_scriptWidgets.end())
+        return false;
+
+    m_scriptWidgets.erase(it);
+    m_renderDirty = true;
+    return true;
+}
+
+void ViewportUIManager::clearAllScriptWidgets()
+{
+    if (!m_scriptWidgets.empty())
+    {
+        m_scriptWidgets.clear();
+        m_renderDirty = true;
+    }
+    m_nextScriptWidgetId = 1;
+}
+
+const std::unordered_map<std::string, std::shared_ptr<Widget>>& ViewportUIManager::getScriptWidgets() const
+{
+    return m_scriptWidgets;
+}
+
+bool ViewportUIManager::hasScriptWidgets() const
+{
+    return !m_scriptWidgets.empty();
+}
