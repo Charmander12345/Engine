@@ -60,6 +60,9 @@ public:
     bool handleMouseDown(const Vec2& screenPos, int button);
     bool handleMouseUp(const Vec2& screenPos, int button);
     bool handleScroll(const Vec2& screenPos, float delta);
+    bool handleRightMouseDown(const Vec2& screenPos);
+    bool handleRightMouseUp(const Vec2& screenPos);
+    void handleMouseMotionForPan(const Vec2& screenPos);
     bool handleTextInput(const std::string& text);
     bool handleKeyDown(int key);
     void setMousePosition(const Vec2& screenPos);
@@ -94,6 +97,9 @@ public:
     void openEngineSettingsPopup();
     void openWidgetEditorPopup(const std::string& relativeAssetPath);
     void openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)> onProjectChosen);
+
+    // Returns true if the active tab is a widget editor and had a selected element to delete
+    bool tryDeleteWidgetEditorElement();
 
     static UIManager* GetActiveInstance();
     static void SetActiveInstance(UIManager* instance);
@@ -196,11 +202,55 @@ private:
 		std::string leftWidgetId;
 		std::string rightWidgetId;
 		std::string canvasWidgetId;
+		std::string toolbarWidgetId;
+
+		unsigned int assetId{ 0 };
+		bool isDirty{ false };
+
+		// Zoom & pan
+		float zoom{ 1.0f };
+		Vec2 panOffset{ 0.0f, 0.0f };
+		bool isPanning{ false };
+		Vec2 panStartMouse{};
+		Vec2 panStartOffset{};
+
+		// Original (unscaled) preview placement
+		Vec2 basePreviewPos{};
+		Vec2 basePreviewSize{};
+
+		// FBO preview dirty flag – set true whenever the preview needs re-rendering
+		bool previewDirty{ true };
 	};
 	std::unordered_map<std::string, WidgetEditorState> m_widgetEditorStates; // key = tabId
 	void refreshWidgetEditorHierarchy(const std::string& tabId);
 	void refreshWidgetEditorDetails(const std::string& tabId);
 	void selectWidgetEditorElement(const std::string& tabId, const std::string& elementId);
+	void applyWidgetEditorTransform(const std::string& tabId);
+	WidgetEditorState* getActiveWidgetEditorState();
+	bool isOverWidgetEditorCanvas(const Vec2& screenPos) const;
+	void addElementToEditedWidget(const std::string& tabId, const std::string& elementType);
+	void saveWidgetEditorAsset(const std::string& tabId);
+	void markWidgetEditorDirty(const std::string& tabId);
+	void refreshWidgetEditorToolbar(const std::string& tabId);
+	void deleteSelectedWidgetEditorElement(const std::string& tabId);
+
+public:
+	bool getWidgetEditorCanvasRect(Vec4& outRect) const;
+	bool isWidgetEditorContentWidget(const std::string& widgetId) const;
+
+	// FBO preview accessors for the renderer
+	struct WidgetEditorPreviewInfo
+	{
+		std::shared_ptr<Widget> editedWidget;
+		std::string selectedElementId;
+		float zoom{ 1.0f };
+		Vec2 panOffset{};
+		bool dirty{ false };
+		std::string tabId;
+	};
+	bool getWidgetEditorPreviewInfo(WidgetEditorPreviewInfo& out) const;
+	void clearWidgetEditorPreviewDirty();
+	bool selectWidgetEditorElementAtPos(const Vec2& screenPos);
 
 public:
 	void refreshWorldOutliner();

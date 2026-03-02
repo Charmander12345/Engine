@@ -98,6 +98,7 @@ public:
     void setActiveTab(const std::string& id) override;
     const std::string& getActiveTabId() const override;
     const std::vector<EditorTab>& getTabs() const;
+    void cleanupWidgetEditorPreview(const std::string& tabId) override;
 
     unsigned int pickEntityAt(int x, int y) override;
 
@@ -445,6 +446,9 @@ private:
 
     // Mesh viewer editor windows
     std::unordered_map<std::string, std::unique_ptr<MeshViewerWindow>> m_meshViewers;
+
+    // Widget editor preview FBOs (one per open editor tab)
+    std::unordered_map<std::string, std::unique_ptr<OpenGLRenderTarget>> m_widgetEditorPreviews;
 
 public:
     void toggleUIDebug() override { m_uiDebugEnabled = !m_uiDebugEnabled; }

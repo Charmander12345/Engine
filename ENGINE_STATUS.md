@@ -26,6 +26,18 @@
 - ✅ `Build-System`: Debug/Release-Artefakt-Kollisionen bei Multi-Config-Builds behoben (konfigurationsgetrennte Output-Verzeichnisse), dadurch `LNK2038` Runtime-/Iterator-Mismatch beseitigt.
 - ✅ `OpenGLRenderer`: Default-Framebuffer wird jetzt vor dem Tab-FBO-Blit explizit mit `m_clearColor` gecleart. Verhindert undefinierte Back-Buffer-Inhalte bei Nicht-Viewport-Tabs (z. B. Widget Editor).
 - ✅ `OpenGLTextRenderer`: Blend-State wird jetzt in `drawTextWithProgram()` per `glGetIntegerv`/`glBlendFuncSeparate` gesichert und nach dem Text-Rendering wiederhergestellt. Behebt das Überschreiben der separaten Alpha-Blend-Funktion des UI-FBO durch `glBlendFunc`.
+- ✅ `Widget Editor`: Preview-Zoom per Mausrad auf dem Canvas (0.1×–5.0×), zentriert auf Widget-Mitte.
+- ✅ `Widget Editor`: Preview-Pan per Rechtsklick+Ziehen auf dem Canvas (im Laptop-Modus per Linksklick+Ziehen).
+- ✅ `Widget Editor`: Steuerelemente in der linken Palette sind per Drag-&-Drop auf das Preview hinzufügbar. Unterstützte Typen: Panel, Text, Button, Image, EntryBar, StackPanel, Grid, Slider, CheckBox, DropDown, ColorPicker, ProgressBar, Separator.
+- ✅ `Widget Editor`: Schriftgrößen in allen Panels vergrößert (Titel 16px, Steuerelemente 14px, Hints 13px) für bessere Lesbarkeit.
+- ✅ `Widget Editor`: Bugfix – Erneutes Öffnen eines Widget-Assets funktioniert jetzt zuverlässig. `loadWidgetAsset` löst Content-relative Pfade gegen das Projekt-Content-Verzeichnis auf. Verwaiste Tabs bei Ladefehler werden automatisch entfernt.
+- ✅ `Widget Editor`: Toolbar am oberen Rand mit Save-Button und Dirty-Indikator („* Unsaved changes"). `saveWidgetEditorAsset()` synchronisiert das Widget-JSON zurück in die AssetData und speichert via `AssetManager::saveAsset()`. `markWidgetEditorDirty()` setzt das `isDirty`-Flag und aktualisiert die Toolbar.
+- ✅ `Widget Editor`: Z-Order-Fix – Preview-Widget rendert jetzt auf z=1 (hinter den UI-Panels z=2), Canvas-Hintergrund auf z=0, Toolbar auf z=3. Beim Zoomen/Panning überdeckt die Preview nicht mehr die Seitenpanels.
+- ✅ `OpenGLRenderer`: Panel-Elemente rendern jetzt Kind-Elemente rekursiv (sowohl in `renderUI()` als auch `renderViewportUI()`). Behebt das Problem, dass Widget-Previews nur eine konstante Hintergrundfarbe ohne Inhalt anzeigten.
+- ✅ `Widget Editor`: Preview-Clipping – Das Preview-Widget wird per `glScissor` auf den Canvas-Bereich beschränkt und ragt beim Zoomen/Panning nicht mehr über die Tab-Content-Area hinaus. `getWidgetEditorCanvasRect()` und `isWidgetEditorContentWidget()` liefern die Clip-Bounds für den Renderer.
+- ✅ `Widget Editor`: Tab-Level-Selektion – Die Delete-Taste löscht im Widget-Editor-Tab das selektierte Element (`deleteSelectedWidgetEditorElement`) statt das Asset im Content Browser. `tryDeleteWidgetEditorElement()` prüft ob ein Widget-Editor aktiv ist und leitet den Delete dorthin um.
+- ✅ `Widget Editor`: Undo/Redo – Hinzufügen und Löschen von Elementen werden als `UndoRedoManager::Command` registriert. Ctrl+Z macht die Aktion rückgängig (Element wird wiederhergestellt bzw. entfernt), Ctrl+Y wiederholt sie.
+- ✅ `Widget Editor`: FBO-basierte Preview – Das editierte Widget wird in einen eigenen OpenGLRenderTarget-FBO gerendert (bei (0,0) mit Design-Größe layoutet, nicht im UI-System registriert). Die FBO-Textur wird per `drawUIImage` als Quad im Canvas-Bereich angezeigt mit Zoom/Pan und Scissor-Clipping. Selektierte Elemente erhalten eine orangefarbene Outline (`drawUIOutline`). Linksklick im Canvas transformiert Screen→Widget-Koordinaten und selektiert das oberste Element per Bounds-Hit-Test. `previewDirty`-Flag steuert Neu-Rendering. FBO-Cleanup beim Tab-Schließen via `cleanupWidgetEditorPreview()`.
 
 ## Legende
 
@@ -637,7 +649,7 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | Tab-Snapshot-Cache (kein Schwarzbild beim Wechsel) | ✅ |
 | Tab-Wechsel während PIE blockiert    | ✅     |
 | Mesh-Viewer-Tabs (Doppelklick auf Model3D) | ✅ |
-| Widget-Editor-Tabs (Doppelklick auf Widget, interaktiver Preview + Hierarchie + Details) | ✅ |
+| Widget-Editor-Tabs (Doppelklick auf Widget, FBO-Preview + Zoom/Pan + Outline-Selektion + Hierarchie + Details) | ✅ |
 | **Tab-Scoped UI** (Viewport-Widgets + ContentBrowser nur bei Viewport-Tab, Mesh-Viewer-Props nur bei deren Tab) | ✅ |
 | **Level-Swap bei Tab-Wechsel** (`swapActiveLevel` + Camera Save/Restore) | ✅ |
 | Weitere Tabs (z.B. Material-Editor) | ❌     |

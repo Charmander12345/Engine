@@ -133,6 +133,7 @@ public:
     virtual void removeTab(const std::string& /*id*/) {}
     virtual void setActiveTab(const std::string& /*id*/) {}
     virtual const std::string& getActiveTabId() const { static const std::string s; return s; }
+    virtual void cleanupWidgetEditorPreview(const std::string& /*tabId*/) {}
 
     // --- Popup windows ---
     virtual PopupWindow* openPopupWindow(const std::string& /*id*/, const std::string& /*title*/, int /*width*/, int /*height*/) { return nullptr; }

@@ -3690,6 +3690,19 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
         }
     }
 
+    // Also check widget editor preview dirty flags
+    if (!anyDirty)
+    {
+        for (const auto& [tabId, state] : m_widgetEditorStates)
+        {
+            if (state.previewDirty && state.editedWidget)
+            {
+                anyDirty = true;
+                break;
+            }
+        }
+    }
+
     if (!anyDirty)
     {
         return;
@@ -3955,6 +3968,35 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
         }
     }
 
+    // Layout widget editor preview widgets (not registered in UI system)
+    for (auto& [tabId, state] : m_widgetEditorStates)
+    {
+        if (!state.editedWidget || tabId != m_activeTabId)
+            continue;
+
+        Vec2 wSize = state.editedWidget->getSizePixels();
+        if (wSize.x <= 0.0f) wSize.x = 400.0f;
+        if (wSize.y <= 0.0f) wSize.y = 300.0f;
+
+        state.editedWidget->setComputedSizePixels(wSize, true);
+        state.editedWidget->setComputedPositionPixels(Vec2{ 0.0f, 0.0f }, true);
+
+        for (auto& element : state.editedWidget->getElementsMutable())
+        {
+            measureElementSize(element, measureText);
+        }
+        for (auto& element : state.editedWidget->getElementsMutable())
+        {
+            layoutElement(element, 0.0f, 0.0f, wSize.x, wSize.y, measureText);
+        }
+        for (auto& element : state.editedWidget->getElementsMutable())
+        {
+            computeElementBounds(element);
+        }
+        state.editedWidget->setLayoutDirty(false);
+        state.previewDirty = true;  // trigger FBO re-render
+    }
+
     m_pointerCacheDirty = true;
 
 }
@@ -3976,6 +4018,31 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
     if (button != SDL_BUTTON_LEFT)
     {
         return false;
+    }
+
+    // Laptop mode: left-click on widget editor canvas starts panning
+    {
+        auto v = DiagnosticsManager::Instance().getState("LaptopMode");
+        const bool laptopMode = v && *v == "1";
+        if (laptopMode)
+        {
+            if (auto* weState = getActiveWidgetEditorState())
+            {
+                if (isOverWidgetEditorCanvas(screenPos))
+                {
+                    weState->isPanning = true;
+                    weState->panStartMouse = screenPos;
+                    weState->panStartOffset = weState->panOffset;
+                    return true;
+                }
+            }
+        }
+    }
+
+    // Non-laptop: left-click on widget editor canvas selects elements
+    if (selectWidgetEditorElementAtPos(screenPos))
+    {
+        return true;
     }
 
     // Cancel any active drag on fresh mouse down
@@ -4326,6 +4393,20 @@ bool UIManager::handleScroll(const Vec2& screenPos, float delta)
         return false;
     }
 
+    // Widget editor canvas zoom
+    if (auto* weState = getActiveWidgetEditorState())
+    {
+        if (isOverWidgetEditorCanvas(screenPos))
+        {
+            const float zoomStep = 0.1f;
+            float newZoom = weState->zoom + delta * zoomStep;
+            newZoom = std::clamp(newZoom, 0.1f, 5.0f);
+            weState->zoom = newZoom;
+            weState->previewDirty = true;
+            return true;
+        }
+    }
+
     const auto pointInRect = [](const Vec2& pos, const Vec2& size, const Vec2& point)
         {
             return point.x >= pos.x && point.x <= (pos.x + size.x) &&
@@ -4454,6 +4535,16 @@ bool UIManager::handleMouseUp(const Vec2& screenPos, int button)
         return false;
     }
 
+    // End laptop-mode left-click panning
+    if (auto* weState = getActiveWidgetEditorState())
+    {
+        if (weState->isPanning)
+        {
+            weState->isPanning = false;
+            return true;
+        }
+    }
+
     // If we had a pending drag that never started, fire the deferred click
     if (m_dragPending && !m_dragging)
     {
@@ -4507,6 +4598,21 @@ bool UIManager::handleMouseUp(const Vec2& screenPos, int button)
     Logger::Instance().log(Logger::Category::UI,
         "Drop at (" + std::to_string(screenPos.x) + ", " + std::to_string(screenPos.y) + ") payload=" + payload,
         Logger::LogLevel::INFO);
+
+    // Widget editor: drop a control onto the canvas
+    const std::string weControlPrefix = "WidgetControl|";
+    if (payload.rfind(weControlPrefix, 0) == 0)
+    {
+        if (auto* weState = getActiveWidgetEditorState())
+        {
+            if (isOverWidgetEditorCanvas(screenPos))
+            {
+                const std::string elementType = payload.substr(weControlPrefix.size());
+                addElementToEditedWidget(weState->tabId, elementType);
+                return true;
+            }
+        }
+    }
 
     // Check if dropped on a content browser folder (grid folder tile)
     WidgetElement* dropTarget = hitTest(screenPos, false);
@@ -5482,6 +5588,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
     if (assetId == 0)
     {
         showToastMessage("Failed to load widget: " + relativeAssetPath, 3.0f);
+        m_renderer->removeTab(tabId);
         return;
     }
 
@@ -5489,6 +5596,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
     if (!asset)
     {
         showToastMessage("Widget asset missing after load: " + relativeAssetPath, 3.0f);
+        m_renderer->removeTab(tabId);
         return;
     }
 
@@ -5496,6 +5604,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
     if (!widget)
     {
         showToastMessage("Failed to create widget from asset: " + relativeAssetPath, 3.0f);
+        m_renderer->removeTab(tabId);
         return;
     }
 
@@ -5503,11 +5612,13 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
     const std::string leftWidgetId = "WidgetEditor.Left." + tabId;
     const std::string rightWidgetId = "WidgetEditor.Right." + tabId;
     const std::string canvasWidgetId = "WidgetEditor.Canvas." + tabId;
+    const std::string toolbarWidgetId = "WidgetEditor.Toolbar." + tabId;
 
     unregisterWidget(contentWidgetId);
     unregisterWidget(leftWidgetId);
     unregisterWidget(rightWidgetId);
     unregisterWidget(canvasWidgetId);
+    unregisterWidget(toolbarWidgetId);
 
     // Store editor state
     WidgetEditorState state;
@@ -5518,7 +5629,79 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
     state.leftWidgetId = leftWidgetId;
     state.rightWidgetId = rightWidgetId;
     state.canvasWidgetId = canvasWidgetId;
+    state.toolbarWidgetId = toolbarWidgetId;
+    state.assetId = static_cast<unsigned int>(assetId);
+    state.isDirty = false;
     m_widgetEditorStates[tabId] = std::move(state);
+
+    // --- Top toolbar: save button + dirty indicator ---
+    {
+        auto toolbarWidget = std::make_shared<Widget>();
+        toolbarWidget->setName(toolbarWidgetId);
+        toolbarWidget->setAnchor(WidgetAnchor::TopLeft);
+        toolbarWidget->setFillX(true);
+        toolbarWidget->setSizePixels(Vec2{ 0.0f, 32.0f });
+        toolbarWidget->setZOrder(3);
+
+        WidgetElement root{};
+        root.id = "WidgetEditor.Toolbar.Root";
+        root.type = WidgetElementType::StackPanel;
+        root.from = Vec2{ 0.0f, 0.0f };
+        root.to = Vec2{ 1.0f, 1.0f };
+        root.fillX = true;
+        root.fillY = true;
+        root.orientation = StackOrientation::Horizontal;
+        root.padding = Vec2{ 8.0f, 4.0f };
+        root.color = Vec4{ 0.14f, 0.15f, 0.19f, 1.0f };
+        root.runtimeOnly = true;
+
+        // Save button
+        {
+            WidgetElement saveBtn{};
+            saveBtn.id = "WidgetEditor.Toolbar.Save";
+            saveBtn.type = WidgetElementType::Button;
+            saveBtn.text = "Save";
+            saveBtn.font = "default.ttf";
+            saveBtn.fontSize = 13.0f;
+            saveBtn.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+            saveBtn.color = Vec4{ 0.22f, 0.24f, 0.30f, 1.0f };
+            saveBtn.hoverColor = Vec4{ 0.30f, 0.34f, 0.42f, 1.0f };
+            saveBtn.textAlignH = TextAlignH::Center;
+            saveBtn.textAlignV = TextAlignV::Center;
+            saveBtn.minSize = Vec2{ 60.0f, 24.0f };
+            saveBtn.padding = Vec2{ 10.0f, 2.0f };
+            saveBtn.isHitTestable = true;
+            saveBtn.runtimeOnly = true;
+            saveBtn.clickEvent = "WidgetEditor.Toolbar.Save." + tabId;
+            root.children.push_back(std::move(saveBtn));
+        }
+
+        // Dirty indicator label
+        {
+            WidgetElement dirtyLabel{};
+            dirtyLabel.id = "WidgetEditor.Toolbar.DirtyLabel";
+            dirtyLabel.type = WidgetElementType::Text;
+            dirtyLabel.text = "";
+            dirtyLabel.font = "default.ttf";
+            dirtyLabel.fontSize = 13.0f;
+            dirtyLabel.textColor = Vec4{ 0.85f, 0.65f, 0.20f, 1.0f };
+            dirtyLabel.textAlignH = TextAlignH::Left;
+            dirtyLabel.textAlignV = TextAlignV::Center;
+            dirtyLabel.minSize = Vec2{ 0.0f, 24.0f };
+            dirtyLabel.padding = Vec2{ 8.0f, 0.0f };
+            dirtyLabel.runtimeOnly = true;
+            root.children.push_back(std::move(dirtyLabel));
+        }
+
+        toolbarWidget->setElements({ std::move(root) });
+        registerWidget(toolbarWidgetId, toolbarWidget, tabId);
+
+        const std::string capturedTabId = tabId;
+        registerClickEvent("WidgetEditor.Toolbar.Save." + tabId, [this, capturedTabId]()
+        {
+            saveWidgetEditorAsset(capturedTabId);
+        });
+    }
 
     // --- Left panel: available controls + hierarchy ---
     {
@@ -5549,12 +5732,12 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             title.type = WidgetElementType::Text;
             title.text = "Controls";
             title.font = "default.ttf";
-            title.fontSize = 14.0f;
+            title.fontSize = 16.0f;
             title.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
             title.textAlignH = TextAlignH::Left;
             title.textAlignV = TextAlignV::Center;
             title.fillX = true;
-            title.minSize = Vec2{ 0.0f, 24.0f };
+            title.minSize = Vec2{ 0.0f, 28.0f };
             title.runtimeOnly = true;
             root.children.push_back(std::move(title));
         }
@@ -5570,12 +5753,15 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             item.type = WidgetElementType::Text;
             item.text = "  " + controls[i];
             item.font = "default.ttf";
-            item.fontSize = 12.0f;
+            item.fontSize = 14.0f;
             item.textColor = Vec4{ 0.78f, 0.80f, 0.85f, 1.0f };
             item.textAlignH = TextAlignH::Left;
             item.textAlignV = TextAlignV::Center;
             item.fillX = true;
-            item.minSize = Vec2{ 0.0f, 18.0f };
+            item.minSize = Vec2{ 0.0f, 24.0f };
+            item.isHitTestable = true;
+            item.isDraggable = true;
+            item.dragPayload = "WidgetControl|" + controls[i];
             item.runtimeOnly = true;
             root.children.push_back(std::move(item));
         }
@@ -5599,12 +5785,12 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             treeTitle.type = WidgetElementType::Text;
             treeTitle.text = "Hierarchy";
             treeTitle.font = "default.ttf";
-            treeTitle.fontSize = 14.0f;
+            treeTitle.fontSize = 16.0f;
             treeTitle.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
             treeTitle.textAlignH = TextAlignH::Left;
             treeTitle.textAlignV = TextAlignV::Center;
             treeTitle.fillX = true;
-            treeTitle.minSize = Vec2{ 0.0f, 24.0f };
+            treeTitle.minSize = Vec2{ 0.0f, 28.0f };
             treeTitle.runtimeOnly = true;
             root.children.push_back(std::move(treeTitle));
         }
@@ -5656,12 +5842,12 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             title.type = WidgetElementType::Text;
             title.text = "Details";
             title.font = "default.ttf";
-            title.fontSize = 14.0f;
+            title.fontSize = 16.0f;
             title.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
             title.textAlignH = TextAlignH::Left;
             title.textAlignV = TextAlignV::Center;
             title.fillX = true;
-            title.minSize = Vec2{ 0.0f, 24.0f };
+            title.minSize = Vec2{ 0.0f, 28.0f };
             title.runtimeOnly = true;
             root.children.push_back(std::move(title));
         }
@@ -5673,7 +5859,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             hint.type = WidgetElementType::Text;
             hint.text = "Select an element in the hierarchy or preview to see its properties.";
             hint.font = "default.ttf";
-            hint.fontSize = 11.0f;
+            hint.fontSize = 13.0f;
             hint.textColor = Vec4{ 0.62f, 0.66f, 0.75f, 1.0f };
             hint.textAlignH = TextAlignH::Left;
             hint.textAlignV = TextAlignV::Center;
@@ -5694,7 +5880,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
         canvasWidget->setAnchor(WidgetAnchor::TopLeft);
         canvasWidget->setFillX(true);
         canvasWidget->setFillY(true);
-        canvasWidget->setZOrder(1);
+        canvasWidget->setZOrder(0);
 
         WidgetElement root{};
         root.id = "WidgetEditor.Canvas.Root";
@@ -5710,57 +5896,20 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
         registerWidget(canvasWidgetId, canvasWidget, tabId);
     }
 
-    // Position the preview widget in the center area
-    if (SDL_Window* w = m_renderer->window())
+    // Ensure the edited widget has a valid design size for FBO rendering
     {
-        int ww = 0;
-        int wh = 0;
-        SDL_GetWindowSizeInPixels(w, &ww, &wh);
-        const float leftW = 280.0f;
-        const float rightW = 300.0f;
-        const float margin = 24.0f;
-        const float contentX = leftW + margin;
-        const float contentY = 74.0f;
-        const float contentW = std::max(320.0f, static_cast<float>(ww) - leftW - rightW - margin * 2.0f);
-        const float contentH = std::max(220.0f, static_cast<float>(wh) - 120.0f);
-
-        Vec2 previewSize = widget->getSizePixels();
-        if (previewSize.x <= 0.0f) previewSize.x = contentW * 0.8f;
-        if (previewSize.y <= 0.0f) previewSize.y = contentH * 0.8f;
-        previewSize.x = std::min(previewSize.x, contentW);
-        previewSize.y = std::min(previewSize.y, contentH);
-
+        Vec2 designSize = widget->getSizePixels();
+        if (designSize.x <= 0.0f) designSize.x = 400.0f;
+        if (designSize.y <= 0.0f) designSize.y = 300.0f;
+        widget->setSizePixels(designSize);
         widget->setAnchor(WidgetAnchor::TopLeft);
         widget->setAbsolutePosition(true);
-        widget->setSizePixels(previewSize);
-        widget->setPositionPixels(Vec2{
-            contentX + std::max(0.0f, (contentW - previewSize.x) * 0.5f),
-            contentY + std::max(0.0f, (contentH - previewSize.y) * 0.5f)
-        });
-        widget->setZOrder(4);
-    }
+        widget->setPositionPixels(Vec2{ 0.0f, 0.0f });
+        widget->setZOrder(0);
 
-    // Make all preview widget elements hit-testable so clicks select them
-    {
-        const std::string capturedTabId = tabId;
-        const std::function<void(WidgetElement&)> makeClickable =
-            [&](WidgetElement& el)
-        {
-            el.isHitTestable = true;
-            const std::string elId = el.id;
-            el.onClicked = [this, capturedTabId, elId]()
-            {
-                selectWidgetEditorElement(capturedTabId, elId);
-            };
-            for (auto& child : el.children)
-            {
-                makeClickable(child);
-            }
-        };
-        for (auto& el : widget->getElementsMutable())
-        {
-            makeClickable(el);
-        }
+        auto& edState = m_widgetEditorStates[tabId];
+        edState.basePreviewSize = designSize;
+        edState.previewDirty = true;
     }
 
     // Tab and close button events
@@ -5776,7 +5925,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
         markAllWidgetsDirty();
     });
 
-    registerClickEvent(closeBtnId, [this, tabId, tabBtnId, closeBtnId, contentWidgetId, leftWidgetId, rightWidgetId, canvasWidgetId]()
+    registerClickEvent(closeBtnId, [this, tabId, tabBtnId, closeBtnId, leftWidgetId, rightWidgetId, canvasWidgetId, toolbarWidgetId]()
     {
         if (!m_renderer)
         {
@@ -5787,18 +5936,17 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             m_renderer->setActiveTab("Viewport");
         }
 
-        unregisterWidget(contentWidgetId);
         unregisterWidget(leftWidgetId);
         unregisterWidget(rightWidgetId);
         unregisterWidget(canvasWidgetId);
+        unregisterWidget(toolbarWidgetId);
 
+        m_renderer->cleanupWidgetEditorPreview(tabId);
         m_widgetEditorStates.erase(tabId);
 
         m_renderer->removeTab(tabId);
         markAllWidgetsDirty();
     });
-
-    registerWidget(contentWidgetId, widget, tabId);
 
     // Populate the hierarchy tree and initial details
     refreshWidgetEditorHierarchy(tabId);
@@ -5816,9 +5964,719 @@ void UIManager::selectWidgetEditorElement(const std::string& tabId, const std::s
         return;
 
     it->second.selectedElementId = elementId;
+    it->second.previewDirty = true;
     refreshWidgetEditorHierarchy(tabId);
     refreshWidgetEditorDetails(tabId);
     markAllWidgetsDirty();
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: apply zoom + pan transform to preview widget
+// ---------------------------------------------------------------------------
+void UIManager::applyWidgetEditorTransform(const std::string& tabId)
+{
+    auto it = m_widgetEditorStates.find(tabId);
+    if (it == m_widgetEditorStates.end() || !it->second.editedWidget)
+        return;
+
+    auto& state = it->second;
+    const Vec2 scaledSize{
+        state.basePreviewSize.x * state.zoom,
+        state.basePreviewSize.y * state.zoom
+    };
+
+    // Compute the center of the canvas area for zoom-toward-center behaviour
+    float canvasCenterX = state.basePreviewPos.x + state.basePreviewSize.x * 0.5f;
+    float canvasCenterY = state.basePreviewPos.y + state.basePreviewSize.y * 0.5f;
+
+    const Vec2 newPos{
+        canvasCenterX - scaledSize.x * 0.5f + state.panOffset.x,
+        canvasCenterY - scaledSize.y * 0.5f + state.panOffset.y
+    };
+
+    state.editedWidget->setSizePixels(scaledSize);
+    state.editedWidget->setPositionPixels(newPos);
+    state.editedWidget->markLayoutDirty();
+    markAllWidgetsDirty();
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: get state for the currently active tab (if it's a widget editor)
+// ---------------------------------------------------------------------------
+UIManager::WidgetEditorState* UIManager::getActiveWidgetEditorState()
+{
+    const std::string& activeTab = m_activeTabId;
+    auto it = m_widgetEditorStates.find(activeTab);
+    if (it == m_widgetEditorStates.end())
+        return nullptr;
+    return &it->second;
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: check if screenPos is over the canvas widget area
+// ---------------------------------------------------------------------------
+bool UIManager::isOverWidgetEditorCanvas(const Vec2& screenPos) const
+{
+    auto it = m_widgetEditorStates.find(m_activeTabId);
+    if (it == m_widgetEditorStates.end())
+        return false;
+
+    const auto* entry = findWidgetEntry(it->second.canvasWidgetId);
+    if (!entry || !entry->widget || !entry->widget->hasComputedPosition() || !entry->widget->hasComputedSize())
+        return false;
+
+    const Vec2 pos = entry->widget->getComputedPositionPixels();
+    const Vec2 size = entry->widget->getComputedSizePixels();
+    return screenPos.x >= pos.x && screenPos.x <= pos.x + size.x &&
+           screenPos.y >= pos.y && screenPos.y <= pos.y + size.y;
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: save the edited widget asset to disk
+// ---------------------------------------------------------------------------
+void UIManager::saveWidgetEditorAsset(const std::string& tabId)
+{
+    auto it = m_widgetEditorStates.find(tabId);
+    if (it == m_widgetEditorStates.end() || !it->second.editedWidget)
+        return;
+
+    auto& state = it->second;
+    auto& assetManager = AssetManager::Instance();
+
+    auto assetData = assetManager.getLoadedAssetByID(state.assetId);
+    if (!assetData)
+    {
+        showToastMessage("Cannot save: asset not found.", 3.0f);
+        return;
+    }
+
+    // Sync the widget's current state back into the asset data
+    assetData->setData(state.editedWidget->toJson());
+
+    Asset asset;
+    asset.ID = state.assetId;
+    asset.type = AssetType::Widget;
+    if (assetManager.saveAsset(asset, AssetManager::Sync))
+    {
+        state.isDirty = false;
+        refreshWidgetEditorToolbar(tabId);
+        showToastMessage("Widget saved.", 2.0f);
+    }
+    else
+    {
+        showToastMessage("Failed to save widget.", 3.0f);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: mark the current editor as having unsaved changes
+// ---------------------------------------------------------------------------
+void UIManager::markWidgetEditorDirty(const std::string& tabId)
+{
+    auto it = m_widgetEditorStates.find(tabId);
+    if (it == m_widgetEditorStates.end())
+        return;
+
+    it->second.previewDirty = true;
+
+    if (!it->second.isDirty)
+    {
+        it->second.isDirty = true;
+        refreshWidgetEditorToolbar(tabId);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: update the toolbar dirty indicator text
+// ---------------------------------------------------------------------------
+void UIManager::refreshWidgetEditorToolbar(const std::string& tabId)
+{
+    auto stateIt = m_widgetEditorStates.find(tabId);
+    if (stateIt == m_widgetEditorStates.end())
+        return;
+
+    const auto* entry = findWidgetEntry(stateIt->second.toolbarWidgetId);
+    if (!entry || !entry->widget)
+        return;
+
+    const std::function<WidgetElement*(WidgetElement&, const std::string&)> findById =
+        [&](WidgetElement& el, const std::string& id) -> WidgetElement*
+        {
+            if (el.id == id) return &el;
+            for (auto& child : el.children)
+            {
+                if (auto* match = findById(child, id))
+                    return match;
+            }
+            return nullptr;
+        };
+
+    for (auto& el : entry->widget->getElementsMutable())
+    {
+        if (auto* dirtyLabel = findById(el, "WidgetEditor.Toolbar.DirtyLabel"))
+        {
+            dirtyLabel->text = stateIt->second.isDirty ? "  * Unsaved changes" : "";
+            break;
+        }
+    }
+
+    entry->widget->markLayoutDirty();
+    markAllWidgetsDirty();
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: delete the currently selected element (with undo/redo)
+// ---------------------------------------------------------------------------
+void UIManager::deleteSelectedWidgetEditorElement(const std::string& tabId)
+{
+    auto it = m_widgetEditorStates.find(tabId);
+    if (it == m_widgetEditorStates.end() || !it->second.editedWidget)
+        return;
+
+    auto& state = it->second;
+    const std::string& selectedId = state.selectedElementId;
+    if (selectedId.empty())
+        return;
+
+    // Find and remove the element from the tree
+    auto& rootElements = state.editedWidget->getElementsMutable();
+
+    // Recursive search: returns (parent's children vector, index) or (empty, -1)
+    struct RemoveResult { bool found; WidgetElement removed; size_t parentIndex; };
+
+    const std::function<bool(std::vector<WidgetElement>&, const std::string&, WidgetElement&, size_t&)> findAndRemove =
+        [&](std::vector<WidgetElement>& elements, const std::string& id, WidgetElement& outRemoved, size_t& outIndex) -> bool
+    {
+        for (size_t i = 0; i < elements.size(); ++i)
+        {
+            if (elements[i].id == id)
+            {
+                outRemoved = std::move(elements[i]);
+                outIndex = i;
+                elements.erase(elements.begin() + static_cast<ptrdiff_t>(i));
+                return true;
+            }
+            if (findAndRemove(elements[i].children, id, outRemoved, outIndex))
+                return true;
+        }
+        return false;
+    };
+
+    // We need to know the parent element id for undo reinsertion
+    std::string parentId;
+    const std::function<bool(const std::vector<WidgetElement>&, const std::string&)> findParent =
+        [&](const std::vector<WidgetElement>& elements, const std::string& id) -> bool
+    {
+        for (const auto& el : elements)
+        {
+            for (const auto& child : el.children)
+            {
+                if (child.id == id)
+                {
+                    parentId = el.id;
+                    return true;
+                }
+            }
+            if (findParent(el.children, id))
+                return true;
+        }
+        return false;
+    };
+
+    findParent(rootElements, selectedId);
+
+    WidgetElement removedElement{};
+    size_t removedIndex = 0;
+    if (!findAndRemove(rootElements, selectedId, removedElement, removedIndex))
+        return;
+
+    state.selectedElementId.clear();
+    state.editedWidget->markLayoutDirty();
+    markWidgetEditorDirty(tabId);
+    refreshWidgetEditorHierarchy(tabId);
+    refreshWidgetEditorDetails(tabId);
+    markAllWidgetsDirty();
+
+    // Push undo/redo command
+    const std::string capturedTabId = tabId;
+    const std::string capturedParentId = parentId;
+    const std::string capturedElId = removedElement.id;
+    auto capturedElement = std::make_shared<WidgetElement>(std::move(removedElement));
+    const size_t capturedIndex = removedIndex;
+
+    UndoRedoManager::Command cmd;
+    cmd.description = "Delete " + capturedElId;
+
+    cmd.undo = [this, capturedTabId, capturedParentId, capturedElement, capturedIndex]()
+    {
+        auto it2 = m_widgetEditorStates.find(capturedTabId);
+        if (it2 == m_widgetEditorStates.end() || !it2->second.editedWidget)
+            return;
+
+        auto& elements = it2->second.editedWidget->getElementsMutable();
+
+        // Re-add click handler
+        const std::string elId = capturedElement->id;
+        capturedElement->onClicked = [this, capturedTabId, elId]()
+        {
+            selectWidgetEditorElement(capturedTabId, elId);
+        };
+
+        if (capturedParentId.empty())
+        {
+            // Was a root element
+            const size_t idx = std::min(capturedIndex, elements.size());
+            elements.insert(elements.begin() + static_cast<ptrdiff_t>(idx), *capturedElement);
+        }
+        else
+        {
+            // Find parent and reinsert
+            const std::function<bool(std::vector<WidgetElement>&)> reinsert =
+                [&](std::vector<WidgetElement>& els) -> bool
+            {
+                for (auto& el : els)
+                {
+                    if (el.id == capturedParentId)
+                    {
+                        const size_t idx = std::min(capturedIndex, el.children.size());
+                        el.children.insert(el.children.begin() + static_cast<ptrdiff_t>(idx), *capturedElement);
+                        return true;
+                    }
+                    if (reinsert(el.children))
+                        return true;
+                }
+                return false;
+            };
+            reinsert(elements);
+        }
+
+        it2->second.editedWidget->markLayoutDirty();
+        markWidgetEditorDirty(capturedTabId);
+        refreshWidgetEditorHierarchy(capturedTabId);
+        refreshWidgetEditorDetails(capturedTabId);
+        markAllWidgetsDirty();
+    };
+
+    cmd.execute = [this, capturedTabId, capturedElId]()
+    {
+        auto it2 = m_widgetEditorStates.find(capturedTabId);
+        if (it2 == m_widgetEditorStates.end() || !it2->second.editedWidget)
+            return;
+
+        auto& elements = it2->second.editedWidget->getElementsMutable();
+        WidgetElement dummy{};
+        size_t dummyIdx = 0;
+        const std::function<bool(std::vector<WidgetElement>&, const std::string&, WidgetElement&, size_t&)> removeEl =
+            [&](std::vector<WidgetElement>& els, const std::string& id, WidgetElement& out, size_t& outIdx) -> bool
+        {
+            for (size_t i = 0; i < els.size(); ++i)
+            {
+                if (els[i].id == id)
+                {
+                    out = std::move(els[i]);
+                    outIdx = i;
+                    els.erase(els.begin() + static_cast<ptrdiff_t>(i));
+                    return true;
+                }
+                if (removeEl(els[i].children, id, out, outIdx))
+                    return true;
+            }
+            return false;
+        };
+        removeEl(elements, capturedElId, dummy, dummyIdx);
+
+        if (it2->second.selectedElementId == capturedElId)
+            it2->second.selectedElementId.clear();
+
+        it2->second.editedWidget->markLayoutDirty();
+        markWidgetEditorDirty(capturedTabId);
+        refreshWidgetEditorHierarchy(capturedTabId);
+        refreshWidgetEditorDetails(capturedTabId);
+        markAllWidgetsDirty();
+    };
+
+    UndoRedoManager::Instance().pushCommand(std::move(cmd));
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: public entry point – delete selected element if in editor tab
+// ---------------------------------------------------------------------------
+bool UIManager::tryDeleteWidgetEditorElement()
+{
+    auto* state = getActiveWidgetEditorState();
+    if (!state || state->selectedElementId.empty())
+        return false;
+
+    deleteSelectedWidgetEditorElement(state->tabId);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: get the canvas clip rect (x, y, w, h) for the active editor
+// ---------------------------------------------------------------------------
+bool UIManager::getWidgetEditorCanvasRect(Vec4& outRect) const
+{
+    auto it = m_widgetEditorStates.find(m_activeTabId);
+    if (it == m_widgetEditorStates.end())
+        return false;
+
+    const auto* entry = findWidgetEntry(it->second.canvasWidgetId);
+    if (!entry || !entry->widget || !entry->widget->hasComputedPosition() || !entry->widget->hasComputedSize())
+        return false;
+
+    const Vec2 pos = entry->widget->getComputedPositionPixels();
+    const Vec2 size = entry->widget->getComputedSizePixels();
+    outRect = Vec4{ pos.x, pos.y, size.x, size.y };
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: check if a widget id belongs to a content preview widget
+// ---------------------------------------------------------------------------
+bool UIManager::isWidgetEditorContentWidget(const std::string& widgetId) const
+{
+    for (const auto& [tabId, state] : m_widgetEditorStates)
+    {
+        if (state.contentWidgetId == widgetId)
+            return true;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: get preview info for FBO rendering
+// ---------------------------------------------------------------------------
+bool UIManager::getWidgetEditorPreviewInfo(WidgetEditorPreviewInfo& out) const
+{
+    auto it = m_widgetEditorStates.find(m_activeTabId);
+    if (it == m_widgetEditorStates.end() || !it->second.editedWidget)
+        return false;
+
+    const auto& state = it->second;
+    out.editedWidget = state.editedWidget;
+    out.selectedElementId = state.selectedElementId;
+    out.zoom = state.zoom;
+    out.panOffset = state.panOffset;
+    out.dirty = state.previewDirty;
+    out.tabId = state.tabId;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: clear preview dirty flag after FBO re-render
+// ---------------------------------------------------------------------------
+void UIManager::clearWidgetEditorPreviewDirty()
+{
+    auto it = m_widgetEditorStates.find(m_activeTabId);
+    if (it != m_widgetEditorStates.end())
+        it->second.previewDirty = false;
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: select element at screen position (click in canvas)
+// ---------------------------------------------------------------------------
+bool UIManager::selectWidgetEditorElementAtPos(const Vec2& screenPos)
+{
+    auto* state = getActiveWidgetEditorState();
+    if (!state || !state->editedWidget)
+        return false;
+
+    Vec4 canvasRect{};
+    if (!getWidgetEditorCanvasRect(canvasRect))
+        return false;
+
+    // Check if inside canvas
+    if (screenPos.x < canvasRect.x || screenPos.x > canvasRect.x + canvasRect.z ||
+        screenPos.y < canvasRect.y || screenPos.y > canvasRect.y + canvasRect.w)
+        return false;
+
+    // Transform screen position to widget-local coordinates
+    const Vec2 wSize = state->editedWidget->getSizePixels();
+    const float fboW = (wSize.x > 0.0f) ? wSize.x : 400.0f;
+    const float fboH = (wSize.y > 0.0f) ? wSize.y : 300.0f;
+
+    const float displayW = fboW * state->zoom;
+    const float displayH = fboH * state->zoom;
+    const float cx = canvasRect.x + canvasRect.z * 0.5f;
+    const float cy = canvasRect.y + canvasRect.w * 0.5f;
+    const float dx0 = cx - displayW * 0.5f + state->panOffset.x;
+    const float dy0 = cy - displayH * 0.5f + state->panOffset.y;
+
+    const float localX = (screenPos.x - dx0) / state->zoom;
+    const float localY = (screenPos.y - dy0) / state->zoom;
+
+    if (localX < 0.0f || localX > fboW || localY < 0.0f || localY > fboH)
+    {
+        selectWidgetEditorElement(state->tabId, "");
+        return true;
+    }
+
+    // Walk elements in reverse to find topmost hit
+    std::string hitId;
+    const auto walkElements = [&](const auto& self, const std::vector<WidgetElement>& elements) -> void
+    {
+        for (auto it2 = elements.rbegin(); it2 != elements.rend(); ++it2)
+        {
+            const auto& el = *it2;
+            if (!el.children.empty())
+                self(self, el.children);
+            if (!hitId.empty())
+                return;
+            if (el.hasBounds &&
+                localX >= el.boundsMinPixels.x && localX <= el.boundsMaxPixels.x &&
+                localY >= el.boundsMinPixels.y && localY <= el.boundsMaxPixels.y)
+            {
+                if (!el.id.empty())
+                    hitId = el.id;
+            }
+        }
+    };
+    walkElements(walkElements, state->editedWidget->getElements());
+    selectWidgetEditorElement(state->tabId, hitId);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: right-mouse-down starts panning on the canvas
+// ---------------------------------------------------------------------------
+bool UIManager::handleRightMouseDown(const Vec2& screenPos)
+{
+    auto* state = getActiveWidgetEditorState();
+    if (!state)
+        return false;
+
+    if (!isOverWidgetEditorCanvas(screenPos))
+        return false;
+
+    state->isPanning = true;
+    state->panStartMouse = screenPos;
+    state->panStartOffset = state->panOffset;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: right-mouse-up ends panning
+// ---------------------------------------------------------------------------
+bool UIManager::handleRightMouseUp(const Vec2& screenPos)
+{
+    (void)screenPos;
+    auto* state = getActiveWidgetEditorState();
+    if (!state || !state->isPanning)
+        return false;
+
+    state->isPanning = false;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: mouse motion updates pan offset
+// ---------------------------------------------------------------------------
+void UIManager::handleMouseMotionForPan(const Vec2& screenPos)
+{
+    auto* state = getActiveWidgetEditorState();
+    if (!state || !state->isPanning)
+        return;
+
+    state->panOffset.x = state->panStartOffset.x + (screenPos.x - state->panStartMouse.x);
+    state->panOffset.y = state->panStartOffset.y + (screenPos.y - state->panStartMouse.y);
+}
+
+// ---------------------------------------------------------------------------
+// Widget Editor: add a new element of the given type to the edited widget
+// ---------------------------------------------------------------------------
+void UIManager::addElementToEditedWidget(const std::string& tabId, const std::string& elementType)
+{
+    auto it = m_widgetEditorStates.find(tabId);
+    if (it == m_widgetEditorStates.end() || !it->second.editedWidget)
+        return;
+
+    auto& state = it->second;
+    auto& elements = state.editedWidget->getElementsMutable();
+    if (elements.empty())
+        return;
+
+    // Generate a unique element id
+    static int s_newElementCounter = 0;
+    const std::string newId = elementType + "_" + std::to_string(++s_newElementCounter);
+
+    WidgetElement newEl{};
+    newEl.id = newId;
+    newEl.isHitTestable = true;
+
+    // Set type-specific defaults
+    if (elementType == "Panel")
+    {
+        newEl.type = WidgetElementType::Panel;
+        newEl.from = Vec2{ 0.05f, 0.05f };
+        newEl.to = Vec2{ 0.95f, 0.25f };
+        newEl.color = Vec4{ 0.15f, 0.15f, 0.20f, 0.8f };
+    }
+    else if (elementType == "Text")
+    {
+        newEl.type = WidgetElementType::Text;
+        newEl.from = Vec2{ 0.05f, 0.05f };
+        newEl.to = Vec2{ 0.95f, 0.15f };
+        newEl.text = "New Text";
+        newEl.font = "default.ttf";
+        newEl.fontSize = 16.0f;
+        newEl.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+    }
+    else if (elementType == "Button")
+    {
+        newEl.type = WidgetElementType::Button;
+        newEl.from = Vec2{ 0.3f, 0.4f };
+        newEl.to = Vec2{ 0.7f, 0.55f };
+        newEl.text = "Button";
+        newEl.font = "default.ttf";
+        newEl.fontSize = 14.0f;
+        newEl.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+        newEl.textAlignH = TextAlignH::Center;
+        newEl.textAlignV = TextAlignV::Center;
+        newEl.color = Vec4{ 0.2f, 0.4f, 0.7f, 0.95f };
+        newEl.hoverColor = Vec4{ 0.3f, 0.5f, 0.8f, 1.0f };
+    }
+    else if (elementType == "Image")
+    {
+        newEl.type = WidgetElementType::Image;
+        newEl.from = Vec2{ 0.1f, 0.1f };
+        newEl.to = Vec2{ 0.5f, 0.5f };
+    }
+    else if (elementType == "EntryBar")
+    {
+        newEl.type = WidgetElementType::EntryBar;
+        newEl.from = Vec2{ 0.1f, 0.4f };
+        newEl.to = Vec2{ 0.9f, 0.52f };
+        newEl.value = "";
+        newEl.fontSize = 14.0f;
+        newEl.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
+        newEl.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.9f };
+    }
+    else if (elementType == "StackPanel")
+    {
+        newEl.type = WidgetElementType::StackPanel;
+        newEl.from = Vec2{ 0.05f, 0.05f };
+        newEl.to = Vec2{ 0.95f, 0.95f };
+        newEl.orientation = StackOrientation::Vertical;
+        newEl.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.6f };
+    }
+    else if (elementType == "Grid")
+    {
+        newEl.type = WidgetElementType::Grid;
+        newEl.from = Vec2{ 0.05f, 0.05f };
+        newEl.to = Vec2{ 0.95f, 0.95f };
+        newEl.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.5f };
+    }
+    else if (elementType == "Slider")
+    {
+        newEl.type = WidgetElementType::Slider;
+        newEl.from = Vec2{ 0.1f, 0.45f };
+        newEl.to = Vec2{ 0.9f, 0.55f };
+        newEl.minValue = 0.0f;
+        newEl.maxValue = 1.0f;
+        newEl.valueFloat = 0.5f;
+    }
+    else if (elementType == "CheckBox")
+    {
+        newEl.type = WidgetElementType::CheckBox;
+        newEl.from = Vec2{ 0.1f, 0.4f };
+        newEl.to = Vec2{ 0.5f, 0.52f };
+        newEl.text = "Checkbox";
+        newEl.font = "default.ttf";
+        newEl.fontSize = 14.0f;
+        newEl.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
+    }
+    else if (elementType == "DropDown")
+    {
+        newEl.type = WidgetElementType::DropDown;
+        newEl.from = Vec2{ 0.1f, 0.4f };
+        newEl.to = Vec2{ 0.6f, 0.52f };
+        newEl.items = { "Option 1", "Option 2", "Option 3" };
+        newEl.selectedIndex = 0;
+    }
+    else if (elementType == "ColorPicker")
+    {
+        newEl.type = WidgetElementType::ColorPicker;
+        newEl.from = Vec2{ 0.1f, 0.1f };
+        newEl.to = Vec2{ 0.5f, 0.5f };
+        newEl.color = Vec4{ 1.0f, 0.5f, 0.2f, 1.0f };
+    }
+    else if (elementType == "ProgressBar")
+    {
+        newEl.type = WidgetElementType::ProgressBar;
+        newEl.from = Vec2{ 0.1f, 0.45f };
+        newEl.to = Vec2{ 0.9f, 0.52f };
+        newEl.minValue = 0.0f;
+        newEl.maxValue = 100.0f;
+        newEl.valueFloat = 50.0f;
+    }
+    else if (elementType == "Separator")
+    {
+        newEl.type = WidgetElementType::Panel;
+        newEl.from = Vec2{ 0.05f, 0.49f };
+        newEl.to = Vec2{ 0.95f, 0.51f };
+        newEl.color = Vec4{ 0.3f, 0.32f, 0.38f, 0.8f };
+    }
+    else
+    {
+        newEl.type = WidgetElementType::Panel;
+        newEl.from = Vec2{ 0.1f, 0.1f };
+        newEl.to = Vec2{ 0.5f, 0.5f };
+        newEl.color = Vec4{ 0.2f, 0.2f, 0.25f, 0.8f };
+    }
+
+    // Add to first root element (the main container panel)
+    const std::string capturedTabId = tabId;
+    const std::string capturedElId = newId;
+    auto capturedElement = std::make_shared<WidgetElement>(newEl);
+    elements.front().children.push_back(std::move(newEl));
+    state.editedWidget->markLayoutDirty();
+
+    markWidgetEditorDirty(tabId);
+    refreshWidgetEditorHierarchy(tabId);
+    refreshWidgetEditorDetails(tabId);
+    markAllWidgetsDirty();
+
+    // Push undo/redo command
+    UndoRedoManager::Command cmd;
+    cmd.description = "Add " + elementType;
+
+    cmd.undo = [this, capturedTabId, capturedElId]()
+    {
+        auto it2 = m_widgetEditorStates.find(capturedTabId);
+        if (it2 == m_widgetEditorStates.end() || !it2->second.editedWidget)
+            return;
+        auto& els = it2->second.editedWidget->getElementsMutable();
+        if (els.empty()) return;
+        auto& children = els.front().children;
+        children.erase(
+            std::remove_if(children.begin(), children.end(),
+                [&](const WidgetElement& e) { return e.id == capturedElId; }),
+            children.end());
+        if (it2->second.selectedElementId == capturedElId)
+            it2->second.selectedElementId.clear();
+        it2->second.editedWidget->markLayoutDirty();
+        markWidgetEditorDirty(capturedTabId);
+        refreshWidgetEditorHierarchy(capturedTabId);
+        refreshWidgetEditorDetails(capturedTabId);
+        markAllWidgetsDirty();
+    };
+
+    cmd.execute = [this, capturedTabId, capturedElement]()
+    {
+        auto it2 = m_widgetEditorStates.find(capturedTabId);
+        if (it2 == m_widgetEditorStates.end() || !it2->second.editedWidget)
+            return;
+        auto& els = it2->second.editedWidget->getElementsMutable();
+        if (els.empty()) return;
+        els.front().children.push_back(*capturedElement);
+        it2->second.editedWidget->markLayoutDirty();
+        markWidgetEditorDirty(capturedTabId);
+        refreshWidgetEditorHierarchy(capturedTabId);
+        refreshWidgetEditorDetails(capturedTabId);
+        markAllWidgetsDirty();
+    };
+
+    UndoRedoManager::Instance().pushCommand(std::move(cmd));
 }
 
 // ---------------------------------------------------------------------------

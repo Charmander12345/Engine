@@ -1574,7 +1574,13 @@ int main()
         if (!renderer) return false;
         auto& uiManager = renderer->getUIManager();
 
-        // Check for selected asset in Content Browser grid first
+        // Check for widget editor element selection first (tab-level selection)
+        if (uiManager.tryDeleteWidgetEditorElement())
+        {
+            return true;
+        }
+
+        // Check for selected asset in Content Browser grid
         const std::string selectedAsset = uiManager.getSelectedGridAsset();
         if (!selectedAsset.empty())
         {
@@ -1846,6 +1852,7 @@ int main()
                     {
                         auto& uiManager = renderer->getUIManager();
                         uiManager.setMousePosition(mousePosPixels);
+                        uiManager.handleMouseMotionForPan(mousePosPixels);
                         if (auto* viewportUI = renderer->getViewportUIManagerPtr())
                         {
                             viewportUI->setMousePosition(mousePosPixels);
@@ -1974,6 +1981,12 @@ int main()
                     else
                     {
                         isOverUI = uiManager.isPointerOverUI(mousePos);
+                    }
+
+                    // Widget editor: right-click starts panning
+                    if (uiManager.handleRightMouseDown(mousePos))
+                    {
+                        continue;
                     }
 
                     // Right-click context menu on Content Browser grid
@@ -2473,7 +2486,16 @@ int main()
             }
             else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_RIGHT)
             {
-                if (rightMouseDown)
+                // Widget editor: end panning
+                if (renderer)
+                {
+                    auto& uiManager = renderer->getUIManager();
+                    const Vec2 mousePos{ static_cast<float>(event.button.x), static_cast<float>(event.button.y) };
+                    if (uiManager.handleRightMouseUp(mousePos))
+                    {
+                        // Pan ended — don't fall through to camera right-click release
+                    }
+                    else if (rightMouseDown)
                     {
                         rightMouseDown = false;
                         if (auto* w = renderer->window())
@@ -2484,6 +2506,11 @@ int main()
                         }
                         SDL_ShowCursor();
                     }
+                }
+                else if (rightMouseDown)
+                {
+                    rightMouseDown = false;
+                }
             }
 
             if (event.type == SDL_EVENT_MOUSE_WHEEL)

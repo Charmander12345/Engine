@@ -5138,6 +5138,31 @@ AssetManager::LoadResult AssetManager::loadWidgetAsset(const std::string& path)
 {
 	LoadResult result;
 	auto raw = readAssetFromDisk(path, AssetType::Widget);
+
+	// If the file was not found and the path is relative, resolve against the
+	// project Content directory (the registry stores Content-relative paths but
+	// readAssetFromDisk needs a path that std::ifstream can open).
+	if (!raw.success && !fs::path(path).is_absolute())
+	{
+		auto& diagnostics = DiagnosticsManager::Instance();
+		if (diagnostics.isProjectLoaded())
+		{
+			const auto& projectPath = diagnostics.getProjectInfo().projectPath;
+			if (!projectPath.empty())
+			{
+				const std::string resolved =
+					(fs::path(projectPath) / "Content" / path).lexically_normal().string();
+				raw = readAssetFromDisk(resolved, AssetType::Widget);
+				if (raw.success)
+				{
+					// Keep the original Content-relative path so the cache key
+					// matches what callers and the asset registry use.
+					raw.path = path;
+				}
+			}
+		}
+	}
+
 	if (!raw.success)
 	{
 		result.errorMessage = raw.errorMessage;

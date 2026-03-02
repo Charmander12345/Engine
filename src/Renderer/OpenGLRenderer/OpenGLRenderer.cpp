@@ -1510,6 +1510,14 @@ void OpenGLRenderer::blitUiCache(int width, int height)
 }
 
 // ---------------------------------------------------------------------------
+// cleanupWidgetEditorPreview
+// ---------------------------------------------------------------------------
+void OpenGLRenderer::cleanupWidgetEditorPreview(const std::string& tabId)
+{
+    m_widgetEditorPreviews.erase(tabId);
+}
+
+// ---------------------------------------------------------------------------
 // drawUIWidgetsToFramebuffer
 // Renders all widgets of 'mgr' into the currently-bound framebuffer.
 // Caller is responsible for binding the target FBO and setting glViewport.
@@ -1552,6 +1560,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
             const GLuint prog = getUIQuadProgram(vp, fp);
             drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, prog, element.color, false);
+            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx);
             if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{1.0f,0.9f,0.1f,1.0f}, uiProjection, prog);
             return;
         }
@@ -1949,6 +1958,9 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
     };
 
     const auto& ordered = mgr.getWidgetsOrderedByZ();
+    Vec4 editorCanvasRect{};
+    const bool hasCanvasClip = mgr.getWidgetEditorCanvasRect(editorCanvasRect);
+
     for (const auto* entry : ordered)
     {
         if (!entry || !entry->widget) continue;
@@ -1959,8 +1971,26 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
         if (widget->hasComputedPosition()) widgetPosition = widget->getComputedPositionPixels();
         if (widgetSize.x <= 0.0f) widgetSize.x = static_cast<float>(width);
         if (widgetSize.y <= 0.0f) widgetSize.y = static_cast<float>(height);
+
+        // Clip widget editor preview to canvas area
+        const bool needsClip = hasCanvasClip && mgr.isWidgetEditorContentWidget(entry->id);
+        if (needsClip)
+        {
+            const GLint cx = static_cast<GLint>(editorCanvasRect.x);
+            const GLint cy = static_cast<GLint>(static_cast<float>(height) - editorCanvasRect.y - editorCanvasRect.w);
+            const GLsizei cw = static_cast<GLsizei>(std::max(0.0f, editorCanvasRect.z));
+            const GLsizei ch = static_cast<GLsizei>(std::max(0.0f, editorCanvasRect.w));
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(cx, cy, cw, ch);
+        }
+
         for (const auto& element : widget->getElements())
             renderElement(renderElement, element, widgetPosition.x, widgetPosition.y, widgetSize.x, widgetSize.y);
+
+        if (needsClip)
+        {
+            glDisable(GL_SCISSOR_TEST);
+        }
     }
 
     // Deferred pass: draw expanded DropDown items on top of everything
@@ -2736,6 +2766,7 @@ void OpenGLRenderer::renderViewportUI()
             const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
             const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
             drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, getUIQuadProgram(vertexPath, fragmentPath), element.hoverColor, element.isHovered);
+            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx);
             return;
         }
 
@@ -2876,7 +2907,7 @@ void OpenGLRenderer::renderUI()
             glEnable(GL_BLEND);
             glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
         ensureUIShaderDefaults();
-        const glm::mat4 uiProjection = glm::ortho(0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f);
+        glm::mat4 uiProjection = glm::ortho(0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f);
 
         struct DeferredDropDown { float x0, y0, x1, y1, fontSize; int selectedIndex; std::vector<std::string> items; Vec4 textColor, hoverColor; Vec2 padding; };
         std::vector<DeferredDropDown> deferredDropDowns;
@@ -3643,6 +3674,112 @@ void OpenGLRenderer::renderUI()
                 const Vec2 itemTextSize = m_textRenderer->measureText(dd.items[i], scale);
                 const float itemTextY = iy0 + (itemHeight - itemTextSize.y) * 0.5f;
                 m_textRenderer->drawText(dd.items[i], Vec2{ contentX0, itemTextY }, scale, dd.textColor);
+            }
+        }
+
+        // ---- Widget Editor FBO preview rendering ----
+        {
+            UIManager::WidgetEditorPreviewInfo previewInfo;
+            if (m_uiManager.getWidgetEditorPreviewInfo(previewInfo) && previewInfo.editedWidget)
+            {
+                const auto& widget = previewInfo.editedWidget;
+                Vec2 wSize = widget->getSizePixels();
+                if (wSize.x <= 0.0f) wSize.x = 400.0f;
+                if (wSize.y <= 0.0f) wSize.y = 300.0f;
+                const int fboW = static_cast<int>(wSize.x);
+                const int fboH = static_cast<int>(wSize.y);
+
+                if (fboW > 0 && fboH > 0)
+                {
+                    auto& previewFbo = m_widgetEditorPreviews[previewInfo.tabId];
+                    if (!previewFbo)
+                        previewFbo = std::make_unique<OpenGLRenderTarget>();
+                    previewFbo->resize(fboW, fboH);
+
+                    // Save current state
+                    const glm::mat4 savedProjection = uiProjection;
+
+                    // Render widget into preview FBO
+                    previewFbo->bind();
+                    glViewport(0, 0, fboW, fboH);
+                    glClearColor(0.18f, 0.19f, 0.23f, 1.0f);
+                    glClear(GL_COLOR_BUFFER_BIT);
+
+                    uiProjection = glm::ortho(0.0f, static_cast<float>(fboW), static_cast<float>(fboH), 0.0f);
+                    m_textRenderer->setScreenSize(fboW, fboH);
+
+                    for (const auto& element : widget->getElements())
+                    {
+                        renderElement(renderElement, element, 0.0f, 0.0f, static_cast<float>(fboW), static_cast<float>(fboH));
+                    }
+
+                    // Draw selection outline in the FBO
+                    if (!previewInfo.selectedElementId.empty())
+                    {
+                        const std::function<const WidgetElement*(const std::vector<WidgetElement>&, const std::string&)> findEl =
+                            [&](const std::vector<WidgetElement>& elements, const std::string& id) -> const WidgetElement*
+                        {
+                            for (const auto& el : elements)
+                            {
+                                if (el.id == id) return &el;
+                                if (!el.children.empty())
+                                {
+                                    if (const auto* found = findEl(el.children, id))
+                                        return found;
+                                }
+                            }
+                            return nullptr;
+                        };
+
+                        const WidgetElement* selEl = findEl(widget->getElements(), previewInfo.selectedElementId);
+                        if (selEl && selEl->hasBounds)
+                        {
+                            const std::string& vp2 = resolveUIShaderPath("", m_defaultPanelVertex);
+                            const std::string& fp2 = resolveUIShaderPath("", m_defaultPanelFragment);
+                            const GLuint outlineProg = getUIQuadProgram(vp2, fp2);
+                            const Vec4 outlineColor{ 1.0f, 0.6f, 0.0f, 0.9f };
+                            drawUIOutline(selEl->boundsMinPixels.x, selEl->boundsMinPixels.y,
+                                selEl->boundsMaxPixels.x, selEl->boundsMaxPixels.y,
+                                outlineColor, uiProjection, outlineProg);
+                        }
+                    }
+
+                    previewFbo->unbind();
+
+                    // Restore state — rebind main UI FBO
+                    uiProjection = savedProjection;
+                    m_textRenderer->setScreenSize(width, height);
+                    glBindFramebuffer(GL_FRAMEBUFFER, m_uiFbo);
+                    glViewport(0, 0, width, height);
+                    glEnable(GL_BLEND);
+                    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+
+                    // Draw the FBO texture as a quad in the canvas area
+                    Vec4 canvasRect{};
+                    if (m_uiManager.getWidgetEditorCanvasRect(canvasRect))
+                    {
+                        const float displayW = static_cast<float>(fboW) * previewInfo.zoom;
+                        const float displayH = static_cast<float>(fboH) * previewInfo.zoom;
+                        const float cx = canvasRect.x + canvasRect.z * 0.5f;
+                        const float cy = canvasRect.y + canvasRect.w * 0.5f;
+                        const float dx0 = cx - displayW * 0.5f + previewInfo.panOffset.x;
+                        const float dy0 = cy - displayH * 0.5f + previewInfo.panOffset.y;
+
+                        glEnable(GL_SCISSOR_TEST);
+                        glScissor(static_cast<int>(canvasRect.x),
+                            height - static_cast<int>(canvasRect.y + canvasRect.w),
+                            static_cast<int>(canvasRect.z),
+                            static_cast<int>(canvasRect.w));
+
+                        drawUIImage(dx0, dy0, dx0 + displayW, dy0 + displayH,
+                            previewFbo->getColorTextureId(), uiProjection,
+                            Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }, false);
+
+                        glDisable(GL_SCISSOR_TEST);
+                    }
+
+                    m_uiManager.clearWidgetEditorPreviewDirty();
+                }
             }
         }
 

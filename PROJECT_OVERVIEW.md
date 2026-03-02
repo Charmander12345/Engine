@@ -18,6 +18,7 @@
 - `Widget Editor`: Tab-Workspace ausgebaut – linker Dock-Bereich zeigt verfügbare Steuerelemente + Element-Hierarchie, rechter Dock-Bereich zeigt Asset/Widget-Details, die Mitte enthält eine dedizierte Preview-Canvas mit Fill-Color-Rahmen.
 - `Widget Editor`: Für Widget-Editor-Tabs wird im Renderer die 3D-Weltpass-Ausgabe unterdrückt; der tab-eigene Framebuffer wird als reine Widget-Workspace-Fläche genutzt.
 - `Widget Editor`: TitleBar-Tabs werden jetzt beim Hinzufügen/Entfernen zentral neu aufgebaut, damit neue Widget-Editor-Tabs immer sichtbar sind wie beim Mesh Viewer.
+- `Widget Editor`: Bugfix – Erneutes Öffnen eines Widget-Assets schlug fehl, weil `loadWidgetAsset` Content-relative Pfade nicht gegen das Projekt-Content-Verzeichnis auflöste (Disk-Load scheiterte nach Neustart oder Cache-Miss). Außerdem wird bei Ladefehler der bereits hinzugefügte Tab entfernt, um verwaiste Tabs zu vermeiden.
 - `Build/CMake`: Multi-Config-Ausgabeverzeichnisse werden nun pro Konfiguration getrennt (`${CMAKE_BINARY_DIR}/Debug|Release|...`) statt zusammengeführt, um Debug/Release-Lib-Kollisionen (MSVC `LNK2038`) zu vermeiden.
 
 ## Inhaltsverzeichnis
@@ -283,7 +284,7 @@ Die Engine unterstützt ein Tab-basiertes Editor-Layout:
 - **Toolbar** (ViewportOverlay, 34px): PIE-Controls zentriert, Settings rechts (Select/Move/Rotate/Scale temporär entfernt)
 - **Viewport-Tab**: Immer geöffnet (nicht schließbar), zeigt die 3D-Szene
 - **Mesh-Viewer-Tabs**: Schließbare Tabs für 3D-Mesh-Vorschau mit Split-View (Viewport + Properties), geöffnet per Doppelklick auf Model3D im Content Browser. Jeder Tab besitzt ein eigenes Runtime-EngineLevel.
-- **Widget-Editor-Tabs**: Schließbare Tabs für Widget-Bearbeitung, geöffnet per Doppelklick auf Widget-Asset im Content Browser. Drei-Panel-Layout: Links Steuerelement-Liste + klickbare Hierarchie, Mitte Preview des Widgets (Elemente per Klick selektierbar), Rechts editierbares Details-Panel (Layout, Appearance, Text, Image, Value). `WidgetEditorState` pro Tab in `UIManager` verwaltet.
+- **Widget-Editor-Tabs**: Schließbare Tabs für Widget-Bearbeitung, geöffnet per Doppelklick auf Widget-Asset im Content Browser. Vier-Panel-Layout: Oben schmale Toolbar (Save-Button + Dirty-Indikator „* Unsaved changes", z=3), Links Steuerelement-Liste (Drag-&-Drop-fähig) + klickbare Hierarchie (z=2), Mitte FBO-basierte Widget-Vorschau (z=1), Rechts editierbares Details-Panel (z=2). Canvas-Hintergrund z=0. **FBO-Preview**: Das editierte Widget wird in einen eigenen OpenGLRenderTarget-FBO gerendert (bei (0,0) mit Design-Größe layoutet, nicht im UI-System registriert). Die FBO-Textur wird per `drawUIImage` als Quad im Canvas-Bereich angezeigt, mit Zoom (Scroll) und Pan (Rechtsklick-Drag). Scissor-Clipping begrenzt die Anzeige auf den Canvas. Selektierte Elemente werden per `drawUIOutline` mit orangefarbener Outline hervorgehoben. Linksklick im Canvas transformiert Screen-Koordinaten → Widget-lokale Koordinaten (via Zoom/Pan/Canvas-Rect) und selektiert das oberste Element per Bounds-Hit-Test. `WidgetEditorState` pro Tab in `UIManager` verwaltet (inkl. Zoom/Pan, `isDirty`-Flag, `previewDirty`-Flag, `assetId`, `toolbarWidgetId`). Speichern: `saveWidgetEditorAsset()` synchronisiert Widget-JSON zurück in AssetData und ruft `AssetManager::saveAsset()` auf. Dirty-Tracking: `markWidgetEditorDirty()` setzt `isDirty`- und `previewDirty`-Flags und aktualisiert Toolbar-Label. Tab-Level-Selektion: Delete-Taste löscht im Widget-Editor das selektierte Element statt das Asset im Content Browser. Undo/Redo: Hinzufügen und Löschen von Elementen werden als `UndoRedoManager::Command` registriert und sind per Ctrl+Z/Ctrl+Y rückgängig/wiederholbar. FBO-Cleanup: `cleanupWidgetEditorPreview(tabId)` wird beim Schließen des Tabs aufgerufen.
 - **Per-Tab-Framebuffer**: Jeder Tab besitzt einen eigenen FBO (Color-Texture + Depth-RBO)
 - **Tab-Umschaltung**: Click-Events auf TitleBar.Tab.* Buttons wechseln den aktiven Tab. `setActiveTab()` tauscht das aktive Level per `swapActiveLevel()` aus (Editor-Level ↔ Mesh-Viewer-Runtime-Level) und speichert/restauriert Kamera-State.
 - **Tab-Scoped UI**: Widgets können einem Tab zugeordnet werden (`registerWidget(id, widget, tabId)`). Viewport-Widgets (ViewportOverlay, WorldSettings, WorldOutliner, EntityDetails, ContentBrowser) sind zum Tab "Viewport" zugeordnet, Mesh-Viewer-Properties-Panels zum jeweiligen Asset-Tab. Globale Widgets (TitleBar, StatusBar) bleiben immer sichtbar.
@@ -1152,7 +1153,7 @@ struct WidgetElement {
 |-------------------|---------------------------------------|
 | `Text`            | Statischer Text                       |
 | `Button`          | Klickbarer Button mit Hover-State     |
-| `Panel`           | Farbiger Hintergrund-Bereich          |
+| `Panel`           | Farbiger Hintergrund-Bereich (rendert Kind-Elemente) |
 | `StackPanel`      | Automatisches Layout (H/V-Stapelung)  |
 | `Grid`            | Raster-Layout                         |
 | `ColorPicker`     | Farbauswahl-Widget                    |
