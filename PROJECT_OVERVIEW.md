@@ -7,11 +7,13 @@
 
 ## Aktuelle Änderung (Viewport)
 
-- `OpenGLTextRenderer`: Bugfix – Horizontale Text-Spiegelung im Viewport behoben. `renderViewportUI()` setzt nun via `setProjectionMatrix()` exakt dieselbe `glm::mat4`-Projektion im Text-Renderer wie beim UI-Quad-Renderer, sodass keine Koordinatensystem-Diskrepanz mehr entstehen kann.
+- `OpenGLTextRenderer`: Bugfix – Horizontale Text-Spiegelung im Viewport behoben. `renderViewportUI()` rendert jetzt im Full-FBO-Viewport (`glViewport(0,0,wW,wH)`) mit offset-verschobener Ortho-Projektion und Scissor-Clip, statt mit Offset-glViewport. Dadurch stimmt das Rendering-Setup exakt mit dem Editor-UI-Pfad (`drawUIWidgetsToFramebuffer`) überein.
 - `UIWidget`: Neue `WidgetElement`-Properties ergänzt: `borderColor`, `borderThickness`, `borderRadius`, `opacity`, `isVisible`, `tooltipText`, `isBold`, `isItalic`, `gradientColor`, `maxSize`, `spacing`, `radioGroup`. Alle Properties werden serialisiert/deserialisiert (JSON).
 - `UIWidget`: Neue Widget-Typen hinzugefügt: `Label` (leichtgewichtiges Text-Element), `Separator` (visuelle Trennlinie), `ScrollView` (dedizierter scrollbarer Container), `ToggleButton` (Button mit An/Aus-Zustand), `RadioButton` (Radio-Button mit Gruppen-ID). Vollständige Rendering-Unterstützung in `renderUI()` und `renderViewportUI()`.
 - `UIWidgets`: Neue Helper-Klassen: `LabelWidget.h`, `ToggleButtonWidget.h`, `ScrollViewWidget.h`, `RadioButtonWidget.h`.
 - `UIManager`: Layout-Berechnung und -Anordnung erweitert für alle neuen Widget-Typen und das neue `spacing`-Property in StackPanel/ScrollView.
+- `UIManager`: Neue Controls (Label, ToggleButton, RadioButton, ScrollView) in der Widget-Editor-Palette (linkes Panel) und Drag&Drop-Defaults.
+- `UIManager`: Details-Panel erweitert – H/V-Alignment (Left/Center/Right/Fill), Size-to-Content, Max Width/Height, Spacing, Opacity, Visibility, Border-Width/-Radius, Tooltip, Bold/Italic, RadioGroup.
 - `Scripting`: Neues Python-Submodul `engine.viewport_ui` mit vollständiger API zum Erstellen und Anpassen von Viewport-UI-Widgets aus Python-Scripten (`create_widget`, `add_text`, `add_label`, `add_button`, `add_panel`, `set_text`, `set_color`, `set_text_color`, `set_opacity`, `set_element_visible`, `set_border`, `set_border_radius`, `set_tooltip`, `set_font_size`, `set_font_bold`, `set_font_italic`).
 - `engine.pyi`: IntelliSense-Typen für `viewport_ui`-Modul und alle neuen Properties/Widget-Typen aktualisiert.
 - `OpenGLRenderer`: Rendering-Unterstützung für neue Widget-Typen (`Label`, `Separator`, `ScrollView`, `ToggleButton`, `RadioButton`) in `renderUI()` und `renderViewportUI()`.

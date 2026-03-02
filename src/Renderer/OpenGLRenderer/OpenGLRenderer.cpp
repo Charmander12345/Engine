@@ -2791,15 +2791,25 @@ void OpenGLRenderer::renderViewportUI()
     glEnable(GL_BLEND);
     glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
+    // Use the full FBO viewport (same as drawUIWidgetsToFramebuffer) to avoid
+    // any driver-specific quirks with offset glViewport + text rendering.
+    // Clip to the viewport area via scissor test.
     glEnable(GL_SCISSOR_TEST);
     glScissor(viewportX, viewportY, viewportW, viewportH);
-    glViewport(viewportX, viewportY, viewportW, viewportH);
+    glViewport(0, 0, m_cachedWindowWidth, m_cachedWindowHeight);
 
-    const glm::mat4 uiProjection = glm::ortho(0.0f, vpRect.z, vpRect.w, 0.0f);
-    // Set text renderer projection to match UI quad projection for the viewport area.
-    // Use both setScreenSize (for the internal state) and setProjectionMatrix (for
-    // exact float precision) to ensure no coordinate-system mismatch occurs.
-    m_textRenderer->setScreenSize(viewportW, viewportH);
+    // Build a projection that maps viewport-local coordinates (0..vpW, 0..vpH)
+    // to the correct pixel position within the full-size FBO. The negative offsets
+    // shift the coordinate origin so that viewport-local (0,0) maps to
+    // FBO pixel (vpRect.x, vpRect.y), i.e. the viewport top-left corner.
+    // This matches the drawUIWidgetsToFramebuffer rendering path exactly, avoiding
+    // driver-specific issues with offset glViewport + per-glyph text rendering.
+    const glm::mat4 uiProjection = glm::ortho(
+        -vpRect.x,                                              // left
+        static_cast<float>(m_cachedWindowWidth) - vpRect.x,     // right
+        static_cast<float>(m_cachedWindowHeight) - vpRect.y,    // bottom
+        -vpRect.y);                                             // top
+    m_textRenderer->setScreenSize(m_cachedWindowWidth, m_cachedWindowHeight);
     m_textRenderer->setProjectionMatrix(uiProjection);
 
     const auto renderElement = [&](const auto& self, const WidgetElement& element,
