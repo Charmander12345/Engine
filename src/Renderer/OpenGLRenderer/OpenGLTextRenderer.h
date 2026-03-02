@@ -31,6 +31,7 @@ public:
 
     bool initialize(const std::string& fontPath, const std::string& vertexShaderPath, const std::string& fragmentShaderPath) override;
     void setScreenSize(int width, int height) override;
+    void setProjectionMatrix(const glm::mat4& projection) { m_projection = projection; }
     void drawText(const std::string& text, const Vec2& screenPos, float scale, const Vec4& color) override;
     void drawTextWithShader(const std::string& text, const Vec2& screenPos, float scale, const Vec4& color,
         const std::string& vertexShaderPath, const std::string& fragmentShaderPath);

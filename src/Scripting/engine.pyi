@@ -410,6 +410,102 @@ class ui:
         ...
 
 # ---------------------------------------------------------------------------
+# engine.viewport_ui  – Viewport overlay widget API
+# ---------------------------------------------------------------------------
+
+class viewport_ui:
+    @staticmethod
+    def create_widget(widget_id: str) -> bool:
+        """Create a new root viewport UI widget."""
+        ...
+
+    @staticmethod
+    def clear_widget(widget_id: str = "") -> bool:
+        """Clear and remove the viewport UI root widget."""
+        ...
+
+    @staticmethod
+    def set_visible(visible: bool) -> bool:
+        """Show or hide the entire viewport UI layer."""
+        ...
+
+    @staticmethod
+    def add_text(element_id: str, text: str, x: float, y: float, w: float, h: float) -> bool:
+        """Add a Text element to the viewport widget."""
+        ...
+
+    @staticmethod
+    def add_label(element_id: str, text: str, x: float, y: float, w: float, h: float) -> bool:
+        """Add a Label element to the viewport widget (non-interactive)."""
+        ...
+
+    @staticmethod
+    def add_button(element_id: str, text: str, x: float, y: float, w: float, h: float) -> bool:
+        """Add a Button element to the viewport widget."""
+        ...
+
+    @staticmethod
+    def add_panel(element_id: str, x: float, y: float, w: float, h: float,
+                  r: float = 0.1, g: float = 0.1, b: float = 0.12, a: float = 0.8) -> bool:
+        """Add a Panel element to the viewport widget."""
+        ...
+
+    @staticmethod
+    def set_text(element_id: str, text: str) -> bool:
+        """Set the text on a viewport widget element."""
+        ...
+
+    @staticmethod
+    def set_color(element_id: str, r: float, g: float, b: float, a: float) -> bool:
+        """Set the background color of a viewport widget element."""
+        ...
+
+    @staticmethod
+    def set_text_color(element_id: str, r: float, g: float, b: float, a: float) -> bool:
+        """Set the text color of a viewport widget element."""
+        ...
+
+    @staticmethod
+    def set_opacity(element_id: str, opacity: float) -> bool:
+        """Set the opacity of a viewport widget element (0=transparent, 1=opaque)."""
+        ...
+
+    @staticmethod
+    def set_element_visible(element_id: str, visible: bool) -> bool:
+        """Show or hide a specific viewport widget element."""
+        ...
+
+    @staticmethod
+    def set_border(element_id: str, thickness: float, r: float, g: float, b: float, a: float) -> bool:
+        """Set border thickness and color on a viewport widget element."""
+        ...
+
+    @staticmethod
+    def set_border_radius(element_id: str, radius: float) -> bool:
+        """Set the border corner radius on a viewport widget element."""
+        ...
+
+    @staticmethod
+    def set_tooltip(element_id: str, tooltip: str) -> bool:
+        """Set the tooltip text for a viewport widget element."""
+        ...
+
+    @staticmethod
+    def set_font_size(element_id: str, size: float) -> bool:
+        """Set the font size on a viewport widget element."""
+        ...
+
+    @staticmethod
+    def set_font_bold(element_id: str, bold: bool) -> bool:
+        """Set bold font style on a viewport widget element."""
+        ...
+
+    @staticmethod
+    def set_font_italic(element_id: str, italic: bool) -> bool:
+        """Set italic font style on a viewport widget element."""
+        ...
+
+# ---------------------------------------------------------------------------
 # engine.physics
 # ---------------------------------------------------------------------------
 

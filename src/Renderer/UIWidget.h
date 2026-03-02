@@ -15,6 +15,7 @@ enum class WidgetElementType
 {
     Unknown,
     Text,
+    Label,
     Button,
     Panel,
     StackPanel,
@@ -28,7 +29,11 @@ enum class WidgetElementType
     DropDown,
     DropdownButton,
     TreeView,
-    TabView
+    TabView,
+    Separator,
+    ScrollView,
+    ToggleButton,
+    RadioButton
 };
 
 enum class TextAlignH
@@ -138,6 +143,35 @@ struct WidgetElement
     // Drag & Drop
     bool isDraggable{ false };
     std::string dragPayload;    // e.g. "Texture|MyTexture.asset" or "Model3D|Mesh.asset"
+
+    // ── Extended styling properties ──────────────────────────────────────
+    // Border
+    Vec4 borderColor{ 0.0f, 0.0f, 0.0f, 0.0f };
+    float borderThickness{ 0.0f };
+    float borderRadius{ 0.0f };
+
+    // Visibility / Opacity
+    float opacity{ 1.0f };       // 0=transparent, 1=fully opaque
+    bool isVisible{ true };      // hide without collapsing layout
+
+    // Tooltip
+    std::string tooltipText;
+
+    // Font styling
+    bool isBold{ false };
+    bool isItalic{ false };
+
+    // Background gradient (secondary color blended from top to bottom)
+    Vec4 gradientColor{ 0.0f, 0.0f, 0.0f, 0.0f };
+
+    // Maximum size constraints (0 = unconstrained, analogous to minSize)
+    Vec2 maxSize{ 0.0f, 0.0f };
+
+    // Spacing between children in StackPanel / ScrollView
+    float spacing{ 0.0f };
+
+    // RadioButton group identifier
+    std::string radioGroup;
 };
 
 class Widget : public EngineObject

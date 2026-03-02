@@ -18,6 +18,8 @@
 #include "../Core/AudioManager.h"
 #include "../Logger/Logger.h"
 #include "../Renderer/UIManager.h"
+#include "../Renderer/ViewportUIManager.h"
+#include "../Renderer/UIWidget.h"
 #include <SDL3/SDL.h>
 #include <cctype>
 #include <cmath>
@@ -2049,6 +2051,314 @@ namespace
         { nullptr, nullptr, 0, nullptr }
     };
 
+    // ── engine.viewport_ui ──────────────────────────────────────────────
+
+    ViewportUIManager* getViewportUI()
+    {
+        if (!s_renderer) return nullptr;
+        return s_renderer->getViewportUIManagerPtr();
+    }
+
+    PyObject* py_vp_create_widget(PyObject*, PyObject* args)
+    {
+        const char* widgetId = nullptr;
+        if (!PyArg_ParseTuple(args, "s", &widgetId)) return nullptr;
+        auto* vp = getViewportUI();
+        if (!vp) { PyErr_SetString(PyExc_RuntimeError, "ViewportUIManager not available."); return nullptr; }
+        if (!widgetId || !*widgetId) { PyErr_SetString(PyExc_ValueError, "widget_id must be non-empty."); return nullptr; }
+        if (vp->getRootWidget())
+        {
+            Logger::Instance().log(Logger::Category::Engine,
+                "viewport_ui.create_widget: replacing existing root widget", Logger::LogLevel::WARNING);
+        }
+        auto widget = std::make_shared<Widget>();
+        widget->setName(widgetId);
+        vp->setRootWidget(widget);
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_vp_clear_widget(PyObject*, PyObject* args)
+    {
+        // widgetId is accepted for API consistency but currently only one root widget exists.
+        const char* widgetId = nullptr;
+        (void)PyArg_ParseTuple(args, "|s", &widgetId);
+        auto* vp = getViewportUI();
+        if (!vp) { PyErr_SetString(PyExc_RuntimeError, "ViewportUIManager not available."); return nullptr; }
+        vp->clearRootWidget();
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_vp_set_visible(PyObject*, PyObject* args)
+    {
+        int visible = 1;
+        if (!PyArg_ParseTuple(args, "i", &visible)) return nullptr;
+        auto* vp = getViewportUI();
+        if (!vp) { PyErr_SetString(PyExc_RuntimeError, "ViewportUIManager not available."); return nullptr; }
+        vp->setVisible(visible != 0);
+        Py_RETURN_TRUE;
+    }
+
+    // Helper: find element by id in root widget, return pointer or nullptr
+    static WidgetElement* findVpElement(const char* elementId)
+    {
+        auto* vp = getViewportUI();
+        if (!vp || !elementId || !*elementId) return nullptr;
+        return vp->findElementById(elementId);
+    }
+
+    PyObject* py_vp_add_text(PyObject*, PyObject* args)
+    {
+        const char* elementId = nullptr;
+        const char* text = nullptr;
+        float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;
+        if (!PyArg_ParseTuple(args, "ssffff", &elementId, &text, &x, &y, &w, &h)) return nullptr;
+        auto* vp = getViewportUI();
+        if (!vp) { PyErr_SetString(PyExc_RuntimeError, "ViewportUIManager not available."); return nullptr; }
+        auto root = vp->getRootWidget();
+        if (!root) { PyErr_SetString(PyExc_RuntimeError, "No root widget; call create_widget first."); return nullptr; }
+        WidgetElement el{};
+        el.type = WidgetElementType::Text;
+        el.id = elementId ? elementId : "";
+        el.text = text ? text : "";
+        el.from = Vec2{ x, y };
+        el.to = Vec2{ x + w, y + h };
+        el.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+        el.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        auto& elems = root->getElementsMutable();
+        elems.push_back(std::move(el));
+        vp->markLayoutDirty();
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_vp_add_label(PyObject*, PyObject* args)
+    {
+        const char* elementId = nullptr;
+        const char* text = nullptr;
+        float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;
+        if (!PyArg_ParseTuple(args, "ssffff", &elementId, &text, &x, &y, &w, &h)) return nullptr;
+        auto* vp = getViewportUI();
+        if (!vp) { PyErr_SetString(PyExc_RuntimeError, "ViewportUIManager not available."); return nullptr; }
+        auto root = vp->getRootWidget();
+        if (!root) { PyErr_SetString(PyExc_RuntimeError, "No root widget; call create_widget first."); return nullptr; }
+        WidgetElement el{};
+        el.type = WidgetElementType::Label;
+        el.id = elementId ? elementId : "";
+        el.text = text ? text : "";
+        el.from = Vec2{ x, y };
+        el.to = Vec2{ x + w, y + h };
+        el.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+        el.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        auto& elems = root->getElementsMutable();
+        elems.push_back(std::move(el));
+        vp->markLayoutDirty();
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_vp_add_button(PyObject*, PyObject* args)
+    {
+        const char* elementId = nullptr;
+        const char* text = nullptr;
+        float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;
+        if (!PyArg_ParseTuple(args, "ssffff", &elementId, &text, &x, &y, &w, &h)) return nullptr;
+        auto* vp = getViewportUI();
+        if (!vp) { PyErr_SetString(PyExc_RuntimeError, "ViewportUIManager not available."); return nullptr; }
+        auto root = vp->getRootWidget();
+        if (!root) { PyErr_SetString(PyExc_RuntimeError, "No root widget; call create_widget first."); return nullptr; }
+        WidgetElement el{};
+        el.type = WidgetElementType::Button;
+        el.id = elementId ? elementId : "";
+        el.text = text ? text : "";
+        el.from = Vec2{ x, y };
+        el.to = Vec2{ x + w, y + h };
+        el.color = Vec4{ 0.18f, 0.19f, 0.22f, 1.0f };
+        el.hoverColor = Vec4{ 0.25f, 0.26f, 0.30f, 1.0f };
+        el.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+        el.isHitTestable = true;
+        auto& elems = root->getElementsMutable();
+        elems.push_back(std::move(el));
+        vp->markLayoutDirty();
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_vp_add_panel(PyObject*, PyObject* args)
+    {
+        const char* elementId = nullptr;
+        float x = 0.0f, y = 0.0f, w = 0.0f, h = 0.0f;
+        float r = 0.1f, g = 0.1f, b = 0.12f, a = 0.8f;
+        if (!PyArg_ParseTuple(args, "sffff|ffff", &elementId, &x, &y, &w, &h, &r, &g, &b, &a)) return nullptr;
+        auto* vp = getViewportUI();
+        if (!vp) { PyErr_SetString(PyExc_RuntimeError, "ViewportUIManager not available."); return nullptr; }
+        auto root = vp->getRootWidget();
+        if (!root) { PyErr_SetString(PyExc_RuntimeError, "No root widget; call create_widget first."); return nullptr; }
+        WidgetElement el{};
+        el.type = WidgetElementType::Panel;
+        el.id = elementId ? elementId : "";
+        el.from = Vec2{ x, y };
+        el.to = Vec2{ x + w, y + h };
+        el.color = Vec4{ r, g, b, a };
+        el.hoverColor = Vec4{ r, g, b, a };
+        auto& elems = root->getElementsMutable();
+        elems.push_back(std::move(el));
+        vp->markLayoutDirty();
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_vp_set_text(PyObject*, PyObject* args)
+    {
+        const char* elementId = nullptr;
+        const char* text = nullptr;
+        if (!PyArg_ParseTuple(args, "ss", &elementId, &text)) return nullptr;
+        WidgetElement* el = findVpElement(elementId);
+        if (!el) { PyErr_SetString(PyExc_KeyError, "Element not found."); return nullptr; }
+        el->text = text ? text : "";
+        if (auto* vp = getViewportUI()) vp->markLayoutDirty();
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_vp_set_color(PyObject*, PyObject* args)
+    {
+        const char* elementId = nullptr;
+        float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
+        if (!PyArg_ParseTuple(args, "sffff", &elementId, &r, &g, &b, &a)) return nullptr;
+        WidgetElement* el = findVpElement(elementId);
+        if (!el) { PyErr_SetString(PyExc_KeyError, "Element not found."); return nullptr; }
+        el->color = Vec4{ r, g, b, a };
+        if (auto* vp = getViewportUI()) vp->markLayoutDirty();
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_vp_set_text_color(PyObject*, PyObject* args)
+    {
+        const char* elementId = nullptr;
+        float r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
+        if (!PyArg_ParseTuple(args, "sffff", &elementId, &r, &g, &b, &a)) return nullptr;
+        WidgetElement* el = findVpElement(elementId);
+        if (!el) { PyErr_SetString(PyExc_KeyError, "Element not found."); return nullptr; }
+        el->textColor = Vec4{ r, g, b, a };
+        if (auto* vp = getViewportUI()) vp->markLayoutDirty();
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_vp_set_opacity(PyObject*, PyObject* args)
+    {
+        const char* elementId = nullptr;
+        float opacity = 1.0f;
+        if (!PyArg_ParseTuple(args, "sf", &elementId, &opacity)) return nullptr;
+        WidgetElement* el = findVpElement(elementId);
+        if (!el) { PyErr_SetString(PyExc_KeyError, "Element not found."); return nullptr; }
+        el->opacity = std::max(0.0f, std::min(1.0f, opacity));
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_vp_set_visible_element(PyObject*, PyObject* args)
+    {
+        const char* elementId = nullptr;
+        int visible = 1;
+        if (!PyArg_ParseTuple(args, "si", &elementId, &visible)) return nullptr;
+        WidgetElement* el = findVpElement(elementId);
+        if (!el) { PyErr_SetString(PyExc_KeyError, "Element not found."); return nullptr; }
+        el->isVisible = (visible != 0);
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_vp_set_border(PyObject*, PyObject* args)
+    {
+        const char* elementId = nullptr;
+        float thickness = 0.0f, r = 1.0f, g = 1.0f, b = 1.0f, a = 1.0f;
+        if (!PyArg_ParseTuple(args, "sfffff", &elementId, &thickness, &r, &g, &b, &a)) return nullptr;
+        WidgetElement* el = findVpElement(elementId);
+        if (!el) { PyErr_SetString(PyExc_KeyError, "Element not found."); return nullptr; }
+        el->borderThickness = thickness;
+        el->borderColor = Vec4{ r, g, b, a };
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_vp_set_border_radius(PyObject*, PyObject* args)
+    {
+        const char* elementId = nullptr;
+        float radius = 0.0f;
+        if (!PyArg_ParseTuple(args, "sf", &elementId, &radius)) return nullptr;
+        WidgetElement* el = findVpElement(elementId);
+        if (!el) { PyErr_SetString(PyExc_KeyError, "Element not found."); return nullptr; }
+        el->borderRadius = radius;
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_vp_set_tooltip(PyObject*, PyObject* args)
+    {
+        const char* elementId = nullptr;
+        const char* tooltip = nullptr;
+        if (!PyArg_ParseTuple(args, "ss", &elementId, &tooltip)) return nullptr;
+        WidgetElement* el = findVpElement(elementId);
+        if (!el) { PyErr_SetString(PyExc_KeyError, "Element not found."); return nullptr; }
+        el->tooltipText = tooltip ? tooltip : "";
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_vp_set_font_size(PyObject*, PyObject* args)
+    {
+        const char* elementId = nullptr;
+        float fontSize = 14.0f;
+        if (!PyArg_ParseTuple(args, "sf", &elementId, &fontSize)) return nullptr;
+        WidgetElement* el = findVpElement(elementId);
+        if (!el) { PyErr_SetString(PyExc_KeyError, "Element not found."); return nullptr; }
+        el->fontSize = fontSize;
+        if (auto* vp = getViewportUI()) vp->markLayoutDirty();
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_vp_set_font_bold(PyObject*, PyObject* args)
+    {
+        const char* elementId = nullptr;
+        int bold = 1;
+        if (!PyArg_ParseTuple(args, "si", &elementId, &bold)) return nullptr;
+        WidgetElement* el = findVpElement(elementId);
+        if (!el) { PyErr_SetString(PyExc_KeyError, "Element not found."); return nullptr; }
+        el->isBold = (bold != 0);
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_vp_set_font_italic(PyObject*, PyObject* args)
+    {
+        const char* elementId = nullptr;
+        int italic = 1;
+        if (!PyArg_ParseTuple(args, "si", &elementId, &italic)) return nullptr;
+        WidgetElement* el = findVpElement(elementId);
+        if (!el) { PyErr_SetString(PyExc_KeyError, "Element not found."); return nullptr; }
+        el->isItalic = (italic != 0);
+        Py_RETURN_TRUE;
+    }
+
+    PyMethodDef ViewportUiMethods[] = {
+        { "create_widget",    py_vp_create_widget,       METH_VARARGS, "Create a new root viewport UI widget." },
+        { "clear_widget",     py_vp_clear_widget,        METH_VARARGS, "Clear and remove the viewport UI root widget." },
+        { "set_visible",      py_vp_set_visible,         METH_VARARGS, "Show or hide the entire viewport UI layer." },
+        { "add_text",         py_vp_add_text,            METH_VARARGS, "Add a Text element (id, text, x, y, w, h)." },
+        { "add_label",        py_vp_add_label,           METH_VARARGS, "Add a Label element (id, text, x, y, w, h)." },
+        { "add_button",       py_vp_add_button,          METH_VARARGS, "Add a Button element (id, text, x, y, w, h)." },
+        { "add_panel",        py_vp_add_panel,           METH_VARARGS, "Add a Panel element (id, x, y, w, h [,r,g,b,a])." },
+        { "set_text",         py_vp_set_text,            METH_VARARGS, "Set text on an element (element_id, text)." },
+        { "set_color",        py_vp_set_color,           METH_VARARGS, "Set background color (element_id, r, g, b, a)." },
+        { "set_text_color",   py_vp_set_text_color,      METH_VARARGS, "Set text color (element_id, r, g, b, a)." },
+        { "set_opacity",      py_vp_set_opacity,         METH_VARARGS, "Set opacity (element_id, opacity 0..1)." },
+        { "set_element_visible", py_vp_set_visible_element, METH_VARARGS, "Show or hide an element (element_id, visible)." },
+        { "set_border",       py_vp_set_border,          METH_VARARGS, "Set border (element_id, thickness, r, g, b, a)." },
+        { "set_border_radius",py_vp_set_border_radius,   METH_VARARGS, "Set border radius (element_id, radius)." },
+        { "set_tooltip",      py_vp_set_tooltip,         METH_VARARGS, "Set tooltip text (element_id, tooltip)." },
+        { "set_font_size",    py_vp_set_font_size,       METH_VARARGS, "Set font size (element_id, size)." },
+        { "set_font_bold",    py_vp_set_font_bold,       METH_VARARGS, "Set bold style (element_id, bold)." },
+        { "set_font_italic",  py_vp_set_font_italic,     METH_VARARGS, "Set italic style (element_id, italic)." },
+        { nullptr, nullptr, 0, nullptr }
+    };
+
+    PyModuleDef ViewportUiModule = {
+        PyModuleDef_HEAD_INIT,
+        "engine.viewport_ui",
+        "Viewport UI scripting API",
+        -1,
+        ViewportUiMethods
+    };
+
     PyMethodDef UiMethods[] = {
         { "show_modal_message", py_show_modal_message, METH_VARARGS, "Show a blocking modal message." },
         { "close_modal_message", py_close_modal_message, METH_NOARGS, "Close the active modal message." },
@@ -2768,19 +3078,21 @@ namespace
         PyObject* audioModule = PyModule_Create(&AudioModule);
         PyObject* inputModule = PyModule_Create(&InputModule);
         PyObject* uiModule = PyModule_Create(&UiModule);
+        PyObject* viewportUiModule = PyModule_Create(&ViewportUiModule);
         PyObject* cameraModule = PyModule_Create(&CameraModule);
         PyObject* diagnosticsModule = PyModule_Create(&DiagnosticsModule);
         PyObject* loggingModule = PyModule_Create(&LoggingModule);
         PyObject* physicsModule = PyModule_Create(&PhysicsModule);
         PyObject* mathModule = PyModule_Create(&MathModule);
 
-        if (!entityModule || !assetModule || !audioModule || !inputModule || !uiModule || !cameraModule || !diagnosticsModule || !loggingModule || !physicsModule || !mathModule)
+        if (!entityModule || !assetModule || !audioModule || !inputModule || !uiModule || !viewportUiModule || !cameraModule || !diagnosticsModule || !loggingModule || !physicsModule || !mathModule)
         {
             Py_XDECREF(entityModule);
             Py_XDECREF(assetModule);
             Py_XDECREF(audioModule);
             Py_XDECREF(inputModule);
             Py_XDECREF(uiModule);
+            Py_XDECREF(viewportUiModule);
             Py_XDECREF(cameraModule);
             Py_XDECREF(diagnosticsModule);
             Py_XDECREF(loggingModule);
@@ -2808,6 +3120,7 @@ namespace
             !AddSubmodule(module, audioModule, "audio") ||
             !AddSubmodule(module, inputModule, "input") ||
             !AddSubmodule(module, uiModule, "ui") ||
+            !AddSubmodule(module, viewportUiModule, "viewport_ui") ||
             !AddSubmodule(module, cameraModule, "camera") ||
             !AddSubmodule(module, diagnosticsModule, "diagnostics") ||
             !AddSubmodule(module, loggingModule, "logging") ||

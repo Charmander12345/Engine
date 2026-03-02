@@ -7,7 +7,16 @@
 
 ## Aktuelle Änderung (Viewport)
 
-- `OpenGLRenderer`: Das Compositing der Szenen-FBO in `render()` blitted jetzt gezielt nur den `ViewportContentRect` statt immer die komplette Fläche. Dadurch wird die 3D-Ansicht nur im verfügbaren Viewport-Bereich (abzüglich UI-Docks) dargestellt.
+- `OpenGLTextRenderer`: Bugfix – Horizontale Text-Spiegelung im Viewport behoben. `renderViewportUI()` rendert jetzt im Full-FBO-Viewport (`glViewport(0,0,wW,wH)`) mit offset-verschobener Ortho-Projektion und Scissor-Clip, statt mit Offset-glViewport. Dadurch stimmt das Rendering-Setup exakt mit dem Editor-UI-Pfad (`drawUIWidgetsToFramebuffer`) überein.
+- `UIWidget`: Neue `WidgetElement`-Properties ergänzt: `borderColor`, `borderThickness`, `borderRadius`, `opacity`, `isVisible`, `tooltipText`, `isBold`, `isItalic`, `gradientColor`, `maxSize`, `spacing`, `radioGroup`. Alle Properties werden serialisiert/deserialisiert (JSON).
+- `UIWidget`: Neue Widget-Typen hinzugefügt: `Label` (leichtgewichtiges Text-Element), `Separator` (visuelle Trennlinie), `ScrollView` (dedizierter scrollbarer Container), `ToggleButton` (Button mit An/Aus-Zustand), `RadioButton` (Radio-Button mit Gruppen-ID). Vollständige Rendering-Unterstützung in `renderUI()` und `renderViewportUI()`.
+- `UIWidgets`: Neue Helper-Klassen: `LabelWidget.h`, `ToggleButtonWidget.h`, `ScrollViewWidget.h`, `RadioButtonWidget.h`.
+- `UIManager`: Layout-Berechnung und -Anordnung erweitert für alle neuen Widget-Typen und das neue `spacing`-Property in StackPanel/ScrollView.
+- `UIManager`: Neue Controls (Label, ToggleButton, RadioButton, ScrollView) in der Widget-Editor-Palette (linkes Panel) und Drag&Drop-Defaults.
+- `UIManager`: Details-Panel erweitert – H/V-Alignment (Left/Center/Right/Fill), Size-to-Content, Max Width/Height, Spacing, Opacity, Visibility, Border-Width/-Radius, Tooltip, Bold/Italic, RadioGroup.
+- `Scripting`: Neues Python-Submodul `engine.viewport_ui` mit vollständiger API zum Erstellen und Anpassen von Viewport-UI-Widgets aus Python-Scripten (`create_widget`, `add_text`, `add_label`, `add_button`, `add_panel`, `set_text`, `set_color`, `set_text_color`, `set_opacity`, `set_element_visible`, `set_border`, `set_border_radius`, `set_tooltip`, `set_font_size`, `set_font_bold`, `set_font_italic`).
+- `engine.pyi`: IntelliSense-Typen für `viewport_ui`-Modul und alle neuen Properties/Widget-Typen aktualisiert.
+- `OpenGLRenderer`: Rendering-Unterstützung für neue Widget-Typen (`Label`, `Separator`, `ScrollView`, `ToggleButton`, `RadioButton`) in `renderUI()` und `renderViewportUI()`.
 - `OpenGLRenderer`: In `renderWorld()` wird nach den Shadow-Pässen der Viewport jetzt wieder inklusive Content-Rect-Offset gesetzt (nicht mehr auf `(0,0)`), damit die Welt nicht in die linke untere Ecke rutscht.
 - `ViewportUI`: Start der Umsetzung mit neuer Klasse `ViewportUIManager` (Dateien `src/Renderer/ViewportUIManager.h/.cpp`) und erster Integration in `OpenGLRenderer` (Übergabe des `ViewportContentRect` pro Frame).
 - `ViewportUI`: Nächster Schritt umgesetzt: `renderViewportUI()` rendert jetzt das Root-Widget viewport-lokal in den aktiven Viewport-Tab-FBO (mit `glViewport`/`glScissor`-Clipping) vor dem finalen Blit.
@@ -165,7 +174,11 @@ Engine/
 │   │   │   ├── CheckBoxWidget.h/.cpp
 │   │   │   ├── DropDownWidget.h/.cpp
 │   │   │   ├── TreeViewWidget.h/.cpp
-│   │   │   └── TabViewWidget.h/.cpp
+│   │   │   ├── TabViewWidget.h/.cpp
+│   │   │   ├── LabelWidget.h           # NEU – leichtgewichtiges Text-Element
+│   │   │   ├── ToggleButtonWidget.h    # NEU – Button mit An/Aus-Zustand
+│   │   │   ├── ScrollViewWidget.h      # NEU – scrollbarer Container
+│   │   │   └── RadioButtonWidget.h     # NEU – Radio-Button (Gruppen-ID)
 │   │   ├── EditorWindows/           # Editor-Fenster (FBO-Override, 3D-Vorschau)
 │   │   │   ├── MeshViewerWindow.h/.cpp  # Mesh-Viewer: Orbit-Kamera, dedizierter FBO
 │   │   │   └── PopupWindow.h/.cpp       # Multi-Window Popup-System (backend-agnostisch, nutzt IRenderContext)

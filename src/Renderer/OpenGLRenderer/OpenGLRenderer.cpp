@@ -1599,7 +1599,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{0.6f,0.9f,0.2f,1.0f}, uiProjection, prog);
             return;
         }
-        if (element.type == WidgetElementType::Text)
+        if (element.type == WidgetElementType::Text || element.type == WidgetElementType::Label)
         {
             const float wPx = std::max(0.0f, x1-x0), hPx = std::max(0.0f, y1-y0);
             const float cx0 = x0+element.padding.x, cy0 = y0+element.padding.y;
@@ -1774,6 +1774,53 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{0.7f,1.0f,0.3f,1.0f}, uiProjection, prog);
             return;
         }
+        if (element.type == WidgetElementType::ToggleButton || element.type == WidgetElementType::RadioButton)
+        {
+            const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
+            const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);
+            const GLuint prog = getUIQuadProgram(vp, fp);
+            const Vec4 displayColor = element.isChecked ? element.fillColor : element.color;
+            drawUIPanel(x0, y0, x1, y1, displayColor, uiProjection, prog, element.hoverColor, element.isHovered);
+            if (!element.text.empty())
+            {
+                const float cx0b=x0+element.padding.x, cy0b=y0+element.padding.y;
+                const float cx1b=x1-element.padding.x, cy1b=y1-element.padding.y;
+                const float cwB=std::max(0.0f,cx1b-cx0b), chB=std::max(0.0f,cy1b-cy0b);
+                float sc = (element.fontSize>0.0f) ? element.fontSize/48.0f : 1.0f;
+                if (element.fontSize<=0.0f)
+                {
+                    const Vec2 ts=m_textRenderer->measureText(element.text,1.0f);
+                    if (ts.x>0.0f&&ts.y>0.0f) sc=std::min(cwB/ts.x,chB/ts.y)*0.9f;
+                }
+                Vec2 ts=m_textRenderer->measureText(element.text,sc);
+                float tx=cx0b, ty=cy0b;
+                if (element.textAlignH==TextAlignH::Center) tx=cx0b+(cwB-ts.x)*0.5f;
+                else if (element.textAlignH==TextAlignH::Right) tx=cx1b-ts.x;
+                if (element.textAlignV==TextAlignV::Center) ty=cy0b+(chB-ts.y)*0.5f;
+                else if (element.textAlignV==TextAlignV::Bottom) ty=cy1b-ts.y;
+                m_textRenderer->drawText(element.text, Vec2{tx,ty}, sc, element.textColor);
+            }
+            if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{0.7f,1.0f,0.3f,1.0f}, uiProjection, prog);
+            return;
+        }
+        if (element.type == WidgetElementType::Separator)
+        {
+            const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+            const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+            const GLuint prog = getUIQuadProgram(vp, fp);
+            const Vec4 lineColor = (element.color.w > 0.0f) ? element.color : Vec4{0.35f, 0.35f, 0.40f, 0.8f};
+            drawUIPanel(x0, y0, x1, y1, lineColor, uiProjection, prog, lineColor, false);
+            return;
+        }
+        if (element.type == WidgetElementType::ScrollView)
+        {
+            const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+            const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+            const GLuint prog = getUIQuadProgram(vp, fp);
+            drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, prog, element.color, false);
+            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx);
+            return;
+        }
         if (element.type == WidgetElementType::Image)
         {
             if (element.textureId!=0 || !element.imagePath.empty())
@@ -1935,7 +1982,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
                 const Vec4& hc = (element.hoverColor.w > 0.0f) ? element.hoverColor : element.color;
                 drawUIPanel(x0,y0,x1,y1,element.color,uiProjection,getUIQuadProgram(vp,fp),hc,element.isHovered);
             }
-            if (element.scrollable)
+            if (element.scrollable || element.type == WidgetElementType::ScrollView)
             {
                 const GLint cx=static_cast<GLint>(x0);
                 const GLint cy=static_cast<GLint>(static_cast<float>(height)-y1);
@@ -2745,12 +2792,26 @@ void OpenGLRenderer::renderViewportUI()
     glEnable(GL_BLEND);
     glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
+    // Use the full FBO viewport (same as drawUIWidgetsToFramebuffer) to avoid
+    // any driver-specific quirks with offset glViewport + text rendering.
+    // Clip to the viewport area via scissor test.
     glEnable(GL_SCISSOR_TEST);
     glScissor(viewportX, viewportY, viewportW, viewportH);
-    glViewport(viewportX, viewportY, viewportW, viewportH);
+    glViewport(0, 0, m_cachedWindowWidth, m_cachedWindowHeight);
 
-    m_textRenderer->setScreenSize(static_cast<int>(vpRect.z), static_cast<int>(vpRect.w));
-    const glm::mat4 uiProjection = glm::ortho(0.0f, vpRect.z, vpRect.w, 0.0f);
+    // Build a projection that maps viewport-local coordinates (0..vpW, 0..vpH)
+    // to the correct pixel position within the full-size FBO. The negative offsets
+    // shift the coordinate origin so that viewport-local (0,0) maps to
+    // FBO pixel (vpRect.x, vpRect.y), i.e. the viewport top-left corner.
+    // This matches the drawUIWidgetsToFramebuffer rendering path exactly, avoiding
+    // driver-specific issues with offset glViewport + per-glyph text rendering.
+    const glm::mat4 uiProjection = glm::ortho(
+        -vpRect.x,                                              // left
+        static_cast<float>(m_cachedWindowWidth) - vpRect.x,     // right
+        static_cast<float>(m_cachedWindowHeight) - vpRect.y,    // bottom
+        -vpRect.y);                                             // top
+    m_textRenderer->setScreenSize(m_cachedWindowWidth, m_cachedWindowHeight);
+    m_textRenderer->setProjectionMatrix(uiProjection);
 
     const auto renderElement = [&](const auto& self, const WidgetElement& element,
         float parentX, float parentY, float parentW, float parentH) -> void
@@ -2771,7 +2832,7 @@ void OpenGLRenderer::renderViewportUI()
             return;
         }
 
-        if (element.type == WidgetElementType::Text)
+        if (element.type == WidgetElementType::Text || element.type == WidgetElementType::Label)
         {
             const float scale = (element.fontSize > 0.0f) ? (element.fontSize / 48.0f) : (14.0f / 48.0f);
             m_textRenderer->drawText(element.text, Vec2{ x0 + element.padding.x, y0 + element.padding.y }, scale, element.textColor);
@@ -2789,6 +2850,39 @@ void OpenGLRenderer::renderViewportUI()
                 const float scale = (element.fontSize > 0.0f) ? (element.fontSize / 48.0f) : (14.0f / 48.0f);
                 m_textRenderer->drawText(element.text, Vec2{ x0 + element.padding.x, y0 + element.padding.y }, scale, element.textColor);
             }
+            return;
+        }
+
+        if (element.type == WidgetElementType::ToggleButton || element.type == WidgetElementType::RadioButton)
+        {
+            const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
+            const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);
+            const Vec4 displayColor = element.isChecked ? element.fillColor : element.color;
+            drawUIPanel(x0, y0, x1, y1, displayColor, uiProjection, getUIQuadProgram(vertexPath, fragmentPath), element.hoverColor, element.isHovered);
+
+            if (!element.text.empty())
+            {
+                const float scale = (element.fontSize > 0.0f) ? (element.fontSize / 48.0f) : (14.0f / 48.0f);
+                m_textRenderer->drawText(element.text, Vec2{ x0 + element.padding.x, y0 + element.padding.y }, scale, element.textColor);
+            }
+            return;
+        }
+
+        if (element.type == WidgetElementType::Separator)
+        {
+            const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+            const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+            const Vec4 lineColor = (element.color.w > 0.0f) ? element.color : Vec4{ 0.35f, 0.35f, 0.40f, 0.8f };
+            drawUIPanel(x0, y0, x1, y1, lineColor, uiProjection, getUIQuadProgram(vertexPath, fragmentPath), lineColor, false);
+            return;
+        }
+
+        if (element.type == WidgetElementType::ScrollView)
+        {
+            const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+            const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+            drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, getUIQuadProgram(vertexPath, fragmentPath), element.color, false);
+            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx);
             return;
         }
 
