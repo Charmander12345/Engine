@@ -33,7 +33,13 @@ enum class WidgetElementType
     Separator,
     ScrollView,
     ToggleButton,
-    RadioButton
+    RadioButton,
+    WrapBox,
+    UniformGrid,
+    SizeBox,
+    ScaleBox,
+    WidgetSwitcher,
+    Overlay
 };
 
 enum class TextAlignH
@@ -61,8 +67,159 @@ enum class WidgetAnchor
     TopLeft,
     TopRight,
     BottomLeft,
-    BottomRight
+    BottomRight,
+    Top,
+    Bottom,
+    Left,
+    Right,
+    Center,
+    Stretch
 };
+
+enum class HitTestMode
+{
+    Enabled,        // Element participates in hit testing
+    DisabledSelf,   // Element itself excluded, children follow their own setting
+    DisabledAll     // Element and all children excluded (parent overrides children)
+};
+
+enum class ScaleMode
+{
+    Contain,        // Scale uniformly to fit inside available area
+    Cover,          // Scale uniformly to cover entire available area
+    Fill,           // Stretch non-uniformly to fill available area
+    ScaleDown,      // Like Contain but never scales up (max scale = 1)
+    UserSpecified   // Use explicit userScale value
+};
+
+// ── Phase 2: Brush-based styling ─────────────────────────────────────────
+
+enum class BrushType
+{
+    None,
+    SolidColor,
+    Image,
+    NineSlice,
+    LinearGradient
+};
+
+struct UIBrush
+{
+    BrushType type{ BrushType::None };
+    Vec4 color{ 1.0f, 1.0f, 1.0f, 1.0f };
+    Vec4 colorEnd{ 0.0f, 0.0f, 0.0f, 0.0f };       // for LinearGradient
+    float gradientAngle{ 0.0f };                      // 0=vertical, 90=horizontal
+    std::string imagePath;
+    unsigned int textureId{ 0 };
+    Vec4 imageMargin{ 0.0f, 0.0f, 0.0f, 0.0f };     // 9-Slice margins (L,T,R,B)
+    Vec2 imageTiling{ 1.0f, 1.0f };
+
+    // Convenience: check if brush should render anything
+    bool isVisible() const
+    {
+        if (type == BrushType::None) return false;
+        if (type == BrushType::SolidColor) return color.w > 0.0f;
+        return true;
+    }
+
+    // Convenience: create a solid-color brush
+    static UIBrush solid(const Vec4& c) { UIBrush b; b.type = BrushType::SolidColor; b.color = c; return b; }
+    static UIBrush none() { UIBrush b; b.type = BrushType::None; return b; }
+};
+
+// ── Phase 2: Render Transforms ───────────────────────────────────────────
+
+struct RenderTransform
+{
+    Vec2 translation{ 0.0f, 0.0f };
+    float rotation{ 0.0f };          // degrees
+    Vec2 scale{ 1.0f, 1.0f };
+    Vec2 shear{ 0.0f, 0.0f };
+    Vec2 pivot{ 0.5f, 0.5f };       // normalised (0,0)=top-left, (0.5,0.5)=centre
+
+    bool isIdentity() const
+    {
+        return translation.x == 0.0f && translation.y == 0.0f
+            && rotation == 0.0f
+            && scale.x == 1.0f && scale.y == 1.0f
+            && shear.x == 0.0f && shear.y == 0.0f;
+    }
+};
+
+// ── Phase 2: Clipping modes ──────────────────────────────────────────────
+
+enum class ClipMode
+{
+    None,              // no additional clipping
+    ClipToBounds,      // clip children to this element's bounds
+    InheritFromParent  // explicitly inherit parent scissor
+};
+
+enum class AnimatableProperty
+{
+    RenderTranslationX,
+    RenderTranslationY,
+    RenderRotation,
+    RenderScaleX,
+    RenderScaleY,
+    RenderShearX,
+    RenderShearY,
+    Opacity,
+    ColorR,
+    ColorG,
+    ColorB,
+    ColorA,
+    PositionX,
+    PositionY,
+    SizeX,
+    SizeY,
+    FontSize
+};
+
+enum class EasingFunction
+{
+    Linear,
+    EaseInQuad,
+    EaseOutQuad,
+    EaseInOutQuad,
+    EaseInCubic,
+    EaseOutCubic,
+    EaseInOutCubic,
+    EaseInElastic,
+    EaseOutElastic,
+    EaseInOutElastic,
+    EaseInBounce,
+    EaseOutBounce,
+    EaseInOutBounce,
+    EaseInBack,
+    EaseOutBack,
+    EaseInOutBack
+};
+
+struct AnimationKeyframe
+{
+    float time{ 0.0f };
+    Vec4 value{ 0.0f, 0.0f, 0.0f, 0.0f };
+    EasingFunction easing{ EasingFunction::Linear };
+};
+
+struct AnimationTrack
+{
+    std::string targetElementId;
+    AnimatableProperty property{ AnimatableProperty::Opacity };
+    std::vector<AnimationKeyframe> keyframes;
+};
+
+struct WidgetAnimation
+{
+    std::string name;
+    float duration{ 0.0f };
+    bool isLooping{ false };
+    float playbackSpeed{ 1.0f };
+    std::vector<AnimationTrack> tracks;
+};
+
+float EvaluateEasing(EasingFunction easing, float t);
 
 struct WidgetElement
 {
@@ -89,7 +246,7 @@ struct WidgetElement
     bool wrapText{ false };
     Vec2 padding{ 0.0f, 0.0f };
     Vec2 margin{ 0.0f, 0.0f };
-    bool isHitTestable{ false };
+    HitTestMode hitTestMode{ HitTestMode::DisabledSelf };
     bool fillX{ false };
     bool fillY{ false };
     bool sizeToContent{ false };
@@ -172,6 +329,44 @@ struct WidgetElement
 
     // RadioButton group identifier
     std::string radioGroup;
+
+    // Anchor-based positioning (used by Gameplay UI / Viewport UI)
+    WidgetAnchor anchor{ WidgetAnchor::TopLeft };
+    Vec2 anchorOffset{ 0.0f, 0.0f };
+
+    // Canvas root flag – the root canvas panel of a widget asset (non-deletable)
+    bool isCanvasRoot{ false };
+
+    // ── Layout panel properties (Phase 1) ─────────────────────────────────
+    // UniformGrid
+    int columns{ 0 };            // 0 = auto-calculate from children count
+    int rows{ 0 };               // 0 = auto-calculate from children count
+
+    // SizeBox
+    float widthOverride{ 0.0f };     // 0 = no override
+    float heightOverride{ 0.0f };    // 0 = no override
+
+    // ScaleBox
+    ScaleMode scaleMode{ ScaleMode::Contain };
+    float userScale{ 1.0f };         // only used with ScaleMode::UserSpecified
+
+    // WidgetSwitcher
+    int activeChildIndex{ 0 };
+
+    // ── Styling & Visual (Phase 2) ────────────────────────────────────────
+    // Brush-based styling (coexists with legacy color fields for backwards compat)
+    UIBrush background;              // replaces color for new assets
+    UIBrush hoverBrush;              // replaces hoverColor for new assets
+    UIBrush fillBrush;               // replaces fillColor for new assets
+
+    // Render transform (visual only – does not affect layout)
+    RenderTransform renderTransform;
+
+    // Clipping mode
+    ClipMode clipMode{ ClipMode::None };
+
+    // Effective (inherited) opacity – computed at render time, not serialised
+    float effectiveOpacity{ 1.0f };
 };
 
 class Widget : public EngineObject
@@ -207,6 +402,10 @@ public:
     const std::vector<WidgetElement>& getElements() const;
     std::vector<WidgetElement>& getElementsMutable();
 
+    void setAnimations(std::vector<WidgetAnimation> animations);
+    const std::vector<WidgetAnimation>& getAnimations() const;
+    std::vector<WidgetAnimation>& getAnimationsMutable();
+
     void setZOrder(int zOrder);
     int getZOrder() const;
 
@@ -226,5 +425,6 @@ private:
     bool m_hasComputedPosition{ false };
     bool m_layoutDirty{ true };
     std::vector<WidgetElement> m_elements;
+    std::vector<WidgetAnimation> m_animations;
     int m_zOrder{ 0 };
 };

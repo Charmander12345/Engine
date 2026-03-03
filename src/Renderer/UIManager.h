@@ -15,6 +15,7 @@
 class EngineLevel;
 class Renderer;
 class PopupWindow;
+class ViewportUIManager;
 
 class UIManager
 {
@@ -96,6 +97,9 @@ public:
     void openLandscapeManagerPopup();
     void openEngineSettingsPopup();
     void openWidgetEditorPopup(const std::string& relativeAssetPath);
+    void openUIDesignerTab();
+    void closeUIDesignerTab();
+    bool isUIDesignerOpen() const;
     void openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)> onProjectChosen);
 
     // Returns true if the active tab is a widget editor and had a selected element to delete
@@ -238,6 +242,25 @@ private:
 	void deleteSelectedWidgetEditorElement(const std::string& tabId);
 	std::string resolveHierarchyRowElementId(const std::string& tabId, const std::string& rowId) const;
 	void moveWidgetEditorElement(const std::string& tabId, const std::string& draggedId, const std::string& targetId);
+
+	// UI Designer state (Gameplay UI designer tab)
+	struct UIDesignerState
+	{
+		std::string tabId;
+		std::string leftWidgetId;
+		std::string rightWidgetId;
+		std::string toolbarWidgetId;
+		std::string selectedWidgetName;   // currently selected viewport widget
+		std::string selectedElementId;    // currently selected element within that widget
+		bool isOpen{ false };
+	};
+	UIDesignerState m_uiDesignerState;
+	void refreshUIDesignerHierarchy();
+	void refreshUIDesignerDetails();
+	void selectUIDesignerElement(const std::string& widgetName, const std::string& elementId);
+	void addElementToViewportWidget(const std::string& elementType);
+	void deleteSelectedUIDesignerElement();
+	ViewportUIManager* getViewportUIManager() const;
 
 public:
 	bool getWidgetEditorCanvasRect(Vec4& outRect) const;

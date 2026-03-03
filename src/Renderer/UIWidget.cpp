@@ -1,7 +1,35 @@
 #include "UIWidget.h"
 
+#include <cmath>
+
 namespace
 {
+    constexpr float kPi = 3.14159265358979323846f;
+
+    float EaseOutBounce01(float t)
+    {
+        constexpr float n1 = 7.5625f;
+        constexpr float d1 = 2.75f;
+
+        if (t < 1.0f / d1)
+        {
+            return n1 * t * t;
+        }
+        if (t < 2.0f / d1)
+        {
+            t -= 1.5f / d1;
+            return n1 * t * t + 0.75f;
+        }
+        if (t < 2.5f / d1)
+        {
+            t -= 2.25f / d1;
+            return n1 * t * t + 0.9375f;
+        }
+
+        t -= 2.625f / d1;
+        return n1 * t * t + 0.984375f;
+    }
+
     std::string toString(WidgetElementType type)
     {
         switch (type)
@@ -26,6 +54,12 @@ namespace
         case WidgetElementType::ScrollView: return "ScrollView";
         case WidgetElementType::ToggleButton: return "ToggleButton";
         case WidgetElementType::RadioButton: return "RadioButton";
+        case WidgetElementType::WrapBox: return "WrapBox";
+        case WidgetElementType::UniformGrid: return "UniformGrid";
+        case WidgetElementType::SizeBox: return "SizeBox";
+        case WidgetElementType::ScaleBox: return "ScaleBox";
+        case WidgetElementType::WidgetSwitcher: return "WidgetSwitcher";
+        case WidgetElementType::Overlay: return "Overlay";
         default: return "Unknown";
         }
     }
@@ -52,6 +86,12 @@ namespace
         if (value == "ScrollView") return WidgetElementType::ScrollView;
         if (value == "ToggleButton") return WidgetElementType::ToggleButton;
         if (value == "RadioButton") return WidgetElementType::RadioButton;
+        if (value == "WrapBox") return WidgetElementType::WrapBox;
+        if (value == "UniformGrid") return WidgetElementType::UniformGrid;
+        if (value == "SizeBox") return WidgetElementType::SizeBox;
+        if (value == "ScaleBox") return WidgetElementType::ScaleBox;
+        if (value == "WidgetSwitcher") return WidgetElementType::WidgetSwitcher;
+        if (value == "Overlay") return WidgetElementType::Overlay;
         return WidgetElementType::Unknown;
     }
 
@@ -111,6 +151,12 @@ namespace
         case WidgetAnchor::TopRight: return "TopRight";
         case WidgetAnchor::BottomLeft: return "BottomLeft";
         case WidgetAnchor::BottomRight: return "BottomRight";
+        case WidgetAnchor::Top: return "Top";
+        case WidgetAnchor::Bottom: return "Bottom";
+        case WidgetAnchor::Left: return "Left";
+        case WidgetAnchor::Right: return "Right";
+        case WidgetAnchor::Center: return "Center";
+        case WidgetAnchor::Stretch: return "Stretch";
         default: return "TopLeft";
         }
     }
@@ -120,8 +166,184 @@ namespace
         if (value == "TopRight") return WidgetAnchor::TopRight;
         if (value == "BottomLeft") return WidgetAnchor::BottomLeft;
         if (value == "BottomRight") return WidgetAnchor::BottomRight;
+        if (value == "Top") return WidgetAnchor::Top;
+        if (value == "Bottom") return WidgetAnchor::Bottom;
+        if (value == "Left") return WidgetAnchor::Left;
+        if (value == "Right") return WidgetAnchor::Right;
+        if (value == "Center") return WidgetAnchor::Center;
+        if (value == "Stretch") return WidgetAnchor::Stretch;
         return WidgetAnchor::TopLeft;
     }
+
+    std::string toString(HitTestMode mode)
+    {
+        switch (mode)
+        {
+        case HitTestMode::Enabled: return "Enabled";
+        case HitTestMode::DisabledAll: return "DisabledAll";
+        default: return "DisabledSelf";
+        }
+    }
+
+    HitTestMode hitTestModeFromString(const std::string& value)
+    {
+        if (value == "Enabled") return HitTestMode::Enabled;
+        if (value == "DisabledAll") return HitTestMode::DisabledAll;
+        return HitTestMode::DisabledSelf;
+    }
+
+    std::string toString(ScaleMode mode)
+    {
+        switch (mode)
+        {
+        case ScaleMode::Cover: return "Cover";
+        case ScaleMode::Fill: return "Fill";
+        case ScaleMode::ScaleDown: return "ScaleDown";
+        case ScaleMode::UserSpecified: return "UserSpecified";
+        default: return "Contain";
+        }
+    }
+
+    ScaleMode scaleModeFromString(const std::string& value)
+    {
+        if (value == "Cover") return ScaleMode::Cover;
+        if (value == "Fill") return ScaleMode::Fill;
+        if (value == "ScaleDown") return ScaleMode::ScaleDown;
+        if (value == "UserSpecified") return ScaleMode::UserSpecified;
+        return ScaleMode::Contain;
+    }
+
+    // ── Phase 2: BrushType ──────────────────────────────────────────────────
+
+    std::string toString(BrushType type)
+    {
+        switch (type)
+        {
+        case BrushType::None:           return "None";
+        case BrushType::Image:          return "Image";
+        case BrushType::NineSlice:      return "NineSlice";
+        case BrushType::LinearGradient: return "LinearGradient";
+        default:                        return "SolidColor";
+        }
+    }
+
+    BrushType brushTypeFromString(const std::string& value)
+    {
+        if (value == "None")           return BrushType::None;
+        if (value == "Image")          return BrushType::Image;
+        if (value == "NineSlice")      return BrushType::NineSlice;
+        if (value == "LinearGradient") return BrushType::LinearGradient;
+        return BrushType::SolidColor;
+    }
+
+    // ── Phase 2: ClipMode ───────────────────────────────────────────────────
+
+    std::string toString(ClipMode mode)
+    {
+        switch (mode)
+        {
+        case ClipMode::ClipToBounds:      return "ClipToBounds";
+        case ClipMode::InheritFromParent: return "InheritFromParent";
+        default:                          return "None";
+        }
+    }
+
+    ClipMode clipModeFromString(const std::string& value)
+    {
+        if (value == "ClipToBounds")      return ClipMode::ClipToBounds;
+        if (value == "InheritFromParent") return ClipMode::InheritFromParent;
+        return ClipMode::None;
+    }
+
+    std::string toString(AnimatableProperty property)
+    {
+        switch (property)
+        {
+        case AnimatableProperty::RenderTranslationX: return "RenderTranslationX";
+        case AnimatableProperty::RenderTranslationY: return "RenderTranslationY";
+        case AnimatableProperty::RenderRotation: return "RenderRotation";
+        case AnimatableProperty::RenderScaleX: return "RenderScaleX";
+        case AnimatableProperty::RenderScaleY: return "RenderScaleY";
+        case AnimatableProperty::RenderShearX: return "RenderShearX";
+        case AnimatableProperty::RenderShearY: return "RenderShearY";
+        case AnimatableProperty::ColorR: return "ColorR";
+        case AnimatableProperty::ColorG: return "ColorG";
+        case AnimatableProperty::ColorB: return "ColorB";
+        case AnimatableProperty::ColorA: return "ColorA";
+        case AnimatableProperty::PositionX: return "PositionX";
+        case AnimatableProperty::PositionY: return "PositionY";
+        case AnimatableProperty::SizeX: return "SizeX";
+        case AnimatableProperty::SizeY: return "SizeY";
+        case AnimatableProperty::FontSize: return "FontSize";
+        default: return "Opacity";
+        }
+    }
+
+    AnimatableProperty animatablePropertyFromString(const std::string& value)
+    {
+        if (value == "RenderTranslationX") return AnimatableProperty::RenderTranslationX;
+        if (value == "RenderTranslationY") return AnimatableProperty::RenderTranslationY;
+        if (value == "RenderRotation") return AnimatableProperty::RenderRotation;
+        if (value == "RenderScaleX") return AnimatableProperty::RenderScaleX;
+        if (value == "RenderScaleY") return AnimatableProperty::RenderScaleY;
+        if (value == "RenderShearX") return AnimatableProperty::RenderShearX;
+        if (value == "RenderShearY") return AnimatableProperty::RenderShearY;
+        if (value == "ColorR") return AnimatableProperty::ColorR;
+        if (value == "ColorG") return AnimatableProperty::ColorG;
+        if (value == "ColorB") return AnimatableProperty::ColorB;
+        if (value == "ColorA") return AnimatableProperty::ColorA;
+        if (value == "PositionX") return AnimatableProperty::PositionX;
+        if (value == "PositionY") return AnimatableProperty::PositionY;
+        if (value == "SizeX") return AnimatableProperty::SizeX;
+        if (value == "SizeY") return AnimatableProperty::SizeY;
+        if (value == "FontSize") return AnimatableProperty::FontSize;
+        return AnimatableProperty::Opacity;
+    }
+
+    std::string toString(EasingFunction easing)
+    {
+        switch (easing)
+        {
+        case EasingFunction::EaseInQuad: return "EaseInQuad";
+        case EasingFunction::EaseOutQuad: return "EaseOutQuad";
+        case EasingFunction::EaseInOutQuad: return "EaseInOutQuad";
+        case EasingFunction::EaseInCubic: return "EaseInCubic";
+        case EasingFunction::EaseOutCubic: return "EaseOutCubic";
+        case EasingFunction::EaseInOutCubic: return "EaseInOutCubic";
+        case EasingFunction::EaseInElastic: return "EaseInElastic";
+        case EasingFunction::EaseOutElastic: return "EaseOutElastic";
+        case EasingFunction::EaseInOutElastic: return "EaseInOutElastic";
+        case EasingFunction::EaseInBounce: return "EaseInBounce";
+        case EasingFunction::EaseOutBounce: return "EaseOutBounce";
+        case EasingFunction::EaseInOutBounce: return "EaseInOutBounce";
+        case EasingFunction::EaseInBack: return "EaseInBack";
+        case EasingFunction::EaseOutBack: return "EaseOutBack";
+        case EasingFunction::EaseInOutBack: return "EaseInOutBack";
+        default: return "Linear";
+        }
+    }
+
+    EasingFunction easingFunctionFromString(const std::string& value)
+    {
+        if (value == "EaseInQuad") return EasingFunction::EaseInQuad;
+        if (value == "EaseOutQuad") return EasingFunction::EaseOutQuad;
+        if (value == "EaseInOutQuad") return EasingFunction::EaseInOutQuad;
+        if (value == "EaseInCubic") return EasingFunction::EaseInCubic;
+        if (value == "EaseOutCubic") return EasingFunction::EaseOutCubic;
+        if (value == "EaseInOutCubic") return EasingFunction::EaseInOutCubic;
+        if (value == "EaseInElastic") return EasingFunction::EaseInElastic;
+        if (value == "EaseOutElastic") return EasingFunction::EaseOutElastic;
+        if (value == "EaseInOutElastic") return EasingFunction::EaseInOutElastic;
+        if (value == "EaseInBounce") return EasingFunction::EaseInBounce;
+        if (value == "EaseOutBounce") return EasingFunction::EaseOutBounce;
+        if (value == "EaseInOutBounce") return EasingFunction::EaseInOutBounce;
+        if (value == "EaseInBack") return EasingFunction::EaseInBack;
+        if (value == "EaseOutBack") return EasingFunction::EaseOutBack;
+        if (value == "EaseInOutBack") return EasingFunction::EaseInOutBack;
+        return EasingFunction::Linear;
+    }
+
+    // ── Vec2/Vec4 JSON helpers ─────────────────────────────────────────────
 
     Vec2 readVec2(const json& value)
     {
@@ -155,6 +377,199 @@ namespace
     json writeVec4(const Vec4& value)
     {
         return json{ {"x", value.x}, {"y", value.y}, {"z", value.z}, {"w", value.w} };
+    }
+
+    AnimationKeyframe readAnimationKeyframe(const json& value)
+    {
+        AnimationKeyframe keyframe{};
+        if (!value.is_object())
+        {
+            return keyframe;
+        }
+
+        if (value.contains("time")) keyframe.time = value.at("time").get<float>();
+        if (value.contains("value")) keyframe.value = readVec4(value.at("value"));
+        if (value.contains("easing") && value.at("easing").is_string())
+        {
+            keyframe.easing = easingFunctionFromString(value.at("easing").get<std::string>());
+        }
+        return keyframe;
+    }
+
+    json writeAnimationKeyframe(const AnimationKeyframe& keyframe)
+    {
+        return json{
+            { "time", keyframe.time },
+            { "value", writeVec4(keyframe.value) },
+            { "easing", toString(keyframe.easing) }
+        };
+    }
+
+    AnimationTrack readAnimationTrack(const json& value)
+    {
+        AnimationTrack track{};
+        if (!value.is_object())
+        {
+            return track;
+        }
+
+        if (value.contains("targetElementId") && value.at("targetElementId").is_string())
+        {
+            track.targetElementId = value.at("targetElementId").get<std::string>();
+        }
+        if (value.contains("property") && value.at("property").is_string())
+        {
+            track.property = animatablePropertyFromString(value.at("property").get<std::string>());
+        }
+        if (value.contains("keyframes") && value.at("keyframes").is_array())
+        {
+            for (const auto& keyframeJson : value.at("keyframes"))
+            {
+                track.keyframes.push_back(readAnimationKeyframe(keyframeJson));
+            }
+        }
+        return track;
+    }
+
+    json writeAnimationTrack(const AnimationTrack& track)
+    {
+        json keyframes = json::array();
+        for (const auto& keyframe : track.keyframes)
+        {
+            keyframes.push_back(writeAnimationKeyframe(keyframe));
+        }
+
+        return json{
+            { "targetElementId", track.targetElementId },
+            { "property", toString(track.property) },
+            { "keyframes", keyframes }
+        };
+    }
+
+    WidgetAnimation readWidgetAnimation(const json& value)
+    {
+        WidgetAnimation animation{};
+        if (!value.is_object())
+        {
+            return animation;
+        }
+
+        if (value.contains("name") && value.at("name").is_string())
+        {
+            animation.name = value.at("name").get<std::string>();
+        }
+        if (value.contains("duration")) animation.duration = value.at("duration").get<float>();
+        if (value.contains("isLooping")) animation.isLooping = value.at("isLooping").get<bool>();
+        if (value.contains("playbackSpeed")) animation.playbackSpeed = value.at("playbackSpeed").get<float>();
+        if (value.contains("tracks") && value.at("tracks").is_array())
+        {
+            for (const auto& trackJson : value.at("tracks"))
+            {
+                animation.tracks.push_back(readAnimationTrack(trackJson));
+            }
+        }
+
+        return animation;
+    }
+
+    json writeWidgetAnimation(const WidgetAnimation& animation)
+    {
+        json tracks = json::array();
+        for (const auto& track : animation.tracks)
+        {
+            tracks.push_back(writeAnimationTrack(track));
+        }
+
+        return json{
+            { "name", animation.name },
+            { "duration", animation.duration },
+            { "isLooping", animation.isLooping },
+            { "playbackSpeed", animation.playbackSpeed },
+            { "tracks", tracks }
+        };
+    }
+
+    // ── Phase 2: UIBrush JSON helpers ───────────────────────────────────────
+
+    UIBrush readBrush(const json& value)
+    {
+        UIBrush brush;
+        if (!value.is_object()) return brush;
+        if (value.contains("type"))
+            brush.type = brushTypeFromString(value.at("type").get<std::string>());
+        if (value.contains("color"))
+            brush.color = readVec4(value.at("color"));
+        if (value.contains("colorEnd"))
+            brush.colorEnd = readVec4(value.at("colorEnd"));
+        if (value.contains("gradientAngle"))
+            brush.gradientAngle = value.at("gradientAngle").get<float>();
+        if (value.contains("imagePath"))
+            brush.imagePath = value.at("imagePath").get<std::string>();
+        if (value.contains("imageMargin"))
+            brush.imageMargin = readVec4(value.at("imageMargin"));
+        if (value.contains("imageTiling"))
+            brush.imageTiling = readVec2(value.at("imageTiling"));
+        return brush;
+    }
+
+    json writeBrush(const UIBrush& brush)
+    {
+        json obj = json::object();
+        obj["type"] = toString(brush.type);
+        if (brush.type == BrushType::SolidColor || brush.type == BrushType::LinearGradient)
+        {
+            obj["color"] = writeVec4(brush.color);
+        }
+        if (brush.type == BrushType::LinearGradient)
+        {
+            obj["colorEnd"] = writeVec4(brush.colorEnd);
+            obj["gradientAngle"] = brush.gradientAngle;
+        }
+        if (brush.type == BrushType::Image || brush.type == BrushType::NineSlice)
+        {
+            if (!brush.imagePath.empty())
+                obj["imagePath"] = brush.imagePath;
+            if (brush.type == BrushType::NineSlice)
+                obj["imageMargin"] = writeVec4(brush.imageMargin);
+            if (brush.imageTiling.x != 1.0f || brush.imageTiling.y != 1.0f)
+                obj["imageTiling"] = writeVec2(brush.imageTiling);
+        }
+        return obj;
+    }
+
+    // ── Phase 2: RenderTransform JSON helpers ───────────────────────────────
+
+    RenderTransform readRenderTransform(const json& value)
+    {
+        RenderTransform rt;
+        if (!value.is_object()) return rt;
+        if (value.contains("translation"))
+            rt.translation = readVec2(value.at("translation"));
+        if (value.contains("rotation"))
+            rt.rotation = value.at("rotation").get<float>();
+        if (value.contains("scale"))
+            rt.scale = readVec2(value.at("scale"));
+        if (value.contains("shear"))
+            rt.shear = readVec2(value.at("shear"));
+        if (value.contains("pivot"))
+            rt.pivot = readVec2(value.at("pivot"));
+        return rt;
+    }
+
+    json writeRenderTransform(const RenderTransform& rt)
+    {
+        json obj = json::object();
+        if (rt.translation.x != 0.0f || rt.translation.y != 0.0f)
+            obj["translation"] = writeVec2(rt.translation);
+        if (rt.rotation != 0.0f)
+            obj["rotation"] = rt.rotation;
+        if (rt.scale.x != 1.0f || rt.scale.y != 1.0f)
+            obj["scale"] = writeVec2(rt.scale);
+        if (rt.shear.x != 0.0f || rt.shear.y != 0.0f)
+            obj["shear"] = writeVec2(rt.shear);
+        if (rt.pivot.x != 0.5f || rt.pivot.y != 0.5f)
+            obj["pivot"] = writeVec2(rt.pivot);
+        return obj;
     }
 
     Vec4 brightenColor(const Vec4& color)
@@ -192,7 +607,10 @@ namespace
             element.color = readVec4(entry.at("color"));
         }
         else if (element.type == WidgetElementType::StackPanel || element.type == WidgetElementType::Grid
-            || element.type == WidgetElementType::ScrollView)
+            || element.type == WidgetElementType::ScrollView
+            || element.type == WidgetElementType::WrapBox || element.type == WidgetElementType::UniformGrid
+            || element.type == WidgetElementType::SizeBox || element.type == WidgetElementType::ScaleBox
+            || element.type == WidgetElementType::WidgetSwitcher || element.type == WidgetElementType::Overlay)
         {
             element.color = Vec4{ 0.1f, 0.1f, 0.12f, 0.65f };
         }
@@ -294,13 +712,17 @@ namespace
         {
             element.margin = readVec2(entry.at("margin"));
         }
-        if (entry.contains("isHitTestable"))
+        if (entry.contains("hitTestMode"))
         {
-            element.isHitTestable = entry.at("isHitTestable").get<bool>();
+            element.hitTestMode = hitTestModeFromString(entry.at("hitTestMode").get<std::string>());
+        }
+        else if (entry.contains("isHitTestable"))
+        {
+            element.hitTestMode = entry.at("isHitTestable").get<bool>() ? HitTestMode::Enabled : HitTestMode::DisabledSelf;
         }
         else
         {
-            element.isHitTestable = (element.type == WidgetElementType::Button ||
+            const bool interactive = (element.type == WidgetElementType::Button ||
                 element.type == WidgetElementType::ToggleButton ||
                 element.type == WidgetElementType::RadioButton ||
                 element.type == WidgetElementType::ColorPicker ||
@@ -309,6 +731,7 @@ namespace
                 element.type == WidgetElementType::CheckBox ||
                 element.type == WidgetElementType::DropDown ||
                 element.type == WidgetElementType::DropdownButton);
+            element.hitTestMode = interactive ? HitTestMode::Enabled : HitTestMode::DisabledSelf;
         }
         if (entry.contains("fillX"))
         {
@@ -437,6 +860,67 @@ namespace
         {
             element.radioGroup = entry.at("radioGroup").get<std::string>();
         }
+        if (entry.contains("anchor"))
+        {
+            element.anchor = anchorFromString(entry.at("anchor").get<std::string>());
+        }
+        if (entry.contains("anchorOffset"))
+        {
+            element.anchorOffset = readVec2(entry.at("anchorOffset"));
+        }
+        if (entry.contains("isCanvasRoot"))
+        {
+            element.isCanvasRoot = entry.at("isCanvasRoot").get<bool>();
+        }
+        if (entry.contains("columns"))
+        {
+            element.columns = entry.at("columns").get<int>();
+        }
+        if (entry.contains("rows"))
+        {
+            element.rows = entry.at("rows").get<int>();
+        }
+        if (entry.contains("widthOverride"))
+        {
+            element.widthOverride = entry.at("widthOverride").get<float>();
+        }
+        if (entry.contains("heightOverride"))
+        {
+            element.heightOverride = entry.at("heightOverride").get<float>();
+        }
+        if (entry.contains("scaleMode"))
+        {
+            element.scaleMode = scaleModeFromString(entry.at("scaleMode").get<std::string>());
+        }
+        if (entry.contains("userScale"))
+        {
+            element.userScale = entry.at("userScale").get<float>();
+        }
+        if (entry.contains("activeChildIndex"))
+        {
+            element.activeChildIndex = entry.at("activeChildIndex").get<int>();
+        }
+        // ── Phase 2: Brush, RenderTransform, ClipMode ────────────────────
+        if (entry.contains("background"))
+        {
+            element.background = readBrush(entry.at("background"));
+        }
+        if (entry.contains("hoverBrush"))
+        {
+            element.hoverBrush = readBrush(entry.at("hoverBrush"));
+        }
+        if (entry.contains("fillBrush"))
+        {
+            element.fillBrush = readBrush(entry.at("fillBrush"));
+        }
+        if (entry.contains("renderTransform"))
+        {
+            element.renderTransform = readRenderTransform(entry.at("renderTransform"));
+        }
+        if (entry.contains("clipMode"))
+        {
+            element.clipMode = clipModeFromString(entry.at("clipMode").get<std::string>());
+        }
         return element;
     }
 
@@ -496,9 +980,9 @@ namespace
         {
             entry["margin"] = writeVec2(element.margin);
         }
-        if (element.isHitTestable)
+        if (element.hitTestMode != HitTestMode::DisabledSelf)
         {
-            entry["isHitTestable"] = element.isHitTestable;
+            entry["hitTestMode"] = toString(element.hitTestMode);
         }
         if (element.fillX)
         {
@@ -593,6 +1077,52 @@ namespace
             entry["activeTab"] = element.activeTab;
             entry["sizeToContent"] = element.sizeToContent;
         }
+        else if (element.type == WidgetElementType::WrapBox)
+        {
+            entry["orientation"] = toString(element.orientation);
+            if (element.spacing > 0.0f)
+            {
+                entry["spacing"] = element.spacing;
+            }
+        }
+        else if (element.type == WidgetElementType::UniformGrid)
+        {
+            if (element.columns > 0)
+            {
+                entry["columns"] = element.columns;
+            }
+            if (element.rows > 0)
+            {
+                entry["rows"] = element.rows;
+            }
+            if (element.spacing > 0.0f)
+            {
+                entry["spacing"] = element.spacing;
+            }
+        }
+        else if (element.type == WidgetElementType::SizeBox)
+        {
+            if (element.widthOverride > 0.0f)
+            {
+                entry["widthOverride"] = element.widthOverride;
+            }
+            if (element.heightOverride > 0.0f)
+            {
+                entry["heightOverride"] = element.heightOverride;
+            }
+        }
+        else if (element.type == WidgetElementType::ScaleBox)
+        {
+            entry["scaleMode"] = toString(element.scaleMode);
+            if (element.scaleMode == ScaleMode::UserSpecified)
+            {
+                entry["userScale"] = element.userScale;
+            }
+        }
+        else if (element.type == WidgetElementType::WidgetSwitcher)
+        {
+            entry["activeChildIndex"] = element.activeChildIndex;
+        }
         if (!element.shaderVertex.empty())
         {
             entry["shaderVertex"] = element.shaderVertex;
@@ -650,6 +1180,45 @@ namespace
         {
             entry["maxSize"] = writeVec2(element.maxSize);
         }
+        if (element.anchor != WidgetAnchor::TopLeft)
+        {
+            entry["anchor"] = toString(element.anchor);
+        }
+        if (element.anchorOffset.x != 0.0f || element.anchorOffset.y != 0.0f)
+        {
+            entry["anchorOffset"] = writeVec2(element.anchorOffset);
+        }
+        if (element.isCanvasRoot)
+        {
+            entry["isCanvasRoot"] = true;
+        }
+        // ── Phase 2: Brush, RenderTransform, ClipMode ────────────────────
+        if (element.background.type != BrushType::SolidColor
+            || element.background.color.x != 1.0f || element.background.color.y != 1.0f
+            || element.background.color.z != 1.0f || element.background.color.w != 1.0f)
+        {
+            entry["background"] = writeBrush(element.background);
+        }
+        if (element.hoverBrush.type != BrushType::SolidColor
+            || element.hoverBrush.color.x != 1.0f || element.hoverBrush.color.y != 1.0f
+            || element.hoverBrush.color.z != 1.0f || element.hoverBrush.color.w != 1.0f)
+        {
+            entry["hoverBrush"] = writeBrush(element.hoverBrush);
+        }
+        if (element.fillBrush.type != BrushType::SolidColor
+            || element.fillBrush.color.x != 1.0f || element.fillBrush.color.y != 1.0f
+            || element.fillBrush.color.z != 1.0f || element.fillBrush.color.w != 1.0f)
+        {
+            entry["fillBrush"] = writeBrush(element.fillBrush);
+        }
+        if (!element.renderTransform.isIdentity())
+        {
+            entry["renderTransform"] = writeRenderTransform(element.renderTransform);
+        }
+        if (element.clipMode != ClipMode::None)
+        {
+            entry["clipMode"] = toString(element.clipMode);
+        }
         if (!element.children.empty())
         {
             json children = json::array();
@@ -668,6 +1237,89 @@ namespace
             entry["children"] = children;
         }
         return entry;
+    }
+}
+
+float EvaluateEasing(EasingFunction easing, float t)
+{
+    const float x = std::clamp(t, 0.0f, 1.0f);
+
+    switch (easing)
+    {
+    case EasingFunction::EaseInQuad:
+        return x * x;
+    case EasingFunction::EaseOutQuad:
+        return 1.0f - (1.0f - x) * (1.0f - x);
+    case EasingFunction::EaseInOutQuad:
+        return (x < 0.5f) ? (2.0f * x * x) : (1.0f - std::pow(-2.0f * x + 2.0f, 2.0f) * 0.5f);
+
+    case EasingFunction::EaseInCubic:
+        return x * x * x;
+    case EasingFunction::EaseOutCubic:
+        return 1.0f - std::pow(1.0f - x, 3.0f);
+    case EasingFunction::EaseInOutCubic:
+        return (x < 0.5f) ? (4.0f * x * x * x) : (1.0f - std::pow(-2.0f * x + 2.0f, 3.0f) * 0.5f);
+
+    case EasingFunction::EaseInElastic:
+    {
+        if (x == 0.0f || x == 1.0f) return x;
+        constexpr float c4 = (2.0f * kPi) / 3.0f;
+        return -std::pow(2.0f, 10.0f * x - 10.0f) * std::sin((x * 10.0f - 10.75f) * c4);
+    }
+    case EasingFunction::EaseOutElastic:
+    {
+        if (x == 0.0f || x == 1.0f) return x;
+        constexpr float c4 = (2.0f * kPi) / 3.0f;
+        return std::pow(2.0f, -10.0f * x) * std::sin((x * 10.0f - 0.75f) * c4) + 1.0f;
+    }
+    case EasingFunction::EaseInOutElastic:
+    {
+        if (x == 0.0f || x == 1.0f) return x;
+        constexpr float c5 = (2.0f * kPi) / 4.5f;
+        if (x < 0.5f)
+        {
+            return -(std::pow(2.0f, 20.0f * x - 10.0f) * std::sin((20.0f * x - 11.125f) * c5)) * 0.5f;
+        }
+        return (std::pow(2.0f, -20.0f * x + 10.0f) * std::sin((20.0f * x - 11.125f) * c5)) * 0.5f + 1.0f;
+    }
+
+    case EasingFunction::EaseInBounce:
+        return 1.0f - EaseOutBounce01(1.0f - x);
+    case EasingFunction::EaseOutBounce:
+        return EaseOutBounce01(x);
+    case EasingFunction::EaseInOutBounce:
+        return (x < 0.5f)
+            ? (1.0f - EaseOutBounce01(1.0f - 2.0f * x)) * 0.5f
+            : (1.0f + EaseOutBounce01(2.0f * x - 1.0f)) * 0.5f;
+
+    case EasingFunction::EaseInBack:
+    {
+        constexpr float c1 = 1.70158f;
+        constexpr float c3 = c1 + 1.0f;
+        return c3 * x * x * x - c1 * x * x;
+    }
+    case EasingFunction::EaseOutBack:
+    {
+        constexpr float c1 = 1.70158f;
+        constexpr float c3 = c1 + 1.0f;
+        return 1.0f + c3 * std::pow(x - 1.0f, 3.0f) + c1 * std::pow(x - 1.0f, 2.0f);
+    }
+    case EasingFunction::EaseInOutBack:
+    {
+        constexpr float c1 = 1.70158f;
+        constexpr float c2 = c1 * 1.525f;
+        if (x < 0.5f)
+        {
+            const float t2 = 2.0f * x;
+            return (t2 * t2 * ((c2 + 1.0f) * t2 - c2)) * 0.5f;
+        }
+        const float t2 = 2.0f * x - 2.0f;
+        return (t2 * t2 * ((c2 + 1.0f) * t2 + c2) + 2.0f) * 0.5f;
+    }
+
+    case EasingFunction::Linear:
+    default:
+        return x;
     }
 }
 
@@ -730,6 +1382,21 @@ std::vector<WidgetElement>& Widget::getElementsMutable()
     return m_elements;
 }
 
+void Widget::setAnimations(std::vector<WidgetAnimation> animations)
+{
+    m_animations = std::move(animations);
+}
+
+const std::vector<WidgetAnimation>& Widget::getAnimations() const
+{
+    return m_animations;
+}
+
+std::vector<WidgetAnimation>& Widget::getAnimationsMutable()
+{
+    return m_animations;
+}
+
 void Widget::setZOrder(int zOrder)
 {
     m_zOrder = zOrder;
@@ -744,6 +1411,7 @@ bool Widget::loadFromJson(const json& data)
 {
     m_sizePixels = {};
     m_elements.clear();
+    m_animations.clear();
     m_layoutDirty = true;
 
     if (data.contains("m_positionPixels"))
@@ -790,6 +1458,14 @@ bool Widget::loadFromJson(const json& data)
         }
     }
 
+    if (data.contains("m_animations") && data.at("m_animations").is_array())
+    {
+        for (const auto& animationJson : data.at("m_animations"))
+        {
+            m_animations.push_back(readWidgetAnimation(animationJson));
+        }
+    }
+
     return true;
 }
 
@@ -817,6 +1493,18 @@ json Widget::toJson() const
         }
     }
     data["m_elements"] = elements;
+
+    json animations = json::array();
+    for (const auto& animation : m_animations)
+    {
+        if (animation.name.empty())
+        {
+            continue;
+        }
+        animations.push_back(writeWidgetAnimation(animation));
+    }
+    data["m_animations"] = animations;
+
     return data;
 }
 

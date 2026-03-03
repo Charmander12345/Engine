@@ -516,7 +516,7 @@ int main()
                 // Destroy all script-spawned viewport widgets
                 if (auto* vpUI = renderer->getViewportUIManagerPtr())
                 {
-                    vpUI->clearAllScriptWidgets();
+                    vpUI->clearAllWidgets();
                 }
                 Logger::Instance().log(Logger::Category::Engine, "PIE: stopped.", Logger::LogLevel::INFO);
             };
@@ -628,6 +628,12 @@ int main()
                 items.push_back({ "Engine Settings", [&renderer]()
                     {
                         renderer->getUIManager().openEngineSettingsPopup();
+                    }
+                });
+
+                items.push_back({ "UI Designer", [&renderer]()
+                    {
+                        renderer->getUIManager().openUIDesignerTab();
                     }
                 });
 
@@ -957,7 +963,7 @@ int main()
                                 skyEntry.fillX = true;
                                 skyEntry.minSize = Vec2{ 0.0f, 24.0f };
                                 skyEntry.padding = Vec2{ 6.0f, 4.0f };
-                                skyEntry.isHitTestable = true;
+                                skyEntry.hitTestMode = HitTestMode::Enabled;
                                 skyEntry.runtimeOnly = true;
                                 skyEntry.onValueChanged = [renderer](const std::string& value)
                                     {
@@ -987,7 +993,7 @@ int main()
                                 clearBtn.fillX = true;
                                 clearBtn.minSize = Vec2{ 0.0f, 24.0f };
                                 clearBtn.padding = Vec2{ 4.0f, 2.0f };
-                                clearBtn.isHitTestable = true;
+                                clearBtn.hitTestMode = HitTestMode::Enabled;
                                 clearBtn.runtimeOnly = true;
                                 clearBtn.onClicked = [renderer]()
                                     {
@@ -2167,13 +2173,21 @@ int main()
                                 defaultWidget->setName(displayName);
                                 defaultWidget->setSizePixels(Vec2{ 640.0f, 360.0f });
 
+                                WidgetElement canvas{};
+                                canvas.id = displayName + ".CanvasPanel";
+                                canvas.type = WidgetElementType::Panel;
+                                canvas.from = Vec2{ 0.0f, 0.0f };
+                                canvas.to = Vec2{ 1.0f, 1.0f };
+                                canvas.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                                canvas.isCanvasRoot = true;
+
                                 WidgetElement panel{};
                                 panel.id = displayName + ".RootPanel";
                                 panel.type = WidgetElementType::Panel;
                                 panel.from = Vec2{ 0.0f, 0.0f };
                                 panel.to = Vec2{ 1.0f, 1.0f };
                                 panel.color = Vec4{ 0.08f, 0.08f, 0.10f, 0.75f };
-                                panel.isHitTestable = true;
+                                panel.hitTestMode = HitTestMode::Enabled;
 
                                 WidgetElement label{};
                                 label.id = displayName + ".Label";
@@ -2185,9 +2199,10 @@ int main()
                                 label.fontSize = 18.0f;
                                 label.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
                                 panel.children.push_back(std::move(label));
+                                canvas.children.push_back(std::move(panel));
 
                                 std::vector<WidgetElement> elements;
-                                elements.push_back(std::move(panel));
+                                elements.push_back(std::move(canvas));
                                 defaultWidget->setElements(std::move(elements));
                                 widgetAsset->setData(defaultWidget->toJson());
 
@@ -2311,7 +2326,7 @@ int main()
                                     entry.fillX = true;
                                     entry.minSize = Vec2{ 0.0f, 24.0f };
                                     entry.padding = Vec2{ 6.0f, 4.0f };
-                                    entry.isHitTestable = true;
+                                    entry.hitTestMode = HitTestMode::Enabled;
                                     entry.runtimeOnly = true;
                                     return entry;
                                 };
@@ -2378,7 +2393,7 @@ int main()
                                     createBtn.hoverColor = Vec4{ 0.2f, 0.6f, 0.35f, 1.0f };
                                     createBtn.shaderVertex = "button_vertex.glsl";
                                     createBtn.shaderFragment = "button_fragment.glsl";
-                                    createBtn.isHitTestable = true;
+                                    createBtn.hitTestMode = HitTestMode::Enabled;
                                     createBtn.onClicked = [state, &renderer, popup]()
                                     {
                                         auto& diagnostics = DiagnosticsManager::Instance();
@@ -2461,7 +2476,7 @@ int main()
                                     cancelBtn.hoverColor = Vec4{ 0.35f, 0.35f, 0.42f, 1.0f };
                                     cancelBtn.shaderVertex = "button_vertex.glsl";
                                     cancelBtn.shaderFragment = "button_fragment.glsl";
-                                    cancelBtn.isHitTestable = true;
+                                    cancelBtn.hitTestMode = HitTestMode::Enabled;
                                     cancelBtn.onClicked = [popup]() { popup->close(); };
                                     elements.push_back(std::move(cancelBtn));
                                 }
@@ -2552,11 +2567,21 @@ int main()
 
             if (event.type == SDL_EVENT_MOUSE_MOTION && (rightMouseDown || (diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused)))
             {
-                // Use a frame-rate independent sensitivity (degrees per pixel).
-                // Relative mouse motion already represents physical movement, not a per-frame quantity.
-                const float sensitivity = 0.12f; // deg per pixel
-                renderer->rotateCamera(static_cast<float>(event.motion.xrel) * sensitivity,
-                    -static_cast<float>(event.motion.yrel) * sensitivity);
+                // Block camera rotation when gameplay cursor is visible
+                bool cursorBlocksCamera = false;
+                if (diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused)
+                {
+                    if (auto* vpUI = renderer->getViewportUIManagerPtr())
+                        cursorBlocksCamera = vpUI->isGameplayCursorVisible();
+                }
+                if (!cursorBlocksCamera)
+                {
+                    // Use a frame-rate independent sensitivity (degrees per pixel).
+                    // Relative mouse motion already represents physical movement, not a per-frame quantity.
+                    const float sensitivity = 0.12f; // deg per pixel
+                    renderer->rotateCamera(static_cast<float>(event.motion.xrel) * sensitivity,
+                        -static_cast<float>(event.motion.yrel) * sensitivity);
+                }
             }
 
             if (event.type == SDL_EVENT_TEXT_INPUT)

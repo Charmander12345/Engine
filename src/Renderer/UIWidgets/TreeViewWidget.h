@@ -80,7 +80,7 @@ private:
             row.textAlignH = TextAlignH::Left;
             row.textAlignV = TextAlignV::Center;
             row.minSize = Vec2{ 0.0f, 22.0f };
-            row.isHitTestable = true;
+            row.hitTestMode = HitTestMode::Enabled;
             row.runtimeOnly = true;
             row.color = m_itemColor;
             row.hoverColor = m_hoverColor;

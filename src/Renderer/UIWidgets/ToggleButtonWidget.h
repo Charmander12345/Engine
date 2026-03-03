@@ -59,7 +59,7 @@ public:
         el.padding = m_padding;
         el.minSize = m_minSize;
         el.isChecked = m_isChecked;
-        el.isHitTestable = true;
+        el.hitTestMode = HitTestMode::Enabled;
         el.fillX = true;
         el.onCheckedChanged = m_onCheckedChanged;
         return el;

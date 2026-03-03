@@ -96,7 +96,7 @@ public:
             tabButton.textColor = m_textColor;
             tabButton.shaderVertex = "button_vertex.glsl";
             tabButton.shaderFragment = "button_fragment.glsl";
-            tabButton.isHitTestable = true;
+            tabButton.hitTestMode = HitTestMode::Enabled;
             tabButton.runtimeOnly = true;
 
             if (static_cast<int>(i) == m_activeTab)

@@ -59,7 +59,7 @@ public:
         el.isBold = m_isBold;
         el.isItalic = m_isItalic;
         el.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };  // transparent background
-        el.isHitTestable = false;
+        el.hitTestMode = HitTestMode::DisabledSelf;
         return el;
     }
 

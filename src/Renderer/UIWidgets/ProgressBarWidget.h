@@ -40,7 +40,7 @@ public:
         element.padding = m_padding;
         element.color = m_backgroundColor;
         element.fillColor = m_fillColor;
-        element.isHitTestable = false;
+        element.hitTestMode = HitTestMode::DisabledSelf;
         return element;
     }
 

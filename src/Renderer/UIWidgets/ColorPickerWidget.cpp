@@ -9,7 +9,7 @@ WidgetElement ColorPickerWidget::toElement() const
     element.type = WidgetElementType::ColorPicker;
     element.color = m_color;
     element.minSize = m_minSize;
-    element.isHitTestable = m_hitTestable;
+    element.hitTestMode = m_hitTestable ? HitTestMode::Enabled : HitTestMode::DisabledSelf;
     element.isCompact = m_compact;
     element.onColorChanged = m_onColorChanged;
 

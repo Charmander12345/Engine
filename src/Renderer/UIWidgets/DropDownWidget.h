@@ -62,7 +62,7 @@ public:
         element.color = m_backgroundColor;
         element.hoverColor = m_hoverColor;
         element.textColor = m_textColor;
-        element.isHitTestable = true;
+        element.hitTestMode = HitTestMode::Enabled;
         if (m_selectedIndex >= 0 && m_selectedIndex < static_cast<int>(m_items.size()))
         {
             element.text = m_items[static_cast<size_t>(m_selectedIndex)];

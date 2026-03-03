@@ -62,7 +62,7 @@ public:
         element.color = m_backgroundColor;
         element.hoverColor = m_hoverColor;
         element.textColor = m_textColor;
-        element.isHitTestable = true;
+        element.hitTestMode = HitTestMode::Enabled;
         element.items = m_items;
 
         // Copy runtime dropdown items (label + callback)

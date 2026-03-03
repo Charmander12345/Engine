@@ -397,6 +397,9 @@ class ui:
     def spawn_widget(content_path: str) -> Optional[str]:
         """Spawn a viewport widget from a content-relative path.
 
+        The ``.asset`` extension is appended automatically if omitted,
+        so ``spawn_widget("HUD")`` resolves to ``HUD.asset``.
+
         The widget is rendered only within the viewport area and is
         automatically destroyed when PIE stops.
 
@@ -409,101 +412,75 @@ class ui:
         """Remove a viewport widget by the id returned from spawn_widget."""
         ...
 
-# ---------------------------------------------------------------------------
-# engine.viewport_ui  – Viewport overlay widget API
-# ---------------------------------------------------------------------------
-
-class viewport_ui:
     @staticmethod
-    def create_widget(widget_id: str) -> bool:
-        """Create a new root viewport UI widget."""
+    def show_cursor(visible: bool) -> bool:
+        """Show or hide the gameplay cursor.
+
+        When visible the OS cursor is shown, relative mouse mode is
+        disabled, and camera rotation is blocked automatically.
+        """
         ...
 
     @staticmethod
-    def clear_widget(widget_id: str = "") -> bool:
-        """Clear and remove the viewport UI root widget."""
+    def clear_all_widgets() -> bool:
+        """Remove all spawned viewport widgets."""
         ...
 
-    @staticmethod
-    def set_visible(visible: bool) -> bool:
-        """Show or hide the entire viewport UI layer."""
-        ...
+    # Widget Element Types available in Widget Assets:
+    # Panel, Text, Label, Button, ToggleButton, RadioButton, Image, EntryBar,
+    # StackPanel, ScrollView, Grid, Slider, CheckBox, DropDown, ColorPicker,
+    # ProgressBar, Separator, TreeView, TabView, DropdownButton,
+    # WrapBox        — flow container that wraps children to the next line/column
+    # UniformGrid    — grid with equal-sized cells (columns, rows)
+    # SizeBox        — single-child container with explicit width/height override
+    # ScaleBox       — single-child container that scales to fit (Contain/Cover/Fill/ScaleDown/UserSpecified)
+    # WidgetSwitcher — shows only one child at a time (activeChildIndex)
+    # Overlay        — stacks all children on top of each other with alignment
 
-    @staticmethod
-    def add_text(element_id: str, text: str, x: float, y: float, w: float, h: float) -> bool:
-        """Add a Text element to the viewport widget."""
-        ...
-
-    @staticmethod
-    def add_label(element_id: str, text: str, x: float, y: float, w: float, h: float) -> bool:
-        """Add a Label element to the viewport widget (non-interactive)."""
-        ...
-
-    @staticmethod
-    def add_button(element_id: str, text: str, x: float, y: float, w: float, h: float) -> bool:
-        """Add a Button element to the viewport widget."""
-        ...
-
-    @staticmethod
-    def add_panel(element_id: str, x: float, y: float, w: float, h: float,
-                  r: float = 0.1, g: float = 0.1, b: float = 0.12, a: float = 0.8) -> bool:
-        """Add a Panel element to the viewport widget."""
-        ...
-
-    @staticmethod
-    def set_text(element_id: str, text: str) -> bool:
-        """Set the text on a viewport widget element."""
-        ...
-
-    @staticmethod
-    def set_color(element_id: str, r: float, g: float, b: float, a: float) -> bool:
-        """Set the background color of a viewport widget element."""
-        ...
-
-    @staticmethod
-    def set_text_color(element_id: str, r: float, g: float, b: float, a: float) -> bool:
-        """Set the text color of a viewport widget element."""
-        ...
-
-    @staticmethod
-    def set_opacity(element_id: str, opacity: float) -> bool:
-        """Set the opacity of a viewport widget element (0=transparent, 1=opaque)."""
-        ...
-
-    @staticmethod
-    def set_element_visible(element_id: str, visible: bool) -> bool:
-        """Show or hide a specific viewport widget element."""
-        ...
-
-    @staticmethod
-    def set_border(element_id: str, thickness: float, r: float, g: float, b: float, a: float) -> bool:
-        """Set border thickness and color on a viewport widget element."""
-        ...
-
-    @staticmethod
-    def set_border_radius(element_id: str, radius: float) -> bool:
-        """Set the border corner radius on a viewport widget element."""
-        ...
-
-    @staticmethod
-    def set_tooltip(element_id: str, tooltip: str) -> bool:
-        """Set the tooltip text for a viewport widget element."""
-        ...
-
-    @staticmethod
-    def set_font_size(element_id: str, size: float) -> bool:
-        """Set the font size on a viewport widget element."""
-        ...
-
-    @staticmethod
-    def set_font_bold(element_id: str, bold: bool) -> bool:
-        """Set bold font style on a viewport widget element."""
-        ...
-
-    @staticmethod
-    def set_font_italic(element_id: str, italic: bool) -> bool:
-        """Set italic font style on a viewport widget element."""
-        ...
+    # ── Phase 2: Brush-based Styling ──────────────────────────────────────
+    #
+    # BrushType enum: None, SolidColor, Image, NineSlice, LinearGradient
+    #
+    # UIBrush struct fields:
+    #   type          — BrushType (default SolidColor)
+    #   color         — Vec4 RGBA (start color for gradients)
+    #   colorEnd      — Vec4 RGBA (end color for LinearGradient)
+    #   gradientAngle — float (0=vertical, 90=horizontal)
+    #   imagePath     — str (asset-relative texture path)
+    #   textureId     — int (preloaded GL texture id, 0 if not loaded)
+    #   imageMargin   — Vec4 (L,T,R,B margins for NineSlice)
+    #   imageTiling   — Vec2 (tile repeat count)
+    #
+    # Every WidgetElement now has:
+    #   background      — UIBrush (replaces color for new assets)
+    #   hoverBrush      — UIBrush (replaces hoverColor for new assets)
+    #   fillBrush       — UIBrush (replaces fillColor for new assets)
+    #   renderTransform — RenderTransform (visual-only, does not affect layout)
+    #   clipMode        — ClipMode (None, ClipToBounds, InheritFromParent)
+    #   effectiveOpacity — float (computed: element.opacity * parent.effectiveOpacity)
+    #
+    # RenderTransform struct fields:
+    #   translation — Vec2 (pixels)
+    #   rotation    — float (degrees)
+    #   scale       — Vec2 (1,1 = identity)
+    #   shear       — Vec2
+    #   pivot       — Vec2 (normalised, 0.5,0.5 = centre)
+    #
+    # RenderTransform is applied visually in all three render paths
+    # (viewport UI, widget preview FBO, editor UI).  The transform matrix is
+    # T(pivot) * Translate * Rotate * Scale * Shear * T(-pivot) and is
+    # multiplied onto the orthographic projection.  Hit-testing applies the
+    # inverse transform so clicks on rotated/scaled widgets are detected
+    # correctly.
+    #
+    # ClipMode behaviour:
+    #   None             — no additional clipping
+    #   ClipToBounds     — children are scissor-clipped to this element's
+    #                      axis-aligned bounding box (nested clips intersect)
+    #   InheritFromParent — keeps the parent's current scissor rect
+    #
+    # Opacity is inherited: children multiply their opacity with the parent's
+    # effective opacity at render time.
 
 # ---------------------------------------------------------------------------
 # engine.physics

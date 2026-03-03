@@ -48,7 +48,7 @@ public:
         element.font = m_font;
         element.fontSize = m_fontSize;
         element.isPassword = m_isPassword;
-        element.isHitTestable = true;
+        element.hitTestMode = HitTestMode::Enabled;
         element.onValueChanged = m_onValueChanged;
         return element;
     }

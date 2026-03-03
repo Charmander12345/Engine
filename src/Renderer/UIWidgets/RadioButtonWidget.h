@@ -61,7 +61,7 @@ public:
         el.padding = m_padding;
         el.isChecked = m_isChecked;
         el.radioGroup = m_group;
-        el.isHitTestable = true;
+        el.hitTestMode = HitTestMode::Enabled;
         el.fillX = true;
         el.onCheckedChanged = m_onCheckedChanged;
         return el;

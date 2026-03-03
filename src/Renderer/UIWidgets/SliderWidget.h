@@ -50,7 +50,7 @@ public:
         element.color = m_trackColor;
         element.fillColor = m_fillColor;
         element.textColor = m_handleColor;
-        element.isHitTestable = true;
+        element.hitTestMode = HitTestMode::Enabled;
         if (m_onValueChanged)
         {
             element.onValueChanged = [callback = m_onValueChanged](const std::string& value)

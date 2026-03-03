@@ -16,9 +16,11 @@
 - ✅ `UIManager`: Details-Panel erweitert – H/V-Alignment (Left/Center/Right/Fill), Size-to-Content, Max Width/Height, Spacing, Opacity, Visibility, Border-Width/-Radius, Tooltip, Bold/Italic, RadioGroup. FillX/FillY-Checkboxen durch intuitivere Alignment-Steuerung ersetzt.
 - ✅ `Scripting`: Neues Python-Modul `engine.viewport_ui` mit 17 Methoden für Viewport-UI aus Scripts. `engine.pyi` aktualisiert.
 - ✅ `OpenGLRenderer`: Nach Shadow-Rendering wird der Content-Rect-Viewport (inkl. Offset) wiederhergestellt. Dadurch bleibt die Welt an der korrekten Position im Viewport-Bereich.
-- 🟡 `ViewportUI`: Grundgerüst `ViewportUIManager` erstellt und an `OpenGLRenderer` angebunden (Viewport-Rect-Übergabe implementiert). Rendering/Input des Viewport-UI folgt in den nächsten Schritten.
-- 🟡 `ViewportUI`: Erster Renderpfad vorhanden (`renderViewportUI()` im `OpenGLRenderer`) und nur für den `Viewport`-Tab aktiv. Der Input-Routing-Teil folgt als nächster Schritt.
-- 🟡 `ViewportUI`: Input-Routing ist jetzt im Haupt-Eventloop integriert (Editor-UI → Viewport-UI → 3D). Basis-HitTest und Klick-Callbacks für hit-testable Elemente im `ViewportUIManager` sind aktiv.
+- ✅ `ViewportUI`: Grundgerüst `ViewportUIManager` erstellt und an `OpenGLRenderer` angebunden (Viewport-Rect-Übergabe, Layout-Dirty-Tracking, Selektion, JSON-Serialisierung).
+- ✅ `ViewportUI`: Renderpfad `renderViewportUI()` im `OpenGLRenderer` voll funktionsfähig – Full-FBO-Viewport mit Ortho-Offset und Scissor-Clipping, nur für Viewport-Tab aktiv.
+- ✅ `ViewportUI`: Input-Routing im Haupt-Eventloop integriert (Editor-UI → Viewport-UI → 3D). HitTest, Klick-Callbacks, Pressed-State und `isOverUI`-Berücksichtigung beider UI-Systeme aktiv.
+- ✅ `Gameplay UI`: Vollständig implementiert – Multi-Widget-System mit Z-Order, WidgetAnchor (10 Positionen), implizites Canvas Panel pro Widget, Anchor-basiertes Layout (`computeAnchorPivot` + `ResolveAnchorsRecursive`), `engine.viewport_ui` Python-Modul (28 Methoden), Gameplay-Cursor-Steuerung mit automatischer Kamera-Blockade, Auto-Cleanup bei PIE-Stop. Rein dynamisch per Script, kein Asset-Typ, kein Level-Bezug. Siehe `GAMEPLAY_UI_PLAN.md` Phase A.
+- ✅ `UI Designer Tab`: Editor-Tab (wie MeshViewer) für visuelles Viewport-UI-Design – Controls-Palette (7 Typen: Panel/Text/Label/Button/Image/ProgressBar/Slider), Widget-Hierarchie-TreeView, Properties-Panel (Identity/Anchor/Size/Appearance/Text/Image/Value), bidirektionale Sync via `setOnSelectionChanged`, Selektions-Highlight (orangefarbener 2px-Rahmen im Viewport). Öffnung über Settings-Dropdown. Siehe `GAMEPLAY_UI_PLAN.md` Phase B.
 - ✅ `Scripting/UI`: Runtime-Widget-Steuerung erweitert – `engine.ui.spawn_widget(content_path)` lädt ein Widget-Asset per Content-relativem Pfad und gibt eine Widget-ID zurück; `engine.ui.remove_widget(widget_id)` entfernt das Widget. Widgets werden ausschließlich im Viewport-Bereich gerendert (via `ViewportUIManager::registerScriptWidget`/`unregisterScriptWidget`) und beim Beenden von PIE automatisch zerstört (`clearAllScriptWidgets`); `engine.pyi` wurde synchronisiert.
 - ✅ `Widget Editor`: Widget-Assets können jetzt im Content Browser über **New Widget** erzeugt werden (`AssetType::Widget`) und erscheinen danach direkt in Tree/Grid.
 - ✅ `Widget Editor`: Doppelklick auf ein Widget-Asset öffnet nun einen eigenen Widget-Editor-Tab; das Asset wird geladen und tab-scoped dargestellt.
@@ -55,6 +57,33 @@
 - ✅ `Widget Editor`: UX-Plan erstellt – `WIDGET_EDITOR_UX_PLAN.md` beschreibt 5 Phasen zur Verbesserung: Grundlegende Bedienbarkeit, WYSIWYG-Editing, Produktivität, fortgeschrittene Features und Polish.
 - ✅ `Widget Editor`: Hit-Test-Fix – `measureAllElements` stellt sicher, dass alle Elemente (auch Kinder von Panel-Elementen) korrekte `hasContentSize`-Werte erhalten. Die Hit-Test-Traversierung in `selectWidgetEditorElementAtPos` verwendet nun `std::function` statt rekursiver Auto-Lambdas für zuverlässigere Tiefensuche.
 - ✅ `Widget Editor`: Hover-Preview – Beim Überfahren eines Elements im Canvas-Preview wird dessen Bounding-Box als hellblaue Outline angezeigt (`updateWidgetEditorHover()`). Die Selection-Outline (orange) und Hover-Outline (blau) verwenden nun `computedPositionPixels/computedSizePixels` statt `boundsMinPixels/boundsMaxPixels`.
+- ✅ `UIWidget`: Phase 1 Layout-Fundament – 6 neue `WidgetElementType`-Werte: `WrapBox` (Flow-Container mit automatischem Umbruch), `UniformGrid` (Grid mit gleichgroßen Zellen, `columns`/`rows`), `SizeBox` (Single-Child-Container mit `widthOverride`/`heightOverride`), `ScaleBox` (skaliert Kind per `ScaleMode`: Contain/Cover/Fill/ScaleDown/UserSpecified), `WidgetSwitcher` (zeigt nur Kind `activeChildIndex`), `Overlay` (stapelt Kinder übereinander mit Alignment). Neue Felder: `columns`, `rows`, `widthOverride`, `heightOverride`, `scaleMode`, `userScale`, `activeChildIndex`. `ScaleMode`-Enum hinzugefügt.
+- ✅ `UIWidget`: JSON-Serialisierung für alle 6 neuen Layout-Typen (readElement/writeElement) mit typspezifischen Feldern.
+- ✅ `UIManager`: Layout-Berechnung (measureElementSize + layoutElement) für alle 6 neuen Typen implementiert – WrapBox Flow+Wrap, UniformGrid gleichmäßige Zellen, SizeBox Override-Dimensionen, ScaleBox Skalierungsfaktor pro Modus, WidgetSwitcher nur aktives Kind, Overlay gestapelt mit H/V-Alignment.
+- ✅ `OpenGLRenderer`: Rendering-Support für alle 6 neuen Layout-Typen in `renderViewportUI()` und `drawUIWidgetsToFramebuffer()` – Container-Hintergrund (falls alpha > 0) + rekursives Kind-Rendering.
+- ✅ `UIManager`: Widget-Editor-Palette um 6 neue Typen erweitert (WrapBox, UniformGrid, SizeBox, ScaleBox, WidgetSwitcher, Overlay). Drag-&-Drop-Defaults und Viewport-Designer-Palette ebenfalls aktualisiert.
+- ✅ `UIManager`: Details-Panel-Properties für neue Typen: Spacing (WrapBox/UniformGrid), Columns/Rows (UniformGrid), Width/Height Override (SizeBox), ScaleMode-Dropdown + UserScale (ScaleBox), Active Index (WidgetSwitcher).
+- ✅ `UIWidgets`: 6 neue Helper-Header erstellt: `WrapBoxWidget.h`, `UniformGridWidget.h`, `SizeBoxWidget.h`, `ScaleBoxWidget.h`, `WidgetSwitcherWidget.h`, `OverlayWidget.h`.
+- ✅ `Scripting`: `engine.pyi` mit Dokumentation der 6 neuen Widget-Typen aktualisiert.
+- ✅ `UIWidget`: Phase 2 Styling & Visual Polish – Neue Datentypen: `BrushType`-Enum (None, SolidColor, Image, NineSlice, LinearGradient), `UIBrush`-Struct (Typ, Farbe, Gradient-Endfarbe, Winkel, Bild-Pfad, 9-Slice-Margins, Tiling), `RenderTransform`-Struct (Translation, Rotation, Scale, Shear, Pivot), `ClipMode`-Enum (None, ClipToBounds, InheritFromParent).
+- ✅ `UIWidget`: Phase 2 WidgetElement-Felder: `background` (UIBrush), `hoverBrush` (UIBrush), `fillBrush` (UIBrush), `renderTransform` (RenderTransform), `clipMode` (ClipMode), `effectiveOpacity` (float, berechneter Wert zur Renderzeit).
+- ✅ `UIWidget`: Phase 2 JSON-Serialisierung: `readBrush`/`writeBrush`, `readRenderTransform`/`writeRenderTransform` Hilfsfunktionen. Rückwärtskompatibilität mit Legacy-`color`-Feldern gewährleistet.
+- ✅ `OpenGLRenderer`: `drawUIBrush()` – Neue Renderer-Funktion, die nach `BrushType` dispatcht: SolidColor → `drawUIPanel`, Image → `drawUIImage`, NineSlice → Bild-Fallback, LinearGradient → dedizierter Gradient-Shader (inline GLSL 330 mit `uColorStart`/`uColorEnd`/`uAngle`).
+- ✅ `OpenGLRenderer`: Gradient-Shader-Programm (`m_uiGradientProgram`) mit Lazy-Init und gecachten Uniform-Locations (`UIGradientUniforms`).
+- ✅ `OpenGLRenderer`: Opacity-Vererbung in beiden Rendering-Pfaden (`renderViewportUI` + `drawUIWidgetsToFramebuffer`). `parentOpacity`-Parameter in `renderElement`-Lambda, `effectiveOpacity = element.opacity * parentOpacity`, Alpha-Multiplikation auf alle `drawUIPanel`/`drawUIImage`/`drawUIBrush`-Aufrufe.
+- ✅ `OpenGLRenderer`: Brush-basiertes Background-Rendering – Wenn `element.background.isVisible()`, wird `drawUIBrush()` vor dem typspezifischen Rendering aufgerufen. Legacy-`color`-Felder werden nur gezeichnet, wenn kein Brush gesetzt ist.
+- ✅ `UIManager`: Phase 2 Details-Panel-Properties im Widget-Editor: Brush-Typ-Dropdown (Background), Brush-Farbfelder (RGBA + Gradient-End-Farbe + Winkel + Bild-Pfad), ClipMode-Dropdown, RenderTransform-Felder (Translation, Rotation, Scale, Shear, Pivot).
+- ✅ `Scripting`: `engine.pyi` mit Phase 2 Typ-Dokumentation aktualisiert (BrushType, UIBrush, RenderTransform, ClipMode, Opacity-Vererbung).
+- ✅ `UIManager`: Bugfix – `handleScroll()` prüft jetzt scrollbare Widgets (z. B. Details-Panel) *vor* dem Canvas-Zoom. Zuvor konsumierte `isOverWidgetEditorCanvas()` den Scroll-Event über dem gesamten Fenster (da das Canvas-Widget `fillX/fillY` hat), sodass Scrolling im rechten Details-Panel als Zoom interpretiert wurde. Zusätzlich Tab-Filterung hinzugefügt (analog `getWidgetsOrderedByZ`), damit Widgets inaktiver Tabs keine Scroll-Events abfangen.
+- ✅ `OpenGLRenderer`: RenderTransform-Rendering – `ComputeRenderTransformMatrix()` Helper (T(pivot)·Translate·Rotate·Scale·Shear·T(-pivot)) im anonymen Namespace. Alle drei Render-Pfade (`renderViewportUI`, `drawUIWidgetsToFramebuffer`, `renderUI`) multiplizieren die Transform-Matrix auf die uiProjection. RAII-Structs (`RtRestore`/`RtRestore2`/`RtRestore3`) stellen die Projektion bei jedem Exit-Pfad automatisch wieder her.
+- ✅ `ViewportUIManager`: RenderTransform-Hit-Testing – `InverseTransformPoint()` Helper im anonymen Namespace berechnet die inverse 2D-Transformation (Undo Translation → Rotation → Scale → Shear). `HitTestRecursive()` und `HitTestRecursiveConst()` transformieren den Mauszeiger in den lokalen (untransformierten) Koordinatenraum, bevor der Bounds-Check erfolgt. Kinder erben den transformierten Punkt.
+- ✅ `OpenGLRenderer`: ClipMode-Scissor-Stack – Alle drei Render-Pfade unterstützen `ClipMode::ClipToBounds`. Bei aktivem Clip wird der aktuelle GL-Scissor gespeichert, mit den Element-Bounds geschnitten (Achsen-ausgerichtete Intersection) und per RAII-Structs (`ScissorRestore`/`ScissorRestore2`/`ScissorRestore3`) beim Verlassen wiederhergestellt. Verschachtelte Clips schneiden korrekt ineinander.
+- ✅ `Scripting`: `engine.pyi` mit RenderTransform-Rendering/Hit-Testing und ClipMode-Scissor-Verhaltensdokumentation aktualisiert.
+- ✅ `UIManager`: Widget-Editor/UI-Designer Sidepanel-Rendering korrigiert – mehrere `StackPanel`-Container setzen jetzt explizit transparente `color`-Werte statt ungewollt den weißen `WidgetElement`-Default zu verwenden (behebt partielle weiße Flächen im linken Panel und in Details-Zeilen).
+- ✅ `UIManager`: Widget-Editor-Control-Palette verbessert – die einzelnen Steuerelement-Einträge nutzen jetzt einen echten Hover-State (`Button` mit transparenter Basis + Hover-Farbe), damit der aktuell überfahrene Eintrag klar sichtbar ist.
+- ✅ `OpenGLRenderer`: Viewport-UI-Control-Rendering korrigiert – `Text`/`Label` sowie `Button`/`ToggleButton`/`RadioButton` verwenden jetzt korrekte H/V-Ausrichtung, Wrap-Text und Auto-Fit der Schrift statt fixer Top-Left-Textausgabe; behebt fehlerhafte Darstellung bei verfügbaren Controls (u. a. Label/Layout).
+- ✅ `UIWidget`: Phase-3-Easing-Grundlage implementiert – neue zentrale Runtime-Funktion `EvaluateEasing(EasingFunction, t)` deckt alle Standardkurven ab (`Linear`, `EaseIn/Out/InOut` für Quad, Cubic, Elastic, Bounce, Back) und normalisiert Eingaben über Clamping auf `[0..1]`.
+- ✅ `UIWidget`: Phase-3-Grundlage implementiert – neue Animationsdatenstrukturen (`AnimatableProperty`, `EasingFunction`, `AnimationKeyframe`, `AnimationTrack`, `WidgetAnimation`) plus Widget-Persistenz (`m_animations`) mit JSON-Serialisierung (`m_animations` im Widget-Asset).
 
 ## Legende
 
@@ -93,6 +122,7 @@
 23. [Skybox-System](#23-skybox-system)
 24. [Physik-System](#24-physik-system)
 25. [Editor-Fenster / Mesh Viewer](#25-editor-fenster--mesh-viewer)
+26. [Viewport UI System](#26-viewport-ui-system)
 
 ---
 
@@ -905,6 +935,86 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 - Kein Mesh-Editing (nur Betrachtung)
 - Keine Animations-Unterstützung
 - Kein Info-Overlay (Vertex/Triangle-Count)
+
+---
+
+## 26. Gameplay UI System (Viewport UI)
+
+### 26.1 ViewportUIManager – Grundgerüst & Multi-Widget (Phase A ✅)
+
+| Feature                                          | Status |
+|--------------------------------------------------|--------|
+| `ViewportUIManager`-Klasse (`src/Renderer/ViewportUIManager.h/.cpp`) | ✅ |
+| Multi-Widget-System (`vector<WidgetEntry>`, Z-Order-Sortierung) | ✅ |
+| `createWidget` / `removeWidget` / `getWidget` / `clearAllWidgets` | ✅ |
+| Implizites Canvas Panel pro Widget (Root-Element) | ✅ |
+| `WidgetAnchor`-Enum (10 Werte: TopLeft/TopRight/BottomLeft/BottomRight/Top/Bottom/Left/Right/Center/Stretch) | ✅ |
+| Anchor-basiertes Layout (`computeAnchorPivot` + `ResolveAnchorsRecursive`) | ✅ |
+| Viewport-Rect-Verwaltung (setViewportRect, getViewportRect, getViewportSize) | ✅ |
+| Element-Zugriff (findElementById, getRootElement) | ✅ |
+| Layout-Update mit Dirty-Tracking | ✅ |
+| Input-Handling (MouseDown/Up, Scroll, TextInput, KeyDown) | ✅ |
+| HitTest (rekursiv, Z-Order-basiert, Multi-Widget) | ✅ |
+| Koordinaten-Transformation (Window→Viewport) | ✅ |
+| Selektion + SelectionChanged-Callback | ✅ |
+| Sichtbarkeitssteuerung (setVisible/isVisible) | ✅ |
+| Render-Dirty-Tracking | ✅ |
+| Gameplay-Cursor-Steuerung (`setGameplayCursorVisible`) | ✅ |
+| Automatische Kamera-Input-Blockade bei sichtbarem Cursor | ✅ |
+| Integration in `OpenGLRenderer` (`m_viewportUIManager`) | ✅ |
+| `renderViewportUI()` (Full-FBO-Viewport, Ortho-Offset, Scissor, Multi-Widget) | ✅ |
+| Input-Routing in `main.cpp` (Editor-UI → Viewport-UI → 3D) | ✅ |
+| Auto-Cleanup aller Widgets bei PIE-Stop | ✅ |
+
+### 26.2 Asset-Integration (Phase 2 – ✅ Vereinfacht)
+
+Gameplay-UI wird ausschließlich über Widget-Assets gesteuert. Widgets werden im Widget Editor gestaltet und per `engine.ui.spawn_widget` zur Laufzeit angezeigt. Die dynamische Widget-Erstellung per Script (`engine.viewport_ui`) wurde entfernt.
+
+| Feature                                          | Status |
+|--------------------------------------------------|--------|
+| Canvas-Panel als Root jedes neuen Widgets (`isCanvasRoot`) | ✅ |
+| Canvas-Root-Löschschutz im Widget Editor         | ✅ |
+| `isCanvasRoot`/`anchor`/`anchorOffset` Serialisierung | ✅ |
+| Normalisierte from/to-Werte (0..1) im Viewport korrekt skaliert | ✅ |
+| 3-Case-Layout in `ResolveAnchorsRecursive` (Normalized/Stretch/Anchor-basiert) | ✅ |
+
+### 26.3 UI Designer Tab (Phase B ✅)
+
+| Feature                                          | Status |
+|--------------------------------------------------|--------|
+| `UIDesignerState`-Struct in `UIManager.h`        | ✅ |
+| Editor-Tab (wie MeshViewer, kein Popup)          | ✅ |
+| Toolbar-Widget (New Widget, Delete Widget, Status-Label) | ✅ |
+| Linkes Panel (250px): Controls-Palette + Widget-Hierarchie-TreeView | ✅ |
+| Controls-Palette (7 Typen: Panel/Text/Label/Button/Image/ProgressBar/Slider) | ✅ |
+| Widget-Hierarchie mit Selektion + Highlighting   | ✅ |
+| Rechtes Panel (280px): Properties-Panel (dynamisch, typ-basiert) | ✅ |
+| Properties: Identity, Transform, Anchor (Dropdown + Offset X/Y), Hit Test (Mode-Dropdown: Enabled/DisabledSelf/DisabledAll), Layout, Appearance, Text, Image, Value | ✅ |
+| Bidirektionale Sync (Designer ↔ Viewport via `setOnSelectionChanged`) | ✅ |
+| `HitTestMode`-Enum (Enabled/DisabledSelf/DisabledAll) pro WidgetElement mit Parent-Override | ✅ |
+| "UI Designer" im Settings-Dropdown               | ✅ |
+| Selektions-Highlight im Viewport (orangefarbener 2px-Rahmen) | ✅ |
+| `addElementToViewportWidget()` (7 Element-Typen mit Defaults) | ✅ |
+| `deleteSelectedUIDesignerElement()` (rekursive Entfernung, Canvas-Root geschützt) | ✅ |
+
+### 26.4 Scripting (Phase A – Vereinfacht ✅)
+
+| Feature                                          | Status |
+|--------------------------------------------------|--------|
+| `engine.ui.spawn_widget(path)` (Auto `.asset`-Endung) | ✅ |
+| `engine.ui.remove_widget(name)` | ✅ |
+| `engine.ui.show_cursor(bool)` + Kamera-Blockade | ✅ |
+| `engine.ui.clear_all_widgets()` | ✅ |
+| `engine.pyi` IntelliSense-Stubs (aktualisiert) | ✅ |
+| Auto-Cleanup Script-Widgets bei PIE-Stop         | ✅ |
+| ~~`engine.viewport_ui` Python-Modul (28 Methoden)~~ | ❌ Entfernt |
+
+**Offene Punkte (Phase D – Zukunft):**
+- Undo/Redo für Designer-Aktionen
+- Drag & Drop aus Palette in Viewport
+- Copy/Paste von Elementen
+- Responsive-Preview (Fenstergrößen-Simulation)
+- Detaillierter Plan mit Fortschritts-Tracking in `GAMEPLAY_UI_PLAN.md`
 
 ---
 

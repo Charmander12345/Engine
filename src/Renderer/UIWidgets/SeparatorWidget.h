@@ -78,7 +78,7 @@ public:
         header.textColor = m_titleColor;
         header.shaderVertex = "button_vertex.glsl";
         header.shaderFragment = "button_fragment.glsl";
-        header.isHitTestable = true;
+        header.hitTestMode = HitTestMode::Enabled;
         header.fillX = true;
         header.runtimeOnly = true;
 

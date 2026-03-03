@@ -1,4 +1,4 @@
-﻿#include "OpenGLRenderer.h"
+#include "OpenGLRenderer.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <array>
@@ -224,6 +224,35 @@ namespace
         }
 
         return SDL_HITTEST_NORMAL;
+    }
+
+    // ── RenderTransform helper ───────────────────────────────────────────
+    // Computes a 2D transformation matrix around the element's pivot point.
+    // The returned matrix is meant to be multiplied onto the ortho projection
+    // so that all subsequent draw calls are visually transformed.
+    glm::mat4 ComputeRenderTransformMatrix(const RenderTransform& rt,
+                                           float x0, float y0,
+                                           float w, float h)
+    {
+        const float pivotX = x0 + rt.pivot.x * w;
+        const float pivotY = y0 + rt.pivot.y * h;
+
+        // T(pivot) * Translate * Rotate * Scale * Shear * T(-pivot)
+        glm::mat4 m(1.0f);
+        m = glm::translate(m, glm::vec3(pivotX, pivotY, 0.0f));
+        m = glm::translate(m, glm::vec3(rt.translation.x, rt.translation.y, 0.0f));
+        m = glm::rotate(m, glm::radians(rt.rotation), glm::vec3(0.0f, 0.0f, 1.0f));
+        m = glm::scale(m, glm::vec3(rt.scale.x, rt.scale.y, 1.0f));
+        // Shear as a manual matrix multiply
+        if (rt.shear.x != 0.0f || rt.shear.y != 0.0f)
+        {
+            glm::mat4 shearMat(1.0f);
+            shearMat[1][0] = rt.shear.x; // x sheared by y
+            shearMat[0][1] = rt.shear.y; // y sheared by x
+            m = m * shearMat;
+        }
+        m = glm::translate(m, glm::vec3(-pivotX, -pivotY, 0.0f));
+        return m;
     }
 
 }
@@ -1539,14 +1568,22 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
     glEnable(GL_BLEND);
     glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
-    const glm::mat4 uiProjection = glm::ortho(0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f);
+    glm::mat4 uiProjection = glm::ortho(0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f);
 
     struct DeferredDropDownCompact { float x0, y0, x1, y1, fontSize; int selectedIndex; std::vector<std::string> items; Vec4 textColor, hoverColor; Vec2 padding; };
     std::vector<DeferredDropDownCompact> deferredDropDownsCompact;
 
+    // Helper: apply opacity to a color's alpha channel
+    const auto applyAlpha = [](const Vec4& c, float opa) -> Vec4 {
+        return Vec4{ c.x, c.y, c.z, c.w * opa };
+    };
+
     const auto renderElement = [&](const auto& self, const WidgetElement& element,
-        float parentX, float parentY, float parentW, float parentH) -> void
+        float parentX, float parentY, float parentW, float parentH, float parentOpacity = 1.0f) -> void
     {
+        // ── Opacity inheritance ───────────────────────────────────────────
+        const float opa = element.opacity * parentOpacity;
+
         float x0 = element.hasComputedPosition ? element.computedPositionPixels.x : (parentX + element.from.x * parentW);
         float y0 = element.hasComputedPosition ? element.computedPositionPixels.y : (parentY + element.from.y * parentH);
         float widthPx = element.hasComputedSize ? element.computedSizePixels.x : (parentW * (element.to.x - element.from.x));
@@ -1554,13 +1591,63 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
         const float x1 = x0 + widthPx;
         const float y1 = y0 + heightPx;
 
+        // ── RenderTransform (Phase 2) ────────────────────────────────────
+        const bool hasTransform = !element.renderTransform.isIdentity();
+        glm::mat4 savedProjectionRT(1.0f);
+        if (hasTransform)
+        {
+            savedProjectionRT = uiProjection;
+            uiProjection = uiProjection * ComputeRenderTransformMatrix(
+                element.renderTransform, x0, y0, widthPx, heightPx);
+        }
+        struct RtRestore2 { glm::mat4& proj; glm::mat4 saved; bool active;
+            ~RtRestore2() { if (active) proj = saved; } };
+        RtRestore2 rtRestore{ uiProjection, savedProjectionRT, hasTransform };
+
+        // ── ClipMode scissor (Phase 2) ──────────────────────────────────
+        GLint prevScissorBoxFB[4]{};
+        GLboolean prevScissorEnabledFB = GL_FALSE;
+        const bool clipToBoundsFB = (element.clipMode == ClipMode::ClipToBounds);
+        if (clipToBoundsFB)
+        {
+            prevScissorEnabledFB = glIsEnabled(GL_SCISSOR_TEST);
+            if (prevScissorEnabledFB)
+                glGetIntegerv(GL_SCISSOR_BOX, prevScissorBoxFB);
+            else
+            {
+                GLint vp[4]; glGetIntegerv(GL_VIEWPORT, vp);
+                prevScissorBoxFB[0] = vp[0]; prevScissorBoxFB[1] = vp[1];
+                prevScissorBoxFB[2] = vp[2]; prevScissorBoxFB[3] = vp[3];
+                glEnable(GL_SCISSOR_TEST);
+            }
+            const GLint nx = static_cast<GLint>(x0);
+            const GLint ny = static_cast<GLint>(static_cast<float>(height) - (y0 + heightPx));
+            const GLint nw = static_cast<GLint>(widthPx);
+            const GLint nh = static_cast<GLint>(heightPx);
+            const GLint ix0 = std::max(nx, prevScissorBoxFB[0]);
+            const GLint iy0 = std::max(ny, prevScissorBoxFB[1]);
+            const GLint ix1 = std::min(nx + nw, prevScissorBoxFB[0] + prevScissorBoxFB[2]);
+            const GLint iy1 = std::min(ny + nh, prevScissorBoxFB[1] + prevScissorBoxFB[3]);
+            glScissor(ix0, iy0, std::max(0, ix1 - ix0), std::max(0, iy1 - iy0));
+        }
+        struct ScissorRestore2 { GLint box[4]; GLboolean wasEnabled; bool active;
+            ~ScissorRestore2() { if (active) { glScissor(box[0], box[1], box[2], box[3]); if (!wasEnabled) glDisable(GL_SCISSOR_TEST); } } };
+        ScissorRestore2 scissorRestore{ {prevScissorBoxFB[0], prevScissorBoxFB[1], prevScissorBoxFB[2], prevScissorBoxFB[3]}, prevScissorEnabledFB, clipToBoundsFB };
+
+        // ── Brush-based background (Phase 2) ─────────────────────────────
+        if (element.background.isVisible())
+        {
+            drawUIBrush(x0, y0, x1, y1, element.background, uiProjection, opa,
+                element.isHovered, element.hoverBrush.isVisible() ? &element.hoverBrush : nullptr);
+        }
+
         if (element.type == WidgetElementType::Panel)
         {
             const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
             const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
             const GLuint prog = getUIQuadProgram(vp, fp);
-            drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, prog, element.color, false);
-            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx);
+            if (!element.background.isVisible()) drawUIPanel(x0, y0, x1, y1, applyAlpha(element.color, opa), uiProjection, prog, applyAlpha(element.color, opa), false);
+            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
             if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{1.0f,0.9f,0.1f,1.0f}, uiProjection, prog);
             return;
         }
@@ -1571,8 +1658,8 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             const GLuint prog = getUIQuadProgram(vp, fp);
             if (element.isCompact)
             {
-                if (element.color.w > 0.0f) drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, prog, element.color, false);
-                for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx);
+                if (element.color.w > 0.0f) drawUIPanel(x0, y0, x1, y1, applyAlpha(element.color, opa), uiProjection, prog, applyAlpha(element.color, opa), false);
+                for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
                 if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{0.6f,0.9f,0.2f,1.0f}, uiProjection, prog);
                 return;
             }
@@ -1770,7 +1857,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
                 const GLuint tex=(element.textureId!=0)?static_cast<GLuint>(element.textureId):getOrLoadUITexture(element.imagePath);
                 if (tex!=0) drawUIImage(x0+4.0f, y0+4.0f, x1-4.0f, y1-4.0f, tex, uiProjection);
             }
-            for (const auto& child : element.children) self(self, child, x0, y0, x1-x0, y1-y0);
+            for (const auto& child : element.children) self(self, child, x0, y0, x1-x0, y1-y0, opa);
             if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{0.7f,1.0f,0.3f,1.0f}, uiProjection, prog);
             return;
         }
@@ -1817,8 +1904,8 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
             const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
             const GLuint prog = getUIQuadProgram(vp, fp);
-            drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, prog, element.color, false);
-            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx);
+            drawUIPanel(x0, y0, x1, y1, applyAlpha(element.color, opa), uiProjection, prog, applyAlpha(element.color, opa), false);
+            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
             return;
         }
         if (element.type == WidgetElementType::Image)
@@ -1964,7 +2051,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             const GLsizei cw=static_cast<GLsizei>(std::max(0.0f,widthPx));
             const GLsizei ch=static_cast<GLsizei>(std::max(0.0f,heightPx));
             glEnable(GL_SCISSOR_TEST); glScissor(cx,cy,cw,ch);
-            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx);
+            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
             glDisable(GL_SCISSOR_TEST);
             if (m_uiDebugEnabled)
             {
@@ -1989,18 +2076,41 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
                 const GLsizei cw=static_cast<GLsizei>(std::max(0.0f,widthPx));
                 const GLsizei ch=static_cast<GLsizei>(std::max(0.0f,heightPx));
                 glEnable(GL_SCISSOR_TEST); glScissor(cx,cy,cw,ch);
-                for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx);
+                for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
                 glDisable(GL_SCISSOR_TEST);
             }
             else
             {
-                for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx);
+                for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
             }
             if (m_uiDebugEnabled)
             {
                 const GLuint prog=getUIQuadProgram(m_defaultPanelVertex,m_defaultPanelFragment);
                 drawUIOutline(x0,y0,x1,y1,Vec4{1.0f,0.4f,0.8f,1.0f},uiProjection,prog);
             }
+            return;
+        }
+        if (element.type == WidgetElementType::WrapBox
+            || element.type == WidgetElementType::UniformGrid
+            || element.type == WidgetElementType::SizeBox
+            || element.type == WidgetElementType::ScaleBox
+            || element.type == WidgetElementType::WidgetSwitcher
+            || element.type == WidgetElementType::Overlay)
+        {
+            if (element.color.w > 0.0f)
+            {
+                const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+                const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+                const Vec4& hc = (element.hoverColor.w > 0.0f) ? element.hoverColor : element.color;
+                drawUIPanel(x0,y0,x1,y1,element.color,uiProjection,getUIQuadProgram(vp,fp),hc,element.isHovered);
+            }
+            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
+            if (m_uiDebugEnabled)
+            {
+                const GLuint prog=getUIQuadProgram(m_defaultPanelVertex,m_defaultPanelFragment);
+                drawUIOutline(x0,y0,x1,y1,Vec4{0.3f,0.8f,1.0f,1.0f},uiProjection,prog);
+            }
+            return;
         }
     };
 
@@ -2032,7 +2142,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
         }
 
         for (const auto& element : widget->getElements())
-            renderElement(renderElement, element, widgetPosition.x, widgetPosition.y, widgetSize.x, widgetSize.y);
+            renderElement(renderElement, element, widgetPosition.x, widgetPosition.y, widgetSize.x, widgetSize.y, 1.0f);
 
         if (needsClip)
         {
@@ -2517,7 +2627,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             entry.textColor = Vec4{ 0.9f, 0.9f, 0.92f, 1.0f };
             entry.hoverColor = Vec4{ 0.15f, 0.15f, 0.18f, 1.0f };
             entry.padding = Vec2{ 6.0f, 4.0f };
-            entry.isHitTestable = true;
+            entry.hitTestMode = HitTestMode::Enabled;
             entry.runtimeOnly = true;
             entry.onValueChanged = std::move(onChange);
             row.children.push_back(std::move(entry));
@@ -2644,7 +2754,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             entry.textColor = Vec4{ 0.9f, 0.9f, 0.92f, 1.0f };
             entry.hoverColor = Vec4{ 0.15f, 0.15f, 0.18f, 1.0f };
             entry.padding = Vec2{ 6.0f, 4.0f };
-            entry.isHitTestable = true;
+            entry.hitTestMode = HitTestMode::Enabled;
             entry.runtimeOnly = true;
             entry.onValueChanged = [capturedResolved](const std::string& val) {
                 auto asset = AssetManager::Instance().getLoadedAssetByPath(capturedResolved);
@@ -2743,9 +2853,7 @@ void OpenGLRenderer::renderViewportUI()
         return;
     }
 
-    auto rootWidget = m_viewportUIManager.getRootWidget();
-    const bool hasScriptWidgets = m_viewportUIManager.hasScriptWidgets();
-    if (!rootWidget && !hasScriptWidgets)
+    if (!m_viewportUIManager.hasWidgets())
     {
         return;
     }
@@ -2805,7 +2913,7 @@ void OpenGLRenderer::renderViewportUI()
     // FBO pixel (vpRect.x, vpRect.y), i.e. the viewport top-left corner.
     // This matches the drawUIWidgetsToFramebuffer rendering path exactly, avoiding
     // driver-specific issues with offset glViewport + per-glyph text rendering.
-    const glm::mat4 uiProjection = glm::ortho(
+    glm::mat4 uiProjection = glm::ortho(
         -vpRect.x,                                              // left
         static_cast<float>(m_cachedWindowWidth) - vpRect.x,     // right
         static_cast<float>(m_cachedWindowHeight) - vpRect.y,    // bottom
@@ -2813,9 +2921,20 @@ void OpenGLRenderer::renderViewportUI()
     m_textRenderer->setScreenSize(m_cachedWindowWidth, m_cachedWindowHeight);
     m_textRenderer->setProjectionMatrix(uiProjection);
 
+    // Helper: apply opacity to a color's alpha channel
+    const auto applyAlpha = [](const Vec4& c, float opa) -> Vec4 {
+        return Vec4{ c.x, c.y, c.z, c.w * opa };
+    };
+
     const auto renderElement = [&](const auto& self, const WidgetElement& element,
-        float parentX, float parentY, float parentW, float parentH) -> void
+        float parentX, float parentY, float parentW, float parentH, float parentOpacity) -> void
     {
+        if (!element.isVisible)
+            return;
+
+        // ── Opacity inheritance ───────────────────────────────────────────
+        const float opa = element.opacity * parentOpacity;
+
         const float x0 = element.hasComputedPosition ? element.computedPositionPixels.x : (parentX + element.from.x * parentW);
         const float y0 = element.hasComputedPosition ? element.computedPositionPixels.y : (parentY + element.from.y * parentH);
         const float widthPx = element.hasComputedSize ? element.computedSizePixels.x : (parentW * (element.to.x - element.from.x));
@@ -2823,19 +2942,188 @@ void OpenGLRenderer::renderViewportUI()
         const float x1 = x0 + widthPx;
         const float y1 = y0 + heightPx;
 
+        // ── RenderTransform (Phase 2) ────────────────────────────────────
+        const bool hasTransform = !element.renderTransform.isIdentity();
+        glm::mat4 savedProjectionRT(1.0f);
+        if (hasTransform)
+        {
+            savedProjectionRT = uiProjection;
+            uiProjection = uiProjection * ComputeRenderTransformMatrix(
+                element.renderTransform, x0, y0, widthPx, heightPx);
+        }
+        // RAII-style restore at every exit path
+        struct RtRestore { glm::mat4& proj; glm::mat4 saved; bool active;
+            ~RtRestore() { if (active) proj = saved; } };
+        RtRestore rtRestore{ uiProjection, savedProjectionRT, hasTransform };
+
+        // ── ClipMode scissor (Phase 2) ──────────────────────────────────
+        GLint prevScissorBoxVP[4]{};
+        GLboolean prevScissorEnabledVP = GL_FALSE;
+        const bool clipToBoundsVP = (element.clipMode == ClipMode::ClipToBounds);
+        if (clipToBoundsVP)
+        {
+            prevScissorEnabledVP = glIsEnabled(GL_SCISSOR_TEST);
+            if (prevScissorEnabledVP)
+                glGetIntegerv(GL_SCISSOR_BOX, prevScissorBoxVP);
+            else
+            {
+                GLint vp[4]; glGetIntegerv(GL_VIEWPORT, vp);
+                prevScissorBoxVP[0] = vp[0]; prevScissorBoxVP[1] = vp[1];
+                prevScissorBoxVP[2] = vp[2]; prevScissorBoxVP[3] = vp[3];
+                glEnable(GL_SCISSOR_TEST);
+            }
+            const GLint nx = static_cast<GLint>(vpRect.x + x0);
+            const GLint ny = static_cast<GLint>(static_cast<float>(m_cachedWindowHeight) - (vpRect.y + y0 + heightPx));
+            const GLint nw = static_cast<GLint>(widthPx);
+            const GLint nh = static_cast<GLint>(heightPx);
+            const GLint ix0 = std::max(nx, prevScissorBoxVP[0]);
+            const GLint iy0 = std::max(ny, prevScissorBoxVP[1]);
+            const GLint ix1 = std::min(nx + nw, prevScissorBoxVP[0] + prevScissorBoxVP[2]);
+            const GLint iy1 = std::min(ny + nh, prevScissorBoxVP[1] + prevScissorBoxVP[3]);
+            glScissor(ix0, iy0, std::max(0, ix1 - ix0), std::max(0, iy1 - iy0));
+        }
+        struct ScissorRestore { GLint box[4]; GLboolean wasEnabled; bool active;
+            ~ScissorRestore() { if (active) { glScissor(box[0], box[1], box[2], box[3]); if (!wasEnabled) glDisable(GL_SCISSOR_TEST); } } };
+        ScissorRestore scissorRestore{ {prevScissorBoxVP[0], prevScissorBoxVP[1], prevScissorBoxVP[2], prevScissorBoxVP[3]}, prevScissorEnabledVP, clipToBoundsVP };
+
+        // ── Brush-based background (Phase 2) ─────────────────────────────
+        if (element.background.isVisible())
+        {
+            drawUIBrush(x0, y0, x1, y1, element.background, uiProjection, opa,
+                element.isHovered, element.hoverBrush.isVisible() ? &element.hoverBrush : nullptr);
+        }
+
         if (element.type == WidgetElementType::Panel)
         {
-            const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
-            const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
-            drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, getUIQuadProgram(vertexPath, fragmentPath), element.hoverColor, element.isHovered);
-            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx);
+            if (element.color.w > 0.0f && !element.background.isVisible())
+            {
+                const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+                const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+                drawUIPanel(x0, y0, x1, y1, applyAlpha(element.color, opa), uiProjection, getUIQuadProgram(vertexPath, fragmentPath), applyAlpha(element.hoverColor, opa), element.isHovered);
+            }
+            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
             return;
         }
 
         if (element.type == WidgetElementType::Text || element.type == WidgetElementType::Label)
         {
-            const float scale = (element.fontSize > 0.0f) ? (element.fontSize / 48.0f) : (14.0f / 48.0f);
-            m_textRenderer->drawText(element.text, Vec2{ x0 + element.padding.x, y0 + element.padding.y }, scale, element.textColor);
+            const float wPx = std::max(0.0f, x1 - x0);
+            const float hPx = std::max(0.0f, y1 - y0);
+            const float cx0 = x0 + element.padding.x;
+            const float cy0 = y0 + element.padding.y;
+            const float cx1 = x1 - element.padding.x;
+            const float cy1 = y1 - element.padding.y;
+            const float cw = std::max(0.0f, cx1 - cx0);
+            const float ch = std::max(0.0f, cy1 - cy0);
+
+            float scale = (element.fontSize > 0.0f) ? (element.fontSize / 48.0f) : 1.0f;
+            if (element.fontSize <= 0.0f)
+            {
+                const Vec2 ts = m_textRenderer->measureText(element.text, 1.0f);
+                if (ts.x > 0.0f && ts.y > 0.0f)
+                    scale = std::min(wPx / ts.x, hPx / ts.y) * 0.9f;
+                else if (hPx > 0.0f)
+                    scale = hPx / 48.0f;
+            }
+
+            const auto drawLine = [&](const std::string& line, const Vec2& pos)
+            {
+                m_textRenderer->drawText(line, pos, scale, applyAlpha(element.textColor, opa));
+            };
+
+            if (element.wrapText && cw > 0.0f)
+            {
+                std::vector<std::string> lines;
+                std::vector<std::string> paragraphs;
+                std::string para;
+                for (char c : element.text)
+                {
+                    if (c == '\n')
+                    {
+                        paragraphs.push_back(para);
+                        para.clear();
+                    }
+                    else para.push_back(c);
+                }
+                paragraphs.push_back(para);
+
+                const auto wrapWord = [&](const std::string& word, std::string& current)
+                {
+                    const Vec2 ws = m_textRenderer->measureText(word, scale);
+                    if (current.empty() && ws.x > cw)
+                    {
+                        std::string chunk;
+                        for (char wc : word)
+                        {
+                            std::string candidate = chunk;
+                            candidate.push_back(wc);
+                            if (m_textRenderer->measureText(candidate, scale).x > cw && !chunk.empty())
+                            {
+                                lines.push_back(chunk);
+                                chunk.clear();
+                                chunk.push_back(wc);
+                            }
+                            else chunk = candidate;
+                        }
+                        current = chunk;
+                        return;
+                    }
+
+                    const std::string candidate = current.empty() ? word : (current + " " + word);
+                    if (m_textRenderer->measureText(candidate, scale).x <= cw || current.empty()) current = candidate;
+                    else
+                    {
+                        lines.push_back(current);
+                        current = word;
+                    }
+                };
+
+                for (const auto& p : paragraphs)
+                {
+                    std::string current;
+                    std::string word;
+                    for (char c : p)
+                    {
+                        if (std::isspace(static_cast<unsigned char>(c)))
+                        {
+                            if (!word.empty())
+                            {
+                                wrapWord(word, current);
+                                word.clear();
+                            }
+                        }
+                        else word.push_back(c);
+                    }
+                    if (!word.empty()) wrapWord(word, current);
+                    if (!current.empty()) lines.push_back(current);
+                }
+
+                const float lineH = m_textRenderer->getLineHeight(scale);
+                const float textH = lineH * static_cast<float>(lines.size());
+                float startY = cy0;
+                if (element.textAlignV == TextAlignV::Center) startY = cy0 + (ch - textH) * 0.5f;
+                else if (element.textAlignV == TextAlignV::Bottom) startY = cy1 - textH;
+
+                for (size_t i = 0; i < lines.size(); ++i)
+                {
+                    const Vec2 lineSize = m_textRenderer->measureText(lines[i], scale);
+                    float tx = cx0;
+                    if (element.textAlignH == TextAlignH::Center) tx = cx0 + (cw - lineSize.x) * 0.5f;
+                    else if (element.textAlignH == TextAlignH::Right) tx = cx1 - lineSize.x;
+                    drawLine(lines[i], Vec2{ tx, startY + lineH * static_cast<float>(i) });
+                }
+            }
+            else
+            {
+                const Vec2 ts = m_textRenderer->measureText(element.text, scale);
+                float tx = cx0;
+                float ty = cy0;
+                if (element.textAlignH == TextAlignH::Center) tx = cx0 + (cw - ts.x) * 0.5f;
+                else if (element.textAlignH == TextAlignH::Right) tx = cx1 - ts.x;
+                if (element.textAlignV == TextAlignV::Center) ty = cy0 + (ch - ts.y) * 0.5f;
+                else if (element.textAlignV == TextAlignV::Bottom) ty = cy1 - ts.y;
+                drawLine(element.text, Vec2{ tx, ty });
+            }
             return;
         }
 
@@ -2843,12 +3131,34 @@ void OpenGLRenderer::renderViewportUI()
         {
             const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
             const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);
-            drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, getUIQuadProgram(vertexPath, fragmentPath), element.hoverColor, element.isHovered);
+            drawUIPanel(x0, y0, x1, y1, applyAlpha(element.color, opa), uiProjection, getUIQuadProgram(vertexPath, fragmentPath), applyAlpha(element.hoverColor, opa), element.isHovered);
 
             if (!element.text.empty())
             {
-                const float scale = (element.fontSize > 0.0f) ? (element.fontSize / 48.0f) : (14.0f / 48.0f);
-                m_textRenderer->drawText(element.text, Vec2{ x0 + element.padding.x, y0 + element.padding.y }, scale, element.textColor);
+                const float cx0 = x0 + element.padding.x;
+                const float cy0 = y0 + element.padding.y;
+                const float cx1 = x1 - element.padding.x;
+                const float cy1 = y1 - element.padding.y;
+                const float cw = std::max(0.0f, cx1 - cx0);
+                const float ch = std::max(0.0f, cy1 - cy0);
+
+                float scale = (element.fontSize > 0.0f) ? element.fontSize / 48.0f : 1.0f;
+                if (element.fontSize <= 0.0f)
+                {
+                    const Vec2 tsFit = m_textRenderer->measureText(element.text, 1.0f);
+                    if (tsFit.x > 0.0f && tsFit.y > 0.0f)
+                        scale = std::min(cw / tsFit.x, ch / tsFit.y) * 0.9f;
+                }
+
+                const Vec2 ts = m_textRenderer->measureText(element.text, scale);
+                float tx = cx0;
+                float ty = cy0;
+                if (element.textAlignH == TextAlignH::Center) tx = cx0 + (cw - ts.x) * 0.5f;
+                else if (element.textAlignH == TextAlignH::Right) tx = cx1 - ts.x;
+                if (element.textAlignV == TextAlignV::Center) ty = cy0 + (ch - ts.y) * 0.5f;
+                else if (element.textAlignV == TextAlignV::Bottom) ty = cy1 - ts.y;
+
+                m_textRenderer->drawText(element.text, Vec2{ tx, ty }, scale, applyAlpha(element.textColor, opa));
             }
             return;
         }
@@ -2858,12 +3168,34 @@ void OpenGLRenderer::renderViewportUI()
             const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
             const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);
             const Vec4 displayColor = element.isChecked ? element.fillColor : element.color;
-            drawUIPanel(x0, y0, x1, y1, displayColor, uiProjection, getUIQuadProgram(vertexPath, fragmentPath), element.hoverColor, element.isHovered);
+            drawUIPanel(x0, y0, x1, y1, applyAlpha(displayColor, opa), uiProjection, getUIQuadProgram(vertexPath, fragmentPath), applyAlpha(element.hoverColor, opa), element.isHovered);
 
             if (!element.text.empty())
             {
-                const float scale = (element.fontSize > 0.0f) ? (element.fontSize / 48.0f) : (14.0f / 48.0f);
-                m_textRenderer->drawText(element.text, Vec2{ x0 + element.padding.x, y0 + element.padding.y }, scale, element.textColor);
+                const float cx0 = x0 + element.padding.x;
+                const float cy0 = y0 + element.padding.y;
+                const float cx1 = x1 - element.padding.x;
+                const float cy1 = y1 - element.padding.y;
+                const float cw = std::max(0.0f, cx1 - cx0);
+                const float ch = std::max(0.0f, cy1 - cy0);
+
+                float scale = (element.fontSize > 0.0f) ? element.fontSize / 48.0f : 1.0f;
+                if (element.fontSize <= 0.0f)
+                {
+                    const Vec2 tsFit = m_textRenderer->measureText(element.text, 1.0f);
+                    if (tsFit.x > 0.0f && tsFit.y > 0.0f)
+                        scale = std::min(cw / tsFit.x, ch / tsFit.y) * 0.9f;
+                }
+
+                const Vec2 ts = m_textRenderer->measureText(element.text, scale);
+                float tx = cx0;
+                float ty = cy0;
+                if (element.textAlignH == TextAlignH::Center) tx = cx0 + (cw - ts.x) * 0.5f;
+                else if (element.textAlignH == TextAlignH::Right) tx = cx1 - ts.x;
+                if (element.textAlignV == TextAlignV::Center) ty = cy0 + (ch - ts.y) * 0.5f;
+                else if (element.textAlignV == TextAlignV::Bottom) ty = cy1 - ts.y;
+
+                m_textRenderer->drawText(element.text, Vec2{ tx, ty }, scale, applyAlpha(element.textColor, opa));
             }
             return;
         }
@@ -2873,7 +3205,7 @@ void OpenGLRenderer::renderViewportUI()
             const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
             const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
             const Vec4 lineColor = (element.color.w > 0.0f) ? element.color : Vec4{ 0.35f, 0.35f, 0.40f, 0.8f };
-            drawUIPanel(x0, y0, x1, y1, lineColor, uiProjection, getUIQuadProgram(vertexPath, fragmentPath), lineColor, false);
+            drawUIPanel(x0, y0, x1, y1, applyAlpha(lineColor, opa), uiProjection, getUIQuadProgram(vertexPath, fragmentPath), applyAlpha(lineColor, opa), false);
             return;
         }
 
@@ -2881,8 +3213,25 @@ void OpenGLRenderer::renderViewportUI()
         {
             const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
             const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
-            drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, getUIQuadProgram(vertexPath, fragmentPath), element.color, false);
-            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx);
+            drawUIPanel(x0, y0, x1, y1, applyAlpha(element.color, opa), uiProjection, getUIQuadProgram(vertexPath, fragmentPath), applyAlpha(element.color, opa), false);
+            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
+            return;
+        }
+
+        if (element.type == WidgetElementType::WrapBox
+            || element.type == WidgetElementType::UniformGrid
+            || element.type == WidgetElementType::SizeBox
+            || element.type == WidgetElementType::ScaleBox
+            || element.type == WidgetElementType::WidgetSwitcher
+            || element.type == WidgetElementType::Overlay)
+        {
+            if (element.color.w > 0.0f && !element.background.isVisible())
+            {
+                const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+                const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+                drawUIPanel(x0, y0, x1, y1, applyAlpha(element.color, opa), uiProjection, getUIQuadProgram(vertexPath, fragmentPath), applyAlpha(element.color, opa), false);
+            }
+            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
             return;
         }
 
@@ -2893,51 +3242,129 @@ void OpenGLRenderer::renderViewportUI()
                 : getOrLoadUITexture(element.imagePath);
             if (tex != 0)
             {
-                drawUIImage(x0, y0, x1, y1, tex, uiProjection, element.color, true);
+                drawUIImage(x0, y0, x1, y1, tex, uiProjection, applyAlpha(element.color, opa), true);
             }
+            return;
+        }
+
+        if (element.type == WidgetElementType::ProgressBar)
+        {
+            const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+            const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+            const GLuint prog = getUIQuadProgram(vertexPath, fragmentPath);
+            drawUIPanel(x0, y0, x1, y1, applyAlpha(element.color, opa), uiProjection, prog, applyAlpha(element.color, opa), false);
+            const float range = (element.maxValue > element.minValue) ? (element.maxValue - element.minValue) : 1.0f;
+            const float pct = std::clamp((element.valueFloat - element.minValue) / range, 0.0f, 1.0f);
+            const float fillX1 = x0 + widthPx * pct;
+            drawUIPanel(x0, y0, fillX1, y1, applyAlpha(element.fillColor, opa), uiProjection, prog, applyAlpha(element.fillColor, opa), false);
+            return;
+        }
+
+        if (element.type == WidgetElementType::Slider)
+        {
+            const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+            const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+            const GLuint prog = getUIQuadProgram(vertexPath, fragmentPath);
+            drawUIPanel(x0, y0, x1, y1, applyAlpha(element.color, opa), uiProjection, prog, applyAlpha(element.color, opa), false);
+            const float range = (element.maxValue > element.minValue) ? (element.maxValue - element.minValue) : 1.0f;
+            const float pct = std::clamp((element.valueFloat - element.minValue) / range, 0.0f, 1.0f);
+            const float thumbW = std::max(8.0f, widthPx * 0.05f);
+            const float thumbX = x0 + (widthPx - thumbW) * pct;
+            drawUIPanel(thumbX, y0, thumbX + thumbW, y1, applyAlpha(element.fillColor, opa), uiProjection, prog, applyAlpha(element.hoverColor, opa), element.isHovered);
             return;
         }
 
         for (const auto& child : element.children)
         {
-            self(self, child, x0, y0, widthPx, heightPx);
+            self(self, child, x0, y0, widthPx, heightPx, opa);
         }
     };
 
-    // Render the root widget (if present)
-    if (rootWidget)
+    // Render all widgets sorted by z-order (ascending = back to front)
+    for (const auto& entry : m_viewportUIManager.getSortedWidgets())
     {
-        Vec2 widgetSize = rootWidget->getSizePixels();
-        if (widgetSize.x <= 0.0f)
-        {
-            widgetSize.x = vpRect.z;
-        }
-        if (widgetSize.y <= 0.0f)
-        {
-            widgetSize.y = vpRect.w;
-        }
+        if (!entry.widget)
+            continue;
 
-        for (const auto& element : rootWidget->getElements())
+        Vec2 widgetSize = entry.widget->getSizePixels();
+        if (widgetSize.x <= 0.0f)
+            widgetSize.x = vpRect.z;
+        if (widgetSize.y <= 0.0f)
+            widgetSize.y = vpRect.w;
+
+        for (const auto& element : entry.widget->getElements())
         {
-            renderElement(renderElement, element, 0.0f, 0.0f, widgetSize.x, widgetSize.y);
+            renderElement(renderElement, element, 0.0f, 0.0f, widgetSize.x, widgetSize.y, 1.0f);
         }
     }
 
-    // Render script-spawned widgets
-    for (const auto& [swId, swWidget] : m_viewportUIManager.getScriptWidgets())
+    // --- Selection highlight (orange outline around selected element) ---
     {
-        if (!swWidget)
-            continue;
-
-        Vec2 swSize = swWidget->getSizePixels();
-        if (swSize.x <= 0.0f)
-            swSize.x = vpRect.z;
-        if (swSize.y <= 0.0f)
-            swSize.y = vpRect.w;
-
-        for (const auto& element : swWidget->getElements())
+        const std::string& selId = m_viewportUIManager.getSelectedElementId();
+        if (!selId.empty())
         {
-            renderElement(renderElement, element, 0.0f, 0.0f, swSize.x, swSize.y);
+            // Find the element and its computed bounds
+            const auto findBounds = [&](const auto& self, const WidgetElement& element,
+                float parentX, float parentY, float parentW, float parentH,
+                Vec4& outBounds) -> bool
+            {
+                const float ex = element.hasComputedPosition ? element.computedPositionPixels.x : (parentX + element.from.x * parentW);
+                const float ey = element.hasComputedPosition ? element.computedPositionPixels.y : (parentY + element.from.y * parentH);
+                const float ew = element.hasComputedSize ? element.computedSizePixels.x : (parentW * (element.to.x - element.from.x));
+                const float eh = element.hasComputedSize ? element.computedSizePixels.y : (parentH * (element.to.y - element.from.y));
+
+                if (element.id == selId)
+                {
+                    outBounds = Vec4{ ex, ey, ew, eh };
+                    return true;
+                }
+                for (const auto& child : element.children)
+                {
+                    if (self(self, child, ex, ey, ew, eh, outBounds))
+                        return true;
+                }
+                return false;
+            };
+
+            Vec4 bounds{};
+            bool found = false;
+            for (const auto& entry2 : m_viewportUIManager.getSortedWidgets())
+            {
+                if (!entry2.widget) continue;
+                Vec2 ws = entry2.widget->getSizePixels();
+                if (ws.x <= 0.0f) ws.x = vpRect.z;
+                if (ws.y <= 0.0f) ws.y = vpRect.w;
+                for (const auto& el : entry2.widget->getElements())
+                {
+                    if (findBounds(findBounds, el, 0.0f, 0.0f, ws.x, ws.y, bounds))
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                if (found) break;
+            }
+
+            if (found)
+            {
+                const float bx = bounds.x;
+                const float by = bounds.y;
+                const float bw = bounds.z;
+                const float bh = bounds.w;
+                constexpr float t = 2.0f;
+                const Vec4 hlColor{ 1.0f, 0.55f, 0.10f, 0.9f };
+                const std::string& vp2 = resolveUIShaderPath("", m_defaultPanelVertex);
+                const std::string& fp2 = resolveUIShaderPath("", m_defaultPanelFragment);
+                const GLuint hlProg = getUIQuadProgram(vp2, fp2);
+                // Top
+                drawUIPanel(bx, by, bx + bw, by + t, hlColor, uiProjection, hlProg, hlColor, false);
+                // Bottom
+                drawUIPanel(bx, by + bh - t, bx + bw, by + bh, hlColor, uiProjection, hlProg, hlColor, false);
+                // Left
+                drawUIPanel(bx, by, bx + t, by + bh, hlColor, uiProjection, hlProg, hlColor, false);
+                // Right
+                drawUIPanel(bx + bw - t, by, bx + bw, by + bh, hlColor, uiProjection, hlProg, hlColor, false);
+            }
         }
     }
 
@@ -3038,6 +3465,49 @@ void OpenGLRenderer::renderUI()
             float heightPx = element.hasComputedSize ? element.computedSizePixels.y : (parentH * (element.to.y - element.from.y));
             const float x1 = x0 + widthPx;
             const float y1 = y0 + heightPx;
+
+            // ── RenderTransform (Phase 2) ────────────────────────────────
+            const bool hasTransform = !element.renderTransform.isIdentity();
+            glm::mat4 savedProjectionRT(1.0f);
+            if (hasTransform)
+            {
+                savedProjectionRT = uiProjection;
+                uiProjection = uiProjection * ComputeRenderTransformMatrix(
+                    element.renderTransform, x0, y0, widthPx, heightPx);
+            }
+            struct RtRestore3 { glm::mat4& proj; glm::mat4 saved; bool active;
+                ~RtRestore3() { if (active) proj = saved; } };
+            RtRestore3 rtRestore{ uiProjection, savedProjectionRT, hasTransform };
+
+            // ── ClipMode scissor (Phase 2) ──────────────────────────────
+            GLint prevScissorBoxUI[4]{};
+            GLboolean prevScissorEnabledUI = GL_FALSE;
+            const bool clipToBoundsUI = (element.clipMode == ClipMode::ClipToBounds);
+            if (clipToBoundsUI)
+            {
+                prevScissorEnabledUI = glIsEnabled(GL_SCISSOR_TEST);
+                if (prevScissorEnabledUI)
+                    glGetIntegerv(GL_SCISSOR_BOX, prevScissorBoxUI);
+                else
+                {
+                    GLint vp[4]; glGetIntegerv(GL_VIEWPORT, vp);
+                    prevScissorBoxUI[0] = vp[0]; prevScissorBoxUI[1] = vp[1];
+                    prevScissorBoxUI[2] = vp[2]; prevScissorBoxUI[3] = vp[3];
+                    glEnable(GL_SCISSOR_TEST);
+                }
+                const GLint nx = static_cast<GLint>(x0);
+                const GLint ny = static_cast<GLint>(static_cast<float>(height) - (y0 + heightPx));
+                const GLint nw = static_cast<GLint>(widthPx);
+                const GLint nh = static_cast<GLint>(heightPx);
+                const GLint ix0 = std::max(nx, prevScissorBoxUI[0]);
+                const GLint iy0 = std::max(ny, prevScissorBoxUI[1]);
+                const GLint ix1 = std::min(nx + nw, prevScissorBoxUI[0] + prevScissorBoxUI[2]);
+                const GLint iy1 = std::min(ny + nh, prevScissorBoxUI[1] + prevScissorBoxUI[3]);
+                glScissor(ix0, iy0, std::max(0, ix1 - ix0), std::max(0, iy1 - iy0));
+            }
+            struct ScissorRestore3 { GLint box[4]; GLboolean wasEnabled; bool active;
+                ~ScissorRestore3() { if (active) { glScissor(box[0], box[1], box[2], box[3]); if (!wasEnabled) glDisable(GL_SCISSOR_TEST); } } };
+            ScissorRestore3 scissorRestore{ {prevScissorBoxUI[0], prevScissorBoxUI[1], prevScissorBoxUI[2], prevScissorBoxUI[3]}, prevScissorEnabledUI, clipToBoundsUI };
 
             if (element.type == WidgetElementType::Panel)
             {
@@ -3918,7 +4388,7 @@ void OpenGLRenderer::renderUI()
 
                         drawUIImage(dx0, dy0, dx0 + displayW, dy0 + displayH,
                             previewFbo->getColorTextureId(), uiProjection,
-                            Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }, false);
+                            Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }, false, true);
 
                         glDisable(GL_SCISSOR_TEST);
                     }
@@ -5781,7 +6251,7 @@ unsigned int OpenGLRenderer::preloadUITexture(const std::string& path)
     return getOrLoadUITexture(path);
 }
 
-void OpenGLRenderer::drawUIImage(float x0, float y0, float x1, float y1, GLuint textureId, const glm::mat4& projection, const Vec4& tintColor, bool invertRGB)
+void OpenGLRenderer::drawUIImage(float x0, float y0, float x1, float y1, GLuint textureId, const glm::mat4& projection, const Vec4& tintColor, bool invertRGB, bool flipY)
 {
     if (textureId == 0 || m_uiQuadVao == 0)
     {
@@ -5796,10 +6266,11 @@ layout(location = 0) in vec2 aPos;
 out vec2 vTexCoord;
 uniform mat4 uProjection;
 uniform vec4 uRect;
+uniform float uFlipY;
 void main() {
     gl_Position = uProjection * vec4(aPos, 0.0, 1.0);
     vec2 normalised = (aPos - uRect.xy) / max(uRect.zw - uRect.xy, vec2(1.0));
-    vTexCoord = vec2(normalised.x, normalised.y);
+    vTexCoord = vec2(normalised.x, mix(normalised.y, 1.0 - normalised.y, uFlipY));
 }
 )";
         const char* fsSource = R"(
@@ -5833,6 +6304,7 @@ void main() {
         m_uiImageUniforms.rect       = glGetUniformLocation(m_uiImageProgram, "uRect");
         m_uiImageUniforms.tintColor  = glGetUniformLocation(m_uiImageProgram, "uTintColor");
         m_uiImageUniforms.invertRGB  = glGetUniformLocation(m_uiImageProgram, "uInvertRGB");
+        m_uiImageUniforms.flipY      = glGetUniformLocation(m_uiImageProgram, "uFlipY");
         m_uiImageUniforms.texture    = glGetUniformLocation(m_uiImageProgram, "uTexture");
     }
 
@@ -5850,6 +6322,7 @@ void main() {
     glUniform4f(m_uiImageUniforms.rect, x0, y0, x1, y1);
     glUniform4f(m_uiImageUniforms.tintColor, tintColor.x, tintColor.y, tintColor.z, tintColor.w);
     glUniform1f(m_uiImageUniforms.invertRGB, invertRGB ? 1.0f : 0.0f);
+    glUniform1f(m_uiImageUniforms.flipY, flipY ? 1.0f : 0.0f);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, textureId);
     glUniform1i(m_uiImageUniforms.texture, 0);
@@ -5861,6 +6334,138 @@ void main() {
     glDrawArrays(GL_TRIANGLES, 0, 6);
     glBindVertexArray(0);
     glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+void OpenGLRenderer::drawUIBrush(float x0, float y0, float x1, float y1, const UIBrush& brush, const glm::mat4& projection, float opacity, bool isHovered, const UIBrush* hoverBrush)
+{
+    const UIBrush& activeBrush = (isHovered && hoverBrush && hoverBrush->isVisible()) ? *hoverBrush : brush;
+    if (!activeBrush.isVisible()) return;
+
+    // Apply opacity to the brush color alpha
+    auto applyOpacity = [opacity](const Vec4& c) -> Vec4 {
+        return Vec4{ c.x, c.y, c.z, c.w * opacity };
+    };
+
+    switch (activeBrush.type)
+    {
+    case BrushType::SolidColor:
+    {
+        ensureUIShaderDefaults();
+        const std::string& vp = m_defaultPanelVertex;
+        const std::string& fp = m_defaultPanelFragment;
+        const GLuint prog = getUIQuadProgram(vp, fp);
+        const Vec4 col = applyOpacity(activeBrush.color);
+        drawUIPanel(x0, y0, x1, y1, col, projection, prog, col, false);
+        break;
+    }
+    case BrushType::Image:
+    {
+        GLuint tex = (activeBrush.textureId != 0)
+            ? static_cast<GLuint>(activeBrush.textureId)
+            : getOrLoadUITexture(activeBrush.imagePath);
+        if (tex != 0)
+        {
+            const Vec4 tint = applyOpacity(activeBrush.color);
+            drawUIImage(x0, y0, x1, y1, tex, projection, tint, false, false);
+        }
+        break;
+    }
+    case BrushType::NineSlice:
+    {
+        // 9-slice rendering: corners stay fixed, edges and center stretch
+        GLuint tex = (activeBrush.textureId != 0)
+            ? static_cast<GLuint>(activeBrush.textureId)
+            : getOrLoadUITexture(activeBrush.imagePath);
+        if (tex != 0)
+        {
+            const Vec4 tint = applyOpacity(activeBrush.color);
+            const float ml = activeBrush.imageMargin.x; // left
+            const float mt = activeBrush.imageMargin.y; // top
+            const float mr = activeBrush.imageMargin.z; // right
+            const float mb = activeBrush.imageMargin.w; // bottom
+            // For now, render as a simple image (full 9-slice shader deferred to later)
+            drawUIImage(x0, y0, x1, y1, tex, projection, tint, false, false);
+        }
+        break;
+    }
+    case BrushType::LinearGradient:
+    {
+        if (m_uiQuadVao == 0) break;
+        // Lazy-init gradient shader
+        if (m_uiGradientProgram == 0)
+        {
+            const char* vsSource = R"(
+#version 330 core
+layout(location = 0) in vec2 aPos;
+out vec2 vLocalPos;
+uniform mat4 uProjection;
+uniform vec4 uRect;
+void main() {
+    gl_Position = uProjection * vec4(aPos, 0.0, 1.0);
+    vLocalPos = (aPos - uRect.xy) / max(uRect.zw - uRect.xy, vec2(1.0));
+}
+)";
+            const char* fsSource = R"(
+#version 330 core
+in vec2 vLocalPos;
+out vec4 FragColor;
+uniform vec4 uColorStart;
+uniform vec4 uColorEnd;
+uniform float uAngle;
+void main() {
+    float rad = radians(uAngle);
+    vec2 dir = vec2(sin(rad), cos(rad));
+    float t = clamp(dot(vLocalPos - vec2(0.5), dir) + 0.5, 0.0, 1.0);
+    FragColor = mix(uColorStart, uColorEnd, t);
+}
+)";
+            GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+            glShaderSource(vs, 1, &vsSource, nullptr);
+            glCompileShader(vs);
+            GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+            glShaderSource(fs, 1, &fsSource, nullptr);
+            glCompileShader(fs);
+            m_uiGradientProgram = glCreateProgram();
+            glAttachShader(m_uiGradientProgram, vs);
+            glAttachShader(m_uiGradientProgram, fs);
+            glLinkProgram(m_uiGradientProgram);
+            glDeleteShader(vs);
+            glDeleteShader(fs);
+
+            m_uiGradientUniforms.projection = glGetUniformLocation(m_uiGradientProgram, "uProjection");
+            m_uiGradientUniforms.rect       = glGetUniformLocation(m_uiGradientProgram, "uRect");
+            m_uiGradientUniforms.colorStart  = glGetUniformLocation(m_uiGradientProgram, "uColorStart");
+            m_uiGradientUniforms.colorEnd    = glGetUniformLocation(m_uiGradientProgram, "uColorEnd");
+            m_uiGradientUniforms.angle       = glGetUniformLocation(m_uiGradientProgram, "uAngle");
+        }
+
+        const Vec4 colStart = applyOpacity(activeBrush.color);
+        const Vec4 colEnd = applyOpacity(activeBrush.colorEnd);
+
+        float vertices[6][2] = {
+            { x0, y1 }, { x0, y0 }, { x1, y0 },
+            { x0, y1 }, { x1, y0 }, { x1, y1 }
+        };
+
+        glUseProgram(m_uiGradientProgram);
+        glUniformMatrix4fv(m_uiGradientUniforms.projection, 1, GL_FALSE, &projection[0][0]);
+        glUniform4f(m_uiGradientUniforms.rect, x0, y0, x1, y1);
+        glUniform4f(m_uiGradientUniforms.colorStart, colStart.x, colStart.y, colStart.z, colStart.w);
+        glUniform4f(m_uiGradientUniforms.colorEnd, colEnd.x, colEnd.y, colEnd.z, colEnd.w);
+        glUniform1f(m_uiGradientUniforms.angle, activeBrush.gradientAngle);
+
+        glBindVertexArray(m_uiQuadVao);
+        glBindBuffer(GL_ARRAY_BUFFER, m_uiQuadVbo);
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glBindVertexArray(0);
+        break;
+    }
+    case BrushType::None:
+    default:
+        break;
+    }
 }
 
 Vec2 OpenGLRenderer::getViewportSize() const
@@ -6561,7 +7166,7 @@ void OpenGLRenderer::rebuildTitleBarTabs()
         tabBtn.textColor = Vec4{ 0.9f, 0.9f, 0.9f, 1.0f };
         tabBtn.minSize = Vec2{ 90.0f, 0.0f };
         tabBtn.padding = Vec2{ 6.0f, 0.0f };
-        tabBtn.isHitTestable = true;
+        tabBtn.hitTestMode = HitTestMode::Enabled;
         tabBtn.runtimeOnly = true;
         tabsStack->children.push_back(std::move(tabBtn));
 
@@ -6583,7 +7188,7 @@ void OpenGLRenderer::rebuildTitleBarTabs()
             closeBtn.textColor = Vec4{ 0.7f, 0.7f, 0.7f, 1.0f };
             closeBtn.minSize = Vec2{ 24.0f, 0.0f };
             closeBtn.padding = Vec2{ 2.0f, 0.0f };
-            closeBtn.isHitTestable = true;
+            closeBtn.hitTestMode = HitTestMode::Enabled;
             closeBtn.runtimeOnly = true;
             tabsStack->children.push_back(std::move(closeBtn));
         }

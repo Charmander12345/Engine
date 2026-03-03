@@ -52,7 +52,7 @@ public:
         element.color = m_boxColor;
         element.fillColor = m_checkColor;
         element.textColor = m_textColor;
-        element.isHitTestable = true;
+        element.hitTestMode = HitTestMode::Enabled;
         if (m_onCheckedChanged)
         {
             element.onCheckedChanged = m_onCheckedChanged;

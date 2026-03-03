@@ -25,6 +25,7 @@
 #include "../AssetManager/AssetManager.h"
 #include "../AssetManager/AssetTypes.h"
 #include "Renderer.h"
+#include "ViewportUIManager.h"
 #include "EditorWindows/PopupWindow.h"
 #include "../Landscape/LandscapeManager.h"
 
@@ -373,6 +374,12 @@ namespace
         case WidgetElementType::StackPanel:
         case WidgetElementType::ScrollView:
         case WidgetElementType::Grid:
+        case WidgetElementType::WrapBox:
+        case WidgetElementType::UniformGrid:
+        case WidgetElementType::SizeBox:
+        case WidgetElementType::ScaleBox:
+        case WidgetElementType::WidgetSwitcher:
+        case WidgetElementType::Overlay:
         {
             childSizes.reserve(element.children.size());
             for (auto& child : element.children)
@@ -452,6 +459,135 @@ namespace
                 size.x += element.padding.x * 2.0f + element.padding.x * static_cast<float>(columns - 1);
                 size.y += element.padding.y * 2.0f + element.padding.y * static_cast<float>(rows - 1);
             }
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
+
+        // WrapBox: children flow in rows/columns and wrap
+        if (element.type == WidgetElementType::WrapBox)
+        {
+            // Measure assumes horizontal orientation by default (wraps into rows)
+            float rowWidth = 0.0f;
+            float rowHeight = 0.0f;
+            float totalHeight = element.padding.y * 2.0f;
+            float maxRowWidth = 0.0f;
+            float spacing = element.spacing;
+            bool firstInRow = true;
+            // We don't know parent width during measure, so just report content size
+            // as if all children were in a single row (actual wrapping happens at layout time)
+            float widthSum = 0.0f;
+            float maxHeight = 0.0f;
+            for (const auto& cs : childSizes)
+            {
+                widthSum += cs.x;
+                maxHeight = std::max(maxHeight, cs.y);
+            }
+            if (!childSizes.empty())
+            {
+                widthSum += spacing * static_cast<float>(childSizes.size() - 1);
+                widthSum += element.padding.x * 2.0f;
+                maxHeight += element.padding.y * 2.0f;
+            }
+            size = Vec2{ widthSum, maxHeight };
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
+
+        // UniformGrid: all cells have equal size
+        if (element.type == WidgetElementType::UniformGrid)
+        {
+            int cols = element.columns;
+            int rowCount = element.rows;
+            const int childCount = static_cast<int>(childSizes.size());
+            if (cols <= 0 && rowCount <= 0)
+            {
+                cols = std::max(1, static_cast<int>(std::ceil(std::sqrt(static_cast<float>(childCount)))));
+                rowCount = (childCount + cols - 1) / cols;
+            }
+            else if (cols <= 0)
+            {
+                cols = (childCount + rowCount - 1) / rowCount;
+            }
+            else if (rowCount <= 0)
+            {
+                rowCount = (childCount + cols - 1) / cols;
+            }
+            float maxChildW = 0.0f;
+            float maxChildH = 0.0f;
+            for (const auto& cs : childSizes)
+            {
+                maxChildW = std::max(maxChildW, cs.x);
+                maxChildH = std::max(maxChildH, cs.y);
+            }
+            float spacing = element.spacing;
+            size.x = maxChildW * static_cast<float>(cols) + spacing * static_cast<float>(std::max(0, cols - 1)) + element.padding.x * 2.0f;
+            size.y = maxChildH * static_cast<float>(rowCount) + spacing * static_cast<float>(std::max(0, rowCount - 1)) + element.padding.y * 2.0f;
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
+
+        // SizeBox: single child with overridden size constraints
+        if (element.type == WidgetElementType::SizeBox)
+        {
+            float childW = 0.0f;
+            float childH = 0.0f;
+            if (!childSizes.empty())
+            {
+                childW = childSizes[0].x;
+                childH = childSizes[0].y;
+            }
+            size.x = (element.widthOverride > 0.0f) ? element.widthOverride : childW;
+            size.y = (element.heightOverride > 0.0f) ? element.heightOverride : childH;
+            size.x += element.padding.x * 2.0f;
+            size.y += element.padding.y * 2.0f;
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
+
+        // ScaleBox: single child, reported at child's natural size
+        if (element.type == WidgetElementType::ScaleBox)
+        {
+            if (!childSizes.empty())
+            {
+                size = Vec2{ childSizes[0].x + element.padding.x * 2.0f,
+                             childSizes[0].y + element.padding.y * 2.0f };
+            }
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
+
+        // WidgetSwitcher: size of the largest child (only one visible at a time)
+        if (element.type == WidgetElementType::WidgetSwitcher)
+        {
+            float maxW = 0.0f;
+            float maxH = 0.0f;
+            for (const auto& cs : childSizes)
+            {
+                maxW = std::max(maxW, cs.x);
+                maxH = std::max(maxH, cs.y);
+            }
+            size = Vec2{ maxW + element.padding.x * 2.0f, maxH + element.padding.y * 2.0f };
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
+
+        // Overlay: size of the largest child (all stacked)
+        if (element.type == WidgetElementType::Overlay)
+        {
+            float maxW = 0.0f;
+            float maxH = 0.0f;
+            for (const auto& cs : childSizes)
+            {
+                maxW = std::max(maxW, cs.x);
+                maxH = std::max(maxH, cs.y);
+            }
+            size = Vec2{ maxW + element.padding.x * 2.0f, maxH + element.padding.y * 2.0f };
             element.contentSizePixels = size;
             element.hasContentSize = true;
             return size;
@@ -861,6 +997,204 @@ namespace
                 cursorY += slotH + spacing;
             }
         }
+        // ── WrapBox: children flow and wrap ──
+        else if (element.type == WidgetElementType::WrapBox)
+        {
+            const float spacing = element.spacing;
+            const bool horizontal = (element.orientation == StackOrientation::Horizontal);
+            if (horizontal)
+            {
+                float cursorX = contentX;
+                float cursorY = contentY;
+                float rowMaxH = 0.0f;
+                for (auto& child : element.children)
+                {
+                    float childW = child.hasContentSize ? std::max(child.minSize.x, child.contentSizePixels.x) : child.minSize.x;
+                    float childH = child.hasContentSize ? std::max(child.minSize.y, child.contentSizePixels.y) : child.minSize.y;
+                    childW += child.margin.x * 2.0f;
+                    childH += child.margin.y * 2.0f;
+                    // Wrap to next row if we exceed available width
+                    if (cursorX + childW > contentX + contentW + 0.5f && cursorX > contentX + 0.5f)
+                    {
+                        cursorX = contentX;
+                        cursorY += rowMaxH + spacing;
+                        rowMaxH = 0.0f;
+                    }
+                    layoutElement(child, cursorX + child.margin.x, cursorY + child.margin.y,
+                        std::max(0.0f, childW - child.margin.x * 2.0f),
+                        std::max(0.0f, childH - child.margin.y * 2.0f), measureText);
+                    cursorX += childW + spacing;
+                    rowMaxH = std::max(rowMaxH, childH);
+                }
+            }
+            else
+            {
+                float cursorX = contentX;
+                float cursorY = contentY;
+                float colMaxW = 0.0f;
+                for (auto& child : element.children)
+                {
+                    float childW = child.hasContentSize ? std::max(child.minSize.x, child.contentSizePixels.x) : child.minSize.x;
+                    float childH = child.hasContentSize ? std::max(child.minSize.y, child.contentSizePixels.y) : child.minSize.y;
+                    childW += child.margin.x * 2.0f;
+                    childH += child.margin.y * 2.0f;
+                    if (cursorY + childH > contentY + contentH + 0.5f && cursorY > contentY + 0.5f)
+                    {
+                        cursorY = contentY;
+                        cursorX += colMaxW + spacing;
+                        colMaxW = 0.0f;
+                    }
+                    layoutElement(child, cursorX + child.margin.x, cursorY + child.margin.y,
+                        std::max(0.0f, childW - child.margin.x * 2.0f),
+                        std::max(0.0f, childH - child.margin.y * 2.0f), measureText);
+                    cursorY += childH + spacing;
+                    colMaxW = std::max(colMaxW, childW);
+                }
+            }
+        }
+        // ── UniformGrid: all cells equal size ──
+        else if (element.type == WidgetElementType::UniformGrid)
+        {
+            const int childCount = static_cast<int>(element.children.size());
+            if (childCount == 0) return;
+
+            int cols = element.columns;
+            int rowCount = element.rows;
+            if (cols <= 0 && rowCount <= 0)
+            {
+                cols = std::max(1, static_cast<int>(std::ceil(std::sqrt(static_cast<float>(childCount)))));
+                rowCount = (childCount + cols - 1) / cols;
+            }
+            else if (cols <= 0)
+            {
+                cols = (childCount + rowCount - 1) / rowCount;
+            }
+            else if (rowCount <= 0)
+            {
+                rowCount = (childCount + cols - 1) / cols;
+            }
+
+            const float spacing = element.spacing;
+            const float cellW = std::max(0.0f, (contentW - spacing * static_cast<float>(std::max(0, cols - 1))) / static_cast<float>(cols));
+            const float cellH = std::max(0.0f, (contentH - spacing * static_cast<float>(std::max(0, rowCount - 1))) / static_cast<float>(rowCount));
+
+            for (int i = 0; i < childCount; ++i)
+            {
+                auto& child = element.children[static_cast<size_t>(i)];
+                const int col = i % cols;
+                const int row = i / cols;
+                const float slotX = contentX + static_cast<float>(col) * (cellW + spacing);
+                const float slotY = contentY + static_cast<float>(row) * (cellH + spacing);
+                layoutElement(child, slotX + child.margin.x, slotY + child.margin.y,
+                    std::max(0.0f, cellW - child.margin.x * 2.0f),
+                    std::max(0.0f, cellH - child.margin.y * 2.0f), measureText);
+            }
+        }
+        // ── SizeBox: single child with size override ──
+        else if (element.type == WidgetElementType::SizeBox)
+        {
+            if (!element.children.empty())
+            {
+                auto& child = element.children[0];
+                float childW = (element.widthOverride > 0.0f) ? element.widthOverride : contentW;
+                float childH = (element.heightOverride > 0.0f) ? element.heightOverride : contentH;
+                layoutElement(child, contentX, contentY, childW, childH, measureText);
+            }
+        }
+        // ── ScaleBox: single child, scaled to fit ──
+        else if (element.type == WidgetElementType::ScaleBox)
+        {
+            if (!element.children.empty())
+            {
+                auto& child = element.children[0];
+                float childNatW = child.hasContentSize ? std::max(child.minSize.x, child.contentSizePixels.x) : child.minSize.x;
+                float childNatH = child.hasContentSize ? std::max(child.minSize.y, child.contentSizePixels.y) : child.minSize.y;
+                if (childNatW <= 0.0f) childNatW = contentW;
+                if (childNatH <= 0.0f) childNatH = contentH;
+
+                float scale = 1.0f;
+                switch (element.scaleMode)
+                {
+                case ScaleMode::Contain:
+                    scale = std::min(contentW / childNatW, contentH / childNatH);
+                    break;
+                case ScaleMode::Cover:
+                    scale = std::max(contentW / childNatW, contentH / childNatH);
+                    break;
+                case ScaleMode::Fill:
+                    // Non-uniform: just use content area directly
+                    layoutElement(child, contentX, contentY, contentW, contentH, measureText);
+                    return;
+                case ScaleMode::ScaleDown:
+                    scale = std::min(1.0f, std::min(contentW / childNatW, contentH / childNatH));
+                    break;
+                case ScaleMode::UserSpecified:
+                    scale = element.userScale;
+                    break;
+                }
+
+                float scaledW = childNatW * scale;
+                float scaledH = childNatH * scale;
+                // Center the scaled child within the content area
+                float offsetX = (contentW - scaledW) * 0.5f;
+                float offsetY = (contentH - scaledH) * 0.5f;
+                layoutElement(child, contentX + offsetX, contentY + offsetY, scaledW, scaledH, measureText);
+            }
+        }
+        // ── WidgetSwitcher: only active child ──
+        else if (element.type == WidgetElementType::WidgetSwitcher)
+        {
+            const int activeIdx = element.activeChildIndex;
+            for (size_t i = 0; i < element.children.size(); ++i)
+            {
+                auto& child = element.children[i];
+                if (static_cast<int>(i) == activeIdx)
+                {
+                    layoutElement(child, contentX, contentY, contentW, contentH, measureText);
+                }
+                else
+                {
+                    // Non-active children: still compute position/size but mark invisible for rendering
+                    child.computedPositionPixels = { contentX, contentY };
+                    child.computedSizePixels = { 0.0f, 0.0f };
+                    child.hasComputedPosition = true;
+                    child.hasComputedSize = true;
+                }
+            }
+        }
+        // ── Overlay: all children stacked, each aligned within the same area ──
+        else if (element.type == WidgetElementType::Overlay)
+        {
+            for (auto& child : element.children)
+            {
+                float childW = contentW;
+                float childH = contentH;
+                float childX = contentX;
+                float childY = contentY;
+
+                // If child has content size and doesn't fill, use its natural size
+                if (!child.fillX && child.hasContentSize)
+                {
+                    childW = std::max(child.minSize.x, child.contentSizePixels.x);
+                    // Horizontal alignment
+                    if (child.textAlignH == TextAlignH::Center)
+                        childX = contentX + (contentW - childW) * 0.5f;
+                    else if (child.textAlignH == TextAlignH::Right)
+                        childX = contentX + contentW - childW;
+                }
+                if (!child.fillY && child.hasContentSize)
+                {
+                    childH = std::max(child.minSize.y, child.contentSizePixels.y);
+                    // Vertical alignment
+                    if (child.textAlignV == TextAlignV::Center)
+                        childY = contentY + (contentH - childH) * 0.5f;
+                    else if (child.textAlignV == TextAlignV::Bottom)
+                        childY = contentY + contentH - childH;
+                }
+
+                layoutElement(child, childX, childY, childW, childH, measureText);
+            }
+        }
         else
         {
             // Default: lay out children with relative from/to positioning
@@ -1096,7 +1430,7 @@ void UIManager::showConfirmDialog(const std::string& message, std::function<void
     overlay.from = Vec2{ 0.0f, 0.0f };
     overlay.to = Vec2{ 1.0f, 1.0f };
     overlay.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.45f };
-    overlay.isHitTestable = true;
+    overlay.hitTestMode = HitTestMode::Enabled;
     overlay.runtimeOnly = true;
 
     WidgetElement panel{};
@@ -1107,7 +1441,7 @@ void UIManager::showConfirmDialog(const std::string& message, std::function<void
     panel.padding = Vec2{ 20.0f, 16.0f };
     panel.orientation = StackOrientation::Vertical;
     panel.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.95f };
-    panel.isHitTestable = false;
+    panel.hitTestMode = HitTestMode::DisabledSelf;
     panel.runtimeOnly = true;
 
     WidgetElement msgText{};
@@ -1172,7 +1506,7 @@ void UIManager::showConfirmDialog(const std::string& message, std::function<void
         btn.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
         btn.shaderVertex = "button_vertex.glsl";
         btn.shaderFragment = "button_fragment.glsl";
-        btn.isHitTestable = true;
+        btn.hitTestMode = HitTestMode::Enabled;
         btn.runtimeOnly = true;
         return btn;
     };
@@ -1248,7 +1582,7 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
     overlay.from = Vec2{ 0.0f, 0.0f };
     overlay.to = Vec2{ 1.0f, 1.0f };
     overlay.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.45f };
-    overlay.isHitTestable = true;
+    overlay.hitTestMode = HitTestMode::Enabled;
     overlay.runtimeOnly = true;
 
     WidgetElement panel{};
@@ -1259,7 +1593,7 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
     panel.padding = Vec2{ 20.0f, 16.0f };
     panel.orientation = StackOrientation::Vertical;
     panel.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.95f };
-    panel.isHitTestable = false;
+    panel.hitTestMode = HitTestMode::DisabledSelf;
     panel.runtimeOnly = true;
 
     WidgetElement msgText{};
@@ -1289,7 +1623,7 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
     checkbox.hoverColor = Vec4{ 0.24f, 0.24f, 0.30f, 1.0f };
     checkbox.fillColor = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
     checkbox.textColor = Vec4{ 0.90f, 0.90f, 0.94f, 1.0f };
-    checkbox.isHitTestable = true;
+    checkbox.hitTestMode = HitTestMode::Enabled;
     checkbox.runtimeOnly = true;
     checkbox.onCheckedChanged = [checkboxState](bool checked)
     {
@@ -1345,7 +1679,7 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
         btn.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
         btn.shaderVertex = "button_vertex.glsl";
         btn.shaderFragment = "button_fragment.glsl";
-        btn.isHitTestable = true;
+        btn.hitTestMode = HitTestMode::Enabled;
         btn.runtimeOnly = true;
         return btn;
     };
@@ -1577,7 +1911,7 @@ void UIManager::populateOutlinerWidget(const std::shared_ptr<Widget>& widget)
         button.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
         button.shaderVertex = "button_vertex.glsl";
         button.shaderFragment = "button_fragment.glsl";
-        button.isHitTestable = true;
+        button.hitTestMode = HitTestMode::Enabled;
         button.onClicked = [this, entity]()
             {
                 m_outlinerSelectedEntity = entity;
@@ -1695,7 +2029,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
                     removeBtn.textColor = Vec4{ 0.95f, 0.80f, 0.80f, 1.0f };
                     removeBtn.shaderVertex = "button_vertex.glsl";
                     removeBtn.shaderFragment = "button_fragment.glsl";
-                    removeBtn.isHitTestable = true;
+                    removeBtn.hitTestMode = HitTestMode::Enabled;
                     removeBtn.runtimeOnly = true;
 
                     const std::string compTitle = title;
@@ -2849,7 +3183,7 @@ static WidgetElement makeTreeRow(const std::string& id,
     btn.hoverColor = Vec4{ 0.22f, 0.24f, 0.30f, 0.95f };
     btn.shaderVertex = "button_vertex.glsl";
     btn.shaderFragment = "button_fragment.glsl";
-    btn.isHitTestable = true;
+    btn.hitTestMode = HitTestMode::Enabled;
     btn.runtimeOnly = true;
     // No own text/image — children handle rendering
     btn.text = "";
@@ -2916,7 +3250,7 @@ static WidgetElement makeGridTile(const std::string& id,
     tile.hoverColor = Vec4{ 0.22f, 0.24f, 0.30f, 0.85f };
     tile.shaderVertex = "button_vertex.glsl";
     tile.shaderFragment = "button_fragment.glsl";
-    tile.isHitTestable = true;
+    tile.hitTestMode = HitTestMode::Enabled;
     tile.runtimeOnly = true;
     tile.text = "";
 
@@ -3255,7 +3589,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             backBtn.hoverColor = Vec4{ 0.25f, 0.27f, 0.33f, 0.95f };
             backBtn.shaderVertex = "button_vertex.glsl";
             backBtn.shaderFragment = "button_fragment.glsl";
-            backBtn.isHitTestable = true;
+            backBtn.hitTestMode = HitTestMode::Enabled;
             backBtn.runtimeOnly = true;
             backBtn.onClicked = [this]()
             {
@@ -3292,7 +3626,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             importBtn.hoverColor = Vec4{ 0.20f, 0.45f, 0.70f, 1.0f };
             importBtn.shaderVertex = "button_vertex.glsl";
             importBtn.shaderFragment = "button_fragment.glsl";
-            importBtn.isHitTestable = true;
+            importBtn.hitTestMode = HitTestMode::Enabled;
             importBtn.runtimeOnly = true;
             pathBar->children.push_back(std::move(importBtn));
         }
@@ -3310,7 +3644,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             renameBtn.minSize = Vec2{ 60.0f, 20.0f };
             renameBtn.shaderVertex = "button_vertex.glsl";
             renameBtn.shaderFragment = "button_fragment.glsl";
-            renameBtn.isHitTestable = true;
+            renameBtn.hitTestMode = HitTestMode::Enabled;
             renameBtn.runtimeOnly = true;
             if (!m_selectedGridAsset.empty())
             {
@@ -3393,7 +3727,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             crumbBtn.hoverColor = Vec4{ 0.22f, 0.25f, 0.33f, 0.95f };
             crumbBtn.shaderVertex = "button_vertex.glsl";
             crumbBtn.shaderFragment = "button_fragment.glsl";
-            crumbBtn.isHitTestable = true;
+            crumbBtn.hitTestMode = HitTestMode::Enabled;
             crumbBtn.runtimeOnly = true;
 
             const std::string crumbPath = crumbs[i].second;
@@ -3542,7 +3876,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
                 entry.from = Vec2{ 0.0f, 0.65f };
                 entry.to = Vec2{ 1.0f, 1.0f };
                 entry.padding = Vec2{ 2.0f, 1.0f };
-                entry.isHitTestable = true;
+                entry.hitTestMode = HitTestMode::Enabled;
                 entry.isFocused = true;
                 entry.runtimeOnly = true;
                 entry.onValueChanged = [this, relPath](const std::string& newName)
@@ -4416,20 +4750,6 @@ bool UIManager::handleScroll(const Vec2& screenPos, float delta)
         return false;
     }
 
-    // Widget editor canvas zoom
-    if (auto* weState = getActiveWidgetEditorState())
-    {
-        if (isOverWidgetEditorCanvas(screenPos))
-        {
-            const float zoomStep = 0.1f;
-            float newZoom = weState->zoom + delta * zoomStep;
-            newZoom = std::clamp(newZoom, 0.1f, 5.0f);
-            weState->zoom = newZoom;
-            weState->previewDirty = true;
-            return true;
-        }
-    }
-
     const auto pointInRect = [](const Vec2& pos, const Vec2& size, const Vec2& point)
         {
             return point.x >= pos.x && point.x <= (pos.x + size.x) &&
@@ -4464,12 +4784,15 @@ bool UIManager::handleScroll(const Vec2& screenPos, float delta)
 
     // Iterate widgets in descending z-order (front-to-back) so that
     // overlapping higher-z widgets receive scroll events first.
+    // Filter by active tab to match getWidgetsOrderedByZ behaviour.
     std::vector<WidgetEntry*> zOrdered;
     zOrdered.reserve(m_widgets.size());
     for (auto& entry : m_widgets)
     {
         if (entry.widget)
         {
+            if (!entry.tabId.empty() && entry.tabId != m_activeTabId)
+                continue;
             zOrdered.push_back(&entry);
         }
     }
@@ -4510,6 +4833,20 @@ bool UIManager::handleScroll(const Vec2& screenPos, float delta)
                 m_renderDirty = true;
                 return true;
             }
+        }
+    }
+
+    // Widget editor canvas zoom — only if no scrollable widget claimed the event
+    if (auto* weState = getActiveWidgetEditorState())
+    {
+        if (isOverWidgetEditorCanvas(screenPos))
+        {
+            const float zoomStep = 0.1f;
+            float newZoom = weState->zoom + delta * zoomStep;
+            newZoom = std::clamp(newZoom, 0.1f, 5.0f);
+            weState->zoom = newZoom;
+            weState->previewDirty = true;
+            return true;
         }
     }
 
@@ -4828,7 +5165,7 @@ void UIManager::ensureModalWidget()
     overlay.from = Vec2{ 0.0f, 0.0f };
     overlay.to = Vec2{ 1.0f, 1.0f };
     overlay.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.45f };
-    overlay.isHitTestable = true;
+    overlay.hitTestMode = HitTestMode::Enabled;
     overlay.runtimeOnly = true;
 
     WidgetElement panel{};
@@ -4839,7 +5176,7 @@ void UIManager::ensureModalWidget()
     panel.padding = Vec2{ 20.0f, 16.0f };
     panel.orientation = StackOrientation::Vertical;
     panel.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.95f };
-    panel.isHitTestable = false;
+    panel.hitTestMode = HitTestMode::DisabledSelf;
     panel.runtimeOnly = true;
 
     WidgetElement message{};
@@ -4870,7 +5207,7 @@ void UIManager::ensureModalWidget()
     closeButton.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
     closeButton.shaderVertex = "button_vertex.glsl";
     closeButton.shaderFragment = "button_fragment.glsl";
-    closeButton.isHitTestable = true;
+    closeButton.hitTestMode = HitTestMode::Enabled;
     closeButton.runtimeOnly = true;
     closeButton.onClicked = [this]()
         {
@@ -4938,7 +5275,7 @@ std::shared_ptr<Widget> UIManager::createToastWidget(const std::string& message,
     panel.padding = Vec2{ 12.0f, 10.0f };
     panel.orientation = StackOrientation::Vertical;
     panel.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.92f };
-    panel.isHitTestable = false;
+    panel.hitTestMode = HitTestMode::DisabledSelf;
     panel.runtimeOnly = true;
 
     WidgetElement messageElement{};
@@ -5008,7 +5345,7 @@ void UIManager::updateHoverStates()
     }
 
     // Hover new element
-    if (newHovered && newHovered->isHitTestable && newHovered != m_lastHoveredElement)
+    if (newHovered && newHovered->hitTestMode == HitTestMode::Enabled && newHovered != m_lastHoveredElement)
     {
         newHovered->isHovered = true;
         if (newHovered->onHovered)
@@ -5018,7 +5355,7 @@ void UIManager::updateHoverStates()
         m_renderDirty = true;
     }
 
-    m_lastHoveredElement = (newHovered && newHovered->isHitTestable) ? newHovered : nullptr;
+    m_lastHoveredElement = (newHovered && newHovered->hitTestMode == HitTestMode::Enabled) ? newHovered : nullptr;
 }
 
 void UIManager::registerClickEvent(const std::string& eventId, std::function<void()> callback)
@@ -5141,6 +5478,13 @@ WidgetElement* UIManager::hitTest(const Vec2& screenPos, bool /*logDetails*/) co
             {
                 return nullptr;
             }
+
+            // DisabledAll: skip self AND all children
+            if (element.hitTestMode == HitTestMode::DisabledAll)
+            {
+                return nullptr;
+            }
+
             for (auto it = element.children.rbegin(); it != element.children.rend(); ++it)
             {
                 if (auto* hitChild = testElement(*it))
@@ -5154,7 +5498,7 @@ WidgetElement* UIManager::hitTest(const Vec2& screenPos, bool /*logDetails*/) co
                 return nullptr;
             }
 
-            if (!element.isHitTestable)
+            if (element.hitTestMode != HitTestMode::Enabled)
             {
                 return nullptr;
             }
@@ -5369,7 +5713,7 @@ void UIManager::showSaveProgressModal(size_t total)
     overlay.from = Vec2{ 0.0f, 0.0f };
     overlay.to = Vec2{ 1.0f, 1.0f };
     overlay.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.4f };
-    overlay.isHitTestable = true;
+    overlay.hitTestMode = HitTestMode::Enabled;
     overlay.runtimeOnly = true;
 
     WidgetElement panel{};
@@ -5520,7 +5864,7 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
             sep.from = Vec2{ 0.08f, (y0 + kItemH * 0.5f) / menuH };
             sep.to = Vec2{ 0.92f, (y0 + kItemH * 0.5f + 1.0f) / menuH };
             sep.color = Vec4{ 0.30f, 0.32f, 0.38f, 1.0f };
-            sep.isHitTestable = false;
+            sep.hitTestMode = HitTestMode::DisabledSelf;
             elements.push_back(std::move(sep));
             continue;
         }
@@ -5538,7 +5882,7 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
         item.textAlignH    = TextAlignH::Left;
         item.textAlignV    = TextAlignV::Center;
         item.padding       = Vec2{ 12.0f, 4.0f };
-        item.isHitTestable = true;
+        item.hitTestMode = HitTestMode::Enabled;
 
         auto callback = items[i].onClick;
         if (callback)
@@ -5724,7 +6068,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             saveBtn.textAlignV = TextAlignV::Center;
             saveBtn.minSize = Vec2{ 60.0f, 24.0f };
             saveBtn.padding = Vec2{ 10.0f, 2.0f };
-            saveBtn.isHitTestable = true;
+            saveBtn.hitTestMode = HitTestMode::Enabled;
             saveBtn.runtimeOnly = true;
             saveBtn.clickEvent = "WidgetEditor.Toolbar.Save." + tabId;
             root.children.push_back(std::move(saveBtn));
@@ -5774,54 +6118,71 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
         root.fillX = true;
         root.fillY = true;
         root.orientation = StackOrientation::Vertical;
-        root.padding = Vec2{ 10.0f, 8.0f };
         root.color = Vec4{ 0.12f, 0.13f, 0.17f, 0.96f };
-        root.scrollable = true;
         root.runtimeOnly = true;
 
-        // Title: Controls
+        // --- Controls section (scrollable) ---
         {
-            WidgetElement title{};
-            title.id = "WidgetEditor.Left.Title";
-            title.type = WidgetElementType::Text;
-            title.text = "Controls";
-            title.font = "default.ttf";
-            title.fontSize = 16.0f;
-            title.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
-            title.textAlignH = TextAlignH::Left;
-            title.textAlignV = TextAlignV::Center;
-            title.fillX = true;
-            title.minSize = Vec2{ 0.0f, 28.0f };
-            title.runtimeOnly = true;
-            root.children.push_back(std::move(title));
+            WidgetElement controlsSection{};
+            controlsSection.id = "WidgetEditor.Left.ControlsSection";
+            controlsSection.type = WidgetElementType::StackPanel;
+            controlsSection.fillX = true;
+            controlsSection.fillY = true;
+            controlsSection.scrollable = true;
+            controlsSection.orientation = StackOrientation::Vertical;
+            controlsSection.padding = Vec2{ 10.0f, 8.0f };
+            controlsSection.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            controlsSection.runtimeOnly = true;
+
+            // Title: Controls
+            {
+                WidgetElement title{};
+                title.id = "WidgetEditor.Left.Title";
+                title.type = WidgetElementType::Text;
+                title.text = "Controls";
+                title.font = "default.ttf";
+                title.fontSize = 16.0f;
+                title.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+                title.textAlignH = TextAlignH::Left;
+                title.textAlignV = TextAlignV::Center;
+                title.fillX = true;
+                title.minSize = Vec2{ 0.0f, 28.0f };
+                title.runtimeOnly = true;
+                controlsSection.children.push_back(std::move(title));
+            }
+
+            const std::vector<std::string> controls = {
+                "Panel", "Text", "Label", "Button", "ToggleButton", "RadioButton",
+                "Image", "EntryBar", "StackPanel", "ScrollView",
+                "Grid", "Slider", "CheckBox", "DropDown", "ColorPicker", "ProgressBar", "Separator",
+                "WrapBox", "UniformGrid", "SizeBox", "ScaleBox", "WidgetSwitcher", "Overlay"
+            };
+            for (size_t i = 0; i < controls.size(); ++i)
+            {
+                WidgetElement item{};
+                item.id = "WidgetEditor.Left.Control." + std::to_string(i);
+                item.type = WidgetElementType::Button;
+                item.text = "  " + controls[i];
+                item.font = "default.ttf";
+                item.fontSize = 14.0f;
+                item.textColor = Vec4{ 0.78f, 0.80f, 0.85f, 1.0f };
+                item.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                item.hoverColor = Vec4{ 0.18f, 0.20f, 0.28f, 0.8f };
+                item.textAlignH = TextAlignH::Left;
+                item.textAlignV = TextAlignV::Center;
+                item.fillX = true;
+                item.minSize = Vec2{ 0.0f, 24.0f };
+                item.hitTestMode = HitTestMode::Enabled;
+                item.isDraggable = true;
+                item.dragPayload = "WidgetControl|" + controls[i];
+                item.runtimeOnly = true;
+                controlsSection.children.push_back(std::move(item));
+            }
+
+            root.children.push_back(std::move(controlsSection));
         }
 
-        const std::vector<std::string> controls = {
-            "Panel", "Text", "Label", "Button", "ToggleButton", "RadioButton",
-            "Image", "EntryBar", "StackPanel", "ScrollView",
-            "Grid", "Slider", "CheckBox", "DropDown", "ColorPicker", "ProgressBar", "Separator"
-        };
-        for (size_t i = 0; i < controls.size(); ++i)
-        {
-            WidgetElement item{};
-            item.id = "WidgetEditor.Left.Control." + std::to_string(i);
-            item.type = WidgetElementType::Text;
-            item.text = "  " + controls[i];
-            item.font = "default.ttf";
-            item.fontSize = 14.0f;
-            item.textColor = Vec4{ 0.78f, 0.80f, 0.85f, 1.0f };
-            item.textAlignH = TextAlignH::Left;
-            item.textAlignV = TextAlignV::Center;
-            item.fillX = true;
-            item.minSize = Vec2{ 0.0f, 24.0f };
-            item.isHitTestable = true;
-            item.isDraggable = true;
-            item.dragPayload = "WidgetControl|" + controls[i];
-            item.runtimeOnly = true;
-            root.children.push_back(std::move(item));
-        }
-
-        // Separator
+        // Separator between sections
         {
             WidgetElement sep{};
             sep.id = "WidgetEditor.Left.Sep";
@@ -5833,36 +6194,50 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             root.children.push_back(std::move(sep));
         }
 
-        // Title: Hierarchy
+        // --- Hierarchy section (scrollable) ---
         {
-            WidgetElement treeTitle{};
-            treeTitle.id = "WidgetEditor.Left.TreeTitle";
-            treeTitle.type = WidgetElementType::Text;
-            treeTitle.text = "Hierarchy";
-            treeTitle.font = "default.ttf";
-            treeTitle.fontSize = 16.0f;
-            treeTitle.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
-            treeTitle.textAlignH = TextAlignH::Left;
-            treeTitle.textAlignV = TextAlignV::Center;
-            treeTitle.fillX = true;
-            treeTitle.minSize = Vec2{ 0.0f, 28.0f };
-            treeTitle.runtimeOnly = true;
-            root.children.push_back(std::move(treeTitle));
-        }
+            WidgetElement hierarchySection{};
+            hierarchySection.id = "WidgetEditor.Left.HierarchySection";
+            hierarchySection.type = WidgetElementType::StackPanel;
+            hierarchySection.fillX = true;
+            hierarchySection.fillY = true;
+            hierarchySection.scrollable = true;
+            hierarchySection.orientation = StackOrientation::Vertical;
+            hierarchySection.padding = Vec2{ 10.0f, 8.0f };
+            hierarchySection.color = Vec4{ 0.08f, 0.09f, 0.12f, 0.75f };
+            hierarchySection.runtimeOnly = true;
 
-        // Hierarchy tree container (will be populated by refreshWidgetEditorHierarchy)
-        {
-            WidgetElement hierarchyStack{};
-            hierarchyStack.id = "WidgetEditor.Left.Tree";
-            hierarchyStack.type = WidgetElementType::StackPanel;
-            hierarchyStack.fillX = true;
-            hierarchyStack.fillY = true;
-            hierarchyStack.scrollable = true;
-            hierarchyStack.orientation = StackOrientation::Vertical;
-            hierarchyStack.padding = Vec2{ 2.0f, 2.0f };
-            hierarchyStack.color = Vec4{ 0.08f, 0.09f, 0.12f, 0.75f };
-            hierarchyStack.runtimeOnly = true;
-            root.children.push_back(std::move(hierarchyStack));
+            // Title: Hierarchy
+            {
+                WidgetElement treeTitle{};
+                treeTitle.id = "WidgetEditor.Left.TreeTitle";
+                treeTitle.type = WidgetElementType::Text;
+                treeTitle.text = "Hierarchy";
+                treeTitle.font = "default.ttf";
+                treeTitle.fontSize = 16.0f;
+                treeTitle.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+                treeTitle.textAlignH = TextAlignH::Left;
+                treeTitle.textAlignV = TextAlignV::Center;
+                treeTitle.fillX = true;
+                treeTitle.minSize = Vec2{ 0.0f, 28.0f };
+                treeTitle.runtimeOnly = true;
+                hierarchySection.children.push_back(std::move(treeTitle));
+            }
+
+            // Hierarchy tree container (will be populated by refreshWidgetEditorHierarchy)
+            {
+                WidgetElement hierarchyStack{};
+                hierarchyStack.id = "WidgetEditor.Left.Tree";
+                hierarchyStack.type = WidgetElementType::StackPanel;
+                hierarchyStack.fillX = true;
+                hierarchyStack.orientation = StackOrientation::Vertical;
+                hierarchyStack.padding = Vec2{ 2.0f, 2.0f };
+                hierarchyStack.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                hierarchyStack.runtimeOnly = true;
+                hierarchySection.children.push_back(std::move(hierarchyStack));
+            }
+
+            root.children.push_back(std::move(hierarchySection));
         }
 
         leftWidget->setElements({ std::move(root) });
@@ -6231,6 +6606,14 @@ void UIManager::deleteSelectedWidgetEditorElement(const std::string& tabId)
     const std::string& selectedId = state.selectedElementId;
     if (selectedId.empty())
         return;
+
+    // Prevent deletion of the canvas root element
+    {
+        auto& elems = state.editedWidget->getElementsMutable();
+        WidgetElement* sel = FindElementById(elems, selectedId);
+        if (sel && sel->isCanvasRoot)
+            return;
+    }
 
     // Find and remove the element from the tree
     auto& rootElements = state.editedWidget->getElementsMutable();
@@ -6710,7 +7093,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
 
     WidgetElement newEl{};
     newEl.id = newId;
-    newEl.isHitTestable = true;
+    newEl.hitTestMode = HitTestMode::Enabled;
 
     // Set type-specific defaults
     if (elementType == "Panel")
@@ -6834,7 +7217,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.font = "default.ttf";
         newEl.fontSize = 14.0f;
         newEl.textColor = Vec4{ 0.85f, 0.85f, 0.90f, 1.0f };
-        newEl.isHitTestable = false;
+        newEl.hitTestMode = HitTestMode::DisabledSelf;
     }
     else if (elementType == "ToggleButton")
     {
@@ -6875,6 +7258,55 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.orientation = StackOrientation::Vertical;
         newEl.color = Vec4{ 0.08f, 0.08f, 0.10f, 0.6f };
         newEl.scrollable = true;
+    }
+    else if (elementType == "WrapBox")
+    {
+        newEl.type = WidgetElementType::WrapBox;
+        newEl.from = Vec2{ 0.05f, 0.05f };
+        newEl.to = Vec2{ 0.95f, 0.95f };
+        newEl.orientation = StackOrientation::Horizontal;
+        newEl.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.5f };
+    }
+    else if (elementType == "UniformGrid")
+    {
+        newEl.type = WidgetElementType::UniformGrid;
+        newEl.from = Vec2{ 0.05f, 0.05f };
+        newEl.to = Vec2{ 0.95f, 0.95f };
+        newEl.columns = 3;
+        newEl.rows = 3;
+        newEl.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.5f };
+    }
+    else if (elementType == "SizeBox")
+    {
+        newEl.type = WidgetElementType::SizeBox;
+        newEl.from = Vec2{ 0.1f, 0.1f };
+        newEl.to = Vec2{ 0.6f, 0.6f };
+        newEl.widthOverride = 200.0f;
+        newEl.heightOverride = 100.0f;
+        newEl.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+    }
+    else if (elementType == "ScaleBox")
+    {
+        newEl.type = WidgetElementType::ScaleBox;
+        newEl.from = Vec2{ 0.05f, 0.05f };
+        newEl.to = Vec2{ 0.95f, 0.95f };
+        newEl.scaleMode = ScaleMode::Contain;
+        newEl.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+    }
+    else if (elementType == "WidgetSwitcher")
+    {
+        newEl.type = WidgetElementType::WidgetSwitcher;
+        newEl.from = Vec2{ 0.05f, 0.05f };
+        newEl.to = Vec2{ 0.95f, 0.95f };
+        newEl.activeChildIndex = 0;
+        newEl.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+    }
+    else if (elementType == "Overlay")
+    {
+        newEl.type = WidgetElementType::Overlay;
+        newEl.from = Vec2{ 0.05f, 0.05f };
+        newEl.to = Vec2{ 0.95f, 0.95f };
+        newEl.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
     }
     else
     {
@@ -7182,7 +7614,7 @@ void UIManager::refreshWidgetEditorHierarchy(const std::string& tabId)
             row.fillX = true;
             row.minSize = Vec2{ 0.0f, 20.0f };
             row.padding = Vec2{ 4.0f, 1.0f };
-            row.isHitTestable = true;
+            row.hitTestMode = HitTestMode::Enabled;
             row.runtimeOnly = true;
 
             if (isSelected)
@@ -7323,6 +7755,12 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         case WidgetElementType::ScrollView:  typeName = "ScrollView"; break;
         case WidgetElementType::ToggleButton: typeName = "ToggleButton"; break;
         case WidgetElementType::RadioButton: typeName = "RadioButton"; break;
+        case WidgetElementType::WrapBox:      typeName = "WrapBox"; break;
+        case WidgetElementType::UniformGrid:  typeName = "UniformGrid"; break;
+        case WidgetElementType::SizeBox:      typeName = "SizeBox"; break;
+        case WidgetElementType::ScaleBox:     typeName = "ScaleBox"; break;
+        case WidgetElementType::WidgetSwitcher: typeName = "WidgetSwitcher"; break;
+        case WidgetElementType::Overlay:      typeName = "Overlay"; break;
         default:                             typeName = "Unknown"; break;
         }
         rootPanel->children.push_back(makeLabel("WE.Det.Type", "Type: " + typeName));
@@ -7419,6 +7857,126 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
                 try { sel->to.y = std::stof(v); } catch (...) {}
                 applyChange();
             }));
+    }
+
+    // --- Section: Anchor ---
+    {
+        WidgetElement sep{};
+        sep.type = WidgetElementType::Panel;
+        sep.fillX = true;
+        sep.minSize = Vec2{ 0.0f, 1.0f };
+        sep.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.runtimeOnly = true;
+        rootPanel->children.push_back(std::move(sep));
+
+        rootPanel->children.push_back(makeLabel("WE.Det.SecAnchor", "Anchor", 13.0f,
+            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
+
+        // Anchor dropdown
+        {
+            int anchorIndex = static_cast<int>(sel->anchor);
+
+            WidgetElement row{};
+            row.type = WidgetElementType::StackPanel;
+            row.orientation = StackOrientation::Horizontal;
+            row.fillX = true;
+            row.sizeToContent = true;
+            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.padding = Vec2{ 0.0f, 1.0f };
+            row.runtimeOnly = true;
+
+            WidgetElement lbl = makeLabel("WE.Det.Anchor.Lbl", "Anchor");
+            lbl.minSize = Vec2{ 90.0f, 22.0f };
+            lbl.fillX = false;
+            row.children.push_back(std::move(lbl));
+
+            DropDownWidget anchorDd;
+            anchorDd.setItems({ "TopLeft", "TopRight", "BottomLeft", "BottomRight", "Top", "Bottom", "Left", "Right", "Center", "Stretch" });
+            anchorDd.setSelectedIndex(anchorIndex);
+            anchorDd.setFont("default.ttf");
+            anchorDd.setFontSize(12.0f);
+            anchorDd.setMinSize(Vec2{ 0.0f, 22.0f });
+            anchorDd.setPadding(Vec2{ 4.0f, 2.0f });
+            anchorDd.setBackgroundColor(Vec4{ 0.16f, 0.16f, 0.20f, 1.0f });
+            anchorDd.setHoverColor(Vec4{ 0.22f, 0.22f, 0.27f, 1.0f });
+            anchorDd.setTextColor(Vec4{ 0.92f, 0.92f, 0.95f, 1.0f });
+            anchorDd.setOnSelectionChanged([sel, applyChange](int idx) {
+                sel->anchor = static_cast<WidgetAnchor>(idx);
+                applyChange();
+            });
+            WidgetElement ddEl = anchorDd.toElement();
+            ddEl.id = "WE.Det.Anchor.DD";
+            ddEl.fillX = true;
+            ddEl.runtimeOnly = true;
+            row.children.push_back(std::move(ddEl));
+
+            rootPanel->children.push_back(std::move(row));
+        }
+
+        rootPanel->children.push_back(makePropertyRow("WE.Det.AnchorOffX", "Offset X", fmtF(sel->anchorOffset.x),
+            [sel, applyChange](const std::string& v) {
+                try { sel->anchorOffset.x = std::stof(v); } catch (...) {}
+                applyChange();
+            }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.AnchorOffY", "Offset Y", fmtF(sel->anchorOffset.y),
+            [sel, applyChange](const std::string& v) {
+                try { sel->anchorOffset.y = std::stof(v); } catch (...) {}
+                applyChange();
+            }));
+    }
+
+    // --- Section: Hit Test ---
+    {
+        WidgetElement sep{};
+        sep.type = WidgetElementType::Panel;
+        sep.fillX = true;
+        sep.minSize = Vec2{ 0.0f, 1.0f };
+        sep.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.runtimeOnly = true;
+        rootPanel->children.push_back(std::move(sep));
+
+        rootPanel->children.push_back(makeLabel("WE.Det.SecHitTest", "Hit Test", 13.0f,
+            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
+
+        {
+            int htIndex = static_cast<int>(sel->hitTestMode);
+
+            WidgetElement row{};
+            row.type = WidgetElementType::StackPanel;
+            row.orientation = StackOrientation::Horizontal;
+            row.fillX = true;
+            row.sizeToContent = true;
+            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.padding = Vec2{ 0.0f, 1.0f };
+            row.runtimeOnly = true;
+
+            WidgetElement lbl = makeLabel("WE.Det.HitTest.Lbl", "Mode");
+            lbl.minSize = Vec2{ 90.0f, 22.0f };
+            lbl.fillX = false;
+            row.children.push_back(std::move(lbl));
+
+            DropDownWidget htDd;
+            htDd.setItems({ "Enabled", "Disabled (Self)", "Disabled (Self + Children)" });
+            htDd.setSelectedIndex(htIndex);
+            htDd.setFont("default.ttf");
+            htDd.setFontSize(12.0f);
+            htDd.setMinSize(Vec2{ 0.0f, 22.0f });
+            htDd.setPadding(Vec2{ 4.0f, 2.0f });
+            htDd.setBackgroundColor(Vec4{ 0.16f, 0.16f, 0.20f, 1.0f });
+            htDd.setHoverColor(Vec4{ 0.22f, 0.22f, 0.27f, 1.0f });
+            htDd.setTextColor(Vec4{ 0.92f, 0.92f, 0.95f, 1.0f });
+            htDd.setOnSelectionChanged([sel, applyChange](int idx) {
+                sel->hitTestMode = static_cast<HitTestMode>(idx);
+                applyChange();
+            });
+            WidgetElement ddEl = htDd.toElement();
+            ddEl.id = "WE.Det.HitTest.DD";
+            ddEl.fillX = true;
+            ddEl.runtimeOnly = true;
+            row.children.push_back(std::move(ddEl));
+
+            rootPanel->children.push_back(std::move(row));
+        }
     }
 
     // --- Section: Layout ---
@@ -7583,12 +8141,101 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             }));
 
         // Spacing (for containers)
-        if (sel->type == WidgetElementType::StackPanel || sel->type == WidgetElementType::ScrollView)
+        if (sel->type == WidgetElementType::StackPanel || sel->type == WidgetElementType::ScrollView
+            || sel->type == WidgetElementType::WrapBox || sel->type == WidgetElementType::UniformGrid)
         {
             rootPanel->children.push_back(makePropertyRow("WE.Det.Spacing", "Spacing", fmtF(sel->spacing),
                 [sel, this](const std::string& v) {
                     try { sel->spacing = std::stof(v); } catch (...) {}
                     markAllWidgetsDirty();
+                }));
+        }
+
+        // UniformGrid specific: columns / rows
+        if (sel->type == WidgetElementType::UniformGrid)
+        {
+            rootPanel->children.push_back(makePropertyRow("WE.Det.Columns", "Columns", std::to_string(sel->columns),
+                [sel, applyChange](const std::string& v) {
+                    try { sel->columns = std::max(0, std::stoi(v)); } catch (...) {}
+                    applyChange();
+                }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.Rows", "Rows", std::to_string(sel->rows),
+                [sel, applyChange](const std::string& v) {
+                    try { sel->rows = std::max(0, std::stoi(v)); } catch (...) {}
+                    applyChange();
+                }));
+        }
+
+        // SizeBox specific: widthOverride / heightOverride
+        if (sel->type == WidgetElementType::SizeBox)
+        {
+            rootPanel->children.push_back(makePropertyRow("WE.Det.WidthOvr", "Width Override", fmtF(sel->widthOverride),
+                [sel, applyChange](const std::string& v) {
+                    try { sel->widthOverride = std::max(0.0f, std::stof(v)); } catch (...) {}
+                    applyChange();
+                }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.HeightOvr", "Height Override", fmtF(sel->heightOverride),
+                [sel, applyChange](const std::string& v) {
+                    try { sel->heightOverride = std::max(0.0f, std::stof(v)); } catch (...) {}
+                    applyChange();
+                }));
+        }
+
+        // ScaleBox specific: scaleMode / userScale
+        if (sel->type == WidgetElementType::ScaleBox)
+        {
+            {
+                int smIndex = static_cast<int>(sel->scaleMode);
+                WidgetElement row{};
+                row.type = WidgetElementType::StackPanel;
+                row.orientation = StackOrientation::Horizontal;
+                row.fillX = true;
+                row.sizeToContent = true;
+                row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                row.runtimeOnly = true;
+
+                WidgetElement lbl = makeLabel("WE.Det.ScaleMode.Lbl", "Scale Mode");
+                lbl.minSize = Vec2{ 90.0f, 22.0f };
+                lbl.fillX = false;
+                row.children.push_back(std::move(lbl));
+
+                DropDownWidget smDd;
+                smDd.setItems({ "Contain", "Cover", "Fill", "ScaleDown", "UserSpecified" });
+                smDd.setSelectedIndex(smIndex);
+                smDd.setFont("default.ttf");
+                smDd.setFontSize(12.0f);
+                smDd.setMinSize(Vec2{ 0.0f, 22.0f });
+                smDd.setPadding(Vec2{ 4.0f, 2.0f });
+                smDd.setBackgroundColor(Vec4{ 0.16f, 0.16f, 0.20f, 1.0f });
+                smDd.setHoverColor(Vec4{ 0.22f, 0.22f, 0.27f, 1.0f });
+                smDd.setTextColor(Vec4{ 0.92f, 0.92f, 0.95f, 1.0f });
+                smDd.setOnSelectionChanged([sel, applyChange](int idx) {
+                    sel->scaleMode = static_cast<ScaleMode>(idx);
+                    applyChange();
+                });
+                WidgetElement ddEl = smDd.toElement();
+                ddEl.id = "WE.Det.ScaleMode.DD";
+                ddEl.fillX = true;
+                ddEl.runtimeOnly = true;
+                row.children.push_back(std::move(ddEl));
+
+                rootPanel->children.push_back(std::move(row));
+            }
+
+            rootPanel->children.push_back(makePropertyRow("WE.Det.UserScale", "User Scale", fmtF(sel->userScale),
+                [sel, applyChange](const std::string& v) {
+                    try { sel->userScale = std::max(0.01f, std::stof(v)); } catch (...) {}
+                    applyChange();
+                }));
+        }
+
+        // WidgetSwitcher specific: activeChildIndex
+        if (sel->type == WidgetElementType::WidgetSwitcher)
+        {
+            rootPanel->children.push_back(makePropertyRow("WE.Det.ActiveIdx", "Active Index", std::to_string(sel->activeChildIndex),
+                [sel, applyChange](const std::string& v) {
+                    try { sel->activeChildIndex = std::max(0, std::stoi(v)); } catch (...) {}
+                    applyChange();
                 }));
         }
     }
@@ -7641,6 +8288,144 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         // Tooltip
         rootPanel->children.push_back(makePropertyRow("WE.Det.Tooltip", "Tooltip", sel->tooltipText,
             [sel, this](const std::string& v) { sel->tooltipText = v; markAllWidgetsDirty(); }));
+
+        // ── Phase 2: Brush & Transform ────────────────────────────────────
+        {
+            WidgetElement sep{};
+            sep.type = WidgetElementType::Panel;
+            sep.fillX = true;
+            sep.minSize = Vec2{ 0.0f, 1.0f };
+            sep.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+            sep.runtimeOnly = true;
+            rootPanel->children.push_back(std::move(sep));
+
+            rootPanel->children.push_back(makeLabel("WE.Det.SecBrush", "Brush / Transform", 13.0f,
+                Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
+
+            // Background BrushType
+            {
+                int btIdx = static_cast<int>(sel->background.type);
+                WidgetElement row{};
+                row.type = WidgetElementType::StackPanel;
+                row.orientation = StackOrientation::Horizontal;
+                row.fillX = true;
+                row.sizeToContent = true;
+                row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                row.runtimeOnly = true;
+
+                WidgetElement lbl = makeLabel("WE.Det.BgBrush.Lbl", "Bg Brush");
+                lbl.minSize = Vec2{ 90.0f, 22.0f };
+                lbl.fillX = false;
+                row.children.push_back(std::move(lbl));
+
+                DropDownWidget dd;
+                dd.setItems({ "None", "SolidColor", "Image", "NineSlice", "LinearGradient" });
+                dd.setSelectedIndex(btIdx);
+                dd.setFont("default.ttf");
+                dd.setFontSize(12.0f);
+                dd.setMinSize(Vec2{ 0.0f, 22.0f });
+                dd.setPadding(Vec2{ 4.0f, 2.0f });
+                dd.setBackgroundColor(Vec4{ 0.16f, 0.16f, 0.20f, 1.0f });
+                dd.setHoverColor(Vec4{ 0.22f, 0.22f, 0.27f, 1.0f });
+                dd.setTextColor(Vec4{ 0.92f, 0.92f, 0.95f, 1.0f });
+                dd.setOnSelectionChanged([sel, this](int idx) {
+                    sel->background.type = static_cast<BrushType>(idx);
+                    markAllWidgetsDirty();
+                });
+                WidgetElement ddEl = dd.toElement();
+                ddEl.id = "WE.Det.BgBrush.DD";
+                ddEl.fillX = true;
+                ddEl.runtimeOnly = true;
+                row.children.push_back(std::move(ddEl));
+                rootPanel->children.push_back(std::move(row));
+            }
+
+            // Background brush color
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BgColR", "Bg Color R", fmtF(sel->background.color.x),
+                [sel, this](const std::string& v) { try { sel->background.color.x = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BgColG", "Bg Color G", fmtF(sel->background.color.y),
+                [sel, this](const std::string& v) { try { sel->background.color.y = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BgColB", "Bg Color B", fmtF(sel->background.color.z),
+                [sel, this](const std::string& v) { try { sel->background.color.z = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BgColA", "Bg Color A", fmtF(sel->background.color.w),
+                [sel, this](const std::string& v) { try { sel->background.color.w = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+
+            // Background gradient end color (only relevant for LinearGradient)
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BgEndR", "Bg End R", fmtF(sel->background.colorEnd.x),
+                [sel, this](const std::string& v) { try { sel->background.colorEnd.x = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BgEndG", "Bg End G", fmtF(sel->background.colorEnd.y),
+                [sel, this](const std::string& v) { try { sel->background.colorEnd.y = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BgEndB", "Bg End B", fmtF(sel->background.colorEnd.z),
+                [sel, this](const std::string& v) { try { sel->background.colorEnd.z = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BgEndA", "Bg End A", fmtF(sel->background.colorEnd.w),
+                [sel, this](const std::string& v) { try { sel->background.colorEnd.w = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+
+            // Gradient angle
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BgAngle", "Gradient Angle", fmtF(sel->background.gradientAngle),
+                [sel, this](const std::string& v) { try { sel->background.gradientAngle = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+
+            // Background image path
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BgImage", "Bg Image", sel->background.imagePath,
+                [sel, this](const std::string& v) { sel->background.imagePath = v; sel->background.textureId = 0; markAllWidgetsDirty(); }));
+
+            // ClipMode
+            {
+                int cmIdx = static_cast<int>(sel->clipMode);
+                WidgetElement row{};
+                row.type = WidgetElementType::StackPanel;
+                row.orientation = StackOrientation::Horizontal;
+                row.fillX = true;
+                row.sizeToContent = true;
+                row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                row.runtimeOnly = true;
+
+                WidgetElement lbl = makeLabel("WE.Det.ClipMode.Lbl", "Clip Mode");
+                lbl.minSize = Vec2{ 90.0f, 22.0f };
+                lbl.fillX = false;
+                row.children.push_back(std::move(lbl));
+
+                DropDownWidget cmDd;
+                cmDd.setItems({ "None", "ClipToBounds", "InheritFromParent" });
+                cmDd.setSelectedIndex(cmIdx);
+                cmDd.setFont("default.ttf");
+                cmDd.setFontSize(12.0f);
+                cmDd.setMinSize(Vec2{ 0.0f, 22.0f });
+                cmDd.setPadding(Vec2{ 4.0f, 2.0f });
+                cmDd.setBackgroundColor(Vec4{ 0.16f, 0.16f, 0.20f, 1.0f });
+                cmDd.setHoverColor(Vec4{ 0.22f, 0.22f, 0.27f, 1.0f });
+                cmDd.setTextColor(Vec4{ 0.92f, 0.92f, 0.95f, 1.0f });
+                cmDd.setOnSelectionChanged([sel, this](int idx) {
+                    sel->clipMode = static_cast<ClipMode>(idx);
+                    markAllWidgetsDirty();
+                });
+                WidgetElement ddEl = cmDd.toElement();
+                ddEl.id = "WE.Det.ClipMode.DD";
+                ddEl.fillX = true;
+                ddEl.runtimeOnly = true;
+                row.children.push_back(std::move(ddEl));
+                rootPanel->children.push_back(std::move(row));
+            }
+
+            // RenderTransform
+            rootPanel->children.push_back(makePropertyRow("WE.Det.RT.TX", "Translate X", fmtF(sel->renderTransform.translation.x),
+                [sel, this](const std::string& v) { try { sel->renderTransform.translation.x = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.RT.TY", "Translate Y", fmtF(sel->renderTransform.translation.y),
+                [sel, this](const std::string& v) { try { sel->renderTransform.translation.y = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.RT.Rot", "Rotation", fmtF(sel->renderTransform.rotation),
+                [sel, this](const std::string& v) { try { sel->renderTransform.rotation = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.RT.SX", "Scale X", fmtF(sel->renderTransform.scale.x),
+                [sel, this](const std::string& v) { try { sel->renderTransform.scale.x = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.RT.SY", "Scale Y", fmtF(sel->renderTransform.scale.y),
+                [sel, this](const std::string& v) { try { sel->renderTransform.scale.y = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.RT.ShX", "Shear X", fmtF(sel->renderTransform.shear.x),
+                [sel, this](const std::string& v) { try { sel->renderTransform.shear.x = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.RT.ShY", "Shear Y", fmtF(sel->renderTransform.shear.y),
+                [sel, this](const std::string& v) { try { sel->renderTransform.shear.y = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.RT.PX", "Pivot X", fmtF(sel->renderTransform.pivot.x),
+                [sel, this](const std::string& v) { try { sel->renderTransform.pivot.x = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.RT.PY", "Pivot Y", fmtF(sel->renderTransform.pivot.y),
+                [sel, this](const std::string& v) { try { sel->renderTransform.pivot.y = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+        }
     }
 
     // --- Section: Text (for elements with text) ---
@@ -7819,7 +8604,7 @@ void UIManager::openLandscapeManagerPopup()
         e.hoverColor   = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
         e.textColor    = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
         e.padding      = Vec2{ 6.0f, 4.0f };
-        e.isHitTestable = true;
+        e.hitTestMode = HitTestMode::Enabled;
         return e;
     };
 
@@ -7929,7 +8714,7 @@ void UIManager::openLandscapeManagerPopup()
         btn.textAlignH    = TextAlignH::Center;
         btn.textAlignV    = TextAlignV::Center;
         btn.padding       = Vec2{ 8.0f, 4.0f };
-        btn.isHitTestable = true;
+        btn.hitTestMode = HitTestMode::Enabled;
         btn.onClicked     = [state, this]()
         {
             LandscapeParams p;
@@ -7983,7 +8768,7 @@ void UIManager::openLandscapeManagerPopup()
         btn.textAlignH    = TextAlignH::Center;
         btn.textAlignV    = TextAlignV::Center;
         btn.padding       = Vec2{ 8.0f, 4.0f };
-        btn.isHitTestable = true;
+        btn.hitTestMode = HitTestMode::Enabled;
         btn.onClicked     = [this]()
         {
             m_renderer->closePopupWindow("LandscapeManager");
@@ -8157,7 +8942,7 @@ void UIManager::openEngineSettingsPopup()
             eb.hoverColor    = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
             eb.textColor     = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
             eb.padding       = Vec2{ 6.0f, 4.0f };
-            eb.isHitTestable = true;
+            eb.hitTestMode = HitTestMode::Enabled;
             eb.minSize       = Vec2{ contentW - kContentPad * 2.0f - 140.0f - 12.0f, kRowH };
             eb.onValueChanged = std::move(onChange);
             rowPanel.children.push_back(eb);
@@ -8180,7 +8965,7 @@ void UIManager::openEngineSettingsPopup()
             cb.fillColor     = Vec4{ 0.25f, 0.6f, 0.95f, 1.0f };
             cb.textColor     = Vec4{ 0.88f, 0.88f, 0.92f, 1.0f };
             cb.padding       = Vec2{ 6.0f, 4.0f };
-            cb.isHitTestable = true;
+            cb.hitTestMode = HitTestMode::Enabled;
             cb.minSize       = Vec2{ contentW - kContentPad * 2.0f, kRowH };
             cb.onCheckedChanged = std::move(onChange);
             entry->children.push_back(cb);
@@ -8220,7 +9005,7 @@ void UIManager::openEngineSettingsPopup()
             dd.hoverColor    = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
             dd.textColor     = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
             dd.padding       = Vec2{ 6.0f, 4.0f };
-            dd.isHitTestable = true;
+            dd.hitTestMode = HitTestMode::Enabled;
             dd.minSize       = Vec2{ contentW - kContentPad * 2.0f - 140.0f - 12.0f, kRowH };
             dd.onSelectionChanged = std::move(onChange);
             rowPanel.children.push_back(dd);
@@ -8440,7 +9225,7 @@ void UIManager::openEngineSettingsPopup()
         catBtn.textAlignH    = TextAlignH::Left;
         catBtn.textAlignV    = TextAlignV::Center;
         catBtn.padding       = Vec2{ 12.0f, 4.0f };
-        catBtn.isHitTestable = true;
+        catBtn.hitTestMode = HitTestMode::Enabled;
 
         const int catIndex = static_cast<int>(ci);
         catBtn.onClicked = [state, catIndex, rebuildContent]()
@@ -8621,7 +9406,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         cb.fillColor     = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
         cb.textColor     = Vec4{ 0.88f, 0.90f, 0.95f, 1.0f };
         cb.padding       = Vec2{ 8.0f, 4.0f };
-        cb.isHitTestable = true;
+        cb.hitTestMode = HitTestMode::Enabled;
         cb.from          = Vec2{ nx(kSidebarW + 12.0f), ny(H - kFooterH + 4.0f) };
         cb.to            = Vec2{ nx(W - 12.0f), ny(H - 4.0f) };
         cb.onCheckedChanged = [state](bool v) { state->setAsDefault = v; };
@@ -8693,7 +9478,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             btn.textAlignH    = TextAlignH::Center;
             btn.textAlignV    = TextAlignV::Center;
             btn.padding       = Vec2{ 16.0f, 8.0f };
-            btn.isHitTestable = true;
+            btn.hitTestMode = HitTestMode::Enabled;
             btn.minSize       = Vec2{ contentW - kContentPad * 2.0f, 38.0f };
             btn.shaderVertex   = "button_vertex.glsl";
             btn.shaderFragment = "button_fragment.glsl";
@@ -8715,7 +9500,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             btn.textAlignH    = TextAlignH::Center;
             btn.textAlignV    = TextAlignV::Center;
             btn.padding       = Vec2{ 12.0f, 6.0f };
-            btn.isHitTestable = true;
+            btn.hitTestMode = HitTestMode::Enabled;
             btn.minSize       = Vec2{ 160.0f, 30.0f };
             btn.shaderVertex   = "button_vertex.glsl";
             btn.shaderFragment = "button_fragment.glsl";
@@ -8753,7 +9538,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             eb.hoverColor    = Vec4{ 0.20f, 0.22f, 0.28f, 1.0f };
             eb.textColor     = Vec4{ 0.95f, 0.95f, 0.97f, 1.0f };
             eb.padding       = Vec2{ 8.0f, 5.0f };
-            eb.isHitTestable = true;
+            eb.hitTestMode = HitTestMode::Enabled;
             eb.minSize       = Vec2{ contentW - kContentPad * 2.0f - 120.0f - 12.0f, kRowH };
             eb.onValueChanged = std::move(onChange);
             rowPanel.children.push_back(eb);
@@ -8840,7 +9625,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                         ? Vec4{ 0.20f, 0.26f, 0.40f, 1.0f }
                         : row.color;
                     row.padding     = Vec2{ 0.0f, 0.0f };
-                    row.isHitTestable = exists;
+                    row.hitTestMode = exists ? HitTestMode::Enabled : HitTestMode::DisabledSelf;
 
                     // Left accent bar
                     WidgetElement accent;
@@ -8894,7 +9679,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     removeBtn.padding = Vec2{ 0.0f, 0.0f };
                     removeBtn.fillY = true;
                     removeBtn.minSize = Vec2{ 44.0f, 44.0f };
-                    removeBtn.isHitTestable = true;
+                    removeBtn.hitTestMode = HitTestMode::Enabled;
                     removeBtn.shaderVertex = "button_vertex.glsl";
                     removeBtn.shaderFragment = "button_fragment.glsl";
                     removeBtn.onClicked = [projPath, projName, exists, screenMgr, rebuildContentPtr]()
@@ -9150,7 +9935,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 includeDefaultContentCb.fillColor = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
                 includeDefaultContentCb.textColor = Vec4{ 0.88f, 0.90f, 0.95f, 1.0f };
                 includeDefaultContentCb.padding = Vec2{ 8.0f, 4.0f };
-                includeDefaultContentCb.isHitTestable = true;
+                includeDefaultContentCb.hitTestMode = HitTestMode::Enabled;
                 includeDefaultContentCb.minSize = Vec2{ contentW - kContentPad * 2.0f, 24.0f };
                 includeDefaultContentCb.onCheckedChanged = [state](bool v)
                 {
@@ -9189,7 +9974,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 rhiDd.hoverColor    = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
                 rhiDd.textColor     = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
                 rhiDd.padding       = Vec2{ 6.0f, 4.0f };
-                rhiDd.isHitTestable = true;
+                rhiDd.hitTestMode = HitTestMode::Enabled;
                 rhiDd.minSize       = Vec2{ contentW - kContentPad * 2.0f - 120.0f - 12.0f, kRowH };
                 rhiDd.onSelectionChanged = [state](int idx)
                 {
@@ -9294,7 +10079,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         catBtn.textAlignH    = TextAlignH::Left;
         catBtn.textAlignV    = TextAlignV::Center;
         catBtn.padding       = Vec2{ 14.0f, 4.0f };
-        catBtn.isHitTestable = true;
+        catBtn.hitTestMode = HitTestMode::Enabled;
         catBtn.shaderVertex   = "button_vertex.glsl";
         catBtn.shaderFragment = "button_fragment.glsl";
 
@@ -9338,4 +10123,1318 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
     {
         (*rebuildContentPtr)();
     }
+}
+
+// ===========================================================================
+// UI Designer Tab  (Gameplay UI — operates on ViewportUIManager)
+// ===========================================================================
+
+ViewportUIManager* UIManager::getViewportUIManager() const
+{
+    return m_renderer ? m_renderer->getViewportUIManagerPtr() : nullptr;
+}
+
+bool UIManager::isUIDesignerOpen() const
+{
+    return m_uiDesignerState.isOpen;
+}
+
+// ---------------------------------------------------------------------------
+// openUIDesignerTab  — creates the tab + left / right / toolbar widgets
+// ---------------------------------------------------------------------------
+void UIManager::openUIDesignerTab()
+{
+    if (!m_renderer)
+        return;
+
+    const std::string tabId = "UIDesigner";
+
+    // If already open, just switch to it
+    if (m_uiDesignerState.isOpen)
+    {
+        m_renderer->setActiveTab(tabId);
+        markAllWidgetsDirty();
+        return;
+    }
+
+    m_renderer->addTab(tabId, "UI Designer", true);
+    m_renderer->setActiveTab(tabId);
+
+    const std::string leftWidgetId    = "UIDesigner.Left";
+    const std::string rightWidgetId   = "UIDesigner.Right";
+    const std::string toolbarWidgetId = "UIDesigner.Toolbar";
+
+    // Clean up any stale registrations
+    unregisterWidget(leftWidgetId);
+    unregisterWidget(rightWidgetId);
+    unregisterWidget(toolbarWidgetId);
+
+    // Store state
+    m_uiDesignerState = {};
+    m_uiDesignerState.tabId           = tabId;
+    m_uiDesignerState.leftWidgetId    = leftWidgetId;
+    m_uiDesignerState.rightWidgetId   = rightWidgetId;
+    m_uiDesignerState.toolbarWidgetId = toolbarWidgetId;
+    m_uiDesignerState.isOpen          = true;
+
+    // --- Top toolbar: widget selector + new / delete buttons ---
+    {
+        auto toolbarWidget = std::make_shared<Widget>();
+        toolbarWidget->setName(toolbarWidgetId);
+        toolbarWidget->setAnchor(WidgetAnchor::TopLeft);
+        toolbarWidget->setFillX(true);
+        toolbarWidget->setSizePixels(Vec2{ 0.0f, 32.0f });
+        toolbarWidget->setZOrder(3);
+
+        WidgetElement root{};
+        root.id          = "UIDesigner.Toolbar.Root";
+        root.type        = WidgetElementType::StackPanel;
+        root.from        = Vec2{ 0.0f, 0.0f };
+        root.to          = Vec2{ 1.0f, 1.0f };
+        root.fillX       = true;
+        root.fillY       = true;
+        root.orientation = StackOrientation::Horizontal;
+        root.padding     = Vec2{ 8.0f, 4.0f };
+        root.color       = Vec4{ 0.14f, 0.15f, 0.19f, 1.0f };
+        root.runtimeOnly = true;
+
+        // "New Widget" button
+        {
+            WidgetElement btn{};
+            btn.id            = "UIDesigner.Toolbar.NewWidget";
+            btn.type          = WidgetElementType::Button;
+            btn.text          = "+ Widget";
+            btn.font          = "default.ttf";
+            btn.fontSize      = 13.0f;
+            btn.textColor     = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+            btn.color         = Vec4{ 0.22f, 0.24f, 0.30f, 1.0f };
+            btn.hoverColor    = Vec4{ 0.30f, 0.34f, 0.42f, 1.0f };
+            btn.textAlignH    = TextAlignH::Center;
+            btn.textAlignV    = TextAlignV::Center;
+            btn.minSize       = Vec2{ 80.0f, 24.0f };
+            btn.padding       = Vec2{ 10.0f, 2.0f };
+            btn.hitTestMode = HitTestMode::Enabled;
+            btn.runtimeOnly   = true;
+            btn.clickEvent    = "UIDesigner.Toolbar.NewWidget";
+            root.children.push_back(std::move(btn));
+        }
+
+        // "Delete Widget" button
+        {
+            WidgetElement btn{};
+            btn.id            = "UIDesigner.Toolbar.DeleteWidget";
+            btn.type          = WidgetElementType::Button;
+            btn.text          = "- Widget";
+            btn.font          = "default.ttf";
+            btn.fontSize      = 13.0f;
+            btn.textColor     = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+            btn.color         = Vec4{ 0.22f, 0.24f, 0.30f, 1.0f };
+            btn.hoverColor    = Vec4{ 0.50f, 0.25f, 0.25f, 1.0f };
+            btn.textAlignH    = TextAlignH::Center;
+            btn.textAlignV    = TextAlignV::Center;
+            btn.minSize       = Vec2{ 80.0f, 24.0f };
+            btn.padding       = Vec2{ 10.0f, 2.0f };
+            btn.hitTestMode = HitTestMode::Enabled;
+            btn.runtimeOnly   = true;
+            btn.clickEvent    = "UIDesigner.Toolbar.DeleteWidget";
+            root.children.push_back(std::move(btn));
+        }
+
+        // Spacer
+        {
+            WidgetElement spacer{};
+            spacer.type        = WidgetElementType::Panel;
+            spacer.fillX       = true;
+            spacer.minSize     = Vec2{ 0.0f, 1.0f };
+            spacer.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            spacer.runtimeOnly = true;
+            root.children.push_back(std::move(spacer));
+        }
+
+        // Status label
+        {
+            WidgetElement lbl{};
+            lbl.id          = "UIDesigner.Toolbar.Status";
+            lbl.type        = WidgetElementType::Text;
+            lbl.text        = "";
+            lbl.font        = "default.ttf";
+            lbl.fontSize    = 12.0f;
+            lbl.textColor   = Vec4{ 0.65f, 0.68f, 0.75f, 1.0f };
+            lbl.textAlignH  = TextAlignH::Right;
+            lbl.textAlignV  = TextAlignV::Center;
+            lbl.minSize     = Vec2{ 0.0f, 24.0f };
+            lbl.padding     = Vec2{ 8.0f, 0.0f };
+            lbl.runtimeOnly = true;
+            root.children.push_back(std::move(lbl));
+        }
+
+        toolbarWidget->setElements({ std::move(root) });
+        registerWidget(toolbarWidgetId, toolbarWidget, tabId);
+
+        // Click events
+        registerClickEvent("UIDesigner.Toolbar.NewWidget", [this]()
+        {
+            auto* vpUI = getViewportUIManager();
+            if (!vpUI) return;
+            static int s_newWidgetCounter = 0;
+            std::string name = "Widget_" + std::to_string(++s_newWidgetCounter);
+            vpUI->createWidget(name, s_newWidgetCounter * 10);
+            m_uiDesignerState.selectedWidgetName = name;
+            m_uiDesignerState.selectedElementId.clear();
+            refreshUIDesignerHierarchy();
+            refreshUIDesignerDetails();
+            markAllWidgetsDirty();
+        });
+
+        registerClickEvent("UIDesigner.Toolbar.DeleteWidget", [this]()
+        {
+            auto* vpUI = getViewportUIManager();
+            if (!vpUI || m_uiDesignerState.selectedWidgetName.empty()) return;
+            vpUI->removeWidget(m_uiDesignerState.selectedWidgetName);
+            m_uiDesignerState.selectedWidgetName.clear();
+            m_uiDesignerState.selectedElementId.clear();
+            refreshUIDesignerHierarchy();
+            refreshUIDesignerDetails();
+            markAllWidgetsDirty();
+        });
+    }
+
+    // --- Left panel: control palette + hierarchy ---
+    {
+        auto leftWidget = std::make_shared<Widget>();
+        leftWidget->setName(leftWidgetId);
+        leftWidget->setAnchor(WidgetAnchor::TopLeft);
+        leftWidget->setFillY(true);
+        leftWidget->setSizePixels(Vec2{ 250.0f, 0.0f });
+        leftWidget->setZOrder(2);
+
+        WidgetElement root{};
+        root.id          = "UIDesigner.Left.Root";
+        root.type        = WidgetElementType::StackPanel;
+        root.from        = Vec2{ 0.0f, 0.0f };
+        root.to          = Vec2{ 1.0f, 1.0f };
+        root.fillX       = true;
+        root.fillY       = true;
+        root.orientation = StackOrientation::Vertical;
+        root.color       = Vec4{ 0.12f, 0.13f, 0.17f, 0.96f };
+        root.runtimeOnly = true;
+
+        // --- Controls section (scrollable) ---
+        {
+            WidgetElement controlsSection{};
+            controlsSection.id          = "UIDesigner.Left.ControlsSection";
+            controlsSection.type        = WidgetElementType::StackPanel;
+            controlsSection.fillX       = true;
+            controlsSection.fillY       = true;
+            controlsSection.scrollable  = true;
+            controlsSection.orientation = StackOrientation::Vertical;
+            controlsSection.padding     = Vec2{ 10.0f, 8.0f };
+            controlsSection.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            controlsSection.runtimeOnly = true;
+
+            // Title: Controls
+            {
+                WidgetElement title{};
+                title.id         = "UIDesigner.Left.Title";
+                title.type       = WidgetElementType::Text;
+                title.text       = "Controls";
+                title.font       = "default.ttf";
+                title.fontSize   = 16.0f;
+                title.textColor  = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+                title.textAlignH = TextAlignH::Left;
+                title.textAlignV = TextAlignV::Center;
+                title.fillX      = true;
+                title.minSize    = Vec2{ 0.0f, 28.0f };
+                title.runtimeOnly = true;
+                controlsSection.children.push_back(std::move(title));
+            }
+
+            // Gameplay-UI element types (subset — only those supported by ViewportUIManager)
+            const std::vector<std::string> controls = {
+                "Panel", "Text", "Label", "Button", "Image", "ProgressBar", "Slider",
+                "WrapBox", "UniformGrid", "SizeBox", "ScaleBox", "WidgetSwitcher", "Overlay"
+            };
+            for (size_t i = 0; i < controls.size(); ++i)
+            {
+                WidgetElement item{};
+                item.id            = "UIDesigner.Left.Control." + std::to_string(i);
+                item.type          = WidgetElementType::Button;
+                item.text          = "  " + controls[i];
+                item.font          = "default.ttf";
+                item.fontSize      = 14.0f;
+                item.textColor     = Vec4{ 0.78f, 0.80f, 0.85f, 1.0f };
+                item.color         = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                item.hoverColor    = Vec4{ 0.18f, 0.20f, 0.28f, 0.8f };
+                item.textAlignH    = TextAlignH::Left;
+                item.textAlignV    = TextAlignV::Center;
+                item.fillX         = true;
+                item.minSize       = Vec2{ 0.0f, 24.0f };
+                item.hitTestMode = HitTestMode::Enabled;
+                item.runtimeOnly   = true;
+                item.clickEvent    = "UIDesigner.Left.Control." + std::to_string(i);
+                controlsSection.children.push_back(std::move(item));
+
+                const std::string controlType = controls[i];
+                registerClickEvent("UIDesigner.Left.Control." + std::to_string(i), [this, controlType]()
+                {
+                    addElementToViewportWidget(controlType);
+                });
+            }
+
+            root.children.push_back(std::move(controlsSection));
+        }
+
+        // Separator between sections
+        {
+            WidgetElement sep{};
+            sep.id         = "UIDesigner.Left.Sep";
+            sep.type       = WidgetElementType::Panel;
+            sep.fillX      = true;
+            sep.minSize    = Vec2{ 0.0f, 1.0f };
+            sep.color      = Vec4{ 0.26f, 0.28f, 0.34f, 0.8f };
+            sep.runtimeOnly = true;
+            root.children.push_back(std::move(sep));
+        }
+
+        // --- Hierarchy section (scrollable) ---
+        {
+            WidgetElement hierarchySection{};
+            hierarchySection.id          = "UIDesigner.Left.HierarchySection";
+            hierarchySection.type        = WidgetElementType::StackPanel;
+            hierarchySection.fillX       = true;
+            hierarchySection.fillY       = true;
+            hierarchySection.scrollable  = true;
+            hierarchySection.orientation = StackOrientation::Vertical;
+            hierarchySection.padding     = Vec2{ 10.0f, 8.0f };
+            hierarchySection.color       = Vec4{ 0.08f, 0.09f, 0.12f, 0.75f };
+            hierarchySection.runtimeOnly = true;
+
+            // Title: Hierarchy
+            {
+                WidgetElement treeTitle{};
+                treeTitle.id         = "UIDesigner.Left.TreeTitle";
+                treeTitle.type       = WidgetElementType::Text;
+                treeTitle.text       = "Hierarchy";
+                treeTitle.font       = "default.ttf";
+                treeTitle.fontSize   = 16.0f;
+                treeTitle.textColor  = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+                treeTitle.textAlignH = TextAlignH::Left;
+                treeTitle.textAlignV = TextAlignV::Center;
+                treeTitle.fillX      = true;
+                treeTitle.minSize    = Vec2{ 0.0f, 28.0f };
+                treeTitle.runtimeOnly = true;
+                hierarchySection.children.push_back(std::move(treeTitle));
+            }
+
+            // Hierarchy tree container (populated by refreshUIDesignerHierarchy)
+            {
+                WidgetElement hierarchyStack{};
+                hierarchyStack.id          = "UIDesigner.Left.Tree";
+                hierarchyStack.type        = WidgetElementType::StackPanel;
+                hierarchyStack.fillX       = true;
+                hierarchyStack.orientation = StackOrientation::Vertical;
+                hierarchyStack.padding     = Vec2{ 2.0f, 2.0f };
+                hierarchyStack.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                hierarchyStack.runtimeOnly = true;
+                hierarchySection.children.push_back(std::move(hierarchyStack));
+            }
+
+            root.children.push_back(std::move(hierarchySection));
+        }
+
+        leftWidget->setElements({ std::move(root) });
+        registerWidget(leftWidgetId, leftWidget, tabId);
+    }
+
+    // --- Right panel: element details (populated by refreshUIDesignerDetails) ---
+    {
+        auto rightWidget = std::make_shared<Widget>();
+        rightWidget->setName(rightWidgetId);
+        rightWidget->setAnchor(WidgetAnchor::TopRight);
+        rightWidget->setFillY(true);
+        rightWidget->setSizePixels(Vec2{ 280.0f, 0.0f });
+        rightWidget->setZOrder(2);
+
+        WidgetElement root{};
+        root.id          = "UIDesigner.Right.Root";
+        root.type        = WidgetElementType::StackPanel;
+        root.from        = Vec2{ 0.0f, 0.0f };
+        root.to          = Vec2{ 1.0f, 1.0f };
+        root.fillX       = true;
+        root.fillY       = true;
+        root.orientation = StackOrientation::Vertical;
+        root.padding     = Vec2{ 10.0f, 8.0f };
+        root.color       = Vec4{ 0.12f, 0.13f, 0.17f, 0.96f };
+        root.scrollable  = true;
+        root.runtimeOnly = true;
+
+        {
+            WidgetElement title{};
+            title.id         = "UIDesigner.Right.Title";
+            title.type       = WidgetElementType::Text;
+            title.text       = "Properties";
+            title.font       = "default.ttf";
+            title.fontSize   = 16.0f;
+            title.textColor  = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+            title.textAlignH = TextAlignH::Left;
+            title.textAlignV = TextAlignV::Center;
+            title.fillX      = true;
+            title.minSize    = Vec2{ 0.0f, 28.0f };
+            title.runtimeOnly = true;
+            root.children.push_back(std::move(title));
+        }
+
+        // Placeholder hint
+        {
+            WidgetElement hint{};
+            hint.id         = "UIDesigner.Right.Hint";
+            hint.type       = WidgetElementType::Text;
+            hint.text       = "Select an element in the hierarchy\nto see its properties.";
+            hint.font       = "default.ttf";
+            hint.fontSize   = 13.0f;
+            hint.textColor  = Vec4{ 0.62f, 0.66f, 0.75f, 1.0f };
+            hint.textAlignH = TextAlignH::Left;
+            hint.textAlignV = TextAlignV::Center;
+            hint.fillX      = true;
+            hint.minSize    = Vec2{ 0.0f, 36.0f };
+            hint.runtimeOnly = true;
+            root.children.push_back(std::move(hint));
+        }
+
+        rightWidget->setElements({ std::move(root) });
+        registerWidget(rightWidgetId, rightWidget, tabId);
+    }
+
+    // Tab and close button events
+    const std::string tabBtnId   = "TitleBar.Tab." + tabId;
+    const std::string closeBtnId = "TitleBar.TabClose." + tabId;
+
+    registerClickEvent(tabBtnId, [this, tabId]()
+    {
+        if (m_renderer)
+            m_renderer->setActiveTab(tabId);
+        // Refresh hierarchy in case scripts changed things while tab was inactive
+        refreshUIDesignerHierarchy();
+        markAllWidgetsDirty();
+    });
+
+    registerClickEvent(closeBtnId, [this]()
+    {
+        closeUIDesignerTab();
+    });
+
+    // --- Bidirectional sync: viewport click → designer selection ---
+    auto* vpUI = getViewportUIManager();
+    if (vpUI)
+    {
+        vpUI->setOnSelectionChanged([this](const std::string& elementId)
+        {
+            if (!m_uiDesignerState.isOpen) return;
+            // Only sync if the UI Designer tab is the active tab
+            if (m_renderer && m_renderer->getActiveTabId() != m_uiDesignerState.tabId) return;
+
+            // Find which widget owns this element
+            auto* vp = getViewportUIManager();
+            if (!vp) return;
+            std::string ownerWidget;
+            for (const auto& we : vp->getSortedWidgets())
+            {
+                if (we.widget)
+                {
+                    auto& elems = we.widget->getElementsMutable();
+                    if (!elems.empty())
+                    {
+                        for (const auto& child : elems[0].children)
+                        {
+                            if (child.id == elementId)
+                            {
+                                ownerWidget = we.name;
+                                break;
+                            }
+                        }
+                        if (!ownerWidget.empty()) break;
+                    }
+                }
+            }
+
+            if (!ownerWidget.empty())
+            {
+                m_uiDesignerState.selectedWidgetName = ownerWidget;
+                m_uiDesignerState.selectedElementId = elementId;
+                refreshUIDesignerHierarchy();
+                refreshUIDesignerDetails();
+                markAllWidgetsDirty();
+            }
+        });
+    }
+
+    // Initial population
+    refreshUIDesignerHierarchy();
+    refreshUIDesignerDetails();
+    markAllWidgetsDirty();
+}
+
+// ---------------------------------------------------------------------------
+// closeUIDesignerTab
+// ---------------------------------------------------------------------------
+void UIManager::closeUIDesignerTab()
+{
+    if (!m_uiDesignerState.isOpen || !m_renderer)
+        return;
+
+    const std::string tabId = m_uiDesignerState.tabId;
+
+    if (m_renderer->getActiveTabId() == tabId)
+        m_renderer->setActiveTab("Viewport");
+
+    unregisterWidget(m_uiDesignerState.leftWidgetId);
+    unregisterWidget(m_uiDesignerState.rightWidgetId);
+    unregisterWidget(m_uiDesignerState.toolbarWidgetId);
+
+    // Clear the selection callback
+    auto* vpUI = getViewportUIManager();
+    if (vpUI)
+        vpUI->setOnSelectionChanged(nullptr);
+
+    m_renderer->removeTab(tabId);
+    m_uiDesignerState = {};
+    markAllWidgetsDirty();
+}
+
+// ---------------------------------------------------------------------------
+// selectUIDesignerElement
+// ---------------------------------------------------------------------------
+void UIManager::selectUIDesignerElement(const std::string& widgetName, const std::string& elementId)
+{
+    m_uiDesignerState.selectedWidgetName = widgetName;
+    m_uiDesignerState.selectedElementId  = elementId;
+
+    // Also inform the ViewportUIManager so it can show a selection highlight
+    auto* vpUI = getViewportUIManager();
+    if (vpUI)
+        vpUI->setSelectedElementId(elementId);
+
+    refreshUIDesignerHierarchy();
+    refreshUIDesignerDetails();
+    markAllWidgetsDirty();
+}
+
+// ---------------------------------------------------------------------------
+// addElementToViewportWidget — adds a new element from the control palette
+// ---------------------------------------------------------------------------
+void UIManager::addElementToViewportWidget(const std::string& elementType)
+{
+    auto* vpUI = getViewportUIManager();
+    if (!vpUI) return;
+
+    // If no widget is selected, create one automatically
+    if (m_uiDesignerState.selectedWidgetName.empty())
+    {
+        if (!vpUI->hasWidgets())
+        {
+            vpUI->createWidget("Default", 0);
+            m_uiDesignerState.selectedWidgetName = "Default";
+        }
+        else
+        {
+            // Select the first widget
+            const auto& sorted = vpUI->getSortedWidgets();
+            if (!sorted.empty())
+                m_uiDesignerState.selectedWidgetName = sorted.front().name;
+        }
+    }
+
+    Widget* w = vpUI->getWidget(m_uiDesignerState.selectedWidgetName);
+    if (!w) return;
+
+    // Find the canvas panel (root element)
+    auto& elements = w->getElementsMutable();
+    if (elements.empty()) return;
+    auto& canvas = elements[0];
+
+    static int s_autoElementId = 0;
+    std::string newId = elementType + "_" + std::to_string(++s_autoElementId);
+
+    WidgetElement newEl{};
+    newEl.id = newId;
+
+    if (elementType == "Panel")
+    {
+        newEl.type  = WidgetElementType::Panel;
+        newEl.from  = Vec2{ 0.0f, 0.0f };
+        newEl.to    = Vec2{ 120.0f, 80.0f };
+        newEl.color = Vec4{ 0.25f, 0.25f, 0.30f, 0.8f };
+    }
+    else if (elementType == "Text")
+    {
+        newEl.type      = WidgetElementType::Text;
+        newEl.from      = Vec2{ 0.0f, 0.0f };
+        newEl.to        = Vec2{ 150.0f, 30.0f };
+        newEl.text      = "Text";
+        newEl.font      = "default.ttf";
+        newEl.fontSize  = 14.0f;
+        newEl.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+    }
+    else if (elementType == "Label")
+    {
+        newEl.type      = WidgetElementType::Label;
+        newEl.from      = Vec2{ 0.0f, 0.0f };
+        newEl.to        = Vec2{ 100.0f, 24.0f };
+        newEl.text      = "Label";
+        newEl.font      = "default.ttf";
+        newEl.fontSize  = 13.0f;
+        newEl.textColor = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
+    }
+    else if (elementType == "Button")
+    {
+        newEl.type          = WidgetElementType::Button;
+        newEl.from          = Vec2{ 0.0f, 0.0f };
+        newEl.to            = Vec2{ 120.0f, 36.0f };
+        newEl.text          = "Button";
+        newEl.font          = "default.ttf";
+        newEl.fontSize      = 14.0f;
+        newEl.textColor     = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+        newEl.color         = Vec4{ 0.22f, 0.24f, 0.32f, 1.0f };
+        newEl.hoverColor    = Vec4{ 0.30f, 0.34f, 0.44f, 1.0f };
+        newEl.hitTestMode = HitTestMode::Enabled;
+    }
+    else if (elementType == "Image")
+    {
+        newEl.type  = WidgetElementType::Image;
+        newEl.from  = Vec2{ 0.0f, 0.0f };
+        newEl.to    = Vec2{ 100.0f, 100.0f };
+        newEl.color = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+    }
+    else if (elementType == "ProgressBar")
+    {
+        newEl.type       = WidgetElementType::ProgressBar;
+        newEl.from       = Vec2{ 0.0f, 0.0f };
+        newEl.to         = Vec2{ 200.0f, 24.0f };
+        newEl.valueFloat = 0.5f;
+        newEl.minValue   = 0.0f;
+        newEl.maxValue   = 1.0f;
+        newEl.color      = Vec4{ 0.15f, 0.15f, 0.20f, 1.0f };
+    }
+    else if (elementType == "Slider")
+    {
+        newEl.type       = WidgetElementType::Slider;
+        newEl.from       = Vec2{ 0.0f, 0.0f };
+        newEl.to         = Vec2{ 200.0f, 24.0f };
+        newEl.valueFloat = 0.5f;
+        newEl.minValue   = 0.0f;
+        newEl.maxValue   = 1.0f;
+        newEl.color      = Vec4{ 0.15f, 0.15f, 0.20f, 1.0f };
+        newEl.hitTestMode = HitTestMode::Enabled;
+    }
+    else if (elementType == "WrapBox")
+    {
+        newEl.type        = WidgetElementType::WrapBox;
+        newEl.from        = Vec2{ 0.0f, 0.0f };
+        newEl.to          = Vec2{ 300.0f, 200.0f };
+        newEl.orientation  = StackOrientation::Horizontal;
+        newEl.color        = Vec4{ 0.1f, 0.1f, 0.13f, 0.5f };
+    }
+    else if (elementType == "UniformGrid")
+    {
+        newEl.type    = WidgetElementType::UniformGrid;
+        newEl.from    = Vec2{ 0.0f, 0.0f };
+        newEl.to      = Vec2{ 300.0f, 300.0f };
+        newEl.columns = 3;
+        newEl.rows    = 3;
+        newEl.color   = Vec4{ 0.1f, 0.1f, 0.13f, 0.5f };
+    }
+    else if (elementType == "SizeBox")
+    {
+        newEl.type           = WidgetElementType::SizeBox;
+        newEl.from           = Vec2{ 0.0f, 0.0f };
+        newEl.to             = Vec2{ 200.0f, 100.0f };
+        newEl.widthOverride  = 200.0f;
+        newEl.heightOverride = 100.0f;
+        newEl.color          = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+    }
+    else if (elementType == "ScaleBox")
+    {
+        newEl.type      = WidgetElementType::ScaleBox;
+        newEl.from      = Vec2{ 0.0f, 0.0f };
+        newEl.to        = Vec2{ 300.0f, 300.0f };
+        newEl.scaleMode = ScaleMode::Contain;
+        newEl.color     = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+    }
+    else if (elementType == "WidgetSwitcher")
+    {
+        newEl.type             = WidgetElementType::WidgetSwitcher;
+        newEl.from             = Vec2{ 0.0f, 0.0f };
+        newEl.to               = Vec2{ 300.0f, 200.0f };
+        newEl.activeChildIndex = 0;
+        newEl.color            = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+    }
+    else if (elementType == "Overlay")
+    {
+        newEl.type  = WidgetElementType::Overlay;
+        newEl.from  = Vec2{ 0.0f, 0.0f };
+        newEl.to    = Vec2{ 300.0f, 200.0f };
+        newEl.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+    }
+    else
+    {
+        return;
+    }
+
+    newEl.anchor       = WidgetAnchor::TopLeft;
+    newEl.anchorOffset = Vec2{ 20.0f, 20.0f };
+    newEl.runtimeOnly  = true;
+
+    canvas.children.push_back(std::move(newEl));
+    w->markLayoutDirty();
+    vpUI->markLayoutDirty();
+
+    m_uiDesignerState.selectedElementId = newId;
+    refreshUIDesignerHierarchy();
+    refreshUIDesignerDetails();
+    markAllWidgetsDirty();
+}
+
+// ---------------------------------------------------------------------------
+// deleteSelectedUIDesignerElement
+// ---------------------------------------------------------------------------
+void UIManager::deleteSelectedUIDesignerElement()
+{
+    auto* vpUI = getViewportUIManager();
+    if (!vpUI || m_uiDesignerState.selectedElementId.empty())
+        return;
+
+    Widget* w = vpUI->getWidget(m_uiDesignerState.selectedWidgetName);
+    if (!w) return;
+
+    auto& elements = w->getElementsMutable();
+    if (elements.empty()) return;
+    auto& canvas = elements[0];
+
+    // Find and remove the element from canvas children
+    const std::string& targetId = m_uiDesignerState.selectedElementId;
+    const std::function<bool(std::vector<WidgetElement>&)> removeElement =
+        [&](std::vector<WidgetElement>& elems) -> bool
+    {
+        for (auto it = elems.begin(); it != elems.end(); ++it)
+        {
+            if (it->id == targetId)
+            {
+                elems.erase(it);
+                return true;
+            }
+            if (removeElement(it->children))
+                return true;
+        }
+        return false;
+    };
+
+    if (removeElement(canvas.children))
+    {
+        m_uiDesignerState.selectedElementId.clear();
+        vpUI->setSelectedElementId("");
+        w->markLayoutDirty();
+        vpUI->markLayoutDirty();
+        refreshUIDesignerHierarchy();
+        refreshUIDesignerDetails();
+        markAllWidgetsDirty();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// refreshUIDesignerHierarchy — traverses ViewportUIManager widgets
+// ---------------------------------------------------------------------------
+void UIManager::refreshUIDesignerHierarchy()
+{
+    if (!m_uiDesignerState.isOpen) return;
+
+    auto* leftEntry = findWidgetEntry(m_uiDesignerState.leftWidgetId);
+    if (!leftEntry || !leftEntry->widget) return;
+
+    auto& leftElements = leftEntry->widget->getElementsMutable();
+    WidgetElement* treePanel = FindElementById(leftElements, "UIDesigner.Left.Tree");
+    if (!treePanel) return;
+
+    treePanel->children.clear();
+    m_lastHoveredElement = nullptr;
+
+    auto* vpUI = getViewportUIManager();
+    if (!vpUI) return;
+
+    const auto& sortedWidgets = vpUI->getSortedWidgets();
+    const std::string& selectedWidget  = m_uiDesignerState.selectedWidgetName;
+    const std::string& selectedElement = m_uiDesignerState.selectedElementId;
+    int lineIndex = 0;
+
+    // Update toolbar status
+    {
+        auto* tbEntry = findWidgetEntry(m_uiDesignerState.toolbarWidgetId);
+        if (tbEntry && tbEntry->widget)
+        {
+            auto& tbElements = tbEntry->widget->getElementsMutable();
+            WidgetElement* statusLabel = FindElementById(tbElements, "UIDesigner.Toolbar.Status");
+            if (statusLabel)
+            {
+                int widgetCount = static_cast<int>(sortedWidgets.size());
+                int elemCount = 0;
+                for (const auto& we : sortedWidgets)
+                {
+                    if (we.widget)
+                    {
+                        const auto& elems = we.widget->getElements();
+                        if (!elems.empty())
+                            elemCount += static_cast<int>(elems[0].children.size());
+                    }
+                }
+                statusLabel->text = std::to_string(widgetCount) + " Widget" +
+                    (widgetCount != 1 ? "s" : "") + ", " +
+                    std::to_string(elemCount) + " Element" +
+                    (elemCount != 1 ? "s" : "");
+            }
+            tbEntry->widget->markLayoutDirty();
+        }
+    }
+
+    const auto getTypeName = [](WidgetElementType t) -> std::string
+    {
+        switch (t)
+        {
+        case WidgetElementType::Panel:       return "Panel";
+        case WidgetElementType::Text:        return "Text";
+        case WidgetElementType::Button:      return "Button";
+        case WidgetElementType::Image:       return "Image";
+        case WidgetElementType::Label:       return "Label";
+        case WidgetElementType::Slider:      return "Slider";
+        case WidgetElementType::ProgressBar: return "ProgressBar";
+        case WidgetElementType::EntryBar:    return "EntryBar";
+        case WidgetElementType::StackPanel:  return "StackPanel";
+        case WidgetElementType::CheckBox:    return "CheckBox";
+        case WidgetElementType::DropDown:    return "DropDown";
+        default:                             return "Element";
+        }
+    };
+
+    for (const auto& widgetEntry : sortedWidgets)
+    {
+        const bool isWidgetSelected = (widgetEntry.name == selectedWidget);
+
+        // Widget header row
+        {
+            WidgetElement row{};
+            row.id   = "UIDesigner.HRow." + std::to_string(lineIndex);
+            row.type = WidgetElementType::Button;
+            row.text = (isWidgetSelected ? "v " : "> ") + widgetEntry.name;
+            row.font     = "default.ttf";
+            row.fontSize = 13.0f;
+            row.textAlignH    = TextAlignH::Left;
+            row.textAlignV    = TextAlignV::Center;
+            row.fillX         = true;
+            row.minSize       = Vec2{ 0.0f, 22.0f };
+            row.padding       = Vec2{ 4.0f, 1.0f };
+            row.hitTestMode = HitTestMode::Enabled;
+            row.runtimeOnly   = true;
+
+            if (isWidgetSelected && selectedElement.empty())
+            {
+                row.color     = Vec4{ 0.20f, 0.30f, 0.55f, 0.9f };
+                row.hoverColor = Vec4{ 0.25f, 0.35f, 0.60f, 1.0f };
+                row.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+            }
+            else
+            {
+                row.color     = Vec4{ 0.14f, 0.15f, 0.20f, 0.6f };
+                row.hoverColor = Vec4{ 0.20f, 0.22f, 0.30f, 0.8f };
+                row.textColor = Vec4{ 0.90f, 0.90f, 0.95f, 1.0f };
+            }
+
+            const std::string capturedName = widgetEntry.name;
+            row.onClicked = [this, capturedName]()
+            {
+                selectUIDesignerElement(capturedName, "");
+            };
+
+            treePanel->children.push_back(std::move(row));
+            ++lineIndex;
+        }
+
+        // Children of the canvas panel (only shown if this widget is selected)
+        if (isWidgetSelected && widgetEntry.widget)
+        {
+            const auto& elements = widgetEntry.widget->getElements();
+            if (!elements.empty())
+            {
+                const auto& canvasChildren = elements[0].children;
+                for (const auto& el : canvasChildren)
+                {
+                    const std::string elId = el.id;
+                    const bool isElementSelected = (!elId.empty() && elId == selectedElement);
+
+                    std::string label = "    [" + getTypeName(el.type) + "]";
+                    if (!elId.empty())
+                        label += " " + elId;
+
+                    WidgetElement row{};
+                    row.id   = "UIDesigner.HRow." + std::to_string(lineIndex);
+                    row.type = WidgetElementType::Button;
+                    row.text = label;
+                    row.font     = "default.ttf";
+                    row.fontSize = 11.0f;
+                    row.textAlignH    = TextAlignH::Left;
+                    row.textAlignV    = TextAlignV::Center;
+                    row.fillX         = true;
+                    row.minSize       = Vec2{ 0.0f, 20.0f };
+                    row.padding       = Vec2{ 4.0f, 1.0f };
+                    row.hitTestMode = HitTestMode::Enabled;
+                    row.runtimeOnly   = true;
+
+                    if (isElementSelected)
+                    {
+                        row.color     = Vec4{ 0.20f, 0.30f, 0.55f, 0.9f };
+                        row.hoverColor = Vec4{ 0.25f, 0.35f, 0.60f, 1.0f };
+                        row.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+                    }
+                    else
+                    {
+                        row.color     = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                        row.hoverColor = Vec4{ 0.18f, 0.20f, 0.28f, 0.8f };
+                        row.textColor = Vec4{ 0.75f, 0.78f, 0.84f, 1.0f };
+                    }
+
+                    const std::string capturedWidgetName = widgetEntry.name;
+                    row.onClicked = [this, capturedWidgetName, elId]()
+                    {
+                        selectUIDesignerElement(capturedWidgetName, elId);
+                    };
+
+                    treePanel->children.push_back(std::move(row));
+                    ++lineIndex;
+                }
+            }
+        }
+    }
+
+    leftEntry->widget->markLayoutDirty();
+}
+
+// ---------------------------------------------------------------------------
+// refreshUIDesignerDetails — properties panel for selected element
+// ---------------------------------------------------------------------------
+void UIManager::refreshUIDesignerDetails()
+{
+    if (!m_uiDesignerState.isOpen) return;
+
+    auto* rightEntry = findWidgetEntry(m_uiDesignerState.rightWidgetId);
+    if (!rightEntry || !rightEntry->widget) return;
+
+    auto& rightElements = rightEntry->widget->getElementsMutable();
+    WidgetElement* rootPanel = FindElementById(rightElements, "UIDesigner.Right.Root");
+    if (!rootPanel) return;
+
+    // Keep only the title (first child)
+    if (rootPanel->children.size() > 1)
+        rootPanel->children.erase(rootPanel->children.begin() + 1, rootPanel->children.end());
+
+    m_lastHoveredElement = nullptr;
+
+    const auto makeLabel = [](const std::string& id, const std::string& text, float fontSize = 12.0f,
+        const Vec4& color = Vec4{ 0.78f, 0.80f, 0.85f, 1.0f }, float minH = 20.0f) -> WidgetElement
+    {
+        WidgetElement lbl{};
+        lbl.id         = id;
+        lbl.type       = WidgetElementType::Text;
+        lbl.text       = text;
+        lbl.font       = "default.ttf";
+        lbl.fontSize   = fontSize;
+        lbl.textColor  = color;
+        lbl.textAlignH = TextAlignH::Left;
+        lbl.textAlignV = TextAlignV::Center;
+        lbl.fillX      = true;
+        lbl.minSize    = Vec2{ 0.0f, minH };
+        lbl.runtimeOnly = true;
+        return lbl;
+    };
+
+    auto fmtF = [](float v) -> std::string {
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%.2f", v);
+        return std::string(buf);
+    };
+
+    auto* vpUI = getViewportUIManager();
+    if (!vpUI)
+    {
+        rootPanel->children.push_back(makeLabel("UID.Hint",
+            "No ViewportUIManager available.", 11.0f,
+            Vec4{ 0.85f, 0.55f, 0.55f, 1.0f }, 36.0f));
+        rightEntry->widget->markLayoutDirty();
+        return;
+    }
+
+    // Widget-level properties if a widget is selected but no element
+    if (!m_uiDesignerState.selectedWidgetName.empty() && m_uiDesignerState.selectedElementId.empty())
+    {
+        Widget* w = vpUI->getWidget(m_uiDesignerState.selectedWidgetName);
+        if (!w)
+        {
+            rootPanel->children.push_back(makeLabel("UID.NotFound",
+                "Widget not found.", 11.0f,
+                Vec4{ 0.85f, 0.55f, 0.55f, 1.0f }, 24.0f));
+            rightEntry->widget->markLayoutDirty();
+            return;
+        }
+
+        rootPanel->children.push_back(makeLabel("UID.SecWidget", "Widget", 13.0f,
+            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
+        rootPanel->children.push_back(makeLabel("UID.WidgetName",
+            "Name: " + m_uiDesignerState.selectedWidgetName));
+
+        int childCount = 0;
+        const auto& elems = w->getElements();
+        if (!elems.empty())
+            childCount = static_cast<int>(elems[0].children.size());
+        rootPanel->children.push_back(makeLabel("UID.WidgetChildren",
+            "Elements: " + std::to_string(childCount)));
+
+        rightEntry->widget->markLayoutDirty();
+        return;
+    }
+
+    // No selection
+    if (m_uiDesignerState.selectedElementId.empty())
+    {
+        rootPanel->children.push_back(makeLabel("UID.Hint",
+            "Select an element in the hierarchy\nto see its properties.", 11.0f,
+            Vec4{ 0.62f, 0.66f, 0.75f, 1.0f }, 36.0f));
+        rightEntry->widget->markLayoutDirty();
+        return;
+    }
+
+    // Find the selected element
+    WidgetElement* selected = vpUI->findElementById(
+        m_uiDesignerState.selectedWidgetName, m_uiDesignerState.selectedElementId);
+    if (!selected)
+    {
+        rootPanel->children.push_back(makeLabel("UID.NotFound",
+            "Element not found: " + m_uiDesignerState.selectedElementId, 11.0f,
+            Vec4{ 0.85f, 0.55f, 0.55f, 1.0f }, 24.0f));
+        rightEntry->widget->markLayoutDirty();
+        return;
+    }
+
+    const auto getTypeName = [](WidgetElementType t) -> std::string
+    {
+        switch (t)
+        {
+        case WidgetElementType::Panel:       return "Panel";
+        case WidgetElementType::Text:        return "Text";
+        case WidgetElementType::Button:      return "Button";
+        case WidgetElementType::Image:       return "Image";
+        case WidgetElementType::Label:       return "Label";
+        case WidgetElementType::Slider:      return "Slider";
+        case WidgetElementType::ProgressBar: return "ProgressBar";
+        default:                             return "Element";
+        }
+    };
+
+    // Lambda to apply changes and refresh
+    const auto applyChange = [this]() {
+        auto* vp = getViewportUIManager();
+        if (vp) vp->markLayoutDirty();
+        markAllWidgetsDirty();
+    };
+
+    const auto makePropertyRow = [&](const std::string& id, const std::string& label,
+        const std::string& value, std::function<void(const std::string&)> onChange) -> WidgetElement
+    {
+        WidgetElement row{};
+        row.type        = WidgetElementType::StackPanel;
+        row.orientation = StackOrientation::Horizontal;
+        row.fillX       = true;
+        row.sizeToContent = true;
+        row.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        row.padding     = Vec2{ 0.0f, 1.0f };
+        row.runtimeOnly = true;
+
+        WidgetElement lbl = makeLabel(id + ".Lbl", label);
+        lbl.minSize = Vec2{ 80.0f, 22.0f };
+        lbl.fillX   = false;
+        row.children.push_back(std::move(lbl));
+
+        EntryBarWidget entry;
+        entry.setValue(value);
+        entry.setFont("default.ttf");
+        entry.setFontSize(12.0f);
+        entry.setMinSize(Vec2{ 0.0f, 22.0f });
+        entry.setPadding(Vec2{ 4.0f, 2.0f });
+        entry.setOnValueChanged(onChange);
+
+        WidgetElement entryEl = entry.toElement();
+        entryEl.id         = id + ".Entry";
+        entryEl.fillX      = true;
+        entryEl.runtimeOnly = true;
+        row.children.push_back(std::move(entryEl));
+
+        return row;
+    };
+
+    WidgetElement* sel = selected;
+
+    // --- Section: Identity ---
+    {
+        rootPanel->children.push_back(makeLabel("UID.SecIdentity", "Identity", 13.0f,
+            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
+        rootPanel->children.push_back(makeLabel("UID.Type", "Type: " + getTypeName(sel->type)));
+
+        rootPanel->children.push_back(makePropertyRow("UID.Id", "ID", sel->id,
+            [sel, applyChange, this](const std::string& v) {
+                sel->id = v;
+                m_uiDesignerState.selectedElementId = v;
+                applyChange();
+                refreshUIDesignerHierarchy();
+            }));
+    }
+
+    // --- Section: Anchor ---
+    {
+        WidgetElement sep{};
+        sep.type    = WidgetElementType::Panel;
+        sep.fillX   = true;
+        sep.minSize = Vec2{ 0.0f, 1.0f };
+        sep.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.runtimeOnly = true;
+        rootPanel->children.push_back(std::move(sep));
+
+        rootPanel->children.push_back(makeLabel("UID.SecAnchor", "Anchor & Position", 13.0f,
+            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
+
+        // Anchor dropdown
+        {
+            int anchorIdx = static_cast<int>(sel->anchor);
+
+            WidgetElement row{};
+            row.type        = WidgetElementType::StackPanel;
+            row.orientation = StackOrientation::Horizontal;
+            row.fillX       = true;
+            row.sizeToContent = true;
+            row.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.padding     = Vec2{ 0.0f, 1.0f };
+            row.runtimeOnly = true;
+
+            WidgetElement lbl = makeLabel("UID.Anchor.Lbl", "Anchor");
+            lbl.minSize = Vec2{ 80.0f, 22.0f };
+            lbl.fillX   = false;
+            row.children.push_back(std::move(lbl));
+
+            DropDownWidget anchorDd;
+            anchorDd.setItems({ "TopLeft", "TopRight", "BottomLeft", "BottomRight",
+                                "Top", "Bottom", "Left", "Right", "Center", "Stretch" });
+            anchorDd.setSelectedIndex(anchorIdx);
+            anchorDd.setFont("default.ttf");
+            anchorDd.setFontSize(12.0f);
+            anchorDd.setMinSize(Vec2{ 0.0f, 22.0f });
+            anchorDd.setPadding(Vec2{ 4.0f, 2.0f });
+            anchorDd.setBackgroundColor(Vec4{ 0.16f, 0.16f, 0.20f, 1.0f });
+            anchorDd.setHoverColor(Vec4{ 0.22f, 0.22f, 0.27f, 1.0f });
+            anchorDd.setTextColor(Vec4{ 0.92f, 0.92f, 0.95f, 1.0f });
+            anchorDd.setOnSelectionChanged([sel, applyChange](int idx) {
+                sel->anchor = static_cast<WidgetAnchor>(idx);
+                applyChange();
+            });
+            WidgetElement ddEl = anchorDd.toElement();
+            ddEl.id         = "UID.Anchor.DD";
+            ddEl.fillX      = true;
+            ddEl.runtimeOnly = true;
+            row.children.push_back(std::move(ddEl));
+
+            rootPanel->children.push_back(std::move(row));
+        }
+
+        rootPanel->children.push_back(makePropertyRow("UID.OffsetX", "Offset X", fmtF(sel->anchorOffset.x),
+            [sel, applyChange](const std::string& v) { try { sel->anchorOffset.x = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.OffsetY", "Offset Y", fmtF(sel->anchorOffset.y),
+            [sel, applyChange](const std::string& v) { try { sel->anchorOffset.y = std::stof(v); } catch (...) {} applyChange(); }));
+    }
+
+    // --- Section: Size ---
+    {
+        WidgetElement sep{};
+        sep.type    = WidgetElementType::Panel;
+        sep.fillX   = true;
+        sep.minSize = Vec2{ 0.0f, 1.0f };
+        sep.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.runtimeOnly = true;
+        rootPanel->children.push_back(std::move(sep));
+
+        rootPanel->children.push_back(makeLabel("UID.SecSize", "Size", 13.0f,
+            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
+
+        rootPanel->children.push_back(makePropertyRow("UID.Width", "Width", fmtF(sel->to.x - sel->from.x),
+            [sel, applyChange](const std::string& v) { try { sel->to.x = sel->from.x + std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.Height", "Height", fmtF(sel->to.y - sel->from.y),
+            [sel, applyChange](const std::string& v) { try { sel->to.y = sel->from.y + std::stof(v); } catch (...) {} applyChange(); }));
+    }
+
+    // --- Section: Appearance ---
+    {
+        WidgetElement sep{};
+        sep.type    = WidgetElementType::Panel;
+        sep.fillX   = true;
+        sep.minSize = Vec2{ 0.0f, 1.0f };
+        sep.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.runtimeOnly = true;
+        rootPanel->children.push_back(std::move(sep));
+
+        rootPanel->children.push_back(makeLabel("UID.SecAppearance", "Appearance", 13.0f,
+            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
+
+        rootPanel->children.push_back(makePropertyRow("UID.ColR", "Color R", fmtF(sel->color.x),
+            [sel, applyChange](const std::string& v) { try { sel->color.x = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.ColG", "Color G", fmtF(sel->color.y),
+            [sel, applyChange](const std::string& v) { try { sel->color.y = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.ColB", "Color B", fmtF(sel->color.z),
+            [sel, applyChange](const std::string& v) { try { sel->color.z = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.ColA", "Color A", fmtF(sel->color.w),
+            [sel, applyChange](const std::string& v) { try { sel->color.w = std::stof(v); } catch (...) {} applyChange(); }));
+
+        rootPanel->children.push_back(makePropertyRow("UID.Opacity", "Opacity", fmtF(sel->opacity),
+            [sel, applyChange](const std::string& v) { try { sel->opacity = std::max(0.0f, std::min(1.0f, std::stof(v))); } catch (...) {} applyChange(); }));
+
+        // Visibility
+        {
+            CheckBoxWidget visCb;
+            visCb.setLabel("Visible");
+            visCb.setChecked(sel->isVisible);
+            visCb.setOnCheckedChanged([sel, applyChange](bool c) { sel->isVisible = c; applyChange(); });
+            WidgetElement visEl = visCb.toElement();
+            visEl.id         = "UID.Visible";
+            visEl.runtimeOnly = true;
+            rootPanel->children.push_back(std::move(visEl));
+        }
+
+        rootPanel->children.push_back(makePropertyRow("UID.BorderW", "Border", fmtF(sel->borderThickness),
+            [sel, applyChange](const std::string& v) { try { sel->borderThickness = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.BorderR", "Radius", fmtF(sel->borderRadius),
+            [sel, applyChange](const std::string& v) { try { sel->borderRadius = std::stof(v); } catch (...) {} applyChange(); }));
+    }
+
+    // --- Section: Text (for elements with text) ---
+    if (sel->type == WidgetElementType::Text || sel->type == WidgetElementType::Button ||
+        sel->type == WidgetElementType::Label)
+    {
+        WidgetElement sep{};
+        sep.type    = WidgetElementType::Panel;
+        sep.fillX   = true;
+        sep.minSize = Vec2{ 0.0f, 1.0f };
+        sep.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.runtimeOnly = true;
+        rootPanel->children.push_back(std::move(sep));
+
+        rootPanel->children.push_back(makeLabel("UID.SecText", "Text", 13.0f,
+            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
+
+        rootPanel->children.push_back(makePropertyRow("UID.Text", "Text", sel->text,
+            [sel, applyChange](const std::string& v) { sel->text = v; applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.FontSz", "Font Size", fmtF(sel->fontSize),
+            [sel, applyChange](const std::string& v) { try { sel->fontSize = std::stof(v); } catch (...) {} applyChange(); }));
+
+        rootPanel->children.push_back(makePropertyRow("UID.TColR", "Text R", fmtF(sel->textColor.x),
+            [sel, applyChange](const std::string& v) { try { sel->textColor.x = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.TColG", "Text G", fmtF(sel->textColor.y),
+            [sel, applyChange](const std::string& v) { try { sel->textColor.y = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.TColB", "Text B", fmtF(sel->textColor.z),
+            [sel, applyChange](const std::string& v) { try { sel->textColor.z = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.TColA", "Text A", fmtF(sel->textColor.w),
+            [sel, applyChange](const std::string& v) { try { sel->textColor.w = std::stof(v); } catch (...) {} applyChange(); }));
+
+        // Bold / Italic
+        {
+            CheckBoxWidget boldCb;
+            boldCb.setLabel("Bold");
+            boldCb.setChecked(sel->isBold);
+            boldCb.setOnCheckedChanged([sel, applyChange](bool c) { sel->isBold = c; applyChange(); });
+            WidgetElement boldEl = boldCb.toElement();
+            boldEl.id         = "UID.Bold";
+            boldEl.runtimeOnly = true;
+            rootPanel->children.push_back(std::move(boldEl));
+        }
+        {
+            CheckBoxWidget italicCb;
+            italicCb.setLabel("Italic");
+            italicCb.setChecked(sel->isItalic);
+            italicCb.setOnCheckedChanged([sel, applyChange](bool c) { sel->isItalic = c; applyChange(); });
+            WidgetElement italicEl = italicCb.toElement();
+            italicEl.id         = "UID.Italic";
+            italicEl.runtimeOnly = true;
+            rootPanel->children.push_back(std::move(italicEl));
+        }
+    }
+
+    // --- Section: Image ---
+    if (sel->type == WidgetElementType::Image)
+    {
+        WidgetElement sep{};
+        sep.type    = WidgetElementType::Panel;
+        sep.fillX   = true;
+        sep.minSize = Vec2{ 0.0f, 1.0f };
+        sep.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.runtimeOnly = true;
+        rootPanel->children.push_back(std::move(sep));
+
+        rootPanel->children.push_back(makeLabel("UID.SecImage", "Image", 13.0f,
+            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
+        rootPanel->children.push_back(makePropertyRow("UID.ImgPath", "Path", sel->imagePath,
+            [sel, applyChange](const std::string& v) { sel->imagePath = v; applyChange(); }));
+    }
+
+    // --- Section: Value (Slider / ProgressBar) ---
+    if (sel->type == WidgetElementType::Slider || sel->type == WidgetElementType::ProgressBar)
+    {
+        WidgetElement sep{};
+        sep.type    = WidgetElementType::Panel;
+        sep.fillX   = true;
+        sep.minSize = Vec2{ 0.0f, 1.0f };
+        sep.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.runtimeOnly = true;
+        rootPanel->children.push_back(std::move(sep));
+
+        rootPanel->children.push_back(makeLabel("UID.SecValue", "Value", 13.0f,
+            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
+        rootPanel->children.push_back(makePropertyRow("UID.MinVal", "Min", fmtF(sel->minValue),
+            [sel, applyChange](const std::string& v) { try { sel->minValue = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.MaxVal", "Max", fmtF(sel->maxValue),
+            [sel, applyChange](const std::string& v) { try { sel->maxValue = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.CurVal", "Value", fmtF(sel->valueFloat),
+            [sel, applyChange](const std::string& v) { try { sel->valueFloat = std::stof(v); } catch (...) {} applyChange(); }));
+    }
+
+    // --- Delete button ---
+    {
+        WidgetElement sep{};
+        sep.type    = WidgetElementType::Panel;
+        sep.fillX   = true;
+        sep.minSize = Vec2{ 0.0f, 8.0f };
+        sep.color   = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        sep.runtimeOnly = true;
+        rootPanel->children.push_back(std::move(sep));
+
+        WidgetElement delBtn{};
+        delBtn.id            = "UID.Delete";
+        delBtn.type          = WidgetElementType::Button;
+        delBtn.text          = "Delete Element";
+        delBtn.font          = "default.ttf";
+        delBtn.fontSize      = 13.0f;
+        delBtn.textColor     = Vec4{ 1.0f, 0.85f, 0.85f, 1.0f };
+        delBtn.color         = Vec4{ 0.45f, 0.18f, 0.18f, 1.0f };
+        delBtn.hoverColor    = Vec4{ 0.60f, 0.22f, 0.22f, 1.0f };
+        delBtn.textAlignH    = TextAlignH::Center;
+        delBtn.textAlignV    = TextAlignV::Center;
+        delBtn.fillX         = true;
+        delBtn.minSize       = Vec2{ 0.0f, 28.0f };
+        delBtn.padding       = Vec2{ 8.0f, 4.0f };
+        delBtn.hitTestMode = HitTestMode::Enabled;
+        delBtn.runtimeOnly   = true;
+        delBtn.onClicked     = [this]() { deleteSelectedUIDesignerElement(); };
+        rootPanel->children.push_back(std::move(delBtn));
+    }
+
+    rightEntry->widget->markLayoutDirty();
 }
