@@ -42,6 +42,7 @@ public:
     WidgetElement* findElementById(const std::string& widgetName, const std::string& elementId);
 
     void updateLayout(const std::function<Vec2(const std::string&, float)>& measureText);
+    void tickAnimations(float deltaTime);
     bool needsLayoutUpdate() const;
     void markLayoutDirty();
 
@@ -49,7 +50,9 @@ public:
     bool handleMouseUp(const Vec2& windowPos, int button);
     bool handleScroll(const Vec2& windowPos, float delta);
     bool handleTextInput(const std::string& text);
-    bool handleKeyDown(int key);
+    bool handleKeyDown(int key, int modifiers = 0);
+    bool handleGamepadButton(int button, bool pressed);
+    bool handleGamepadAxis(int axis, float value);
     void setMousePosition(const Vec2& windowPos);
     bool isPointerOverViewportUI(const Vec2& windowPos) const;
 
@@ -59,6 +62,19 @@ public:
     void setSelectedElementId(const std::string& elementId);
     const std::string& getSelectedElementId() const;
     void setOnSelectionChanged(SelectionChangedCallback callback);
+
+    // --- Focus management (Phase 5) ---
+    void setFocus(const std::string& elementId);
+    void clearFocus();
+    const std::string& getFocusedElementId() const;
+    void setFocusable(const std::string& elementId, bool focusable);
+
+    // --- Runtime Drag & Drop (Phase 5) ---
+    bool handleMouseMove(const Vec2& windowPos);
+    bool isDragging() const;
+    const DragDropOperation& getCurrentDragOperation() const;
+    const std::string& getDragOverElementId() const;
+    void cancelDrag();
 
     void setVisible(bool visible);
     bool isVisible() const;
@@ -77,6 +93,19 @@ private:
     const WidgetElement* hitTestConst(const Vec2& viewportLocalPos) const;
     void sortWidgetsIfNeeded();
 
+    // Focus helpers
+    struct FocusableEntry
+    {
+        std::string id;
+        int tabIndex;
+        Vec2 center;    // centre of the element in viewport space
+    };
+    std::vector<FocusableEntry> collectFocusableElements() const;
+    void tabToNext();
+    void tabToPrevious();
+    void moveFocusInDirection(int dirX, int dirY);
+    void activateFocusedElement();
+
 private:
     Vec4 m_viewportRect{};
     std::vector<WidgetEntry> m_widgets;
@@ -84,10 +113,28 @@ private:
 
     std::string m_selectedElementId;
     std::string m_pressedElementId;
+    std::string m_focusedElementId;
     SelectionChangedCallback m_onSelectionChanged;
     bool m_visible{ true };
     bool m_layoutDirty{ true };
     bool m_renderDirty{ true };
     Vec2 m_mousePosition{};
     bool m_gameplayCursorVisible{ false };
+
+    // Gamepad stick navigation state
+    int  m_gpStickDirX{ 0 };
+    int  m_gpStickDirY{ 0 };
+    float m_gpStickRepeatTimer{ 0.0f };
+    bool  m_gpStickFirstMove{ true };
+    static constexpr float kGpDeadzone       = 0.25f;
+    static constexpr float kGpRepeatDelay    = 0.35f;
+    static constexpr float kGpRepeatInterval = 0.12f;
+
+    // Runtime Drag & Drop state
+    bool m_isDragging{ false };
+    bool m_dragPending{ false };             // mouse down on draggable, waiting for threshold
+    Vec2 m_dragStartPos{};                   // window position at mouse-down
+    DragDropOperation m_dragOp;
+    std::string m_dragOverElementId;         // element currently hovered during drag
+    static constexpr float kDragThreshold = 5.0f;
 };

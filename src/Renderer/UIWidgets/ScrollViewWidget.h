@@ -49,7 +49,7 @@ public:
         el.type = WidgetElementType::ScrollView;
         el.id = m_id;
         el.orientation = m_orientation;
-        el.color = m_color;
+        el.style.color = m_color;
         el.padding = m_padding;
         el.fillX = m_fillX;
         el.fillY = m_fillY;

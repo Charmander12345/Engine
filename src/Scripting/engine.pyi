@@ -413,6 +413,21 @@ class ui:
         ...
 
     @staticmethod
+    def play_animation(widget_id: str, animation_name: str, from_start: bool = True) -> bool:
+        """Play a named animation on a spawned viewport widget."""
+        ...
+
+    @staticmethod
+    def stop_animation(widget_id: str, animation_name: str) -> bool:
+        """Stop a named animation on a spawned viewport widget."""
+        ...
+
+    @staticmethod
+    def set_animation_speed(widget_id: str, animation_name: str, speed: float) -> bool:
+        """Set playback speed of a named animation on a spawned viewport widget."""
+        ...
+
+    @staticmethod
     def show_cursor(visible: bool) -> bool:
         """Show or hide the gameplay cursor.
 
@@ -426,6 +441,57 @@ class ui:
         """Remove all spawned viewport widgets."""
         ...
 
+    @staticmethod
+    def set_focus(element_id: str) -> bool:
+        """Set focus to a viewport UI element by id.
+
+        The element does not need to be marked as focusable; this forces
+        focus directly.  A focus highlight is drawn around the element.
+        """
+        ...
+
+    @staticmethod
+    def clear_focus() -> bool:
+        """Clear focus from the currently focused viewport UI element."""
+        ...
+
+    @staticmethod
+    def get_focused_element() -> Optional[str]:
+        """Get the id of the currently focused viewport UI element.
+
+        Returns None if no element is focused.
+        """
+        ...
+
+    @staticmethod
+    def set_focusable(element_id: str, focusable: bool = True) -> bool:
+        """Set whether a viewport UI element is focusable.
+
+        Focusable elements can be reached via Tab / Shift+Tab navigation
+        and arrow-key spatial navigation.
+        """
+        ...
+
+    @staticmethod
+    def set_draggable(element_id: str, enabled: bool = True, payload: str = '') -> bool:
+        """Set a viewport UI element as draggable.
+
+        When enabled, the element can be picked up by clicking and
+        dragging beyond a 5-pixel threshold.  The optional payload
+        string is delivered to drop targets via the DragDropOperation.
+        """
+        ...
+
+    @staticmethod
+    def set_drop_target(element_id: str, enabled: bool = True) -> bool:
+        """Set a viewport UI element as a drop target.
+
+        Drop targets receive dragged items.  During a drag, a green
+        highlight outline is drawn around the hovered drop target.
+        Callbacks (onDragOver, onDrop) can be set from C++ code.
+        """
+        ...
+
     # Widget Element Types available in Widget Assets:
     # Panel, Text, Label, Button, ToggleButton, RadioButton, Image, EntryBar,
     # StackPanel, ScrollView, Grid, Slider, CheckBox, DropDown, ColorPicker,
@@ -436,6 +502,213 @@ class ui:
     # ScaleBox       — single-child container that scales to fit (Contain/Cover/Fill/ScaleDown/UserSpecified)
     # WidgetSwitcher — shows only one child at a time (activeChildIndex)
     # Overlay        — stacks all children on top of each other with alignment
+    # Border         — single-child container with configurable border edges
+    # Spinner        — animated loading indicator (circular dot pattern)
+    # RichText       — formatted text block with inline markup (bold, italic, color)
+    # ListView       — virtualised scrollable list (renders only visible items)
+    # TileView       — virtualised tile grid (renders only visible tiles)
+    #
+    # ── Phase 4: Border Widget ────────────────────────────────────────────
+    #
+    # WidgetElementType::Border — a single-child container that draws a
+    # configurable border around its content.
+    #
+    # Border-specific fields on WidgetElement:
+    #   borderBrush            — UIBrush (color/style for the four border edges)
+    #   borderThicknessLeft    — float (left edge thickness in pixels, default 1)
+    #   borderThicknessTop     — float (top edge thickness, default 1)
+    #   borderThicknessRight   — float (right edge thickness, default 1)
+    #   borderThicknessBottom  — float (bottom edge thickness, default 1)
+    #   contentPadding         — Vec2 (extra inner padding X/Y between border and child)
+    #
+    # Layout: child is inset by border thickness + contentPadding on each side.
+    # Rendering: background brush fills the full rect, then four border edge
+    # rects are drawn using borderBrush.  The child is rendered inside the
+    # inset area.
+    #
+    # ── Phase 4: Spinner Widget ───────────────────────────────────────────
+    #
+    # WidgetElementType::Spinner — an animated circular loading indicator.
+    #
+    # Spinner-specific fields on WidgetElement:
+    #   spinnerDotCount  — int (number of dots arranged in a circle, default 8)
+    #   spinnerSpeed     — float (rotations per second, default 1.0)
+    #   spinnerElapsed   — float (runtime accumulated time, not serialised)
+    #
+    # Rendering: N dots are placed evenly around a circle.  Each dot's opacity
+    # fades based on its index offset from the "active" dot (determined by
+    # spinnerElapsed * spinnerSpeed).  The element's color/background brush
+    # controls the dot colour.  Spinner is a leaf node (no children).
+    #
+    # ── Phase 4: Multiline EntryBar ────────────────────────────────────────
+    #
+    # The existing EntryBar widget now supports multiline text input.
+    #
+    # New fields on WidgetElement (EntryBar):
+    #   isMultiline — bool (default false, enables newline insertion on Enter)
+    #   maxLines    — int  (0 = unlimited, caps the number of lines)
+    #
+    # When isMultiline is true:
+    #   - Pressing Enter inserts a '\n' character instead of committing the value.
+    #   - Text is rendered line-by-line (split on '\n'), each line at an
+    #     incremented Y offset equal to the line height.
+    #   - The caret is positioned at the end of the last line.
+    #   - maxLines limits the number of '\n' characters that can be inserted
+    #     (0 means no limit).
+    # When isMultiline is false (default), EntryBar behaves as a single-line
+    # text input (unchanged from previous behaviour).
+    #
+    # ── Phase 4: Rich Text Block ────────────────────────────────────────────
+    #
+    # WidgetElementType::RichText — displays formatted text with inline markup
+    # for bold, italic, per-word colour, and inline images.
+    #
+    # RichText-specific fields on WidgetElement:
+    #   richText — str (markup source string, HTML-like tags)
+    #
+    # Supported markup tags:
+    #   <b>...</b>             — bold text (flag stored; same font used)
+    #   <i>...</i>             — italic text (flag stored; same font used)
+    #   <color=#RRGGBB>...</color> — per-segment text colour override
+    #   <img src="path" w=N h=N/> — inline image placeholder (parsed, not rendered yet)
+    #
+    # Tags can be nested.  Text between tags is split into segments via
+    # ParseRichTextMarkup().  The renderer performs greedy word-wrap within
+    # the element's padded content area and draws each word with its
+    # segment-specific colour.  The element's textColor is used as the
+    # default colour for segments that do not override it.
+    #
+    # Layout: leaf node, uses minSize or defaults to 200x40 pixels.
+    # Helper class: RichTextWidget (src/Renderer/UIWidgets/RichTextWidget.h)
+    #
+    # ── Phase 4: ListView ───────────────────────────────────────────────────
+    #
+    # WidgetElementType::ListView — a virtualised scrollable list that renders
+    # only the visible range of items for efficient display of large datasets.
+    #
+    # ListView-specific fields on WidgetElement:
+    #   totalItemCount — int (total number of items, default 0)
+    #   itemHeight     — float (fixed height per row in pixels, default 32)
+    #   scrollOffset   — float (current vertical scroll position)
+    #   onGenerateItem — callback(int index, WidgetElement& template)
+    #
+    # Rendering: computes firstVisible = scrollOffset / itemHeight, renders
+    # only the visible rows with alternating background colours and an index
+    # label.  Scissor clipping constrains output to the element bounds.
+    #
+    # Layout: leaf node, uses minSize or defaults to 200x200 pixels.
+    # Helper class: ListViewWidget (src/Renderer/UIWidgets/ListViewWidget.h)
+    #
+    # ── Phase 4: TileView ───────────────────────────────────────────────────
+    #
+    # WidgetElementType::TileView — a virtualised tile grid that renders
+    # only the visible range of tiles arranged in a fixed column layout.
+    #
+    # TileView-specific fields on WidgetElement:
+    #   totalItemCount — int (total number of tiles, default 0)
+    #   itemHeight     — float (fixed height per tile in pixels, default 80)
+    #   itemWidth      — float (fixed width per tile in pixels, default 100)
+    #   columnsPerRow  — int (number of columns per row, default 4)
+    #   scrollOffset   — float (current vertical scroll position)
+    #   onGenerateItem — callback(int index, WidgetElement& template)
+    #
+    # Rendering: computes visible row range from scrollOffset / itemHeight,
+    # draws tiles in a grid with alternating colours and index labels.
+    # Scissor clipping constrains output to the element bounds.
+    #
+    # Layout: leaf node, uses minSize or defaults to 300x200 pixels.
+    # Helper class: TileViewWidget (src/Renderer/UIWidgets/TileViewWidget.h)
+    #
+    # ── Phase 5: Focus System & Keyboard Navigation ───────────────────────
+    #
+    # FocusConfig struct (per WidgetElement):
+    #   isFocusable — bool (default false; marks element as reachable by Tab/arrows)
+    #   tabIndex    — int  (-1 = auto document order; ≥0 = explicit order)
+    #   focusUp     — str  (element id override for Up arrow navigation)
+    #   focusDown   — str  (element id override for Down arrow navigation)
+    #   focusLeft   — str  (element id override for Left arrow navigation)
+    #   focusRight  — str  (element id override for Right arrow navigation)
+    #
+    # focusBrush — UIBrush (colour used for the focus highlight outline;
+    #   default blue {0.2, 0.6, 1.0, 0.9} when colour alpha is zero)
+    #
+    # Keyboard handling (ViewportUIManager.handleKeyDown):
+    #   Tab / Shift+Tab — cycle focus through focusable elements (by tabIndex)
+    #   Arrow keys      — spatial navigation to nearest focusable in direction
+    #   Enter / Space   — activate focused element (click / toggle)
+    #   Escape          — clear focus
+    #
+    # Python API:
+    #   engine.ui.set_focus(element_id)       — set focus to an element
+    #   engine.ui.clear_focus()               — clear current focus
+    #   engine.ui.get_focused_element()       — get focused element id or None
+    #   engine.ui.set_focusable(id, enabled)  — mark element as focusable
+    #
+    # Gamepad navigation (ViewportUIManager.handleGamepadButton / handleGamepadAxis):
+    #   D-Pad Up/Down/Left/Right — spatial navigation (moveFocusInDirection)
+    #   A / Cross (South)        — activate focused element
+    #   B / Circle (East)        — clear focus
+    #   LB / RB (Shoulders)      — tab previous / tab next
+    #   Left Stick               — spatial navigation with deadzone (0.25),
+    #                              repeat delay 0.35s then interval 0.12s
+    #
+    # SDL3 integration (main.cpp):
+    #   SDL_INIT_GAMEPAD enabled, first connected gamepad auto-opened.
+    #   Button/axis events routed to ViewportUIManager.
+    #
+    # ── Phase 5: Runtime Drag & Drop ──────────────────────────────────────
+    #
+    # DragDropOperation struct:
+    #   sourceElementId — str (id of the element being dragged)
+    #   payload         — str (user-defined payload string)
+    #   dragPosition    — Vec2 (current pointer position in viewport coords)
+    #
+    # WidgetElement drag fields:
+    #   isDraggable  — bool (default false; element can be picked up)
+    #   dragPayload  — str  (arbitrary payload string attached to drag)
+    #   acceptsDrop  — bool (default false; element accepts dropped items)
+    #   onDragStart  — callback()           (called when drag begins)
+    #   onDragOver   — callback(op) -> bool (called while hovering; return false to reject)
+    #   onDrop       — callback(op)         (called when item is dropped)
+    #
+    # Drag flow:
+    #   mouseDown on isDraggable element → drag pending
+    #   mouseMove exceeds 5px threshold  → drag starts (onDragStart called)
+    #   mouseMove updates dragPosition, tracks drop-target under cursor
+    #   mouseUp on acceptsDrop element   → onDragOver check → onDrop
+    #   mouseUp elsewhere / Escape       → cancelDrag
+    #
+    # Visual feedback (OpenGLRenderer):
+    #   Drop-target highlight: green 2px outline around hovered acceptsDrop element
+    #
+    # JSON serialization: isDraggable, dragPayload, acceptsDrop (in widget asset files)
+    #
+    # Python API:
+    #   engine.ui.set_draggable(element_id, enabled=True, payload='')
+    #   engine.ui.set_drop_target(element_id, enabled=True)
+
+    # ── WidgetElementStyle Struct ─────────────────────────────────────────
+    #
+    # All visual/style properties on a WidgetElement are now consolidated
+    # inside a single ``style`` member (WidgetElementStyle struct).
+    #
+    # WidgetElementStyle fields:
+    #   color           — Vec4 RGBA (normal/default background color)
+    #   hoverColor      — Vec4 RGBA (background on hover)
+    #   pressedColor    — Vec4 RGBA (background on press; alpha 0 = use hoverColor)
+    #   disabledColor   — Vec4 RGBA (background when disabled)
+    #   textColor       — Vec4 RGBA (normal text color)
+    #   textHoverColor  — Vec4 RGBA (text on hover; alpha 0 = use textColor)
+    #   textPressedColor — Vec4 RGBA (text on press; alpha 0 = use textColor)
+    #   fillColor       — Vec4 RGBA (fill/accent, e.g. slider fill, progress bar)
+    #   opacity         — float (0..1, default 1)
+    #   borderThickness — float (border outline in pixels, default 0)
+    #   borderRadius    — float (corner radius in pixels, default 0)
+    #   isVisible       — bool  (whether the element is rendered/interactive)
+    #   isBold          — bool  (bold text style)
+    #   isItalic        — bool  (italic text style)
+    #
+    # Access pattern: element.style.color, element.style.opacity, etc.
 
     # ── Phase 2: Brush-based Styling ──────────────────────────────────────
     #

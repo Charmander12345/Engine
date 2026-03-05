@@ -61,7 +61,7 @@ public:
         container.activeTab = m_activeTab;
         container.minSize = m_minSize;
         container.padding = m_padding;
-        container.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        container.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
         container.fillX = true;
         container.sizeToContent = true;
         container.runtimeOnly = true;
@@ -77,7 +77,7 @@ public:
         tabBar.orientation = StackOrientation::Horizontal;
         tabBar.fillX = true;
         tabBar.sizeToContent = true;
-        tabBar.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        tabBar.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
         tabBar.padding = Vec2{ 2.0f, 0.0f };
         tabBar.runtimeOnly = true;
 
@@ -93,7 +93,7 @@ public:
             tabButton.textAlignV = TextAlignV::Center;
             tabButton.padding = Vec2{ 10.0f, 4.0f };
             tabButton.minSize = Vec2{ 0.0f, 26.0f };
-            tabButton.textColor = m_textColor;
+            tabButton.style.textColor = m_textColor;
             tabButton.shaderVertex = "button_vertex.glsl";
             tabButton.shaderFragment = "button_fragment.glsl";
             tabButton.hitTestMode = HitTestMode::Enabled;
@@ -101,13 +101,13 @@ public:
 
             if (static_cast<int>(i) == m_activeTab)
             {
-                tabButton.color = m_activeTabColor;
-                tabButton.hoverColor = m_activeTabColor;
+                tabButton.style.color = m_activeTabColor;
+                tabButton.style.hoverColor = m_activeTabColor;
             }
             else
             {
-                tabButton.color = m_tabColor;
-                tabButton.hoverColor = m_hoverColor;
+                tabButton.style.color = m_tabColor;
+                tabButton.style.hoverColor = m_hoverColor;
             }
 
             tabBar.children.push_back(std::move(tabButton));
@@ -122,7 +122,7 @@ public:
             contentPanel.orientation = StackOrientation::Vertical;
             contentPanel.fillX = true;
             contentPanel.sizeToContent = true;
-            contentPanel.color = m_contentColor;
+            contentPanel.style.color = m_contentColor;
             contentPanel.padding = Vec2{ 4.0f, 4.0f };
             contentPanel.runtimeOnly = true;
             contentPanel.children = m_tabs[static_cast<size_t>(m_activeTab)].content;

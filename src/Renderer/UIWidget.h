@@ -39,7 +39,12 @@ enum class WidgetElementType
     SizeBox,
     ScaleBox,
     WidgetSwitcher,
-    Overlay
+    Overlay,
+    Border,
+    Spinner,
+    RichText,
+    ListView,
+    TileView
 };
 
 enum class TextAlignH
@@ -155,6 +160,18 @@ enum class ClipMode
     InheritFromParent  // explicitly inherit parent scissor
 };
 
+// ── Phase 5: Focus & Keyboard Navigation ─────────────────────────────────
+
+struct FocusConfig
+{
+    bool isFocusable{ false };
+    int tabIndex{ -1 };                  // -1 = automatic (document order)
+    std::string focusUp;                 // element ID for Up-navigation
+    std::string focusDown;               // element ID for Down-navigation
+    std::string focusLeft;               // element ID for Left-navigation
+    std::string focusRight;              // element ID for Right-navigation
+};
+
 enum class AnimatableProperty
 {
     RenderTranslationX,
@@ -221,16 +238,110 @@ struct WidgetAnimation
 
 float EvaluateEasing(EasingFunction easing, float t);
 
+class Widget;
+
+class WidgetAnimationPlayer
+{
+public:
+    void attachWidget(Widget* widget);
+    void play(const std::string& animName, bool fromStart = true);
+    void playReverse(const std::string& animName);
+    void pause();
+    void stop();
+    void setSpeed(float speed);
+    float getCurrentTime() const;
+    bool isPlaying() const;
+    const std::string& getCurrentAnimation() const;
+    void tick(float deltaTime);
+
+private:
+    Widget* m_widget{ nullptr };
+    std::string m_currentAnimation;
+    float m_currentTime{ 0.0f };
+    float m_speed{ 1.0f };
+    bool m_playing{ false };
+    bool m_reverse{ false };
+};
+
+// ── Phase 4: Rich Text segment ───────────────────────────────────────────
+
+struct RichTextSegment
+{
+    std::string text;
+    bool bold{ false };
+    bool italic{ false };
+    Vec4 color{ 1.0f, 1.0f, 1.0f, 1.0f };   // per-segment override (default = white)
+    bool hasColor{ false };                    // true if <color> was specified
+    std::string imagePath;                     // non-empty for <img> segments
+    float imageW{ 16.0f };
+    float imageH{ 16.0f };
+
+    bool isImage() const { return !imagePath.empty(); }
+};
+
+// Parse simplified rich-text markup into a flat list of segments.
+// Supported tags: <b>...</b>  <i>...</i>  <color=#RRGGBB>...</color>
+//                 <img src="path" w=W h=H/>
+std::vector<RichTextSegment> ParseRichTextMarkup(const std::string& markup, const Vec4& defaultColor);
+
+// ── Phase 5: Runtime Drag & Drop ─────────────────────────────────────────
+
+struct DragDropOperation
+{
+    std::string sourceElementId;
+    std::string payload;           // Free-form string (e.g. "item:sword")
+    Vec2        dragPosition{};    // Current cursor position during drag
+};
+
+// ── Consolidated Style Properties ────────────────────────────────────────
+
+struct WidgetElementStyle
+{
+    // Core state colors
+    Vec4 color{ 1.0f, 1.0f, 1.0f, 1.0f };            // normal/default background color
+    Vec4 hoverColor{ 1.0f, 1.0f, 1.0f, 1.0f };        // background on hover
+    Vec4 pressedColor{ 0.0f, 0.0f, 0.0f, 0.0f };      // background on press (alpha 0 = use hoverColor)
+    Vec4 disabledColor{ 0.4f, 0.4f, 0.4f, 1.0f };     // background when disabled
+
+    // Text colors
+    Vec4 textColor{ 1.0f, 1.0f, 1.0f, 1.0f };         // normal text color
+    Vec4 textHoverColor{ 0.0f, 0.0f, 0.0f, 0.0f };    // text on hover (alpha 0 = use textColor)
+    Vec4 textPressedColor{ 0.0f, 0.0f, 0.0f, 0.0f };  // text on press (alpha 0 = use textColor)
+
+    // Fill colors (ProgressBar, Slider, etc.)
+    Vec4 fillColor{ 1.0f, 1.0f, 1.0f, 1.0f };         // fill area color
+
+    // Outline / Border
+    Vec4 outlineColor{ 0.0f, 0.0f, 0.0f, 0.0f };      // general outline/stroke color
+    Vec4 borderColor{ 0.0f, 0.0f, 0.0f, 0.0f };       // border color
+    float borderThickness{ 0.0f };                      // border thickness
+    float borderRadius{ 0.0f };                         // border corner radius
+
+    // Gradient
+    Vec4 gradientColor{ 0.0f, 0.0f, 0.0f, 0.0f };     // secondary gradient color (top to bottom)
+
+    // Shadow
+    Vec4 shadowColor{ 0.0f, 0.0f, 0.0f, 0.0f };       // drop shadow color (alpha 0 = no shadow)
+    Vec2 shadowOffset{ 0.0f, 2.0f };                   // drop shadow offset
+
+    // Opacity / Visibility
+    float opacity{ 1.0f };                              // 0=transparent, 1=fully opaque
+    bool isVisible{ true };                             // hide without collapsing layout
+
+    // Font styling
+    bool isBold{ false };
+    bool isItalic{ false };
+    float letterSpacing{ 0.0f };                        // extra spacing between characters
+    float lineSpacing{ 0.0f };                          // extra spacing between lines
+};
+
 struct WidgetElement
 {
     WidgetElementType type{ WidgetElementType::Unknown };
     std::string id;
     Vec2 from{};
     Vec2 to{ 1.0f, 1.0f };
-    Vec4 color{ 1.0f, 1.0f, 1.0f, 1.0f };
-    Vec4 hoverColor{ 1.0f, 1.0f, 1.0f, 1.0f };
-    Vec4 fillColor{ 1.0f, 1.0f, 1.0f, 1.0f };
-    Vec4 textColor{ 1.0f, 1.0f, 1.0f, 1.0f };
+    WidgetElementStyle style;
     std::string text;
     std::string font;
     float fontSize{ 0.0f };
@@ -241,6 +352,8 @@ struct WidgetElement
     float maxValue{ 1.0f };
     bool isPassword{ false };
     bool isCompact{ false };
+    bool isMultiline{ false };
+    int maxLines{ 0 };               // 0 = unlimited
     TextAlignH textAlignH{ TextAlignH::Left };
     TextAlignV textAlignV{ TextAlignV::Top };
     bool wrapText{ false };
@@ -301,25 +414,8 @@ struct WidgetElement
     bool isDraggable{ false };
     std::string dragPayload;    // e.g. "Texture|MyTexture.asset" or "Model3D|Mesh.asset"
 
-    // ── Extended styling properties ──────────────────────────────────────
-    // Border
-    Vec4 borderColor{ 0.0f, 0.0f, 0.0f, 0.0f };
-    float borderThickness{ 0.0f };
-    float borderRadius{ 0.0f };
-
-    // Visibility / Opacity
-    float opacity{ 1.0f };       // 0=transparent, 1=fully opaque
-    bool isVisible{ true };      // hide without collapsing layout
-
     // Tooltip
     std::string tooltipText;
-
-    // Font styling
-    bool isBold{ false };
-    bool isItalic{ false };
-
-    // Background gradient (secondary color blended from top to bottom)
-    Vec4 gradientColor{ 0.0f, 0.0f, 0.0f, 0.0f };
 
     // Maximum size constraints (0 = unconstrained, analogous to minSize)
     Vec2 maxSize{ 0.0f, 0.0f };
@@ -367,12 +463,46 @@ struct WidgetElement
 
     // Effective (inherited) opacity – computed at render time, not serialised
     float effectiveOpacity{ 1.0f };
+
+    // ── Phase 4: Extended widget properties ────────────────────────────────
+    // Border – dedicated container with separate border brush and per-side thickness
+    UIBrush borderBrush;                     // brush for the border itself
+    float borderThicknessLeft{ 0.0f };
+    float borderThicknessTop{ 0.0f };
+    float borderThicknessRight{ 0.0f };
+    float borderThicknessBottom{ 0.0f };
+    Vec2 contentPadding{ 0.0f, 0.0f };       // inner padding for the child
+
+    // Spinner – animated loading indicator
+    int spinnerDotCount{ 8 };                // number of dots on the circle
+    float spinnerSpeed{ 1.0f };              // rotations per second
+    float spinnerElapsed{ 0.0f };            // runtime: accumulated time (not serialised)
+
+    // RichText – inline-formatted text block
+    std::string richText;                    // markup source: <b>, <i>, <color=#RRGGBB>, <img src="" w= h=/>
+
+    // ListView / TileView – virtualised list rendering
+    int totalItemCount{ 0 };                 // total number of items in the data source
+    float itemHeight{ 32.0f };               // fixed height per item (ListView & TileView)
+    float itemWidth{ 100.0f };               // fixed width per tile (TileView only)
+    int columnsPerRow{ 4 };                  // tiles per row (TileView only)
+    std::function<void(int index, WidgetElement& itemTemplate)> onGenerateItem;
+
+    // ── Phase 5: Focus & Keyboard Navigation ──────────────────────────────
+    FocusConfig focusConfig;                 // per-element focus/navigation settings
+    UIBrush focusBrush;                      // visual outline when element has focus
+
+    // ── Phase 5: Runtime Drag & Drop ──────────────────────────────────────
+    bool acceptsDrop{ false };               // element can receive drops
+    std::function<bool(const DragDropOperation&)> onDragOver;   // return true to accept
+    std::function<void(const DragDropOperation&)> onDrop;       // called on successful drop
+    std::function<void()> onDragStart;       // called when drag begins on this element
 };
 
 class Widget : public EngineObject
 {
 public:
-    Widget() = default;
+    Widget();
     ~Widget() override = default;
 
     void setSizePixels(const Vec2& size);
@@ -405,6 +535,9 @@ public:
     void setAnimations(std::vector<WidgetAnimation> animations);
     const std::vector<WidgetAnimation>& getAnimations() const;
     std::vector<WidgetAnimation>& getAnimationsMutable();
+    WidgetAnimationPlayer& animationPlayer();
+    const WidgetAnimationPlayer& animationPlayer() const;
+    bool applyAnimationAtTime(const std::string& animationName, float timeSeconds);
 
     void setZOrder(int zOrder);
     int getZOrder() const;
@@ -413,6 +546,9 @@ public:
     json toJson() const;
 
 private:
+    const WidgetAnimation* findAnimationByName(const std::string& animationName) const;
+    void applyAnimationTrackValue(const AnimationTrack& track, const Vec4& value);
+
     Vec2 m_sizePixels{};
     Vec2 m_positionPixels{};
     WidgetAnchor m_anchor{ WidgetAnchor::TopLeft };
@@ -426,5 +562,6 @@ private:
     bool m_layoutDirty{ true };
     std::vector<WidgetElement> m_elements;
     std::vector<WidgetAnimation> m_animations;
+    WidgetAnimationPlayer m_animationPlayer;
     int m_zOrder{ 0 };
 };

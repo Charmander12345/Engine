@@ -56,7 +56,7 @@ public:
         container.type = WidgetElementType::TreeView;
         container.minSize = m_minSize;
         container.padding = m_padding;
-        container.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        container.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
         container.fillX = true;
         container.sizeToContent = true;
         container.scrollable = true;
@@ -82,9 +82,9 @@ private:
             row.minSize = Vec2{ 0.0f, 22.0f };
             row.hitTestMode = HitTestMode::Enabled;
             row.runtimeOnly = true;
-            row.color = m_itemColor;
-            row.hoverColor = m_hoverColor;
-            row.textColor = m_textColor;
+            row.style.color = m_itemColor;
+            row.style.hoverColor = m_hoverColor;
+            row.style.textColor = m_textColor;
             row.shaderVertex = "button_vertex.glsl";
             row.shaderFragment = "button_fragment.glsl";
 

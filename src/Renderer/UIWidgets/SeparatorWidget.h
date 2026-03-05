@@ -50,7 +50,7 @@ public:
         container.orientation = StackOrientation::Vertical;
         container.fillX = true;
         container.sizeToContent = true;
-        container.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        container.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
         container.runtimeOnly = true;
 
         // Thin divider line above the section
@@ -58,14 +58,14 @@ public:
         divider.type = WidgetElementType::Panel;
         divider.fillX = true;
         divider.minSize = Vec2{ 0.0f, 1.0f };
-        divider.color = Vec4{ 0.25f, 0.26f, 0.3f, 0.6f };
+        divider.style.color = Vec4{ 0.25f, 0.26f, 0.3f, 0.6f };
         divider.runtimeOnly = true;
 
         // Flat section header (styled as subtle bar, not a prominent button)
         WidgetElement header{};
         header.type = WidgetElementType::Button;
         header.id = "Separator.Toggle." + m_id;
-        // UTF-8 for ▾ (U+25BE small down-pointing triangle)
+        // UTF-8 for â–¾ (U+25BE small down-pointing triangle)
         header.text = std::string("\xe2\x96\xbe") + "  " + m_title;
         header.font = m_font;
         header.fontSize = m_fontSize;
@@ -73,9 +73,9 @@ public:
         header.textAlignV = TextAlignV::Center;
         header.padding = Vec2{ 8.0f, 3.0f };
         header.minSize = Vec2{ 0.0f, 22.0f };
-        header.color = m_headerColor;
-        header.hoverColor = m_headerHoverColor;
-        header.textColor = m_titleColor;
+        header.style.color = m_headerColor;
+        header.style.hoverColor = m_headerHoverColor;
+        header.style.textColor = m_titleColor;
         header.shaderVertex = "button_vertex.glsl";
         header.shaderFragment = "button_fragment.glsl";
         header.hitTestMode = HitTestMode::Enabled;
@@ -89,7 +89,7 @@ public:
         content.padding = m_contentPadding;
         content.fillX = true;
         content.sizeToContent = true;
-        content.color = m_contentColor;
+        content.style.color = m_contentColor;
         content.children = m_children;
         content.cachedChildren = m_children;
         content.runtimeOnly = true;

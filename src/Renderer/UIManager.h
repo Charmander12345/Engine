@@ -6,6 +6,7 @@
 #include <functional>
 #include <unordered_map>
 #include <unordered_set>
+#include <set>
 
 #include "../Core/MathTypes.h"
 #include "../AssetManager/AssetTypes.h"
@@ -210,6 +211,20 @@ private:
 
 		unsigned int assetId{ 0 };
 		bool isDirty{ false };
+		bool showAnimationsPanel{ false };
+		std::string selectedAnimationName;
+
+		// Bottom animation timeline panel
+		std::string bottomWidgetId;
+		float timelineScrubTime{ 0.0f };      // current scrubber position in seconds
+		float timelineZoom{ 1.0f };            // horizontal zoom for timeline
+		float timelineScrollX{ 0.0f };         // horizontal scroll offset
+		int selectedTrackIndex{ -1 };          // which track row is selected
+		int draggingKeyframeTrack{ -1 };       // track index of keyframe being dragged (-1=none)
+		int draggingKeyframeIndex{ -1 };       // keyframe index being dragged
+		bool isDraggingScrubber{ false };       // true while dragging the scrubber
+		bool isDraggingEndLine{ false };        // true while dragging the end-of-animation duration line
+		std::set<std::string> expandedTimelineElements; // element IDs expanded in tree-view
 
 		// Zoom & pan
 		float zoom{ 1.0f };
@@ -242,6 +257,12 @@ private:
 	void deleteSelectedWidgetEditorElement(const std::string& tabId);
 	std::string resolveHierarchyRowElementId(const std::string& tabId, const std::string& rowId) const;
 	void moveWidgetEditorElement(const std::string& tabId, const std::string& draggedId, const std::string& targetId);
+	void refreshWidgetEditorTimeline(const std::string& tabId);
+	void buildTimelineTrackRows(const std::string& tabId, WidgetElement& container);
+	void buildTimelineRulerAndKeyframes(const std::string& tabId, WidgetElement& container);
+	void handleTimelineMouseDown(const std::string& tabId, const Vec2& localPos, float trackAreaWidth);
+	void handleTimelineMouseMove(const std::string& tabId, const Vec2& localPos, float trackAreaWidth);
+	void handleTimelineMouseUp(const std::string& tabId);
 
 	// UI Designer state (Gameplay UI designer tab)
 	struct UIDesignerState

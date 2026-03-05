@@ -47,9 +47,9 @@ public:
         element.maxValue = m_maxValue;
         element.minSize = m_minSize;
         element.padding = m_padding;
-        element.color = m_trackColor;
-        element.fillColor = m_fillColor;
-        element.textColor = m_handleColor;
+        element.style.color = m_trackColor;
+        element.style.fillColor = m_fillColor;
+        element.style.textColor = m_handleColor;
         element.hitTestMode = HitTestMode::Enabled;
         if (m_onValueChanged)
         {

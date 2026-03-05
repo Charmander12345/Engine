@@ -60,6 +60,11 @@ namespace
         case WidgetElementType::ScaleBox: return "ScaleBox";
         case WidgetElementType::WidgetSwitcher: return "WidgetSwitcher";
         case WidgetElementType::Overlay: return "Overlay";
+        case WidgetElementType::Border: return "Border";
+        case WidgetElementType::Spinner: return "Spinner";
+        case WidgetElementType::RichText: return "RichText";
+        case WidgetElementType::ListView: return "ListView";
+        case WidgetElementType::TileView: return "TileView";
         default: return "Unknown";
         }
     }
@@ -92,6 +97,11 @@ namespace
         if (value == "ScaleBox") return WidgetElementType::ScaleBox;
         if (value == "WidgetSwitcher") return WidgetElementType::WidgetSwitcher;
         if (value == "Overlay") return WidgetElementType::Overlay;
+        if (value == "Border") return WidgetElementType::Border;
+        if (value == "Spinner") return WidgetElementType::Spinner;
+        if (value == "RichText") return WidgetElementType::RichText;
+        if (value == "ListView") return WidgetElementType::ListView;
+        if (value == "TileView") return WidgetElementType::TileView;
         return WidgetElementType::Unknown;
     }
 
@@ -604,49 +614,51 @@ namespace
         const bool hasColor = entry.contains("color");
         if (hasColor)
         {
-            element.color = readVec4(entry.at("color"));
+            element.style.color = readVec4(entry.at("color"));
         }
         else if (element.type == WidgetElementType::StackPanel || element.type == WidgetElementType::Grid
             || element.type == WidgetElementType::ScrollView
             || element.type == WidgetElementType::WrapBox || element.type == WidgetElementType::UniformGrid
             || element.type == WidgetElementType::SizeBox || element.type == WidgetElementType::ScaleBox
-            || element.type == WidgetElementType::WidgetSwitcher || element.type == WidgetElementType::Overlay)
+            || element.type == WidgetElementType::WidgetSwitcher || element.type == WidgetElementType::Overlay
+            || element.type == WidgetElementType::Border || element.type == WidgetElementType::ListView
+            || element.type == WidgetElementType::TileView)
         {
-            element.color = Vec4{ 0.1f, 0.1f, 0.12f, 0.65f };
+            element.style.color = Vec4{ 0.1f, 0.1f, 0.12f, 0.65f };
         }
         else if (element.type == WidgetElementType::EntryBar)
         {
-            element.color = Vec4{ 0.12f, 0.12f, 0.15f, 0.9f };
+            element.style.color = Vec4{ 0.12f, 0.12f, 0.15f, 0.9f };
         }
         else if (element.type == WidgetElementType::ProgressBar || element.type == WidgetElementType::Slider)
         {
-            element.color = Vec4{ 0.14f, 0.14f, 0.18f, 0.9f };
+            element.style.color = Vec4{ 0.14f, 0.14f, 0.18f, 0.9f };
         }
         else if (element.type == WidgetElementType::ColorPicker)
         {
-            element.color = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+            element.style.color = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
         }
         if (entry.contains("hoverColor"))
         {
-            element.hoverColor = readVec4(entry.at("hoverColor"));
+            element.style.hoverColor = readVec4(entry.at("hoverColor"));
         }
         else
         {
-            element.hoverColor = (element.type == WidgetElementType::Button) ? brightenColor(element.color) : element.color;
+            element.style.hoverColor = (element.type == WidgetElementType::Button) ? brightenColor(element.style.color) : element.style.color;
         }
         if (entry.contains("fillColor"))
         {
-            element.fillColor = readVec4(entry.at("fillColor"));
+            element.style.fillColor = readVec4(entry.at("fillColor"));
         }
         else
         {
-            element.fillColor = (element.type == WidgetElementType::ProgressBar || element.type == WidgetElementType::Slider)
-                ? brightenColor(element.color)
-                : element.color;
+            element.style.fillColor = (element.type == WidgetElementType::ProgressBar || element.type == WidgetElementType::Slider)
+                ? brightenColor(element.style.color)
+                : element.style.color;
         }
         if (entry.contains("textColor"))
         {
-            element.textColor = readVec4(entry.at("textColor"));
+            element.style.textColor = readVec4(entry.at("textColor"));
         }
         if (entry.contains("text"))
         {
@@ -814,23 +826,23 @@ namespace
         }
         if (entry.contains("borderColor"))
         {
-            element.borderColor = readVec4(entry.at("borderColor"));
+            element.style.borderColor = readVec4(entry.at("borderColor"));
         }
         if (entry.contains("borderThickness"))
         {
-            element.borderThickness = entry.at("borderThickness").get<float>();
+            element.style.borderThickness = entry.at("borderThickness").get<float>();
         }
         if (entry.contains("borderRadius"))
         {
-            element.borderRadius = entry.at("borderRadius").get<float>();
+            element.style.borderRadius = entry.at("borderRadius").get<float>();
         }
         if (entry.contains("opacity"))
         {
-            element.opacity = entry.at("opacity").get<float>();
+            element.style.opacity = entry.at("opacity").get<float>();
         }
         if (entry.contains("isVisible"))
         {
-            element.isVisible = entry.at("isVisible").get<bool>();
+            element.style.isVisible = entry.at("isVisible").get<bool>();
         }
         if (entry.contains("tooltipText"))
         {
@@ -838,15 +850,15 @@ namespace
         }
         if (entry.contains("isBold"))
         {
-            element.isBold = entry.at("isBold").get<bool>();
+            element.style.isBold = entry.at("isBold").get<bool>();
         }
         if (entry.contains("isItalic"))
         {
-            element.isItalic = entry.at("isItalic").get<bool>();
+            element.style.isItalic = entry.at("isItalic").get<bool>();
         }
         if (entry.contains("gradientColor"))
         {
-            element.gradientColor = readVec4(entry.at("gradientColor"));
+            element.style.gradientColor = readVec4(entry.at("gradientColor"));
         }
         if (entry.contains("maxSize"))
         {
@@ -900,6 +912,59 @@ namespace
         {
             element.activeChildIndex = entry.at("activeChildIndex").get<int>();
         }
+        // ── Phase 4: Border, Spinner, RichText, ListView, TileView ──────
+        if (entry.contains("borderBrush"))
+        {
+            element.borderBrush = readBrush(entry.at("borderBrush"));
+        }
+        if (entry.contains("borderThicknessLeft"))
+        {
+            element.borderThicknessLeft = entry.at("borderThicknessLeft").get<float>();
+        }
+        if (entry.contains("borderThicknessTop"))
+        {
+            element.borderThicknessTop = entry.at("borderThicknessTop").get<float>();
+        }
+        if (entry.contains("borderThicknessRight"))
+        {
+            element.borderThicknessRight = entry.at("borderThicknessRight").get<float>();
+        }
+        if (entry.contains("borderThicknessBottom"))
+        {
+            element.borderThicknessBottom = entry.at("borderThicknessBottom").get<float>();
+        }
+        if (entry.contains("contentPadding"))
+        {
+            element.contentPadding = readVec2(entry.at("contentPadding"));
+        }
+        if (entry.contains("spinnerDotCount"))
+        {
+            element.spinnerDotCount = entry.at("spinnerDotCount").get<int>();
+        }
+        if (entry.contains("spinnerSpeed"))
+        {
+            element.spinnerSpeed = entry.at("spinnerSpeed").get<float>();
+        }
+        if (entry.contains("richText"))
+        {
+            element.richText = entry.at("richText").get<std::string>();
+        }
+        if (entry.contains("totalItemCount"))
+        {
+            element.totalItemCount = entry.at("totalItemCount").get<int>();
+        }
+        if (entry.contains("itemHeight"))
+        {
+            element.itemHeight = entry.at("itemHeight").get<float>();
+        }
+        if (entry.contains("itemWidth"))
+        {
+            element.itemWidth = entry.at("itemWidth").get<float>();
+        }
+        if (entry.contains("columnsPerRow"))
+        {
+            element.columnsPerRow = entry.at("columnsPerRow").get<int>();
+        }
         // ── Phase 2: Brush, RenderTransform, ClipMode ────────────────────
         if (entry.contains("background"))
         {
@@ -938,17 +1003,17 @@ namespace
         }
         entry["from"] = writeVec2(element.from);
         entry["to"] = writeVec2(element.to);
-        entry["color"] = writeVec4(element.color);
-        if (element.fillColor.x != element.color.x || element.fillColor.y != element.color.y ||
-            element.fillColor.z != element.color.z || element.fillColor.w != element.color.w)
+        entry["color"] = writeVec4(element.style.color);
+        if (element.style.fillColor.x != element.style.color.x || element.style.fillColor.y != element.style.color.y ||
+            element.style.fillColor.z != element.style.color.z || element.style.fillColor.w != element.style.color.w)
         {
-            entry["fillColor"] = writeVec4(element.fillColor);
+            entry["fillColor"] = writeVec4(element.style.fillColor);
         }
-        entry["textColor"] = writeVec4(element.textColor);
-        if (element.hoverColor.x != element.color.x || element.hoverColor.y != element.color.y ||
-            element.hoverColor.z != element.color.z || element.hoverColor.w != element.color.w)
+        entry["textColor"] = writeVec4(element.style.textColor);
+        if (element.style.hoverColor.x != element.style.color.x || element.style.hoverColor.y != element.style.color.y ||
+            element.style.hoverColor.z != element.style.color.z || element.style.hoverColor.w != element.style.color.w)
         {
-            entry["hoverColor"] = writeVec4(element.hoverColor);
+            entry["hoverColor"] = writeVec4(element.style.hoverColor);
         }
         if (!element.text.empty())
         {
@@ -1123,6 +1188,65 @@ namespace
         {
             entry["activeChildIndex"] = element.activeChildIndex;
         }
+        else if (element.type == WidgetElementType::Border)
+        {
+            if (element.borderBrush.isVisible())
+            {
+                entry["borderBrush"] = writeBrush(element.borderBrush);
+            }
+            if (element.borderThicknessLeft > 0.0f)
+            {
+                entry["borderThicknessLeft"] = element.borderThicknessLeft;
+            }
+            if (element.borderThicknessTop > 0.0f)
+            {
+                entry["borderThicknessTop"] = element.borderThicknessTop;
+            }
+            if (element.borderThicknessRight > 0.0f)
+            {
+                entry["borderThicknessRight"] = element.borderThicknessRight;
+            }
+            if (element.borderThicknessBottom > 0.0f)
+            {
+                entry["borderThicknessBottom"] = element.borderThicknessBottom;
+            }
+            if (element.contentPadding.x > 0.0f || element.contentPadding.y > 0.0f)
+            {
+                entry["contentPadding"] = writeVec2(element.contentPadding);
+            }
+        }
+        else if (element.type == WidgetElementType::Spinner)
+        {
+            entry["spinnerDotCount"] = element.spinnerDotCount;
+            entry["spinnerSpeed"] = element.spinnerSpeed;
+        }
+        else if (element.type == WidgetElementType::RichText)
+        {
+            if (!element.richText.empty())
+            {
+                entry["richText"] = element.richText;
+            }
+        }
+        else if (element.type == WidgetElementType::ListView)
+        {
+            entry["totalItemCount"] = element.totalItemCount;
+            entry["itemHeight"] = element.itemHeight;
+            if (element.scrollable)
+            {
+                entry["scrollable"] = element.scrollable;
+            }
+        }
+        else if (element.type == WidgetElementType::TileView)
+        {
+            entry["totalItemCount"] = element.totalItemCount;
+            entry["itemHeight"] = element.itemHeight;
+            entry["itemWidth"] = element.itemWidth;
+            entry["columnsPerRow"] = element.columnsPerRow;
+            if (element.scrollable)
+            {
+                entry["scrollable"] = element.scrollable;
+            }
+        }
         if (!element.shaderVertex.empty())
         {
             entry["shaderVertex"] = element.shaderVertex;
@@ -1140,41 +1264,41 @@ namespace
             entry["imagePath"] = element.imagePath;
         }
         // Extended styling properties
-        if (element.borderThickness > 0.0f)
+        if (element.style.borderThickness > 0.0f)
         {
-            entry["borderThickness"] = element.borderThickness;
-            entry["borderColor"] = writeVec4(element.borderColor);
+            entry["borderThickness"] = element.style.borderThickness;
+            entry["borderColor"] = writeVec4(element.style.borderColor);
         }
-        if (element.borderRadius > 0.0f)
+        if (element.style.borderRadius > 0.0f)
         {
-            entry["borderRadius"] = element.borderRadius;
+            entry["borderRadius"] = element.style.borderRadius;
         }
-        if (element.opacity < 1.0f)
+        if (element.style.opacity < 1.0f)
         {
-            entry["opacity"] = element.opacity;
+            entry["opacity"] = element.style.opacity;
         }
-        if (!element.isVisible)
+        if (!element.style.isVisible)
         {
-            entry["isVisible"] = element.isVisible;
+            entry["isVisible"] = element.style.isVisible;
         }
         if (!element.tooltipText.empty())
         {
             entry["tooltipText"] = element.tooltipText;
         }
-        if (element.isBold)
+        if (element.style.isBold)
         {
-            entry["isBold"] = element.isBold;
+            entry["isBold"] = element.style.isBold;
         }
-        if (element.isItalic)
+        if (element.style.isItalic)
         {
-            entry["isItalic"] = element.isItalic;
+            entry["isItalic"] = element.style.isItalic;
         }
-        if (element.gradientColor.x != 0.0f ||
-            element.gradientColor.y != 0.0f ||
-            element.gradientColor.z != 0.0f ||
-            element.gradientColor.w != 0.0f)
+        if (element.style.gradientColor.x != 0.0f ||
+            element.style.gradientColor.y != 0.0f ||
+            element.style.gradientColor.z != 0.0f ||
+            element.style.gradientColor.w != 0.0f)
         {
-            entry["gradientColor"] = writeVec4(element.gradientColor);
+            entry["gradientColor"] = writeVec4(element.style.gradientColor);
         }
         if (element.maxSize.x > 0.0f || element.maxSize.y > 0.0f)
         {
@@ -1576,4 +1700,322 @@ bool Widget::isLayoutDirty() const
 void Widget::setLayoutDirty(bool dirty)
 {
     m_layoutDirty = dirty;
+}
+
+// ── Widget constructor ──────────────────────────────────────────────────
+
+Widget::Widget()
+{
+    m_animationPlayer.attachWidget(this);
+}
+
+// ── Widget animation helpers ────────────────────────────────────────────
+
+WidgetAnimationPlayer& Widget::animationPlayer()
+{
+    return m_animationPlayer;
+}
+
+const WidgetAnimationPlayer& Widget::animationPlayer() const
+{
+    return m_animationPlayer;
+}
+
+const WidgetAnimation* Widget::findAnimationByName(const std::string& animationName) const
+{
+    for (const auto& anim : m_animations)
+    {
+        if (anim.name == animationName)
+        {
+            return &anim;
+        }
+    }
+    return nullptr;
+}
+
+namespace
+{
+    WidgetElement* FindElementById(std::vector<WidgetElement>& elements, const std::string& id)
+    {
+        for (auto& el : elements)
+        {
+            if (el.id == id)
+            {
+                return &el;
+            }
+            if (!el.children.empty())
+            {
+                WidgetElement* found = FindElementById(el.children, id);
+                if (found)
+                {
+                    return found;
+                }
+            }
+        }
+        return nullptr;
+    }
+}
+
+void Widget::applyAnimationTrackValue(const AnimationTrack& track, const Vec4& value)
+{
+    WidgetElement* target = FindElementById(m_elements, track.targetElementId);
+    if (!target)
+    {
+        return;
+    }
+
+    switch (track.property)
+    {
+    case AnimatableProperty::RenderTranslationX:
+        target->renderTransform.translation.x = value.x;
+        break;
+    case AnimatableProperty::RenderTranslationY:
+        target->renderTransform.translation.y = value.x;
+        break;
+    case AnimatableProperty::RenderRotation:
+        target->renderTransform.rotation = value.x;
+        break;
+    case AnimatableProperty::RenderScaleX:
+        target->renderTransform.scale.x = value.x;
+        break;
+    case AnimatableProperty::RenderScaleY:
+        target->renderTransform.scale.y = value.x;
+        break;
+    case AnimatableProperty::RenderShearX:
+        target->renderTransform.shear.x = value.x;
+        break;
+    case AnimatableProperty::RenderShearY:
+        target->renderTransform.shear.y = value.x;
+        break;
+    case AnimatableProperty::Opacity:
+        target->style.opacity = value.x;
+        break;
+    case AnimatableProperty::ColorR:
+        target->style.color.x = value.x;
+        break;
+    case AnimatableProperty::ColorG:
+        target->style.color.y = value.x;
+        break;
+    case AnimatableProperty::ColorB:
+        target->style.color.z = value.x;
+        break;
+    case AnimatableProperty::ColorA:
+        target->style.color.w = value.x;
+        break;
+    case AnimatableProperty::PositionX:
+        target->from.x = value.x;
+        break;
+    case AnimatableProperty::PositionY:
+        target->from.y = value.x;
+        break;
+    case AnimatableProperty::SizeX:
+        target->to.x = value.x;
+        break;
+    case AnimatableProperty::SizeY:
+        target->to.y = value.x;
+        break;
+    case AnimatableProperty::FontSize:
+        target->fontSize = value.x;
+        break;
+    }
+}
+
+bool Widget::applyAnimationAtTime(const std::string& animationName, float timeSeconds)
+{
+    const WidgetAnimation* anim = findAnimationByName(animationName);
+    if (!anim)
+    {
+        return false;
+    }
+
+    const float t = (anim->duration > 0.0f)
+        ? std::clamp(timeSeconds, 0.0f, anim->duration)
+        : 0.0f;
+
+    for (const auto& track : anim->tracks)
+    {
+        if (track.keyframes.empty())
+        {
+            continue;
+        }
+
+        // Single keyframe — just use its value
+        if (track.keyframes.size() == 1)
+        {
+            applyAnimationTrackValue(track, track.keyframes[0].value);
+            continue;
+        }
+
+        // Find surrounding keyframes
+        const AnimationKeyframe* prev = &track.keyframes.front();
+        const AnimationKeyframe* next = &track.keyframes.back();
+
+        for (size_t i = 0; i + 1 < track.keyframes.size(); ++i)
+        {
+            if (t >= track.keyframes[i].time && t <= track.keyframes[i + 1].time)
+            {
+                prev = &track.keyframes[i];
+                next = &track.keyframes[i + 1];
+                break;
+            }
+        }
+
+        float alpha = 0.0f;
+        const float span = next->time - prev->time;
+        if (span > 0.0f)
+        {
+            alpha = (t - prev->time) / span;
+        }
+
+        alpha = EvaluateEasing(next->easing, alpha);
+
+        Vec4 interpolated{};
+        interpolated.x = prev->value.x + (next->value.x - prev->value.x) * alpha;
+        interpolated.y = prev->value.y + (next->value.y - prev->value.y) * alpha;
+        interpolated.z = prev->value.z + (next->value.z - prev->value.z) * alpha;
+        interpolated.w = prev->value.w + (next->value.w - prev->value.w) * alpha;
+
+        applyAnimationTrackValue(track, interpolated);
+    }
+
+    m_layoutDirty = true;
+    return true;
+}
+
+// ── WidgetAnimationPlayer ───────────────────────────────────────────────
+
+void WidgetAnimationPlayer::attachWidget(Widget* widget)
+{
+    m_widget = widget;
+}
+
+void WidgetAnimationPlayer::play(const std::string& animName, bool fromStart)
+{
+    m_currentAnimation = animName;
+    m_playing = true;
+    m_reverse = false;
+    if (fromStart)
+    {
+        m_currentTime = 0.0f;
+    }
+}
+
+void WidgetAnimationPlayer::playReverse(const std::string& animName)
+{
+    m_currentAnimation = animName;
+    m_playing = true;
+    m_reverse = true;
+
+    if (m_widget)
+    {
+        const auto& animations = m_widget->getAnimations();
+        for (const auto& anim : animations)
+        {
+            if (anim.name == animName)
+            {
+                m_currentTime = anim.duration;
+                break;
+            }
+        }
+    }
+}
+
+void WidgetAnimationPlayer::pause()
+{
+    m_playing = false;
+}
+
+void WidgetAnimationPlayer::stop()
+{
+    m_playing = false;
+    m_currentTime = 0.0f;
+    m_currentAnimation.clear();
+}
+
+void WidgetAnimationPlayer::setSpeed(float speed)
+{
+    m_speed = speed;
+}
+
+float WidgetAnimationPlayer::getCurrentTime() const
+{
+    return m_currentTime;
+}
+
+bool WidgetAnimationPlayer::isPlaying() const
+{
+    return m_playing;
+}
+
+const std::string& WidgetAnimationPlayer::getCurrentAnimation() const
+{
+    return m_currentAnimation;
+}
+
+void WidgetAnimationPlayer::tick(float deltaTime)
+{
+    if (!m_playing || !m_widget || m_currentAnimation.empty())
+    {
+        return;
+    }
+
+    const auto& animations = m_widget->getAnimations();
+    const WidgetAnimation* anim = nullptr;
+    for (const auto& a : animations)
+    {
+        if (a.name == m_currentAnimation)
+        {
+            anim = &a;
+            break;
+        }
+    }
+
+    if (!anim || anim->duration <= 0.0f)
+    {
+        m_playing = false;
+        return;
+    }
+
+    const float dt = deltaTime * m_speed * anim->playbackSpeed;
+    if (m_reverse)
+    {
+        m_currentTime -= dt;
+    }
+    else
+    {
+        m_currentTime += dt;
+    }
+
+    bool finished = false;
+    if (!m_reverse && m_currentTime >= anim->duration)
+    {
+        if (anim->isLooping)
+        {
+            m_currentTime = std::fmod(m_currentTime, anim->duration);
+        }
+        else
+        {
+            m_currentTime = anim->duration;
+            finished = true;
+        }
+    }
+    else if (m_reverse && m_currentTime <= 0.0f)
+    {
+        if (anim->isLooping)
+        {
+            m_currentTime = anim->duration + std::fmod(m_currentTime, anim->duration);
+        }
+        else
+        {
+            m_currentTime = 0.0f;
+            finished = true;
+        }
+    }
+
+    m_widget->applyAnimationAtTime(m_currentAnimation, m_currentTime);
+
+    if (finished)
+    {
+        m_playing = false;
+    }
 }

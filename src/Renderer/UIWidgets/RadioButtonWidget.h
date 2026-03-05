@@ -51,13 +51,13 @@ public:
         el.text = m_text;
         el.font = m_font;
         el.fontSize = m_fontSize;
-        el.color = m_isChecked ? m_checkedColor : m_color;
-        el.hoverColor = Vec4{
+        el.style.color = m_isChecked ? m_checkedColor : m_color;
+        el.style.hoverColor = Vec4{
             std::min(1.0f, m_color.x + 0.1f),
             std::min(1.0f, m_color.y + 0.1f),
             std::min(1.0f, m_color.z + 0.1f),
             m_color.w };
-        el.textColor = m_textColor;
+        el.style.textColor = m_textColor;
         el.padding = m_padding;
         el.isChecked = m_isChecked;
         el.radioGroup = m_group;

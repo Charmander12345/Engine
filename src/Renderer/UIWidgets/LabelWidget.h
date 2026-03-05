@@ -51,14 +51,14 @@ public:
         el.text = m_text;
         el.font = m_font;
         el.fontSize = m_fontSize;
-        el.textColor = m_textColor;
+        el.style.textColor = m_textColor;
         el.textAlignH = m_textAlignH;
         el.textAlignV = m_textAlignV;
         el.padding = m_padding;
         el.wrapText = m_wrapText;
-        el.isBold = m_isBold;
-        el.isItalic = m_isItalic;
-        el.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };  // transparent background
+        el.style.isBold = m_isBold;
+        el.style.isItalic = m_isItalic;
+        el.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };  // transparent background
         el.hitTestMode = HitTestMode::DisabledSelf;
         return el;
     }

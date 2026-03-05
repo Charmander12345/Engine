@@ -33,6 +33,12 @@ public:
     void setPassword(bool isPassword) { m_isPassword = isPassword; }
     bool isPassword() const { return m_isPassword; }
 
+    void setMultiline(bool multiline) { m_isMultiline = multiline; }
+    bool isMultiline() const { return m_isMultiline; }
+
+    void setMaxLines(int maxLines) { m_maxLines = maxLines; }
+    int getMaxLines() const { return m_maxLines; }
+
     void setOnValueChanged(std::function<void(const std::string&)> callback) { m_onValueChanged = std::move(callback); }
     const std::function<void(const std::string&)>& getOnValueChanged() const { return m_onValueChanged; }
 
@@ -43,11 +49,13 @@ public:
         element.value = m_value;
         element.minSize = m_minSize;
         element.padding = m_padding;
-        element.textColor = m_textColor;
-        element.color = m_backgroundColor;
+        element.style.textColor = m_textColor;
+        element.style.color = m_backgroundColor;
         element.font = m_font;
         element.fontSize = m_fontSize;
         element.isPassword = m_isPassword;
+        element.isMultiline = m_isMultiline;
+        element.maxLines = m_maxLines;
         element.hitTestMode = HitTestMode::Enabled;
         element.onValueChanged = m_onValueChanged;
         return element;
@@ -62,5 +70,7 @@ private:
     std::string m_font{ "default.ttf" };
     float m_fontSize{ 14.0f };
     bool m_isPassword{ false };
+    bool m_isMultiline{ false };
+    int m_maxLines{ 0 };
     std::function<void(const std::string&)> m_onValueChanged;
 };

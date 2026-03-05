@@ -27,6 +27,11 @@
 - `Widget Editor`: Steuerelement-Einträge in der linken Palette haben jetzt einen sichtbaren Hover-State (Button-Basis mit transparenter Grundfarbe + Hover-Farbe), sodass einzelne Controls beim Überfahren visuell hervorgehoben werden.
 - `OpenGLRenderer`: Viewport-UI-Rendering für `Text`/`Label` sowie `Button`/`ToggleButton`/`RadioButton` an den Editor-Renderpfad angeglichen – korrekte H/V-Ausrichtung, Wrap-Text-Unterstützung und bessere Text-Fit-Berechnung statt fixer Top-Left-Ausgabe.
 - `UIWidget` (Phase 3 – Animation): Zentrale Easing-Auswertung ergänzt: `EvaluateEasing(EasingFunction, t)` unterstützt jetzt alle Standardkurven (`Linear`, `Quad`, `Cubic`, `Elastic`, `Bounce`, `Back`; jeweils In/Out/InOut) mit auf `[0..1]` geklemmtem Eingangswert.
+- `UIWidget` (Phase 3 – Animation): `WidgetAnimationPlayer` implementiert (`play`, `playReverse`, `pause`, `stop`, `setSpeed`, `tick`) und in `Widget` integriert. Track-Interpolation nutzt `EvaluateEasing`; Track-Werte werden auf animierbare Properties angewendet (`RenderTransform`, `Opacity`, `Color`, `Position`, `Size`, `FontSize`).
+- `ViewportUIManager` / `OpenGLRenderer`: Phase-3-Tick-Integration ergänzt – `ViewportUIManager::tickAnimations(deltaTime)` tickt alle Widget-Animationen pro Frame; `OpenGLRenderer::render()` berechnet das Delta via SDL-Performance-Counter und ruft den Tick zentral auf.
+- `Scripting` (Phase 3 – Animation): `engine.ui` um Animationssteuerung erweitert: `play_animation(widget_id, animation_name, from_start=True)`, `stop_animation(widget_id, animation_name)` und `set_animation_speed(widget_id, animation_name, speed)` für Laufzeit-Widgets; `engine.pyi` entsprechend synchronisiert.
+- `UIManager` (Widget Editor): Rechtses Panel kann jetzt per Toggle-Button in der oberen Leiste zwischen **Details** und **Animations** umgeschaltet werden. Der Animationsmodus zeigt eine Liste vorhandener Widget-Animationen inkl. Play/Stop-Bedienung als Basis-Animations-Panel.
+- `UIManager` (Widget Editor): Animations-Timeline – Redesigned Unreal-Style Bottom-Panel (260px) mit zwei Hauptbereichen: **Links (150px)** Animations-Liste mit klickbaren Einträgen und Selektions-Highlight. **Rechts** Timeline-Content: Toolbar (+Track, Play/Stop, Duration, Loop), horizontaler Split mit Tree-View-Track-Namen (aufklappbare Element-Header ▾/▸ + eingerückte Property-Tracks) und Timeline-Bereich (Ruler, Scrubber-Linie draggbar mit Echtzeit-FBO-Preview, kleinere Keyframe-Diamanten 9px, draggbare End-of-Animation-Linie zur Dauer-Änderung, Echtzeit-Keyframe-Dragging begrenzt auf [0, duration]).
 - `Widget Editor`: Für Widget-Editor-Tabs wird im Renderer die 3D-Weltpass-Ausgabe unterdrückt; der tab-eigene Framebuffer wird als reine Widget-Workspace-Fläche genutzt.
 - `Widget Editor`: TitleBar-Tabs werden jetzt beim Hinzufügen/Entfernen zentral neu aufgebaut, damit neue Widget-Editor-Tabs immer sichtbar sind wie beim Mesh Viewer.
 - `Widget Editor`: Bugfix – Erneutes Öffnen eines Widget-Assets schlug fehl, weil `loadWidgetAsset` Content-relative Pfade nicht gegen das Projekt-Content-Verzeichnis auflöste (Disk-Load scheiterte nach Neustart oder Cache-Miss). Außerdem wird bei Ladefehler der bereits hinzugefügte Tab entfernt, um verwaiste Tabs zu vermeiden.
@@ -38,7 +43,31 @@
 - `Widget Editor`: Hit-Test-Fix – Rekursive Messung aller Elemente (`measureAllElements`) und robustere Tiefensuche. Hover-Preview mit hellblauer Outline beim Überfahren von Elementen im Canvas.
 - `Build/CMake`: Multi-Config-Ausgabeverzeichnisse werden nun pro Konfiguration getrennt (`${CMAKE_BINARY_DIR}/Debug|Release|...`) statt zusammengeführt, um Debug/Release-Lib-Kollisionen (MSVC `LNK2038`) zu vermeiden.
 - `Gameplay UI/Designer`: Gesamtplan und Fortschritts-Tracking in `GAMEPLAY_UI_PLAN.md`. Phase A (Runtime-System) und Phase B (UI Designer Tab) vollständig implementiert. Scripting vereinfacht: `engine.viewport_ui` entfernt, nur noch `engine.ui.spawn_widget/remove_widget/show_cursor/clear_all_widgets`. Canvas-Root mit Löschschutz, Anchor-Dropdown im Details-Panel, normalisierte from/to-Werte korrekt skaliert. Phase D (UX-Verbesserungen) steht als Zukunft aus.
-- `UIWidget` (Phase 2 – Styling): Neues Brush-System (`BrushType` Enum: None/SolidColor/Image/NineSlice/LinearGradient) mit `UIBrush` Struct für einheitliche Flächenfüllung. Neue WidgetElement-Felder: `background`, `hoverBrush`, `fillBrush` (je UIBrush), `renderTransform` (RenderTransform), `clipMode` (ClipMode), `effectiveOpacity`.
+- `UIWidget` (Phase 4 – Border): Neuer `WidgetElementType::Border` – Single-Child-Container mit separater `borderBrush` (UIBrush) für die vier Kanten, per-Seite Dicke (`borderThicknessLeft/Top/Right/Bottom`), `contentPadding` (Vec2). JSON-Serialisierung vollständig. Helper-Klasse `BorderWidget.h`.
+- `UIWidget` (Phase 4 – Spinner): Neuer `WidgetElementType::Spinner` – animiertes Lade-Symbol mit `spinnerDotCount` (default 8), `spinnerSpeed` (Umdrehungen/Sek, default 1.0), `spinnerElapsed` (Runtime-Zähler). JSON-Serialisierung (ohne Runtime-Feld). Helper-Klasse `SpinnerWidget.h`.
+- `UIManager` (Phase 4): Layout/Measure für Border (Kind + Insets) und Spinner (feste Größe). Border-Arrange: Kind um borderThickness + contentPadding eingerückt. Editor-Palette, addElementToEditedWidget-Defaults und Details-Panel (Border: Dicke L/T/R/B, ContentPadding X/Y, BorderBrush RGBA; Spinner: DotCount, Speed).
+- `OpenGLRenderer` (Phase 4): Rendering für Border (4 Kanten-Rects via `drawUIBrush` + Kind-Rekursion) und Spinner (N Punkte im Kreis mit Opacity-Falloff) in allen 3 Render-Pfaden (Viewport-UI, Editor-UI, Widget-Editor-Preview).
+- `ViewportUIManager` (Phase 4): Spinner-Tick via `tickSpinnersRecursive` in `tickAnimations()` – inkrementiert `spinnerElapsed` für alle Spinner-Elemente pro Frame.
+- `UIManager` (Phase 4): Spinner-Tick via `TickSpinnersRecursive` in `updateNotifications()` für Editor-Widgets.
+- `engine.pyi` (Phase 4): IntelliSense-Dokumentation für Border- und Spinner-Widgettypen mit allen Feldern, Layout- und Rendering-Beschreibung.
+- `UIWidget` (Phase 4 – Multiline EntryBar): Neue Felder `isMultiline` (bool, default false) und `maxLines` (int, 0 = unbegrenzt) für mehrzeilige Texteingabe. JSON-Serialisierung vollständig.
+- `UIManager` (Phase 4 – Multiline EntryBar): Enter-Taste fügt `\n` ein bei `isMultiline`-Modus (mit `maxLines`-Prüfung). Details-Panel: Multiline-Checkbox und Max-Lines-Property für EntryBar-Elemente.
+- `OpenGLRenderer` (Phase 4 – Multiline EntryBar): Mehrzeiliges Rendering – Text wird an `\n` gesplittet und zeilenweise gezeichnet (Y-Offset = lineHeight pro Zeile). Caret auf letzter Zeile. Beide Render-Pfade (Viewport-UI, Editor-UI) aktualisiert.
+- `EntryBarWidget.h` (Phase 4): `setMultiline(bool)` und `setMaxLines(int)` Builder-Methoden hinzugefügt.
+- `engine.pyi` (Phase 4): IntelliSense-Dokumentation für Multiline-EntryBar (isMultiline, maxLines, Rendering-Verhalten) ergänzt.
+- `UIWidget` (Phase 4 – Rich Text Block): Neuer `WidgetElementType::RichText` mit `richText`-Feld (Markup-String). Neues `RichTextSegment` Struct (text, bold, italic, color, hasColor, imagePath, imageW, imageH). `ParseRichTextMarkup()` Parser für `<b>`, `<i>`, `<color=#RRGGBB>`, `<img>` Tags mit Style-Stack für Verschachtelung. JSON-Serialisierung vollständig.
+- `OpenGLRenderer` (Phase 4 – Rich Text Block): Markup-Parse → Word-Liste mit Per-Word-Style → Greedy Word-Wrap → Zeilen-Rendering mit `drawText` pro Wort und segmentspezifischer Farbe. Alle 3 Render-Pfade (Viewport-UI, Editor-UI, Widget-Editor-Preview) aktualisiert.
+- `UIManager` (Phase 4 – Rich Text Block): Layout (minSize oder 200×40 Default), Palette-Eintrag „RichText", addElementToEditedWidget-Defaults, Details-Panel „Rich Text"-Markup-Feld.
+- `RichTextWidget.h` (Phase 4): Neuer Builder-Header in UIWidgets – setRichText, setFontSize, setTextColor, setBackgroundColor, setPadding, setMinSize, toElement().
+- `engine.pyi` (Phase 4): IntelliSense-Dokumentation für Rich-Text-Block (richText-Feld, Markup-Tags, Layout, Helper-Klasse) ergänzt.
+- `UIWidget` (Phase 4 – ListView/TileView): Neue `WidgetElementType::ListView` und `WidgetElementType::TileView`. Neue Felder `totalItemCount` (int), `itemHeight` (float, 32), `itemWidth` (float, 100), `columnsPerRow` (int, 4), `onGenerateItem` (Callback). JSON-Serialisierung vollständig.
+- `OpenGLRenderer` (Phase 4 – ListView/TileView): Virtualisiertes Rendering mit Scissor-Clipping, alternierenden Zeilen-/Tile-Farben, Scroll-Offset. Alle 3 Render-Pfade aktualisiert.
+- `UIManager` (Phase 4 – ListView/TileView): Layout (ListView 200×200, TileView 300×200), Palette-Einträge, addElementToEditedWidget-Defaults, Details-Panel (Item Count, Item Height, Item Width, Columns).
+- `ListViewWidget.h` (Phase 4): Builder-Header – setTotalItemCount, setItemHeight, setOnGenerateItem, toElement().
+- `TileViewWidget.h` (Phase 4): Builder-Header – setItemWidth, setColumnsPerRow + alle ListView-Methoden, toElement().
+- `engine.pyi` (Phase 4): IntelliSense-Dokumentation für ListView/TileView (Felder, Virtualisierung, Helper-Klassen) ergänzt.
+- `UIWidget` / `UIManager` / `OpenGLRenderer` (Phase 4 – Integration-Fix): Fehlende Switch-Cases für Border, Spinner, RichText, ListView, TileView in `toString`/`fromString`, `measureElementSize`, `layoutElement` (Border: Kind-Inset, ListView: vertikaler Stack, TileView: Grid), Auto-ID-Zuweisung, Hierarchy-Type-Labels und Renderer-Container-Checks nachgetragen. Viewport-Designer-Palette und Creation-Defaults für alle 5 neuen Typen ergänzt. Details-Panel-Properties: Border (Dicke L/T/R/B, ContentPadding, BorderBrush RGBA), Spinner (DotCount, Speed), RichText (Markup), ListView (Item Count, Item Height), TileView (Item Count, Item Height, Item Width, Columns).
+- `UIWidget` (Phase 2 – Styling):
 - `UIWidget` (Phase 2 – Styling): `RenderTransform` Struct (Translation, Rotation, Scale, Shear, Pivot) für rein visuelle Per-Element-Transformation ohne Layout-Einfluss. `ClipMode` Enum (None/ClipToBounds/InheritFromParent) für Clipping-Steuerung.
 - `UIWidget` (Phase 2 – Serialisierung): `readBrush`/`writeBrush` und `readRenderTransform`/`writeRenderTransform` JSON-Helfer. Rückwärtskompatibilität mit bestehenden `color`-Feldern.
 - `OpenGLRenderer` (Phase 2): Neue `drawUIBrush()` Funktion für Brush-basiertes Rendering (SolidColor, Image, NineSlice-Fallback, LinearGradient mit eigenem GLSL-Shader). `m_uiGradientProgram` + `UIGradientUniforms` für Gradient-Rendering.
@@ -49,6 +78,14 @@
 - `OpenGLRenderer` (Phase 2): RenderTransform-Rendering – `ComputeRenderTransformMatrix()` berechnet T(pivot)·Translate·Rotate·Scale·Shear·T(-pivot) und multipliziert die Matrix auf die uiProjection in allen drei Pfaden (`renderViewportUI`, `drawUIWidgetsToFramebuffer`, `renderUI`). RAII-Restore-Structs stellen die Projektion automatisch wieder her.
 - `ViewportUIManager` (Phase 2): RenderTransform-Hit-Testing – `InverseTransformPoint()` transformiert den Mauszeiger in den lokalen (untransformierten) Koordinatenraum. `HitTestRecursive`/`HitTestRecursiveConst` nutzen den invertierten Punkt für Bounds-Check und Child-Rekursion.
 - `OpenGLRenderer` (Phase 2): ClipMode-Scissor-Stack – `ClipMode::ClipToBounds` erzeugt per RAII einen verschachtelten GL-Scissor-Bereich (Achsen-ausgerichtete Intersection mit dem aktuellen Scissor). Alle drei Render-Pfade unterstützt.
+- `UIWidget` (Phase 5 – Focus System): Neues Struct `FocusConfig` (isFocusable, tabIndex, focusUp/Down/Left/Right). Neue Felder `focusConfig` (FocusConfig) und `focusBrush` (UIBrush) auf WidgetElement. JSON-Serialisierung (readFocusConfig/writeFocusConfig).
+- `ViewportUIManager` (Phase 5): Focus-Manager – `setFocus()`, `clearFocus()`, `getFocusedElementId()`, `setFocusable()`. Tab/Shift+Tab-Navigation (tabIndex-sortiert), Pfeiltasten Spatial-Navigation, Enter/Space-Aktivierung, Escape zum Fokus-Löschen. Fokus-on-Click in `handleMouseDown`. `handleKeyDown(key, modifiers)` Signatur.
+- `OpenGLRenderer` (Phase 5): Fokus-Highlight – Post-Render-Pass in `renderViewportUI()` zeichnet 2px-Outline mit `focusBrush.color` (Default blau).
+- `UIManager` (Phase 5): Widget-Editor Details-Panel „Focus"-Sektion – Focusable-Checkbox, Tab Index, Focus Up/Down/Left/Right, Focus Brush RGBA.
+- `Scripting` (Phase 5): Python API – `engine.ui.set_focus()`, `clear_focus()`, `get_focused_element()`, `set_focusable()`. `engine.pyi` mit Phase-5-Dokumentation aktualisiert.
+- `UIWidget` (WidgetElementStyle-Refactoring): 14 visuelle Felder (`color`, `hoverColor`, `pressedColor`, `disabledColor`, `textColor`, `textHoverColor`, `textPressedColor`, `fillColor`, `opacity`, `borderThickness`, `borderRadius`, `isVisible`, `isBold`, `isItalic`) aus `WidgetElement` in neues Sub-Struct `WidgetElementStyle style` konsolidiert. Zugriff einheitlich über `element.style.*`. Alle Renderer-, Layout-, Editor- und Scripting-Pfade migriert. JSON-Serialisierung rückwärtskompatibel.
+- `UIWidget` (Bugfix): Fehlende Implementierungen für `Widget`-Konstruktor, `animationPlayer()`, `findAnimationByName()`, `applyAnimationTrackValue()`, `applyAnimationAtTime()` und alle `WidgetAnimationPlayer`-Methoden in `UIWidget.cpp` ergänzt.
+- `engine.pyi`: `WidgetElementStyle`-Struct-Dokumentation mit allen 14 Feldern und `element.style.*`-Zugriffsmuster hinzugefügt.
 
 ## Inhaltsverzeichnis
 
@@ -200,7 +237,9 @@ Engine/
 │   │   │   ├── LabelWidget.h           # NEU – leichtgewichtiges Text-Element
 │   │   │   ├── ToggleButtonWidget.h    # NEU – Button mit An/Aus-Zustand
 │   │   │   ├── ScrollViewWidget.h      # NEU – scrollbarer Container
-│   │   │   └── RadioButtonWidget.h     # NEU – Radio-Button (Gruppen-ID)
+│   │   │   ├── RadioButtonWidget.h     # NEU – Radio-Button (Gruppen-ID)
+│   │   │   ├── ListViewWidget.h        # NEU – Virtualisierte Liste (Phase 4)
+│   │   │   └── TileViewWidget.h        # NEU – Grid-Tile-Ansicht (Phase 4)
 │   │   ├── EditorWindows/           # Editor-Fenster (FBO-Override, 3D-Vorschau)
 │   │   │   ├── MeshViewerWindow.h/.cpp  # Mesh-Viewer: Orbit-Kamera, dedizierter FBO
 │   │   │   └── PopupWindow.h/.cpp       # Multi-Window Popup-System (backend-agnostisch, nutzt IRenderContext)
@@ -1174,6 +1213,30 @@ struct WidgetElement {
     float userScale;                      // ScaleBox (UserSpecified)
     int activeChildIndex;                 // WidgetSwitcher
 
+    // Border-Widget-Felder (Phase 4):
+    UIBrush borderBrush;                   // Brush für die 4 Kanten
+    float borderThicknessLeft, borderThicknessTop, borderThicknessRight, borderThicknessBottom;
+    Vec2 contentPadding;                   // Zusätzlicher Innen-Abstand
+
+    // Spinner-Widget-Felder (Phase 4):
+    int spinnerDotCount;                   // Anzahl Punkte (default 8)
+    float spinnerSpeed;                    // Umdrehungen/Sek (default 1.0)
+    float spinnerElapsed;                  // Runtime-Zähler (nicht serialisiert)
+
+    // Multiline-EntryBar-Felder (Phase 4):
+    bool isMultiline;                      // Mehrzeilige Eingabe (default false)
+    int maxLines;                          // Max Zeilen, 0 = unbegrenzt
+
+    // Rich-Text-Block-Felder (Phase 4):
+    std::string richText;                  // Markup-String (<b>, <i>, <color>, <img>)
+
+    // ListView/TileView-Felder (Phase 4):
+    int totalItemCount;                    // Anzahl Items (default 0)
+    float itemHeight;                      // Zeilenhöhe in px (default 32)
+    float itemWidth;                       // Tile-Breite in px (default 100, nur TileView)
+    int columnsPerRow;                     // Spalten pro Zeile (default 4, nur TileView)
+    std::function<void(int, WidgetElement&)> onGenerateItem; // Item-Template-Callback
+
     // Styling & Visual Polish (Phase 2):
     UIBrush background;                   // Brush-basierter Hintergrund (None/SolidColor/Image/NineSlice/LinearGradient)
     UIBrush hoverBrush;                   // Brush für Hover-State
@@ -1181,6 +1244,18 @@ struct WidgetElement {
     RenderTransform renderTransform;      // Rein visuelle Transformation (Translate/Rotate/Scale/Shear/Pivot)
     ClipMode clipMode;                    // Clipping-Modus (None/ClipToBounds/InheritFromParent)
     float effectiveOpacity;               // Berechnete Opacity (element.opacity * parent.effectiveOpacity)
+
+    // Focus (Phase 5):
+    FocusConfig focusConfig;              // isFocusable, tabIndex, focusUp/Down/Left/Right
+    UIBrush focusBrush;                   // Farbe für Fokus-Highlight-Outline
+
+    // Drag & Drop (Phase 5):
+    bool isDraggable;                     // Element kann per Drag bewegt werden
+    std::string dragPayload;              // Beliebiger Payload-String für Drag
+    bool acceptsDrop;                     // Element akzeptiert Drops
+    std::function<void()> onDragStart;    // Callback bei Drag-Start
+    std::function<bool(const DragDropOperation&)> onDragOver; // Hover-Validierung
+    std::function<void(const DragDropOperation&)> onDrop;     // Drop-Callback
 
     // Berechnete Layout-Werte:
     Vec2 computedSizePixels, computedPositionPixels;
@@ -1219,6 +1294,8 @@ struct WidgetElement {
 | `ScaleBox`        | Skaliert Kind auf verfügbare Fläche (Contain/Cover/Fill/ScaleDown/UserSpecified) |
 | `WidgetSwitcher`  | Zeigt nur ein Kind gleichzeitig (Index-basiert) |
 | `Overlay`         | Stapelt alle Kinder übereinander mit Alignment |
+| `Border`          | Single-Child-Container mit konfigurierbarem Rahmen (separate borderBrush, per-Seite Dicke, contentPadding) |
+| `Spinner`         | Animiertes Lade-Symbol (N Punkte im Kreis mit Opacity-Falloff) |
 
 #### Brush-System (Phase 2 – Styling):
 
@@ -1245,6 +1322,21 @@ struct WidgetElement {
 - Neue Widget-Animationsstrukturen: `AnimationKeyframe` (`time`, `value` als `Vec4`, `easing`), `AnimationTrack` (`targetElementId`, `property`, `keyframes`), `WidgetAnimation` (`name`, `duration`, `isLooping`, `playbackSpeed`, `tracks`).
 - `Widget` speichert Animationen in `m_animations` inkl. JSON-Laden/Speichern über `m_animations` im Widget-Asset.
 
+#### Animations-Timeline (Widget-Editor Bottom-Panel):
+
+- Unreal-Style Bottom-Dock-Panel (250px Höhe, per Toggle-Button ein-/ausblendbar)
+- Horizontales Split-Layout: Links (220px) Track-Liste (Element-Label + Property-Dropdown + ◆-Add-Keyframe + Remove-Track), rechts scrollbare Timeline mit Ruler/Zeitachse + Keyframe-Diamanten als Drag-&-Drop-Buttons
+- Toolbar: Animations-Dropdown, +New/Delete, Play ▶ / Stop ■, Duration-Eingabe, Loop-Checkbox
+- Tracks per Dropdown über alle Widget-Elemente hinzufügbar (Element-ID + animierbare Property)
+- Keyframe-Details-Leiste: Time, Value, Easing-Dropdown, Delete-Button
+- Scrubber: Klick auf Ruler setzt Position, orangefarbener 2px-Indikator; Echtzeit-Drag über Ruler via `handleMouseDown`/`handleMouseMotionForPan`
+- End-of-Animation-Linie: 2px roter Indikator, per Drag verschiebbar zur Änderung der Dauer
+- Drag-Interaktionen in bestehende Event-Handler integriert (`handleMouseDown` startet Drag via Element-Bounds-Hit-Test, `handleMouseMotionForPan` aktualisiert Position in Echtzeit, `handleMouseUp` beendet Drag und sortiert Keyframes)
+- Alternating Row Colors (gerade/ungerade Zeilen) für bessere Track-Sichtbarkeit; Element-Header-Rows betten 1px Scrubber- (orange) und End-Linie (rot) ein
+- Ruler-Indikator-Leiste (4px): zeigt Scrubber- und End-Line-Position als farbige Marker
+- Keyframe-Diamanten: 7px/7pt (kleine ◆-Symbole) mit Hit-Test für Click-Selektion und Drag-Start
+- Implementierung: `UIManager::refreshWidgetEditorTimeline()` in `UIManager.cpp`, Drag-Logik in `handleMouseDown`/`handleMouseMotionForPan`/`handleMouseUp`, State-Felder (`timelineScrubTime`, `timelineZoom`, `selectedTrackIndex`, `isDraggingScrubber`, `isDraggingEndLine`, `draggingKeyframeTrack/Index`, `expandedTimelineElements`) in `WidgetEditorState`
+
 ---
 
 ### 10.3 UIWidgets (Einzelne Controls)
@@ -1259,7 +1351,7 @@ Jedes Widget ist als eigene Klasse implementiert (gemäß Projekt-Richtlinien):
 | `StackPanelWidget`   | `StackPanelWidget.h/.cpp`| Horizontale/Vertikale Kind-Anordnung       |
 | `GridWidget`         | `GridWidget.h/.cpp`      | Raster-Layout mit Padding                  |
 | `ColorPickerWidget`  | `ColorPickerWidget.h/.cpp`| Farbauswahl, `onColorChanged`-Callback    |
-| `EntryBarWidget`     | `EntryBarWidget.h`       | Text-Eingabe, Passwort-Modus, Validierung  |
+| `EntryBarWidget`     | `EntryBarWidget.h`       | Text-Eingabe, Passwort-Modus, Multiline-Modus (isMultiline, maxLines) |
 | `SeparatorWidget`    | `SeparatorWidget.h/.cpp` | Aufklappbarer Abschnitt mit flachem Sektions-Header (▾/▸ Chevron, Trennlinie, indentierter Inhalt) |
 | `ProgressBarWidget`  | `ProgressBarWidget.h/.cpp`| Wertebalken mit Min/Max und Farben        |
 | `SliderWidget`       | `SliderWidget.h/.cpp`    | Schieberegler, `onValueChanged`-Callback   |
@@ -1274,6 +1366,11 @@ Jedes Widget ist als eigene Klasse implementiert (gemäß Projekt-Richtlinien):
 | `ScaleBoxWidget`     | `ScaleBoxWidget.h`        | Skaliert Kind (Contain/Cover/Fill/ScaleDown/UserSpecified) |
 | `WidgetSwitcherWidget` | `WidgetSwitcherWidget.h` | Zeigt ein Kind per Index |
 | `OverlayWidget`      | `OverlayWidget.h`         | Stapelt Kinder übereinander |
+| `BorderWidget`       | `BorderWidget.h`           | Single-Child-Container mit konfigurierbarem Rahmen |
+| `SpinnerWidget`      | `SpinnerWidget.h`          | Animiertes Lade-Symbol (rotierende Punkte) |
+| `RichTextWidget`     | `RichTextWidget.h`          | Formatierter Textblock mit Inline-Markup (Bold, Italic, Color) |
+| `ListViewWidget`     | `ListViewWidget.h`          | Virtualisierte scrollbare Liste mit Item-Template-Callback |
+| `TileViewWidget`     | `TileViewWidget.h`          | Grid-basierte Tile-Ansicht mit konfigurierbaren Spalten/Größen |
 
 ---
 
@@ -1355,6 +1452,15 @@ Das `engine`-Modul wird Python-Skripten automatisch zur Verfügung gestellt und 
 | `show_toast_message(msg, dur)`     | Toast-Nachricht anzeigen        |
 | `spawn_widget(content_path) -> str`| Widget per Content-Pfad laden, gibt Widget-ID zurück. Wird nur im Viewport gerendert, bei PIE-Stop automatisch zerstört. |
 | `remove_widget(widget_id) -> bool` | Viewport-Widget per ID entfernen |
+| `play_animation(widget_id, name, from_start)` | Widget-Animation abspielen |
+| `stop_animation(widget_id, name)`  | Widget-Animation stoppen        |
+| `set_animation_speed(widget_id, name, speed)` | Animationsgeschwindigkeit setzen |
+| `show_cursor(visible) -> bool`     | Gameplay-Cursor ein-/ausblenden (+ Kamera-Blockade) |
+| `clear_all_widgets() -> bool`      | Alle Viewport-Widgets entfernen |
+| `set_focus(element_id) -> bool`    | Fokus auf ein UI-Element setzen |
+| `clear_focus() -> bool`            | Fokus vom aktuellen Element entfernen |
+| `get_focused_element() -> str/None`| ID des fokussierten Elements    |
+| `set_focusable(element_id, focusable) -> bool` | Element als fokussierbar markieren |
 
 ---
 
@@ -1920,6 +2026,7 @@ Eigenständiger Manager mit dem Viewport-Content-Rect als Basis:
 - **Element-Zugriff**: `findElementById(id)` – rekursive Suche über alle Widgets
 - **Layout**: Dirty-Tracking, `updateLayout()` mit Text-Measure-Callback
 - **Input**: `handleMouseDown/Up`, `handleScroll`, `handleTextInput`, `handleKeyDown` – Koordinaten intern von Fenster- in Viewport-lokale Pixel umgerechnet; Z-Order-basiertes Multi-Widget-Hit-Testing
+- **Gamepad**: `handleGamepadButton(button, pressed)` und `handleGamepadAxis(axis, value)` – D-Pad/Left-Stick → Spatial-Navigation, A → Aktivierung, B → Fokus löschen, LB/RB → Tab-Navigation. Left-Stick mit Deadzone (0.25), Repeat-Delay (0.35s) und Repeat-Interval (0.12s). SDL3-Gamepad-Events werden in `main.cpp` geroutet (`SDL_INIT_GAMEPAD`, Auto-Open erster Controller).
 - **Selektion**: `setSelectedElementId()` mit `setOnSelectionChanged`-Callback (bidirektionale Sync mit UI Designer)
 - **Cursor-Steuerung**: `setGameplayCursorVisible(bool)` steuert SDL-Cursor + unterdrückt Kamera-Rotation im PIE-Modus
 - **Auto-Cleanup**: Alle Widgets werden beim PIE-Stop automatisch zerstört
@@ -1963,6 +2070,10 @@ Editor-Tab (wie MeshViewer, kein Popup) für visuelles Viewport-UI-Design:
 - `engine.ui.remove_widget(widget_id)` – Widget aus dem Viewport entfernen
 - `engine.ui.show_cursor(visible)` – Gameplay-Cursor ein-/ausblenden (+ Kamera-Blockade)
 - `engine.ui.clear_all_widgets()` – Alle Viewport-Widgets entfernen
+- `engine.ui.set_focus(element_id)` – Fokus auf ein Viewport-UI-Element setzen
+- `engine.ui.clear_focus()` – Fokus vom aktuell fokussierten Element entfernen
+- `engine.ui.get_focused_element()` – ID des fokussierten Elements (oder None)
+- `engine.ui.set_focusable(element_id, focusable)` – Element als fokussierbar markieren
 - `engine.pyi` IntelliSense-Stubs synchronisiert
 - Automatisches Cleanup aller Script-Widgets bei PIE-Stop
 - ~~`engine.viewport_ui` (28 Methoden)~~ – Entfernt zugunsten des Asset-basierten Ansatzes
@@ -1974,7 +2085,8 @@ Editor-Tab (wie MeshViewer, kein Popup) für visuelles Viewport-UI-Design:
 | Phase A | Runtime-System (Multi-Widget, Anchor, Layout, Rendering, Input) | ✅ Abgeschlossen |
 | Phase 2 | Asset-Integration (Canvas-Root, isCanvasRoot, Serialisierung, normalisierte from/to) | ✅ Abgeschlossen |
 | Phase B | UI Designer Tab (Controls, Hierarchie, Properties inkl. Anchor-Dropdown, Sync, Highlight) | ✅ Abgeschlossen |
-| Scripting | Vereinfacht: spawn_widget, remove_widget, show_cursor, clear_all_widgets | ✅ Abgeschlossen |
+| Scripting | Vereinfacht: spawn_widget, remove_widget, show_cursor, clear_all_widgets + Focus API | ✅ Abgeschlossen |
+| Phase 5 | Focus System & Keyboard Navigation (FocusConfig, Tab/Arrow/Enter/Escape, Focus-Highlight, Python API) + Gamepad-Input-Adapter (D-Pad/Stick/A/B/LB/RB → FocusManager) | ✅ Abgeschlossen |
 | Phase D | UX-Verbesserungen (Undo/Redo, Drag & Drop, Copy/Paste, Responsive-Preview) | ❌ Zukunft |
 
 ### 17.7 Nächste Schritte (Phase D)

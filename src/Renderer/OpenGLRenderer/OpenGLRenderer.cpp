@@ -1582,7 +1582,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
         float parentX, float parentY, float parentW, float parentH, float parentOpacity = 1.0f) -> void
     {
         // ── Opacity inheritance ───────────────────────────────────────────
-        const float opa = element.opacity * parentOpacity;
+        const float opa = element.style.opacity * parentOpacity;
 
         float x0 = element.hasComputedPosition ? element.computedPositionPixels.x : (parentX + element.from.x * parentW);
         float y0 = element.hasComputedPosition ? element.computedPositionPixels.y : (parentY + element.from.y * parentH);
@@ -1646,7 +1646,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
             const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
             const GLuint prog = getUIQuadProgram(vp, fp);
-            if (!element.background.isVisible()) drawUIPanel(x0, y0, x1, y1, applyAlpha(element.color, opa), uiProjection, prog, applyAlpha(element.color, opa), false);
+            if (!element.background.isVisible()) drawUIPanel(x0, y0, x1, y1, applyAlpha(element.style.color, opa), uiProjection, prog, applyAlpha(element.style.color, opa), false);
             for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
             if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{1.0f,0.9f,0.1f,1.0f}, uiProjection, prog);
             return;
@@ -1658,7 +1658,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             const GLuint prog = getUIQuadProgram(vp, fp);
             if (element.isCompact)
             {
-                if (element.color.w > 0.0f) drawUIPanel(x0, y0, x1, y1, applyAlpha(element.color, opa), uiProjection, prog, applyAlpha(element.color, opa), false);
+                if (element.style.color.w > 0.0f) drawUIPanel(x0, y0, x1, y1, applyAlpha(element.style.color, opa), uiProjection, prog, applyAlpha(element.style.color, opa), false);
                 for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
                 if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{0.6f,0.9f,0.2f,1.0f}, uiProjection, prog);
                 return;
@@ -1680,7 +1680,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             if (sw > 0.0f)
             {
                 const float sx = x1 - sw - 4.0f, sy = y0 + 4.0f;
-                drawUIPanel(sx, sy, sx+sw, sy+sw, element.color, uiProjection, prog, element.color, false);
+                drawUIPanel(sx, sy, sx+sw, sy+sw, element.style.color, uiProjection, prog, element.style.color, false);
                 drawUIOutline(sx, sy, sx+sw, sy+sw, Vec4{0.1f,0.1f,0.1f,0.9f}, uiProjection, prog);
             }
             if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{0.6f,0.9f,0.2f,1.0f}, uiProjection, prog);
@@ -1704,9 +1704,9 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             const auto drawLine = [&](const std::string& line, const Vec2& pos)
             {
                 if (!element.shaderVertex.empty() || !element.shaderFragment.empty())
-                    m_textRenderer->drawTextWithShader(line, pos, scale, element.textColor, vp, fp);
+                    m_textRenderer->drawTextWithShader(line, pos, scale, element.style.textColor, vp, fp);
                 else
-                    m_textRenderer->drawText(line, pos, scale, element.textColor);
+                    m_textRenderer->drawText(line, pos, scale, element.style.textColor);
             };
             if (element.wrapText && cw > 0.0f)
             {
@@ -1776,10 +1776,10 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
             const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
             const GLuint prog = getUIQuadProgram(vp, fp);
-            drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, prog, element.color, false);
+            drawUIPanel(x0, y0, x1, y1, element.style.color, uiProjection, prog, element.style.color, false);
             const float range = element.maxValue - element.minValue;
             const float ratio = (range>0.0f) ? std::clamp((element.valueFloat-element.minValue)/range, 0.0f, 1.0f) : 0.0f;
-            if (ratio > 0.0f) drawUIPanel(x0, y0, x0+widthPx*ratio, y1, element.fillColor, uiProjection, prog, element.fillColor, false);
+            if (ratio > 0.0f) drawUIPanel(x0, y0, x0+widthPx*ratio, y1, element.style.fillColor, uiProjection, prog, element.style.fillColor, false);
             if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{0.2f,0.9f,0.6f,1.0f}, uiProjection, prog);
             return;
         }
@@ -1792,11 +1792,11 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             const float ratio = (range>0.0f) ? std::clamp((element.valueFloat-element.minValue)/range, 0.0f, 1.0f) : 0.0f;
             const float th = std::min(heightPx, 6.0f);
             const float ty0 = y0+(heightPx-th)*0.5f, ty1 = ty0+th;
-            drawUIPanel(x0, ty0, x1, ty1, element.color, uiProjection, prog, element.color, false);
-            if (ratio > 0.0f) drawUIPanel(x0, ty0, x0+widthPx*ratio, ty1, element.fillColor, uiProjection, prog, element.fillColor, false);
+            drawUIPanel(x0, ty0, x1, ty1, element.style.color, uiProjection, prog, element.style.color, false);
+            if (ratio > 0.0f) drawUIPanel(x0, ty0, x0+widthPx*ratio, ty1, element.style.fillColor, uiProjection, prog, element.style.fillColor, false);
             const float hs = std::max(10.0f, heightPx);
             float hx = std::clamp(x0+widthPx*ratio-hs*0.5f, x0, x1-hs);
-            drawUIPanel(hx, y0, hx+hs, y1, element.textColor, uiProjection, prog, element.textColor, false);
+            drawUIPanel(hx, y0, hx+hs, y1, element.style.textColor, uiProjection, prog, element.style.textColor, false);
             if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{0.2f,0.7f,1.0f,1.0f}, uiProjection, prog);
             return;
         }
@@ -1805,7 +1805,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
             const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
             const GLuint prog = getUIQuadProgram(vp, fp);
-            drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, prog, element.hoverColor, element.isHovered);
+            drawUIPanel(x0, y0, x1, y1, element.style.color, uiProjection, prog, element.style.hoverColor, element.isHovered);
             const float fs = (element.fontSize>0.0f)?element.fontSize:14.0f, sc = fs/48.0f;
             std::string disp = element.value;
             if (element.isPassword) disp.assign(element.value.size(), '*');
@@ -1816,13 +1816,13 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             if (!disp.empty())
             {
                 ts = m_textRenderer->measureText(disp, sc);
-                m_textRenderer->drawText(disp, Vec2{cx0e, cy0e+std::max(0.0f,(chE-ts.y)*0.5f)}, sc, element.textColor);
+                m_textRenderer->drawText(disp, Vec2{cx0e, cy0e+std::max(0.0f,(chE-ts.y)*0.5f)}, sc, element.style.textColor);
             }
             if (element.isFocused)
             {
                 const float ch2 = std::max(0.0f, chE-2.0f);
                 const float cx = cx0e+ts.x+1.0f;
-                if (cx < cx1e) drawUIPanel(cx, cy0e+1.0f, cx+2.0f, cy0e+1.0f+ch2, element.textColor, uiProjection, prog, element.textColor, false);
+                if (cx < cx1e) drawUIPanel(cx, cy0e+1.0f, cx+2.0f, cy0e+1.0f+ch2, element.style.textColor, uiProjection, prog, element.style.textColor, false);
             }
             if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{0.5f,0.8f,1.0f,1.0f}, uiProjection, prog);
             return;
@@ -1832,7 +1832,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
             const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);
             const GLuint prog = getUIQuadProgram(vp, fp);
-            drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, prog, element.hoverColor, element.isHovered);
+            drawUIPanel(x0, y0, x1, y1, element.style.color, uiProjection, prog, element.style.hoverColor, element.isHovered);
             if (!element.text.empty())
             {
                 const float cx0b=x0+element.padding.x, cy0b=y0+element.padding.y;
@@ -1850,7 +1850,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
                 else if (element.textAlignH==TextAlignH::Right) tx=cx1b-ts.x;
                 if (element.textAlignV==TextAlignV::Center) ty=cy0b+(chB-ts.y)*0.5f;
                 else if (element.textAlignV==TextAlignV::Bottom) ty=cy1b-ts.y;
-                m_textRenderer->drawText(element.text, Vec2{tx,ty}, sc, element.textColor);
+                m_textRenderer->drawText(element.text, Vec2{tx,ty}, sc, element.style.textColor);
             }
             else if (element.textureId!=0 || !element.imagePath.empty())
             {
@@ -1866,8 +1866,8 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
             const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);
             const GLuint prog = getUIQuadProgram(vp, fp);
-            const Vec4 displayColor = element.isChecked ? element.fillColor : element.color;
-            drawUIPanel(x0, y0, x1, y1, displayColor, uiProjection, prog, element.hoverColor, element.isHovered);
+            const Vec4 displayColor = element.isChecked ? element.style.fillColor : element.style.color;
+            drawUIPanel(x0, y0, x1, y1, displayColor, uiProjection, prog, element.style.hoverColor, element.isHovered);
             if (!element.text.empty())
             {
                 const float cx0b=x0+element.padding.x, cy0b=y0+element.padding.y;
@@ -1885,7 +1885,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
                 else if (element.textAlignH==TextAlignH::Right) tx=cx1b-ts.x;
                 if (element.textAlignV==TextAlignV::Center) ty=cy0b+(chB-ts.y)*0.5f;
                 else if (element.textAlignV==TextAlignV::Bottom) ty=cy1b-ts.y;
-                m_textRenderer->drawText(element.text, Vec2{tx,ty}, sc, element.textColor);
+                m_textRenderer->drawText(element.text, Vec2{tx,ty}, sc, element.style.textColor);
             }
             if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{0.7f,1.0f,0.3f,1.0f}, uiProjection, prog);
             return;
@@ -1895,7 +1895,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
             const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
             const GLuint prog = getUIQuadProgram(vp, fp);
-            const Vec4 lineColor = (element.color.w > 0.0f) ? element.color : Vec4{0.35f, 0.35f, 0.40f, 0.8f};
+            const Vec4 lineColor = (element.style.color.w > 0.0f) ? element.style.color : Vec4{0.35f, 0.35f, 0.40f, 0.8f};
             drawUIPanel(x0, y0, x1, y1, lineColor, uiProjection, prog, lineColor, false);
             return;
         }
@@ -1904,7 +1904,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
             const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
             const GLuint prog = getUIQuadProgram(vp, fp);
-            drawUIPanel(x0, y0, x1, y1, applyAlpha(element.color, opa), uiProjection, prog, applyAlpha(element.color, opa), false);
+            drawUIPanel(x0, y0, x1, y1, applyAlpha(element.style.color, opa), uiProjection, prog, applyAlpha(element.style.color, opa), false);
             for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
             return;
         }
@@ -1913,7 +1913,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             if (element.textureId!=0 || !element.imagePath.empty())
             {
                 const GLuint tex=(element.textureId!=0)?static_cast<GLuint>(element.textureId):getOrLoadUITexture(element.imagePath);
-                if (tex!=0) drawUIImage(x0, y0, x1, y1, tex, uiProjection, element.color, true);
+                if (tex!=0) drawUIImage(x0, y0, x1, y1, tex, uiProjection, element.style.color, true);
             }
             if (m_uiDebugEnabled)
             {
@@ -1929,18 +1929,18 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             const GLuint prog = getUIQuadProgram(vp, fp);
             const float bs=std::min(heightPx-2.0f,16.0f);
             const float bx0=x0+element.padding.x, by0=y0+(heightPx-bs)*0.5f, bx1=bx0+bs, by1=by0+bs;
-            drawUIPanel(bx0,by0,bx1,by1,element.color,uiProjection,prog,element.hoverColor,element.isHovered);
+            drawUIPanel(bx0,by0,bx1,by1,element.style.color,uiProjection,prog,element.style.hoverColor,element.isHovered);
             drawUIOutline(bx0,by0,bx1,by1,Vec4{0.4f,0.4f,0.45f,0.9f},uiProjection,prog);
             if (element.isChecked)
             {
                 const float inset=3.0f;
-                drawUIPanel(bx0+inset,by0+inset,bx1-inset,by1-inset,element.fillColor,uiProjection,prog,element.fillColor,false);
+                drawUIPanel(bx0+inset,by0+inset,bx1-inset,by1-inset,element.style.fillColor,uiProjection,prog,element.style.fillColor,false);
             }
             if (!element.text.empty())
             {
                 const float sc=(element.fontSize>0.0f)?element.fontSize/48.0f:14.0f/48.0f;
                 const Vec2 ts=m_textRenderer->measureText(element.text,sc);
-                m_textRenderer->drawText(element.text,Vec2{bx1+6.0f,y0+(heightPx-ts.y)*0.5f},sc,element.textColor);
+                m_textRenderer->drawText(element.text,Vec2{bx1+6.0f,y0+(heightPx-ts.y)*0.5f},sc,element.style.textColor);
             }
             if (m_uiDebugEnabled) drawUIOutline(x0,y0,x1,y1,Vec4{0.9f,0.5f,0.2f,1.0f},uiProjection,prog);
             return;
@@ -1950,7 +1950,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
             const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);
             const GLuint prog = getUIQuadProgram(vp, fp);
-            drawUIPanel(x0,y0,x1,y1,element.color,uiProjection,prog,element.hoverColor,element.isHovered);
+            drawUIPanel(x0,y0,x1,y1,element.style.color,uiProjection,prog,element.style.hoverColor,element.isHovered);
             const float sc=(element.fontSize>0.0f)?element.fontSize/48.0f:14.0f/48.0f;
 
             // Draw image icon (if set, like a Button)
@@ -1960,7 +1960,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
                 if (imgSize>0.0f)
                 {
                     const float ix0=x0+element.padding.x, iy0=y0+(heightPx-imgSize)*0.5f;
-                    drawUIImage(ix0,iy0,ix0+imgSize,iy0+imgSize,element.textureId,uiProjection,element.textColor);
+                    drawUIImage(ix0,iy0,ix0+imgSize,iy0+imgSize,element.textureId,uiProjection,element.style.textColor);
                 }
             }
 
@@ -1975,14 +1975,14 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
                     tx+=imgSize+4.0f;
                 }
                 const float ty=y0+(heightPx-ts.y)*0.5f;
-                m_textRenderer->drawText(element.text,Vec2{tx,ty},sc,element.textColor);
+                m_textRenderer->drawText(element.text,Vec2{tx,ty},sc,element.style.textColor);
             }
 
             // Draw small down-arrow indicator on the right
             const float arrowSize=std::min(heightPx*0.3f,6.0f);
             const float arrowX=x1-element.padding.x-arrowSize;
             const float arrowY=y0+(heightPx-arrowSize)*0.5f;
-            drawUIPanel(arrowX,arrowY,arrowX+arrowSize,arrowY+arrowSize,element.textColor,uiProjection,prog,element.textColor,false);
+            drawUIPanel(arrowX,arrowY,arrowX+arrowSize,arrowY+arrowSize,element.style.textColor,uiProjection,prog,element.style.textColor,false);
 
             if (m_uiDebugEnabled) drawUIOutline(x0,y0,x1,y1,Vec4{0.9f,0.7f,0.1f,1.0f},uiProjection,prog);
             return;
@@ -1992,7 +1992,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
             const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
             const GLuint prog = getUIQuadProgram(vp, fp);
-            drawUIPanel(x0,y0,x1,y1,element.color,uiProjection,prog,element.hoverColor,element.isHovered);
+            drawUIPanel(x0,y0,x1,y1,element.style.color,uiProjection,prog,element.style.hoverColor,element.isHovered);
             const float sc=(element.fontSize>0.0f)?element.fontSize/48.0f:14.0f/48.0f;
             const float cx0d=x0+element.padding.x, cy0d=y0+element.padding.y, cy1d=y1-element.padding.y;
             const float chD=std::max(0.0f,cy1d-cy0d);
@@ -2002,14 +2002,14 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             if (!disp.empty())
             {
                 const Vec2 ts=m_textRenderer->measureText(disp,sc);
-                m_textRenderer->drawText(disp,Vec2{cx0d,cy0d+std::max(0.0f,(chD-ts.y)*0.5f)},sc,element.textColor);
+                m_textRenderer->drawText(disp,Vec2{cx0d,cy0d+std::max(0.0f,(chD-ts.y)*0.5f)},sc,element.style.textColor);
             }
             const float as=std::min(heightPx*0.4f,8.0f);
-            drawUIPanel(x1-element.padding.x-as, y0+(heightPx-as)*0.5f, x1-element.padding.x, y0+(heightPx-as)*0.5f+as, element.textColor,uiProjection,prog,element.textColor,false);
+            drawUIPanel(x1-element.padding.x-as, y0+(heightPx-as)*0.5f, x1-element.padding.x, y0+(heightPx-as)*0.5f+as, element.style.textColor,uiProjection,prog,element.style.textColor,false);
             if (element.isExpanded && !element.items.empty())
             {
                 const float fs=(element.fontSize>0.0f)?element.fontSize:14.0f;
-                deferredDropDownsCompact.push_back({ x0, y0, x1, y1, fs, element.selectedIndex, element.items, element.textColor, element.hoverColor, element.padding });
+                deferredDropDownsCompact.push_back({ x0, y0, x1, y1, fs, element.selectedIndex, element.items, element.style.textColor, element.style.hoverColor, element.padding });
             }
             if (m_uiDebugEnabled) drawUIOutline(x0,y0,x1,y1,Vec4{0.9f,0.6f,0.1f,1.0f},uiProjection,prog);
             return;
@@ -2019,7 +2019,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
             const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);
             const GLuint prog = getUIQuadProgram(vp, fp);
-            drawUIPanel(x0,y0,x1,y1,element.color,uiProjection,prog,element.hoverColor,element.isHovered);
+            drawUIPanel(x0,y0,x1,y1,element.style.color,uiProjection,prog,element.style.hoverColor,element.isHovered);
             if (!element.text.empty())
             {
                 const float sc=(element.fontSize>0.0f)?element.fontSize/48.0f:14.0f/48.0f;
@@ -2029,22 +2029,22 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
                 const Vec2 ts=m_textRenderer->measureText(element.text,sc);
                 float textX=cx0b, textY=cy0b+std::max(0.0f,(chB-ts.y)*0.5f);
                 switch(element.textAlignH){case TextAlignH::Center: textX=cx0b+(cwB-ts.x)*0.5f; break; case TextAlignH::Right: textX=cx1b-ts.x; break; default: break;}
-                m_textRenderer->drawText(element.text,Vec2{textX,textY},sc,element.textColor);
+                m_textRenderer->drawText(element.text,Vec2{textX,textY},sc,element.style.textColor);
             }
             const float as=std::min(heightPx*0.3f,6.0f);
             const float arrowX=x1-element.padding.x-as;
             const float arrowY=y0+(heightPx-as)*0.5f;
-            drawUIPanel(arrowX,arrowY,arrowX+as,arrowY+as,element.textColor,uiProjection,prog,element.textColor,false);
+            drawUIPanel(arrowX,arrowY,arrowX+as,arrowY+as,element.style.textColor,uiProjection,prog,element.style.textColor,false);
             if (m_uiDebugEnabled) drawUIOutline(x0,y0,x1,y1,Vec4{0.9f,0.7f,0.1f,1.0f},uiProjection,prog);
             return;
         }
         if (element.type == WidgetElementType::TreeView || element.type == WidgetElementType::TabView)
         {
-            if (element.color.w > 0.0f)
+            if (element.style.color.w > 0.0f)
             {
                 const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
                 const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
-                drawUIPanel(x0,y0,x1,y1,element.color,uiProjection,getUIQuadProgram(vp,fp),element.color,false);
+                drawUIPanel(x0,y0,x1,y1,element.style.color,uiProjection,getUIQuadProgram(vp,fp),element.style.color,false);
             }
             const GLint cx=static_cast<GLint>(x0);
             const GLint cy=static_cast<GLint>(static_cast<float>(height)-y1);
@@ -2062,12 +2062,12 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
         }
         if (element.type == WidgetElementType::StackPanel || element.type == WidgetElementType::Grid)
         {
-            if (element.color.w > 0.0f)
+            if (element.style.color.w > 0.0f)
             {
                 const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
                 const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
-                const Vec4& hc = (element.hoverColor.w > 0.0f) ? element.hoverColor : element.color;
-                drawUIPanel(x0,y0,x1,y1,element.color,uiProjection,getUIQuadProgram(vp,fp),hc,element.isHovered);
+                const Vec4& hc = (element.style.hoverColor.w > 0.0f) ? element.style.hoverColor : element.style.color;
+                drawUIPanel(x0,y0,x1,y1,element.style.color,uiProjection,getUIQuadProgram(vp,fp),hc,element.isHovered);
             }
             if (element.scrollable || element.type == WidgetElementType::ScrollView)
             {
@@ -2095,20 +2095,84 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             || element.type == WidgetElementType::SizeBox
             || element.type == WidgetElementType::ScaleBox
             || element.type == WidgetElementType::WidgetSwitcher
-            || element.type == WidgetElementType::Overlay)
+            || element.type == WidgetElementType::Overlay
+            || element.type == WidgetElementType::ListView
+            || element.type == WidgetElementType::TileView)
         {
-            if (element.color.w > 0.0f)
+            if (element.style.color.w > 0.0f)
             {
                 const std::string& vp = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
                 const std::string& fp = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
-                const Vec4& hc = (element.hoverColor.w > 0.0f) ? element.hoverColor : element.color;
-                drawUIPanel(x0,y0,x1,y1,element.color,uiProjection,getUIQuadProgram(vp,fp),hc,element.isHovered);
+                const Vec4& hc = (element.style.hoverColor.w > 0.0f) ? element.style.hoverColor : element.style.color;
+                drawUIPanel(x0,y0,x1,y1,element.style.color,uiProjection,getUIQuadProgram(vp,fp),hc,element.isHovered);
             }
             for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
             if (m_uiDebugEnabled)
             {
                 const GLuint prog=getUIQuadProgram(m_defaultPanelVertex,m_defaultPanelFragment);
                 drawUIOutline(x0,y0,x1,y1,Vec4{0.3f,0.8f,1.0f,1.0f},uiProjection,prog);
+            }
+            return;
+        }
+        // Border widget: background + 4 border-brush edges + child rendering
+        if (element.type == WidgetElementType::Border)
+        {
+            const GLuint prog = getUIQuadProgram(m_defaultPanelVertex, m_defaultPanelFragment);
+            // Background
+            if (element.style.color.w > 0.0f)
+                drawUIPanel(x0, y0, x1, y1, element.style.color, uiProjection, prog, element.style.color, false);
+            // Border edges via borderBrush
+            if (element.borderBrush.isVisible())
+            {
+                float bL = element.borderThicknessLeft, bT = element.borderThicknessTop;
+                float bR = element.borderThicknessRight, bB = element.borderThicknessBottom;
+                Vec4 bc = element.borderBrush.color;
+                drawUIPanel(x0, y0, x0 + bL, y1, bc, uiProjection, prog, bc, false);         // left
+                drawUIPanel(x1 - bR, y0, x1, y1, bc, uiProjection, prog, bc, false);         // right
+                drawUIPanel(x0 + bL, y0, x1 - bR, y0 + bT, bc, uiProjection, prog, bc, false); // top
+                drawUIPanel(x0 + bL, y1 - bB, x1 - bR, y1, bc, uiProjection, prog, bc, false); // bottom
+            }
+            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
+            return;
+        }
+        // Spinner: animated dots in a circle
+        if (element.type == WidgetElementType::Spinner)
+        {
+            const GLuint prog = getUIQuadProgram(m_defaultPanelVertex, m_defaultPanelFragment);
+            int dots = std::max(1, element.spinnerDotCount);
+            float cx = (x0 + x1) * 0.5f, cy = (y0 + y1) * 0.5f;
+            float radius = std::min(x1 - x0, y1 - y0) * 0.4f;
+            float dotSize = radius * 0.22f;
+            float phase = element.spinnerElapsed * element.spinnerSpeed * 2.0f * 3.14159265f;
+            for (int d = 0; d < dots; ++d)
+            {
+                float angle = phase + (static_cast<float>(d) / dots) * 2.0f * 3.14159265f;
+                float dx = cx + std::cos(angle) * radius;
+                float dy = cy + std::sin(angle) * radius;
+                float alpha = 1.0f - static_cast<float>(d) / dots;
+                Vec4 dc = element.style.color; dc.w *= alpha * opa;
+                drawUIPanel(dx - dotSize, dy - dotSize, dx + dotSize, dy + dotSize, dc, uiProjection, prog, dc, false);
+            }
+            return;
+        }
+        // RichText: render as plain text for now (full markup parsing is a future step)
+        if (element.type == WidgetElementType::RichText)
+        {
+            if (!element.richText.empty() && m_textRenderer)
+            {
+                std::string plainText = element.richText;
+                // Strip basic tags for display
+                auto stripTag = [](std::string& s, const std::string& tag) {
+                    std::string open = "<" + tag + ">", close = "</" + tag + ">";
+                    size_t pos;
+                    while ((pos = s.find(open)) != std::string::npos) s.erase(pos, open.size());
+                    while ((pos = s.find(close)) != std::string::npos) s.erase(pos, close.size());
+                };
+                stripTag(plainText, "b"); stripTag(plainText, "i"); stripTag(plainText, "u");
+                float fs = element.fontSize > 0.0f ? element.fontSize : 14.0f;
+                float scale = fs / 48.0f;
+                Vec4 tc = element.style.textColor; tc.w *= opa;
+                m_textRenderer->drawText(plainText, Vec2{ x0, y0 + fs }, scale, tc);
             }
             return;
         }
@@ -2520,7 +2584,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
         root.to = Vec2{ 1.0f, 1.0f };
         root.fillX = true;
         root.fillY = true;
-        root.color = Vec4{ 0.14f, 0.14f, 0.18f, 0.95f };
+        root.style.color = Vec4{ 0.14f, 0.14f, 0.18f, 0.95f };
         root.padding = Vec2{ 10.0f, 10.0f };
         root.scrollable = true;
 
@@ -2530,7 +2594,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
         title.text = displayName;
         title.font = "default.ttf";
         title.fontSize = 16.0f;
-        title.textColor = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+        title.style.textColor = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
         title.fillX = true;
         title.minSize = Vec2{ 0.0f, 28.0f };
         title.runtimeOnly = true;
@@ -2542,7 +2606,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
         pathLine.text = "Path: " + assetPath;
         pathLine.font = "default.ttf";
         pathLine.fontSize = 12.0f;
-        pathLine.textColor = Vec4{ 0.7f, 0.7f, 0.75f, 1.0f };
+        pathLine.style.textColor = Vec4{ 0.7f, 0.7f, 0.75f, 1.0f };
         pathLine.fillX = true;
         pathLine.minSize = Vec2{ 0.0f, 20.0f };
         pathLine.runtimeOnly = true;
@@ -2555,7 +2619,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             + "  Indices: " + std::to_string(ptr->getIndexCount());
         statsLine.font = "default.ttf";
         statsLine.fontSize = 12.0f;
-        statsLine.textColor = Vec4{ 0.7f, 0.7f, 0.75f, 1.0f };
+        statsLine.style.textColor = Vec4{ 0.7f, 0.7f, 0.75f, 1.0f };
         statsLine.fillX = true;
         statsLine.minSize = Vec2{ 0.0f, 20.0f };
         statsLine.runtimeOnly = true;
@@ -2567,7 +2631,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             sep.type = WidgetElementType::Panel;
             sep.fillX = true;
             sep.minSize = Vec2{ 0.0f, 1.0f };
-            sep.color = Vec4{ 0.3f, 0.3f, 0.35f, 0.6f };
+            sep.style.color = Vec4{ 0.3f, 0.3f, 0.35f, 0.6f };
             sep.runtimeOnly = true;
             root.children.push_back(std::move(sep));
         }
@@ -2579,7 +2643,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             header.text = "Transform";
             header.font = "default.ttf";
             header.fontSize = 13.0f;
-            header.textColor = Vec4{ 0.85f, 0.85f, 0.9f, 1.0f };
+            header.style.textColor = Vec4{ 0.85f, 0.85f, 0.9f, 1.0f };
             header.fillX = true;
             header.minSize = Vec2{ 0.0f, 24.0f };
             header.runtimeOnly = true;
@@ -2594,7 +2658,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             row.type = WidgetElementType::StackPanel;
             row.fillX = true;
             row.minSize = Vec2{ 0.0f, 26.0f };
-            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             row.runtimeOnly = true;
             row.orientation = StackOrientation::Horizontal;
 
@@ -2603,7 +2667,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             lbl.text = label;
             lbl.font = "default.ttf";
             lbl.fontSize = 12.0f;
-            lbl.textColor = Vec4{ 0.7f, 0.7f, 0.75f, 1.0f };
+            lbl.style.textColor = Vec4{ 0.7f, 0.7f, 0.75f, 1.0f };
             lbl.minSize = Vec2{ 80.0f, 26.0f };
             lbl.textAlignV = TextAlignV::Center;
             lbl.runtimeOnly = true;
@@ -2623,9 +2687,9 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             entry.fontSize = 12.0f;
             entry.fillX = true;
             entry.minSize = Vec2{ 60.0f, 24.0f };
-            entry.color = Vec4{ 0.1f, 0.1f, 0.13f, 1.0f };
-            entry.textColor = Vec4{ 0.9f, 0.9f, 0.92f, 1.0f };
-            entry.hoverColor = Vec4{ 0.15f, 0.15f, 0.18f, 1.0f };
+            entry.style.color = Vec4{ 0.1f, 0.1f, 0.13f, 1.0f };
+            entry.style.textColor = Vec4{ 0.9f, 0.9f, 0.92f, 1.0f };
+            entry.style.hoverColor = Vec4{ 0.15f, 0.15f, 0.18f, 1.0f };
             entry.padding = Vec2{ 6.0f, 4.0f };
             entry.hitTestMode = HitTestMode::Enabled;
             entry.runtimeOnly = true;
@@ -2702,7 +2766,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             sep.type = WidgetElementType::Panel;
             sep.fillX = true;
             sep.minSize = Vec2{ 0.0f, 1.0f };
-            sep.color = Vec4{ 0.3f, 0.3f, 0.35f, 0.6f };
+            sep.style.color = Vec4{ 0.3f, 0.3f, 0.35f, 0.6f };
             sep.runtimeOnly = true;
             root.children.push_back(std::move(sep));
         }
@@ -2714,7 +2778,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             header.text = "Material";
             header.font = "default.ttf";
             header.fontSize = 13.0f;
-            header.textColor = Vec4{ 0.85f, 0.85f, 0.9f, 1.0f };
+            header.style.textColor = Vec4{ 0.85f, 0.85f, 0.9f, 1.0f };
             header.fillX = true;
             header.minSize = Vec2{ 0.0f, 24.0f };
             header.runtimeOnly = true;
@@ -2727,7 +2791,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             row.type = WidgetElementType::StackPanel;
             row.fillX = true;
             row.minSize = Vec2{ 0.0f, 26.0f };
-            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             row.runtimeOnly = true;
             row.orientation = StackOrientation::Horizontal;
 
@@ -2736,7 +2800,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             lbl.text = "Path";
             lbl.font = "default.ttf";
             lbl.fontSize = 12.0f;
-            lbl.textColor = Vec4{ 0.7f, 0.7f, 0.75f, 1.0f };
+            lbl.style.textColor = Vec4{ 0.7f, 0.7f, 0.75f, 1.0f };
             lbl.minSize = Vec2{ 80.0f, 26.0f };
             lbl.textAlignV = TextAlignV::Center;
             lbl.runtimeOnly = true;
@@ -2750,9 +2814,9 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             entry.fontSize = 12.0f;
             entry.fillX = true;
             entry.minSize = Vec2{ 60.0f, 24.0f };
-            entry.color = Vec4{ 0.1f, 0.1f, 0.13f, 1.0f };
-            entry.textColor = Vec4{ 0.9f, 0.9f, 0.92f, 1.0f };
-            entry.hoverColor = Vec4{ 0.15f, 0.15f, 0.18f, 1.0f };
+            entry.style.color = Vec4{ 0.1f, 0.1f, 0.13f, 1.0f };
+            entry.style.textColor = Vec4{ 0.9f, 0.9f, 0.92f, 1.0f };
+            entry.style.hoverColor = Vec4{ 0.15f, 0.15f, 0.18f, 1.0f };
             entry.padding = Vec2{ 6.0f, 4.0f };
             entry.hitTestMode = HitTestMode::Enabled;
             entry.runtimeOnly = true;
@@ -2774,7 +2838,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
         WidgetElement content{};
         content.type = WidgetElementType::StackPanel;
         content.id = "MeshViewer.Details.Content";
-        content.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        content.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
         content.fillX = true;
         content.sizeToContent = true;
         content.padding = Vec2{ 0.0f, 4.0f };
@@ -2929,11 +2993,11 @@ void OpenGLRenderer::renderViewportUI()
     const auto renderElement = [&](const auto& self, const WidgetElement& element,
         float parentX, float parentY, float parentW, float parentH, float parentOpacity) -> void
     {
-        if (!element.isVisible)
+        if (!element.style.isVisible)
             return;
 
         // ── Opacity inheritance ───────────────────────────────────────────
-        const float opa = element.opacity * parentOpacity;
+        const float opa = element.style.opacity * parentOpacity;
 
         const float x0 = element.hasComputedPosition ? element.computedPositionPixels.x : (parentX + element.from.x * parentW);
         const float y0 = element.hasComputedPosition ? element.computedPositionPixels.y : (parentY + element.from.y * parentH);
@@ -2995,11 +3059,11 @@ void OpenGLRenderer::renderViewportUI()
 
         if (element.type == WidgetElementType::Panel)
         {
-            if (element.color.w > 0.0f && !element.background.isVisible())
+            if (element.style.color.w > 0.0f && !element.background.isVisible())
             {
                 const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
                 const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
-                drawUIPanel(x0, y0, x1, y1, applyAlpha(element.color, opa), uiProjection, getUIQuadProgram(vertexPath, fragmentPath), applyAlpha(element.hoverColor, opa), element.isHovered);
+                drawUIPanel(x0, y0, x1, y1, applyAlpha(element.style.color, opa), uiProjection, getUIQuadProgram(vertexPath, fragmentPath), applyAlpha(element.style.hoverColor, opa), element.isHovered);
             }
             for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
             return;
@@ -3028,7 +3092,7 @@ void OpenGLRenderer::renderViewportUI()
 
             const auto drawLine = [&](const std::string& line, const Vec2& pos)
             {
-                m_textRenderer->drawText(line, pos, scale, applyAlpha(element.textColor, opa));
+                m_textRenderer->drawText(line, pos, scale, applyAlpha(element.style.textColor, opa));
             };
 
             if (element.wrapText && cw > 0.0f)
@@ -3131,7 +3195,7 @@ void OpenGLRenderer::renderViewportUI()
         {
             const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
             const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);
-            drawUIPanel(x0, y0, x1, y1, applyAlpha(element.color, opa), uiProjection, getUIQuadProgram(vertexPath, fragmentPath), applyAlpha(element.hoverColor, opa), element.isHovered);
+            drawUIPanel(x0, y0, x1, y1, applyAlpha(element.style.color, opa), uiProjection, getUIQuadProgram(vertexPath, fragmentPath), applyAlpha(element.style.hoverColor, opa), element.isHovered);
 
             if (!element.text.empty())
             {
@@ -3158,7 +3222,7 @@ void OpenGLRenderer::renderViewportUI()
                 if (element.textAlignV == TextAlignV::Center) ty = cy0 + (ch - ts.y) * 0.5f;
                 else if (element.textAlignV == TextAlignV::Bottom) ty = cy1 - ts.y;
 
-                m_textRenderer->drawText(element.text, Vec2{ tx, ty }, scale, applyAlpha(element.textColor, opa));
+                m_textRenderer->drawText(element.text, Vec2{ tx, ty }, scale, applyAlpha(element.style.textColor, opa));
             }
             return;
         }
@@ -3167,8 +3231,8 @@ void OpenGLRenderer::renderViewportUI()
         {
             const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
             const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);
-            const Vec4 displayColor = element.isChecked ? element.fillColor : element.color;
-            drawUIPanel(x0, y0, x1, y1, applyAlpha(displayColor, opa), uiProjection, getUIQuadProgram(vertexPath, fragmentPath), applyAlpha(element.hoverColor, opa), element.isHovered);
+            const Vec4 displayColor = element.isChecked ? element.style.fillColor : element.style.color;
+            drawUIPanel(x0, y0, x1, y1, applyAlpha(displayColor, opa), uiProjection, getUIQuadProgram(vertexPath, fragmentPath), applyAlpha(element.style.hoverColor, opa), element.isHovered);
 
             if (!element.text.empty())
             {
@@ -3195,7 +3259,7 @@ void OpenGLRenderer::renderViewportUI()
                 if (element.textAlignV == TextAlignV::Center) ty = cy0 + (ch - ts.y) * 0.5f;
                 else if (element.textAlignV == TextAlignV::Bottom) ty = cy1 - ts.y;
 
-                m_textRenderer->drawText(element.text, Vec2{ tx, ty }, scale, applyAlpha(element.textColor, opa));
+                m_textRenderer->drawText(element.text, Vec2{ tx, ty }, scale, applyAlpha(element.style.textColor, opa));
             }
             return;
         }
@@ -3204,7 +3268,7 @@ void OpenGLRenderer::renderViewportUI()
         {
             const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
             const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
-            const Vec4 lineColor = (element.color.w > 0.0f) ? element.color : Vec4{ 0.35f, 0.35f, 0.40f, 0.8f };
+            const Vec4 lineColor = (element.style.color.w > 0.0f) ? element.style.color : Vec4{ 0.35f, 0.35f, 0.40f, 0.8f };
             drawUIPanel(x0, y0, x1, y1, applyAlpha(lineColor, opa), uiProjection, getUIQuadProgram(vertexPath, fragmentPath), applyAlpha(lineColor, opa), false);
             return;
         }
@@ -3213,7 +3277,7 @@ void OpenGLRenderer::renderViewportUI()
         {
             const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
             const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
-            drawUIPanel(x0, y0, x1, y1, applyAlpha(element.color, opa), uiProjection, getUIQuadProgram(vertexPath, fragmentPath), applyAlpha(element.color, opa), false);
+            drawUIPanel(x0, y0, x1, y1, applyAlpha(element.style.color, opa), uiProjection, getUIQuadProgram(vertexPath, fragmentPath), applyAlpha(element.style.color, opa), false);
             for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
             return;
         }
@@ -3223,15 +3287,76 @@ void OpenGLRenderer::renderViewportUI()
             || element.type == WidgetElementType::SizeBox
             || element.type == WidgetElementType::ScaleBox
             || element.type == WidgetElementType::WidgetSwitcher
-            || element.type == WidgetElementType::Overlay)
+            || element.type == WidgetElementType::Overlay
+            || element.type == WidgetElementType::ListView
+            || element.type == WidgetElementType::TileView)
         {
-            if (element.color.w > 0.0f && !element.background.isVisible())
+            if (element.style.color.w > 0.0f && !element.background.isVisible())
             {
                 const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
                 const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
-                drawUIPanel(x0, y0, x1, y1, applyAlpha(element.color, opa), uiProjection, getUIQuadProgram(vertexPath, fragmentPath), applyAlpha(element.color, opa), false);
+                drawUIPanel(x0, y0, x1, y1, applyAlpha(element.style.color, opa), uiProjection, getUIQuadProgram(vertexPath, fragmentPath), applyAlpha(element.style.color, opa), false);
             }
             for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
+            return;
+        }
+        // Border widget: background + 4 border-brush edges + child rendering
+        if (element.type == WidgetElementType::Border)
+        {
+            const GLuint prog = getUIQuadProgram(m_defaultPanelVertex, m_defaultPanelFragment);
+            if (element.style.color.w > 0.0f)
+                drawUIPanel(x0, y0, x1, y1, applyAlpha(element.style.color, opa), uiProjection, prog, applyAlpha(element.style.color, opa), false);
+            if (element.borderBrush.isVisible())
+            {
+                float bL = element.borderThicknessLeft, bT = element.borderThicknessTop;
+                float bR = element.borderThicknessRight, bB = element.borderThicknessBottom;
+                Vec4 bc = applyAlpha(element.borderBrush.color, opa);
+                drawUIPanel(x0, y0, x0 + bL, y1, bc, uiProjection, prog, bc, false);
+                drawUIPanel(x1 - bR, y0, x1, y1, bc, uiProjection, prog, bc, false);
+                drawUIPanel(x0 + bL, y0, x1 - bR, y0 + bT, bc, uiProjection, prog, bc, false);
+                drawUIPanel(x0 + bL, y1 - bB, x1 - bR, y1, bc, uiProjection, prog, bc, false);
+            }
+            for (const auto& child : element.children) self(self, child, x0, y0, widthPx, heightPx, opa);
+            return;
+        }
+        // Spinner: animated dots in a circle
+        if (element.type == WidgetElementType::Spinner)
+        {
+            const GLuint prog = getUIQuadProgram(m_defaultPanelVertex, m_defaultPanelFragment);
+            int dots = std::max(1, element.spinnerDotCount);
+            float cx = (x0 + x1) * 0.5f, cy = (y0 + y1) * 0.5f;
+            float radius = std::min(x1 - x0, y1 - y0) * 0.4f;
+            float dotSize = radius * 0.22f;
+            float phase = element.spinnerElapsed * element.spinnerSpeed * 2.0f * 3.14159265f;
+            for (int d = 0; d < dots; ++d)
+            {
+                float angle = phase + (static_cast<float>(d) / dots) * 2.0f * 3.14159265f;
+                float dx = cx + std::cos(angle) * radius;
+                float dy = cy + std::sin(angle) * radius;
+                float alpha = 1.0f - static_cast<float>(d) / dots;
+                Vec4 dc = element.style.color; dc.w *= alpha * opa;
+                drawUIPanel(dx - dotSize, dy - dotSize, dx + dotSize, dy + dotSize, dc, uiProjection, prog, dc, false);
+            }
+            return;
+        }
+        // RichText: render as plain text (full markup parsing is a future step)
+        if (element.type == WidgetElementType::RichText)
+        {
+            if (!element.richText.empty() && m_textRenderer)
+            {
+                std::string plainText = element.richText;
+                auto stripTag = [](std::string& s, const std::string& tag) {
+                    std::string open = "<" + tag + ">", close = "</" + tag + ">";
+                    size_t pos;
+                    while ((pos = s.find(open)) != std::string::npos) s.erase(pos, open.size());
+                    while ((pos = s.find(close)) != std::string::npos) s.erase(pos, close.size());
+                };
+                stripTag(plainText, "b"); stripTag(plainText, "i"); stripTag(plainText, "u");
+                float fs = element.fontSize > 0.0f ? element.fontSize : 14.0f;
+                float scale = fs / 48.0f;
+                Vec4 tc = applyAlpha(element.style.textColor, opa);
+                m_textRenderer->drawText(plainText, Vec2{ x0, y0 + fs }, scale, tc);
+            }
             return;
         }
 
@@ -3242,7 +3367,7 @@ void OpenGLRenderer::renderViewportUI()
                 : getOrLoadUITexture(element.imagePath);
             if (tex != 0)
             {
-                drawUIImage(x0, y0, x1, y1, tex, uiProjection, applyAlpha(element.color, opa), true);
+                drawUIImage(x0, y0, x1, y1, tex, uiProjection, applyAlpha(element.style.color, opa), true);
             }
             return;
         }
@@ -3252,11 +3377,11 @@ void OpenGLRenderer::renderViewportUI()
             const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
             const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
             const GLuint prog = getUIQuadProgram(vertexPath, fragmentPath);
-            drawUIPanel(x0, y0, x1, y1, applyAlpha(element.color, opa), uiProjection, prog, applyAlpha(element.color, opa), false);
+            drawUIPanel(x0, y0, x1, y1, applyAlpha(element.style.color, opa), uiProjection, prog, applyAlpha(element.style.color, opa), false);
             const float range = (element.maxValue > element.minValue) ? (element.maxValue - element.minValue) : 1.0f;
             const float pct = std::clamp((element.valueFloat - element.minValue) / range, 0.0f, 1.0f);
             const float fillX1 = x0 + widthPx * pct;
-            drawUIPanel(x0, y0, fillX1, y1, applyAlpha(element.fillColor, opa), uiProjection, prog, applyAlpha(element.fillColor, opa), false);
+            drawUIPanel(x0, y0, fillX1, y1, applyAlpha(element.style.fillColor, opa), uiProjection, prog, applyAlpha(element.style.fillColor, opa), false);
             return;
         }
 
@@ -3265,12 +3390,12 @@ void OpenGLRenderer::renderViewportUI()
             const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
             const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
             const GLuint prog = getUIQuadProgram(vertexPath, fragmentPath);
-            drawUIPanel(x0, y0, x1, y1, applyAlpha(element.color, opa), uiProjection, prog, applyAlpha(element.color, opa), false);
+            drawUIPanel(x0, y0, x1, y1, applyAlpha(element.style.color, opa), uiProjection, prog, applyAlpha(element.style.color, opa), false);
             const float range = (element.maxValue > element.minValue) ? (element.maxValue - element.minValue) : 1.0f;
             const float pct = std::clamp((element.valueFloat - element.minValue) / range, 0.0f, 1.0f);
             const float thumbW = std::max(8.0f, widthPx * 0.05f);
             const float thumbX = x0 + (widthPx - thumbW) * pct;
-            drawUIPanel(thumbX, y0, thumbX + thumbW, y1, applyAlpha(element.fillColor, opa), uiProjection, prog, applyAlpha(element.hoverColor, opa), element.isHovered);
+            drawUIPanel(thumbX, y0, thumbX + thumbW, y1, applyAlpha(element.style.fillColor, opa), uiProjection, prog, applyAlpha(element.style.hoverColor, opa), element.isHovered);
             return;
         }
 
@@ -3514,7 +3639,7 @@ void OpenGLRenderer::renderUI()
                 const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
                 const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
                 const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
-                drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.color, false);
+                drawUIPanel(x0, y0, x1, y1, element.style.color, uiProjection, program, element.style.color, false);
 
                 for (const auto& child : element.children)
                 {
@@ -3535,9 +3660,9 @@ void OpenGLRenderer::renderUI()
 
                 if (element.isCompact)
                 {
-                    if (element.color.w > 0.0f)
+                    if (element.style.color.w > 0.0f)
                     {
-                        drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.color, false);
+                        drawUIPanel(x0, y0, x1, y1, element.style.color, uiProjection, program, element.style.color, false);
                     }
                     for (const auto& child : element.children)
                     {
@@ -3574,7 +3699,7 @@ void OpenGLRenderer::renderUI()
                     const float swatchX0 = x1 - swatchSize - 4.0f;
                     const float swatchY0 = y0 + 4.0f;
                     drawUIPanel(swatchX0, swatchY0, swatchX0 + swatchSize, swatchY0 + swatchSize,
-                        element.color, uiProjection, program, element.color, false);
+                        element.style.color, uiProjection, program, element.style.color, false);
                     drawUIOutline(swatchX0, swatchY0, swatchX0 + swatchSize, swatchY0 + swatchSize,
                         Vec4{ 0.1f, 0.1f, 0.1f, 0.9f }, uiProjection, program);
                 }
@@ -3620,11 +3745,11 @@ void OpenGLRenderer::renderUI()
                     {
                         if (!element.shaderVertex.empty() || !element.shaderFragment.empty())
                         {
-                            m_textRenderer->drawTextWithShader(line, pos, scale, element.textColor, vertexPath, fragmentPath);
+                            m_textRenderer->drawTextWithShader(line, pos, scale, element.style.textColor, vertexPath, fragmentPath);
                         }
                         else
                         {
-                            m_textRenderer->drawText(line, pos, scale, element.textColor);
+                            m_textRenderer->drawText(line, pos, scale, element.style.textColor);
                         }
                     };
 
@@ -3803,7 +3928,7 @@ void OpenGLRenderer::renderUI()
                 const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
                 const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
                 const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
-                drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.color, false);
+                drawUIPanel(x0, y0, x1, y1, element.style.color, uiProjection, program, element.style.color, false);
 
                 const float range = element.maxValue - element.minValue;
                 const float ratio = (range > 0.0f)
@@ -3812,7 +3937,7 @@ void OpenGLRenderer::renderUI()
                 if (ratio > 0.0f)
                 {
                     const float fillX1 = x0 + widthPx * ratio;
-                    drawUIPanel(x0, y0, fillX1, y1, element.fillColor, uiProjection, program, element.fillColor, false);
+                    drawUIPanel(x0, y0, fillX1, y1, element.style.fillColor, uiProjection, program, element.style.fillColor, false);
                 }
 
                 if (m_uiDebugEnabled)
@@ -3835,17 +3960,17 @@ void OpenGLRenderer::renderUI()
                 const float trackHeight = std::min(heightPx, 6.0f);
                 const float trackY0 = y0 + (heightPx - trackHeight) * 0.5f;
                 const float trackY1 = trackY0 + trackHeight;
-                drawUIPanel(x0, trackY0, x1, trackY1, element.color, uiProjection, program, element.color, false);
+                drawUIPanel(x0, trackY0, x1, trackY1, element.style.color, uiProjection, program, element.style.color, false);
                 if (ratio > 0.0f)
                 {
                     const float fillX1 = x0 + widthPx * ratio;
-                    drawUIPanel(x0, trackY0, fillX1, trackY1, element.fillColor, uiProjection, program, element.fillColor, false);
+                    drawUIPanel(x0, trackY0, fillX1, trackY1, element.style.fillColor, uiProjection, program, element.style.fillColor, false);
                 }
 
                 const float handleSize = std::max(10.0f, heightPx);
                 float handleX0 = x0 + widthPx * ratio - handleSize * 0.5f;
                 handleX0 = std::clamp(handleX0, x0, x1 - handleSize);
-                drawUIPanel(handleX0, y0, handleX0 + handleSize, y1, element.textColor, uiProjection, program, element.textColor, false);
+                drawUIPanel(handleX0, y0, handleX0 + handleSize, y1, element.style.textColor, uiProjection, program, element.style.textColor, false);
 
                 if (m_uiDebugEnabled)
                 {
@@ -3858,7 +3983,7 @@ void OpenGLRenderer::renderUI()
                 const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
                 const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
                 const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
-                drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.hoverColor, element.isHovered);
+                drawUIPanel(x0, y0, x1, y1, element.style.color, uiProjection, program, element.style.hoverColor, element.isHovered);
 
                 const float fontSize = (element.fontSize > 0.0f) ? element.fontSize : 14.0f;
                 const float scale = fontSize / 48.0f;
@@ -3881,7 +4006,7 @@ void OpenGLRenderer::renderUI()
                     textSize = m_textRenderer->measureText(display, scale);
                     const float textX = contentX0;
                     const float textY = contentY0 + std::max(0.0f, (contentH - textSize.y) * 0.5f);
-                    m_textRenderer->drawText(display, Vec2{ textX, textY }, scale, element.textColor);
+                    m_textRenderer->drawText(display, Vec2{ textX, textY }, scale, element.style.textColor);
                 }
 
                 if (element.isFocused)
@@ -3891,7 +4016,7 @@ void OpenGLRenderer::renderUI()
                     if (caretX < contentX1)
                     {
                         drawUIPanel(caretX, contentY0 + 1.0f, caretX + 2.0f, contentY0 + 1.0f + caretHeight,
-                            element.textColor, uiProjection, program, element.textColor, false);
+                            element.style.textColor, uiProjection, program, element.style.textColor, false);
                     }
                 }
 
@@ -3911,7 +4036,7 @@ void OpenGLRenderer::renderUI()
                 const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
                 const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);
                 const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
-                drawUIPanel(bx0, by0, bx1, by1, element.color, uiProjection, program, element.hoverColor, element.isHovered);
+                drawUIPanel(bx0, by0, bx1, by1, element.style.color, uiProjection, program, element.style.hoverColor, element.isHovered);
 
                 if (!element.text.empty())
                 {
@@ -3968,7 +4093,7 @@ void OpenGLRenderer::renderUI()
                         break;
                     }
 
-                    m_textRenderer->drawText(element.text, Vec2{ textX, textY }, scale, element.textColor);
+                    m_textRenderer->drawText(element.text, Vec2{ textX, textY }, scale, element.style.textColor);
                 }
                 else if (element.textureId != 0 || !element.imagePath.empty())
                 {
@@ -3996,7 +4121,7 @@ void OpenGLRenderer::renderUI()
                     const GLuint tex = (element.textureId != 0) ? static_cast<GLuint>(element.textureId) : getOrLoadUITexture(element.imagePath);
                     if (tex != 0)
                     {
-                        drawUIImage(x0, y0, x1, y1, tex, uiProjection, element.color, true);
+                        drawUIImage(x0, y0, x1, y1, tex, uiProjection, element.style.color, true);
                     }
                 }
                 if (m_uiDebugEnabled)
@@ -4018,14 +4143,14 @@ void OpenGLRenderer::renderUI()
                 const float boxX1 = boxX0 + boxSize;
                 const float boxY1 = boxY0 + boxSize;
 
-                drawUIPanel(boxX0, boxY0, boxX1, boxY1, element.color, uiProjection, program, element.hoverColor, element.isHovered);
+                drawUIPanel(boxX0, boxY0, boxX1, boxY1, element.style.color, uiProjection, program, element.style.hoverColor, element.isHovered);
                 drawUIOutline(boxX0, boxY0, boxX1, boxY1, Vec4{ 0.4f, 0.4f, 0.45f, 0.9f }, uiProjection, program);
 
                 if (element.isChecked)
                 {
                     const float inset = 3.0f;
                     drawUIPanel(boxX0 + inset, boxY0 + inset, boxX1 - inset, boxY1 - inset,
-                        element.fillColor, uiProjection, program, element.fillColor, false);
+                        element.style.fillColor, uiProjection, program, element.style.fillColor, false);
                 }
 
                 if (!element.text.empty())
@@ -4035,7 +4160,7 @@ void OpenGLRenderer::renderUI()
                     const float textX = boxX1 + 6.0f;
                     const Vec2 textSize = m_textRenderer->measureText(element.text, scale);
                     const float textY = y0 + (heightPx - textSize.y) * 0.5f;
-                    m_textRenderer->drawText(element.text, Vec2{ textX, textY }, scale, element.textColor);
+                    m_textRenderer->drawText(element.text, Vec2{ textX, textY }, scale, element.style.textColor);
                 }
 
                 if (m_uiDebugEnabled)
@@ -4050,7 +4175,7 @@ void OpenGLRenderer::renderUI()
                 const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
                 const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
 
-                drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.hoverColor, element.isHovered);
+                drawUIPanel(x0, y0, x1, y1, element.style.color, uiProjection, program, element.style.hoverColor, element.isHovered);
 
                 const float fontSize = (element.fontSize > 0.0f) ? element.fontSize : 14.0f;
                 const float scale = fontSize / 48.0f;
@@ -4070,18 +4195,18 @@ void OpenGLRenderer::renderUI()
                 {
                     const Vec2 textSize = m_textRenderer->measureText(display, scale);
                     const float textY = contentY0 + std::max(0.0f, (contentH - textSize.y) * 0.5f);
-                    m_textRenderer->drawText(display, Vec2{ contentX0, textY }, scale, element.textColor);
+                    m_textRenderer->drawText(display, Vec2{ contentX0, textY }, scale, element.style.textColor);
                 }
 
                 const float arrowSize = std::min(heightPx * 0.4f, 8.0f);
                 const float arrowX = contentX1 - arrowSize;
                 const float arrowY = y0 + (heightPx - arrowSize) * 0.5f;
                 drawUIPanel(arrowX, arrowY, arrowX + arrowSize, arrowY + arrowSize,
-                    element.textColor, uiProjection, program, element.textColor, false);
+                    element.style.textColor, uiProjection, program, element.style.textColor, false);
 
                 if (element.isExpanded && !element.items.empty())
                 {
-                    deferredDropDowns.push_back({ x0, y0, x1, y1, fontSize, element.selectedIndex, element.items, element.textColor, element.hoverColor, element.padding });
+                    deferredDropDowns.push_back({ x0, y0, x1, y1, fontSize, element.selectedIndex, element.items, element.style.textColor, element.style.hoverColor, element.padding });
                 }
 
                 if (m_uiDebugEnabled)
@@ -4095,7 +4220,7 @@ void OpenGLRenderer::renderUI()
                 const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultButtonVertex);
                 const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultButtonFragment);
                 const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
-                drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.hoverColor, element.isHovered);
+                drawUIPanel(x0, y0, x1, y1, element.style.color, uiProjection, program, element.style.hoverColor, element.isHovered);
 
                 if (!element.text.empty())
                 {
@@ -4124,14 +4249,14 @@ void OpenGLRenderer::renderUI()
                         break;
                     }
 
-                    m_textRenderer->drawText(element.text, Vec2{ textX, textY }, scale, element.textColor);
+                    m_textRenderer->drawText(element.text, Vec2{ textX, textY }, scale, element.style.textColor);
                 }
 
                 const float arrowSize = std::min(heightPx * 0.3f, 6.0f);
                 const float arrowX = x1 - element.padding.x - arrowSize;
                 const float arrowY = y0 + (heightPx - arrowSize) * 0.5f;
                 drawUIPanel(arrowX, arrowY, arrowX + arrowSize, arrowY + arrowSize,
-                    element.textColor, uiProjection, program, element.textColor, false);
+                    element.style.textColor, uiProjection, program, element.style.textColor, false);
 
                 if (m_uiDebugEnabled)
                 {
@@ -4141,12 +4266,12 @@ void OpenGLRenderer::renderUI()
             }
             if (element.type == WidgetElementType::TreeView || element.type == WidgetElementType::TabView)
             {
-                if (element.color.w > 0.0f)
+                if (element.style.color.w > 0.0f)
                 {
                     const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
                     const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
                     const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
-                    drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, element.color, false);
+                    drawUIPanel(x0, y0, x1, y1, element.style.color, uiProjection, program, element.style.color, false);
                 }
 
                 // Clip children to the TreeView/TabView bounds
@@ -4174,13 +4299,13 @@ void OpenGLRenderer::renderUI()
             }
             if (element.type == WidgetElementType::StackPanel || element.type == WidgetElementType::Grid)
             {
-                if (element.color.w > 0.0f)
+                if (element.style.color.w > 0.0f)
                 {
                     const std::string& vertexPath = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
                     const std::string& fragmentPath = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
                     const GLuint program = getUIQuadProgram(vertexPath, fragmentPath);
-                    const Vec4& hc = (element.hoverColor.w > 0.0f) ? element.hoverColor : element.color;
-                    drawUIPanel(x0, y0, x1, y1, element.color, uiProjection, program, hc, element.isHovered);
+                    const Vec4& hc = (element.style.hoverColor.w > 0.0f) ? element.style.hoverColor : element.style.color;
+                    drawUIPanel(x0, y0, x1, y1, element.style.color, uiProjection, program, hc, element.isHovered);
                 }
 
                 const bool needsClip = element.scrollable;
@@ -6533,7 +6658,7 @@ std::shared_ptr<Widget> OpenGLRenderer::createWidgetFromAsset(const std::shared_
 
         if (auto* picker = findById(widget->getElementsMutable(), "WorldSettings.ClearColor"))
         {
-            picker->color = m_clearColor;
+            picker->style.color = m_clearColor;
             picker->onColorChanged = [this](const Vec4& color)
                 {
                     setClearColor(color);
@@ -7161,9 +7286,9 @@ void OpenGLRenderer::rebuildTitleBarTabs()
         tabBtn.textAlignH = TextAlignH::Center;
         tabBtn.textAlignV = TextAlignV::Center;
         tabBtn.fillY = true;
-        tabBtn.color = Vec4{ 0.14f, 0.14f, 0.14f, 1.0f };
-        tabBtn.hoverColor = Vec4{ 0.2f, 0.2f, 0.2f, 1.0f };
-        tabBtn.textColor = Vec4{ 0.9f, 0.9f, 0.9f, 1.0f };
+        tabBtn.style.color = Vec4{ 0.14f, 0.14f, 0.14f, 1.0f };
+        tabBtn.style.hoverColor = Vec4{ 0.2f, 0.2f, 0.2f, 1.0f };
+        tabBtn.style.textColor = Vec4{ 0.9f, 0.9f, 0.9f, 1.0f };
         tabBtn.minSize = Vec2{ 90.0f, 0.0f };
         tabBtn.padding = Vec2{ 6.0f, 0.0f };
         tabBtn.hitTestMode = HitTestMode::Enabled;
@@ -7183,9 +7308,9 @@ void OpenGLRenderer::rebuildTitleBarTabs()
             closeBtn.textAlignH = TextAlignH::Center;
             closeBtn.textAlignV = TextAlignV::Center;
             closeBtn.fillY = true;
-            closeBtn.color = Vec4{ 0.14f, 0.14f, 0.14f, 1.0f };
-            closeBtn.hoverColor = Vec4{ 0.6f, 0.15f, 0.15f, 1.0f };
-            closeBtn.textColor = Vec4{ 0.7f, 0.7f, 0.7f, 1.0f };
+            closeBtn.style.color = Vec4{ 0.14f, 0.14f, 0.14f, 1.0f };
+            closeBtn.style.hoverColor = Vec4{ 0.6f, 0.15f, 0.15f, 1.0f };
+            closeBtn.style.textColor = Vec4{ 0.7f, 0.7f, 0.7f, 1.0f };
             closeBtn.minSize = Vec2{ 24.0f, 0.0f };
             closeBtn.padding = Vec2{ 2.0f, 0.0f };
             closeBtn.hitTestMode = HitTestMode::Enabled;

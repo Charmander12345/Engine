@@ -242,6 +242,7 @@ private:
     std::vector<OpenGLMaterial::LightData> m_sceneLights;
     int m_cachedWindowWidth{0};
     int m_cachedWindowHeight{0};
+    uint64_t m_lastUiAnimationTickCounter{0};
     int m_lastProjectionWidth{0};
     int m_lastProjectionHeight{0};
     Vec4 m_cachedViewportContentRect{}; // {x, y, w, h} viewport area after editor panels dock

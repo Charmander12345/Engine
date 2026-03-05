@@ -38,8 +38,8 @@ public:
         element.maxValue = m_maxValue;
         element.minSize = m_minSize;
         element.padding = m_padding;
-        element.color = m_backgroundColor;
-        element.fillColor = m_fillColor;
+        element.style.color = m_backgroundColor;
+        element.style.fillColor = m_fillColor;
         element.hitTestMode = HitTestMode::DisabledSelf;
         return element;
     }

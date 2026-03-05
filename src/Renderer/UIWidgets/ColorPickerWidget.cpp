@@ -7,7 +7,7 @@ WidgetElement ColorPickerWidget::toElement() const
 {
     WidgetElement element{};
     element.type = WidgetElementType::ColorPicker;
-    element.color = m_color;
+    element.style.color = m_color;
     element.minSize = m_minSize;
     element.hitTestMode = m_hitTestable ? HitTestMode::Enabled : HitTestMode::DisabledSelf;
     element.isCompact = m_compact;
@@ -27,7 +27,7 @@ WidgetElement ColorPickerWidget::toElement() const
     stack.orientation = StackOrientation::Horizontal;
     stack.padding = Vec2{ 6.0f, 2.0f };
     stack.fillX = true;
-    stack.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    stack.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
 
     EntryBarWidget entryR;
     entryR.setMinSize(Vec2{ 50.0f, 24.0f });

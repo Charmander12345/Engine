@@ -380,6 +380,9 @@ namespace
         case WidgetElementType::ScaleBox:
         case WidgetElementType::WidgetSwitcher:
         case WidgetElementType::Overlay:
+        case WidgetElementType::Border:
+        case WidgetElementType::ListView:
+        case WidgetElementType::TileView:
         {
             childSizes.reserve(element.children.size());
             for (auto& child : element.children)
@@ -588,6 +591,80 @@ namespace
                 maxH = std::max(maxH, cs.y);
             }
             size = Vec2{ maxW + element.padding.x * 2.0f, maxH + element.padding.y * 2.0f };
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
+
+        // Border: single child with border insets
+        if (element.type == WidgetElementType::Border)
+        {
+            float childW = 0.0f;
+            float childH = 0.0f;
+            if (!childSizes.empty())
+            {
+                childW = childSizes[0].x;
+                childH = childSizes[0].y;
+            }
+            size.x = childW + element.borderThicknessLeft + element.borderThicknessRight + element.contentPadding.x * 2.0f;
+            size.y = childH + element.borderThicknessTop + element.borderThicknessBottom + element.contentPadding.y * 2.0f;
+            size.x += element.padding.x * 2.0f;
+            size.y += element.padding.y * 2.0f;
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
+
+        // Spinner: fixed size based on minSize (no children to measure)
+        if (element.type == WidgetElementType::Spinner)
+        {
+            size = Vec2{ std::max(element.minSize.x, 32.0f), std::max(element.minSize.y, 32.0f) };
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
+
+        // RichText: use text measurement as approximation
+        if (element.type == WidgetElementType::RichText)
+        {
+            const std::string& displayText = element.richText.empty() ? element.text : element.richText;
+            if (!displayText.empty() && measureText)
+            {
+                float fSize = (element.fontSize > 0.0f) ? element.fontSize : 14.0f;
+                Vec2 textSize = measureText(displayText, fSize);
+                size.x = textSize.x + element.padding.x * 2.0f;
+                size.y = textSize.y + element.padding.y * 2.0f;
+            }
+            size.x = std::max(size.x, element.minSize.x);
+            size.y = std::max(size.y, element.minSize.y);
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
+
+        // ListView: height = itemHeight * totalItemCount
+        if (element.type == WidgetElementType::ListView)
+        {
+            float contentH = element.itemHeight * static_cast<float>(element.totalItemCount);
+            float maxChildW = 0.0f;
+            for (const auto& cs : childSizes)
+            {
+                maxChildW = std::max(maxChildW, cs.x);
+            }
+            size.x = std::max(maxChildW, element.minSize.x) + element.padding.x * 2.0f;
+            size.y = contentH + element.padding.y * 2.0f;
+            element.contentSizePixels = size;
+            element.hasContentSize = true;
+            return size;
+        }
+
+        // TileView: grid of tiles
+        if (element.type == WidgetElementType::TileView)
+        {
+            int cols = std::max(1, element.columnsPerRow);
+            int rowCount = (element.totalItemCount + cols - 1) / std::max(1, cols);
+            size.x = element.itemWidth * static_cast<float>(cols) + element.padding.x * 2.0f;
+            size.y = element.itemHeight * static_cast<float>(rowCount) + element.padding.y * 2.0f;
             element.contentSizePixels = size;
             element.hasContentSize = true;
             return size;
@@ -1195,6 +1272,48 @@ namespace
                 layoutElement(child, childX, childY, childW, childH, measureText);
             }
         }
+        // ── Border: single child inset by border thickness + content padding ──
+        else if (element.type == WidgetElementType::Border)
+        {
+            float insetL = element.borderThicknessLeft + element.contentPadding.x;
+            float insetT = element.borderThicknessTop + element.contentPadding.y;
+            float insetR = element.borderThicknessRight + element.contentPadding.x;
+            float insetB = element.borderThicknessBottom + element.contentPadding.y;
+            float childX = contentX + insetL;
+            float childY = contentY + insetT;
+            float childW = std::max(0.0f, contentW - insetL - insetR);
+            float childH = std::max(0.0f, contentH - insetT - insetB);
+            for (auto& child : element.children)
+            {
+                layoutElement(child, childX, childY, childW, childH, measureText);
+            }
+        }
+        // ── ListView: vertical stack of items ──
+        else if (element.type == WidgetElementType::ListView)
+        {
+            float curY = contentY;
+            float itemH = element.itemHeight > 0.0f ? element.itemHeight : 32.0f;
+            for (auto& child : element.children)
+            {
+                layoutElement(child, contentX, curY, contentW, itemH, measureText);
+                curY += itemH;
+            }
+        }
+        // ── TileView: grid of tiles ──
+        else if (element.type == WidgetElementType::TileView)
+        {
+            int cols = element.columnsPerRow > 0 ? element.columnsPerRow : 4;
+            float tileW = element.itemWidth > 0.0f ? element.itemWidth : (contentW / static_cast<float>(cols));
+            float tileH = element.itemHeight > 0.0f ? element.itemHeight : 80.0f;
+            for (size_t i = 0; i < element.children.size(); ++i)
+            {
+                int col = static_cast<int>(i) % cols;
+                int row = static_cast<int>(i) / cols;
+                float childX = contentX + col * tileW;
+                float childY = contentY + row * tileH;
+                layoutElement(element.children[i], childX, childY, tileW, tileH, measureText);
+            }
+        }
         else
         {
             // Default: lay out children with relative from/to positioning
@@ -1429,7 +1548,7 @@ void UIManager::showConfirmDialog(const std::string& message, std::function<void
     overlay.type = WidgetElementType::Panel;
     overlay.from = Vec2{ 0.0f, 0.0f };
     overlay.to = Vec2{ 1.0f, 1.0f };
-    overlay.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.45f };
+    overlay.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.45f };
     overlay.hitTestMode = HitTestMode::Enabled;
     overlay.runtimeOnly = true;
 
@@ -1440,7 +1559,7 @@ void UIManager::showConfirmDialog(const std::string& message, std::function<void
     panel.to = Vec2{ 0.75f, 0.68f };
     panel.padding = Vec2{ 20.0f, 16.0f };
     panel.orientation = StackOrientation::Vertical;
-    panel.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.95f };
+    panel.style.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.95f };
     panel.hitTestMode = HitTestMode::DisabledSelf;
     panel.runtimeOnly = true;
 
@@ -1450,7 +1569,7 @@ void UIManager::showConfirmDialog(const std::string& message, std::function<void
     msgText.text = message;
     msgText.font = "default.ttf";
     msgText.fontSize = 16.0f;
-    msgText.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+    msgText.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
     msgText.wrapText = true;
     msgText.fillX = true;
     msgText.fillY = true;
@@ -1463,7 +1582,7 @@ void UIManager::showConfirmDialog(const std::string& message, std::function<void
     buttonRow.from = Vec2{ 0.0f, 0.0f };
     buttonRow.to = Vec2{ 1.0f, 1.0f };
     buttonRow.fillX = true;
-    buttonRow.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    buttonRow.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
     buttonRow.minSize = Vec2{ 0.0f, 32.0f };
     buttonRow.orientation = StackOrientation::Horizontal;
     buttonRow.padding = Vec2{ 8.0f, 0.0f };
@@ -1473,21 +1592,21 @@ void UIManager::showConfirmDialog(const std::string& message, std::function<void
     spacerLeft.id = "Modal.SpacerL";
     spacerLeft.type = WidgetElementType::Panel;
     spacerLeft.fillX = true;
-    spacerLeft.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    spacerLeft.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
     spacerLeft.runtimeOnly = true;
 
     WidgetElement spacerMid{};
     spacerMid.id = "Modal.SpacerM";
     spacerMid.type = WidgetElementType::Panel;
     spacerMid.fillX = true;
-    spacerMid.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    spacerMid.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
     spacerMid.runtimeOnly = true;
 
     WidgetElement spacerRight{};
     spacerRight.id = "Modal.SpacerR";
     spacerRight.type = WidgetElementType::Panel;
     spacerRight.fillX = true;
-    spacerRight.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    spacerRight.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
     spacerRight.runtimeOnly = true;
 
     auto makeBtn = [](const std::string& id, const std::string& label, const Vec4& bgColor, const Vec4& hoverColor) {
@@ -1501,9 +1620,9 @@ void UIManager::showConfirmDialog(const std::string& message, std::function<void
         btn.textAlignV = TextAlignV::Center;
         btn.padding = Vec2{ 8.0f, 6.0f };
         btn.minSize = Vec2{ 110.0f, 32.0f };
-        btn.color = bgColor;
-        btn.hoverColor = hoverColor;
-        btn.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+        btn.style.color = bgColor;
+        btn.style.hoverColor = hoverColor;
+        btn.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
         btn.shaderVertex = "button_vertex.glsl";
         btn.shaderFragment = "button_fragment.glsl";
         btn.hitTestMode = HitTestMode::Enabled;
@@ -1581,7 +1700,7 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
     overlay.type = WidgetElementType::Panel;
     overlay.from = Vec2{ 0.0f, 0.0f };
     overlay.to = Vec2{ 1.0f, 1.0f };
-    overlay.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.45f };
+    overlay.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.45f };
     overlay.hitTestMode = HitTestMode::Enabled;
     overlay.runtimeOnly = true;
 
@@ -1592,7 +1711,7 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
     panel.to = Vec2{ 0.75f, 0.70f };
     panel.padding = Vec2{ 20.0f, 16.0f };
     panel.orientation = StackOrientation::Vertical;
-    panel.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.95f };
+    panel.style.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.95f };
     panel.hitTestMode = HitTestMode::DisabledSelf;
     panel.runtimeOnly = true;
 
@@ -1602,7 +1721,7 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
     msgText.text = message;
     msgText.font = "default.ttf";
     msgText.fontSize = 16.0f;
-    msgText.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+    msgText.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
     msgText.wrapText = true;
     msgText.fillX = true;
     msgText.fillY = true;
@@ -1619,10 +1738,10 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
     checkbox.fillX = true;
     checkbox.minSize = Vec2{ 0.0f, 26.0f };
     checkbox.padding = Vec2{ 2.0f, 2.0f };
-    checkbox.color = Vec4{ 0.18f, 0.18f, 0.22f, 0.9f };
-    checkbox.hoverColor = Vec4{ 0.24f, 0.24f, 0.30f, 1.0f };
-    checkbox.fillColor = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
-    checkbox.textColor = Vec4{ 0.90f, 0.90f, 0.94f, 1.0f };
+    checkbox.style.color = Vec4{ 0.18f, 0.18f, 0.22f, 0.9f };
+    checkbox.style.hoverColor = Vec4{ 0.24f, 0.24f, 0.30f, 1.0f };
+    checkbox.style.fillColor = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
+    checkbox.style.textColor = Vec4{ 0.90f, 0.90f, 0.94f, 1.0f };
     checkbox.hitTestMode = HitTestMode::Enabled;
     checkbox.runtimeOnly = true;
     checkbox.onCheckedChanged = [checkboxState](bool checked)
@@ -1636,7 +1755,7 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
     buttonRow.from = Vec2{ 0.0f, 0.0f };
     buttonRow.to = Vec2{ 1.0f, 1.0f };
     buttonRow.fillX = true;
-    buttonRow.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    buttonRow.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
     buttonRow.minSize = Vec2{ 0.0f, 32.0f };
     buttonRow.orientation = StackOrientation::Horizontal;
     buttonRow.padding = Vec2{ 8.0f, 0.0f };
@@ -1646,21 +1765,21 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
     spacerLeft.id = "Modal.SpacerL";
     spacerLeft.type = WidgetElementType::Panel;
     spacerLeft.fillX = true;
-    spacerLeft.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    spacerLeft.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
     spacerLeft.runtimeOnly = true;
 
     WidgetElement spacerMid{};
     spacerMid.id = "Modal.SpacerM";
     spacerMid.type = WidgetElementType::Panel;
     spacerMid.fillX = true;
-    spacerMid.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    spacerMid.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
     spacerMid.runtimeOnly = true;
 
     WidgetElement spacerRight{};
     spacerRight.id = "Modal.SpacerR";
     spacerRight.type = WidgetElementType::Panel;
     spacerRight.fillX = true;
-    spacerRight.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    spacerRight.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
     spacerRight.runtimeOnly = true;
 
     auto makeBtn = [](const std::string& id, const std::string& label, const Vec4& bgColor, const Vec4& hoverColor) {
@@ -1674,9 +1793,9 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
         btn.textAlignV = TextAlignV::Center;
         btn.padding = Vec2{ 8.0f, 6.0f };
         btn.minSize = Vec2{ 110.0f, 32.0f };
-        btn.color = bgColor;
-        btn.hoverColor = hoverColor;
-        btn.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+        btn.style.color = bgColor;
+        btn.style.hoverColor = hoverColor;
+        btn.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
         btn.shaderVertex = "button_vertex.glsl";
         btn.shaderFragment = "button_fragment.glsl";
         btn.hitTestMode = HitTestMode::Enabled;
@@ -1906,9 +2025,9 @@ void UIManager::populateOutlinerWidget(const std::shared_ptr<Widget>& widget)
         button.textAlignV = TextAlignV::Center;
         button.padding = Vec2{ 6.0f, 4.0f };
         button.minSize = Vec2{ 0.0f, 24.0f };
-        button.color = Vec4{ 0.12f, 0.12f, 0.14f, 0.9f };
-        button.hoverColor = Vec4{ 0.18f, 0.18f, 0.22f, 0.95f };
-        button.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+        button.style.color = Vec4{ 0.12f, 0.12f, 0.14f, 0.9f };
+        button.style.hoverColor = Vec4{ 0.18f, 0.18f, 0.22f, 0.95f };
+        button.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
         button.shaderVertex = "button_vertex.glsl";
         button.shaderFragment = "button_fragment.glsl";
         button.hitTestMode = HitTestMode::Enabled;
@@ -1974,7 +2093,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             line.fontSize = 13.0f;
             line.textAlignH = TextAlignH::Left;
             line.textAlignV = TextAlignV::Center;
-            line.textColor = Vec4{ 0.85f, 0.86f, 0.9f, 1.0f };
+            line.style.textColor = Vec4{ 0.85f, 0.86f, 0.9f, 1.0f };
             line.fillX = true;
             line.minSize = Vec2{ 0.0f, 20.0f };
             line.runtimeOnly = true;
@@ -2024,9 +2143,9 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
                     removeBtn.textAlignV = TextAlignV::Center;
                     removeBtn.minSize = Vec2{ 22.0f, 22.0f };
                     removeBtn.padding = Vec2{ 2.0f, 2.0f };
-                    removeBtn.color = Vec4{ 0.45f, 0.15f, 0.15f, 0.9f };
-                    removeBtn.hoverColor = Vec4{ 0.65f, 0.20f, 0.20f, 1.0f };
-                    removeBtn.textColor = Vec4{ 0.95f, 0.80f, 0.80f, 1.0f };
+                    removeBtn.style.color = Vec4{ 0.45f, 0.15f, 0.15f, 0.9f };
+                    removeBtn.style.hoverColor = Vec4{ 0.65f, 0.20f, 0.20f, 1.0f };
+                    removeBtn.style.textColor = Vec4{ 0.95f, 0.80f, 0.80f, 1.0f };
                     removeBtn.shaderVertex = "button_vertex.glsl";
                     removeBtn.shaderFragment = "button_fragment.glsl";
                     removeBtn.hitTestMode = HitTestMode::Enabled;
@@ -2046,7 +2165,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
                     headerRow.orientation = StackOrientation::Horizontal;
                     headerRow.fillX = true;
                     headerRow.sizeToContent = true;
-                    headerRow.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                    headerRow.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
                     headerRow.padding = Vec2{ 0.0f, 0.0f };
                     headerRow.runtimeOnly = true;
                     headerRow.children.push_back(std::move(originalHeader));
@@ -2073,7 +2192,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
         row.orientation = StackOrientation::Horizontal;
         row.fillX = true;
         row.sizeToContent = true;
-        row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
         row.padding = Vec2{ 0.0f, 1.0f };
         row.runtimeOnly = true;
 
@@ -2110,7 +2229,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
         row.orientation = StackOrientation::Horizontal;
         row.fillX = true;
         row.sizeToContent = true;
-        row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
         row.padding = Vec2{ 0.0f, 1.0f };
         row.runtimeOnly = true;
 
@@ -2409,7 +2528,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             row.orientation = StackOrientation::Horizontal;
             row.fillX = true;
             row.sizeToContent = true;
-            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             row.padding = Vec2{ 0.0f, 1.0f };
             row.runtimeOnly = true;
 
@@ -2433,7 +2552,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             row.orientation = StackOrientation::Horizontal;
             row.fillX = true;
             row.sizeToContent = true;
-            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             row.padding = Vec2{ 0.0f, 1.0f };
             row.runtimeOnly = true;
 
@@ -2593,7 +2712,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             row.orientation = StackOrientation::Horizontal;
             row.fillX = true;
             row.sizeToContent = true;
-            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             row.padding = Vec2{ 0.0f, 1.0f };
             row.runtimeOnly = true;
 
@@ -2703,7 +2822,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             row.orientation = StackOrientation::Horizontal;
             row.fillX = true;
             row.sizeToContent = true;
-            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             row.padding = Vec2{ 0.0f, 1.0f };
             row.runtimeOnly = true;
 
@@ -2812,7 +2931,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             row.orientation = StackOrientation::Horizontal;
             row.fillX = true;
             row.sizeToContent = true;
-            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             row.padding = Vec2{ 0.0f, 1.0f };
             row.runtimeOnly = true;
 
@@ -3179,8 +3298,8 @@ static WidgetElement makeTreeRow(const std::string& id,
     btn.type = WidgetElementType::Button;
     btn.fillX = true;
     btn.minSize = Vec2{ 0.0f, 22.0f };
-    btn.color = Vec4{ 0.10f, 0.11f, 0.14f, 0.0f };   // transparent default
-    btn.hoverColor = Vec4{ 0.22f, 0.24f, 0.30f, 0.95f };
+    btn.style.color = Vec4{ 0.10f, 0.11f, 0.14f, 0.0f };   // transparent default
+    btn.style.hoverColor = Vec4{ 0.22f, 0.24f, 0.30f, 0.95f };
     btn.shaderVertex = "button_vertex.glsl";
     btn.shaderFragment = "button_fragment.glsl";
     btn.hitTestMode = HitTestMode::Enabled;
@@ -3201,7 +3320,7 @@ static WidgetElement makeTreeRow(const std::string& id,
         icon.id = id + ".Icon";
         icon.type = WidgetElementType::Image;
         icon.imagePath = iconPath;
-        icon.color = iconTint;
+        icon.style.color = iconTint;
         icon.minSize = Vec2{ iconSize, iconSize };
         icon.sizeToContent = true;
         icon.from = Vec2{ indentFrac + 0.01f, iconPad };
@@ -3221,7 +3340,7 @@ static WidgetElement makeTreeRow(const std::string& id,
         lbl.fontSize = 13.0f;
         lbl.textAlignH = TextAlignH::Left;
         lbl.textAlignV = TextAlignV::Center;
-        lbl.textColor = isFolder
+        lbl.style.textColor = isFolder
             ? Vec4{ 0.90f, 0.85f, 0.55f, 1.0f }
             : Vec4{ 0.92f, 0.92f, 0.92f, 1.0f };
         lbl.from = Vec2{ textFrom, 0.0f };
@@ -3246,8 +3365,8 @@ static WidgetElement makeGridTile(const std::string& id,
     tile.id = id;
     tile.type = WidgetElementType::Button;
     tile.minSize = Vec2{ 80.0f, 80.0f };
-    tile.color = Vec4{ 0.12f, 0.13f, 0.16f, 0.0f };
-    tile.hoverColor = Vec4{ 0.22f, 0.24f, 0.30f, 0.85f };
+    tile.style.color = Vec4{ 0.12f, 0.13f, 0.16f, 0.0f };
+    tile.style.hoverColor = Vec4{ 0.22f, 0.24f, 0.30f, 0.85f };
     tile.shaderVertex = "button_vertex.glsl";
     tile.shaderFragment = "button_fragment.glsl";
     tile.hitTestMode = HitTestMode::Enabled;
@@ -3261,7 +3380,7 @@ static WidgetElement makeGridTile(const std::string& id,
         icon.id = id + ".Icon";
         icon.type = WidgetElementType::Image;
         icon.imagePath = iconPath;
-        icon.color = iconTint;
+        icon.style.color = iconTint;
         icon.from = Vec2{ 0.15f, 0.05f };
         icon.to   = Vec2{ 0.85f, 0.62f };
         icon.runtimeOnly = true;
@@ -3278,7 +3397,7 @@ static WidgetElement makeGridTile(const std::string& id,
         lbl.fontSize = 11.0f;
         lbl.textAlignH = TextAlignH::Center;
         lbl.textAlignV = TextAlignV::Top;
-        lbl.textColor = isFolder
+        lbl.style.textColor = isFolder
             ? Vec4{ 0.90f, 0.85f, 0.55f, 1.0f }
             : Vec4{ 0.88f, 0.88f, 0.88f, 1.0f };
         lbl.from = Vec2{ 0.0f, 0.65f };
@@ -3332,7 +3451,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             loadingRow.text = "Building asset registry...";
             loadingRow.font = "default.ttf";
             loadingRow.fontSize = 13.0f;
-            loadingRow.textColor = Vec4{ 0.6f, 0.6f, 0.65f, 1.0f };
+            loadingRow.style.textColor = Vec4{ 0.6f, 0.6f, 0.65f, 1.0f };
             loadingRow.textAlignH = TextAlignH::Left;
             loadingRow.textAlignV = TextAlignV::Center;
             loadingRow.fillX = true;
@@ -3422,7 +3541,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
                 // Highlight if this is the currently viewed folder
                 if (newSub == self->m_selectedBrowserFolder)
                 {
-                    row.color = Vec4{ 0.20f, 0.25f, 0.35f, 0.9f };
+                    row.style.color = Vec4{ 0.20f, 0.25f, 0.35f, 0.9f };
                 }
 
                 row.onClicked = [uiMgr = self, newSub]()
@@ -3499,7 +3618,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
         rootRow.isExpanded = true;
         if (m_selectedBrowserFolder.empty())
         {
-            rootRow.color = Vec4{ 0.20f, 0.25f, 0.35f, 0.9f };
+            rootRow.style.color = Vec4{ 0.20f, 0.25f, 0.35f, 0.9f };
         }
         rootRow.onClicked = [this]()
         {
@@ -3524,7 +3643,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             shadersRow.isExpanded = expanded;
             if (m_selectedBrowserFolder == shadersVirtualPath)
             {
-                shadersRow.color = Vec4{ 0.20f, 0.25f, 0.35f, 0.9f };
+                shadersRow.style.color = Vec4{ 0.20f, 0.25f, 0.35f, 0.9f };
             }
             shadersRow.onClicked = [this, shadersVirtualPath]()
             {
@@ -3581,12 +3700,12 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             backBtn.text = "<";
             backBtn.font = "default.ttf";
             backBtn.fontSize = 13.0f;
-            backBtn.textColor = Vec4{ 0.9f, 0.9f, 0.9f, 1.0f };
+            backBtn.style.textColor = Vec4{ 0.9f, 0.9f, 0.9f, 1.0f };
             backBtn.textAlignH = TextAlignH::Center;
             backBtn.textAlignV = TextAlignV::Center;
             backBtn.minSize = Vec2{ 24.0f, 20.0f };
-            backBtn.color = Vec4{ 0.14f, 0.15f, 0.19f, 0.9f };
-            backBtn.hoverColor = Vec4{ 0.25f, 0.27f, 0.33f, 0.95f };
+            backBtn.style.color = Vec4{ 0.14f, 0.15f, 0.19f, 0.9f };
+            backBtn.style.hoverColor = Vec4{ 0.25f, 0.27f, 0.33f, 0.95f };
             backBtn.shaderVertex = "button_vertex.glsl";
             backBtn.shaderFragment = "button_fragment.glsl";
             backBtn.hitTestMode = HitTestMode::Enabled;
@@ -3618,12 +3737,12 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             importBtn.text = "+ Import";
             importBtn.font = "default.ttf";
             importBtn.fontSize = 13.0f;
-            importBtn.textColor = Vec4{ 0.9f, 0.95f, 1.0f, 1.0f };
+            importBtn.style.textColor = Vec4{ 0.9f, 0.95f, 1.0f, 1.0f };
             importBtn.textAlignH = TextAlignH::Center;
             importBtn.textAlignV = TextAlignV::Center;
             importBtn.minSize = Vec2{ 64.0f, 20.0f };
-            importBtn.color = Vec4{ 0.15f, 0.35f, 0.55f, 0.95f };
-            importBtn.hoverColor = Vec4{ 0.20f, 0.45f, 0.70f, 1.0f };
+            importBtn.style.color = Vec4{ 0.15f, 0.35f, 0.55f, 0.95f };
+            importBtn.style.hoverColor = Vec4{ 0.20f, 0.45f, 0.70f, 1.0f };
             importBtn.shaderVertex = "button_vertex.glsl";
             importBtn.shaderFragment = "button_fragment.glsl";
             importBtn.hitTestMode = HitTestMode::Enabled;
@@ -3648,9 +3767,9 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             renameBtn.runtimeOnly = true;
             if (!m_selectedGridAsset.empty())
             {
-                renameBtn.color = Vec4{ 0.35f, 0.30f, 0.15f, 0.95f };
-                renameBtn.hoverColor = Vec4{ 0.50f, 0.42f, 0.18f, 1.0f };
-                renameBtn.textColor = Vec4{ 0.95f, 0.92f, 0.8f, 1.0f };
+                renameBtn.style.color = Vec4{ 0.35f, 0.30f, 0.15f, 0.95f };
+                renameBtn.style.hoverColor = Vec4{ 0.50f, 0.42f, 0.18f, 1.0f };
+                renameBtn.style.textColor = Vec4{ 0.95f, 0.92f, 0.8f, 1.0f };
                 renameBtn.onClicked = [this]()
                 {
                     if (!m_selectedGridAsset.empty())
@@ -3663,9 +3782,9 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             }
             else
             {
-                renameBtn.color = Vec4{ 0.18f, 0.18f, 0.20f, 0.6f };
-                renameBtn.hoverColor = Vec4{ 0.18f, 0.18f, 0.20f, 0.6f };
-                renameBtn.textColor = Vec4{ 0.5f, 0.5f, 0.5f, 1.0f };
+                renameBtn.style.color = Vec4{ 0.18f, 0.18f, 0.20f, 0.6f };
+                renameBtn.style.hoverColor = Vec4{ 0.18f, 0.18f, 0.20f, 0.6f };
+                renameBtn.style.textColor = Vec4{ 0.5f, 0.5f, 0.5f, 1.0f };
             }
             pathBar->children.push_back(std::move(renameBtn));
         }
@@ -3698,7 +3817,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
                 sep.text = ">";
                 sep.font = "default.ttf";
                 sep.fontSize = 12.0f;
-                sep.textColor = Vec4{ 0.5f, 0.5f, 0.5f, 1.0f };
+                sep.style.textColor = Vec4{ 0.5f, 0.5f, 0.5f, 1.0f };
                 sep.textAlignH = TextAlignH::Center;
                 sep.textAlignV = TextAlignV::Center;
                 sep.minSize = Vec2{ 14.0f, 20.0f };
@@ -3713,7 +3832,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             crumbBtn.text = crumbs[i].first;
             crumbBtn.font = "default.ttf";
             crumbBtn.fontSize = 12.0f;
-            crumbBtn.textColor = isActive
+            crumbBtn.style.textColor = isActive
                 ? Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }
                 : Vec4{ 0.7f, 0.7f, 0.7f, 1.0f };
             crumbBtn.textAlignH = TextAlignH::Center;
@@ -3721,10 +3840,10 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             crumbBtn.minSize = Vec2{ 0.0f, 20.0f };
             crumbBtn.sizeToContent = true;
             crumbBtn.padding = Vec2{ 6.0f, 2.0f };
-            crumbBtn.color = isActive
+            crumbBtn.style.color = isActive
                 ? Vec4{ 0.18f, 0.22f, 0.30f, 0.9f }
                 : Vec4{ 0.12f, 0.13f, 0.17f, 0.0f };
-            crumbBtn.hoverColor = Vec4{ 0.22f, 0.25f, 0.33f, 0.95f };
+            crumbBtn.style.hoverColor = Vec4{ 0.22f, 0.25f, 0.33f, 0.95f };
             crumbBtn.shaderVertex = "button_vertex.glsl";
             crumbBtn.shaderFragment = "button_fragment.glsl";
             crumbBtn.hitTestMode = HitTestMode::Enabled;
@@ -3856,7 +3975,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             // Highlight selected asset
             if (relPath == m_selectedGridAsset)
             {
-                tile.color = Vec4{ 0.18f, 0.30f, 0.50f, 0.9f };
+                tile.style.color = Vec4{ 0.18f, 0.30f, 0.50f, 0.9f };
             }
 
             // Inline rename: replace the label child with an EntryBar
@@ -3870,9 +3989,9 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
                 entry.value = item.name;
                 entry.font = "default.ttf";
                 entry.fontSize = 11.0f;
-                entry.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
-                entry.color = Vec4{ 0.10f, 0.10f, 0.14f, 1.0f };
-                entry.hoverColor = Vec4{ 0.14f, 0.14f, 0.18f, 1.0f };
+                entry.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+                entry.style.color = Vec4{ 0.10f, 0.10f, 0.14f, 1.0f };
+                entry.style.hoverColor = Vec4{ 0.14f, 0.14f, 0.18f, 1.0f };
                 entry.from = Vec2{ 0.0f, 0.65f };
                 entry.to = Vec2{ 1.0f, 1.0f };
                 entry.padding = Vec2{ 2.0f, 1.0f };
@@ -4526,10 +4645,10 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
         const float relY = (screenPos.y - target->computedPositionPixels.y) / std::max(1.0f, target->computedSizePixels.y);
         const float hue = std::clamp(relX, 0.0f, 1.0f);
         const float value = std::clamp(1.0f - relY, 0.0f, 1.0f);
-        target->color = hsvToRgb(hue, 1.0f, value);
+        target->style.color = hsvToRgb(hue, 1.0f, value);
         if (target->onColorChanged)
         {
-            target->onColorChanged(target->color);
+            target->onColorChanged(target->style.color);
         }
     }
     if (target->type == WidgetElementType::CheckBox)
@@ -5164,7 +5283,7 @@ void UIManager::ensureModalWidget()
     overlay.type = WidgetElementType::Panel;
     overlay.from = Vec2{ 0.0f, 0.0f };
     overlay.to = Vec2{ 1.0f, 1.0f };
-    overlay.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.45f };
+    overlay.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.45f };
     overlay.hitTestMode = HitTestMode::Enabled;
     overlay.runtimeOnly = true;
 
@@ -5175,7 +5294,7 @@ void UIManager::ensureModalWidget()
     panel.to = Vec2{ 0.7f, 0.65f };
     panel.padding = Vec2{ 20.0f, 16.0f };
     panel.orientation = StackOrientation::Vertical;
-    panel.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.95f };
+    panel.style.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.95f };
     panel.hitTestMode = HitTestMode::DisabledSelf;
     panel.runtimeOnly = true;
 
@@ -5185,7 +5304,7 @@ void UIManager::ensureModalWidget()
     message.text = m_modalMessage;
     message.font = "default.ttf";
     message.fontSize = 18.0f;
-    message.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+    message.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
     message.wrapText = true;
     message.fillX = true;
     message.fillY = true;
@@ -5202,9 +5321,9 @@ void UIManager::ensureModalWidget()
     closeButton.textAlignV = TextAlignV::Center;
     closeButton.padding = Vec2{ 8.0f, 6.0f };
     closeButton.minSize = Vec2{ 0.0f, 32.0f };
-    closeButton.color = Vec4{ 0.25f, 0.26f, 0.32f, 0.95f };
-    closeButton.hoverColor = Vec4{ 0.35f, 0.36f, 0.42f, 0.98f };
-    closeButton.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+    closeButton.style.color = Vec4{ 0.25f, 0.26f, 0.32f, 0.95f };
+    closeButton.style.hoverColor = Vec4{ 0.35f, 0.36f, 0.42f, 0.98f };
+    closeButton.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
     closeButton.shaderVertex = "button_vertex.glsl";
     closeButton.shaderFragment = "button_fragment.glsl";
     closeButton.hitTestMode = HitTestMode::Enabled;
@@ -5220,7 +5339,7 @@ void UIManager::ensureModalWidget()
     buttonRow.from = Vec2{ 0.0f, 0.0f };
     buttonRow.to = Vec2{ 1.0f, 1.0f };
     buttonRow.fillX = true;
-    buttonRow.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    buttonRow.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
     buttonRow.minSize = Vec2{ 0.0f, 32.0f };
     buttonRow.orientation = StackOrientation::Horizontal;
     buttonRow.padding = Vec2{ 8.0f, 0.0f };
@@ -5230,14 +5349,14 @@ void UIManager::ensureModalWidget()
     spacerLeft.id = "Modal.ButtonSpacerLeft";
     spacerLeft.type = WidgetElementType::Panel;
     spacerLeft.fillX = true;
-    spacerLeft.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    spacerLeft.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
     spacerLeft.runtimeOnly = true;
 
     WidgetElement spacerRight{};
     spacerRight.id = "Modal.ButtonSpacerRight";
     spacerRight.type = WidgetElementType::Panel;
     spacerRight.fillX = true;
-    spacerRight.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    spacerRight.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
     spacerRight.runtimeOnly = true;
 
     closeButton.minSize = Vec2{ 120.0f, 32.0f };
@@ -5274,7 +5393,7 @@ std::shared_ptr<Widget> UIManager::createToastWidget(const std::string& message,
     panel.to = Vec2{ 1.0f, 1.0f };
     panel.padding = Vec2{ 12.0f, 10.0f };
     panel.orientation = StackOrientation::Vertical;
-    panel.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.92f };
+    panel.style.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.92f };
     panel.hitTestMode = HitTestMode::DisabledSelf;
     panel.runtimeOnly = true;
 
@@ -5284,7 +5403,7 @@ std::shared_ptr<Widget> UIManager::createToastWidget(const std::string& message,
     messageElement.text = message;
     messageElement.font = "default.ttf";
     messageElement.fontSize = 14.0f;
-    messageElement.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+    messageElement.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
     messageElement.fillX = true;
     messageElement.minSize = Vec2{ 0.0f, 22.0f };
     messageElement.runtimeOnly = true;
@@ -5644,12 +5763,12 @@ void UIManager::refreshStatusBar()
         if (count == 0)
         {
             dirtyLabel->text = "No unsaved changes";
-            dirtyLabel->textColor = Vec4{ 0.6f, 0.6f, 0.65f, 1.0f };
+            dirtyLabel->style.textColor = Vec4{ 0.6f, 0.6f, 0.65f, 1.0f };
         }
         else
         {
             dirtyLabel->text = std::to_string(count) + " unsaved change" + (count > 1 ? "s" : "");
-            dirtyLabel->textColor = Vec4{ 1.0f, 0.85f, 0.3f, 1.0f };
+            dirtyLabel->style.textColor = Vec4{ 1.0f, 0.85f, 0.3f, 1.0f };
         }
     }
 
@@ -5658,7 +5777,7 @@ void UIManager::refreshStatusBar()
     {
         auto& undo = UndoRedoManager::Instance();
         const bool canUndo = undo.canUndo();
-        undoBtn->textColor = canUndo
+        undoBtn->style.textColor = canUndo
             ? Vec4{ 0.95f, 0.95f, 0.95f, 1.0f }
             : Vec4{ 0.45f, 0.45f, 0.5f, 1.0f };
         undoBtn->text = canUndo
@@ -5675,7 +5794,7 @@ void UIManager::refreshStatusBar()
     {
         auto& undo = UndoRedoManager::Instance();
         const bool canRedo = undo.canRedo();
-        redoBtn->textColor = canRedo
+        redoBtn->style.textColor = canRedo
             ? Vec4{ 0.95f, 0.95f, 0.95f, 1.0f }
             : Vec4{ 0.45f, 0.45f, 0.5f, 1.0f };
         redoBtn->text = canRedo
@@ -5712,7 +5831,7 @@ void UIManager::showSaveProgressModal(size_t total)
     overlay.type = WidgetElementType::Panel;
     overlay.from = Vec2{ 0.0f, 0.0f };
     overlay.to = Vec2{ 1.0f, 1.0f };
-    overlay.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.4f };
+    overlay.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.4f };
     overlay.hitTestMode = HitTestMode::Enabled;
     overlay.runtimeOnly = true;
 
@@ -5723,7 +5842,7 @@ void UIManager::showSaveProgressModal(size_t total)
     panel.to = Vec2{ 0.7f, 0.62f };
     panel.padding = Vec2{ 20.0f, 14.0f };
     panel.orientation = StackOrientation::Vertical;
-    panel.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.96f };
+    panel.style.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.96f };
     panel.runtimeOnly = true;
 
     WidgetElement title{};
@@ -5733,7 +5852,7 @@ void UIManager::showSaveProgressModal(size_t total)
     title.font = "default.ttf";
     title.fontSize = 18.0f;
     title.textAlignH = TextAlignH::Center;
-    title.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+    title.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
     title.fillX = true;
     title.minSize = Vec2{ 0.0f, 24.0f };
     title.runtimeOnly = true;
@@ -5745,7 +5864,7 @@ void UIManager::showSaveProgressModal(size_t total)
     counter.font = "default.ttf";
     counter.fontSize = 14.0f;
     counter.textAlignH = TextAlignH::Center;
-    counter.textColor = Vec4{ 0.8f, 0.85f, 0.9f, 1.0f };
+    counter.style.textColor = Vec4{ 0.8f, 0.85f, 0.9f, 1.0f };
     counter.fillX = true;
     counter.minSize = Vec2{ 0.0f, 20.0f };
     counter.runtimeOnly = true;
@@ -5758,8 +5877,8 @@ void UIManager::showSaveProgressModal(size_t total)
     progress.minValue = 0.0f;
     progress.maxValue = static_cast<float>(total);
     progress.valueFloat = 0.0f;
-    progress.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.9f };
-    progress.fillColor = Vec4{ 0.2f, 0.55f, 0.2f, 0.95f };
+    progress.style.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.9f };
+    progress.style.fillColor = Vec4{ 0.2f, 0.55f, 0.2f, 0.95f };
     progress.runtimeOnly = true;
 
     panel.children.push_back(std::move(title));
@@ -5848,7 +5967,7 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
     bg.id    = "Dropdown.Bg";
     bg.from  = Vec2{ 0.0f, 0.0f };
     bg.to    = Vec2{ 1.0f, 1.0f };
-    bg.color = Vec4{ 0.14f, 0.14f, 0.18f, 1.0f };
+    bg.style.color = Vec4{ 0.14f, 0.14f, 0.18f, 1.0f };
     elements.push_back(bg);
 
     for (size_t i = 0; i < items.size(); ++i)
@@ -5863,7 +5982,7 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
             sep.id = "Dropdown.Sep." + std::to_string(i);
             sep.from = Vec2{ 0.08f, (y0 + kItemH * 0.5f) / menuH };
             sep.to = Vec2{ 0.92f, (y0 + kItemH * 0.5f + 1.0f) / menuH };
-            sep.color = Vec4{ 0.30f, 0.32f, 0.38f, 1.0f };
+            sep.style.color = Vec4{ 0.30f, 0.32f, 0.38f, 1.0f };
             sep.hitTestMode = HitTestMode::DisabledSelf;
             elements.push_back(std::move(sep));
             continue;
@@ -5876,9 +5995,9 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
         item.to            = Vec2{ 1.0f, y1 / menuH };
         item.text          = items[i].label;
         item.fontSize      = 13.0f;
-        item.color         = Vec4{ 0.14f, 0.14f, 0.18f, 0.0f };
-        item.hoverColor    = Vec4{ 0.24f, 0.24f, 0.30f, 1.0f };
-        item.textColor     = Vec4{ 0.88f, 0.88f, 0.92f, 1.0f };
+        item.style.color         = Vec4{ 0.14f, 0.14f, 0.18f, 0.0f };
+        item.style.hoverColor    = Vec4{ 0.24f, 0.24f, 0.30f, 1.0f };
+        item.style.textColor     = Vec4{ 0.88f, 0.88f, 0.92f, 1.0f };
         item.textAlignH    = TextAlignH::Left;
         item.textAlignV    = TextAlignV::Center;
         item.padding       = Vec2{ 12.0f, 4.0f };
@@ -5896,8 +6015,8 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
         else
         {
             // Placeholder item with no callback — just close the menu
-            item.textColor = Vec4{ 0.55f, 0.55f, 0.6f, 1.0f };
-            item.hoverColor = item.color;
+            item.style.textColor = Vec4{ 0.55f, 0.55f, 0.6f, 1.0f };
+            item.style.hoverColor = item.style.color;
             item.onClicked = [this]()
             {
                 closeDropdownMenu();
@@ -6050,7 +6169,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
         root.fillY = true;
         root.orientation = StackOrientation::Horizontal;
         root.padding = Vec2{ 8.0f, 4.0f };
-        root.color = Vec4{ 0.14f, 0.15f, 0.19f, 1.0f };
+        root.style.color = Vec4{ 0.14f, 0.15f, 0.19f, 1.0f };
         root.runtimeOnly = true;
 
         // Save button
@@ -6061,9 +6180,9 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             saveBtn.text = "Save";
             saveBtn.font = "default.ttf";
             saveBtn.fontSize = 13.0f;
-            saveBtn.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
-            saveBtn.color = Vec4{ 0.22f, 0.24f, 0.30f, 1.0f };
-            saveBtn.hoverColor = Vec4{ 0.30f, 0.34f, 0.42f, 1.0f };
+            saveBtn.style.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+            saveBtn.style.color = Vec4{ 0.22f, 0.24f, 0.30f, 1.0f };
+            saveBtn.style.hoverColor = Vec4{ 0.30f, 0.34f, 0.42f, 1.0f };
             saveBtn.textAlignH = TextAlignH::Center;
             saveBtn.textAlignV = TextAlignV::Center;
             saveBtn.minSize = Vec2{ 60.0f, 24.0f };
@@ -6082,7 +6201,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             dirtyLabel.text = "";
             dirtyLabel.font = "default.ttf";
             dirtyLabel.fontSize = 13.0f;
-            dirtyLabel.textColor = Vec4{ 0.85f, 0.65f, 0.20f, 1.0f };
+            dirtyLabel.style.textColor = Vec4{ 0.85f, 0.65f, 0.20f, 1.0f };
             dirtyLabel.textAlignH = TextAlignH::Left;
             dirtyLabel.textAlignV = TextAlignV::Center;
             dirtyLabel.minSize = Vec2{ 0.0f, 24.0f };
@@ -6118,7 +6237,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
         root.fillX = true;
         root.fillY = true;
         root.orientation = StackOrientation::Vertical;
-        root.color = Vec4{ 0.12f, 0.13f, 0.17f, 0.96f };
+        root.style.color = Vec4{ 0.12f, 0.13f, 0.17f, 0.96f };
         root.runtimeOnly = true;
 
         // --- Controls section (scrollable) ---
@@ -6131,7 +6250,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             controlsSection.scrollable = true;
             controlsSection.orientation = StackOrientation::Vertical;
             controlsSection.padding = Vec2{ 10.0f, 8.0f };
-            controlsSection.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            controlsSection.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             controlsSection.runtimeOnly = true;
 
             // Title: Controls
@@ -6142,7 +6261,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
                 title.text = "Controls";
                 title.font = "default.ttf";
                 title.fontSize = 16.0f;
-                title.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+                title.style.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
                 title.textAlignH = TextAlignH::Left;
                 title.textAlignV = TextAlignV::Center;
                 title.fillX = true;
@@ -6155,7 +6274,8 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
                 "Panel", "Text", "Label", "Button", "ToggleButton", "RadioButton",
                 "Image", "EntryBar", "StackPanel", "ScrollView",
                 "Grid", "Slider", "CheckBox", "DropDown", "ColorPicker", "ProgressBar", "Separator",
-                "WrapBox", "UniformGrid", "SizeBox", "ScaleBox", "WidgetSwitcher", "Overlay"
+                "WrapBox", "UniformGrid", "SizeBox", "ScaleBox", "WidgetSwitcher", "Overlay",
+                "Border", "Spinner", "RichText", "ListView", "TileView"
             };
             for (size_t i = 0; i < controls.size(); ++i)
             {
@@ -6165,9 +6285,9 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
                 item.text = "  " + controls[i];
                 item.font = "default.ttf";
                 item.fontSize = 14.0f;
-                item.textColor = Vec4{ 0.78f, 0.80f, 0.85f, 1.0f };
-                item.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-                item.hoverColor = Vec4{ 0.18f, 0.20f, 0.28f, 0.8f };
+                item.style.textColor = Vec4{ 0.78f, 0.80f, 0.85f, 1.0f };
+                item.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                item.style.hoverColor = Vec4{ 0.18f, 0.20f, 0.28f, 0.8f };
                 item.textAlignH = TextAlignH::Left;
                 item.textAlignV = TextAlignV::Center;
                 item.fillX = true;
@@ -6189,7 +6309,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             sep.type = WidgetElementType::Panel;
             sep.fillX = true;
             sep.minSize = Vec2{ 0.0f, 1.0f };
-            sep.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.8f };
+            sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.8f };
             sep.runtimeOnly = true;
             root.children.push_back(std::move(sep));
         }
@@ -6204,7 +6324,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             hierarchySection.scrollable = true;
             hierarchySection.orientation = StackOrientation::Vertical;
             hierarchySection.padding = Vec2{ 10.0f, 8.0f };
-            hierarchySection.color = Vec4{ 0.08f, 0.09f, 0.12f, 0.75f };
+            hierarchySection.style.color = Vec4{ 0.08f, 0.09f, 0.12f, 0.75f };
             hierarchySection.runtimeOnly = true;
 
             // Title: Hierarchy
@@ -6215,7 +6335,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
                 treeTitle.text = "Hierarchy";
                 treeTitle.font = "default.ttf";
                 treeTitle.fontSize = 16.0f;
-                treeTitle.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+                treeTitle.style.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
                 treeTitle.textAlignH = TextAlignH::Left;
                 treeTitle.textAlignV = TextAlignV::Center;
                 treeTitle.fillX = true;
@@ -6232,7 +6352,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
                 hierarchyStack.fillX = true;
                 hierarchyStack.orientation = StackOrientation::Vertical;
                 hierarchyStack.padding = Vec2{ 2.0f, 2.0f };
-                hierarchyStack.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                hierarchyStack.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
                 hierarchyStack.runtimeOnly = true;
                 hierarchySection.children.push_back(std::move(hierarchyStack));
             }
@@ -6262,7 +6382,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
         root.fillY = true;
         root.orientation = StackOrientation::Vertical;
         root.padding = Vec2{ 10.0f, 8.0f };
-        root.color = Vec4{ 0.12f, 0.13f, 0.17f, 0.96f };
+        root.style.color = Vec4{ 0.12f, 0.13f, 0.17f, 0.96f };
         root.scrollable = true;
         root.runtimeOnly = true;
 
@@ -6273,7 +6393,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             title.text = "Details";
             title.font = "default.ttf";
             title.fontSize = 16.0f;
-            title.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+            title.style.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
             title.textAlignH = TextAlignH::Left;
             title.textAlignV = TextAlignV::Center;
             title.fillX = true;
@@ -6290,7 +6410,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             hint.text = "Select an element in the hierarchy or preview to see its properties.";
             hint.font = "default.ttf";
             hint.fontSize = 13.0f;
-            hint.textColor = Vec4{ 0.62f, 0.66f, 0.75f, 1.0f };
+            hint.style.textColor = Vec4{ 0.62f, 0.66f, 0.75f, 1.0f };
             hint.textAlignH = TextAlignH::Left;
             hint.textAlignV = TextAlignV::Center;
             hint.fillX = true;
@@ -6319,7 +6439,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
         root.to = Vec2{ 1.0f, 1.0f };
         root.fillX = true;
         root.fillY = true;
-        root.color = Vec4{ 0.08f, 0.09f, 0.12f, 1.0f };
+        root.style.color = Vec4{ 0.08f, 0.09f, 0.12f, 1.0f };
         root.runtimeOnly = true;
 
         canvasWidget->setElements({ std::move(root) });
@@ -6365,6 +6485,17 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
                         case WidgetElementType::Label:       typeName = "Label"; break;
                         case WidgetElementType::ToggleButton:typeName = "ToggleButton"; break;
                         case WidgetElementType::RadioButton: typeName = "RadioButton"; break;
+                        case WidgetElementType::WrapBox:     typeName = "WrapBox"; break;
+                        case WidgetElementType::UniformGrid: typeName = "UniformGrid"; break;
+                        case WidgetElementType::SizeBox:     typeName = "SizeBox"; break;
+                        case WidgetElementType::ScaleBox:    typeName = "ScaleBox"; break;
+                        case WidgetElementType::WidgetSwitcher: typeName = "WidgetSwitcher"; break;
+                        case WidgetElementType::Overlay:     typeName = "Overlay"; break;
+                        case WidgetElementType::Border:      typeName = "Border"; break;
+                        case WidgetElementType::Spinner:     typeName = "Spinner"; break;
+                        case WidgetElementType::RichText:    typeName = "RichText"; break;
+                        case WidgetElementType::ListView:    typeName = "ListView"; break;
+                        case WidgetElementType::TileView:    typeName = "TileView"; break;
                         default:                             typeName = "Element"; break;
                         }
                         el.id = typeName + "_auto_" + std::to_string(++s_autoIdCounter);
@@ -7101,7 +7232,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.type = WidgetElementType::Panel;
         newEl.from = Vec2{ 0.05f, 0.05f };
         newEl.to = Vec2{ 0.95f, 0.25f };
-        newEl.color = Vec4{ 0.15f, 0.15f, 0.20f, 0.8f };
+        newEl.style.color = Vec4{ 0.15f, 0.15f, 0.20f, 0.8f };
     }
     else if (elementType == "Text")
     {
@@ -7111,7 +7242,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.text = "New Text";
         newEl.font = "default.ttf";
         newEl.fontSize = 16.0f;
-        newEl.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+        newEl.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
     }
     else if (elementType == "Button")
     {
@@ -7121,11 +7252,11 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.text = "Button";
         newEl.font = "default.ttf";
         newEl.fontSize = 14.0f;
-        newEl.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+        newEl.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
         newEl.textAlignH = TextAlignH::Center;
         newEl.textAlignV = TextAlignV::Center;
-        newEl.color = Vec4{ 0.2f, 0.4f, 0.7f, 0.95f };
-        newEl.hoverColor = Vec4{ 0.3f, 0.5f, 0.8f, 1.0f };
+        newEl.style.color = Vec4{ 0.2f, 0.4f, 0.7f, 0.95f };
+        newEl.style.hoverColor = Vec4{ 0.3f, 0.5f, 0.8f, 1.0f };
     }
     else if (elementType == "Image")
     {
@@ -7140,8 +7271,8 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.to = Vec2{ 0.9f, 0.52f };
         newEl.value = "";
         newEl.fontSize = 14.0f;
-        newEl.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
-        newEl.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.9f };
+        newEl.style.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
+        newEl.style.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.9f };
     }
     else if (elementType == "StackPanel")
     {
@@ -7149,14 +7280,14 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.from = Vec2{ 0.05f, 0.05f };
         newEl.to = Vec2{ 0.95f, 0.95f };
         newEl.orientation = StackOrientation::Vertical;
-        newEl.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.6f };
+        newEl.style.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.6f };
     }
     else if (elementType == "Grid")
     {
         newEl.type = WidgetElementType::Grid;
         newEl.from = Vec2{ 0.05f, 0.05f };
         newEl.to = Vec2{ 0.95f, 0.95f };
-        newEl.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.5f };
+        newEl.style.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.5f };
     }
     else if (elementType == "Slider")
     {
@@ -7175,7 +7306,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.text = "Checkbox";
         newEl.font = "default.ttf";
         newEl.fontSize = 14.0f;
-        newEl.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
+        newEl.style.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
     }
     else if (elementType == "DropDown")
     {
@@ -7190,7 +7321,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.type = WidgetElementType::ColorPicker;
         newEl.from = Vec2{ 0.1f, 0.1f };
         newEl.to = Vec2{ 0.5f, 0.5f };
-        newEl.color = Vec4{ 1.0f, 0.5f, 0.2f, 1.0f };
+        newEl.style.color = Vec4{ 1.0f, 0.5f, 0.2f, 1.0f };
     }
     else if (elementType == "ProgressBar")
     {
@@ -7206,7 +7337,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.type = WidgetElementType::Separator;
         newEl.from = Vec2{ 0.05f, 0.49f };
         newEl.to = Vec2{ 0.95f, 0.51f };
-        newEl.color = Vec4{ 0.3f, 0.32f, 0.38f, 0.8f };
+        newEl.style.color = Vec4{ 0.3f, 0.32f, 0.38f, 0.8f };
     }
     else if (elementType == "Label")
     {
@@ -7216,7 +7347,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.text = "Label";
         newEl.font = "default.ttf";
         newEl.fontSize = 14.0f;
-        newEl.textColor = Vec4{ 0.85f, 0.85f, 0.90f, 1.0f };
+        newEl.style.textColor = Vec4{ 0.85f, 0.85f, 0.90f, 1.0f };
         newEl.hitTestMode = HitTestMode::DisabledSelf;
     }
     else if (elementType == "ToggleButton")
@@ -7227,12 +7358,12 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.text = "Toggle";
         newEl.font = "default.ttf";
         newEl.fontSize = 14.0f;
-        newEl.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+        newEl.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
         newEl.textAlignH = TextAlignH::Center;
         newEl.textAlignV = TextAlignV::Center;
-        newEl.color = Vec4{ 0.2f, 0.2f, 0.3f, 0.95f };
-        newEl.hoverColor = Vec4{ 0.3f, 0.3f, 0.4f, 1.0f };
-        newEl.fillColor = Vec4{ 0.2f, 0.5f, 0.8f, 0.95f };
+        newEl.style.color = Vec4{ 0.2f, 0.2f, 0.3f, 0.95f };
+        newEl.style.hoverColor = Vec4{ 0.3f, 0.3f, 0.4f, 1.0f };
+        newEl.style.fillColor = Vec4{ 0.2f, 0.5f, 0.8f, 0.95f };
     }
     else if (elementType == "RadioButton")
     {
@@ -7242,12 +7373,12 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.text = "Radio";
         newEl.font = "default.ttf";
         newEl.fontSize = 14.0f;
-        newEl.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+        newEl.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
         newEl.textAlignH = TextAlignH::Center;
         newEl.textAlignV = TextAlignV::Center;
-        newEl.color = Vec4{ 0.2f, 0.2f, 0.3f, 0.95f };
-        newEl.hoverColor = Vec4{ 0.3f, 0.3f, 0.4f, 1.0f };
-        newEl.fillColor = Vec4{ 0.2f, 0.5f, 0.8f, 0.95f };
+        newEl.style.color = Vec4{ 0.2f, 0.2f, 0.3f, 0.95f };
+        newEl.style.hoverColor = Vec4{ 0.3f, 0.3f, 0.4f, 1.0f };
+        newEl.style.fillColor = Vec4{ 0.2f, 0.5f, 0.8f, 0.95f };
         newEl.radioGroup = "default";
     }
     else if (elementType == "ScrollView")
@@ -7256,7 +7387,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.from = Vec2{ 0.05f, 0.05f };
         newEl.to = Vec2{ 0.95f, 0.95f };
         newEl.orientation = StackOrientation::Vertical;
-        newEl.color = Vec4{ 0.08f, 0.08f, 0.10f, 0.6f };
+        newEl.style.color = Vec4{ 0.08f, 0.08f, 0.10f, 0.6f };
         newEl.scrollable = true;
     }
     else if (elementType == "WrapBox")
@@ -7265,7 +7396,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.from = Vec2{ 0.05f, 0.05f };
         newEl.to = Vec2{ 0.95f, 0.95f };
         newEl.orientation = StackOrientation::Horizontal;
-        newEl.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.5f };
+        newEl.style.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.5f };
     }
     else if (elementType == "UniformGrid")
     {
@@ -7274,7 +7405,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.to = Vec2{ 0.95f, 0.95f };
         newEl.columns = 3;
         newEl.rows = 3;
-        newEl.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.5f };
+        newEl.style.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.5f };
     }
     else if (elementType == "SizeBox")
     {
@@ -7283,7 +7414,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.to = Vec2{ 0.6f, 0.6f };
         newEl.widthOverride = 200.0f;
         newEl.heightOverride = 100.0f;
-        newEl.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+        newEl.style.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
     }
     else if (elementType == "ScaleBox")
     {
@@ -7291,7 +7422,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.from = Vec2{ 0.05f, 0.05f };
         newEl.to = Vec2{ 0.95f, 0.95f };
         newEl.scaleMode = ScaleMode::Contain;
-        newEl.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+        newEl.style.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
     }
     else if (elementType == "WidgetSwitcher")
     {
@@ -7299,21 +7430,77 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.from = Vec2{ 0.05f, 0.05f };
         newEl.to = Vec2{ 0.95f, 0.95f };
         newEl.activeChildIndex = 0;
-        newEl.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+        newEl.style.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
     }
     else if (elementType == "Overlay")
     {
         newEl.type = WidgetElementType::Overlay;
         newEl.from = Vec2{ 0.05f, 0.05f };
         newEl.to = Vec2{ 0.95f, 0.95f };
-        newEl.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+        newEl.style.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+    }
+    else if (elementType == "Border")
+    {
+        newEl.type = WidgetElementType::Border;
+        newEl.from = Vec2{ 0.05f, 0.05f };
+        newEl.to = Vec2{ 0.95f, 0.95f };
+        newEl.style.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+        newEl.borderThicknessLeft = 2.0f;
+        newEl.borderThicknessTop = 2.0f;
+        newEl.borderThicknessRight = 2.0f;
+        newEl.borderThicknessBottom = 2.0f;
+        newEl.borderBrush.type = BrushType::SolidColor;
+        newEl.borderBrush.color = Vec4{ 0.5f, 0.5f, 0.6f, 1.0f };
+        newEl.contentPadding = Vec2{ 4.0f, 4.0f };
+    }
+    else if (elementType == "Spinner")
+    {
+        newEl.type = WidgetElementType::Spinner;
+        newEl.from = Vec2{ 0.4f, 0.3f };
+        newEl.to = Vec2{ 0.6f, 0.6f };
+        newEl.minSize = Vec2{ 32.0f, 32.0f };
+        newEl.spinnerDotCount = 8;
+        newEl.spinnerSpeed = 1.0f;
+        newEl.style.color = Vec4{ 0.8f, 0.8f, 0.9f, 1.0f };
+    }
+    else if (elementType == "RichText")
+    {
+        newEl.type = WidgetElementType::RichText;
+        newEl.from = Vec2{ 0.05f, 0.05f };
+        newEl.to = Vec2{ 0.95f, 0.5f };
+        newEl.richText = "<b>Bold</b> and <i>italic</i> text";
+        newEl.font = "default.ttf";
+        newEl.fontSize = 14.0f;
+        newEl.style.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
+    }
+    else if (elementType == "ListView")
+    {
+        newEl.type = WidgetElementType::ListView;
+        newEl.from = Vec2{ 0.05f, 0.05f };
+        newEl.to = Vec2{ 0.95f, 0.95f };
+        newEl.totalItemCount = 10;
+        newEl.itemHeight = 32.0f;
+        newEl.scrollable = true;
+        newEl.style.color = Vec4{ 0.08f, 0.08f, 0.10f, 0.6f };
+    }
+    else if (elementType == "TileView")
+    {
+        newEl.type = WidgetElementType::TileView;
+        newEl.from = Vec2{ 0.05f, 0.05f };
+        newEl.to = Vec2{ 0.95f, 0.95f };
+        newEl.totalItemCount = 12;
+        newEl.itemHeight = 80.0f;
+        newEl.itemWidth = 100.0f;
+        newEl.columnsPerRow = 4;
+        newEl.scrollable = true;
+        newEl.style.color = Vec4{ 0.08f, 0.08f, 0.10f, 0.6f };
     }
     else
     {
         newEl.type = WidgetElementType::Panel;
         newEl.from = Vec2{ 0.1f, 0.1f };
         newEl.to = Vec2{ 0.5f, 0.5f };
-        newEl.color = Vec4{ 0.2f, 0.2f, 0.25f, 0.8f };
+        newEl.style.color = Vec4{ 0.2f, 0.2f, 0.25f, 0.8f };
     }
 
     // Add to widget: if empty, add as root element; otherwise append to first root's children
@@ -7593,6 +7780,22 @@ void UIManager::refreshWidgetEditorHierarchy(const std::string& tabId)
             case WidgetElementType::DropdownButton: typeName = "DropdownButton"; break;
             case WidgetElementType::TreeView:    typeName = "TreeView"; break;
             case WidgetElementType::TabView:     typeName = "TabView"; break;
+            case WidgetElementType::Separator:   typeName = "Separator"; break;
+            case WidgetElementType::ScrollView:  typeName = "ScrollView"; break;
+            case WidgetElementType::Label:       typeName = "Label"; break;
+            case WidgetElementType::ToggleButton:typeName = "ToggleButton"; break;
+            case WidgetElementType::RadioButton: typeName = "RadioButton"; break;
+            case WidgetElementType::WrapBox:     typeName = "WrapBox"; break;
+            case WidgetElementType::UniformGrid: typeName = "UniformGrid"; break;
+            case WidgetElementType::SizeBox:     typeName = "SizeBox"; break;
+            case WidgetElementType::ScaleBox:    typeName = "ScaleBox"; break;
+            case WidgetElementType::WidgetSwitcher: typeName = "WidgetSwitcher"; break;
+            case WidgetElementType::Overlay:     typeName = "Overlay"; break;
+            case WidgetElementType::Border:      typeName = "Border"; break;
+            case WidgetElementType::Spinner:     typeName = "Spinner"; break;
+            case WidgetElementType::RichText:    typeName = "RichText"; break;
+            case WidgetElementType::ListView:    typeName = "ListView"; break;
+            case WidgetElementType::TileView:    typeName = "TileView"; break;
             default:                             typeName = "Unknown"; break;
             }
 
@@ -7619,15 +7822,15 @@ void UIManager::refreshWidgetEditorHierarchy(const std::string& tabId)
 
             if (isSelected)
             {
-                row.color = Vec4{ 0.20f, 0.30f, 0.55f, 0.9f };
-                row.hoverColor = Vec4{ 0.25f, 0.35f, 0.60f, 1.0f };
-                row.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+                row.style.color = Vec4{ 0.20f, 0.30f, 0.55f, 0.9f };
+                row.style.hoverColor = Vec4{ 0.25f, 0.35f, 0.60f, 1.0f };
+                row.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
             }
             else
             {
-                row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-                row.hoverColor = Vec4{ 0.18f, 0.20f, 0.28f, 0.8f };
-                row.textColor = Vec4{ 0.75f, 0.78f, 0.84f, 1.0f };
+                row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                row.style.hoverColor = Vec4{ 0.18f, 0.20f, 0.28f, 0.8f };
+                row.style.textColor = Vec4{ 0.75f, 0.78f, 0.84f, 1.0f };
             }
 
             const std::string capturedTabId = tabId;
@@ -7685,7 +7888,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         lbl.text = text;
         lbl.font = "default.ttf";
         lbl.fontSize = fontSize;
-        lbl.textColor = color;
+        lbl.style.textColor = color;
         lbl.textAlignH = TextAlignH::Left;
         lbl.textAlignV = TextAlignV::Center;
         lbl.fillX = true;
@@ -7761,6 +7964,11 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         case WidgetElementType::ScaleBox:     typeName = "ScaleBox"; break;
         case WidgetElementType::WidgetSwitcher: typeName = "WidgetSwitcher"; break;
         case WidgetElementType::Overlay:      typeName = "Overlay"; break;
+        case WidgetElementType::Border:       typeName = "Border"; break;
+        case WidgetElementType::Spinner:      typeName = "Spinner"; break;
+        case WidgetElementType::RichText:     typeName = "RichText"; break;
+        case WidgetElementType::ListView:     typeName = "ListView"; break;
+        case WidgetElementType::TileView:     typeName = "TileView"; break;
         default:                             typeName = "Unknown"; break;
         }
         rootPanel->children.push_back(makeLabel("WE.Det.Type", "Type: " + typeName));
@@ -7787,7 +7995,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         row.orientation = StackOrientation::Horizontal;
         row.fillX = true;
         row.sizeToContent = true;
-        row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
         row.padding = Vec2{ 0.0f, 1.0f };
         row.runtimeOnly = true;
 
@@ -7830,7 +8038,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         sep.type = WidgetElementType::Panel;
         sep.fillX = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -7865,7 +8073,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         sep.type = WidgetElementType::Panel;
         sep.fillX = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -7881,7 +8089,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             row.orientation = StackOrientation::Horizontal;
             row.fillX = true;
             row.sizeToContent = true;
-            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             row.padding = Vec2{ 0.0f, 1.0f };
             row.runtimeOnly = true;
 
@@ -7931,7 +8139,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         sep.type = WidgetElementType::Panel;
         sep.fillX = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -7946,7 +8154,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             row.orientation = StackOrientation::Horizontal;
             row.fillX = true;
             row.sizeToContent = true;
-            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             row.padding = Vec2{ 0.0f, 1.0f };
             row.runtimeOnly = true;
 
@@ -7985,7 +8193,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         sep.type = WidgetElementType::Panel;
         sep.fillX = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -8027,7 +8235,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             row.orientation = StackOrientation::Horizontal;
             row.fillX = true;
             row.sizeToContent = true;
-            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             row.padding = Vec2{ 0.0f, 1.0f };
             row.runtimeOnly = true;
 
@@ -8078,7 +8286,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             row.orientation = StackOrientation::Horizontal;
             row.fillX = true;
             row.sizeToContent = true;
-            row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             row.padding = Vec2{ 0.0f, 1.0f };
             row.runtimeOnly = true;
 
@@ -8191,7 +8399,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
                 row.orientation = StackOrientation::Horizontal;
                 row.fillX = true;
                 row.sizeToContent = true;
-                row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
                 row.runtimeOnly = true;
 
                 WidgetElement lbl = makeLabel("WE.Det.ScaleMode.Lbl", "Scale Mode");
@@ -8238,6 +8446,69 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
                     applyChange();
                 }));
         }
+
+        // Border widget specific: per-side thickness, content padding, border brush
+        if (sel->type == WidgetElementType::Border)
+        {
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrThkL", "Border Left", fmtF(sel->borderThicknessLeft),
+                [sel, applyChange](const std::string& v) { try { sel->borderThicknessLeft = std::stof(v); } catch (...) {} applyChange(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrThkT", "Border Top", fmtF(sel->borderThicknessTop),
+                [sel, applyChange](const std::string& v) { try { sel->borderThicknessTop = std::stof(v); } catch (...) {} applyChange(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrThkR", "Border Right", fmtF(sel->borderThicknessRight),
+                [sel, applyChange](const std::string& v) { try { sel->borderThicknessRight = std::stof(v); } catch (...) {} applyChange(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrThkB", "Border Bottom", fmtF(sel->borderThicknessBottom),
+                [sel, applyChange](const std::string& v) { try { sel->borderThicknessBottom = std::stof(v); } catch (...) {} applyChange(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrPadX", "Content Pad X", fmtF(sel->contentPadding.x),
+                [sel, applyChange](const std::string& v) { try { sel->contentPadding.x = std::stof(v); } catch (...) {} applyChange(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrPadY", "Content Pad Y", fmtF(sel->contentPadding.y),
+                [sel, applyChange](const std::string& v) { try { sel->contentPadding.y = std::stof(v); } catch (...) {} applyChange(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrBrR", "Brush Col R", fmtF(sel->borderBrush.color.x),
+                [sel, applyChange](const std::string& v) { try { sel->borderBrush.color.x = std::stof(v); } catch (...) {} applyChange(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrBrG", "Brush Col G", fmtF(sel->borderBrush.color.y),
+                [sel, applyChange](const std::string& v) { try { sel->borderBrush.color.y = std::stof(v); } catch (...) {} applyChange(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrBrB", "Brush Col B", fmtF(sel->borderBrush.color.z),
+                [sel, applyChange](const std::string& v) { try { sel->borderBrush.color.z = std::stof(v); } catch (...) {} applyChange(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrBrA", "Brush Col A", fmtF(sel->borderBrush.color.w),
+                [sel, applyChange](const std::string& v) { try { sel->borderBrush.color.w = std::stof(v); } catch (...) {} applyChange(); }));
+        }
+
+        // Spinner specific: dot count, speed
+        if (sel->type == WidgetElementType::Spinner)
+        {
+            rootPanel->children.push_back(makePropertyRow("WE.Det.SpnDots", "Dot Count", std::to_string(sel->spinnerDotCount),
+                [sel, applyChange](const std::string& v) { try { sel->spinnerDotCount = std::max(1, std::stoi(v)); } catch (...) {} applyChange(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.SpnSpd", "Speed", fmtF(sel->spinnerSpeed),
+                [sel, applyChange](const std::string& v) { try { sel->spinnerSpeed = std::stof(v); } catch (...) {} applyChange(); }));
+        }
+
+        // RichText specific: rich text markup
+        if (sel->type == WidgetElementType::RichText)
+        {
+            rootPanel->children.push_back(makePropertyRow("WE.Det.RichTxt", "Rich Text", sel->richText,
+                [sel, applyChange](const std::string& v) { sel->richText = v; applyChange(); }));
+        }
+
+        // ListView specific: total items, item height
+        if (sel->type == WidgetElementType::ListView)
+        {
+            rootPanel->children.push_back(makePropertyRow("WE.Det.LvCount", "Item Count", std::to_string(sel->totalItemCount),
+                [sel, applyChange](const std::string& v) { try { sel->totalItemCount = std::max(0, std::stoi(v)); } catch (...) {} applyChange(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.LvItemH", "Item Height", fmtF(sel->itemHeight),
+                [sel, applyChange](const std::string& v) { try { sel->itemHeight = std::stof(v); } catch (...) {} applyChange(); }));
+        }
+
+        // TileView specific: total items, item dimensions, columns
+        if (sel->type == WidgetElementType::TileView)
+        {
+            rootPanel->children.push_back(makePropertyRow("WE.Det.TvCount", "Item Count", std::to_string(sel->totalItemCount),
+                [sel, applyChange](const std::string& v) { try { sel->totalItemCount = std::max(0, std::stoi(v)); } catch (...) {} applyChange(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.TvItemH", "Item Height", fmtF(sel->itemHeight),
+                [sel, applyChange](const std::string& v) { try { sel->itemHeight = std::stof(v); } catch (...) {} applyChange(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.TvItemW", "Item Width", fmtF(sel->itemWidth),
+                [sel, applyChange](const std::string& v) { try { sel->itemWidth = std::stof(v); } catch (...) {} applyChange(); }));
+            rootPanel->children.push_back(makePropertyRow("WE.Det.TvCols", "Columns", std::to_string(sel->columnsPerRow),
+                [sel, applyChange](const std::string& v) { try { sel->columnsPerRow = std::max(1, std::stoi(v)); } catch (...) {} applyChange(); }));
+        }
     }
 
     // --- Section: Appearance ---
@@ -8246,7 +8517,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         sep.type = WidgetElementType::Panel;
         sep.fillX = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -8254,25 +8525,55 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
 
         // Color (RGBA as individual fields)
-        rootPanel->children.push_back(makePropertyRow("WE.Det.ColR", "Color R", fmtF(sel->color.x),
-            [sel, applyChange](const std::string& v) { try { sel->color.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.ColG", "Color G", fmtF(sel->color.y),
-            [sel, applyChange](const std::string& v) { try { sel->color.y = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.ColB", "Color B", fmtF(sel->color.z),
-            [sel, applyChange](const std::string& v) { try { sel->color.z = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.ColA", "Color A", fmtF(sel->color.w),
-            [sel, this](const std::string& v) { try { sel->color.w = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.ColR", "Color R", fmtF(sel->style.color.x),
+            [sel, applyChange](const std::string& v) { try { sel->style.color.x = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.ColG", "Color G", fmtF(sel->style.color.y),
+            [sel, applyChange](const std::string& v) { try { sel->style.color.y = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.ColB", "Color B", fmtF(sel->style.color.z),
+            [sel, applyChange](const std::string& v) { try { sel->style.color.z = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.ColA", "Color A", fmtF(sel->style.color.w),
+            [sel, this](const std::string& v) { try { sel->style.color.w = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+
+        // Hover color
+        rootPanel->children.push_back(makePropertyRow("WE.Det.HColR", "Hover R", fmtF(sel->style.hoverColor.x),
+            [sel, applyChange](const std::string& v) { try { sel->style.hoverColor.x = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.HColG", "Hover G", fmtF(sel->style.hoverColor.y),
+            [sel, applyChange](const std::string& v) { try { sel->style.hoverColor.y = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.HColB", "Hover B", fmtF(sel->style.hoverColor.z),
+            [sel, applyChange](const std::string& v) { try { sel->style.hoverColor.z = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.HColA", "Hover A", fmtF(sel->style.hoverColor.w),
+            [sel, applyChange](const std::string& v) { try { sel->style.hoverColor.w = std::stof(v); } catch (...) {} applyChange(); }));
+
+        // Pressed color
+        rootPanel->children.push_back(makePropertyRow("WE.Det.PColR", "Pressed R", fmtF(sel->style.pressedColor.x),
+            [sel, applyChange](const std::string& v) { try { sel->style.pressedColor.x = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.PColG", "Pressed G", fmtF(sel->style.pressedColor.y),
+            [sel, applyChange](const std::string& v) { try { sel->style.pressedColor.y = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.PColB", "Pressed B", fmtF(sel->style.pressedColor.z),
+            [sel, applyChange](const std::string& v) { try { sel->style.pressedColor.z = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.PColA", "Pressed A", fmtF(sel->style.pressedColor.w),
+            [sel, applyChange](const std::string& v) { try { sel->style.pressedColor.w = std::stof(v); } catch (...) {} applyChange(); }));
+
+        // Disabled color
+        rootPanel->children.push_back(makePropertyRow("WE.Det.DColR", "Disabled R", fmtF(sel->style.disabledColor.x),
+            [sel, applyChange](const std::string& v) { try { sel->style.disabledColor.x = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.DColG", "Disabled G", fmtF(sel->style.disabledColor.y),
+            [sel, applyChange](const std::string& v) { try { sel->style.disabledColor.y = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.DColB", "Disabled B", fmtF(sel->style.disabledColor.z),
+            [sel, applyChange](const std::string& v) { try { sel->style.disabledColor.z = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.DColA", "Disabled A", fmtF(sel->style.disabledColor.w),
+            [sel, applyChange](const std::string& v) { try { sel->style.disabledColor.w = std::stof(v); } catch (...) {} applyChange(); }));
 
         // Opacity
-        rootPanel->children.push_back(makePropertyRow("WE.Det.Opacity", "Opacity", fmtF(sel->opacity),
-            [sel, this](const std::string& v) { try { sel->opacity = std::max(0.0f, std::min(1.0f, std::stof(v))); } catch (...) {} markAllWidgetsDirty(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.Opacity", "Opacity", fmtF(sel->style.opacity),
+            [sel, this](const std::string& v) { try { sel->style.opacity = std::max(0.0f, std::min(1.0f, std::stof(v))); } catch (...) {} markAllWidgetsDirty(); }));
 
         // Visibility
         {
             CheckBoxWidget visCb;
             visCb.setLabel("Visible");
-            visCb.setChecked(sel->isVisible);
-            visCb.setOnCheckedChanged([sel, this](bool c) { sel->isVisible = c; markAllWidgetsDirty(); });
+            visCb.setChecked(sel->style.isVisible);
+            visCb.setOnCheckedChanged([sel, this](bool c) { sel->style.isVisible = c; markAllWidgetsDirty(); });
             WidgetElement visEl = visCb.toElement();
             visEl.id = "WE.Det.Visible";
             visEl.runtimeOnly = true;
@@ -8280,10 +8581,54 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         }
 
         // Border
-        rootPanel->children.push_back(makePropertyRow("WE.Det.BorderW", "Border Width", fmtF(sel->borderThickness),
-            [sel, this](const std::string& v) { try { sel->borderThickness = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.BorderR", "Border Radius", fmtF(sel->borderRadius),
-            [sel, this](const std::string& v) { try { sel->borderRadius = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.BorderW", "Border Width", fmtF(sel->style.borderThickness),
+            [sel, this](const std::string& v) { try { sel->style.borderThickness = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.BorderR", "Border Radius", fmtF(sel->style.borderRadius),
+            [sel, this](const std::string& v) { try { sel->style.borderRadius = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+
+        // Border color
+        rootPanel->children.push_back(makePropertyRow("WE.Det.BrdColR", "Border Col R", fmtF(sel->style.borderColor.x),
+            [sel, applyChange](const std::string& v) { try { sel->style.borderColor.x = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.BrdColG", "Border Col G", fmtF(sel->style.borderColor.y),
+            [sel, applyChange](const std::string& v) { try { sel->style.borderColor.y = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.BrdColB", "Border Col B", fmtF(sel->style.borderColor.z),
+            [sel, applyChange](const std::string& v) { try { sel->style.borderColor.z = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.BrdColA", "Border Col A", fmtF(sel->style.borderColor.w),
+            [sel, applyChange](const std::string& v) { try { sel->style.borderColor.w = std::stof(v); } catch (...) {} applyChange(); }));
+
+        // Outline color
+        rootPanel->children.push_back(makePropertyRow("WE.Det.OutColR", "Outline R", fmtF(sel->style.outlineColor.x),
+            [sel, applyChange](const std::string& v) { try { sel->style.outlineColor.x = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.OutColG", "Outline G", fmtF(sel->style.outlineColor.y),
+            [sel, applyChange](const std::string& v) { try { sel->style.outlineColor.y = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.OutColB", "Outline B", fmtF(sel->style.outlineColor.z),
+            [sel, applyChange](const std::string& v) { try { sel->style.outlineColor.z = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.OutColA", "Outline A", fmtF(sel->style.outlineColor.w),
+            [sel, applyChange](const std::string& v) { try { sel->style.outlineColor.w = std::stof(v); } catch (...) {} applyChange(); }));
+
+        // Gradient color
+        rootPanel->children.push_back(makePropertyRow("WE.Det.GradR", "Gradient R", fmtF(sel->style.gradientColor.x),
+            [sel, applyChange](const std::string& v) { try { sel->style.gradientColor.x = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.GradG", "Gradient G", fmtF(sel->style.gradientColor.y),
+            [sel, applyChange](const std::string& v) { try { sel->style.gradientColor.y = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.GradB", "Gradient B", fmtF(sel->style.gradientColor.z),
+            [sel, applyChange](const std::string& v) { try { sel->style.gradientColor.z = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.GradA", "Gradient A", fmtF(sel->style.gradientColor.w),
+            [sel, applyChange](const std::string& v) { try { sel->style.gradientColor.w = std::stof(v); } catch (...) {} applyChange(); }));
+
+        // Shadow
+        rootPanel->children.push_back(makePropertyRow("WE.Det.ShadR", "Shadow R", fmtF(sel->style.shadowColor.x),
+            [sel, applyChange](const std::string& v) { try { sel->style.shadowColor.x = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.ShadG", "Shadow G", fmtF(sel->style.shadowColor.y),
+            [sel, applyChange](const std::string& v) { try { sel->style.shadowColor.y = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.ShadB", "Shadow B", fmtF(sel->style.shadowColor.z),
+            [sel, applyChange](const std::string& v) { try { sel->style.shadowColor.z = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.ShadA", "Shadow A", fmtF(sel->style.shadowColor.w),
+            [sel, applyChange](const std::string& v) { try { sel->style.shadowColor.w = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.ShadOX", "Shadow Off X", fmtF(sel->style.shadowOffset.x),
+            [sel, applyChange](const std::string& v) { try { sel->style.shadowOffset.x = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.ShadOY", "Shadow Off Y", fmtF(sel->style.shadowOffset.y),
+            [sel, applyChange](const std::string& v) { try { sel->style.shadowOffset.y = std::stof(v); } catch (...) {} applyChange(); }));
 
         // Tooltip
         rootPanel->children.push_back(makePropertyRow("WE.Det.Tooltip", "Tooltip", sel->tooltipText,
@@ -8295,7 +8640,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             sep.type = WidgetElementType::Panel;
             sep.fillX = true;
             sep.minSize = Vec2{ 0.0f, 1.0f };
-            sep.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+            sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
             sep.runtimeOnly = true;
             rootPanel->children.push_back(std::move(sep));
 
@@ -8310,7 +8655,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
                 row.orientation = StackOrientation::Horizontal;
                 row.fillX = true;
                 row.sizeToContent = true;
-                row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
                 row.runtimeOnly = true;
 
                 WidgetElement lbl = makeLabel("WE.Det.BgBrush.Lbl", "Bg Brush");
@@ -8376,7 +8721,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
                 row.orientation = StackOrientation::Horizontal;
                 row.fillX = true;
                 row.sizeToContent = true;
-                row.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
                 row.runtimeOnly = true;
 
                 WidgetElement lbl = makeLabel("WE.Det.ClipMode.Lbl", "Clip Mode");
@@ -8438,7 +8783,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         sep.type = WidgetElementType::Panel;
         sep.fillX = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -8455,21 +8800,41 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             [sel, applyChange](const std::string& v) { try { sel->fontSize = std::stof(v); } catch (...) {} applyChange(); }));
 
         // Text color
-        rootPanel->children.push_back(makePropertyRow("WE.Det.TColR", "Text R", fmtF(sel->textColor.x),
-            [sel, applyChange](const std::string& v) { try { sel->textColor.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.TColG", "Text G", fmtF(sel->textColor.y),
-            [sel, applyChange](const std::string& v) { try { sel->textColor.y = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.TColB", "Text B", fmtF(sel->textColor.z),
-            [sel, applyChange](const std::string& v) { try { sel->textColor.z = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.TColA", "Text A", fmtF(sel->textColor.w),
-            [sel, this](const std::string& v) { try { sel->textColor.w = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.TColR", "Text R", fmtF(sel->style.textColor.x),
+            [sel, applyChange](const std::string& v) { try { sel->style.textColor.x = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.TColG", "Text G", fmtF(sel->style.textColor.y),
+            [sel, applyChange](const std::string& v) { try { sel->style.textColor.y = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.TColB", "Text B", fmtF(sel->style.textColor.z),
+            [sel, applyChange](const std::string& v) { try { sel->style.textColor.z = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.TColA", "Text A", fmtF(sel->style.textColor.w),
+            [sel, this](const std::string& v) { try { sel->style.textColor.w = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
+
+        // Text hover color
+        rootPanel->children.push_back(makePropertyRow("WE.Det.THColR", "Text Hover R", fmtF(sel->style.textHoverColor.x),
+            [sel, applyChange](const std::string& v) { try { sel->style.textHoverColor.x = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.THColG", "Text Hover G", fmtF(sel->style.textHoverColor.y),
+            [sel, applyChange](const std::string& v) { try { sel->style.textHoverColor.y = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.THColB", "Text Hover B", fmtF(sel->style.textHoverColor.z),
+            [sel, applyChange](const std::string& v) { try { sel->style.textHoverColor.z = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.THColA", "Text Hover A", fmtF(sel->style.textHoverColor.w),
+            [sel, applyChange](const std::string& v) { try { sel->style.textHoverColor.w = std::stof(v); } catch (...) {} applyChange(); }));
+
+        // Text pressed color
+        rootPanel->children.push_back(makePropertyRow("WE.Det.TPColR", "Text Press R", fmtF(sel->style.textPressedColor.x),
+            [sel, applyChange](const std::string& v) { try { sel->style.textPressedColor.x = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.TPColG", "Text Press G", fmtF(sel->style.textPressedColor.y),
+            [sel, applyChange](const std::string& v) { try { sel->style.textPressedColor.y = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.TPColB", "Text Press B", fmtF(sel->style.textPressedColor.z),
+            [sel, applyChange](const std::string& v) { try { sel->style.textPressedColor.z = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.TPColA", "Text Press A", fmtF(sel->style.textPressedColor.w),
+            [sel, applyChange](const std::string& v) { try { sel->style.textPressedColor.w = std::stof(v); } catch (...) {} applyChange(); }));
 
         // Bold / Italic
         {
             CheckBoxWidget boldCb;
             boldCb.setLabel("Bold");
-            boldCb.setChecked(sel->isBold);
-            boldCb.setOnCheckedChanged([sel, this](bool c) { sel->isBold = c; markAllWidgetsDirty(); });
+            boldCb.setChecked(sel->style.isBold);
+            boldCb.setOnCheckedChanged([sel, this](bool c) { sel->style.isBold = c; markAllWidgetsDirty(); });
             WidgetElement boldEl = boldCb.toElement();
             boldEl.id = "WE.Det.Bold";
             boldEl.runtimeOnly = true;
@@ -8478,13 +8843,19 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         {
             CheckBoxWidget italicCb;
             italicCb.setLabel("Italic");
-            italicCb.setChecked(sel->isItalic);
-            italicCb.setOnCheckedChanged([sel, this](bool c) { sel->isItalic = c; markAllWidgetsDirty(); });
+            italicCb.setChecked(sel->style.isItalic);
+            italicCb.setOnCheckedChanged([sel, this](bool c) { sel->style.isItalic = c; markAllWidgetsDirty(); });
             WidgetElement italicEl = italicCb.toElement();
             italicEl.id = "WE.Det.Italic";
             italicEl.runtimeOnly = true;
             rootPanel->children.push_back(std::move(italicEl));
         }
+
+        // Letter spacing / Line spacing
+        rootPanel->children.push_back(makePropertyRow("WE.Det.LetterSp", "Letter Spacing", fmtF(sel->style.letterSpacing),
+            [sel, applyChange](const std::string& v) { try { sel->style.letterSpacing = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.LineSp", "Line Spacing", fmtF(sel->style.lineSpacing),
+            [sel, applyChange](const std::string& v) { try { sel->style.lineSpacing = std::stof(v); } catch (...) {} applyChange(); }));
 
         // RadioGroup for RadioButton
         if (sel->type == WidgetElementType::RadioButton)
@@ -8501,7 +8872,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         sep.type = WidgetElementType::Panel;
         sep.fillX = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -8519,7 +8890,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         sep.type = WidgetElementType::Panel;
         sep.fillX = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -8532,6 +8903,16 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             [sel, applyChange](const std::string& v) { try { sel->maxValue = std::stof(v); } catch (...) {} applyChange(); }));
         rootPanel->children.push_back(makePropertyRow("WE.Det.CurVal", "Value", fmtF(sel->valueFloat),
             [sel, applyChange](const std::string& v) { try { sel->valueFloat = std::stof(v); } catch (...) {} applyChange(); }));
+
+        // Fill color
+        rootPanel->children.push_back(makePropertyRow("WE.Det.FillR", "Fill R", fmtF(sel->style.fillColor.x),
+            [sel, applyChange](const std::string& v) { try { sel->style.fillColor.x = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.FillG", "Fill G", fmtF(sel->style.fillColor.y),
+            [sel, applyChange](const std::string& v) { try { sel->style.fillColor.y = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.FillB", "Fill B", fmtF(sel->style.fillColor.z),
+            [sel, applyChange](const std::string& v) { try { sel->style.fillColor.z = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("WE.Det.FillA", "Fill A", fmtF(sel->style.fillColor.w),
+            [sel, applyChange](const std::string& v) { try { sel->style.fillColor.w = std::stof(v); } catch (...) {} applyChange(); }));
     }
 
     rightEntry->widget->markLayoutDirty();
@@ -8584,7 +8965,7 @@ void UIManager::openLandscapeManagerPopup()
         e.to        = Vec2{ nx(x1), ny(y1) };
         e.text      = text;
         e.fontSize  = 13.0f;
-        e.textColor = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
+        e.style.textColor = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
         e.textAlignV = TextAlignV::Center;
         e.padding   = Vec2{ 6.0f, 0.0f };
         return e;
@@ -8600,9 +8981,9 @@ void UIManager::openLandscapeManagerPopup()
         e.to           = Vec2{ nx(x1), ny(y1) };
         e.value        = val;
         e.fontSize     = 13.0f;
-        e.color        = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
-        e.hoverColor   = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
-        e.textColor    = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+        e.style.color        = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
+        e.style.hoverColor   = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
+        e.style.textColor    = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
         e.padding      = Vec2{ 6.0f, 4.0f };
         e.hitTestMode = HitTestMode::Enabled;
         return e;
@@ -8617,7 +8998,7 @@ void UIManager::openLandscapeManagerPopup()
         bg.id    = "LM.Bg";
         bg.from  = Vec2{ 0.0f, 0.0f };
         bg.to    = Vec2{ 1.0f, 1.0f };
-        bg.color = Vec4{ 0.13f, 0.13f, 0.16f, 1.0f };
+        bg.style.color = Vec4{ 0.13f, 0.13f, 0.16f, 1.0f };
         elements.push_back(bg);
     }
 
@@ -8628,7 +9009,7 @@ void UIManager::openLandscapeManagerPopup()
         title.id    = "LM.TitleBg";
         title.from  = Vec2{ 0.0f, 0.0f };
         title.to    = Vec2{ 1.0f, ny(44.0f) };
-        title.color = Vec4{ 0.09f, 0.09f, 0.13f, 1.0f };
+        title.style.color = Vec4{ 0.09f, 0.09f, 0.13f, 1.0f };
         elements.push_back(title);
 
         elements.push_back(makeLabel("LM.TitleText", "Landscape Manager",
@@ -8692,7 +9073,7 @@ void UIManager::openLandscapeManagerPopup()
         sep.id    = "LM.Sep";
         sep.from  = Vec2{ nx(8.0f), ny(rowY1(4) + 12.0f) };
         sep.to    = Vec2{ nx(W - 8.0f), ny(rowY1(4) + 14.0f) };
-        sep.color = Vec4{ 0.28f, 0.28f, 0.32f, 1.0f };
+        sep.style.color = Vec4{ 0.28f, 0.28f, 0.32f, 1.0f };
         elements.push_back(sep);
     }
 
@@ -8708,9 +9089,9 @@ void UIManager::openLandscapeManagerPopup()
         btn.to            = Vec2{ nx(W - 114.0f), ny(btnY1) };
         btn.text          = "Create";
         btn.fontSize      = 13.0f;
-        btn.color         = Vec4{ 0.12f, 0.32f, 0.12f, 1.0f };
-        btn.hoverColor    = Vec4{ 0.18f, 0.46f, 0.18f, 1.0f };
-        btn.textColor     = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+        btn.style.color         = Vec4{ 0.12f, 0.32f, 0.12f, 1.0f };
+        btn.style.hoverColor    = Vec4{ 0.18f, 0.46f, 0.18f, 1.0f };
+        btn.style.textColor     = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
         btn.textAlignH    = TextAlignH::Center;
         btn.textAlignV    = TextAlignV::Center;
         btn.padding       = Vec2{ 8.0f, 4.0f };
@@ -8762,9 +9143,9 @@ void UIManager::openLandscapeManagerPopup()
         btn.to            = Vec2{ nx(W - 12.0f),  ny(btnY1) };
         btn.text          = "Cancel";
         btn.fontSize      = 13.0f;
-        btn.color         = Vec4{ 0.22f, 0.22f, 0.25f, 1.0f };
-        btn.hoverColor    = Vec4{ 0.32f, 0.32f, 0.36f, 1.0f };
-        btn.textColor     = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
+        btn.style.color         = Vec4{ 0.22f, 0.22f, 0.25f, 1.0f };
+        btn.style.hoverColor    = Vec4{ 0.32f, 0.32f, 0.36f, 1.0f };
+        btn.style.textColor     = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
         btn.textAlignH    = TextAlignH::Center;
         btn.textAlignV    = TextAlignV::Center;
         btn.padding       = Vec2{ 8.0f, 4.0f };
@@ -8817,7 +9198,7 @@ void UIManager::openEngineSettingsPopup()
         bg.id    = "ES.Bg";
         bg.from  = Vec2{ 0.0f, 0.0f };
         bg.to    = Vec2{ 1.0f, 1.0f };
-        bg.color = Vec4{ 0.13f, 0.13f, 0.16f, 1.0f };
+        bg.style.color = Vec4{ 0.13f, 0.13f, 0.16f, 1.0f };
         elements.push_back(bg);
     }
 
@@ -8828,7 +9209,7 @@ void UIManager::openEngineSettingsPopup()
         title.id    = "ES.TitleBg";
         title.from  = Vec2{ 0.0f, 0.0f };
         title.to    = Vec2{ 1.0f, ny(kTitleH) };
-        title.color = Vec4{ 0.09f, 0.09f, 0.13f, 1.0f };
+        title.style.color = Vec4{ 0.09f, 0.09f, 0.13f, 1.0f };
         elements.push_back(title);
 
         WidgetElement titleText;
@@ -8838,7 +9219,7 @@ void UIManager::openEngineSettingsPopup()
         titleText.to        = Vec2{ nx(W - 8.0f), ny(kTitleH) };
         titleText.text      = "Engine Settings";
         titleText.fontSize  = 14.0f;
-        titleText.textColor = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+        titleText.style.textColor = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
         titleText.textAlignV = TextAlignV::Center;
         titleText.padding   = Vec2{ 6.0f, 0.0f };
         elements.push_back(titleText);
@@ -8851,7 +9232,7 @@ void UIManager::openEngineSettingsPopup()
         sidebarBg.id    = "ES.SidebarBg";
         sidebarBg.from  = Vec2{ 0.0f, ny(kTitleH) };
         sidebarBg.to    = Vec2{ nx(kSidebarW), 1.0f };
-        sidebarBg.color = Vec4{ 0.10f, 0.10f, 0.13f, 1.0f };
+        sidebarBg.style.color = Vec4{ 0.10f, 0.10f, 0.13f, 1.0f };
         elements.push_back(sidebarBg);
     }
 
@@ -8862,7 +9243,7 @@ void UIManager::openEngineSettingsPopup()
         sep.id    = "ES.SidebarSep";
         sep.from  = Vec2{ nx(kSidebarW - 1.0f), ny(kTitleH) };
         sep.to    = Vec2{ nx(kSidebarW), 1.0f };
-        sep.color = Vec4{ 0.25f, 0.25f, 0.30f, 1.0f };
+        sep.style.color = Vec4{ 0.25f, 0.25f, 0.30f, 1.0f };
         elements.push_back(sep);
     }
 
@@ -8892,7 +9273,7 @@ void UIManager::openEngineSettingsPopup()
             sec.id        = id;
             sec.text      = label;
             sec.fontSize  = 13.0f;
-            sec.textColor = Vec4{ 0.55f, 0.60f, 0.70f, 1.0f };
+            sec.style.textColor = Vec4{ 0.55f, 0.60f, 0.70f, 1.0f };
             sec.textAlignV = TextAlignV::Center;
             sec.padding   = Vec2{ 4.0f, 0.0f };
             sec.minSize   = Vec2{ contentW - kContentPad * 2.0f, kRowH };
@@ -8905,7 +9286,7 @@ void UIManager::openEngineSettingsPopup()
             WidgetElement sep;
             sep.type    = WidgetElementType::Panel;
             sep.id      = id;
-            sep.color   = Vec4{ 0.28f, 0.28f, 0.32f, 1.0f };
+            sep.style.color   = Vec4{ 0.28f, 0.28f, 0.32f, 1.0f };
             sep.minSize = Vec2{ contentW - kContentPad * 2.0f, 2.0f };
             entry->children.push_back(sep);
             ++row;
@@ -8919,7 +9300,7 @@ void UIManager::openEngineSettingsPopup()
             rowPanel.id          = id + ".Row";
             rowPanel.orientation = StackOrientation::Horizontal;
             rowPanel.minSize     = Vec2{ contentW - kContentPad * 2.0f, kRowH };
-            rowPanel.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            rowPanel.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             rowPanel.padding     = Vec2{ 6.0f, 2.0f };
 
             WidgetElement lbl;
@@ -8927,7 +9308,7 @@ void UIManager::openEngineSettingsPopup()
             lbl.id        = id + ".Lbl";
             lbl.text      = label;
             lbl.fontSize  = 13.0f;
-            lbl.textColor = Vec4{ 0.88f, 0.88f, 0.92f, 1.0f };
+            lbl.style.textColor = Vec4{ 0.88f, 0.88f, 0.92f, 1.0f };
             lbl.textAlignV = TextAlignV::Center;
             lbl.minSize   = Vec2{ 140.0f, kRowH };
             lbl.padding   = Vec2{ 0.0f, 0.0f };
@@ -8938,9 +9319,9 @@ void UIManager::openEngineSettingsPopup()
             eb.id            = id;
             eb.value         = value;
             eb.fontSize      = 12.0f;
-            eb.color         = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
-            eb.hoverColor    = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
-            eb.textColor     = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+            eb.style.color         = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
+            eb.style.hoverColor    = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
+            eb.style.textColor     = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
             eb.padding       = Vec2{ 6.0f, 4.0f };
             eb.hitTestMode = HitTestMode::Enabled;
             eb.minSize       = Vec2{ contentW - kContentPad * 2.0f - 140.0f - 12.0f, kRowH };
@@ -8960,10 +9341,10 @@ void UIManager::openEngineSettingsPopup()
             cb.text          = label;
             cb.fontSize      = 13.0f;
             cb.isChecked     = checked;
-            cb.color         = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
-            cb.hoverColor    = Vec4{ 0.24f, 0.24f, 0.30f, 1.0f };
-            cb.fillColor     = Vec4{ 0.25f, 0.6f, 0.95f, 1.0f };
-            cb.textColor     = Vec4{ 0.88f, 0.88f, 0.92f, 1.0f };
+            cb.style.color         = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
+            cb.style.hoverColor    = Vec4{ 0.24f, 0.24f, 0.30f, 1.0f };
+            cb.style.fillColor     = Vec4{ 0.25f, 0.6f, 0.95f, 1.0f };
+            cb.style.textColor     = Vec4{ 0.88f, 0.88f, 0.92f, 1.0f };
             cb.padding       = Vec2{ 6.0f, 4.0f };
             cb.hitTestMode = HitTestMode::Enabled;
             cb.minSize       = Vec2{ contentW - kContentPad * 2.0f, kRowH };
@@ -8981,7 +9362,7 @@ void UIManager::openEngineSettingsPopup()
             rowPanel.id          = id + ".Row";
             rowPanel.orientation = StackOrientation::Horizontal;
             rowPanel.minSize     = Vec2{ contentW - kContentPad * 2.0f, kRowH };
-            rowPanel.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            rowPanel.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             rowPanel.padding     = Vec2{ 6.0f, 2.0f };
 
             WidgetElement lbl;
@@ -8989,7 +9370,7 @@ void UIManager::openEngineSettingsPopup()
             lbl.id        = id + ".Lbl";
             lbl.text      = label;
             lbl.fontSize  = 13.0f;
-            lbl.textColor = Vec4{ 0.88f, 0.88f, 0.92f, 1.0f };
+            lbl.style.textColor = Vec4{ 0.88f, 0.88f, 0.92f, 1.0f };
             lbl.textAlignV = TextAlignV::Center;
             lbl.minSize   = Vec2{ 140.0f, kRowH };
             lbl.padding   = Vec2{ 0.0f, 0.0f };
@@ -9001,9 +9382,9 @@ void UIManager::openEngineSettingsPopup()
             dd.items         = items;
             dd.selectedIndex = selected;
             dd.fontSize      = 12.0f;
-            dd.color         = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
-            dd.hoverColor    = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
-            dd.textColor     = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+            dd.style.color         = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
+            dd.style.hoverColor    = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
+            dd.style.textColor     = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
             dd.padding       = Vec2{ 6.0f, 4.0f };
             dd.hitTestMode = HitTestMode::Enabled;
             dd.minSize       = Vec2{ contentW - kContentPad * 2.0f - 140.0f - 12.0f, kRowH };
@@ -9196,7 +9577,7 @@ void UIManager::openEngineSettingsPopup()
             auto* catBtn = pMgr.findElementById(btnId);
             if (catBtn)
             {
-                catBtn->color = (static_cast<int>(ci) == state->activeCategory)
+                catBtn->style.color = (static_cast<int>(ci) == state->activeCategory)
                     ? Vec4{ 0.20f, 0.20f, 0.28f, 1.0f }
                     : Vec4{ 0.10f, 0.10f, 0.13f, 0.0f };
             }
@@ -9217,11 +9598,11 @@ void UIManager::openEngineSettingsPopup()
         catBtn.to            = Vec2{ nx(kSidebarW - 4.0f), ny(by1) };
         catBtn.text          = categories[ci];
         catBtn.fontSize      = 13.0f;
-        catBtn.color         = (static_cast<int>(ci) == state->activeCategory)
+        catBtn.style.color         = (static_cast<int>(ci) == state->activeCategory)
             ? Vec4{ 0.20f, 0.20f, 0.28f, 1.0f }
             : Vec4{ 0.10f, 0.10f, 0.13f, 0.0f };
-        catBtn.hoverColor    = Vec4{ 0.22f, 0.22f, 0.28f, 1.0f };
-        catBtn.textColor     = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
+        catBtn.style.hoverColor    = Vec4{ 0.22f, 0.22f, 0.28f, 1.0f };
+        catBtn.style.textColor     = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
         catBtn.textAlignH    = TextAlignH::Left;
         catBtn.textAlignV    = TextAlignV::Center;
         catBtn.padding       = Vec2{ 12.0f, 4.0f };
@@ -9246,7 +9627,7 @@ void UIManager::openEngineSettingsPopup()
         content.id          = "ES.ContentArea";
         content.from        = Vec2{ nx(kSidebarW + 16.0f), ny(kTitleH + 16.0f) };
         content.to          = Vec2{ nx(W - 8.0f), ny(H - 8.0f) };
-        content.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        content.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
         content.orientation = StackOrientation::Vertical;
         content.padding     = Vec2{ 4.0f, 4.0f };
         content.scrollable  = true;
@@ -9320,7 +9701,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         bg.id    = "PS.Bg";
         bg.from  = Vec2{ 0.0f, 0.0f };
         bg.to    = Vec2{ 1.0f, 1.0f };
-        bg.color = Vec4{ 0.11f, 0.11f, 0.14f, 1.0f };
+        bg.style.color = Vec4{ 0.11f, 0.11f, 0.14f, 1.0f };
         elements.push_back(bg);
     }
 
@@ -9331,7 +9712,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         titleBg.id    = "PS.TitleBg";
         titleBg.from  = Vec2{ 0.0f, 0.0f };
         titleBg.to    = Vec2{ 1.0f, ny(kTitleH) };
-        titleBg.color = Vec4{ 0.14f, 0.16f, 0.22f, 1.0f };
+        titleBg.style.color = Vec4{ 0.14f, 0.16f, 0.22f, 1.0f };
         elements.push_back(titleBg);
 
         WidgetElement accent;
@@ -9339,7 +9720,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         accent.id    = "PS.TitleAccent";
         accent.from  = Vec2{ 0.0f, ny(kTitleH - 2.0f) };
         accent.to    = Vec2{ 1.0f, ny(kTitleH) };
-        accent.color = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
+        accent.style.color = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
         elements.push_back(accent);
 
         WidgetElement titleText;
@@ -9349,7 +9730,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         titleText.to        = Vec2{ nx(W - 12.0f), ny(kTitleH - 2.0f) };
         titleText.text      = "HorizonEngine  —  Project Selection";
         titleText.fontSize  = 16.0f;
-        titleText.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+        titleText.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
         titleText.textAlignV = TextAlignV::Center;
         titleText.padding   = Vec2{ 6.0f, 0.0f };
         elements.push_back(titleText);
@@ -9362,7 +9743,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         sidebarBg.id    = "PS.SidebarBg";
         sidebarBg.from  = Vec2{ 0.0f, ny(kTitleH) };
         sidebarBg.to    = Vec2{ nx(kSidebarW), 1.0f };
-        sidebarBg.color = Vec4{ 0.09f, 0.09f, 0.11f, 1.0f };
+        sidebarBg.style.color = Vec4{ 0.09f, 0.09f, 0.11f, 1.0f };
         elements.push_back(sidebarBg);
 
         WidgetElement sep;
@@ -9370,7 +9751,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         sep.id    = "PS.SidebarSep";
         sep.from  = Vec2{ nx(kSidebarW - 1.0f), ny(kTitleH) };
         sep.to    = Vec2{ nx(kSidebarW), 1.0f };
-        sep.color = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
+        sep.style.color = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
         elements.push_back(sep);
     }
 
@@ -9381,7 +9762,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         footerSep.id    = "PS.FooterSep";
         footerSep.from  = Vec2{ nx(kSidebarW), ny(H - kFooterH - 1.0f) };
         footerSep.to    = Vec2{ 1.0f, ny(H - kFooterH) };
-        footerSep.color = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
+        footerSep.style.color = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
         elements.push_back(footerSep);
 
         WidgetElement footerBg;
@@ -9389,7 +9770,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         footerBg.id    = "PS.FooterBg";
         footerBg.from  = Vec2{ nx(kSidebarW), ny(H - kFooterH) };
         footerBg.to    = Vec2{ 1.0f, 1.0f };
-        footerBg.color = Vec4{ 0.10f, 0.10f, 0.13f, 1.0f };
+        footerBg.style.color = Vec4{ 0.10f, 0.10f, 0.13f, 1.0f };
         elements.push_back(footerBg);
     }
 
@@ -9401,10 +9782,10 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         cb.text          = "Set as default project (skip this screen on next start)";
         cb.fontSize      = 12.0f;
         cb.isChecked     = state->setAsDefault;
-        cb.color         = Vec4{ 0.22f, 0.22f, 0.28f, 1.0f };
-        cb.hoverColor    = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
-        cb.fillColor     = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
-        cb.textColor     = Vec4{ 0.88f, 0.90f, 0.95f, 1.0f };
+        cb.style.color         = Vec4{ 0.22f, 0.22f, 0.28f, 1.0f };
+        cb.style.hoverColor    = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
+        cb.style.fillColor     = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
+        cb.style.textColor     = Vec4{ 0.88f, 0.90f, 0.95f, 1.0f };
         cb.padding       = Vec2{ 8.0f, 4.0f };
         cb.hitTestMode = HitTestMode::Enabled;
         cb.from          = Vec2{ nx(kSidebarW + 12.0f), ny(H - kFooterH + 4.0f) };
@@ -9447,7 +9828,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             sec.id        = id;
             sec.text      = label;
             sec.fontSize  = 14.0f;
-            sec.textColor = Vec4{ 0.45f, 0.60f, 0.90f, 1.0f };
+            sec.style.textColor = Vec4{ 0.45f, 0.60f, 0.90f, 1.0f };
             sec.textAlignV = TextAlignV::Center;
             sec.padding   = Vec2{ 4.0f, 2.0f };
             sec.minSize   = Vec2{ contentW - kContentPad * 2.0f, kRowH };
@@ -9459,7 +9840,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             WidgetElement sep;
             sep.type    = WidgetElementType::Panel;
             sep.id      = id;
-            sep.color   = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
+            sep.style.color   = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
             sep.minSize = Vec2{ contentW - kContentPad * 2.0f, 1.0f };
             entry->children.push_back(sep);
         };
@@ -9472,9 +9853,9 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             btn.id            = id;
             btn.text          = label;
             btn.fontSize      = 14.0f;
-            btn.color         = bgColor;
-            btn.hoverColor    = hoverColor;
-            btn.textColor     = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+            btn.style.color         = bgColor;
+            btn.style.hoverColor    = hoverColor;
+            btn.style.textColor     = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
             btn.textAlignH    = TextAlignH::Center;
             btn.textAlignV    = TextAlignV::Center;
             btn.padding       = Vec2{ 16.0f, 8.0f };
@@ -9494,9 +9875,9 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             btn.id            = id;
             btn.text          = label;
             btn.fontSize      = 12.0f;
-            btn.color         = Vec4{ 0.18f, 0.20f, 0.26f, 1.0f };
-            btn.hoverColor    = Vec4{ 0.25f, 0.28f, 0.36f, 1.0f };
-            btn.textColor     = Vec4{ 0.85f, 0.88f, 0.95f, 1.0f };
+            btn.style.color         = Vec4{ 0.18f, 0.20f, 0.26f, 1.0f };
+            btn.style.hoverColor    = Vec4{ 0.25f, 0.28f, 0.36f, 1.0f };
+            btn.style.textColor     = Vec4{ 0.85f, 0.88f, 0.95f, 1.0f };
             btn.textAlignH    = TextAlignH::Center;
             btn.textAlignV    = TextAlignV::Center;
             btn.padding       = Vec2{ 12.0f, 6.0f };
@@ -9516,7 +9897,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             rowPanel.id          = id + ".Row";
             rowPanel.orientation = StackOrientation::Horizontal;
             rowPanel.minSize     = Vec2{ contentW - kContentPad * 2.0f, kRowH };
-            rowPanel.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            rowPanel.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             rowPanel.padding     = Vec2{ 6.0f, 2.0f };
 
             WidgetElement lbl;
@@ -9524,7 +9905,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             lbl.id        = id + ".Lbl";
             lbl.text      = label;
             lbl.fontSize  = 13.0f;
-            lbl.textColor = Vec4{ 0.80f, 0.82f, 0.88f, 1.0f };
+            lbl.style.textColor = Vec4{ 0.80f, 0.82f, 0.88f, 1.0f };
             lbl.textAlignV = TextAlignV::Center;
             lbl.minSize   = Vec2{ 120.0f, kRowH };
             rowPanel.children.push_back(lbl);
@@ -9534,9 +9915,9 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             eb.id            = id;
             eb.value         = value;
             eb.fontSize      = 13.0f;
-            eb.color         = Vec4{ 0.15f, 0.16f, 0.20f, 1.0f };
-            eb.hoverColor    = Vec4{ 0.20f, 0.22f, 0.28f, 1.0f };
-            eb.textColor     = Vec4{ 0.95f, 0.95f, 0.97f, 1.0f };
+            eb.style.color         = Vec4{ 0.15f, 0.16f, 0.20f, 1.0f };
+            eb.style.hoverColor    = Vec4{ 0.20f, 0.22f, 0.28f, 1.0f };
+            eb.style.textColor     = Vec4{ 0.95f, 0.95f, 0.97f, 1.0f };
             eb.padding       = Vec2{ 8.0f, 5.0f };
             eb.hitTestMode = HitTestMode::Enabled;
             eb.minSize       = Vec2{ contentW - kContentPad * 2.0f - 120.0f - 12.0f, kRowH };
@@ -9560,7 +9941,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 noProjects.id        = "PS.C.NoProjects";
                 noProjects.text      = "No known projects yet.\nOpen or create a project to get started.";
                 noProjects.fontSize  = 13.0f;
-                noProjects.textColor = Vec4{ 0.45f, 0.47f, 0.55f, 1.0f };
+                noProjects.style.textColor = Vec4{ 0.45f, 0.47f, 0.55f, 1.0f };
                 noProjects.textAlignV = TextAlignV::Center;
                 noProjects.padding   = Vec2{ 10.0f, 16.0f };
                 noProjects.minSize   = Vec2{ contentW - kContentPad * 2.0f, 80.0f };
@@ -9575,7 +9956,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     hdrRow.id          = "PS.C.ListHdr";
                     hdrRow.orientation = StackOrientation::Horizontal;
                     hdrRow.minSize     = Vec2{ contentW - kContentPad * 2.0f, 26.0f };
-                    hdrRow.color       = Vec4{ 0.10f, 0.10f, 0.13f, 1.0f };
+                    hdrRow.style.color       = Vec4{ 0.10f, 0.10f, 0.13f, 1.0f };
                     hdrRow.padding     = Vec2{ 18.0f, 2.0f };
 
                     WidgetElement hdrName;
@@ -9583,7 +9964,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     hdrName.id        = "PS.C.ListHdr.Name";
                     hdrName.text      = "Project";
                     hdrName.fontSize  = 11.0f;
-                    hdrName.textColor = Vec4{ 0.45f, 0.50f, 0.65f, 1.0f };
+                    hdrName.style.textColor = Vec4{ 0.45f, 0.50f, 0.65f, 1.0f };
                     hdrName.textAlignV = TextAlignV::Center;
                     hdrName.minSize   = Vec2{ 180.0f, 24.0f };
                     hdrRow.children.push_back(hdrName);
@@ -9593,7 +9974,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     hdrPath.id        = "PS.C.ListHdr.Path";
                     hdrPath.text      = "Location";
                     hdrPath.fontSize  = 11.0f;
-                    hdrPath.textColor = Vec4{ 0.45f, 0.50f, 0.65f, 1.0f };
+                    hdrPath.style.textColor = Vec4{ 0.45f, 0.50f, 0.65f, 1.0f };
                     hdrPath.textAlignV = TextAlignV::Center;
                     hdrPath.fillX     = true;
                     hdrPath.minSize   = Vec2{ 0.0f, 24.0f };
@@ -9618,12 +9999,12 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     row.id          = rowId + ".Row";
                     row.orientation = StackOrientation::Horizontal;
                     row.minSize     = Vec2{ contentW - kContentPad * 2.0f, 44.0f };
-                    row.color       = isEven
+                    row.style.color       = isEven
                         ? Vec4{ 0.15f, 0.15f, 0.20f, 1.0f }
                         : Vec4{ 0.11f, 0.11f, 0.14f, 1.0f };
-                    row.hoverColor  = exists
+                    row.style.hoverColor  = exists
                         ? Vec4{ 0.20f, 0.26f, 0.40f, 1.0f }
-                        : row.color;
+                        : row.style.color;
                     row.padding     = Vec2{ 0.0f, 0.0f };
                     row.hitTestMode = exists ? HitTestMode::Enabled : HitTestMode::DisabledSelf;
 
@@ -9631,7 +10012,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     WidgetElement accent;
                     accent.type    = WidgetElementType::Panel;
                     accent.id      = rowId + ".Accent";
-                    accent.color   = exists
+                    accent.style.color   = exists
                         ? Vec4{ 0.30f, 0.55f, 0.95f, 1.0f }
                         : Vec4{ 0.45f, 0.28f, 0.28f, 0.6f };
                     accent.minSize = Vec2{ 4.0f, 44.0f };
@@ -9643,7 +10024,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     nameCol.id        = rowId + ".Name";
                     nameCol.text      = projName;
                     nameCol.fontSize  = 14.0f;
-                    nameCol.textColor = exists
+                    nameCol.style.textColor = exists
                         ? Vec4{ 0.95f, 0.97f, 1.0f, 1.0f }
                         : Vec4{ 0.50f, 0.38f, 0.38f, 1.0f };
                     nameCol.textAlignV = TextAlignV::Center;
@@ -9657,7 +10038,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     pathCol.id        = rowId + ".Path";
                     pathCol.text      = exists ? projPath : (projPath + "  (not found)");
                     pathCol.fontSize  = 11.0f;
-                    pathCol.textColor = exists
+                    pathCol.style.textColor = exists
                         ? Vec4{ 0.48f, 0.54f, 0.68f, 1.0f }
                         : Vec4{ 0.45f, 0.30f, 0.30f, 0.8f };
                     pathCol.textAlignV = TextAlignV::Center;
@@ -9671,9 +10052,9 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     removeBtn.id = rowId + ".Remove";
                     removeBtn.text = "X";
                     removeBtn.fontSize = 12.0f;
-                    removeBtn.color = Vec4{ 0.35f, 0.16f, 0.16f, 0.95f };
-                    removeBtn.hoverColor = Vec4{ 0.55f, 0.22f, 0.22f, 1.0f };
-                    removeBtn.textColor = Vec4{ 0.95f, 0.88f, 0.88f, 1.0f };
+                    removeBtn.style.color = Vec4{ 0.35f, 0.16f, 0.16f, 0.95f };
+                    removeBtn.style.hoverColor = Vec4{ 0.55f, 0.22f, 0.22f, 1.0f };
+                    removeBtn.style.textColor = Vec4{ 0.95f, 0.88f, 0.88f, 1.0f };
                     removeBtn.textAlignH = TextAlignH::Center;
                     removeBtn.textAlignV = TextAlignV::Center;
                     removeBtn.padding = Vec2{ 0.0f, 0.0f };
@@ -9745,7 +10126,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                         WidgetElement rowSep;
                         rowSep.type    = WidgetElementType::Panel;
                         rowSep.id      = rowId + ".Sep";
-                        rowSep.color   = Vec4{ 0.22f, 0.24f, 0.30f, 1.0f };
+                        rowSep.style.color   = Vec4{ 0.22f, 0.24f, 0.30f, 1.0f };
                         rowSep.minSize = Vec2{ contentW - kContentPad * 2.0f, 1.0f };
                         entry->children.push_back(rowSep);
                     }
@@ -9763,7 +10144,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             desc.id        = "PS.C.OpenDesc";
             desc.text      = "Select a .project file to open an existing project.";
             desc.fontSize  = 13.0f;
-            desc.textColor = Vec4{ 0.65f, 0.68f, 0.75f, 1.0f };
+            desc.style.textColor = Vec4{ 0.65f, 0.68f, 0.75f, 1.0f };
             desc.padding   = Vec2{ 10.0f, 12.0f };
             desc.minSize   = Vec2{ contentW - kContentPad * 2.0f, 44.0f };
             entry->children.push_back(desc);
@@ -9908,7 +10289,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 preview.id        = "PS.C.Preview";
                 preview.text      = "Target:  " + previewPath;
                 preview.fontSize  = 11.0f;
-                preview.textColor = Vec4{ 0.45f, 0.55f, 0.70f, 1.0f };
+                preview.style.textColor = Vec4{ 0.45f, 0.55f, 0.70f, 1.0f };
                 preview.padding   = Vec2{ 10.0f, 6.0f };
                 preview.minSize   = Vec2{ contentW - kContentPad * 2.0f, 26.0f };
                 entry->children.push_back(preview);
@@ -9918,7 +10299,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 WidgetElement spacer;
                 spacer.type    = WidgetElementType::Panel;
                 spacer.id      = "PS.C.Spacer.New";
-                spacer.color   = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                spacer.style.color   = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
                 spacer.minSize = Vec2{ contentW - kContentPad * 2.0f, 8.0f };
                 entry->children.push_back(spacer);
             }
@@ -9930,10 +10311,10 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 includeDefaultContentCb.text = "Include default content";
                 includeDefaultContentCb.fontSize = 12.0f;
                 includeDefaultContentCb.isChecked = state->includeDefaultContent;
-                includeDefaultContentCb.color = Vec4{ 0.22f, 0.22f, 0.28f, 1.0f };
-                includeDefaultContentCb.hoverColor = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
-                includeDefaultContentCb.fillColor = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
-                includeDefaultContentCb.textColor = Vec4{ 0.88f, 0.90f, 0.95f, 1.0f };
+                includeDefaultContentCb.style.color = Vec4{ 0.22f, 0.22f, 0.28f, 1.0f };
+                includeDefaultContentCb.style.hoverColor = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
+                includeDefaultContentCb.style.fillColor = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
+                includeDefaultContentCb.style.textColor = Vec4{ 0.88f, 0.90f, 0.95f, 1.0f };
                 includeDefaultContentCb.padding = Vec2{ 8.0f, 4.0f };
                 includeDefaultContentCb.hitTestMode = HitTestMode::Enabled;
                 includeDefaultContentCb.minSize = Vec2{ contentW - kContentPad * 2.0f, 24.0f };
@@ -9951,7 +10332,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 rhiRow.id          = "PS.C.RHI.Row";
                 rhiRow.orientation = StackOrientation::Horizontal;
                 rhiRow.minSize     = Vec2{ contentW - kContentPad * 2.0f, kRowH };
-                rhiRow.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                rhiRow.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
                 rhiRow.padding     = Vec2{ 6.0f, 2.0f };
 
                 WidgetElement rhiLbl;
@@ -9959,7 +10340,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 rhiLbl.id        = "PS.C.RHI.Lbl";
                 rhiLbl.text      = "Graphics API";
                 rhiLbl.fontSize  = 13.0f;
-                rhiLbl.textColor = Vec4{ 0.80f, 0.82f, 0.88f, 1.0f };
+                rhiLbl.style.textColor = Vec4{ 0.80f, 0.82f, 0.88f, 1.0f };
                 rhiLbl.textAlignV = TextAlignV::Center;
                 rhiLbl.minSize   = Vec2{ 120.0f, kRowH };
                 rhiRow.children.push_back(rhiLbl);
@@ -9970,9 +10351,9 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 rhiDd.items         = { "OpenGL" };
                 rhiDd.selectedIndex = state->selectedRHI;
                 rhiDd.fontSize      = 12.0f;
-                rhiDd.color         = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
-                rhiDd.hoverColor    = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
-                rhiDd.textColor     = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+                rhiDd.style.color         = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
+                rhiDd.style.hoverColor    = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
+                rhiDd.style.textColor     = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
                 rhiDd.padding       = Vec2{ 6.0f, 4.0f };
                 rhiDd.hitTestMode = HitTestMode::Enabled;
                 rhiDd.minSize       = Vec2{ contentW - kContentPad * 2.0f - 120.0f - 12.0f, kRowH };
@@ -10043,10 +10424,10 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             if (catBtn)
             {
                 const bool active = (static_cast<int>(ci) == state->activeCategory);
-                catBtn->color     = active
+                catBtn->style.color     = active
                     ? Vec4{ 0.20f, 0.26f, 0.40f, 1.0f }
                     : Vec4{ 0.09f, 0.09f, 0.11f, 0.0f };
-                catBtn->textColor = active
+                catBtn->style.textColor = active
                     ? Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }
                     : Vec4{ 0.65f, 0.68f, 0.72f, 1.0f };
             }
@@ -10069,11 +10450,11 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         catBtn.to            = Vec2{ nx(kSidebarW - 6.0f), ny(by1) };
         catBtn.text          = categories[ci];
         catBtn.fontSize      = 13.0f;
-        catBtn.color         = active
+        catBtn.style.color         = active
             ? Vec4{ 0.20f, 0.26f, 0.40f, 1.0f }
             : Vec4{ 0.09f, 0.09f, 0.11f, 0.0f };
-        catBtn.hoverColor    = Vec4{ 0.22f, 0.28f, 0.42f, 1.0f };
-        catBtn.textColor     = active
+        catBtn.style.hoverColor    = Vec4{ 0.22f, 0.28f, 0.42f, 1.0f };
+        catBtn.style.textColor     = active
             ? Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }
             : Vec4{ 0.65f, 0.68f, 0.72f, 1.0f };
         catBtn.textAlignH    = TextAlignH::Left;
@@ -10105,7 +10486,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         content.id          = "PS.ContentArea";
         content.from        = Vec2{ nx(kSidebarW + 16.0f), ny(kTitleH + 12.0f) };
         content.to          = Vec2{ nx(W - 12.0f), ny(H - kFooterH - 6.0f) };
-        content.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        content.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
         content.orientation = StackOrientation::Vertical;
         content.padding     = Vec2{ 4.0f, 4.0f };
         content.scrollable  = true;
@@ -10195,7 +10576,7 @@ void UIManager::openUIDesignerTab()
         root.fillY       = true;
         root.orientation = StackOrientation::Horizontal;
         root.padding     = Vec2{ 8.0f, 4.0f };
-        root.color       = Vec4{ 0.14f, 0.15f, 0.19f, 1.0f };
+        root.style.color       = Vec4{ 0.14f, 0.15f, 0.19f, 1.0f };
         root.runtimeOnly = true;
 
         // "New Widget" button
@@ -10206,9 +10587,9 @@ void UIManager::openUIDesignerTab()
             btn.text          = "+ Widget";
             btn.font          = "default.ttf";
             btn.fontSize      = 13.0f;
-            btn.textColor     = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
-            btn.color         = Vec4{ 0.22f, 0.24f, 0.30f, 1.0f };
-            btn.hoverColor    = Vec4{ 0.30f, 0.34f, 0.42f, 1.0f };
+            btn.style.textColor     = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+            btn.style.color         = Vec4{ 0.22f, 0.24f, 0.30f, 1.0f };
+            btn.style.hoverColor    = Vec4{ 0.30f, 0.34f, 0.42f, 1.0f };
             btn.textAlignH    = TextAlignH::Center;
             btn.textAlignV    = TextAlignV::Center;
             btn.minSize       = Vec2{ 80.0f, 24.0f };
@@ -10227,9 +10608,9 @@ void UIManager::openUIDesignerTab()
             btn.text          = "- Widget";
             btn.font          = "default.ttf";
             btn.fontSize      = 13.0f;
-            btn.textColor     = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
-            btn.color         = Vec4{ 0.22f, 0.24f, 0.30f, 1.0f };
-            btn.hoverColor    = Vec4{ 0.50f, 0.25f, 0.25f, 1.0f };
+            btn.style.textColor     = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+            btn.style.color         = Vec4{ 0.22f, 0.24f, 0.30f, 1.0f };
+            btn.style.hoverColor    = Vec4{ 0.50f, 0.25f, 0.25f, 1.0f };
             btn.textAlignH    = TextAlignH::Center;
             btn.textAlignV    = TextAlignV::Center;
             btn.minSize       = Vec2{ 80.0f, 24.0f };
@@ -10246,7 +10627,7 @@ void UIManager::openUIDesignerTab()
             spacer.type        = WidgetElementType::Panel;
             spacer.fillX       = true;
             spacer.minSize     = Vec2{ 0.0f, 1.0f };
-            spacer.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            spacer.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             spacer.runtimeOnly = true;
             root.children.push_back(std::move(spacer));
         }
@@ -10259,7 +10640,7 @@ void UIManager::openUIDesignerTab()
             lbl.text        = "";
             lbl.font        = "default.ttf";
             lbl.fontSize    = 12.0f;
-            lbl.textColor   = Vec4{ 0.65f, 0.68f, 0.75f, 1.0f };
+            lbl.style.textColor   = Vec4{ 0.65f, 0.68f, 0.75f, 1.0f };
             lbl.textAlignH  = TextAlignH::Right;
             lbl.textAlignV  = TextAlignV::Center;
             lbl.minSize     = Vec2{ 0.0f, 24.0f };
@@ -10316,7 +10697,7 @@ void UIManager::openUIDesignerTab()
         root.fillX       = true;
         root.fillY       = true;
         root.orientation = StackOrientation::Vertical;
-        root.color       = Vec4{ 0.12f, 0.13f, 0.17f, 0.96f };
+        root.style.color       = Vec4{ 0.12f, 0.13f, 0.17f, 0.96f };
         root.runtimeOnly = true;
 
         // --- Controls section (scrollable) ---
@@ -10329,7 +10710,7 @@ void UIManager::openUIDesignerTab()
             controlsSection.scrollable  = true;
             controlsSection.orientation = StackOrientation::Vertical;
             controlsSection.padding     = Vec2{ 10.0f, 8.0f };
-            controlsSection.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            controlsSection.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             controlsSection.runtimeOnly = true;
 
             // Title: Controls
@@ -10340,7 +10721,7 @@ void UIManager::openUIDesignerTab()
                 title.text       = "Controls";
                 title.font       = "default.ttf";
                 title.fontSize   = 16.0f;
-                title.textColor  = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+                title.style.textColor  = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
                 title.textAlignH = TextAlignH::Left;
                 title.textAlignV = TextAlignV::Center;
                 title.fillX      = true;
@@ -10352,7 +10733,8 @@ void UIManager::openUIDesignerTab()
             // Gameplay-UI element types (subset — only those supported by ViewportUIManager)
             const std::vector<std::string> controls = {
                 "Panel", "Text", "Label", "Button", "Image", "ProgressBar", "Slider",
-                "WrapBox", "UniformGrid", "SizeBox", "ScaleBox", "WidgetSwitcher", "Overlay"
+                "WrapBox", "UniformGrid", "SizeBox", "ScaleBox", "WidgetSwitcher", "Overlay",
+                "Border", "Spinner", "RichText", "ListView", "TileView"
             };
             for (size_t i = 0; i < controls.size(); ++i)
             {
@@ -10362,9 +10744,9 @@ void UIManager::openUIDesignerTab()
                 item.text          = "  " + controls[i];
                 item.font          = "default.ttf";
                 item.fontSize      = 14.0f;
-                item.textColor     = Vec4{ 0.78f, 0.80f, 0.85f, 1.0f };
-                item.color         = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-                item.hoverColor    = Vec4{ 0.18f, 0.20f, 0.28f, 0.8f };
+                item.style.textColor     = Vec4{ 0.78f, 0.80f, 0.85f, 1.0f };
+                item.style.color         = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                item.style.hoverColor    = Vec4{ 0.18f, 0.20f, 0.28f, 0.8f };
                 item.textAlignH    = TextAlignH::Left;
                 item.textAlignV    = TextAlignV::Center;
                 item.fillX         = true;
@@ -10391,7 +10773,7 @@ void UIManager::openUIDesignerTab()
             sep.type       = WidgetElementType::Panel;
             sep.fillX      = true;
             sep.minSize    = Vec2{ 0.0f, 1.0f };
-            sep.color      = Vec4{ 0.26f, 0.28f, 0.34f, 0.8f };
+            sep.style.color      = Vec4{ 0.26f, 0.28f, 0.34f, 0.8f };
             sep.runtimeOnly = true;
             root.children.push_back(std::move(sep));
         }
@@ -10406,7 +10788,7 @@ void UIManager::openUIDesignerTab()
             hierarchySection.scrollable  = true;
             hierarchySection.orientation = StackOrientation::Vertical;
             hierarchySection.padding     = Vec2{ 10.0f, 8.0f };
-            hierarchySection.color       = Vec4{ 0.08f, 0.09f, 0.12f, 0.75f };
+            hierarchySection.style.color       = Vec4{ 0.08f, 0.09f, 0.12f, 0.75f };
             hierarchySection.runtimeOnly = true;
 
             // Title: Hierarchy
@@ -10417,7 +10799,7 @@ void UIManager::openUIDesignerTab()
                 treeTitle.text       = "Hierarchy";
                 treeTitle.font       = "default.ttf";
                 treeTitle.fontSize   = 16.0f;
-                treeTitle.textColor  = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+                treeTitle.style.textColor  = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
                 treeTitle.textAlignH = TextAlignH::Left;
                 treeTitle.textAlignV = TextAlignV::Center;
                 treeTitle.fillX      = true;
@@ -10434,7 +10816,7 @@ void UIManager::openUIDesignerTab()
                 hierarchyStack.fillX       = true;
                 hierarchyStack.orientation = StackOrientation::Vertical;
                 hierarchyStack.padding     = Vec2{ 2.0f, 2.0f };
-                hierarchyStack.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                hierarchyStack.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
                 hierarchyStack.runtimeOnly = true;
                 hierarchySection.children.push_back(std::move(hierarchyStack));
             }
@@ -10464,7 +10846,7 @@ void UIManager::openUIDesignerTab()
         root.fillY       = true;
         root.orientation = StackOrientation::Vertical;
         root.padding     = Vec2{ 10.0f, 8.0f };
-        root.color       = Vec4{ 0.12f, 0.13f, 0.17f, 0.96f };
+        root.style.color       = Vec4{ 0.12f, 0.13f, 0.17f, 0.96f };
         root.scrollable  = true;
         root.runtimeOnly = true;
 
@@ -10475,7 +10857,7 @@ void UIManager::openUIDesignerTab()
             title.text       = "Properties";
             title.font       = "default.ttf";
             title.fontSize   = 16.0f;
-            title.textColor  = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+            title.style.textColor  = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
             title.textAlignH = TextAlignH::Left;
             title.textAlignV = TextAlignV::Center;
             title.fillX      = true;
@@ -10492,7 +10874,7 @@ void UIManager::openUIDesignerTab()
             hint.text       = "Select an element in the hierarchy\nto see its properties.";
             hint.font       = "default.ttf";
             hint.fontSize   = 13.0f;
-            hint.textColor  = Vec4{ 0.62f, 0.66f, 0.75f, 1.0f };
+            hint.style.textColor  = Vec4{ 0.62f, 0.66f, 0.75f, 1.0f };
             hint.textAlignH = TextAlignH::Left;
             hint.textAlignV = TextAlignV::Center;
             hint.fillX      = true;
@@ -10663,7 +11045,7 @@ void UIManager::addElementToViewportWidget(const std::string& elementType)
         newEl.type  = WidgetElementType::Panel;
         newEl.from  = Vec2{ 0.0f, 0.0f };
         newEl.to    = Vec2{ 120.0f, 80.0f };
-        newEl.color = Vec4{ 0.25f, 0.25f, 0.30f, 0.8f };
+        newEl.style.color = Vec4{ 0.25f, 0.25f, 0.30f, 0.8f };
     }
     else if (elementType == "Text")
     {
@@ -10673,7 +11055,7 @@ void UIManager::addElementToViewportWidget(const std::string& elementType)
         newEl.text      = "Text";
         newEl.font      = "default.ttf";
         newEl.fontSize  = 14.0f;
-        newEl.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+        newEl.style.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
     }
     else if (elementType == "Label")
     {
@@ -10683,7 +11065,7 @@ void UIManager::addElementToViewportWidget(const std::string& elementType)
         newEl.text      = "Label";
         newEl.font      = "default.ttf";
         newEl.fontSize  = 13.0f;
-        newEl.textColor = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
+        newEl.style.textColor = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
     }
     else if (elementType == "Button")
     {
@@ -10693,9 +11075,9 @@ void UIManager::addElementToViewportWidget(const std::string& elementType)
         newEl.text          = "Button";
         newEl.font          = "default.ttf";
         newEl.fontSize      = 14.0f;
-        newEl.textColor     = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
-        newEl.color         = Vec4{ 0.22f, 0.24f, 0.32f, 1.0f };
-        newEl.hoverColor    = Vec4{ 0.30f, 0.34f, 0.44f, 1.0f };
+        newEl.style.textColor     = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+        newEl.style.color         = Vec4{ 0.22f, 0.24f, 0.32f, 1.0f };
+        newEl.style.hoverColor    = Vec4{ 0.30f, 0.34f, 0.44f, 1.0f };
         newEl.hitTestMode = HitTestMode::Enabled;
     }
     else if (elementType == "Image")
@@ -10703,7 +11085,7 @@ void UIManager::addElementToViewportWidget(const std::string& elementType)
         newEl.type  = WidgetElementType::Image;
         newEl.from  = Vec2{ 0.0f, 0.0f };
         newEl.to    = Vec2{ 100.0f, 100.0f };
-        newEl.color = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+        newEl.style.color = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
     }
     else if (elementType == "ProgressBar")
     {
@@ -10713,7 +11095,7 @@ void UIManager::addElementToViewportWidget(const std::string& elementType)
         newEl.valueFloat = 0.5f;
         newEl.minValue   = 0.0f;
         newEl.maxValue   = 1.0f;
-        newEl.color      = Vec4{ 0.15f, 0.15f, 0.20f, 1.0f };
+        newEl.style.color      = Vec4{ 0.15f, 0.15f, 0.20f, 1.0f };
     }
     else if (elementType == "Slider")
     {
@@ -10723,7 +11105,7 @@ void UIManager::addElementToViewportWidget(const std::string& elementType)
         newEl.valueFloat = 0.5f;
         newEl.minValue   = 0.0f;
         newEl.maxValue   = 1.0f;
-        newEl.color      = Vec4{ 0.15f, 0.15f, 0.20f, 1.0f };
+        newEl.style.color      = Vec4{ 0.15f, 0.15f, 0.20f, 1.0f };
         newEl.hitTestMode = HitTestMode::Enabled;
     }
     else if (elementType == "WrapBox")
@@ -10732,7 +11114,7 @@ void UIManager::addElementToViewportWidget(const std::string& elementType)
         newEl.from        = Vec2{ 0.0f, 0.0f };
         newEl.to          = Vec2{ 300.0f, 200.0f };
         newEl.orientation  = StackOrientation::Horizontal;
-        newEl.color        = Vec4{ 0.1f, 0.1f, 0.13f, 0.5f };
+        newEl.style.color        = Vec4{ 0.1f, 0.1f, 0.13f, 0.5f };
     }
     else if (elementType == "UniformGrid")
     {
@@ -10741,7 +11123,7 @@ void UIManager::addElementToViewportWidget(const std::string& elementType)
         newEl.to      = Vec2{ 300.0f, 300.0f };
         newEl.columns = 3;
         newEl.rows    = 3;
-        newEl.color   = Vec4{ 0.1f, 0.1f, 0.13f, 0.5f };
+        newEl.style.color   = Vec4{ 0.1f, 0.1f, 0.13f, 0.5f };
     }
     else if (elementType == "SizeBox")
     {
@@ -10750,7 +11132,7 @@ void UIManager::addElementToViewportWidget(const std::string& elementType)
         newEl.to             = Vec2{ 200.0f, 100.0f };
         newEl.widthOverride  = 200.0f;
         newEl.heightOverride = 100.0f;
-        newEl.color          = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+        newEl.style.color          = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
     }
     else if (elementType == "ScaleBox")
     {
@@ -10758,7 +11140,7 @@ void UIManager::addElementToViewportWidget(const std::string& elementType)
         newEl.from      = Vec2{ 0.0f, 0.0f };
         newEl.to        = Vec2{ 300.0f, 300.0f };
         newEl.scaleMode = ScaleMode::Contain;
-        newEl.color     = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+        newEl.style.color     = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
     }
     else if (elementType == "WidgetSwitcher")
     {
@@ -10766,14 +11148,70 @@ void UIManager::addElementToViewportWidget(const std::string& elementType)
         newEl.from             = Vec2{ 0.0f, 0.0f };
         newEl.to               = Vec2{ 300.0f, 200.0f };
         newEl.activeChildIndex = 0;
-        newEl.color            = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+        newEl.style.color            = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
     }
     else if (elementType == "Overlay")
     {
         newEl.type  = WidgetElementType::Overlay;
         newEl.from  = Vec2{ 0.0f, 0.0f };
         newEl.to    = Vec2{ 300.0f, 200.0f };
-        newEl.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+        newEl.style.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+    }
+    else if (elementType == "Border")
+    {
+        newEl.type  = WidgetElementType::Border;
+        newEl.from  = Vec2{ 0.0f, 0.0f };
+        newEl.to    = Vec2{ 300.0f, 200.0f };
+        newEl.style.color = Vec4{ 0.1f, 0.1f, 0.13f, 0.4f };
+        newEl.borderThicknessLeft = 2.0f;
+        newEl.borderThicknessTop = 2.0f;
+        newEl.borderThicknessRight = 2.0f;
+        newEl.borderThicknessBottom = 2.0f;
+        newEl.borderBrush.type = BrushType::SolidColor;
+        newEl.borderBrush.color = Vec4{ 0.5f, 0.5f, 0.6f, 1.0f };
+        newEl.contentPadding = Vec2{ 4.0f, 4.0f };
+    }
+    else if (elementType == "Spinner")
+    {
+        newEl.type  = WidgetElementType::Spinner;
+        newEl.from  = Vec2{ 0.0f, 0.0f };
+        newEl.to    = Vec2{ 64.0f, 64.0f };
+        newEl.minSize = Vec2{ 32.0f, 32.0f };
+        newEl.spinnerDotCount = 8;
+        newEl.spinnerSpeed = 1.0f;
+        newEl.style.color = Vec4{ 0.8f, 0.8f, 0.9f, 1.0f };
+    }
+    else if (elementType == "RichText")
+    {
+        newEl.type  = WidgetElementType::RichText;
+        newEl.from  = Vec2{ 0.0f, 0.0f };
+        newEl.to    = Vec2{ 300.0f, 100.0f };
+        newEl.richText = "<b>Bold</b> and <i>italic</i> text";
+        newEl.font = "default.ttf";
+        newEl.fontSize = 14.0f;
+        newEl.style.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
+    }
+    else if (elementType == "ListView")
+    {
+        newEl.type  = WidgetElementType::ListView;
+        newEl.from  = Vec2{ 0.0f, 0.0f };
+        newEl.to    = Vec2{ 300.0f, 300.0f };
+        newEl.totalItemCount = 10;
+        newEl.itemHeight = 32.0f;
+        newEl.scrollable = true;
+        newEl.style.color = Vec4{ 0.08f, 0.08f, 0.10f, 0.6f };
+    }
+    else if (elementType == "TileView")
+    {
+        newEl.type  = WidgetElementType::TileView;
+        newEl.from  = Vec2{ 0.0f, 0.0f };
+        newEl.to    = Vec2{ 400.0f, 300.0f };
+        newEl.totalItemCount = 12;
+        newEl.itemHeight = 80.0f;
+        newEl.itemWidth = 100.0f;
+        newEl.columnsPerRow = 4;
+        newEl.scrollable = true;
+        newEl.style.color = Vec4{ 0.08f, 0.08f, 0.10f, 0.6f };
     }
     else
     {
@@ -10935,15 +11373,15 @@ void UIManager::refreshUIDesignerHierarchy()
 
             if (isWidgetSelected && selectedElement.empty())
             {
-                row.color     = Vec4{ 0.20f, 0.30f, 0.55f, 0.9f };
-                row.hoverColor = Vec4{ 0.25f, 0.35f, 0.60f, 1.0f };
-                row.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+                row.style.color     = Vec4{ 0.20f, 0.30f, 0.55f, 0.9f };
+                row.style.hoverColor = Vec4{ 0.25f, 0.35f, 0.60f, 1.0f };
+                row.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
             }
             else
             {
-                row.color     = Vec4{ 0.14f, 0.15f, 0.20f, 0.6f };
-                row.hoverColor = Vec4{ 0.20f, 0.22f, 0.30f, 0.8f };
-                row.textColor = Vec4{ 0.90f, 0.90f, 0.95f, 1.0f };
+                row.style.color     = Vec4{ 0.14f, 0.15f, 0.20f, 0.6f };
+                row.style.hoverColor = Vec4{ 0.20f, 0.22f, 0.30f, 0.8f };
+                row.style.textColor = Vec4{ 0.90f, 0.90f, 0.95f, 1.0f };
             }
 
             const std::string capturedName = widgetEntry.name;
@@ -10988,15 +11426,15 @@ void UIManager::refreshUIDesignerHierarchy()
 
                     if (isElementSelected)
                     {
-                        row.color     = Vec4{ 0.20f, 0.30f, 0.55f, 0.9f };
-                        row.hoverColor = Vec4{ 0.25f, 0.35f, 0.60f, 1.0f };
-                        row.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+                        row.style.color     = Vec4{ 0.20f, 0.30f, 0.55f, 0.9f };
+                        row.style.hoverColor = Vec4{ 0.25f, 0.35f, 0.60f, 1.0f };
+                        row.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
                     }
                     else
                     {
-                        row.color     = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-                        row.hoverColor = Vec4{ 0.18f, 0.20f, 0.28f, 0.8f };
-                        row.textColor = Vec4{ 0.75f, 0.78f, 0.84f, 1.0f };
+                        row.style.color     = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                        row.style.hoverColor = Vec4{ 0.18f, 0.20f, 0.28f, 0.8f };
+                        row.style.textColor = Vec4{ 0.75f, 0.78f, 0.84f, 1.0f };
                     }
 
                     const std::string capturedWidgetName = widgetEntry.name;
@@ -11044,7 +11482,7 @@ void UIManager::refreshUIDesignerDetails()
         lbl.text       = text;
         lbl.font       = "default.ttf";
         lbl.fontSize   = fontSize;
-        lbl.textColor  = color;
+        lbl.style.textColor  = color;
         lbl.textAlignH = TextAlignH::Left;
         lbl.textAlignV = TextAlignV::Center;
         lbl.fillX      = true;
@@ -11150,7 +11588,7 @@ void UIManager::refreshUIDesignerDetails()
         row.orientation = StackOrientation::Horizontal;
         row.fillX       = true;
         row.sizeToContent = true;
-        row.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        row.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
         row.padding     = Vec2{ 0.0f, 1.0f };
         row.runtimeOnly = true;
 
@@ -11199,7 +11637,7 @@ void UIManager::refreshUIDesignerDetails()
         sep.type    = WidgetElementType::Panel;
         sep.fillX   = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -11215,7 +11653,7 @@ void UIManager::refreshUIDesignerDetails()
             row.orientation = StackOrientation::Horizontal;
             row.fillX       = true;
             row.sizeToContent = true;
-            row.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             row.padding     = Vec2{ 0.0f, 1.0f };
             row.runtimeOnly = true;
 
@@ -11260,7 +11698,7 @@ void UIManager::refreshUIDesignerDetails()
         sep.type    = WidgetElementType::Panel;
         sep.fillX   = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -11279,41 +11717,41 @@ void UIManager::refreshUIDesignerDetails()
         sep.type    = WidgetElementType::Panel;
         sep.fillX   = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
         rootPanel->children.push_back(makeLabel("UID.SecAppearance", "Appearance", 13.0f,
             Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
 
-        rootPanel->children.push_back(makePropertyRow("UID.ColR", "Color R", fmtF(sel->color.x),
-            [sel, applyChange](const std::string& v) { try { sel->color.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.ColG", "Color G", fmtF(sel->color.y),
-            [sel, applyChange](const std::string& v) { try { sel->color.y = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.ColB", "Color B", fmtF(sel->color.z),
-            [sel, applyChange](const std::string& v) { try { sel->color.z = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.ColA", "Color A", fmtF(sel->color.w),
-            [sel, applyChange](const std::string& v) { try { sel->color.w = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.ColR", "Color R", fmtF(sel->style.color.x),
+            [sel, applyChange](const std::string& v) { try { sel->style.color.x = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.ColG", "Color G", fmtF(sel->style.color.y),
+            [sel, applyChange](const std::string& v) { try { sel->style.color.y = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.ColB", "Color B", fmtF(sel->style.color.z),
+            [sel, applyChange](const std::string& v) { try { sel->style.color.z = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.ColA", "Color A", fmtF(sel->style.color.w),
+            [sel, applyChange](const std::string& v) { try { sel->style.color.w = std::stof(v); } catch (...) {} applyChange(); }));
 
-        rootPanel->children.push_back(makePropertyRow("UID.Opacity", "Opacity", fmtF(sel->opacity),
-            [sel, applyChange](const std::string& v) { try { sel->opacity = std::max(0.0f, std::min(1.0f, std::stof(v))); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.Opacity", "Opacity", fmtF(sel->style.opacity),
+            [sel, applyChange](const std::string& v) { try { sel->style.opacity = std::max(0.0f, std::min(1.0f, std::stof(v))); } catch (...) {} applyChange(); }));
 
         // Visibility
         {
             CheckBoxWidget visCb;
             visCb.setLabel("Visible");
-            visCb.setChecked(sel->isVisible);
-            visCb.setOnCheckedChanged([sel, applyChange](bool c) { sel->isVisible = c; applyChange(); });
+            visCb.setChecked(sel->style.isVisible);
+            visCb.setOnCheckedChanged([sel, applyChange](bool c) { sel->style.isVisible = c; applyChange(); });
             WidgetElement visEl = visCb.toElement();
             visEl.id         = "UID.Visible";
             visEl.runtimeOnly = true;
             rootPanel->children.push_back(std::move(visEl));
         }
 
-        rootPanel->children.push_back(makePropertyRow("UID.BorderW", "Border", fmtF(sel->borderThickness),
-            [sel, applyChange](const std::string& v) { try { sel->borderThickness = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.BorderR", "Radius", fmtF(sel->borderRadius),
-            [sel, applyChange](const std::string& v) { try { sel->borderRadius = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.BorderW", "Border", fmtF(sel->style.borderThickness),
+            [sel, applyChange](const std::string& v) { try { sel->style.borderThickness = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.BorderR", "Radius", fmtF(sel->style.borderRadius),
+            [sel, applyChange](const std::string& v) { try { sel->style.borderRadius = std::stof(v); } catch (...) {} applyChange(); }));
     }
 
     // --- Section: Text (for elements with text) ---
@@ -11324,7 +11762,7 @@ void UIManager::refreshUIDesignerDetails()
         sep.type    = WidgetElementType::Panel;
         sep.fillX   = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -11336,21 +11774,21 @@ void UIManager::refreshUIDesignerDetails()
         rootPanel->children.push_back(makePropertyRow("UID.FontSz", "Font Size", fmtF(sel->fontSize),
             [sel, applyChange](const std::string& v) { try { sel->fontSize = std::stof(v); } catch (...) {} applyChange(); }));
 
-        rootPanel->children.push_back(makePropertyRow("UID.TColR", "Text R", fmtF(sel->textColor.x),
-            [sel, applyChange](const std::string& v) { try { sel->textColor.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.TColG", "Text G", fmtF(sel->textColor.y),
-            [sel, applyChange](const std::string& v) { try { sel->textColor.y = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.TColB", "Text B", fmtF(sel->textColor.z),
-            [sel, applyChange](const std::string& v) { try { sel->textColor.z = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.TColA", "Text A", fmtF(sel->textColor.w),
-            [sel, applyChange](const std::string& v) { try { sel->textColor.w = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.TColR", "Text R", fmtF(sel->style.textColor.x),
+            [sel, applyChange](const std::string& v) { try { sel->style.textColor.x = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.TColG", "Text G", fmtF(sel->style.textColor.y),
+            [sel, applyChange](const std::string& v) { try { sel->style.textColor.y = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.TColB", "Text B", fmtF(sel->style.textColor.z),
+            [sel, applyChange](const std::string& v) { try { sel->style.textColor.z = std::stof(v); } catch (...) {} applyChange(); }));
+        rootPanel->children.push_back(makePropertyRow("UID.TColA", "Text A", fmtF(sel->style.textColor.w),
+            [sel, applyChange](const std::string& v) { try { sel->style.textColor.w = std::stof(v); } catch (...) {} applyChange(); }));
 
         // Bold / Italic
         {
             CheckBoxWidget boldCb;
             boldCb.setLabel("Bold");
-            boldCb.setChecked(sel->isBold);
-            boldCb.setOnCheckedChanged([sel, applyChange](bool c) { sel->isBold = c; applyChange(); });
+            boldCb.setChecked(sel->style.isBold);
+            boldCb.setOnCheckedChanged([sel, applyChange](bool c) { sel->style.isBold = c; applyChange(); });
             WidgetElement boldEl = boldCb.toElement();
             boldEl.id         = "UID.Bold";
             boldEl.runtimeOnly = true;
@@ -11359,8 +11797,8 @@ void UIManager::refreshUIDesignerDetails()
         {
             CheckBoxWidget italicCb;
             italicCb.setLabel("Italic");
-            italicCb.setChecked(sel->isItalic);
-            italicCb.setOnCheckedChanged([sel, applyChange](bool c) { sel->isItalic = c; applyChange(); });
+            italicCb.setChecked(sel->style.isItalic);
+            italicCb.setOnCheckedChanged([sel, applyChange](bool c) { sel->style.isItalic = c; applyChange(); });
             WidgetElement italicEl = italicCb.toElement();
             italicEl.id         = "UID.Italic";
             italicEl.runtimeOnly = true;
@@ -11375,7 +11813,7 @@ void UIManager::refreshUIDesignerDetails()
         sep.type    = WidgetElementType::Panel;
         sep.fillX   = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -11392,7 +11830,7 @@ void UIManager::refreshUIDesignerDetails()
         sep.type    = WidgetElementType::Panel;
         sep.fillX   = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -11412,7 +11850,7 @@ void UIManager::refreshUIDesignerDetails()
         sep.type    = WidgetElementType::Panel;
         sep.fillX   = true;
         sep.minSize = Vec2{ 0.0f, 8.0f };
-        sep.color   = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        sep.style.color   = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -11422,9 +11860,9 @@ void UIManager::refreshUIDesignerDetails()
         delBtn.text          = "Delete Element";
         delBtn.font          = "default.ttf";
         delBtn.fontSize      = 13.0f;
-        delBtn.textColor     = Vec4{ 1.0f, 0.85f, 0.85f, 1.0f };
-        delBtn.color         = Vec4{ 0.45f, 0.18f, 0.18f, 1.0f };
-        delBtn.hoverColor    = Vec4{ 0.60f, 0.22f, 0.22f, 1.0f };
+        delBtn.style.textColor     = Vec4{ 1.0f, 0.85f, 0.85f, 1.0f };
+        delBtn.style.color         = Vec4{ 0.45f, 0.18f, 0.18f, 1.0f };
+        delBtn.style.hoverColor    = Vec4{ 0.60f, 0.22f, 0.22f, 1.0f };
         delBtn.textAlignH    = TextAlignH::Center;
         delBtn.textAlignV    = TextAlignV::Center;
         delBtn.fillX         = true;

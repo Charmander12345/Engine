@@ -53,9 +53,9 @@ public:
         el.text = m_text;
         el.font = m_font;
         el.fontSize = m_fontSize;
-        el.color = m_isChecked ? m_checkedColor : m_color;
-        el.hoverColor = m_hoverColor;
-        el.textColor = m_textColor;
+        el.style.color = m_isChecked ? m_checkedColor : m_color;
+        el.style.hoverColor = m_hoverColor;
+        el.style.textColor = m_textColor;
         el.padding = m_padding;
         el.minSize = m_minSize;
         el.isChecked = m_isChecked;

@@ -53,8 +53,8 @@ int main()
 #endif
 
     // --- Phase 1: Show something on screen as fast as possible ---
-    logTimed(Logger::Category::Engine, "Initialising SDL (video + audio)...", Logger::LogLevel::INFO);
-    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO))
+    logTimed(Logger::Category::Engine, "Initialising SDL (video + audio + gamepad)...", Logger::LogLevel::INFO);
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD))
     {
         logTimed(Logger::Category::Engine, std::string("Failed to initialise SDL: ") + SDL_GetError(), Logger::LogLevel::FATAL);
         return -1;
@@ -376,7 +376,7 @@ int main()
             while (SDL_PollEvent(&ev))
             {
                 if (ev.type == SDL_EVENT_QUIT)
-                    continue; // ignore – may be leftover from popup destruction
+                    continue; // ignore â€“ may be leftover from popup destruction
             }
             renderer->getUIManager().updateNotifications(0.016f);
             renderer->render();
@@ -473,6 +473,9 @@ int main()
     // can be warped back on release, keeping it visually fixed in the viewport.
     float preCaptureMouseX = 0.0f;
     float preCaptureMouseY = 0.0f;
+
+    // Gamepad state â€“ we keep the first connected gamepad open for UI navigation
+    SDL_Gamepad* activeGamepad = nullptr;
 
     if (renderer)
     {
@@ -818,7 +821,7 @@ int main()
 
                         if (auto* picker = findElementById(widget->getElementsMutable(), "WorldSettings.ClearColor"))
                         {
-                            picker->color = renderer->getClearColor();
+                            picker->style.color = renderer->getClearColor();
                             picker->onColorChanged = [renderer](const Vec4& color)
                                 {
                                     renderer->setClearColor(color);
@@ -846,9 +849,9 @@ int main()
                                 };
 
                                 auto state = std::make_shared<RgbState>();
-                                state->r = static_cast<int>(std::round(std::clamp(picker->color.x, 0.0f, 1.0f) * 255.0f));
-                                state->g = static_cast<int>(std::round(std::clamp(picker->color.y, 0.0f, 1.0f) * 255.0f));
-                                state->b = static_cast<int>(std::round(std::clamp(picker->color.z, 0.0f, 1.0f) * 255.0f));
+                                state->r = static_cast<int>(std::round(std::clamp(picker->style.color.x, 0.0f, 1.0f) * 255.0f));
+                                state->g = static_cast<int>(std::round(std::clamp(picker->style.color.y, 0.0f, 1.0f) * 255.0f));
+                                state->b = static_cast<int>(std::round(std::clamp(picker->style.color.z, 0.0f, 1.0f) * 255.0f));
                                 state->picker = picker;
 
                                 const auto applyColor = [state]()
@@ -863,7 +866,7 @@ int main()
                                         std::clamp(state->b / 255.0f, 0.0f, 1.0f),
                                         1.0f
                                     };
-                                    state->picker->color = color;
+                                    state->picker->style.color = color;
                                     state->picker->onColorChanged(color);
                                 };
 
@@ -945,7 +948,7 @@ int main()
                                 skyLabel.text = "Skybox Asset";
                                 skyLabel.font = "default.ttf";
                                 skyLabel.fontSize = 13.0f;
-                                skyLabel.textColor = Vec4{ 0.7f, 0.75f, 0.85f, 1.0f };
+                                skyLabel.style.textColor = Vec4{ 0.7f, 0.75f, 0.85f, 1.0f };
                                 skyLabel.fillX = true;
                                 skyLabel.minSize = Vec2{ 0.0f, 22.0f };
                                 skyLabel.padding = Vec2{ 4.0f, 2.0f };
@@ -958,8 +961,8 @@ int main()
                                 skyEntry.value = renderer->getSkyboxPath();
                                 skyEntry.font = "default.ttf";
                                 skyEntry.fontSize = 13.0f;
-                                skyEntry.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
-                                skyEntry.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.9f };
+                                skyEntry.style.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
+                                skyEntry.style.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.9f };
                                 skyEntry.fillX = true;
                                 skyEntry.minSize = Vec2{ 0.0f, 24.0f };
                                 skyEntry.padding = Vec2{ 6.0f, 4.0f };
@@ -983,11 +986,11 @@ int main()
                                 clearBtn.text = "Clear Skybox";
                                 clearBtn.font = "default.ttf";
                                 clearBtn.fontSize = 12.0f;
-                                clearBtn.textColor = Vec4{ 0.9f, 0.7f, 0.7f, 1.0f };
+                                clearBtn.style.textColor = Vec4{ 0.9f, 0.7f, 0.7f, 1.0f };
                                 clearBtn.textAlignH = TextAlignH::Center;
                                 clearBtn.textAlignV = TextAlignV::Center;
-                                clearBtn.color = Vec4{ 0.3f, 0.15f, 0.15f, 0.8f };
-                                clearBtn.hoverColor = Vec4{ 0.45f, 0.2f, 0.2f, 0.95f };
+                                clearBtn.style.color = Vec4{ 0.3f, 0.15f, 0.15f, 0.8f };
+                                clearBtn.style.hoverColor = Vec4{ 0.45f, 0.2f, 0.2f, 0.95f };
                                 clearBtn.shaderVertex = "button_vertex.glsl";
                                 clearBtn.shaderFragment = "button_fragment.glsl";
                                 clearBtn.fillX = true;
@@ -1098,7 +1101,7 @@ int main()
                                 }
                             });
 
-                        // --- Drag & Drop: asset dropped on viewport → spawn entity ---
+                        // --- Drag & Drop: asset dropped on viewport â†’ spawn entity ---
                         renderer->getUIManager().setOnDropOnViewport([&renderer](const std::string& payload, const Vec2& screenPos)
                             {
                                 const auto sep = payload.find('|');
@@ -1179,12 +1182,12 @@ int main()
                                         {
                                             renderer->getUIManager().selectEntity(targetEntity);
                                             renderer->getUIManager().showToastMessage(
-                                                "Applied " + assetName + " → Entity " + std::to_string(targetEntity), 2.5f);
+                                                "Applied " + assetName + " â†’ Entity " + std::to_string(targetEntity), 2.5f);
                                         }
                                     }
                                     else
                                     {
-                                        // No entity under cursor — cannot apply, show hint
+                                        // No entity under cursor â€” cannot apply, show hint
                                         if (renderer)
                                         {
                                             renderer->getUIManager().showToastMessage(
@@ -1309,7 +1312,7 @@ int main()
                                 UndoRedoManager::Instance().pushCommand(std::move(spawnCmd));
                             });
 
-                        // --- Drag & Drop: asset dropped on content browser folder → move asset ---
+                        // --- Drag & Drop: asset dropped on content browser folder â†’ move asset ---
                         renderer->getUIManager().setOnDropOnFolder([&renderer](const std::string& payload, const std::string& folderPath)
                             {
                                 const auto sep = payload.find('|');
@@ -1338,7 +1341,7 @@ int main()
                                 }
                             });
 
-                        // --- Drag & Drop: asset dropped on Outliner entity → apply to entity ---
+                        // --- Drag & Drop: asset dropped on Outliner entity â†’ apply to entity ---
                         renderer->getUIManager().setOnDropOnEntity([&renderer](const std::string& payload, unsigned int entityId)
                             {
                                 const auto sep = payload.find('|');
@@ -1429,7 +1432,7 @@ int main()
                                 if (renderer)
                                 {
                                     renderer->getUIManager().showToastMessage(
-                                        "Applied " + assetName + " → Entity " + std::to_string(entityId), 2.5f);
+                                        "Applied " + assetName + " â†’ Entity " + std::to_string(entityId), 2.5f);
                                 }
                             });
                     }
@@ -1453,7 +1456,7 @@ int main()
             logTimed(Logger::Category::UI, "[ContentBrowser] main: getEditorWidgetPath returned empty path", Logger::LogLevel::WARNING);
         }
 
-        // --- UndoRedo onChange → mark level dirty + refresh StatusBar ---
+        // --- UndoRedo onChange â†’ mark level dirty + refresh StatusBar ---
         UndoRedoManager::Instance().setOnChanged([&renderer]()
             {
                 auto& diag = DiagnosticsManager::Instance();
@@ -1522,7 +1525,7 @@ int main()
 
     }
 
-    // All subsystems initialised — render the first frame while the splash is
+    // All subsystems initialised â€” render the first frame while the splash is
     // still visible so the main window never appears white / empty.
     if (renderer)
     {
@@ -1534,7 +1537,7 @@ int main()
         while (SDL_PollEvent(&ev))
         {
             if (ev.type == SDL_EVENT_QUIT)
-                continue; // ignore – may be leftover from popup destruction
+                continue; // ignore â€“ may be leftover from popup destruction
         }
         renderer->getUIManager().updateNotifications(0.016f);
         renderer->render();
@@ -1561,7 +1564,7 @@ int main()
             Logger::LogLevel::WARNING);
     }
 
-    // Reset shutdown flag – only TitleBar.Close and SDL_EVENT_QUIT inside the
+    // Reset shutdown flag â€“ only TitleBar.Close and SDL_EVENT_QUIT inside the
     // main loop should be able to shut the engine down from this point on.
     diagnostics.resetShutdownRequest();
 
@@ -1867,6 +1870,7 @@ int main()
                         if (auto* viewportUI = renderer->getViewportUIManagerPtr())
                         {
                             viewportUI->setMousePosition(mousePosPixels);
+                            viewportUI->handleMouseMove(mousePosPixels);
                             isOverUI = uiManager.isPointerOverUI(mousePosPixels) || viewportUI->isPointerOverViewportUI(mousePosPixels);
                         }
                         else
@@ -2178,7 +2182,7 @@ int main()
                                 canvas.type = WidgetElementType::Panel;
                                 canvas.from = Vec2{ 0.0f, 0.0f };
                                 canvas.to = Vec2{ 1.0f, 1.0f };
-                                canvas.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                                canvas.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
                                 canvas.isCanvasRoot = true;
 
                                 WidgetElement panel{};
@@ -2186,7 +2190,7 @@ int main()
                                 panel.type = WidgetElementType::Panel;
                                 panel.from = Vec2{ 0.0f, 0.0f };
                                 panel.to = Vec2{ 1.0f, 1.0f };
-                                panel.color = Vec4{ 0.08f, 0.08f, 0.10f, 0.75f };
+                                panel.style.color = Vec4{ 0.08f, 0.08f, 0.10f, 0.75f };
                                 panel.hitTestMode = HitTestMode::Enabled;
 
                                 WidgetElement label{};
@@ -2197,7 +2201,7 @@ int main()
                                 label.text = "New Widget";
                                 label.font = "default.ttf";
                                 label.fontSize = 18.0f;
-                                label.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+                                label.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
                                 panel.children.push_back(std::move(label));
                                 canvas.children.push_back(std::move(panel));
 
@@ -2274,7 +2278,7 @@ int main()
                                     bg.id = "NM.Bg";
                                     bg.from = Vec2{ 0.0f, 0.0f };
                                     bg.to = Vec2{ 1.0f, 1.0f };
-                                    bg.color = Vec4{ 0.13f, 0.13f, 0.16f, 1.0f };
+                                    bg.style.color = Vec4{ 0.13f, 0.13f, 0.16f, 1.0f };
                                     elements.push_back(bg);
                                 }
 
@@ -2287,7 +2291,7 @@ int main()
                                     title.to = Vec2{ 1.0f, ny(36.0f) };
                                     title.text = "New Material";
                                     title.fontSize = 15.0f;
-                                    title.textColor = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+                                    title.style.textColor = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
                                     title.textAlignV = TextAlignV::Center;
                                     title.padding = Vec2{ 6.0f, 0.0f };
                                     elements.push_back(title);
@@ -2308,7 +2312,7 @@ int main()
                                     lbl.id = id;
                                     lbl.text = text;
                                     lbl.fontSize = 13.0f;
-                                    lbl.textColor = Vec4{ 0.7f, 0.75f, 0.85f, 1.0f };
+                                    lbl.style.textColor = Vec4{ 0.7f, 0.75f, 0.85f, 1.0f };
                                     lbl.fillX = true;
                                     lbl.minSize = Vec2{ 0.0f, 20.0f };
                                     lbl.runtimeOnly = true;
@@ -2321,8 +2325,8 @@ int main()
                                     entry.id = id;
                                     entry.value = value;
                                     entry.fontSize = 13.0f;
-                                    entry.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
-                                    entry.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.9f };
+                                    entry.style.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
+                                    entry.style.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.9f };
                                     entry.fillX = true;
                                     entry.minSize = Vec2{ 0.0f, 24.0f };
                                     entry.padding = Vec2{ 6.0f, 4.0f };
@@ -2386,11 +2390,11 @@ int main()
                                     createBtn.to = Vec2{ nx(W - 100.0f), ny(H - 12.0f) };
                                     createBtn.text = "Create";
                                     createBtn.fontSize = 14.0f;
-                                    createBtn.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+                                    createBtn.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
                                     createBtn.textAlignH = TextAlignH::Center;
                                     createBtn.textAlignV = TextAlignV::Center;
-                                    createBtn.color = Vec4{ 0.15f, 0.45f, 0.25f, 0.95f };
-                                    createBtn.hoverColor = Vec4{ 0.2f, 0.6f, 0.35f, 1.0f };
+                                    createBtn.style.color = Vec4{ 0.15f, 0.45f, 0.25f, 0.95f };
+                                    createBtn.style.hoverColor = Vec4{ 0.2f, 0.6f, 0.35f, 1.0f };
                                     createBtn.shaderVertex = "button_vertex.glsl";
                                     createBtn.shaderFragment = "button_fragment.glsl";
                                     createBtn.hitTestMode = HitTestMode::Enabled;
@@ -2469,11 +2473,11 @@ int main()
                                     cancelBtn.to = Vec2{ nx(W - 16.0f), ny(H - 12.0f) };
                                     cancelBtn.text = "Cancel";
                                     cancelBtn.fontSize = 14.0f;
-                                    cancelBtn.textColor = Vec4{ 0.9f, 0.9f, 0.9f, 1.0f };
+                                    cancelBtn.style.textColor = Vec4{ 0.9f, 0.9f, 0.9f, 1.0f };
                                     cancelBtn.textAlignH = TextAlignH::Center;
                                     cancelBtn.textAlignV = TextAlignV::Center;
-                                    cancelBtn.color = Vec4{ 0.25f, 0.25f, 0.3f, 0.95f };
-                                    cancelBtn.hoverColor = Vec4{ 0.35f, 0.35f, 0.42f, 1.0f };
+                                    cancelBtn.style.color = Vec4{ 0.25f, 0.25f, 0.3f, 0.95f };
+                                    cancelBtn.style.hoverColor = Vec4{ 0.35f, 0.35f, 0.42f, 1.0f };
                                     cancelBtn.shaderVertex = "button_vertex.glsl";
                                     cancelBtn.shaderFragment = "button_fragment.glsl";
                                     cancelBtn.hitTestMode = HitTestMode::Enabled;
@@ -2513,7 +2517,7 @@ int main()
                     const Vec2 mousePos{ static_cast<float>(event.button.x), static_cast<float>(event.button.y) };
                     if (uiManager.handleRightMouseUp(mousePos))
                     {
-                        // Pan ended — don't fall through to camera right-click release
+                        // Pan ended â€” don't fall through to camera right-click release
                     }
                     else if (rightMouseDown)
                     {
@@ -2659,7 +2663,7 @@ int main()
                     }
                     continue;
                 }
-                // Gizmo mode shortcuts (W/E/R) – only in editor mode, not when holding right-click, and not when a text entry is focused
+                // Gizmo mode shortcuts (W/E/R) â€“ only in editor mode, not when holding right-click, and not when a text entry is focused
                 if (!diagnostics.isPIEActive() && !rightMouseDown && renderer && !renderer->getUIManager().hasEntryFocused())
                 {
                     if (event.key.key == SDLK_W)
@@ -2757,7 +2761,7 @@ int main()
                     }
                     if (auto* viewportUI = renderer->getViewportUIManagerPtr())
                     {
-                        if (viewportUI->handleKeyDown(event.key.key))
+                        if (viewportUI->handleKeyDown(event.key.key, static_cast<int>(event.key.mod)))
                         {
                             continue;
                         }
@@ -2769,6 +2773,45 @@ int main()
                     Scripting::HandleKeyDown(event.key.key);
                 }
             }
+
+            // --- Gamepad events ---
+            if (event.type == SDL_EVENT_GAMEPAD_ADDED)
+            {
+                if (!activeGamepad)
+                {
+                    activeGamepad = SDL_OpenGamepad(event.gdevice.which);
+                }
+            }
+            if (event.type == SDL_EVENT_GAMEPAD_REMOVED)
+            {
+                if (activeGamepad)
+                {
+                    SDL_CloseGamepad(activeGamepad);
+                    activeGamepad = nullptr;
+                }
+            }
+            if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || event.type == SDL_EVENT_GAMEPAD_BUTTON_UP)
+            {
+                const bool pressed = (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN);
+                if (renderer)
+                {
+                    if (auto* viewportUI = renderer->getViewportUIManagerPtr())
+                    {
+                        viewportUI->handleGamepadButton(event.gbutton.button, pressed);
+                    }
+                }
+            }
+            if (event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION)
+            {
+                if (renderer)
+                {
+                    if (auto* viewportUI = renderer->getViewportUIManagerPtr())
+                    {
+                        const float normalized = static_cast<float>(event.gaxis.value) / 32767.0f;
+                        viewportUI->handleGamepadAxis(event.gaxis.axis, normalized);
+                    }
+                }
+            }
         }
         const uint64_t eventEndCounter = SDL_GetPerformanceCounter();
         cpuEventMs = (freq > 0.0) ? (static_cast<double>(eventEndCounter - eventStartCounter) / freq * 1000.0) : 0.0;
@@ -2778,7 +2821,7 @@ int main()
 
         if (diagnostics.isShutdownRequested())
         {
-            logTimed(Logger::Category::Engine, "Shutdown requested – exiting main loop.", Logger::LogLevel::INFO);
+            logTimed(Logger::Category::Engine, "Shutdown requested â€“ exiting main loop.", Logger::LogLevel::INFO);
             running = false;
         }
 
@@ -2982,6 +3025,12 @@ int main()
     renderer->shutdown();
 
     delete renderer;
+
+    if (activeGamepad)
+    {
+        SDL_CloseGamepad(activeGamepad);
+        activeGamepad = nullptr;
+    }
 
     logTimed(Logger::Category::Engine, "SDL_Quit()", Logger::LogLevel::INFO);
     SDL_Quit();

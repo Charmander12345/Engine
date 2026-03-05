@@ -49,9 +49,9 @@ public:
         element.fontSize = m_fontSize;
         element.minSize = m_minSize;
         element.padding = m_padding;
-        element.color = m_boxColor;
-        element.fillColor = m_checkColor;
-        element.textColor = m_textColor;
+        element.style.color = m_boxColor;
+        element.style.fillColor = m_checkColor;
+        element.style.textColor = m_textColor;
         element.hitTestMode = HitTestMode::Enabled;
         if (m_onCheckedChanged)
         {

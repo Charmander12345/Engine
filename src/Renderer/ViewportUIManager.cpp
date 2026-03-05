@@ -1,6 +1,8 @@
 #include "ViewportUIManager.h"
 #include <SDL3/SDL.h>
 #include <cmath>
+#include <algorithm>
+#include <limits>
 
 namespace
 {
@@ -189,6 +191,40 @@ namespace
 
         return nullptr;
     }
+
+    struct FocusableInfo
+    {
+        std::string id;
+        int tabIndex;
+        Vec2 center;
+    };
+
+    void CollectFocusableRecursive(const std::vector<WidgetElement>& elements,
+                                    float parentX, float parentY,
+                                    float parentW, float parentH,
+                                    std::vector<FocusableInfo>& out,
+                                    int& autoIndex)
+    {
+        for (const auto& element : elements)
+        {
+            const float x0 = element.hasComputedPosition ? element.computedPositionPixels.x : (parentX + element.from.x * parentW);
+            const float y0 = element.hasComputedPosition ? element.computedPositionPixels.y : (parentY + element.from.y * parentH);
+            const float w  = element.hasComputedSize ? element.computedSizePixels.x : (parentW * (element.to.x - element.from.x));
+            const float h  = element.hasComputedSize ? element.computedSizePixels.y : (parentH * (element.to.y - element.from.y));
+
+            if (element.focusConfig.isFocusable && !element.id.empty())
+            {
+                const int idx = element.focusConfig.tabIndex >= 0 ? element.focusConfig.tabIndex : autoIndex;
+                out.push_back({ element.id, idx, Vec2{ x0 + w * 0.5f, y0 + h * 0.5f } });
+                ++autoIndex;
+            }
+
+            if (!element.children.empty())
+            {
+                CollectFocusableRecursive(element.children, x0, y0, w, h, out, autoIndex);
+            }
+        }
+    }
 }
 
 ViewportUIManager::ViewportUIManager() = default;
@@ -233,8 +269,8 @@ bool ViewportUIManager::createWidget(const std::string& name, int zOrder)
     WidgetElement canvas{};
     canvas.type = WidgetElementType::Panel;
     canvas.id = name + "_canvas";
-    canvas.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-    canvas.hoverColor = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    canvas.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    canvas.style.hoverColor = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
     canvas.fillX = true;
     canvas.fillY = true;
     canvas.from = Vec2{ 0.0f, 0.0f };
@@ -291,6 +327,7 @@ void ViewportUIManager::clearAllWidgets()
     }
     m_selectedElementId.clear();
     m_pressedElementId.clear();
+    m_focusedElementId.clear();
     m_gameplayCursorVisible = false;
     m_layoutDirty = true;
 }
@@ -466,6 +503,80 @@ void ViewportUIManager::updateLayout(const std::function<Vec2(const std::string&
     m_layoutDirty = false;
 }
 
+static void tickSpinnersRecursive(std::vector<WidgetElement>& elements, float dt, bool& changed)
+{
+    for (auto& el : elements)
+    {
+        if (el.type == WidgetElementType::Spinner)
+        {
+            el.spinnerElapsed += dt;
+            changed = true;
+        }
+        if (!el.children.empty())
+        {
+            tickSpinnersRecursive(el.children, dt, changed);
+        }
+    }
+}
+
+void ViewportUIManager::tickAnimations(float deltaTime)
+{
+    if (deltaTime <= 0.0f)
+    {
+        return;
+    }
+
+    bool changed = false;
+    for (auto& entry : m_widgets)
+    {
+        if (!entry.widget)
+        {
+            continue;
+        }
+
+        auto& player = entry.widget->animationPlayer();
+        const float beforeTime = player.getCurrentTime();
+        const bool beforePlaying = player.isPlaying();
+        player.tick(deltaTime);
+
+        if (beforePlaying || player.isPlaying() || std::abs(player.getCurrentTime() - beforeTime) > 1e-6f)
+        {
+            changed = true;
+        }
+
+        tickSpinnersRecursive(entry.widget->getElementsMutable(), deltaTime, changed);
+    }
+
+    if (changed)
+    {
+        m_layoutDirty = true;
+        m_renderDirty = true;
+    }
+
+    // Gamepad left-stick repeat navigation
+    if (m_gpStickDirX != 0 || m_gpStickDirY != 0)
+    {
+        if (m_gpStickFirstMove)
+        {
+            moveFocusInDirection(m_gpStickDirX, m_gpStickDirY);
+            m_gpStickFirstMove = false;
+            m_gpStickRepeatTimer = 0.0f;
+        }
+        else
+        {
+            m_gpStickRepeatTimer += deltaTime;
+            const float threshold = (m_gpStickRepeatTimer < kGpRepeatDelay)
+                ? kGpRepeatDelay : kGpRepeatInterval;
+            if (m_gpStickRepeatTimer >= threshold)
+            {
+                moveFocusInDirection(m_gpStickDirX, m_gpStickDirY);
+                m_gpStickRepeatTimer = (m_gpStickRepeatTimer < kGpRepeatDelay)
+                    ? 0.0f : m_gpStickRepeatTimer - kGpRepeatInterval;
+            }
+        }
+    }
+}
+
 bool ViewportUIManager::needsLayoutUpdate() const
 {
     if (m_layoutDirty)
@@ -519,6 +630,20 @@ bool ViewportUIManager::handleMouseDown(const Vec2& windowPos, int button)
     hit->isPressed = true;
     m_renderDirty = true;
     setSelectedElementId(hit->id);
+
+    // Set focus on clicked element if it is focusable
+    if (hit->focusConfig.isFocusable)
+        setFocus(hit->id);
+    else
+        clearFocus();
+
+    // Begin pending drag if element is draggable
+    if (hit->isDraggable)
+    {
+        m_dragPending = true;
+        m_dragStartPos = windowPos;
+    }
+
     return true;
 }
 
@@ -527,6 +652,31 @@ bool ViewportUIManager::handleMouseUp(const Vec2& windowPos, int button)
     if (!m_visible || m_widgets.empty() || button != SDL_BUTTON_LEFT)
     {
         return false;
+    }
+
+    // Cancel pending drag on mouse up (didn't meet threshold)
+    m_dragPending = false;
+
+    // Complete active drag
+    if (m_isDragging)
+    {
+        // Find drop target
+        if (isInsideViewport(windowPos))
+        {
+            WidgetElement* dropTarget = hitTest(windowToViewport(windowPos));
+            if (dropTarget && dropTarget->acceptsDrop && dropTarget->onDrop)
+            {
+                bool accepted = true;
+                if (dropTarget->onDragOver)
+                    accepted = dropTarget->onDragOver(m_dragOp);
+
+                if (accepted)
+                    dropTarget->onDrop(m_dragOp);
+            }
+        }
+        cancelDrag();
+        m_pressedElementId.clear();
+        return true;
     }
 
     bool consumed = false;
@@ -565,9 +715,195 @@ bool ViewportUIManager::handleTextInput(const std::string& /*text*/)
     return false;
 }
 
-bool ViewportUIManager::handleKeyDown(int /*key*/)
+bool ViewportUIManager::handleKeyDown(int key, int modifiers)
 {
+    if (!m_visible || m_widgets.empty())
+        return false;
+
+    // Tab / Shift+Tab: cycle focus
+    if (key == SDLK_TAB)
+    {
+        if (modifiers & SDL_KMOD_SHIFT)
+            tabToPrevious();
+        else
+            tabToNext();
+        return true;
+    }
+
+    // Arrow keys: spatial navigation
+    if (key == SDLK_UP)    { moveFocusInDirection( 0, -1); return true; }
+    if (key == SDLK_DOWN)  { moveFocusInDirection( 0,  1); return true; }
+    if (key == SDLK_LEFT)  { moveFocusInDirection(-1,  0); return true; }
+    if (key == SDLK_RIGHT) { moveFocusInDirection( 1,  0); return true; }
+
+    // Enter / Space: activate focused element
+    if ((key == SDLK_RETURN || key == SDLK_KP_ENTER || key == SDLK_SPACE) && !m_focusedElementId.empty())
+    {
+        activateFocusedElement();
+        return true;
+    }
+
+    // Escape: clear focus
+    if (key == SDLK_ESCAPE && !m_focusedElementId.empty())
+    {
+        clearFocus();
+        return true;
+    }
+
     return false;
+}
+
+bool ViewportUIManager::handleGamepadButton(int button, bool pressed)
+{
+    if (!m_visible || m_widgets.empty() || !pressed)
+        return false;
+
+    // D-Pad → spatial navigation
+    if (button == SDL_GAMEPAD_BUTTON_DPAD_UP)    { moveFocusInDirection( 0, -1); return true; }
+    if (button == SDL_GAMEPAD_BUTTON_DPAD_DOWN)  { moveFocusInDirection( 0,  1); return true; }
+    if (button == SDL_GAMEPAD_BUTTON_DPAD_LEFT)  { moveFocusInDirection(-1,  0); return true; }
+    if (button == SDL_GAMEPAD_BUTTON_DPAD_RIGHT) { moveFocusInDirection( 1,  0); return true; }
+
+    // A / Cross → activate
+    if (button == SDL_GAMEPAD_BUTTON_SOUTH && !m_focusedElementId.empty())
+    {
+        activateFocusedElement();
+        return true;
+    }
+
+    // B / Circle → back / clear focus
+    if (button == SDL_GAMEPAD_BUTTON_EAST && !m_focusedElementId.empty())
+    {
+        clearFocus();
+        return true;
+    }
+
+    // LB → tab previous, RB → tab next
+    if (button == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)  { tabToPrevious(); return true; }
+    if (button == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) { tabToNext();     return true; }
+
+    return false;
+}
+
+bool ViewportUIManager::handleGamepadAxis(int axis, float value)
+{
+    if (!m_visible || m_widgets.empty())
+        return false;
+
+    // Only process left stick
+    if (axis == SDL_GAMEPAD_AXIS_LEFTX)
+    {
+        if (std::abs(value) < kGpDeadzone)
+            m_gpStickDirX = 0;
+        else
+            m_gpStickDirX = (value > 0.0f) ? 1 : -1;
+    }
+    else if (axis == SDL_GAMEPAD_AXIS_LEFTY)
+    {
+        if (std::abs(value) < kGpDeadzone)
+            m_gpStickDirY = 0;
+        else
+            m_gpStickDirY = (value > 0.0f) ? 1 : -1;
+    }
+    else
+    {
+        return false;
+    }
+
+    // Reset repeat timer when direction changes
+    if (m_gpStickDirX == 0 && m_gpStickDirY == 0)
+    {
+        m_gpStickRepeatTimer = 0.0f;
+        m_gpStickFirstMove = true;
+    }
+
+    return m_gpStickDirX != 0 || m_gpStickDirY != 0;
+}
+
+bool ViewportUIManager::handleMouseMove(const Vec2& windowPos)
+{
+    if (!m_visible || m_widgets.empty())
+        return false;
+
+    // Check if we should start a drag (pending from mouseDown, threshold met)
+    if (m_dragPending && !m_isDragging)
+    {
+        const float dx = windowPos.x - m_dragStartPos.x;
+        const float dy = windowPos.y - m_dragStartPos.y;
+        if (dx * dx + dy * dy >= kDragThreshold * kDragThreshold)
+        {
+            auto* source = findElementById(m_pressedElementId);
+            if (source && source->isDraggable)
+            {
+                m_isDragging = true;
+                m_dragPending = false;
+                m_dragOp.sourceElementId = source->id;
+                m_dragOp.payload = source->dragPayload;
+                m_dragOp.dragPosition = windowToViewport(windowPos);
+
+                if (source->onDragStart)
+                    source->onDragStart();
+
+                source->isPressed = false;
+                m_renderDirty = true;
+            }
+            else
+            {
+                m_dragPending = false;
+            }
+        }
+    }
+
+    // Update active drag
+    if (m_isDragging)
+    {
+        m_dragOp.dragPosition = windowToViewport(windowPos);
+
+        // Find element under cursor for drop-target feedback
+        std::string newOverId;
+        if (isInsideViewport(windowPos))
+        {
+            if (auto* over = hitTest(windowToViewport(windowPos)))
+            {
+                if (over->acceptsDrop && over->id != m_dragOp.sourceElementId)
+                    newOverId = over->id;
+            }
+        }
+
+        if (newOverId != m_dragOverElementId)
+        {
+            m_dragOverElementId = newOverId;
+            m_renderDirty = true;
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+bool ViewportUIManager::isDragging() const
+{
+    return m_isDragging;
+}
+
+const DragDropOperation& ViewportUIManager::getCurrentDragOperation() const
+{
+    return m_dragOp;
+}
+
+const std::string& ViewportUIManager::getDragOverElementId() const
+{
+    return m_dragOverElementId;
+}
+
+void ViewportUIManager::cancelDrag()
+{
+    m_isDragging = false;
+    m_dragPending = false;
+    m_dragOp = DragDropOperation{};
+    m_dragOverElementId.clear();
+    m_renderDirty = true;
 }
 
 void ViewportUIManager::setMousePosition(const Vec2& windowPos)
@@ -626,6 +962,244 @@ const std::string& ViewportUIManager::getSelectedElementId() const
 void ViewportUIManager::setOnSelectionChanged(SelectionChangedCallback callback)
 {
     m_onSelectionChanged = std::move(callback);
+}
+
+// ---------------------------------------------------------------------------
+// Focus management (Phase 5)
+// ---------------------------------------------------------------------------
+
+void ViewportUIManager::setFocus(const std::string& elementId)
+{
+    if (m_focusedElementId == elementId)
+        return;
+
+    // Clear old focus
+    if (auto* prev = findElementById(m_focusedElementId))
+        prev->isFocused = false;
+
+    m_focusedElementId = elementId;
+
+    // Set new focus
+    if (auto* elem = findElementById(m_focusedElementId))
+        elem->isFocused = true;
+
+    m_renderDirty = true;
+}
+
+void ViewportUIManager::clearFocus()
+{
+    if (m_focusedElementId.empty())
+        return;
+
+    if (auto* prev = findElementById(m_focusedElementId))
+        prev->isFocused = false;
+
+    m_focusedElementId.clear();
+    m_renderDirty = true;
+}
+
+const std::string& ViewportUIManager::getFocusedElementId() const
+{
+    return m_focusedElementId;
+}
+
+void ViewportUIManager::setFocusable(const std::string& elementId, bool focusable)
+{
+    if (auto* elem = findElementById(elementId))
+    {
+        elem->focusConfig.isFocusable = focusable;
+    }
+}
+
+std::vector<ViewportUIManager::FocusableEntry> ViewportUIManager::collectFocusableElements() const
+{
+    std::vector<FocusableEntry> result;
+    const float vpW = m_viewportRect.z;
+    const float vpH = m_viewportRect.w;
+
+    for (const auto& entry : m_widgets)
+    {
+        if (!entry.widget)
+            continue;
+        const auto& elements = entry.widget->getElements();
+        if (elements.empty())
+            continue;
+
+        Vec2 widgetSize = entry.widget->getSizePixels();
+        if (widgetSize.x <= 0.0f) widgetSize.x = vpW;
+        if (widgetSize.y <= 0.0f) widgetSize.y = vpH;
+
+        int autoIndex = 0;
+        std::vector<FocusableInfo> infos;
+        CollectFocusableRecursive(elements, 0.0f, 0.0f, widgetSize.x, widgetSize.y, infos, autoIndex);
+        for (auto& fi : infos)
+        {
+            result.push_back({ std::move(fi.id), fi.tabIndex, fi.center });
+        }
+    }
+
+    // Sort by tabIndex (stable, so document order is preserved for equal indices)
+    std::stable_sort(result.begin(), result.end(),
+        [](const FocusableEntry& a, const FocusableEntry& b)
+        {
+            return a.tabIndex < b.tabIndex;
+        });
+
+    return result;
+}
+
+void ViewportUIManager::tabToNext()
+{
+    auto focusables = collectFocusableElements();
+    if (focusables.empty())
+        return;
+
+    if (m_focusedElementId.empty())
+    {
+        setFocus(focusables.front().id);
+        return;
+    }
+
+    for (size_t i = 0; i < focusables.size(); ++i)
+    {
+        if (focusables[i].id == m_focusedElementId)
+        {
+            const size_t next = (i + 1) % focusables.size();
+            setFocus(focusables[next].id);
+            return;
+        }
+    }
+    // Current focus not found, go to first
+    setFocus(focusables.front().id);
+}
+
+void ViewportUIManager::tabToPrevious()
+{
+    auto focusables = collectFocusableElements();
+    if (focusables.empty())
+        return;
+
+    if (m_focusedElementId.empty())
+    {
+        setFocus(focusables.back().id);
+        return;
+    }
+
+    for (size_t i = 0; i < focusables.size(); ++i)
+    {
+        if (focusables[i].id == m_focusedElementId)
+        {
+            const size_t prev = (i == 0) ? focusables.size() - 1 : i - 1;
+            setFocus(focusables[prev].id);
+            return;
+        }
+    }
+    setFocus(focusables.back().id);
+}
+
+void ViewportUIManager::moveFocusInDirection(int dirX, int dirY)
+{
+    // First check explicit directional overrides
+    if (auto* focused = findElementById(m_focusedElementId))
+    {
+        const std::string& target =
+            (dirY < 0) ? focused->focusConfig.focusUp :
+            (dirY > 0) ? focused->focusConfig.focusDown :
+            (dirX < 0) ? focused->focusConfig.focusLeft :
+            (dirX > 0) ? focused->focusConfig.focusRight : focused->focusConfig.focusUp;
+
+        if (!target.empty())
+        {
+            setFocus(target);
+            return;
+        }
+    }
+
+    // Spatial navigation: find nearest focusable element in the given direction
+    auto focusables = collectFocusableElements();
+    if (focusables.empty())
+        return;
+
+    Vec2 currentCenter{};
+    bool foundCurrent = false;
+    for (const auto& fe : focusables)
+    {
+        if (fe.id == m_focusedElementId)
+        {
+            currentCenter = fe.center;
+            foundCurrent = true;
+            break;
+        }
+    }
+    if (!foundCurrent)
+    {
+        if (!focusables.empty())
+            setFocus(focusables.front().id);
+        return;
+    }
+
+    float bestDist = std::numeric_limits<float>::max();
+    std::string bestId;
+    const float dx = static_cast<float>(dirX);
+    const float dy = static_cast<float>(dirY);
+
+    for (const auto& fe : focusables)
+    {
+        if (fe.id == m_focusedElementId)
+            continue;
+
+        const float offX = fe.center.x - currentCenter.x;
+        const float offY = fe.center.y - currentCenter.y;
+
+        // Check the candidate is in the correct direction
+        const float dot = offX * dx + offY * dy;
+        if (dot <= 0.0f)
+            continue;
+
+        const float dist = offX * offX + offY * offY;
+        if (dist < bestDist)
+        {
+            bestDist = dist;
+            bestId = fe.id;
+        }
+    }
+
+    if (!bestId.empty())
+        setFocus(bestId);
+}
+
+void ViewportUIManager::activateFocusedElement()
+{
+    auto* elem = findElementById(m_focusedElementId);
+    if (!elem)
+        return;
+
+    // Toggle checkboxes
+    if (elem->type == WidgetElementType::CheckBox)
+    {
+        elem->isChecked = !elem->isChecked;
+        if (elem->onCheckedChanged)
+            elem->onCheckedChanged(elem->isChecked);
+        m_renderDirty = true;
+        return;
+    }
+
+    // Toggle buttons
+    if (elem->type == WidgetElementType::ToggleButton)
+    {
+        elem->isChecked = !elem->isChecked;
+        if (elem->onCheckedChanged)
+            elem->onCheckedChanged(elem->isChecked);
+        m_renderDirty = true;
+        return;
+    }
+
+    // Click callback for all other types
+    if (elem->onClicked)
+    {
+        elem->onClicked();
+        m_renderDirty = true;
+    }
 }
 
 // ---------------------------------------------------------------------------

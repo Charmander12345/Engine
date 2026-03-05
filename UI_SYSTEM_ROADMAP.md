@@ -95,9 +95,9 @@ Ein UI-System, das die folgenden **UMG-Kernkonzepte** abdeckt:
 | Clipping-Modi (Bounds/None/Inherit) | ✅ | ❌ | Mittel |
 | Animations (Widget Animation) | ✅ | ❌ | Groß |
 | Data Binding (Property Binding) | ✅ | ❌ | Groß |
-| Rich Text Block | ✅ | ❌ | Mittel |
+| Rich Text Block | ✅ | ✅ | Mittel |
 | Virtualisierte Listen (ListView/TileView) | ✅ | ❌ | Groß |
-| Focus / Keyboard Navigation | ✅ | ❌ | Mittel |
+| Focus / Keyboard Navigation | ✅ | ✅ | Mittel |
 | Gamepad-Navigation | ✅ | ❌ | Mittel |
 | Named Slots / User Widgets | ✅ | 🟡 (Assets) | Mittel |
 | Retainer Box (Off-Screen-Caching) | ✅ | ❌ | Mittel |
@@ -108,9 +108,9 @@ Ein UI-System, das die folgenden **UMG-Kernkonzepte** abdeckt:
 | Drag & Drop (Runtime, UI-intern) | ✅ | 🟡 (nur Editor) | Mittel |
 | Lokalisierung (FText) | ✅ | ❌ | Mittel |
 | Accessibility (Screen Reader) | ✅ | ❌ | Groß |
-| Circular Throbber / Spinner | ✅ | ❌ | Klein |
-| Editable Text (Multiline) | ✅ | 🟡 (EntryBar) | Mittel |
-| Border Widget | ✅ | 🟡 (border Properties) | Klein |
+| Circular Throbber / Spinner | ✅ | ✅ | Klein |
+| Editable Text (Multiline) | ✅ | ✅ | Mittel |
+| Border Widget | ✅ | ✅ | Klein |
 
 ---
 
@@ -419,14 +419,16 @@ engine.ui.set_animation_speed(widget_id, "FadeIn", 2.0)
 
 - [x] `WidgetAnimation`, `AnimationTrack`, `Keyframe` Datenstrukturen
 - [x] `EasingFunction` – Implementierung aller Standard-Easing-Kurven
-- [ ] `WidgetAnimationPlayer` – play/pause/stop/tick/reverse
-- [ ] Tick-Integration in `ViewportUIManager::update()` / `OpenGLRenderer::render()`
-- [ ] Property-Application (Track-Wert → WidgetElement-Feld setzen)
+- [x] `WidgetAnimationPlayer` – play/pause/stop/tick/reverse
+- [x] Tick-Integration in `ViewportUIManager::update()` / `OpenGLRenderer::render()`
+- [x] Property-Application (Track-Wert → WidgetElement-Feld setzen)
 - [x] JSON-Serialisierung (Animationen als Teil des Widget-Assets)
-- [ ] Python API (`play_animation`, `stop_animation`, `set_animation_speed`)
-- [ ] `engine.pyi` aktualisieren
-- [ ] Basis-Animations-Panel im Widget-Editor (Liste + Play/Stop)
-- [ ] Dokumentation
+- [x] Python API (`play_animation`, `stop_animation`, `set_animation_speed`)
+- [x] `engine.pyi` aktualisieren
+- [x] Basis-Animations-Panel im Widget-Editor (Liste + Play/Stop)
+- [x] Animations-Timeline-Panel im Widget-Editor (Unreal-Style Bottom-Dock mit Track-Management, Keyframe-Diamanten, Scrubber, Drag-&-Drop)
+- [x] Redesigned Timeline-Panel: Links Animationsliste + Rechts Timeline mit Tree-View (aufklappbare Element-Header), kleinere Keyframe-Diamanten (9px), draggbare Scrubber-Linie (Echtzeit-Preview), draggbare End-Line (Dauer ändern), Echtzeit-Keyframe-Dragging
+- [x] Dokumentation
 
 ---
 
@@ -508,14 +510,16 @@ Vec2 contentPadding;
 
 ### 7.6 Checkliste Phase 4
 
-- [ ] Rich Text Block – Parser, Zeilenumbruch, Segment-Rendering
-- [ ] ListView – Virtualisierung, Item-Pool, ScrollView-Integration
-- [ ] TileView – Grid-basierte Virtualisierung
-- [ ] Spinner – Rendering, Animation
-- [ ] Multiline EntryBar – Textumbruch, Cursor-Positionierung, Selection
-- [ ] Border Widget – Separate Border-Brush, per-Seite Dicke
-- [ ] Alle: WidgetElementType, Editor-Palette, Details-Panel, JSON-Serialisierung
-- [ ] Dokumentation
+- [x] Rich Text Block – Parser, Zeilenumbruch, Segment-Rendering
+- [x] ListView – Virtualisierung, Scissor-Clipping, alternating Rows, Scroll-Offset
+- [x] TileView – Grid-basierte Virtualisierung, columnsPerRow, itemWidth/itemHeight
+- [x] Spinner – Rendering, Animation (dotCount, speed, elapsed tick)
+- [x] Multiline EntryBar – Textumbruch, Cursor-Positionierung, Selection
+- [x] Border Widget – Separate Border-Brush, per-Seite Dicke, contentPadding
+- [x] Alle (Border/Spinner): WidgetElementType, Editor-Palette, Details-Panel, JSON-Serialisierung
+- [x] Dokumentation (Border/Spinner): engine.pyi, ENGINE_STATUS.md, PROJECT_OVERVIEW.md
+- [x] Multiline EntryBar: isMultiline, maxLines, mehrzeiliges Rendering, Editor-Details, EntryBarWidget.h, engine.pyi
+- [x] ListView/TileView: Rendering (3 Pfade), Layout, Palette, Details-Panel, JSON, ListViewWidget.h, TileViewWidget.h, engine.pyi
 
 ---
 
@@ -595,16 +599,16 @@ std::function<void()> onDragStart;
 
 ### 8.5 Checkliste Phase 5
 
-- [ ] `FocusConfig` Struct + FocusManager-Klasse
-- [ ] Tab/Shift+Tab-Navigation
-- [ ] Pfeiltasten-Navigation (explizite Richtung oder Auto-Spatial)
-- [ ] Enter/Space-Aktivierung
-- [ ] Visuelles Fokus-Feedback (Focus-Brush / Outline)
-- [ ] Gamepad-Input-Adapter (SDL GameController → FocusManager)
-- [ ] Runtime Drag & Drop (DragDropOperation, Callbacks)
-- [ ] Python API: `set_focusable()`, `set_focus()`, `on_drag_start()`, `on_drop()`
-- [ ] `engine.pyi` aktualisieren
-- [ ] Dokumentation
+- [x] `FocusConfig` Struct + FocusManager-Klasse
+- [x] Tab/Shift+Tab-Navigation
+- [x] Pfeiltasten-Navigation (explizite Richtung oder Auto-Spatial)
+- [x] Enter/Space-Aktivierung
+- [x] Visuelles Fokus-Feedback (Focus-Brush / Outline)
+- [x] Gamepad-Input-Adapter (SDL GameController → FocusManager)
+- [x] Runtime Drag & Drop (DragDropOperation, Callbacks)
+- [x] Python API: `set_focusable()`, `set_focus()`, `clear_focus()`, `get_focused_element()`
+- [x] `engine.pyi` aktualisieren
+- [x] Dokumentation
 
 ---
 
@@ -833,11 +837,13 @@ void setSlotContent(const std::string& widgetId, const std::string& slotName, co
 
 ### 12.1 Animations-Timeline
 
-- Horizontale Zeitachse im Widget-Editor
-- Pro Track eine Zeile (Element + Property)
-- Keyframes als Punkte, Easing-Kurven als Verbindungslinien
-- Scrubber zum Vorspulen, Live-Preview im FBO
-- Play/Pause/Stop-Controls
+- ✅ Horizontale Zeitachse im Widget-Editor (Bottom-Dock-Panel, 250px)
+- ✅ Pro Track eine Zeile (Element + Property) mit Add/Remove-Buttons
+- ✅ Keyframes als Diamant-Punkte (◆), per Drag-&-Drop verschiebbar
+- ✅ Scrubber zum Vorspulen (Klick auf Ruler setzt Position)
+- ✅ Play/Stop-Controls + Animations-Selektor + New/Delete
+- [ ] Easing-Kurven visuell als Verbindungslinien
+- [ ] Live-Preview im FBO bei Scrubber-Bewegung
 
 ### 12.2 Binding-Editor
 
