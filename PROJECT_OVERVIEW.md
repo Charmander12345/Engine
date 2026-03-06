@@ -90,6 +90,12 @@
 - `UIManager` (Widget Editor): Editierbare Keyframes in `buildTimelineTrackRows` – expandierte Keyframe-Zeilen verwenden EntryBar-Elemente für Time- und Value-Felder (inline editierbar, `onValueChanged`-Callbacks aktualisieren `AnimationKeyframe::time`/`value.x`). Zusätzlich ×-Delete-Button pro Keyframe-Zeile.
 - `Editor Theme System`: Zentralisiertes Theme-System für einheitliches Editor-Design. `EditorTheme.h` (Singleton, ~60 Vec4-Farben, 6 Schriftgrößen, 7 Spacing-Werte für alle Editor-UI-Bereiche). `EditorUIBuilder.h/.cpp` (17+ statische Factory-Methoden: makeLabel, makeButton, makePrimaryButton, makeDangerButton, makeEntryBar, makeCheckBox, makeDropDown, makeFloatRow, makeVec3Row etc.). `ViewportUITheme.h` (separate, anpassbare Runtime-Theme-Klasse für Viewport/Gameplay-UI mit halbtransparenten Defaults). Systematischer Ersatz aller hardcoded Farben/Fonts in `UIManager.cpp` (~13.000 Zeilen): Outliner, Details-Panel, Modals, Toasts, Content Browser, Dropdowns, Projekt-Screen, Widget Editor (Controls, Hierarchy, Details, Toolbar, Timeline inkl. Tracks/Keyframes/Ruler), UIDesigner (Toolbar, Controls, Hierarchy, Properties). `OpenGLRenderer.cpp`: Mesh-Viewer (Titel, Pfad, Stats, Transform/Material-Header, Float-Rows, Material-Pfad) und Tab-Bar auf EditorTheme umgestellt. `ViewportUIManager.h` erweitert um `ViewportUITheme m_theme` Member mit `getTheme()`-Accessors.
 - `EditorWidget / GameplayWidget Trennung`: Architektonische Aufspaltung des UI-Systems in Editor-Widgets (`EditorWidget`, `src/Renderer/EditorUI/EditorWidget.h`) und Gameplay-Widgets (`GameplayWidget = Widget`, `src/Renderer/GameplayUI/GameplayWidget.h`). Editor-Widgets sind schlank (kein EngineObject, kein JSON, keine Animationen), Gameplay-Widgets behalten volles Feature-Set. `UIManager` nutzt `EditorWidget`, `ViewportUIManager` nutzt `GameplayWidget`. Übergangsüberladungen in `registerWidget` konvertieren bestehende Widget-Instanzen via `EditorWidget::fromWidget()`.
+- `Darker Modern Editor Theme`: Komplette Überarbeitung der EditorTheme-Farbpalette für dunkleres, moderneres Erscheinungsbild mit weißer Schrift. Alle ~60 Farbwerte in `EditorTheme.h` angepasst (Window/Chrome 0.06–0.08, Panels 0.08–0.10, Text 0.95 weiß). Blaustich entfernt, rein neutrales Grau. Alle UI-Bereiche proportional abgedunkelt.
+- `Editor Settings Popup`: Neues Editor-Settings-Popup über Settings-Dropdown (zwischen "Engine Settings" und "UI Designer"). `openEditorSettingsPopup()` in UIManager (PopupWindow 480×380). Zwei Sektionen: Font Sizes (6 Einträge, 6–48px) und Spacing (5 Einträge mit feldspezifischen Bereichen). Direkte Modifikation des EditorTheme-Singletons + `markAllWidgetsDirty()` für Live-Vorschau.
+- `UIManager` (EditorTheme-Migration): Vollständige Ersetzung aller verbliebenen hardcoded `Vec4`-Farbliterale in `UIManager.cpp` durch `EditorTheme::Get().*`-Referenzen. Betrifft: Engine-Settings-Popup (Checkbox-Farben, EntryBar-Text, Dropdown-Styling, Kategorie-Buttons), Projekt-Auswahl-Screen (Background, Titlebar, Sidebar, Footer, Projekt-Zeilen mit Akzentbalken, Buttons, Checkboxen, RHI-Dropdown, Create-Button, Pfad-Vorschau), Content-Browser-Selektionsfarben. ~53 verschiedene Theme-Konstanten im Einsatz.
+- `Editor Theme Serialization & Selection`: Vollständige Theme-Persistierung und Auswahl. `EditorTheme` um JSON-Serialisierung erweitert (`toJson()`/`fromJson()`, `saveToFile()`/`loadFromFile()`, `discoverThemes()`). Statische Methoden: `GetThemesDirectory()` (Editor/Themes/), `EnsureDefaultThemes()` (Dark.json + Light.json), `loadThemeByName()`, `saveActiveTheme()`. Default-Themes werden automatisch über `AssetManager::ensureDefaultAssetsCreated()` erzeugt. Gespeichertes Theme wird beim Start aus DiagnosticsManager geladen. Editor Settings Popup um Theme-Dropdown erweitert (Sektion "Theme" mit Live-Wechsel, Persistierung, Auto-Save bei Font/Spacing-Änderungen).
+- `Full UI Rebuild on Theme Change (Deferred)`: `rebuildAllEditorUI()` setzt nur `m_themeDirty = true` + `markAllWidgetsDirty()`. Die eigentliche Aktualisierung erfolgt verzögert im nächsten Frame über `applyPendingThemeUpdate()` (aufgerufen am Anfang von `updateLayouts()`). Private Methode populiert dynamische Panels gezielt neu (Outliner, Details, ContentBrowser, StatusBar) – die `populate*`-Funktionen erzeugen frische Elemente über `EditorUIBuilder` mit aktuellen `EditorTheme`-Farben – und markiert alles dirty. Asset-basierte Widget-Hintergründe (TitleBar, ViewportOverlay etc.) behalten ihre bewusst gesetzten JSON-Farben. Ein früherer generischer `applyThemeColors`-Walk wurde entfernt (überschrieb Sonderfarben wie rote Close-Button-Hover und deckte nicht alle Widget-Typen ab). Deferred-Ansatz verhindert Freeze/Crash bei Theme-Wechsel innerhalb von Dropdown-Callbacks.
+- `Theme-Driven Editor Widget Styling`: Neue statische Methode `EditorTheme::ApplyThemeToElement(WidgetElement&, const EditorTheme&)` mappt jeden `WidgetElementType` auf Theme-Farben (color, hoverColor, pressedColor, textColor, borderColor, fillColor, font, fontSize). Spezialbehandlung für ColorPicker (übersprungen), Image (Tint beibehalten), transparente Spacer (bleiben transparent). ID-basierte Overrides: Close → `buttonDanger`-Hover, Save → `buttonPrimary`. Alle ~25 Element-Typen abgedeckt, rekursive Kind-Anwendung. `UIManager::applyThemeToAllEditorWidgets()` iteriert über alle Editor-Widgets und wendet Theme per `ApplyThemeToElement` an. Integration in `applyPendingThemeUpdate()` – asset-basierte Widgets (TitleBar, ViewportOverlay, WorldOutliner, EntityDetails, ContentBrowser, StatusBar, WorldSettings) werden beim Theme-Wechsel jetzt korrekt umgefärbt. `loadThemeByName()`-Fallback auf Dark-Theme-Defaults bei fehlender Theme-Datei.
 
 ## Inhaltsverzeichnis
 
@@ -123,6 +129,9 @@
     - 10.3 [UIWidgets (Einzelne Controls)](#103-uiwidgets-einzelne-controls)
     - 10.4 [Editor Theme System](#104-editor-theme-system)
     - 10.5 [EditorWidget / GameplayWidget Trennung](#105-editorwidget--gameplaywidget-trennung)
+    - 10.6 [Darker Modern Editor Theme](#106-darker-modern-editor-theme)
+    - 10.7 [Editor Settings Popup](#107-editor-settings-popup)
+    - 10.8 [Editor Theme Serialization & Selection](#108-editor-theme-serialization--selection)
 11. [Scripting (Python)](#11-scripting-python)
     - 11.1 [Initialisierung](#111-initialisierung)
     - 11.2 [Script-API (engine-Modul)](#112-script-api-engine-modul)
@@ -1467,6 +1476,75 @@ Architektonische Aufspaltung des UI-Widget-Systems in zwei separate Basisklassen
 - `main.cpp` und bestehender Code, der `Widget`-Instanzen aus JSON lädt, funktioniert weiterhin über die Transition-Überladung
 - `WidgetEditorState.editedWidget` bleibt `shared_ptr<Widget>`, da der Widget-Editor Gameplay-Widgets bearbeitet
 - Renderer (`OpenGLRenderer`) arbeitet weiterhin mit `vector<WidgetElement>&`, das beide Widget-Typen über `getElements()`/`getElementsMutable()` bereitstellen
+
+---
+
+### 10.6 Darker Modern Editor Theme
+**Datei:** `src/Renderer/EditorTheme.h`
+
+Komplette Überarbeitung der EditorTheme-Farbpalette für ein dunkleres, moderneres Erscheinungsbild mit weißer Schrift:
+
+- **Window/Chrome**: Hintergründe auf 0.06–0.08 abgesenkt (vorher 0.09–0.11)
+- **Panel-Hintergründe**: Auf 0.08–0.10 abgesenkt (vorher 0.11–0.14)
+- **Text**: Alle Textfarben auf 0.95 angehoben (nahezu reines Weiß, vorher 0.82–0.92)
+- **Neutral**: Blaustich aus Hintergründen entfernt, rein neutrales Grau
+- **Proportional**: Buttons, Inputs, Dropdowns, TreeView, ContentBrowser, Timeline, StatusBar proportional abgedunkelt
+- **Akzentfarben**: Selection/Hover dezent angepasst für besseren Kontrast
+
+### 10.7 Editor Settings Popup
+**Dateien:** `src/Renderer/UIManager.h`, `src/Renderer/UIManager.cpp`, `src/main.cpp`
+
+Editor-Settings-Popup erreichbar über Settings-Dropdown im ViewportOverlay (zwischen "Engine Settings" und "UI Designer").
+
+**Implementierung:**
+- `openEditorSettingsPopup()` in UIManager.h deklariert, in UIManager.cpp implementiert (~200 Zeilen)
+- PopupWindow (480×380) mit dunklem Theme-Styling aus `EditorTheme::Get()`
+
+**Sektionen:**
+1. **Font Sizes** – 6 EntryBar-Einträge: Heading, Subheading, Body, Small, Caption, Monospace (Bereich 6–48px)
+2. **Spacing** – 5 EntryBar-Einträge: Row Height (16–48), Row Height Small (14–40), Row Height Large (20–56), Toolbar Height (24–64), Border Radius (0–12)
+
+**Mechanik:**
+- Jeder Eintrag schreibt direkt in den `EditorTheme`-Singleton via `float*`-Pointer
+- Nach Änderung: `markAllWidgetsDirty()` für sofortiges visuelles Feedback (Live-Vorschau)
+- Wertvalidierung mit `try/catch` auf `std::stof` und feldspezifischen Min/Max-Bereichen
+- Font-Size- und Spacing-Änderungen werden automatisch ins aktive Theme zurückgespeichert (`saveActiveTheme()`)
+
+**Theme-Auswahl:**
+- Neue Sektion "Theme" am Anfang des Popups mit "Active Theme"-DropDown
+- DropDown zeigt alle `.json`-Dateien aus `Editor/Themes/` (via `EditorTheme::discoverThemes()`)
+- Theme-Wechsel: lädt neues Theme (`loadThemeByName`), persistiert Auswahl in DiagnosticsManager, löst deferred UI-Rebuild aus (`rebuildAllEditorUI`) – Farben werden im nächsten Frame über `ApplyThemeToElement` aktualisiert
+
+### 10.8 Editor Theme Serialization & Selection
+**Dateien:** `src/Renderer/EditorTheme.h`, `src/AssetManager/AssetManager.cpp`, `src/main.cpp`
+
+Vollständige Theme-Persistierung mit JSON-Serialisierung und automatischer Default-Theme-Erstellung.
+
+**Serialisierung:**
+- `toJson()` / `fromJson()`: Konvertiert alle ~60 Vec4-Farben, Fonts, Spacing-Werte zu/von `nlohmann::json`
+- `saveToFile(path)` / `loadFromFile(path)`: Schreibt/liest Theme-JSON-Dateien
+- `discoverThemes()`: Scannt `Editor/Themes/`-Verzeichnis nach `.json`-Dateien, gibt Namensliste zurück
+
+**Default-Themes:**
+- `EnsureDefaultThemes()`: Erstellt `Dark.json` (Standard-Defaults) und `Light.json` (helle Farbpalette mit ~50 Overrides) falls nicht vorhanden
+- Wird automatisch von `AssetManager::ensureDefaultAssetsCreated()` aufgerufen (kein separater Aufruf in `main.cpp` nötig)
+- Theme-Verzeichnis: `Editor/Themes/` (relativ zum Arbeitsverzeichnis)
+
+**Startup-Flow:**
+1. `AssetManager::ensureDefaultAssetsCreated()` → `EditorTheme::EnsureDefaultThemes()` (erstellt Dark.json + Light.json)
+2. `main.cpp` Phase 2b: Liest gespeichertes Theme aus `DiagnosticsManager::getState("EditorTheme")` und lädt es via `loadThemeByName()`
+
+**Hilfsmethoden:**
+- `GetThemesDirectory()`: Gibt `Editor/Themes/`-Pfad zurück
+- `loadThemeByName(name)`: Lädt Theme aus `Editor/Themes/<name>.json`
+- `saveActiveTheme()`: Speichert aktuelles Theme zurück in seine Datei
+
+**Deferred UI Rebuild (`rebuildAllEditorUI()` + `applyPendingThemeUpdate()`):**
+- `rebuildAllEditorUI()` setzt nur `m_themeDirty = true` und ruft `markAllWidgetsDirty()` auf – keine schwere Arbeit im Callback-Kontext
+- `applyPendingThemeUpdate()` (private) wird am Anfang von `updateLayouts()` aufgerufen und prüft `m_themeDirty`
+- Ruft `applyThemeToAllEditorWidgets()` auf: rekursiver Farb-Walk über alle registrierten Editor-Widgets via `EditorTheme::ApplyThemeToElement` – aktualisiert Farben, Fonts und Spacing bestehender Elemente in-place
+- Abschließend `markAllWidgetsDirty()` für Layout-Neuberechnung
+- Deferred-Ansatz verhindert Editor-Freeze/Crash bei synchroner UI-Rekonstruktion innerhalb von Dropdown-Callbacks
 
 ---
 

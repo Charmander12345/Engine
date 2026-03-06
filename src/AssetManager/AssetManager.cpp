@@ -22,6 +22,7 @@
 #include <assimp/postprocess.h>
 
 #include "../Core/ECS/ECS.h"
+#include "../Renderer/EditorTheme.h"
 
 namespace fs = std::filesystem;
 
@@ -2892,6 +2893,9 @@ void AssetManager::ensureDefaultAssetsCreated()
 			ensureOnDisk(skyboxAssetRel, AssetType::Skybox, skybox);
 		}
 	}
+
+	// Default editor themes (Dark + Light JSON files in Editor/Themes/)
+	EditorTheme::EnsureDefaultThemes();
 
 	logger.log(Logger::Category::AssetManagement, "Default assets ensured.", Logger::LogLevel::INFO);
 }

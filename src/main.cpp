@@ -30,6 +30,7 @@
 #include "Core/EngineLevel.h"
 #include "Scripting/PythonScripting.h"
 #include "Physics/PhysicsWorld.h"
+#include "Renderer/EditorTheme.h"
 
 using namespace std;
 
@@ -461,6 +462,12 @@ int main()
         return -1;
     }
 
+    // --- Phase 2b: Load saved editor theme ---
+    {
+        if (auto savedTheme = diagnostics.getState("EditorTheme"); savedTheme && !savedTheme->empty())
+            EditorTheme::Get().loadThemeByName(*savedTheme);
+    }
+
     // --- Phase 3: Load editor UI widgets ---
     showProgress("Loading editor UI...");
 
@@ -631,6 +638,12 @@ int main()
                 items.push_back({ "Engine Settings", [&renderer]()
                     {
                         renderer->getUIManager().openEngineSettingsPopup();
+                    }
+                });
+
+                items.push_back({ "Editor Settings", [&renderer]()
+                    {
+                        renderer->getUIManager().openEditorSettingsPopup();
                     }
                 });
 

@@ -75,10 +75,12 @@ public:
     const Vec2& getMousePosition() const { return m_mousePosition; }
     bool isPointerOverUI(const Vec2& screenPos) const;
     bool hasClickEvent(const std::string& eventId) const;
-    void registerClickEvent(const std::string& eventId, std::function<void()> callback);
-    void markAllWidgetsDirty();
+	void registerClickEvent(const std::string& eventId, std::function<void()> callback);
+	void markAllWidgetsDirty();
+	void rebuildAllEditorUI();
+	void applyThemeToAllEditorWidgets();
 
-    bool isRenderDirty() const;
+	bool isRenderDirty() const;
     void clearRenderDirty();
 
     void showModalMessage(const std::string& message, std::function<void()> onClosed = {});
@@ -100,8 +102,9 @@ public:
     bool isDropdownMenuOpen() const { return m_dropdownVisible; }
 
     void openLandscapeManagerPopup();
-    void openEngineSettingsPopup();
-    void openWidgetEditorPopup(const std::string& relativeAssetPath);
+	void openEngineSettingsPopup();
+	void openEditorSettingsPopup();
+	void openWidgetEditorPopup(const std::string& relativeAssetPath);
     void openUIDesignerTab();
     void closeUIDesignerTab();
     bool isUIDesignerOpen() const;
@@ -114,8 +117,9 @@ public:
     static void SetActiveInstance(UIManager* instance);
 
 private:
-    WidgetEntry* findWidgetEntry(const std::string& id);
-    const WidgetEntry* findWidgetEntry(const std::string& id) const;
+	WidgetEntry* findWidgetEntry(const std::string& id);
+	const WidgetEntry* findWidgetEntry(const std::string& id) const;
+	void applyPendingThemeUpdate();
     WidgetElement* hitTest(const Vec2& screenPos, bool logDetails = false) const;
 	void populateOutlinerWidget(const std::shared_ptr<EditorWidget>& widget);
 	void populateOutlinerDetails(unsigned int entity);
@@ -143,8 +147,9 @@ private:
     mutable bool m_lastPointerOverUI{ false };
     mutable bool m_pointerCacheDirty{ true };
     WidgetElement* m_focusedEntry{ nullptr };
-    bool m_renderDirty{ true };
-    std::string m_activeTabId{ "Viewport" };
+	bool m_renderDirty{ true };
+	bool m_themeDirty{ false };
+	std::string m_activeTabId{ "Viewport" };
 
 	std::shared_ptr<EditorWidget> m_modalWidget;
     std::string m_modalMessage;

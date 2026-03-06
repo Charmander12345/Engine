@@ -1076,7 +1076,7 @@ namespace
                 cursorY += slotH + spacing;
             }
         }
-        // ── WrapBox: children flow and wrap ──
+        // â”€â”€ WrapBox: children flow and wrap â”€â”€
         else if (element.type == WidgetElementType::WrapBox)
         {
             const float spacing = element.spacing;
@@ -1131,7 +1131,7 @@ namespace
                 }
             }
         }
-        // ── UniformGrid: all cells equal size ──
+        // â”€â”€ UniformGrid: all cells equal size â”€â”€
         else if (element.type == WidgetElementType::UniformGrid)
         {
             const int childCount = static_cast<int>(element.children.size());
@@ -1169,7 +1169,7 @@ namespace
                     std::max(0.0f, cellH - child.margin.y * 2.0f), measureText);
             }
         }
-        // ── SizeBox: single child with size override ──
+        // â”€â”€ SizeBox: single child with size override â”€â”€
         else if (element.type == WidgetElementType::SizeBox)
         {
             if (!element.children.empty())
@@ -1180,7 +1180,7 @@ namespace
                 layoutElement(child, contentX, contentY, childW, childH, measureText);
             }
         }
-        // ── ScaleBox: single child, scaled to fit ──
+        // â”€â”€ ScaleBox: single child, scaled to fit â”€â”€
         else if (element.type == WidgetElementType::ScaleBox)
         {
             if (!element.children.empty())
@@ -1220,7 +1220,7 @@ namespace
                 layoutElement(child, contentX + offsetX, contentY + offsetY, scaledW, scaledH, measureText);
             }
         }
-        // ── WidgetSwitcher: only active child ──
+        // â”€â”€ WidgetSwitcher: only active child â”€â”€
         else if (element.type == WidgetElementType::WidgetSwitcher)
         {
             const int activeIdx = element.activeChildIndex;
@@ -1241,7 +1241,7 @@ namespace
                 }
             }
         }
-        // ── Overlay: all children stacked, each aligned within the same area ──
+        // â”€â”€ Overlay: all children stacked, each aligned within the same area â”€â”€
         else if (element.type == WidgetElementType::Overlay)
         {
             for (auto& child : element.children)
@@ -1274,7 +1274,7 @@ namespace
                 layoutElement(child, childX, childY, childW, childH, measureText);
             }
         }
-        // ── Border: single child inset by border thickness + content padding ──
+        // â”€â”€ Border: single child inset by border thickness + content padding â”€â”€
         else if (element.type == WidgetElementType::Border)
         {
             float insetL = element.borderThicknessLeft + element.contentPadding.x;
@@ -1290,7 +1290,7 @@ namespace
                 layoutElement(child, childX, childY, childW, childH, measureText);
             }
         }
-        // ── ListView: vertical stack of items ──
+        // â”€â”€ ListView: vertical stack of items â”€â”€
         else if (element.type == WidgetElementType::ListView)
         {
             float curY = contentY;
@@ -1301,7 +1301,7 @@ namespace
                 curY += itemH;
             }
         }
-        // ── TileView: grid of tiles ──
+        // â”€â”€ TileView: grid of tiles â”€â”€
         else if (element.type == WidgetElementType::TileView)
         {
             int cols = element.columnsPerRow > 0 ? element.columnsPerRow : 4;
@@ -2033,7 +2033,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
 
     detailsPanel->children.clear();
 
-    // Invalidate cached hover pointer – the old elements are destroyed.
+    // Invalidate cached hover pointer â€“ the old elements are destroyed.
     m_lastHoveredElement = nullptr;
 
     const auto makeTextLine = [](const std::string& text) -> WidgetElement
@@ -2508,7 +2508,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
         });
     }
 
-    // ── Collision Component ──────────────────────────────────────────────
+    // â”€â”€ Collision Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (const auto* collision = ecs.getComponent<ECS::CollisionComponent>(entity))
     {
         std::vector<WidgetElement> lines;
@@ -2618,7 +2618,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
         });
     }
 
-    // ── Physics Component ────────────────────────────────────────────────
+    // â”€â”€ Physics Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (const auto* physics = ecs.getComponent<ECS::PhysicsComponent>(entity))
     {
         std::vector<WidgetElement> lines;
@@ -3133,7 +3133,7 @@ static WidgetElement makeTreeRow(const std::string& id,
     btn.shaderFragment = "button_fragment.glsl";
     btn.hitTestMode = HitTestMode::Enabled;
     btn.runtimeOnly = true;
-    // No own text/image — children handle rendering
+    // No own text/image â€” children handle rendering
     btn.text = "";
 
     const float indentFrac = static_cast<float>(indentLevel) * 0.04f; // 4% per level
@@ -3142,7 +3142,7 @@ static WidgetElement makeTreeRow(const std::string& id,
     const float iconPad  = 0.1f;                                     // 10% vertical padding
     const float iconSize = rowHeight * (1.0f - 2.0f * iconPad);      // square icon in pixels
 
-    // Icon child (left side, square — pixel-sized so it stays 1:1 regardless of button width)
+    // Icon child (left side, square â€” pixel-sized so it stays 1:1 regardless of button width)
     if (!iconPath.empty())
     {
         WidgetElement icon{};
@@ -3169,9 +3169,7 @@ static WidgetElement makeTreeRow(const std::string& id,
         lbl.fontSize = theme.fontSizeBody;
         lbl.textAlignH = TextAlignH::Left;
         lbl.textAlignV = TextAlignV::Center;
-        lbl.style.textColor = isFolder
-            ? theme.cbFolderAccent
-            : theme.textPrimary;
+        lbl.style.textColor = theme.textPrimary;
         lbl.from = Vec2{ textFrom, 0.0f };
         lbl.to   = Vec2{ 1.0f, 1.0f };
         lbl.padding = Vec2{ 3.0f, 2.0f };
@@ -3228,9 +3226,7 @@ static WidgetElement makeGridTile(const std::string& id,
         lbl.fontSize = theme.fontSizeSmall;
         lbl.textAlignH = TextAlignH::Center;
         lbl.textAlignV = TextAlignV::Top;
-        lbl.style.textColor = isFolder
-            ? theme.cbFolderAccent
-            : theme.textPrimary;
+        lbl.style.textColor = theme.textPrimary;
         lbl.from = Vec2{ 0.0f, 0.65f };
         lbl.to   = Vec2{ 1.0f, 1.0f };
         lbl.padding = Vec2{ 2.0f, 1.0f };
@@ -3241,7 +3237,7 @@ static WidgetElement makeGridTile(const std::string& id,
     return tile;
 }
 
-void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widget)
+void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>& widget)
 {
     auto& log = Logger::Instance();
 
@@ -3372,7 +3368,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
                 // Highlight if this is the currently viewed folder
                 if (newSub == self->m_selectedBrowserFolder)
                 {
-                    row.style.color = Vec4{ 0.20f, 0.25f, 0.35f, 0.9f };
+                    row.style.color = EditorTheme::Get().treeRowSelected;
                 }
 
                 row.onClicked = [uiMgr = self, newSub]()
@@ -3449,7 +3445,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
         rootRow.isExpanded = true;
         if (m_selectedBrowserFolder.empty())
         {
-            rootRow.style.color = Vec4{ 0.20f, 0.25f, 0.35f, 0.9f };
+            rootRow.style.color = EditorTheme::Get().treeRowSelected;
         }
         rootRow.onClicked = [this]()
         {
@@ -3474,7 +3470,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             shadersRow.isExpanded = expanded;
             if (m_selectedBrowserFolder == shadersVirtualPath)
             {
-                shadersRow.style.color = Vec4{ 0.20f, 0.25f, 0.35f, 0.9f };
+                shadersRow.style.color = EditorTheme::Get().treeRowSelected;
             }
             shadersRow.onClicked = [this, shadersVirtualPath]()
             {
@@ -3774,7 +3770,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             // Highlight selected asset
             if (relPath == m_selectedGridAsset)
             {
-                tile.style.color = Vec4{ 0.18f, 0.30f, 0.50f, 0.9f };
+                tile.style.color = EditorTheme::Get().cbTileSelected;
             }
 
             // Inline rename: replace the label child with an EntryBar
@@ -3955,6 +3951,9 @@ WidgetElement* UIManager::findElementById(const std::string& elementId)
 
 void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float)>& measureText)
 {
+    // Apply deferred theme color updates before layout calculation
+    applyPendingThemeUpdate();
+
     bool anyDirty = false;
     for (const auto& entry : m_widgets)
     {
@@ -3992,7 +3991,7 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
         Right
     };
 
-    const auto getDockSide = [](const Widget& widget) -> DockSide
+    const auto getDockSide = [](const EditorWidget& widget) -> DockSide
         {
             const bool fillX = widget.getFillX();
             const bool fillY = widget.getFillY();
@@ -4343,7 +4342,7 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
         }
     }
 
-    // Check if this element is draggable — set up pending drag
+    // Check if this element is draggable â€” set up pending drag
     if (target && target->isDraggable && !target->dragPayload.empty())
     {
         m_dragPending = true;
@@ -4396,7 +4395,7 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
     {
         const std::string separatorId = target->id.substr(separatorPrefix.size());
         const std::string contentId = "Separator.Content." + separatorId;
-        // UTF-8: ▾ = \xe2\x96\xbe, ▸ = \xe2\x96\xb8
+        // UTF-8: â–¾ = \xe2\x96\xbe, â–¸ = \xe2\x96\xb8
         const std::string expandedPrefix = std::string("\xe2\x96\xbe") + "  ";
         const std::string collapsedPrefix = std::string("\xe2\x96\xb8") + "  ";
         for (auto& entry : m_widgets)
@@ -4540,7 +4539,7 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
         }
         markAllWidgetsDirty();
     }
-    // Copy target data before callbacks — onClicked/onDoubleClicked may rebuild
+    // Copy target data before callbacks â€” onClicked/onDoubleClicked may rebuild
     // the widget tree (e.g. refreshContentBrowser), invalidating the target pointer.
     const std::string targetId = target->id;
     const std::string targetClickEvent = target->clickEvent;
@@ -4548,7 +4547,7 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
     const auto targetOnDoubleClicked = target->onDoubleClicked;
     const bool targetIsDraggable = target->isDraggable;
 
-    // Suppress click for draggable elements — click will fire on mouse-up if no drag occurred
+    // Suppress click for draggable elements â€” click will fire on mouse-up if no drag occurred
     if (!targetIsDraggable)
     {
         if (targetOnClicked)
@@ -4754,7 +4753,7 @@ bool UIManager::handleScroll(const Vec2& screenPos, float delta)
         }
     }
 
-    // Widget editor canvas zoom — only if no scrollable widget claimed the event
+    // Widget editor canvas zoom â€” only if no scrollable widget claimed the event
     if (auto* weState = getActiveWidgetEditorState())
     {
         if (isOverWidgetEditorCanvas(screenPos))
@@ -4871,7 +4870,7 @@ bool UIManager::handleMouseUp(const Vec2& screenPos, int button)
         return false;
     }
 
-    // We are dropping — figure out where
+    // We are dropping â€” figure out where
     const std::string payload = m_dragPayload;
     const std::string sourceId = m_dragSourceId;
     cancelDrag();
@@ -4952,7 +4951,7 @@ bool UIManager::handleMouseUp(const Vec2& screenPos, int button)
             }
             return true;
         }
-        // Drop on Outliner entity row → apply asset to entity
+        // Drop on Outliner entity row â†’ apply asset to entity
         if (dropTarget->id.rfind(outlinerPrefix, 0) == 0)
         {
             const char* start = dropTarget->id.c_str() + outlinerPrefix.size();
@@ -5053,6 +5052,39 @@ void UIManager::markAllWidgetsDirty()
     }
     m_lastHoveredElement = nullptr;
     m_renderDirty = true;
+}
+
+void UIManager::rebuildAllEditorUI()
+{
+    // Defer the actual color update to the next frame via updateLayouts().
+    // This avoids heavy synchronous work inside dropdown callbacks that can
+    // freeze or crash the editor.
+    m_themeDirty = true;
+    markAllWidgetsDirty();
+}
+
+void UIManager::applyThemeToAllEditorWidgets()
+{
+    const auto& theme = EditorTheme::Get();
+    for (auto& entry : m_widgets)
+    {
+        if (!entry.widget) continue;
+        for (auto& element : entry.widget->getElementsMutable())
+            EditorTheme::ApplyThemeToElement(element, theme);
+        entry.widget->markLayoutDirty();
+    }
+}
+
+void UIManager::applyPendingThemeUpdate()
+{
+    if (!m_themeDirty) return;
+    m_themeDirty = false;
+
+    // Apply theme colors to ALL editor widget elements (backgrounds,
+    // buttons, text, inputs, etc.) based on their element type and ID.
+    applyThemeToAllEditorWidgets();
+
+    markAllWidgetsDirty();
 }
 
 bool UIManager::isRenderDirty() const
@@ -5503,7 +5535,7 @@ WidgetElement* UIManager::hitTest(const Vec2& screenPos, bool /*logDetails*/) co
     return nullptr;
 }
 
-void UIManager::bindClickEventsForWidget(const std::shared_ptr<Widget>& widget)
+void UIManager::bindClickEventsForWidget(const std::shared_ptr<EditorWidget>& widget)
 {
     if (!widget)
     {
@@ -5550,12 +5582,12 @@ void UIManager::refreshStatusBar()
         if (count == 0)
         {
             dirtyLabel->text = "No unsaved changes";
-            dirtyLabel->style.textColor = Vec4{ 0.6f, 0.6f, 0.65f, 1.0f };
+            dirtyLabel->style.textColor = EditorTheme::Get().textMuted;
         }
         else
         {
             dirtyLabel->text = std::to_string(count) + " unsaved change" + (count > 1 ? "s" : "");
-            dirtyLabel->style.textColor = Vec4{ 1.0f, 0.85f, 0.3f, 1.0f };
+            dirtyLabel->style.textColor = EditorTheme::Get().warningColor;
         }
     }
 
@@ -5565,8 +5597,8 @@ void UIManager::refreshStatusBar()
         auto& undo = UndoRedoManager::Instance();
         const bool canUndo = undo.canUndo();
         undoBtn->style.textColor = canUndo
-            ? Vec4{ 0.95f, 0.95f, 0.95f, 1.0f }
-            : Vec4{ 0.45f, 0.45f, 0.5f, 1.0f };
+            ? EditorTheme::Get().textPrimary
+            : EditorTheme::Get().textMuted;
         undoBtn->text = canUndo
             ? ("Undo: " + undo.lastUndoDescription())
             : "Undo";
@@ -5582,8 +5614,8 @@ void UIManager::refreshStatusBar()
         auto& undo = UndoRedoManager::Instance();
         const bool canRedo = undo.canRedo();
         redoBtn->style.textColor = canRedo
-            ? Vec4{ 0.95f, 0.95f, 0.95f, 1.0f }
-            : Vec4{ 0.45f, 0.45f, 0.5f, 1.0f };
+            ? EditorTheme::Get().textPrimary
+            : EditorTheme::Get().textMuted;
         redoBtn->text = canRedo
             ? ("Redo: " + undo.lastRedoDescription())
             : "Redo";
@@ -5618,7 +5650,7 @@ void UIManager::showSaveProgressModal(size_t total)
     overlay.type = WidgetElementType::Panel;
     overlay.from = Vec2{ 0.0f, 0.0f };
     overlay.to = Vec2{ 1.0f, 1.0f };
-    overlay.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.4f };
+    overlay.style.color = EditorTheme::Get().modalOverlay;
     overlay.hitTestMode = HitTestMode::Enabled;
     overlay.runtimeOnly = true;
 
@@ -5629,7 +5661,7 @@ void UIManager::showSaveProgressModal(size_t total)
     panel.to = Vec2{ 0.7f, 0.62f };
     panel.padding = Vec2{ 20.0f, 14.0f };
     panel.orientation = StackOrientation::Vertical;
-    panel.style.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.96f };
+    panel.style.color = EditorTheme::Get().modalBackground;
     panel.runtimeOnly = true;
 
     WidgetElement title{};
@@ -5664,8 +5696,8 @@ void UIManager::showSaveProgressModal(size_t total)
     progress.minValue = 0.0f;
     progress.maxValue = static_cast<float>(total);
     progress.valueFloat = 0.0f;
-    progress.style.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.9f };
-    progress.style.fillColor = Vec4{ 0.2f, 0.55f, 0.2f, 0.95f };
+    progress.style.color = EditorTheme::Get().sliderTrack;
+    progress.style.fillColor = Vec4{ EditorTheme::Get().successColor.x, EditorTheme::Get().successColor.y, EditorTheme::Get().successColor.z, 0.95f };
     progress.runtimeOnly = true;
 
     panel.children.push_back(std::move(title));
@@ -5732,6 +5764,7 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
 
     if (items.empty()) return;
 
+    const auto& theme = EditorTheme::Get();
     constexpr float kItemH = 28.0f;
     constexpr float kPadY = 4.0f;
     constexpr float kDefaultMenuW = 180.0f;
@@ -5754,7 +5787,7 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
     bg.id    = "Dropdown.Bg";
     bg.from  = Vec2{ 0.0f, 0.0f };
     bg.to    = Vec2{ 1.0f, 1.0f };
-    bg.style.color = Vec4{ 0.14f, 0.14f, 0.18f, 1.0f };
+    bg.style.color = theme.dropdownBackground;
     elements.push_back(bg);
 
     for (size_t i = 0; i < items.size(); ++i)
@@ -5769,7 +5802,7 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
             sep.id = "Dropdown.Sep." + std::to_string(i);
             sep.from = Vec2{ 0.08f, (y0 + kItemH * 0.5f) / menuH };
             sep.to = Vec2{ 0.92f, (y0 + kItemH * 0.5f + 1.0f) / menuH };
-            sep.style.color = Vec4{ 0.30f, 0.32f, 0.38f, 1.0f };
+            sep.style.color = theme.panelBorder;
             sep.hitTestMode = HitTestMode::DisabledSelf;
             elements.push_back(std::move(sep));
             continue;
@@ -5781,10 +5814,10 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
         item.from          = Vec2{ 0.0f, y0 / menuH };
         item.to            = Vec2{ 1.0f, y1 / menuH };
         item.text          = items[i].label;
-        item.fontSize      = 13.0f;
-        item.style.color         = Vec4{ 0.14f, 0.14f, 0.18f, 0.0f };
-        item.style.hoverColor    = Vec4{ 0.24f, 0.24f, 0.30f, 1.0f };
-        item.style.textColor     = Vec4{ 0.88f, 0.88f, 0.92f, 1.0f };
+        item.fontSize      = theme.fontSizeBody;
+        item.style.color         = Vec4{ theme.dropdownBackground.x, theme.dropdownBackground.y, theme.dropdownBackground.z, 0.0f };
+        item.style.hoverColor    = theme.dropdownHover;
+        item.style.textColor     = theme.textPrimary;
         item.textAlignH    = TextAlignH::Left;
         item.textAlignV    = TextAlignV::Center;
         item.padding       = Vec2{ 12.0f, 4.0f };
@@ -5801,8 +5834,8 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
         }
         else
         {
-            // Placeholder item with no callback — just close the menu
-            item.style.textColor = Vec4{ 0.55f, 0.55f, 0.6f, 1.0f };
+            // Placeholder item with no callback â€” just close the menu
+            item.style.textColor = theme.textMuted;
             item.style.hoverColor = item.style.color;
             item.onClicked = [this]()
             {
@@ -5959,7 +5992,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
         root.fillY = true;
         root.orientation = StackOrientation::Horizontal;
         root.padding = Vec2{ 8.0f, 4.0f };
-        root.style.color = Vec4{ 0.14f, 0.15f, 0.19f, 1.0f };
+        root.style.color = EditorTheme::Get().panelHeader;
         root.runtimeOnly = true;
 
         // Save button
@@ -6058,7 +6091,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
         root.fillX = true;
         root.fillY = true;
         root.orientation = StackOrientation::Vertical;
-        root.style.color = Vec4{ 0.12f, 0.13f, 0.17f, 0.96f };
+        root.style.color = EditorTheme::Get().panelBackground;
         root.runtimeOnly = true;
 
         // --- Controls section (scrollable) ---
@@ -6071,7 +6104,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             controlsSection.scrollable = true;
             controlsSection.orientation = StackOrientation::Vertical;
             controlsSection.padding = Vec2{ 10.0f, 8.0f };
-            controlsSection.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            controlsSection.style.color = EditorTheme::Get().transparent;
             controlsSection.runtimeOnly = true;
 
             // Title: Controls
@@ -6130,7 +6163,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             sep.type = WidgetElementType::Panel;
             sep.fillX = true;
             sep.minSize = Vec2{ 0.0f, 1.0f };
-            sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.8f };
+            sep.style.color = EditorTheme::Get().panelBorder;
             sep.runtimeOnly = true;
             root.children.push_back(std::move(sep));
         }
@@ -6145,7 +6178,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             hierarchySection.scrollable = true;
             hierarchySection.orientation = StackOrientation::Vertical;
             hierarchySection.padding = Vec2{ 10.0f, 8.0f };
-            hierarchySection.style.color = Vec4{ 0.08f, 0.09f, 0.12f, 0.75f };
+            hierarchySection.style.color = EditorTheme::Get().panelBackgroundAlt;
             hierarchySection.runtimeOnly = true;
 
             // Title: Hierarchy
@@ -6173,7 +6206,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
                 hierarchyStack.fillX = true;
                 hierarchyStack.orientation = StackOrientation::Vertical;
                 hierarchyStack.padding = Vec2{ 2.0f, 2.0f };
-                hierarchyStack.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                hierarchyStack.style.color = EditorTheme::Get().transparent;
                 hierarchyStack.runtimeOnly = true;
                 hierarchySection.children.push_back(std::move(hierarchyStack));
             }
@@ -6203,7 +6236,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
         root.fillY = true;
         root.orientation = StackOrientation::Vertical;
         root.padding = Vec2{ 10.0f, 8.0f };
-        root.style.color = Vec4{ 0.12f, 0.13f, 0.17f, 0.96f };
+        root.style.color = EditorTheme::Get().panelBackground;
         root.scrollable = true;
         root.runtimeOnly = true;
 
@@ -6260,10 +6293,10 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
         root.to = Vec2{ 1.0f, 1.0f };
         root.fillX = true;
         root.fillY = true;
-        root.style.color = Vec4{ 0.08f, 0.09f, 0.12f, 1.0f };
+        root.style.color = EditorTheme::Get().panelBackgroundAlt;
         root.runtimeOnly = true;
 
-        canvasWidget->setElements({ std::move(root) });
+        canvasWidget->setElements({ root });
         registerWidget(canvasWidgetId, canvasWidget, tabId);
     }
 
@@ -6731,7 +6764,7 @@ void UIManager::deleteSelectedWidgetEditorElement(const std::string& tabId)
 }
 
 // ---------------------------------------------------------------------------
-// Widget Editor: public entry point – delete selected element if in editor tab
+// Widget Editor: public entry point â€“ delete selected element if in editor tab
 // ---------------------------------------------------------------------------
 bool UIManager::tryDeleteWidgetEditorElement()
 {
@@ -6872,7 +6905,7 @@ bool UIManager::selectWidgetEditorElementAtPos(const Vec2& screenPos)
             // (skip subtrees that can't contain the click).
             const bool insideSelf = pointInElement(el);
 
-            // Recurse into children – a matching child takes priority over
+            // Recurse into children â€“ a matching child takes priority over
             // the parent so we check children first.
             if (!el.children.empty())
             {
@@ -7733,7 +7766,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
     {
         rootPanel->children.push_back(makeLabel("WidgetEditor.Right.Hint",
             "Select an element to view its properties.", 11.0f,
-            Vec4{ 0.62f, 0.66f, 0.75f, 1.0f }, 36.0f));
+            EditorTheme::Get().textMuted, 36.0f));
         rightEntry->widget->markLayoutDirty();
         return;
     }
@@ -7863,7 +7896,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         sep.type = WidgetElementType::Panel;
         sep.fillX = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color = EditorTheme::Get().panelBorder;
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -7898,7 +7931,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         sep.type = WidgetElementType::Panel;
         sep.fillX = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color = EditorTheme::Get().panelBorder;
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -7964,7 +7997,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         sep.type = WidgetElementType::Panel;
         sep.fillX = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color = EditorTheme::Get().panelBorder;
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -8018,7 +8051,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         sep.type = WidgetElementType::Panel;
         sep.fillX = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color = EditorTheme::Get().panelBorder;
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -8342,7 +8375,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         sep.type = WidgetElementType::Panel;
         sep.fillX = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color = EditorTheme::Get().panelBorder;
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -8459,13 +8492,13 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         rootPanel->children.push_back(makePropertyRow("WE.Det.Tooltip", "Tooltip", sel->tooltipText,
             [sel, this](const std::string& v) { sel->tooltipText = v; markAllWidgetsDirty(); }));
 
-        // ── Phase 2: Brush & Transform ────────────────────────────────────
+        // â”€â”€ Phase 2: Brush & Transform â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         {
             WidgetElement sep{};
             sep.type = WidgetElementType::Panel;
             sep.fillX = true;
             sep.minSize = Vec2{ 0.0f, 1.0f };
-            sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+            sep.style.color = EditorTheme::Get().panelBorder;
             sep.runtimeOnly = true;
             rootPanel->children.push_back(std::move(sep));
 
@@ -8608,7 +8641,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         sep.type = WidgetElementType::Panel;
         sep.fillX = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color = EditorTheme::Get().panelBorder;
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -8697,7 +8730,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         sep.type = WidgetElementType::Panel;
         sep.fillX = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color = EditorTheme::Get().panelBorder;
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -8715,7 +8748,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         sep.type = WidgetElementType::Panel;
         sep.fillX = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color = EditorTheme::Get().panelBorder;
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -8790,7 +8823,7 @@ void UIManager::openLandscapeManagerPopup()
         e.to        = Vec2{ nx(x1), ny(y1) };
         e.text      = text;
         e.fontSize  = 13.0f;
-        e.style.textColor = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
+        e.style.textColor = EditorTheme::Get().textPrimary;
         e.textAlignV = TextAlignV::Center;
         e.padding   = Vec2{ 6.0f, 0.0f };
         return e;
@@ -8806,9 +8839,9 @@ void UIManager::openLandscapeManagerPopup()
         e.to           = Vec2{ nx(x1), ny(y1) };
         e.value        = val;
         e.fontSize     = 13.0f;
-        e.style.color        = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
-        e.style.hoverColor   = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
-        e.style.textColor    = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+        e.style.color        = EditorTheme::Get().inputBackground;
+        e.style.hoverColor   = EditorTheme::Get().inputBackgroundHover;
+        e.style.textColor    = EditorTheme::Get().inputText;
         e.padding      = Vec2{ 6.0f, 4.0f };
         e.hitTestMode = HitTestMode::Enabled;
         return e;
@@ -8823,7 +8856,7 @@ void UIManager::openLandscapeManagerPopup()
         bg.id    = "LM.Bg";
         bg.from  = Vec2{ 0.0f, 0.0f };
         bg.to    = Vec2{ 1.0f, 1.0f };
-        bg.style.color = Vec4{ 0.13f, 0.13f, 0.16f, 1.0f };
+        bg.style.color = EditorTheme::Get().panelBackground;
         elements.push_back(bg);
     }
 
@@ -8834,7 +8867,7 @@ void UIManager::openLandscapeManagerPopup()
         title.id    = "LM.TitleBg";
         title.from  = Vec2{ 0.0f, 0.0f };
         title.to    = Vec2{ 1.0f, ny(44.0f) };
-        title.style.color = Vec4{ 0.09f, 0.09f, 0.13f, 1.0f };
+        title.style.color = EditorTheme::Get().titleBarBackground;
         elements.push_back(title);
 
         elements.push_back(makeLabel("LM.TitleText", "Landscape Manager",
@@ -8898,7 +8931,7 @@ void UIManager::openLandscapeManagerPopup()
         sep.id    = "LM.Sep";
         sep.from  = Vec2{ nx(8.0f), ny(rowY1(4) + 12.0f) };
         sep.to    = Vec2{ nx(W - 8.0f), ny(rowY1(4) + 14.0f) };
-        sep.style.color = Vec4{ 0.28f, 0.28f, 0.32f, 1.0f };
+        sep.style.color = EditorTheme::Get().panelBorder;
         elements.push_back(sep);
     }
 
@@ -8914,9 +8947,9 @@ void UIManager::openLandscapeManagerPopup()
         btn.to            = Vec2{ nx(W - 114.0f), ny(btnY1) };
         btn.text          = "Create";
         btn.fontSize      = 13.0f;
-        btn.style.color         = Vec4{ 0.12f, 0.32f, 0.12f, 1.0f };
-        btn.style.hoverColor    = Vec4{ 0.18f, 0.46f, 0.18f, 1.0f };
-        btn.style.textColor     = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+        btn.style.color         = EditorTheme::Get().accentGreen;
+        btn.style.hoverColor    = Vec4{ 0.40f, 0.78f, 0.44f, 1.0f };
+        btn.style.textColor     = EditorTheme::Get().buttonPrimaryText;
         btn.textAlignH    = TextAlignH::Center;
         btn.textAlignV    = TextAlignV::Center;
         btn.padding       = Vec2{ 8.0f, 4.0f };
@@ -8968,9 +9001,9 @@ void UIManager::openLandscapeManagerPopup()
         btn.to            = Vec2{ nx(W - 12.0f),  ny(btnY1) };
         btn.text          = "Cancel";
         btn.fontSize      = 13.0f;
-        btn.style.color         = Vec4{ 0.22f, 0.22f, 0.25f, 1.0f };
-        btn.style.hoverColor    = Vec4{ 0.32f, 0.32f, 0.36f, 1.0f };
-        btn.style.textColor     = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
+        btn.style.color         = EditorTheme::Get().buttonDefault;
+        btn.style.hoverColor    = EditorTheme::Get().buttonHover;
+        btn.style.textColor     = EditorTheme::Get().buttonText;
         btn.textAlignH    = TextAlignH::Center;
         btn.textAlignV    = TextAlignV::Center;
         btn.padding       = Vec2{ 8.0f, 4.0f };
@@ -9023,7 +9056,7 @@ void UIManager::openEngineSettingsPopup()
         bg.id    = "ES.Bg";
         bg.from  = Vec2{ 0.0f, 0.0f };
         bg.to    = Vec2{ 1.0f, 1.0f };
-        bg.style.color = Vec4{ 0.13f, 0.13f, 0.16f, 1.0f };
+        bg.style.color = EditorTheme::Get().panelBackground;
         elements.push_back(bg);
     }
 
@@ -9034,7 +9067,7 @@ void UIManager::openEngineSettingsPopup()
         title.id    = "ES.TitleBg";
         title.from  = Vec2{ 0.0f, 0.0f };
         title.to    = Vec2{ 1.0f, ny(kTitleH) };
-        title.style.color = Vec4{ 0.09f, 0.09f, 0.13f, 1.0f };
+        title.style.color = EditorTheme::Get().titleBarBackground;
         elements.push_back(title);
 
         WidgetElement titleText;
@@ -9044,7 +9077,7 @@ void UIManager::openEngineSettingsPopup()
         titleText.to        = Vec2{ nx(W - 8.0f), ny(kTitleH) };
         titleText.text      = "Engine Settings";
         titleText.fontSize  = 14.0f;
-        titleText.style.textColor = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+        titleText.style.textColor = EditorTheme::Get().titleBarText;
         titleText.textAlignV = TextAlignV::Center;
         titleText.padding   = Vec2{ 6.0f, 0.0f };
         elements.push_back(titleText);
@@ -9057,7 +9090,7 @@ void UIManager::openEngineSettingsPopup()
         sidebarBg.id    = "ES.SidebarBg";
         sidebarBg.from  = Vec2{ 0.0f, ny(kTitleH) };
         sidebarBg.to    = Vec2{ nx(kSidebarW), 1.0f };
-        sidebarBg.style.color = Vec4{ 0.10f, 0.10f, 0.13f, 1.0f };
+        sidebarBg.style.color = EditorTheme::Get().panelBackgroundAlt;
         elements.push_back(sidebarBg);
     }
 
@@ -9068,7 +9101,7 @@ void UIManager::openEngineSettingsPopup()
         sep.id    = "ES.SidebarSep";
         sep.from  = Vec2{ nx(kSidebarW - 1.0f), ny(kTitleH) };
         sep.to    = Vec2{ nx(kSidebarW), 1.0f };
-        sep.style.color = Vec4{ 0.25f, 0.25f, 0.30f, 1.0f };
+        sep.style.color = Vec4{ EditorTheme::Get().panelBorder.x, EditorTheme::Get().panelBorder.y, EditorTheme::Get().panelBorder.z, 1.0f };
         elements.push_back(sep);
     }
 
@@ -9098,7 +9131,7 @@ void UIManager::openEngineSettingsPopup()
             sec.id        = id;
             sec.text      = label;
             sec.fontSize  = 13.0f;
-            sec.style.textColor = Vec4{ 0.55f, 0.60f, 0.70f, 1.0f };
+            sec.style.textColor = EditorTheme::Get().textMuted;
             sec.textAlignV = TextAlignV::Center;
             sec.padding   = Vec2{ 4.0f, 0.0f };
             sec.minSize   = Vec2{ contentW - kContentPad * 2.0f, kRowH };
@@ -9111,7 +9144,7 @@ void UIManager::openEngineSettingsPopup()
             WidgetElement sep;
             sep.type    = WidgetElementType::Panel;
             sep.id      = id;
-            sep.style.color   = Vec4{ 0.28f, 0.28f, 0.32f, 1.0f };
+            sep.style.color   = EditorTheme::Get().panelBorder;
             sep.minSize = Vec2{ contentW - kContentPad * 2.0f, 2.0f };
             entry->children.push_back(sep);
             ++row;
@@ -9125,7 +9158,7 @@ void UIManager::openEngineSettingsPopup()
             rowPanel.id          = id + ".Row";
             rowPanel.orientation = StackOrientation::Horizontal;
             rowPanel.minSize     = Vec2{ contentW - kContentPad * 2.0f, kRowH };
-            rowPanel.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            rowPanel.style.color       = EditorTheme::Get().transparent;
             rowPanel.padding     = Vec2{ 6.0f, 2.0f };
 
             WidgetElement lbl;
@@ -9133,7 +9166,7 @@ void UIManager::openEngineSettingsPopup()
             lbl.id        = id + ".Lbl";
             lbl.text      = label;
             lbl.fontSize  = 13.0f;
-            lbl.style.textColor = Vec4{ 0.88f, 0.88f, 0.92f, 1.0f };
+            lbl.style.textColor = EditorTheme::Get().textPrimary;
             lbl.textAlignV = TextAlignV::Center;
             lbl.minSize   = Vec2{ 140.0f, kRowH };
             lbl.padding   = Vec2{ 0.0f, 0.0f };
@@ -9144,9 +9177,9 @@ void UIManager::openEngineSettingsPopup()
             eb.id            = id;
             eb.value         = value;
             eb.fontSize      = 12.0f;
-            eb.style.color         = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
-            eb.style.hoverColor    = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
-            eb.style.textColor     = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+            eb.style.color         = EditorTheme::Get().inputBackground;
+            eb.style.hoverColor    = EditorTheme::Get().inputBackgroundHover;
+            eb.style.textColor     = EditorTheme::Get().inputText;
             eb.padding       = Vec2{ 6.0f, 4.0f };
             eb.hitTestMode = HitTestMode::Enabled;
             eb.minSize       = Vec2{ contentW - kContentPad * 2.0f - 140.0f - 12.0f, kRowH };
@@ -9166,10 +9199,10 @@ void UIManager::openEngineSettingsPopup()
             cb.text          = label;
             cb.fontSize      = 13.0f;
             cb.isChecked     = checked;
-            cb.style.color         = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
-            cb.style.hoverColor    = Vec4{ 0.24f, 0.24f, 0.30f, 1.0f };
-            cb.style.fillColor     = Vec4{ 0.25f, 0.6f, 0.95f, 1.0f };
-            cb.style.textColor     = Vec4{ 0.88f, 0.88f, 0.92f, 1.0f };
+            cb.style.color         = EditorTheme::Get().inputBackground;
+            cb.style.hoverColor    = EditorTheme::Get().checkboxHover;
+            cb.style.fillColor     = EditorTheme::Get().checkboxChecked;
+            cb.style.textColor     = EditorTheme::Get().textPrimary;
             cb.padding       = Vec2{ 6.0f, 4.0f };
             cb.hitTestMode = HitTestMode::Enabled;
             cb.minSize       = Vec2{ contentW - kContentPad * 2.0f, kRowH };
@@ -9187,7 +9220,7 @@ void UIManager::openEngineSettingsPopup()
             rowPanel.id          = id + ".Row";
             rowPanel.orientation = StackOrientation::Horizontal;
             rowPanel.minSize     = Vec2{ contentW - kContentPad * 2.0f, kRowH };
-            rowPanel.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            rowPanel.style.color       = EditorTheme::Get().transparent;
             rowPanel.padding     = Vec2{ 6.0f, 2.0f };
 
             WidgetElement lbl;
@@ -9195,7 +9228,7 @@ void UIManager::openEngineSettingsPopup()
             lbl.id        = id + ".Lbl";
             lbl.text      = label;
             lbl.fontSize  = 13.0f;
-            lbl.style.textColor = Vec4{ 0.88f, 0.88f, 0.92f, 1.0f };
+            lbl.style.textColor = EditorTheme::Get().textPrimary;
             lbl.textAlignV = TextAlignV::Center;
             lbl.minSize   = Vec2{ 140.0f, kRowH };
             lbl.padding   = Vec2{ 0.0f, 0.0f };
@@ -9207,9 +9240,9 @@ void UIManager::openEngineSettingsPopup()
             dd.items         = items;
             dd.selectedIndex = selected;
             dd.fontSize      = 12.0f;
-            dd.style.color         = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
-            dd.style.hoverColor    = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
-            dd.style.textColor     = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+            dd.style.color         = EditorTheme::Get().inputBackground;
+            dd.style.hoverColor    = EditorTheme::Get().inputBackgroundHover;
+            dd.style.textColor     = EditorTheme::Get().inputText;
             dd.padding       = Vec2{ 6.0f, 4.0f };
             dd.hitTestMode = HitTestMode::Enabled;
             dd.minSize       = Vec2{ contentW - kContentPad * 2.0f - 140.0f - 12.0f, kRowH };
@@ -9323,7 +9356,7 @@ void UIManager::openEngineSettingsPopup()
         {
             auto& diag = DiagnosticsManager::Instance();
 
-            // ── Backend selector ────────────────────────────────────
+            // â”€â”€ Backend selector â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             addSectionLabel("ES.C.Sec.Backend", "Backend");
             {
                 std::vector<std::string> backendItems;
@@ -9403,8 +9436,8 @@ void UIManager::openEngineSettingsPopup()
             if (catBtn)
             {
                 catBtn->style.color = (static_cast<int>(ci) == state->activeCategory)
-                    ? Vec4{ 0.20f, 0.20f, 0.28f, 1.0f }
-                    : Vec4{ 0.10f, 0.10f, 0.13f, 0.0f };
+                    ? EditorTheme::Get().accentMuted
+                    : EditorTheme::Get().transparent;
             }
         }
 
@@ -9424,10 +9457,10 @@ void UIManager::openEngineSettingsPopup()
         catBtn.text          = categories[ci];
         catBtn.fontSize      = 13.0f;
         catBtn.style.color         = (static_cast<int>(ci) == state->activeCategory)
-            ? Vec4{ 0.20f, 0.20f, 0.28f, 1.0f }
-            : Vec4{ 0.10f, 0.10f, 0.13f, 0.0f };
-        catBtn.style.hoverColor    = Vec4{ 0.22f, 0.22f, 0.28f, 1.0f };
-        catBtn.style.textColor     = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
+            ? EditorTheme::Get().accentMuted
+            : EditorTheme::Get().transparent;
+        catBtn.style.hoverColor    = EditorTheme::Get().buttonSubtleHover;
+        catBtn.style.textColor     = EditorTheme::Get().textPrimary;
         catBtn.textAlignH    = TextAlignH::Left;
         catBtn.textAlignV    = TextAlignV::Center;
         catBtn.padding       = Vec2{ 12.0f, 4.0f };
@@ -9452,7 +9485,7 @@ void UIManager::openEngineSettingsPopup()
         content.id          = "ES.ContentArea";
         content.from        = Vec2{ nx(kSidebarW + 16.0f), ny(kTitleH + 16.0f) };
         content.to          = Vec2{ nx(W - 8.0f), ny(H - 8.0f) };
-        content.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        content.style.color       = EditorTheme::Get().transparent;
         content.orientation = StackOrientation::Vertical;
         content.padding     = Vec2{ 4.0f, 4.0f };
         content.scrollable  = true;
@@ -9469,9 +9502,358 @@ void UIManager::openEngineSettingsPopup()
     rebuildContent();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Editor Settings Popup (font size, theme tuning)
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+void UIManager::openEditorSettingsPopup()
+{
+    if (!m_renderer)
+        return;
+
+    constexpr int kPopupW = 480;
+    constexpr int kPopupH = 380;
+    PopupWindow* popup = m_renderer->openPopupWindow(
+        "EditorSettings", "Editor Settings", kPopupW, kPopupH);
+    if (!popup) return;
+    if (!popup->uiManager().getRegisteredWidgets().empty()) return;
+
+    const float W = static_cast<float>(kPopupW);
+    const float H = static_cast<float>(kPopupH);
+    auto nx = [&](float px) { return px / W; };
+    auto ny = [&](float py) { return py / H; };
+
+    auto& theme = EditorTheme::Get();
+
+    std::vector<WidgetElement> elements;
+
+    // Background
+    {
+        WidgetElement bg;
+        bg.type  = WidgetElementType::Panel;
+        bg.id    = "EdS.Bg";
+        bg.from  = Vec2{ 0.0f, 0.0f };
+        bg.to    = Vec2{ 1.0f, 1.0f };
+        bg.style.color = theme.panelBackground;
+        elements.push_back(bg);
+    }
+
+    constexpr float kTitleH = 40.0f;
+
+    // Title bar
+    {
+        WidgetElement titleBg;
+        titleBg.type  = WidgetElementType::Panel;
+        titleBg.id    = "EdS.TitleBg";
+        titleBg.from  = Vec2{ 0.0f, 0.0f };
+        titleBg.to    = Vec2{ 1.0f, ny(kTitleH) };
+        titleBg.style.color = theme.titleBarBackground;
+        elements.push_back(titleBg);
+
+        WidgetElement titleText;
+        titleText.type      = WidgetElementType::Text;
+        titleText.id        = "EdS.TitleText";
+        titleText.from      = Vec2{ nx(8.0f), 0.0f };
+        titleText.to        = Vec2{ nx(W - 8.0f), ny(kTitleH) };
+        titleText.text      = "Editor Settings";
+        titleText.fontSize  = theme.fontSizeHeading;
+        titleText.style.textColor = theme.titleBarText;
+        titleText.textAlignV = TextAlignV::Center;
+        titleText.padding   = Vec2{ 8.0f, 0.0f };
+        elements.push_back(titleText);
+    }
+
+    // Content area (scrollable stack)
+    {
+        WidgetElement content;
+        content.type        = WidgetElementType::StackPanel;
+        content.id          = "EdS.Content";
+        content.from        = Vec2{ nx(16.0f), ny(kTitleH + 12.0f) };
+        content.to          = Vec2{ nx(W - 16.0f), ny(H - 16.0f) };
+        content.style.color = theme.transparent;
+        content.orientation = StackOrientation::Vertical;
+        content.padding     = Vec2{ 4.0f, 4.0f };
+        content.scrollable  = true;
+
+        const float contentW = W - 32.0f;
+        constexpr float kRowH = 28.0f;
+        constexpr float kLabelW = 150.0f;
+
+        // -- Section: Theme --
+        {
+            const std::string themesDir = EditorTheme::GetThemesDirectory();
+            std::vector<std::string> themeNames = EditorTheme::discoverThemes(themesDir);
+            if (themeNames.empty()) themeNames.push_back("Dark");
+
+            int selectedIdx = 0;
+            for (int i = 0; i < static_cast<int>(themeNames.size()); ++i)
+            {
+                if (themeNames[i] == theme.themeName)
+                { selectedIdx = i; break; }
+            }
+
+            WidgetElement secLabel;
+            secLabel.type      = WidgetElementType::Text;
+            secLabel.id        = "EdS.Sec.Theme";
+            secLabel.text      = "Theme";
+            secLabel.fontSize  = theme.fontSizeSubheading;
+            secLabel.style.textColor = theme.textSecondary;
+            secLabel.textAlignV = TextAlignV::Center;
+            secLabel.minSize   = Vec2{ contentW - 8.0f, kRowH };
+            secLabel.padding   = Vec2{ 2.0f, 0.0f };
+            content.children.push_back(secLabel);
+
+            WidgetElement sep;
+            sep.type    = WidgetElementType::Panel;
+            sep.id      = "EdS.Sep.Theme";
+            sep.style.color   = theme.panelBorder;
+            sep.minSize = Vec2{ contentW - 8.0f, 1.0f };
+            content.children.push_back(sep);
+
+            WidgetElement row;
+            row.type        = WidgetElementType::StackPanel;
+            row.id          = "EdS.ThemeDD.Row";
+            row.orientation = StackOrientation::Horizontal;
+            row.minSize     = Vec2{ contentW - 8.0f, kRowH };
+            row.style.color = theme.transparent;
+            row.padding     = Vec2{ 4.0f, 2.0f };
+
+            WidgetElement lbl;
+            lbl.type      = WidgetElementType::Text;
+            lbl.id        = "EdS.ThemeDD.Lbl";
+            lbl.text      = "Active Theme";
+            lbl.fontSize  = theme.fontSizeBody;
+            lbl.style.textColor = theme.textPrimary;
+            lbl.textAlignV = TextAlignV::Center;
+            lbl.minSize   = Vec2{ kLabelW, kRowH };
+            row.children.push_back(lbl);
+
+            WidgetElement dd;
+            dd.type          = WidgetElementType::DropDown;
+            dd.id            = "EdS.ThemeDD";
+            dd.items         = themeNames;
+            dd.selectedIndex = selectedIdx;
+            dd.fontSize      = theme.fontSizeSmall;
+            dd.style.color         = theme.inputBackground;
+            dd.style.hoverColor    = theme.inputBackgroundHover;
+            dd.style.textColor     = theme.inputText;
+            dd.padding       = Vec2{ 6.0f, 4.0f };
+            dd.hitTestMode   = HitTestMode::Enabled;
+            dd.minSize       = Vec2{ contentW - 8.0f - kLabelW - 12.0f, kRowH };
+
+            UIManager* self = this;
+            dd.onSelectionChanged = [self, themeNames](int idx) {
+                if (idx < 0 || idx >= static_cast<int>(themeNames.size())) return;
+                const std::string& name = themeNames[idx];
+                auto& t = EditorTheme::Get();
+                if (t.themeName == name) return;
+
+                t.loadThemeByName(name);
+                DiagnosticsManager::Instance().setState("EditorTheme", name);
+                self->rebuildAllEditorUI();
+            };
+            row.children.push_back(dd);
+            content.children.push_back(row);
+        }
+        {
+            WidgetElement spacer;
+            spacer.type    = WidgetElementType::Panel;
+            spacer.id      = "EdS.Spacer.Theme";
+            spacer.style.color   = theme.transparent;
+            spacer.minSize = Vec2{ contentW - 8.0f, 8.0f };
+            content.children.push_back(spacer);
+        }
+
+
+        // â”€â”€ Section: Font Sizes â”€â”€
+        {
+            WidgetElement secLabel;
+            secLabel.type      = WidgetElementType::Text;
+            secLabel.id        = "EdS.Sec.Fonts";
+            secLabel.text      = "Font Sizes";
+            secLabel.fontSize  = theme.fontSizeSubheading;
+            secLabel.style.textColor = theme.textSecondary;
+            secLabel.textAlignV = TextAlignV::Center;
+            secLabel.minSize   = Vec2{ contentW - 8.0f, kRowH };
+            secLabel.padding   = Vec2{ 2.0f, 0.0f };
+            content.children.push_back(secLabel);
+        }
+
+        {
+            WidgetElement sep;
+            sep.type    = WidgetElementType::Panel;
+            sep.id      = "EdS.Sep.Fonts";
+            sep.style.color   = theme.panelBorder;
+            sep.minSize = Vec2{ contentW - 8.0f, 1.0f };
+            content.children.push_back(sep);
+        }
+
+        struct FontSizeEntry { const char* label; const char* id; float* target; };
+        FontSizeEntry fontEntries[] = {
+            { "Heading",     "EdS.FontHeading",     &theme.fontSizeHeading },
+            { "Subheading",  "EdS.FontSubheading",  &theme.fontSizeSubheading },
+            { "Body",        "EdS.FontBody",        &theme.fontSizeBody },
+            { "Small",       "EdS.FontSmall",       &theme.fontSizeSmall },
+            { "Caption",     "EdS.FontCaption",     &theme.fontSizeCaption },
+            { "Monospace",   "EdS.FontMono",        &theme.fontSizeMonospace },
+        };
+
+        UIManager* self = this;
+        for (auto& fe : fontEntries)
+        {
+            WidgetElement row;
+            row.type        = WidgetElementType::StackPanel;
+            row.id          = std::string(fe.id) + ".Row";
+            row.orientation = StackOrientation::Horizontal;
+            row.minSize     = Vec2{ contentW - 8.0f, kRowH };
+            row.style.color = theme.transparent;
+            row.padding     = Vec2{ 4.0f, 2.0f };
+
+            WidgetElement lbl;
+            lbl.type      = WidgetElementType::Text;
+            lbl.id        = std::string(fe.id) + ".Lbl";
+            lbl.text      = fe.label;
+            lbl.fontSize  = theme.fontSizeBody;
+            lbl.style.textColor = theme.textPrimary;
+            lbl.textAlignV = TextAlignV::Center;
+            lbl.minSize   = Vec2{ kLabelW, kRowH };
+            row.children.push_back(lbl);
+
+            std::ostringstream ss;
+            ss << *fe.target;
+
+            WidgetElement eb;
+            eb.type          = WidgetElementType::EntryBar;
+            eb.id            = fe.id;
+            eb.value         = ss.str();
+            eb.fontSize      = theme.fontSizeSmall;
+            eb.style.color         = theme.inputBackground;
+            eb.style.hoverColor    = theme.inputBackgroundHover;
+            eb.style.textColor     = theme.inputText;
+            eb.padding       = Vec2{ 6.0f, 4.0f };
+            eb.hitTestMode   = HitTestMode::Enabled;
+            eb.minSize       = Vec2{ contentW - 8.0f - kLabelW - 12.0f, kRowH };
+
+            float* target = fe.target;
+            eb.onValueChanged = [target, self](const std::string& v) {
+                try {
+                    float val = std::stof(v);
+                    if (val >= 6.0f && val <= 48.0f)
+                    {
+                        *target = val;
+                        self->markAllWidgetsDirty();
+                        EditorTheme::Get().saveActiveTheme();
+                    }
+                } catch (...) {}
+            };
+            row.children.push_back(eb);
+            content.children.push_back(row);
+        }
+
+        // â”€â”€ Section: Spacing â”€â”€
+        {
+            WidgetElement spacer;
+            spacer.type    = WidgetElementType::Panel;
+            spacer.id      = "EdS.Spacer1";
+            spacer.style.color   = theme.transparent;
+            spacer.minSize = Vec2{ contentW - 8.0f, 8.0f };
+            content.children.push_back(spacer);
+        }
+        {
+            WidgetElement secLabel;
+            secLabel.type      = WidgetElementType::Text;
+            secLabel.id        = "EdS.Sec.Spacing";
+            secLabel.text      = "Spacing";
+            secLabel.fontSize  = theme.fontSizeSubheading;
+            secLabel.style.textColor = theme.textSecondary;
+            secLabel.textAlignV = TextAlignV::Center;
+            secLabel.minSize   = Vec2{ contentW - 8.0f, kRowH };
+            secLabel.padding   = Vec2{ 2.0f, 0.0f };
+            content.children.push_back(secLabel);
+        }
+        {
+            WidgetElement sep;
+            sep.type    = WidgetElementType::Panel;
+            sep.id      = "EdS.Sep.Spacing";
+            sep.style.color   = theme.panelBorder;
+            sep.minSize = Vec2{ contentW - 8.0f, 1.0f };
+            content.children.push_back(sep);
+        }
+
+        struct SpacingEntry { const char* label; const char* id; float* target; float minVal; float maxVal; };
+        SpacingEntry spacingEntries[] = {
+            { "Row Height",       "EdS.RowHeight",      &theme.rowHeight,       16.0f, 48.0f },
+            { "Row Height Small", "EdS.RowHeightSmall", &theme.rowHeightSmall,  14.0f, 40.0f },
+            { "Row Height Large", "EdS.RowHeightLarge", &theme.rowHeightLarge,  20.0f, 56.0f },
+            { "Toolbar Height",   "EdS.ToolbarHeight",  &theme.toolbarHeight,   24.0f, 64.0f },
+            { "Border Radius",    "EdS.BorderRadius",   &theme.borderRadius,    0.0f,  12.0f },
+        };
+
+        for (auto& se : spacingEntries)
+        {
+            WidgetElement row;
+            row.type        = WidgetElementType::StackPanel;
+            row.id          = std::string(se.id) + ".Row";
+            row.orientation = StackOrientation::Horizontal;
+            row.minSize     = Vec2{ contentW - 8.0f, kRowH };
+            row.style.color = theme.transparent;
+            row.padding     = Vec2{ 4.0f, 2.0f };
+
+            WidgetElement lbl;
+            lbl.type      = WidgetElementType::Text;
+            lbl.id        = std::string(se.id) + ".Lbl";
+            lbl.text      = se.label;
+            lbl.fontSize  = theme.fontSizeBody;
+            lbl.style.textColor = theme.textPrimary;
+            lbl.textAlignV = TextAlignV::Center;
+            lbl.minSize   = Vec2{ kLabelW, kRowH };
+            row.children.push_back(lbl);
+
+            std::ostringstream ss;
+            ss << *se.target;
+
+            WidgetElement eb;
+            eb.type          = WidgetElementType::EntryBar;
+            eb.id            = se.id;
+            eb.value         = ss.str();
+            eb.fontSize      = theme.fontSizeSmall;
+            eb.style.color         = theme.inputBackground;
+            eb.style.hoverColor    = theme.inputBackgroundHover;
+            eb.style.textColor     = theme.inputText;
+            eb.padding       = Vec2{ 6.0f, 4.0f };
+            eb.hitTestMode   = HitTestMode::Enabled;
+            eb.minSize       = Vec2{ contentW - 8.0f - kLabelW - 12.0f, kRowH };
+
+            float* target = se.target;
+            float minV = se.minVal, maxV = se.maxVal;
+            eb.onValueChanged = [target, minV, maxV, self](const std::string& v) {
+                try {
+                    float val = std::stof(v);
+                    if (val >= minV && val <= maxV)
+                    {
+                        *target = val;
+                        self->markAllWidgetsDirty();
+                        EditorTheme::Get().saveActiveTheme();
+                    }
+                } catch (...) {}
+            };
+            row.children.push_back(eb);
+            content.children.push_back(row);
+        }
+
+        elements.push_back(content);
+    }
+
+    auto widget = std::make_shared<EditorWidget>();
+    widget->setName("EditorSettingsWidget");
+    widget->setFillX(true);
+    widget->setFillY(true);
+    widget->setElements(std::move(elements));
+    popup->uiManager().registerWidget("EditorSettings.Main", widget);
+}
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Project Selection Screen
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 void UIManager::openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)> onProjectChosen)
 {
     if (!m_renderer)
@@ -9519,25 +9901,25 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
 
     std::vector<WidgetElement> elements;
 
-    // ── Background ─────────────────────────────────────────────────────
+    // â”€â”€ Background â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         WidgetElement bg;
         bg.type  = WidgetElementType::Panel;
         bg.id    = "PS.Bg";
         bg.from  = Vec2{ 0.0f, 0.0f };
         bg.to    = Vec2{ 1.0f, 1.0f };
-        bg.style.color = Vec4{ 0.11f, 0.11f, 0.14f, 1.0f };
+        bg.style.color = EditorTheme::Get().panelBackground;
         elements.push_back(bg);
     }
 
-    // ── Title bar (accent stripe) ──────────────────────────────────────
+    // â”€â”€ Title bar (accent stripe) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         WidgetElement titleBg;
         titleBg.type  = WidgetElementType::Panel;
         titleBg.id    = "PS.TitleBg";
         titleBg.from  = Vec2{ 0.0f, 0.0f };
         titleBg.to    = Vec2{ 1.0f, ny(kTitleH) };
-        titleBg.style.color = Vec4{ 0.14f, 0.16f, 0.22f, 1.0f };
+        titleBg.style.color = EditorTheme::Get().titleBarBackground;
         elements.push_back(titleBg);
 
         WidgetElement accent;
@@ -9545,30 +9927,28 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         accent.id    = "PS.TitleAccent";
         accent.from  = Vec2{ 0.0f, ny(kTitleH - 2.0f) };
         accent.to    = Vec2{ 1.0f, ny(kTitleH) };
-        accent.style.color = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
-        elements.push_back(accent);
+        accent.style.color = EditorTheme::Get().accent;
 
         WidgetElement titleText;
         titleText.type      = WidgetElementType::Text;
         titleText.id        = "PS.TitleText";
         titleText.from      = Vec2{ nx(12.0f), 0.0f };
         titleText.to        = Vec2{ nx(W - 12.0f), ny(kTitleH - 2.0f) };
-        titleText.text      = "HorizonEngine  —  Project Selection";
+        titleText.text      = "HorizonEngine  â€”  Project Selection";
         titleText.fontSize  = 16.0f;
-        titleText.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
-        titleText.textAlignV = TextAlignV::Center;
+        titleText.style.textColor = EditorTheme::Get().buttonPrimaryText;
         titleText.padding   = Vec2{ 6.0f, 0.0f };
         elements.push_back(titleText);
     }
 
-    // ── Sidebar ────────────────────────────────────────────────────────
+    // â”€â”€ Sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         WidgetElement sidebarBg;
         sidebarBg.type  = WidgetElementType::Panel;
         sidebarBg.id    = "PS.SidebarBg";
         sidebarBg.from  = Vec2{ 0.0f, ny(kTitleH) };
         sidebarBg.to    = Vec2{ nx(kSidebarW), 1.0f };
-        sidebarBg.style.color = Vec4{ 0.09f, 0.09f, 0.11f, 1.0f };
+        sidebarBg.style.color = EditorTheme::Get().panelBackgroundAlt;
         elements.push_back(sidebarBg);
 
         WidgetElement sep;
@@ -9576,18 +9956,18 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         sep.id    = "PS.SidebarSep";
         sep.from  = Vec2{ nx(kSidebarW - 1.0f), ny(kTitleH) };
         sep.to    = Vec2{ nx(kSidebarW), 1.0f };
-        sep.style.color = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
+        sep.style.color = EditorTheme::Get().panelBorder;
         elements.push_back(sep);
     }
 
-    // ── Footer background (for checkbox) ───────────────────────────────
+    // â”€â”€ Footer background (for checkbox) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         WidgetElement footerSep;
         footerSep.type  = WidgetElementType::Panel;
         footerSep.id    = "PS.FooterSep";
         footerSep.from  = Vec2{ nx(kSidebarW), ny(H - kFooterH - 1.0f) };
         footerSep.to    = Vec2{ 1.0f, ny(H - kFooterH) };
-        footerSep.style.color = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
+        footerSep.style.color = EditorTheme::Get().panelBorder;
         elements.push_back(footerSep);
 
         WidgetElement footerBg;
@@ -9595,11 +9975,11 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         footerBg.id    = "PS.FooterBg";
         footerBg.from  = Vec2{ nx(kSidebarW), ny(H - kFooterH) };
         footerBg.to    = Vec2{ 1.0f, 1.0f };
-        footerBg.style.color = Vec4{ 0.10f, 0.10f, 0.13f, 1.0f };
+        footerBg.style.color = EditorTheme::Get().panelBackgroundAlt;
         elements.push_back(footerBg);
     }
 
-    // ── "Set as default" checkbox (always visible in footer) ───────────
+    // â”€â”€ "Set as default" checkbox (always visible in footer) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         WidgetElement cb;
         cb.type          = WidgetElementType::CheckBox;
@@ -9607,10 +9987,10 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         cb.text          = "Set as default project (skip this screen on next start)";
         cb.fontSize      = 12.0f;
         cb.isChecked     = state->setAsDefault;
-        cb.style.color         = Vec4{ 0.22f, 0.22f, 0.28f, 1.0f };
-        cb.style.hoverColor    = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
-        cb.style.fillColor     = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
-        cb.style.textColor     = Vec4{ 0.88f, 0.90f, 0.95f, 1.0f };
+        cb.style.color         = EditorTheme::Get().checkboxDefault;
+        cb.style.hoverColor    = EditorTheme::Get().checkboxHover;
+        cb.style.fillColor     = EditorTheme::Get().checkboxChecked;
+        cb.style.textColor     = EditorTheme::Get().textPrimary;
         cb.padding       = Vec2{ 8.0f, 4.0f };
         cb.hitTestMode = HitTestMode::Enabled;
         cb.from          = Vec2{ nx(kSidebarW + 12.0f), ny(H - kFooterH + 4.0f) };
@@ -9633,7 +10013,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
     };
     auto rebuildContentPtr = std::make_shared<std::function<void()>>();
 
-    // ── Content builder ────────────────────────────────────────────────
+    // â”€â”€ Content builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     *rebuildContentPtr = [state, screenMgr, hostWindow, categories, nx, ny, W, H, kSidebarW, kTitleH, kFooterH, renderer, callbackPtr, closeScreen, rebuildContentPtr]()
     {
         auto& pMgr = *screenMgr;
@@ -9754,7 +10134,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             entry->children.push_back(rowPanel);
         };
 
-        // ── Category: Recent Projects ──────────────────────────────────
+        // â”€â”€ Category: Recent Projects â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if (state->activeCategory == 0)
         {
             addSectionLabel("PS.C.Sec.Recent", "Known Projects");
@@ -9820,17 +10200,17 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     const std::string rowId = "PS.C.Proj." + std::to_string(i);
                     const bool isEven = (i % 2 == 0);
 
-                    // Outer row container – holds accent bar + content
+                    // Outer row container â€“ holds accent bar + content
                     WidgetElement row;
                     row.type        = WidgetElementType::StackPanel;
                     row.id          = rowId + ".Row";
                     row.orientation = StackOrientation::Horizontal;
                     row.minSize     = Vec2{ contentW - kContentPad * 2.0f, 44.0f };
                     row.style.color       = isEven
-                        ? Vec4{ 0.15f, 0.15f, 0.20f, 1.0f }
-                        : Vec4{ 0.11f, 0.11f, 0.14f, 1.0f };
+                        ? EditorTheme::Get().treeRowEven
+                        : EditorTheme::Get().treeRowOdd;
                     row.style.hoverColor  = exists
-                        ? Vec4{ 0.20f, 0.26f, 0.40f, 1.0f }
+                        ? EditorTheme::Get().selectionHighlightHover
                         : row.style.color;
                     row.padding     = Vec2{ 0.0f, 0.0f };
                     row.hitTestMode = exists ? HitTestMode::Enabled : HitTestMode::DisabledSelf;
@@ -9840,8 +10220,8 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     accent.type    = WidgetElementType::Panel;
                     accent.id      = rowId + ".Accent";
                     accent.style.color   = exists
-                        ? Vec4{ 0.30f, 0.55f, 0.95f, 1.0f }
-                        : Vec4{ 0.45f, 0.28f, 0.28f, 0.6f };
+                        ? EditorTheme::Get().accent
+                        : Vec4{ EditorTheme::Get().errorColor.x, EditorTheme::Get().errorColor.y, EditorTheme::Get().errorColor.z, 0.6f };
                     accent.minSize = Vec2{ 4.0f, 44.0f };
                     row.children.push_back(accent);
 
@@ -9852,8 +10232,8 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     nameCol.text      = projName;
                     nameCol.fontSize  = 14.0f;
                     nameCol.style.textColor = exists
-                        ? Vec4{ 0.95f, 0.97f, 1.0f, 1.0f }
-                        : Vec4{ 0.50f, 0.38f, 0.38f, 1.0f };
+                        ? EditorTheme::Get().textPrimary
+                        : Vec4{ EditorTheme::Get().errorColor.x, 0.38f, 0.38f, 1.0f };
                     nameCol.textAlignV = TextAlignV::Center;
                     nameCol.padding   = Vec2{ 12.0f, 0.0f };
                     nameCol.minSize   = Vec2{ 180.0f, 44.0f };
@@ -9866,7 +10246,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     pathCol.text      = exists ? projPath : (projPath + "  (not found)");
                     pathCol.fontSize  = 11.0f;
                     pathCol.style.textColor = exists
-                        ? Vec4{ 0.48f, 0.54f, 0.68f, 1.0f }
+                        ? EditorTheme::Get().textMuted
                         : Vec4{ 0.45f, 0.30f, 0.30f, 0.8f };
                     pathCol.textAlignV = TextAlignV::Center;
                     pathCol.fillX     = true;
@@ -9960,7 +10340,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 }
             }
         }
-        // ── Category: Open Project ─────────────────────────────────────
+        // â”€â”€ Category: Open Project â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         else if (state->activeCategory == 1)
         {
             addSectionLabel("PS.C.Sec.Open", "Open Existing Project");
@@ -9971,7 +10351,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             desc.id        = "PS.C.OpenDesc";
             desc.text      = "Select a .project file to open an existing project.";
             desc.fontSize  = 13.0f;
-            desc.style.textColor = Vec4{ 0.65f, 0.68f, 0.75f, 1.0f };
+            desc.style.textColor = EditorTheme::Get().textSecondary;
             desc.padding   = Vec2{ 10.0f, 12.0f };
             desc.minSize   = Vec2{ contentW - kContentPad * 2.0f, 44.0f };
             entry->children.push_back(desc);
@@ -10018,7 +10398,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     );
                 });
         }
-        // ── Category: New Project ──────────────────────────────────────
+        // â”€â”€ Category: New Project â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         else if (state->activeCategory == 2)
         {
             addSectionLabel("PS.C.Sec.New", "Create New Project");
@@ -10116,7 +10496,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 preview.id        = "PS.C.Preview";
                 preview.text      = "Target:  " + previewPath;
                 preview.fontSize  = 11.0f;
-                preview.style.textColor = Vec4{ 0.45f, 0.55f, 0.70f, 1.0f };
+                preview.style.textColor = EditorTheme::Get().textLink;
                 preview.padding   = Vec2{ 10.0f, 6.0f };
                 preview.minSize   = Vec2{ contentW - kContentPad * 2.0f, 26.0f };
                 entry->children.push_back(preview);
@@ -10138,10 +10518,10 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 includeDefaultContentCb.text = "Include default content";
                 includeDefaultContentCb.fontSize = 12.0f;
                 includeDefaultContentCb.isChecked = state->includeDefaultContent;
-                includeDefaultContentCb.style.color = Vec4{ 0.22f, 0.22f, 0.28f, 1.0f };
-                includeDefaultContentCb.style.hoverColor = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
-                includeDefaultContentCb.style.fillColor = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
-                includeDefaultContentCb.style.textColor = Vec4{ 0.88f, 0.90f, 0.95f, 1.0f };
+                includeDefaultContentCb.style.color = EditorTheme::Get().checkboxDefault;
+                includeDefaultContentCb.style.hoverColor = EditorTheme::Get().checkboxHover;
+                includeDefaultContentCb.style.fillColor = EditorTheme::Get().checkboxChecked;
+                includeDefaultContentCb.style.textColor = EditorTheme::Get().textPrimary;
                 includeDefaultContentCb.padding = Vec2{ 8.0f, 4.0f };
                 includeDefaultContentCb.hitTestMode = HitTestMode::Enabled;
                 includeDefaultContentCb.minSize = Vec2{ contentW - kContentPad * 2.0f, 24.0f };
@@ -10152,14 +10532,14 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 entry->children.push_back(includeDefaultContentCb);
             }
 
-            // ── RHI Type dropdown ──────────────────────────────────────
+            // â”€â”€ RHI Type dropdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             {
                 WidgetElement rhiRow;
                 rhiRow.type        = WidgetElementType::StackPanel;
                 rhiRow.id          = "PS.C.RHI.Row";
                 rhiRow.orientation = StackOrientation::Horizontal;
                 rhiRow.minSize     = Vec2{ contentW - kContentPad * 2.0f, kRowH };
-                rhiRow.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                rhiRow.style.color       = EditorTheme::Get().transparent;
                 rhiRow.padding     = Vec2{ 6.0f, 2.0f };
 
                 WidgetElement rhiLbl;
@@ -10167,7 +10547,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 rhiLbl.id        = "PS.C.RHI.Lbl";
                 rhiLbl.text      = "Graphics API";
                 rhiLbl.fontSize  = 13.0f;
-                rhiLbl.style.textColor = Vec4{ 0.80f, 0.82f, 0.88f, 1.0f };
+                rhiLbl.style.textColor = EditorTheme::Get().textSecondary;
                 rhiLbl.textAlignV = TextAlignV::Center;
                 rhiLbl.minSize   = Vec2{ 120.0f, kRowH };
                 rhiRow.children.push_back(rhiLbl);
@@ -10178,9 +10558,9 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 rhiDd.items         = { "OpenGL" };
                 rhiDd.selectedIndex = state->selectedRHI;
                 rhiDd.fontSize      = 12.0f;
-                rhiDd.style.color         = Vec4{ 0.18f, 0.18f, 0.22f, 1.0f };
-                rhiDd.style.hoverColor    = Vec4{ 0.22f, 0.22f, 0.27f, 1.0f };
-                rhiDd.style.textColor     = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+                rhiDd.style.color         = EditorTheme::Get().inputBackground;
+                rhiDd.style.hoverColor    = EditorTheme::Get().inputBackgroundHover;
+                rhiDd.style.textColor     = EditorTheme::Get().textPrimary;
                 rhiDd.padding       = Vec2{ 6.0f, 4.0f };
                 rhiDd.hitTestMode = HitTestMode::Enabled;
                 rhiDd.minSize       = Vec2{ contentW - kContentPad * 2.0f - 120.0f - 12.0f, kRowH };
@@ -10194,8 +10574,8 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             }
 
             addActionButton("PS.C.CreateBtn", "Create Project",
-                Vec4{ 0.18f, 0.50f, 0.28f, 1.0f },
-                Vec4{ 0.22f, 0.62f, 0.35f, 1.0f },
+                EditorTheme::Get().accentGreen,
+                Vec4{ 0.40f, 0.78f, 0.44f, 1.0f },
                 [state, callbackPtr, closeScreen, sanitizeProjectName, screenMgr]()
                 {
                     const std::string sanitized = sanitizeProjectName(state->newProjectName);
@@ -10252,18 +10632,18 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             {
                 const bool active = (static_cast<int>(ci) == state->activeCategory);
                 catBtn->style.color     = active
-                    ? Vec4{ 0.20f, 0.26f, 0.40f, 1.0f }
-                    : Vec4{ 0.09f, 0.09f, 0.11f, 0.0f };
+                    ? EditorTheme::Get().selectionHighlight
+                    : EditorTheme::Get().transparent;
                 catBtn->style.textColor = active
-                    ? Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }
-                    : Vec4{ 0.65f, 0.68f, 0.72f, 1.0f };
+                    ? EditorTheme::Get().textPrimary
+                    : EditorTheme::Get().textSecondary;
             }
         }
 
         pMgr.markAllWidgetsDirty();
     };
 
-    // ── Sidebar category buttons ───────────────────────────────────────
+    // â”€â”€ Sidebar category buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     for (size_t ci = 0; ci < categories.size(); ++ci)
     {
         const float by0 = kCatBtnY0 + static_cast<float>(ci) * (kCatBtnH + kCatBtnGap);
@@ -10306,7 +10686,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         elements.push_back(catBtn);
     }
 
-    // ── Content area (above footer) ────────────────────────────────────
+    // â”€â”€ Content area (above footer) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         WidgetElement content;
         content.type        = WidgetElementType::StackPanel;
@@ -11021,7 +11401,7 @@ void UIManager::buildTimelineTrackRows(const std::string& tabId, WidgetElement& 
                 WidgetElement delBtn{};
                 delBtn.id = "WE.TL.KFDel." + std::to_string(ti) + "." + std::to_string(ki);
                 delBtn.type = WidgetElementType::Button;
-                delBtn.text = "\xc3\x97"; // × symbol
+                delBtn.text = "\xc3\x97"; // Ã— symbol
                 delBtn.font = EditorTheme::Get().fontDefault;
                 delBtn.fontSize = EditorTheme::Get().fontSizeCaption;
                 delBtn.minSize = Vec2{ 18.0f, 18.0f };
@@ -11134,7 +11514,7 @@ void UIManager::buildTimelineRulerAndKeyframes(const std::string& tabId, WidgetE
     const float lanesFrac = 1.0f - rulerFrac;
     const float laneFrac = lanesFrac / static_cast<float>(totalRows);
 
-    // ── Ruler background ─────────────────────────────────────────────────
+    // â”€â”€ Ruler background â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         WidgetElement rulerBg{};
         rulerBg.id = "WE.TL.RulerBg";
@@ -11147,7 +11527,7 @@ void UIManager::buildTimelineRulerAndKeyframes(const std::string& tabId, WidgetE
         container.children.push_back(std::move(rulerBg));
     }
 
-    // ── Ruler tick marks ─────────────────────────────────────────────────
+    // â”€â”€ Ruler tick marks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         float step = 0.25f;
         if (duration > 5.0f) step = 1.0f;
@@ -11177,7 +11557,7 @@ void UIManager::buildTimelineRulerAndKeyframes(const std::string& tabId, WidgetE
         }
     }
 
-    // ── Lane backgrounds + keyframe markers ──────────────────────────────
+    // â”€â”€ Lane backgrounds + keyframe markers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     int rowIndex = 0;
     for (size_t ti = 0; ti < anim->tracks.size(); ++ti)
     {
@@ -11281,7 +11661,7 @@ void UIManager::buildTimelineRulerAndKeyframes(const std::string& tabId, WidgetE
         }
     }
 
-    // ── Scrubber indicator (orange line) ─────────────────────────────────
+    // â”€â”€ Scrubber indicator (orange line) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         const float scrubFrac = (duration > 0.0f) ? std::clamp(edState.timelineScrubTime / duration, 0.0f, 1.0f) : 0.0f;
 
@@ -11296,7 +11676,7 @@ void UIManager::buildTimelineRulerAndKeyframes(const std::string& tabId, WidgetE
         container.children.push_back(std::move(scrubber));
     }
 
-    // ── End-of-animation line (red) ──────────────────────────────────────
+    // â”€â”€ End-of-animation line (red) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         WidgetElement endLine{};
         endLine.id = "WE.TL.EndLine";
@@ -11368,7 +11748,7 @@ void UIManager::handleTimelineMouseUp(const std::string& tabId)
 }
 
 // ===========================================================================
-// UI Designer Tab  (Gameplay UI — operates on ViewportUIManager)
+// UI Designer Tab  (Gameplay UI â€” operates on ViewportUIManager)
 // ===========================================================================
 
 ViewportUIManager* UIManager::getViewportUIManager() const
@@ -11382,7 +11762,7 @@ bool UIManager::isUIDesignerOpen() const
 }
 
 // ---------------------------------------------------------------------------
-// openUIDesignerTab  — creates the tab + left / right / toolbar widgets
+// openUIDesignerTab  â€” creates the tab + left / right / toolbar widgets
 // ---------------------------------------------------------------------------
 void UIManager::openUIDesignerTab()
 {
@@ -11591,7 +11971,7 @@ void UIManager::openUIDesignerTab()
                 controlsSection.children.push_back(std::move(title));
             }
 
-            // Gameplay-UI element types (subset — only those supported by ViewportUIManager)
+            // Gameplay-UI element types (subset â€” only those supported by ViewportUIManager)
             const std::vector<std::string> controls = {
                 "Panel", "Text", "Label", "Button", "Image", "ProgressBar", "Slider",
                 "WrapBox", "UniformGrid", "SizeBox", "ScaleBox", "WidgetSwitcher", "Overlay",
@@ -11634,7 +12014,7 @@ void UIManager::openUIDesignerTab()
             sep.type       = WidgetElementType::Panel;
             sep.fillX      = true;
             sep.minSize    = Vec2{ 0.0f, 1.0f };
-            sep.style.color      = Vec4{ 0.26f, 0.28f, 0.34f, 0.8f };
+            sep.style.color      = EditorTheme::Get().panelBorder;
             sep.runtimeOnly = true;
             root.children.push_back(std::move(sep));
         }
@@ -11766,7 +12146,7 @@ void UIManager::openUIDesignerTab()
         closeUIDesignerTab();
     });
 
-    // --- Bidirectional sync: viewport click → designer selection ---
+    // --- Bidirectional sync: viewport click â†’ designer selection ---
     auto* vpUI = getViewportUIManager();
     if (vpUI)
     {
@@ -11863,7 +12243,7 @@ void UIManager::selectUIDesignerElement(const std::string& widgetName, const std
 }
 
 // ---------------------------------------------------------------------------
-// addElementToViewportWidget — adds a new element from the control palette
+// addElementToViewportWidget â€” adds a new element from the control palette
 // ---------------------------------------------------------------------------
 void UIManager::addElementToViewportWidget(const std::string& elementType)
 {
@@ -12140,7 +12520,7 @@ void UIManager::deleteSelectedUIDesignerElement()
 }
 
 // ---------------------------------------------------------------------------
-// refreshUIDesignerHierarchy — traverses ViewportUIManager widgets
+// refreshUIDesignerHierarchy â€” traverses ViewportUIManager widgets
 // ---------------------------------------------------------------------------
 void UIManager::refreshUIDesignerHierarchy()
 {
@@ -12315,7 +12695,7 @@ void UIManager::refreshUIDesignerHierarchy()
 }
 
 // ---------------------------------------------------------------------------
-// refreshUIDesignerDetails — properties panel for selected element
+// refreshUIDesignerDetails â€” properties panel for selected element
 // ---------------------------------------------------------------------------
 void UIManager::refreshUIDesignerDetails()
 {
@@ -12499,7 +12879,7 @@ void UIManager::refreshUIDesignerDetails()
         sep.type    = WidgetElementType::Panel;
         sep.fillX   = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color   = EditorTheme::Get().panelBorder;
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -12560,7 +12940,7 @@ void UIManager::refreshUIDesignerDetails()
         sep.type    = WidgetElementType::Panel;
         sep.fillX   = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color   = EditorTheme::Get().panelBorder;
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -12579,7 +12959,7 @@ void UIManager::refreshUIDesignerDetails()
         sep.type    = WidgetElementType::Panel;
         sep.fillX   = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color   = EditorTheme::Get().panelBorder;
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -12624,7 +13004,7 @@ void UIManager::refreshUIDesignerDetails()
         sep.type    = WidgetElementType::Panel;
         sep.fillX   = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color   = EditorTheme::Get().panelBorder;
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -12675,7 +13055,7 @@ void UIManager::refreshUIDesignerDetails()
         sep.type    = WidgetElementType::Panel;
         sep.fillX   = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color   = EditorTheme::Get().panelBorder;
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
@@ -12692,7 +13072,7 @@ void UIManager::refreshUIDesignerDetails()
         sep.type    = WidgetElementType::Panel;
         sep.fillX   = true;
         sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color   = Vec4{ 0.26f, 0.28f, 0.34f, 0.6f };
+        sep.style.color   = EditorTheme::Get().panelBorder;
         sep.runtimeOnly = true;
         rootPanel->children.push_back(std::move(sep));
 
