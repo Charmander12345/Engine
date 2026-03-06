@@ -1733,6 +1733,18 @@ const WidgetAnimation* Widget::findAnimationByName(const std::string& animationN
     return nullptr;
 }
 
+WidgetAnimation* Widget::findAnimationByNameMutable(const std::string& animationName)
+{
+    for (auto& anim : m_animations)
+    {
+        if (anim.name == animationName)
+        {
+            return &anim;
+        }
+    }
+    return nullptr;
+}
+
 namespace
 {
     WidgetElement* FindElementById(std::vector<WidgetElement>& elements, const std::string& id)

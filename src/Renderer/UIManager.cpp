@@ -22,6 +22,8 @@
 #include "UIWidgets/CheckBoxWidget.h"
 #include "UIWidgets/DropDownWidget.h"
 #include "UIWidgets/ColorPickerWidget.h"
+#include "EditorTheme.h"
+#include "EditorUIBuilder.h"
 #include "../AssetManager/AssetManager.h"
 #include "../AssetManager/AssetTypes.h"
 #include "Renderer.h"
@@ -1433,12 +1435,12 @@ const std::vector<UIManager::UIEntry>& UIManager::getRegisteredUI() const
     return m_entries;
 }
 
-void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widget>& widget)
+void UIManager::registerWidget(const std::string& id, const std::shared_ptr<EditorWidget>& widget)
 {
     registerWidget(id, widget, std::string{});
 }
 
-void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widget>& widget, const std::string& tabId)
+void UIManager::registerWidget(const std::string& id, const std::shared_ptr<EditorWidget>& widget, const std::string& tabId)
 {
     WidgetEntry* entry = findWidgetEntry(id);
     if (!entry)
@@ -1475,6 +1477,17 @@ void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widg
     m_widgetOrderDirty = true;
     m_pointerCacheDirty = true;
     m_renderDirty = true;
+}
+
+// Transition overloads: accept gameplay Widget, convert to EditorWidget
+void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widget>& widget)
+{
+    registerWidget(id, EditorWidget::fromWidget(widget));
+}
+
+void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widget>& widget, const std::string& tabId)
+{
+    registerWidget(id, EditorWidget::fromWidget(widget), tabId);
 }
 
 void UIManager::showModalMessage(const std::string& message, std::function<void()> onClosed)
@@ -1535,7 +1548,7 @@ void UIManager::showConfirmDialog(const std::string& message, std::function<void
 
     if (!m_modalWidget)
     {
-        m_modalWidget = std::make_shared<Widget>();
+        m_modalWidget = std::make_shared<EditorWidget>();
         m_modalWidget->setName("ModalMessage");
         m_modalWidget->setAnchor(WidgetAnchor::TopLeft);
         m_modalWidget->setFillX(true);
@@ -1543,12 +1556,14 @@ void UIManager::showConfirmDialog(const std::string& message, std::function<void
         m_modalWidget->setZOrder(10000);
     }
 
+    const auto& theme = EditorTheme::Get();
+
     WidgetElement overlay{};
     overlay.id = "Modal.Overlay";
     overlay.type = WidgetElementType::Panel;
     overlay.from = Vec2{ 0.0f, 0.0f };
     overlay.to = Vec2{ 1.0f, 1.0f };
-    overlay.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.45f };
+    overlay.style.color = theme.modalOverlay;
     overlay.hitTestMode = HitTestMode::Enabled;
     overlay.runtimeOnly = true;
 
@@ -1559,7 +1574,7 @@ void UIManager::showConfirmDialog(const std::string& message, std::function<void
     panel.to = Vec2{ 0.75f, 0.68f };
     panel.padding = Vec2{ 20.0f, 16.0f };
     panel.orientation = StackOrientation::Vertical;
-    panel.style.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.95f };
+    panel.style.color = theme.modalBackground;
     panel.hitTestMode = HitTestMode::DisabledSelf;
     panel.runtimeOnly = true;
 
@@ -1567,9 +1582,9 @@ void UIManager::showConfirmDialog(const std::string& message, std::function<void
     msgText.id = "Modal.Text";
     msgText.type = WidgetElementType::Text;
     msgText.text = message;
-    msgText.font = "default.ttf";
-    msgText.fontSize = 16.0f;
-    msgText.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+    msgText.font = theme.fontDefault;
+    msgText.fontSize = theme.fontSizeHeading;
+    msgText.style.textColor = theme.modalText;
     msgText.wrapText = true;
     msgText.fillX = true;
     msgText.fillY = true;
@@ -1606,42 +1621,17 @@ void UIManager::showConfirmDialog(const std::string& message, std::function<void
     spacerRight.id = "Modal.SpacerR";
     spacerRight.type = WidgetElementType::Panel;
     spacerRight.fillX = true;
-    spacerRight.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    spacerRight.style.color = theme.transparent;
     spacerRight.runtimeOnly = true;
 
-    auto makeBtn = [](const std::string& id, const std::string& label, const Vec4& bgColor, const Vec4& hoverColor) {
-        WidgetElement btn{};
-        btn.id = id;
-        btn.type = WidgetElementType::Button;
-        btn.text = label;
-        btn.font = "default.ttf";
-        btn.fontSize = 14.0f;
-        btn.textAlignH = TextAlignH::Center;
-        btn.textAlignV = TextAlignV::Center;
-        btn.padding = Vec2{ 8.0f, 6.0f };
-        btn.minSize = Vec2{ 110.0f, 32.0f };
-        btn.style.color = bgColor;
-        btn.style.hoverColor = hoverColor;
-        btn.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
-        btn.shaderVertex = "button_vertex.glsl";
-        btn.shaderFragment = "button_fragment.glsl";
-        btn.hitTestMode = HitTestMode::Enabled;
-        btn.runtimeOnly = true;
-        return btn;
-    };
-
-    WidgetElement yesBtn = makeBtn("Modal.Yes", "Delete",
-        Vec4{ 0.55f, 0.18f, 0.18f, 0.95f },
-        Vec4{ 0.70f, 0.22f, 0.22f, 1.0f });
+    WidgetElement yesBtn = EditorUIBuilder::makeDangerButton("Modal.Yes", "Delete", {}, Vec2{ 110.0f, 32.0f });
     yesBtn.onClicked = [this, confirmCb]()
     {
         closeModalMessage();
         if (*confirmCb) (*confirmCb)();
     };
 
-    WidgetElement noBtn = makeBtn("Modal.No", "Cancel",
-        Vec4{ 0.25f, 0.26f, 0.32f, 0.95f },
-        Vec4{ 0.35f, 0.36f, 0.42f, 0.98f });
+    WidgetElement noBtn = EditorUIBuilder::makeButton("Modal.No", "Cancel", {}, Vec2{ 110.0f, 32.0f });
     noBtn.onClicked = [this, cancelCb]()
     {
         closeModalMessage();
@@ -1687,7 +1677,7 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
 
     if (!m_modalWidget)
     {
-        m_modalWidget = std::make_shared<Widget>();
+        m_modalWidget = std::make_shared<EditorWidget>();
         m_modalWidget->setName("ModalMessage");
         m_modalWidget->setAnchor(WidgetAnchor::TopLeft);
         m_modalWidget->setFillX(true);
@@ -1695,12 +1685,14 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
         m_modalWidget->setZOrder(10000);
     }
 
+    const auto& theme = EditorTheme::Get();
+
     WidgetElement overlay{};
     overlay.id = "Modal.Overlay";
     overlay.type = WidgetElementType::Panel;
     overlay.from = Vec2{ 0.0f, 0.0f };
     overlay.to = Vec2{ 1.0f, 1.0f };
-    overlay.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.45f };
+    overlay.style.color = theme.modalOverlay;
     overlay.hitTestMode = HitTestMode::Enabled;
     overlay.runtimeOnly = true;
 
@@ -1711,7 +1703,7 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
     panel.to = Vec2{ 0.75f, 0.70f };
     panel.padding = Vec2{ 20.0f, 16.0f };
     panel.orientation = StackOrientation::Vertical;
-    panel.style.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.95f };
+    panel.style.color = theme.modalBackground;
     panel.hitTestMode = HitTestMode::DisabledSelf;
     panel.runtimeOnly = true;
 
@@ -1719,9 +1711,9 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
     msgText.id = "Modal.Text";
     msgText.type = WidgetElementType::Text;
     msgText.text = message;
-    msgText.font = "default.ttf";
-    msgText.fontSize = 16.0f;
-    msgText.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+    msgText.font = theme.fontDefault;
+    msgText.fontSize = theme.fontSizeHeading;
+    msgText.style.textColor = theme.modalText;
     msgText.wrapText = true;
     msgText.fillX = true;
     msgText.fillY = true;
@@ -1732,16 +1724,16 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
     checkbox.id = "Modal.Checkbox";
     checkbox.type = WidgetElementType::CheckBox;
     checkbox.text = checkboxLabel;
-    checkbox.font = "default.ttf";
-    checkbox.fontSize = 13.0f;
+    checkbox.font = theme.fontDefault;
+    checkbox.fontSize = theme.fontSizeBody;
     checkbox.isChecked = checkedByDefault;
     checkbox.fillX = true;
     checkbox.minSize = Vec2{ 0.0f, 26.0f };
-    checkbox.padding = Vec2{ 2.0f, 2.0f };
-    checkbox.style.color = Vec4{ 0.18f, 0.18f, 0.22f, 0.9f };
-    checkbox.style.hoverColor = Vec4{ 0.24f, 0.24f, 0.30f, 1.0f };
-    checkbox.style.fillColor = Vec4{ 0.30f, 0.55f, 0.95f, 1.0f };
-    checkbox.style.textColor = Vec4{ 0.90f, 0.90f, 0.94f, 1.0f };
+    checkbox.padding = theme.paddingSmall;
+    checkbox.style.color = theme.checkboxDefault;
+    checkbox.style.hoverColor = theme.checkboxHover;
+    checkbox.style.fillColor = theme.checkboxChecked;
+    checkbox.style.textColor = theme.checkboxText;
     checkbox.hitTestMode = HitTestMode::Enabled;
     checkbox.runtimeOnly = true;
     checkbox.onCheckedChanged = [checkboxState](bool checked)
@@ -1779,42 +1771,17 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
     spacerRight.id = "Modal.SpacerR";
     spacerRight.type = WidgetElementType::Panel;
     spacerRight.fillX = true;
-    spacerRight.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+    spacerRight.style.color = theme.transparent;
     spacerRight.runtimeOnly = true;
 
-    auto makeBtn = [](const std::string& id, const std::string& label, const Vec4& bgColor, const Vec4& hoverColor) {
-        WidgetElement btn{};
-        btn.id = id;
-        btn.type = WidgetElementType::Button;
-        btn.text = label;
-        btn.font = "default.ttf";
-        btn.fontSize = 14.0f;
-        btn.textAlignH = TextAlignH::Center;
-        btn.textAlignV = TextAlignV::Center;
-        btn.padding = Vec2{ 8.0f, 6.0f };
-        btn.minSize = Vec2{ 110.0f, 32.0f };
-        btn.style.color = bgColor;
-        btn.style.hoverColor = hoverColor;
-        btn.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
-        btn.shaderVertex = "button_vertex.glsl";
-        btn.shaderFragment = "button_fragment.glsl";
-        btn.hitTestMode = HitTestMode::Enabled;
-        btn.runtimeOnly = true;
-        return btn;
-    };
-
-    WidgetElement yesBtn = makeBtn("Modal.Yes", "Delete",
-        Vec4{ 0.55f, 0.18f, 0.18f, 0.95f },
-        Vec4{ 0.70f, 0.22f, 0.22f, 1.0f });
+    WidgetElement yesBtn = EditorUIBuilder::makeDangerButton("Modal.Yes", "Delete", {}, Vec2{ 110.0f, 32.0f });
     yesBtn.onClicked = [this, confirmCb, checkboxState]()
     {
         closeModalMessage();
         if (*confirmCb) (*confirmCb)(*checkboxState);
     };
 
-    WidgetElement noBtn = makeBtn("Modal.No", "Cancel",
-        Vec4{ 0.25f, 0.26f, 0.32f, 0.95f },
-        Vec4{ 0.35f, 0.36f, 0.42f, 0.98f });
+    WidgetElement noBtn = EditorUIBuilder::makeButton("Modal.No", "Cancel", {}, Vec2{ 110.0f, 32.0f });
     noBtn.onClicked = [this, cancelCb]()
     {
         closeModalMessage();
@@ -1942,10 +1909,10 @@ void UIManager::updateNotifications(float deltaSeconds)
     }
 }
 
-void UIManager::populateOutlinerWidget(const std::shared_ptr<Widget>& widget)
+void UIManager::populateOutlinerWidget(const std::shared_ptr<EditorWidget>& widget)
 {
-    if (!widget)
-    {
+	if (!widget)
+	{
 		Logger::Instance().log(Logger::Category::UI, "WorldOutliner widget is null.", Logger::LogLevel::WARNING);
         return;
     }
@@ -2012,31 +1979,16 @@ void UIManager::populateOutlinerWidget(const std::shared_ptr<Widget>& widget)
             }
         }
 
-        WidgetElement button{};
-        button.id = "Outliner.Entity." + std::to_string(entity);
-        button.type = WidgetElementType::Button;
+        WidgetElement button = EditorUIBuilder::makeButton(
+            "Outliner.Entity." + std::to_string(entity), label);
         button.from = Vec2{ 0.0f, 0.0f };
         button.to = Vec2{ 1.0f, 1.0f };
-        button.fillX = true;
-        button.text = label;
-        button.font = "default.ttf";
-        button.fontSize = 14.0f;
         button.textAlignH = TextAlignH::Center;
-        button.textAlignV = TextAlignV::Center;
-        button.padding = Vec2{ 6.0f, 4.0f };
-        button.minSize = Vec2{ 0.0f, 24.0f };
-        button.style.color = Vec4{ 0.12f, 0.12f, 0.14f, 0.9f };
-        button.style.hoverColor = Vec4{ 0.18f, 0.18f, 0.22f, 0.95f };
-        button.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
-        button.shaderVertex = "button_vertex.glsl";
-        button.shaderFragment = "button_fragment.glsl";
-        button.hitTestMode = HitTestMode::Enabled;
         button.onClicked = [this, entity]()
             {
                 m_outlinerSelectedEntity = entity;
                 populateOutlinerDetails(entity);
             };
-        button.runtimeOnly = true;
         listPanel->children.push_back(std::move(button));
         Logger::Instance().log(Logger::Category::UI,
             "WorldOutliner created button for entity " + std::to_string(entity) + " label=" + label,
@@ -2086,43 +2038,18 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
 
     const auto makeTextLine = [](const std::string& text) -> WidgetElement
         {
-            WidgetElement line{};
-            line.type = WidgetElementType::Text;
-            line.text = text;
-            line.font = "default.ttf";
-            line.fontSize = 13.0f;
-            line.textAlignH = TextAlignH::Left;
-            line.textAlignV = TextAlignV::Center;
-            line.style.textColor = Vec4{ 0.85f, 0.86f, 0.9f, 1.0f };
-            line.fillX = true;
-            line.minSize = Vec2{ 0.0f, 20.0f };
-            line.runtimeOnly = true;
-            return line;
+            return EditorUIBuilder::makeLabel(text);
         };
 
     const auto sanitizeId = [](const std::string& text)
         {
-            std::string result;
-            result.reserve(text.size());
-            for (unsigned char c : text)
-            {
-                result.push_back(std::isalnum(c) ? static_cast<char>(c) : '_');
-            }
-            if (result.empty())
-            {
-                result = "Section";
-            }
-            return result;
+            return EditorUIBuilder::sanitizeId(text);
         };
 
     const auto addSeparator = [&](const std::string& title, const std::vector<WidgetElement>& lines,
         std::function<void()> onRemove = {})
         {
-            SeparatorWidget separator;
-            separator.setId(sanitizeId(title));
-            separator.setTitle(title);
-            separator.setChildren(lines);
-            WidgetElement separatorEl = separator.toElement();
+            WidgetElement separatorEl = EditorUIBuilder::makeSection(sanitizeId(title), title, lines);
 
             if (onRemove)
             {
@@ -2133,23 +2060,10 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
                     WidgetElement originalHeader = std::move(separatorEl.children[1]);
                     originalHeader.fillX = true;
 
-                    WidgetElement removeBtn{};
-                    removeBtn.id = "Details.Remove." + sanitizeId(title);
-                    removeBtn.type = WidgetElementType::Button;
-                    removeBtn.text = "X";
-                    removeBtn.font = "default.ttf";
-                    removeBtn.fontSize = 11.0f;
-                    removeBtn.textAlignH = TextAlignH::Center;
-                    removeBtn.textAlignV = TextAlignV::Center;
-                    removeBtn.minSize = Vec2{ 22.0f, 22.0f };
-                    removeBtn.padding = Vec2{ 2.0f, 2.0f };
-                    removeBtn.style.color = Vec4{ 0.45f, 0.15f, 0.15f, 0.9f };
-                    removeBtn.style.hoverColor = Vec4{ 0.65f, 0.20f, 0.20f, 1.0f };
-                    removeBtn.style.textColor = Vec4{ 0.95f, 0.80f, 0.80f, 1.0f };
-                    removeBtn.shaderVertex = "button_vertex.glsl";
-                    removeBtn.shaderFragment = "button_fragment.glsl";
-                    removeBtn.hitTestMode = HitTestMode::Enabled;
-                    removeBtn.runtimeOnly = true;
+                    WidgetElement removeBtn = EditorUIBuilder::makeDangerButton(
+                        "Details.Remove." + sanitizeId(title), "X", {}, Vec2{ 22.0f, 22.0f });
+                    removeBtn.fillX = false;
+                    removeBtn.fontSize = EditorTheme::Get().fontSizeSmall;
 
                     const std::string compTitle = title;
                     removeBtn.onClicked = [this, compTitle, onRemove]()
@@ -2159,15 +2073,8 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
                             []() {});
                     };
 
-                    WidgetElement headerRow{};
-                    headerRow.id = "Details.HeaderRow." + sanitizeId(title);
-                    headerRow.type = WidgetElementType::StackPanel;
-                    headerRow.orientation = StackOrientation::Horizontal;
-                    headerRow.fillX = true;
-                    headerRow.sizeToContent = true;
-                    headerRow.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-                    headerRow.padding = Vec2{ 0.0f, 0.0f };
-                    headerRow.runtimeOnly = true;
+                    WidgetElement headerRow = EditorUIBuilder::makeHorizontalRow(
+                        "Details.HeaderRow." + sanitizeId(title));
                     headerRow.children.push_back(std::move(originalHeader));
                     headerRow.children.push_back(std::move(removeBtn));
 
@@ -2179,118 +2086,37 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
         };
 
     auto fmtF = [](float v) -> std::string {
-        char buf[32];
-        std::snprintf(buf, sizeof(buf), "%.2f", v);
-        return std::string(buf);
+        return EditorUIBuilder::fmtFloat(v);
     };
 
     const auto makeFloatEntry = [&](const std::string& id, const std::string& label, float value,
         std::function<void(float)> onChange) -> WidgetElement
     {
-        WidgetElement row{};
-        row.type = WidgetElementType::StackPanel;
-        row.orientation = StackOrientation::Horizontal;
-        row.fillX = true;
-        row.sizeToContent = true;
-        row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-        row.padding = Vec2{ 0.0f, 1.0f };
-        row.runtimeOnly = true;
-
-        WidgetElement lbl = makeTextLine(label);
-        lbl.minSize = Vec2{ 100.0f, 22.0f };
-        lbl.fillX = false;
-        row.children.push_back(std::move(lbl));
-
-        EntryBarWidget entry;
-        entry.setValue(fmtF(value));
-        entry.setFont("default.ttf");
-        entry.setFontSize(12.0f);
-        entry.setMinSize(Vec2{ 0.0f, 22.0f });
-        entry.setPadding(Vec2{ 4.0f, 2.0f });
-        entry.setOnValueChanged([onChange](const std::string& val) {
-            try { onChange(std::stof(val)); } catch (...) {}
-            if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
-        });
-
-        WidgetElement entryEl = entry.toElement();
-        entryEl.id = id;
-        entryEl.fillX = true;
-        entryEl.runtimeOnly = true;
-        row.children.push_back(std::move(entryEl));
-
-        return row;
+        return EditorUIBuilder::makeFloatRow(id, label, value,
+            [onChange = std::move(onChange)](float v) {
+                onChange(v);
+                if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            });
     };
 
     const auto makeVec3Row = [&](const std::string& idPrefix, const std::string& label, const float values[3],
         std::function<void(int, float)> onChange) -> WidgetElement
     {
-        WidgetElement row{};
-        row.type = WidgetElementType::StackPanel;
-        row.orientation = StackOrientation::Horizontal;
-        row.fillX = true;
-        row.sizeToContent = true;
-        row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-        row.padding = Vec2{ 0.0f, 1.0f };
-        row.runtimeOnly = true;
-
-        WidgetElement lbl = makeTextLine(label);
-        lbl.minSize = Vec2{ 100.0f, 22.0f };
-        lbl.fillX = false;
-        row.children.push_back(std::move(lbl));
-
-        const char* axes[] = { "X", "Y", "Z" };
-        const Vec4 axisColors[] = {
-            { 0.22f, 0.10f, 0.10f, 0.9f },
-            { 0.10f, 0.20f, 0.10f, 0.9f },
-            { 0.10f, 0.10f, 0.22f, 0.9f },
-        };
-
-        for (int i = 0; i < 3; ++i)
-        {
-            EntryBarWidget entry;
-            entry.setValue(fmtF(values[i]));
-            entry.setFont("default.ttf");
-            entry.setFontSize(12.0f);
-            entry.setMinSize(Vec2{ 0.0f, 22.0f });
-            entry.setPadding(Vec2{ 4.0f, 2.0f });
-            entry.setBackgroundColor(axisColors[i]);
-
-            int axis = i;
-            entry.setOnValueChanged([onChange, axis](const std::string& val) {
-                try { onChange(axis, std::stof(val)); } catch (...) {}
+        return EditorUIBuilder::makeVec3Row(idPrefix, label, values,
+            [onChange = std::move(onChange)](int axis, float v) {
+                onChange(axis, v);
                 if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
             });
-
-            WidgetElement entryEl = entry.toElement();
-            entryEl.id = idPrefix + "." + axes[i];
-            entryEl.fillX = true;
-            entryEl.runtimeOnly = true;
-            row.children.push_back(std::move(entryEl));
-        }
-
-        return row;
     };
 
     const auto makeCheckBoxRow = [&](const std::string& id, const std::string& label, bool checked,
         std::function<void(bool)> onChange) -> WidgetElement
     {
-        CheckBoxWidget cb;
-        cb.setChecked(checked);
-        cb.setLabel(label);
-        cb.setFont("default.ttf");
-        cb.setFontSize(12.0f);
-        cb.setMinSize(Vec2{ 0.0f, 22.0f });
-        cb.setPadding(Vec2{ 4.0f, 2.0f });
-        cb.setOnCheckedChanged([onChange = std::move(onChange)](bool val) {
-            onChange(val);
-            if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
-        });
-
-        WidgetElement el = cb.toElement();
-        el.id = id;
-        el.fillX = true;
-        el.runtimeOnly = true;
-        return el;
+        return EditorUIBuilder::makeCheckBox(id, label, checked,
+            [onChange = std::move(onChange)](bool val) {
+                onChange(val);
+                if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            });
     };
 
     if (entity == 0)
@@ -2323,12 +2149,13 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
     {
         std::vector<WidgetElement> lines;
 
+        auto& theme = EditorTheme::Get();
         EntryBarWidget nameEntry;
         nameEntry.setValue(nameComponent->displayName);
-        nameEntry.setFont("default.ttf");
-        nameEntry.setFontSize(12.0f);
-        nameEntry.setMinSize(Vec2{ 0.0f, 22.0f });
-        nameEntry.setPadding(Vec2{ 6.0f, 3.0f });
+        nameEntry.setFont(theme.fontDefault);
+        nameEntry.setFontSize(theme.fontSizeSmall);
+        nameEntry.setMinSize(Vec2{ 0.0f, theme.rowHeightSmall });
+        nameEntry.setPadding(theme.paddingNormal);
         nameEntry.setOnValueChanged([this, entity](const std::string& val) {
             auto& ecs = ECS::ECSManager::Instance();
             if (auto* comp = ecs.getComponent<ECS::NameComponent>(entity))
@@ -2418,13 +2245,13 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
         {
             DropdownButtonWidget dropdown;
             dropdown.setText(mesh->meshAssetPath.empty() ? "Select Mesh..." : mesh->meshAssetPath);
-            dropdown.setFont("default.ttf");
-            dropdown.setFontSize(12.0f);
-            dropdown.setMinSize(Vec2{ 0.0f, 22.0f });
-            dropdown.setPadding(Vec2{ 6.0f, 3.0f });
-            dropdown.setBackgroundColor(Vec4{ 0.16f, 0.18f, 0.24f, 0.95f });
-            dropdown.setHoverColor(Vec4{ 0.22f, 0.26f, 0.34f, 1.0f });
-            dropdown.setTextColor(Vec4{ 0.8f, 0.85f, 0.95f, 1.0f });
+            dropdown.setFont(EditorTheme::Get().fontDefault);
+            dropdown.setFontSize(EditorTheme::Get().fontSizeSmall);
+            dropdown.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
+            dropdown.setPadding(EditorTheme::Get().paddingNormal);
+            dropdown.setBackgroundColor(EditorTheme::Get().dropdownBackground);
+            dropdown.setHoverColor(EditorTheme::Get().dropdownHover);
+            dropdown.setTextColor(EditorTheme::Get().dropdownText);
 
             const auto& registry = AssetManager::Instance().getAssetRegistry();
             for (const auto& reg : registry)
@@ -2463,13 +2290,13 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
         {
             DropdownButtonWidget dropdown;
             dropdown.setText(material->materialAssetPath.empty() ? "Select Material..." : material->materialAssetPath);
-            dropdown.setFont("default.ttf");
-            dropdown.setFontSize(12.0f);
-            dropdown.setMinSize(Vec2{ 0.0f, 22.0f });
-            dropdown.setPadding(Vec2{ 6.0f, 3.0f });
-            dropdown.setBackgroundColor(Vec4{ 0.16f, 0.18f, 0.24f, 0.95f });
-            dropdown.setHoverColor(Vec4{ 0.22f, 0.26f, 0.34f, 1.0f });
-            dropdown.setTextColor(Vec4{ 0.8f, 0.85f, 0.95f, 1.0f });
+            dropdown.setFont(EditorTheme::Get().fontDefault);
+            dropdown.setFontSize(EditorTheme::Get().fontSizeSmall);
+            dropdown.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
+            dropdown.setPadding(EditorTheme::Get().paddingNormal);
+            dropdown.setBackgroundColor(EditorTheme::Get().dropdownBackground);
+            dropdown.setHoverColor(EditorTheme::Get().dropdownHover);
+            dropdown.setTextColor(EditorTheme::Get().dropdownText);
 
             const auto& registry = AssetManager::Instance().getAssetRegistry();
             for (const auto& reg : registry)
@@ -2508,10 +2335,10 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             DropDownWidget typeDropdown;
             typeDropdown.setItems({ "Point", "Directional", "Spot" });
             typeDropdown.setSelectedIndex(currentIdx);
-            typeDropdown.setFont("default.ttf");
-            typeDropdown.setFontSize(12.0f);
-            typeDropdown.setMinSize(Vec2{ 0.0f, 22.0f });
-            typeDropdown.setPadding(Vec2{ 6.0f, 3.0f });
+            typeDropdown.setFont(EditorTheme::Get().fontDefault);
+            typeDropdown.setFontSize(EditorTheme::Get().fontSizeSmall);
+            typeDropdown.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
+            typeDropdown.setPadding(EditorTheme::Get().paddingNormal);
             typeDropdown.setOnSelectionChanged([entity](int idx) {
                 auto& ecs = ECS::ECSManager::Instance();
                 if (auto* comp = ecs.getComponent<ECS::LightComponent>(entity))
@@ -2692,10 +2519,10 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             DropDownWidget colliderDropdown;
             colliderDropdown.setItems({ "Box", "Sphere", "Capsule", "Cylinder", "Mesh", "HeightField" });
             colliderDropdown.setSelectedIndex(currentIdx);
-            colliderDropdown.setFont("default.ttf");
-            colliderDropdown.setFontSize(12.0f);
-            colliderDropdown.setMinSize(Vec2{ 0.0f, 22.0f });
-            colliderDropdown.setPadding(Vec2{ 6.0f, 3.0f });
+            colliderDropdown.setFont(EditorTheme::Get().fontDefault);
+            colliderDropdown.setFontSize(EditorTheme::Get().fontSizeSmall);
+            colliderDropdown.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
+            colliderDropdown.setPadding(EditorTheme::Get().paddingNormal);
             colliderDropdown.setOnSelectionChanged([entity](int idx) {
                 auto& ecs = ECS::ECSManager::Instance();
                 if (auto* comp = ecs.getComponent<ECS::CollisionComponent>(entity))
@@ -2802,10 +2629,10 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             DropDownWidget motionDropdown;
             motionDropdown.setItems({ "Static", "Kinematic", "Dynamic" });
             motionDropdown.setSelectedIndex(currentIdx);
-            motionDropdown.setFont("default.ttf");
-            motionDropdown.setFontSize(12.0f);
-            motionDropdown.setMinSize(Vec2{ 0.0f, 22.0f });
-            motionDropdown.setPadding(Vec2{ 6.0f, 3.0f });
+            motionDropdown.setFont(EditorTheme::Get().fontDefault);
+            motionDropdown.setFontSize(EditorTheme::Get().fontSizeSmall);
+            motionDropdown.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
+            motionDropdown.setPadding(EditorTheme::Get().paddingNormal);
             motionDropdown.setOnSelectionChanged([entity](int idx) {
                 auto& ecs = ECS::ECSManager::Instance();
                 if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
@@ -2911,10 +2738,10 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             DropDownWidget mqDropdown;
             mqDropdown.setItems({ "Discrete", "LinearCast (CCD)" });
             mqDropdown.setSelectedIndex(currentIdx);
-            mqDropdown.setFont("default.ttf");
-            mqDropdown.setFontSize(12.0f);
-            mqDropdown.setMinSize(Vec2{ 0.0f, 22.0f });
-            mqDropdown.setPadding(Vec2{ 6.0f, 3.0f });
+            mqDropdown.setFont(EditorTheme::Get().fontDefault);
+            mqDropdown.setFontSize(EditorTheme::Get().fontSizeSmall);
+            mqDropdown.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
+            mqDropdown.setPadding(EditorTheme::Get().paddingNormal);
             mqDropdown.setOnSelectionChanged([entity](int idx) {
                 auto& ecs = ECS::ECSManager::Instance();
                 if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
@@ -2998,13 +2825,13 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
         {
             DropdownButtonWidget dropdown;
             dropdown.setText(script->scriptPath.empty() ? "Select Script..." : script->scriptPath);
-            dropdown.setFont("default.ttf");
-            dropdown.setFontSize(12.0f);
-            dropdown.setMinSize(Vec2{ 0.0f, 22.0f });
-            dropdown.setPadding(Vec2{ 6.0f, 3.0f });
-            dropdown.setBackgroundColor(Vec4{ 0.16f, 0.18f, 0.24f, 0.95f });
-            dropdown.setHoverColor(Vec4{ 0.22f, 0.26f, 0.34f, 1.0f });
-            dropdown.setTextColor(Vec4{ 0.8f, 0.85f, 0.95f, 1.0f });
+            dropdown.setFont(EditorTheme::Get().fontDefault);
+            dropdown.setFontSize(EditorTheme::Get().fontSizeSmall);
+            dropdown.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
+            dropdown.setPadding(EditorTheme::Get().paddingNormal);
+            dropdown.setBackgroundColor(EditorTheme::Get().dropdownBackground);
+            dropdown.setHoverColor(EditorTheme::Get().dropdownHover);
+            dropdown.setTextColor(EditorTheme::Get().dropdownText);
 
             const auto& registry = AssetManager::Instance().getAssetRegistry();
             for (const auto& reg : registry)
@@ -3036,13 +2863,13 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
     {
         DropdownButtonWidget dropdown;
         dropdown.setText("+ Add Component");
-        dropdown.setFont("default.ttf");
-        dropdown.setFontSize(12.0f);
+        dropdown.setFont(EditorTheme::Get().fontDefault);
+        dropdown.setFontSize(EditorTheme::Get().fontSizeSmall);
         dropdown.setMinSize(Vec2{ 0.0f, 26.0f });
-        dropdown.setPadding(Vec2{ 8.0f, 4.0f });
-        dropdown.setBackgroundColor(Vec4{ 0.14f, 0.30f, 0.14f, 0.95f });
-        dropdown.setHoverColor(Vec4{ 0.18f, 0.42f, 0.18f, 1.0f });
-        dropdown.setTextColor(Vec4{ 0.90f, 0.95f, 0.90f, 1.0f });
+        dropdown.setPadding(EditorTheme::Get().paddingLarge);
+        dropdown.setBackgroundColor(Vec4{ EditorTheme::Get().successColor.x, EditorTheme::Get().successColor.y, EditorTheme::Get().successColor.z, 0.85f });
+        dropdown.setHoverColor(EditorTheme::Get().successColor);
+        dropdown.setTextColor(EditorTheme::Get().textPrimary);
 
         struct CompOption { std::string label; bool present; std::function<void()> addFn; };
         std::vector<CompOption> options = {
@@ -3293,13 +3120,15 @@ static WidgetElement makeTreeRow(const std::string& id,
                                  int indentLevel = 0,
                                  const Vec4& iconTint = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f })
 {
+    const auto& theme = EditorTheme::Get();
+
     WidgetElement btn{};
     btn.id = id;
     btn.type = WidgetElementType::Button;
     btn.fillX = true;
-    btn.minSize = Vec2{ 0.0f, 22.0f };
-    btn.style.color = Vec4{ 0.10f, 0.11f, 0.14f, 0.0f };   // transparent default
-    btn.style.hoverColor = Vec4{ 0.22f, 0.24f, 0.30f, 0.95f };
+    btn.minSize = Vec2{ 0.0f, theme.rowHeightSmall };
+    btn.style.color = theme.buttonSubtle;
+    btn.style.hoverColor = theme.buttonSubtleHover;
     btn.shaderVertex = "button_vertex.glsl";
     btn.shaderFragment = "button_fragment.glsl";
     btn.hitTestMode = HitTestMode::Enabled;
@@ -3309,7 +3138,7 @@ static WidgetElement makeTreeRow(const std::string& id,
 
     const float indentFrac = static_cast<float>(indentLevel) * 0.04f; // 4% per level
 
-    const float rowHeight = 22.0f;
+    const float rowHeight = theme.rowHeightSmall;
     const float iconPad  = 0.1f;                                     // 10% vertical padding
     const float iconSize = rowHeight * (1.0f - 2.0f * iconPad);      // square icon in pixels
 
@@ -3336,13 +3165,13 @@ static WidgetElement makeTreeRow(const std::string& id,
         lbl.id = id + ".Label";
         lbl.type = WidgetElementType::Text;
         lbl.text = label;
-        lbl.font = "default.ttf";
-        lbl.fontSize = 13.0f;
+        lbl.font = theme.fontDefault;
+        lbl.fontSize = theme.fontSizeBody;
         lbl.textAlignH = TextAlignH::Left;
         lbl.textAlignV = TextAlignV::Center;
         lbl.style.textColor = isFolder
-            ? Vec4{ 0.90f, 0.85f, 0.55f, 1.0f }
-            : Vec4{ 0.92f, 0.92f, 0.92f, 1.0f };
+            ? theme.cbFolderAccent
+            : theme.textPrimary;
         lbl.from = Vec2{ textFrom, 0.0f };
         lbl.to   = Vec2{ 1.0f, 1.0f };
         lbl.padding = Vec2{ 3.0f, 2.0f };
@@ -3361,12 +3190,14 @@ static WidgetElement makeGridTile(const std::string& id,
                                   const Vec4& iconTint,
                                   bool isFolder)
 {
+    const auto& theme = EditorTheme::Get();
+
     WidgetElement tile{};
     tile.id = id;
     tile.type = WidgetElementType::Button;
     tile.minSize = Vec2{ 80.0f, 80.0f };
-    tile.style.color = Vec4{ 0.12f, 0.13f, 0.16f, 0.0f };
-    tile.style.hoverColor = Vec4{ 0.22f, 0.24f, 0.30f, 0.85f };
+    tile.style.color = theme.buttonSubtle;
+    tile.style.hoverColor = theme.cbTileHover;
     tile.shaderVertex = "button_vertex.glsl";
     tile.shaderFragment = "button_fragment.glsl";
     tile.hitTestMode = HitTestMode::Enabled;
@@ -3393,13 +3224,13 @@ static WidgetElement makeGridTile(const std::string& id,
         lbl.id = id + ".Label";
         lbl.type = WidgetElementType::Text;
         lbl.text = label;
-        lbl.font = "default.ttf";
-        lbl.fontSize = 11.0f;
+        lbl.font = theme.fontDefault;
+        lbl.fontSize = theme.fontSizeSmall;
         lbl.textAlignH = TextAlignH::Center;
         lbl.textAlignV = TextAlignV::Top;
         lbl.style.textColor = isFolder
-            ? Vec4{ 0.90f, 0.85f, 0.55f, 1.0f }
-            : Vec4{ 0.88f, 0.88f, 0.88f, 1.0f };
+            ? theme.cbFolderAccent
+            : theme.textPrimary;
         lbl.from = Vec2{ 0.0f, 0.65f };
         lbl.to   = Vec2{ 1.0f, 1.0f };
         lbl.padding = Vec2{ 2.0f, 1.0f };
@@ -3449,9 +3280,9 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             loadingRow.id = "ContentBrowser.Loading";
             loadingRow.type = WidgetElementType::Text;
             loadingRow.text = "Building asset registry...";
-            loadingRow.font = "default.ttf";
-            loadingRow.fontSize = 13.0f;
-            loadingRow.style.textColor = Vec4{ 0.6f, 0.6f, 0.65f, 1.0f };
+            loadingRow.font = EditorTheme::Get().fontDefault;
+            loadingRow.fontSize = EditorTheme::Get().fontSizeBody;
+            loadingRow.style.textColor = EditorTheme::Get().textMuted;
             loadingRow.textAlignH = TextAlignH::Left;
             loadingRow.textAlignV = TextAlignV::Center;
             loadingRow.fillX = true;
@@ -3694,22 +3525,11 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
 
         // Back button (navigate up one level)
         {
-            WidgetElement backBtn{};
-            backBtn.id = "ContentBrowser.PathBar.Back";
-            backBtn.type = WidgetElementType::Button;
-            backBtn.text = "<";
-            backBtn.font = "default.ttf";
-            backBtn.fontSize = 13.0f;
-            backBtn.style.textColor = Vec4{ 0.9f, 0.9f, 0.9f, 1.0f };
-            backBtn.textAlignH = TextAlignH::Center;
-            backBtn.textAlignV = TextAlignV::Center;
-            backBtn.minSize = Vec2{ 24.0f, 20.0f };
-            backBtn.style.color = Vec4{ 0.14f, 0.15f, 0.19f, 0.9f };
-            backBtn.style.hoverColor = Vec4{ 0.25f, 0.27f, 0.33f, 0.95f };
-            backBtn.shaderVertex = "button_vertex.glsl";
-            backBtn.shaderFragment = "button_fragment.glsl";
-            backBtn.hitTestMode = HitTestMode::Enabled;
-            backBtn.runtimeOnly = true;
+            const auto& theme = EditorTheme::Get();
+            WidgetElement backBtn = EditorUIBuilder::makeSubtleButton(
+                "ContentBrowser.PathBar.Back", "<", {}, Vec2{ 24.0f, theme.rowHeightSmall });
+            backBtn.fillX = false;
+            backBtn.sizeToContent = false;
             backBtn.onClicked = [this]()
             {
                 if (!m_selectedBrowserFolder.empty())
@@ -3731,45 +3551,23 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
 
         // Import button
         {
-            WidgetElement importBtn{};
-            importBtn.id = "ContentBrowser.PathBar.Import";
-            importBtn.type = WidgetElementType::Button;
-            importBtn.text = "+ Import";
-            importBtn.font = "default.ttf";
-            importBtn.fontSize = 13.0f;
-            importBtn.style.textColor = Vec4{ 0.9f, 0.95f, 1.0f, 1.0f };
-            importBtn.textAlignH = TextAlignH::Center;
-            importBtn.textAlignV = TextAlignV::Center;
-            importBtn.minSize = Vec2{ 64.0f, 20.0f };
-            importBtn.style.color = Vec4{ 0.15f, 0.35f, 0.55f, 0.95f };
-            importBtn.style.hoverColor = Vec4{ 0.20f, 0.45f, 0.70f, 1.0f };
-            importBtn.shaderVertex = "button_vertex.glsl";
-            importBtn.shaderFragment = "button_fragment.glsl";
-            importBtn.hitTestMode = HitTestMode::Enabled;
-            importBtn.runtimeOnly = true;
+            WidgetElement importBtn = EditorUIBuilder::makePrimaryButton(
+                "ContentBrowser.PathBar.Import", "+ Import", {}, Vec2{ 64.0f, EditorTheme::Get().rowHeightSmall });
+            importBtn.fillX = false;
             pathBar->children.push_back(std::move(importBtn));
         }
 
         // Rename button (enabled only when a grid asset is selected)
         {
-            WidgetElement renameBtn{};
-            renameBtn.id = "ContentBrowser.PathBar.Rename";
-            renameBtn.type = WidgetElementType::Button;
-            renameBtn.text = "Rename";
-            renameBtn.font = "default.ttf";
-            renameBtn.fontSize = 13.0f;
-            renameBtn.textAlignH = TextAlignH::Center;
-            renameBtn.textAlignV = TextAlignV::Center;
-            renameBtn.minSize = Vec2{ 60.0f, 20.0f };
-            renameBtn.shaderVertex = "button_vertex.glsl";
-            renameBtn.shaderFragment = "button_fragment.glsl";
-            renameBtn.hitTestMode = HitTestMode::Enabled;
-            renameBtn.runtimeOnly = true;
+            const auto& theme = EditorTheme::Get();
+            WidgetElement renameBtn = EditorUIBuilder::makeButton(
+                "ContentBrowser.PathBar.Rename", "Rename", {}, Vec2{ 60.0f, theme.rowHeightSmall });
+            renameBtn.fillX = false;
             if (!m_selectedGridAsset.empty())
             {
-                renameBtn.style.color = Vec4{ 0.35f, 0.30f, 0.15f, 0.95f };
-                renameBtn.style.hoverColor = Vec4{ 0.50f, 0.42f, 0.18f, 1.0f };
-                renameBtn.style.textColor = Vec4{ 0.95f, 0.92f, 0.8f, 1.0f };
+                renameBtn.style.color = Vec4{ theme.warningColor.x, theme.warningColor.y, theme.warningColor.z, 0.6f };
+                renameBtn.style.hoverColor = Vec4{ theme.warningColor.x, theme.warningColor.y, theme.warningColor.z, 0.8f };
+                renameBtn.style.textColor = theme.textPrimary;
                 renameBtn.onClicked = [this]()
                 {
                     if (!m_selectedGridAsset.empty())
@@ -3782,9 +3580,9 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             }
             else
             {
-                renameBtn.style.color = Vec4{ 0.18f, 0.18f, 0.20f, 0.6f };
-                renameBtn.style.hoverColor = Vec4{ 0.18f, 0.18f, 0.20f, 0.6f };
-                renameBtn.style.textColor = Vec4{ 0.5f, 0.5f, 0.5f, 1.0f };
+                renameBtn.style.color = Vec4{ theme.buttonDefault.x, theme.buttonDefault.y, theme.buttonDefault.z, 0.4f };
+                renameBtn.style.hoverColor = Vec4{ theme.buttonDefault.x, theme.buttonDefault.y, theme.buttonDefault.z, 0.4f };
+                renameBtn.style.textColor = theme.textMuted;
             }
             pathBar->children.push_back(std::move(renameBtn));
         }
@@ -3815,9 +3613,9 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
                 sep.id = "ContentBrowser.PathBar.Sep." + std::to_string(i);
                 sep.type = WidgetElementType::Text;
                 sep.text = ">";
-                sep.font = "default.ttf";
-                sep.fontSize = 12.0f;
-                sep.style.textColor = Vec4{ 0.5f, 0.5f, 0.5f, 1.0f };
+                sep.font = EditorTheme::Get().fontDefault;
+                sep.fontSize = EditorTheme::Get().fontSizeSmall;
+                sep.style.textColor = EditorTheme::Get().textMuted;
                 sep.textAlignH = TextAlignH::Center;
                 sep.textAlignV = TextAlignV::Center;
                 sep.minSize = Vec2{ 14.0f, 20.0f };
@@ -3830,20 +3628,21 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
             crumbBtn.id = "ContentBrowser.PathBar.Crumb." + std::to_string(i);
             crumbBtn.type = WidgetElementType::Button;
             crumbBtn.text = crumbs[i].first;
-            crumbBtn.font = "default.ttf";
-            crumbBtn.fontSize = 12.0f;
+            const auto& theme = EditorTheme::Get();
+            crumbBtn.font = theme.fontDefault;
+            crumbBtn.fontSize = theme.fontSizeSmall;
             crumbBtn.style.textColor = isActive
-                ? Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }
-                : Vec4{ 0.7f, 0.7f, 0.7f, 1.0f };
+                ? theme.textPrimary
+                : theme.textSecondary;
             crumbBtn.textAlignH = TextAlignH::Center;
             crumbBtn.textAlignV = TextAlignV::Center;
-            crumbBtn.minSize = Vec2{ 0.0f, 20.0f };
+            crumbBtn.minSize = Vec2{ 0.0f, theme.rowHeightSmall };
             crumbBtn.sizeToContent = true;
-            crumbBtn.padding = Vec2{ 6.0f, 2.0f };
+            crumbBtn.padding = theme.paddingNormal;
             crumbBtn.style.color = isActive
-                ? Vec4{ 0.18f, 0.22f, 0.30f, 0.9f }
-                : Vec4{ 0.12f, 0.13f, 0.17f, 0.0f };
-            crumbBtn.style.hoverColor = Vec4{ 0.22f, 0.25f, 0.33f, 0.95f };
+                ? theme.selectionHighlight
+                : theme.transparent;
+            crumbBtn.style.hoverColor = theme.buttonSubtleHover;
             crumbBtn.shaderVertex = "button_vertex.glsl";
             crumbBtn.shaderFragment = "button_fragment.glsl";
             crumbBtn.hitTestMode = HitTestMode::Enabled;
@@ -3987,11 +3786,11 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<Widget>& widg
                 entry.id = "ContentBrowser.RenameEntry";
                 entry.type = WidgetElementType::EntryBar;
                 entry.value = item.name;
-                entry.font = "default.ttf";
-                entry.fontSize = 11.0f;
-                entry.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
-                entry.style.color = Vec4{ 0.10f, 0.10f, 0.14f, 1.0f };
-                entry.style.hoverColor = Vec4{ 0.14f, 0.14f, 0.18f, 1.0f };
+                entry.font = EditorTheme::Get().fontDefault;
+                entry.fontSize = EditorTheme::Get().fontSizeSmall;
+                entry.style.textColor = EditorTheme::Get().textPrimary;
+                entry.style.color = EditorTheme::Get().inputBackground;
+                entry.style.hoverColor = EditorTheme::Get().inputBackgroundHover;
                 entry.from = Vec2{ 0.0f, 0.65f };
                 entry.to = Vec2{ 1.0f, 1.0f };
                 entry.padding = Vec2{ 2.0f, 1.0f };
@@ -5270,7 +5069,7 @@ void UIManager::ensureModalWidget()
 {
     if (!m_modalWidget)
     {
-        m_modalWidget = std::make_shared<Widget>();
+        m_modalWidget = std::make_shared<EditorWidget>();
         m_modalWidget->setName("ModalMessage");
         m_modalWidget->setAnchor(WidgetAnchor::TopLeft);
         m_modalWidget->setFillX(true);
@@ -5278,12 +5077,14 @@ void UIManager::ensureModalWidget()
         m_modalWidget->setZOrder(10000);
     }
 
+    const auto& theme = EditorTheme::Get();
+
     WidgetElement overlay{};
     overlay.id = "Modal.Overlay";
     overlay.type = WidgetElementType::Panel;
     overlay.from = Vec2{ 0.0f, 0.0f };
     overlay.to = Vec2{ 1.0f, 1.0f };
-    overlay.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.45f };
+    overlay.style.color = theme.modalOverlay;
     overlay.hitTestMode = HitTestMode::Enabled;
     overlay.runtimeOnly = true;
 
@@ -5294,7 +5095,7 @@ void UIManager::ensureModalWidget()
     panel.to = Vec2{ 0.7f, 0.65f };
     panel.padding = Vec2{ 20.0f, 16.0f };
     panel.orientation = StackOrientation::Vertical;
-    panel.style.color = Vec4{ 0.15f, 0.16f, 0.2f, 0.95f };
+    panel.style.color = theme.modalBackground;
     panel.hitTestMode = HitTestMode::DisabledSelf;
     panel.runtimeOnly = true;
 
@@ -5302,32 +5103,16 @@ void UIManager::ensureModalWidget()
     message.id = "Modal.Text";
     message.type = WidgetElementType::Text;
     message.text = m_modalMessage;
-    message.font = "default.ttf";
-    message.fontSize = 18.0f;
-    message.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+    message.font = theme.fontDefault;
+    message.fontSize = theme.fontSizeHeading + 2.0f;
+    message.style.textColor = theme.modalText;
     message.wrapText = true;
     message.fillX = true;
     message.fillY = true;
     message.minSize = Vec2{ 0.0f, 28.0f };
     message.runtimeOnly = true;
 
-    WidgetElement closeButton{};
-    closeButton.id = "Modal.Close";
-    closeButton.type = WidgetElementType::Button;
-    closeButton.text = "Close";
-    closeButton.font = "default.ttf";
-    closeButton.fontSize = 16.0f;
-    closeButton.textAlignH = TextAlignH::Center;
-    closeButton.textAlignV = TextAlignV::Center;
-    closeButton.padding = Vec2{ 8.0f, 6.0f };
-    closeButton.minSize = Vec2{ 0.0f, 32.0f };
-    closeButton.style.color = Vec4{ 0.25f, 0.26f, 0.32f, 0.95f };
-    closeButton.style.hoverColor = Vec4{ 0.35f, 0.36f, 0.42f, 0.98f };
-    closeButton.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
-    closeButton.shaderVertex = "button_vertex.glsl";
-    closeButton.shaderFragment = "button_fragment.glsl";
-    closeButton.hitTestMode = HitTestMode::Enabled;
-    closeButton.runtimeOnly = true;
+    WidgetElement closeButton = EditorUIBuilder::makeButton("Modal.Close", "Close", {}, Vec2{ 0.0f, 32.0f });
     closeButton.onClicked = [this]()
         {
             closeModalMessage();
@@ -5377,14 +5162,16 @@ void UIManager::ensureModalWidget()
     m_modalWidget->markLayoutDirty();
 }
 
-std::shared_ptr<Widget> UIManager::createToastWidget(const std::string& message, const std::string& name) const
+std::shared_ptr<EditorWidget> UIManager::createToastWidget(const std::string& message, const std::string& name) const
 {
-    auto widget = std::make_shared<Widget>();
+    auto widget = std::make_shared<EditorWidget>();
     widget->setName(name);
     widget->setAnchor(WidgetAnchor::BottomRight);
     widget->setPositionPixels(Vec2{ 20.0f, 20.0f });
     widget->setSizePixels(Vec2{ 320.0f, 70.0f });
     widget->setZOrder(9000);
+
+    const auto& theme = EditorTheme::Get();
 
     WidgetElement panel{};
     panel.id = name + ".Panel";
@@ -5393,7 +5180,7 @@ std::shared_ptr<Widget> UIManager::createToastWidget(const std::string& message,
     panel.to = Vec2{ 1.0f, 1.0f };
     panel.padding = Vec2{ 12.0f, 10.0f };
     panel.orientation = StackOrientation::Vertical;
-    panel.style.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.92f };
+    panel.style.color = theme.toastBackground;
     panel.hitTestMode = HitTestMode::DisabledSelf;
     panel.runtimeOnly = true;
 
@@ -5401,9 +5188,9 @@ std::shared_ptr<Widget> UIManager::createToastWidget(const std::string& message,
     messageElement.id = name + ".Text";
     messageElement.type = WidgetElementType::Text;
     messageElement.text = message;
-    messageElement.font = "default.ttf";
-    messageElement.fontSize = 14.0f;
-    messageElement.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+    messageElement.font = theme.fontDefault;
+    messageElement.fontSize = theme.fontSizeSubheading;
+    messageElement.style.textColor = theme.toastText;
     messageElement.fillX = true;
     messageElement.minSize = Vec2{ 0.0f, 22.0f };
     messageElement.runtimeOnly = true;
@@ -5818,7 +5605,7 @@ void UIManager::showSaveProgressModal(size_t total)
 
     if (!m_saveProgressWidget)
     {
-        m_saveProgressWidget = std::make_shared<Widget>();
+        m_saveProgressWidget = std::make_shared<EditorWidget>();
         m_saveProgressWidget->setName("SaveProgress");
         m_saveProgressWidget->setAnchor(WidgetAnchor::TopLeft);
         m_saveProgressWidget->setFillX(true);
@@ -5849,10 +5636,10 @@ void UIManager::showSaveProgressModal(size_t total)
     title.id = "SaveProgress.Title";
     title.type = WidgetElementType::Text;
     title.text = "Saving...";
-    title.font = "default.ttf";
-    title.fontSize = 18.0f;
+    title.font = EditorTheme::Get().fontDefault;
+    title.fontSize = EditorTheme::Get().fontSizeHeading;
     title.textAlignH = TextAlignH::Center;
-    title.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
+    title.style.textColor = EditorTheme::Get().textPrimary;
     title.fillX = true;
     title.minSize = Vec2{ 0.0f, 24.0f };
     title.runtimeOnly = true;
@@ -5861,10 +5648,10 @@ void UIManager::showSaveProgressModal(size_t total)
     counter.id = "SaveProgress.Counter";
     counter.type = WidgetElementType::Text;
     counter.text = "0 / " + std::to_string(total);
-    counter.font = "default.ttf";
-    counter.fontSize = 14.0f;
+    counter.font = EditorTheme::Get().fontDefault;
+    counter.fontSize = EditorTheme::Get().fontSizeSubheading;
     counter.textAlignH = TextAlignH::Center;
-    counter.style.textColor = Vec4{ 0.8f, 0.85f, 0.9f, 1.0f };
+    counter.style.textColor = EditorTheme::Get().textSecondary;
     counter.fillX = true;
     counter.minSize = Vec2{ 0.0f, 20.0f };
     counter.runtimeOnly = true;
@@ -5951,7 +5738,7 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
     const float menuW = std::max(kDefaultMenuW, minWidth);
     const float menuH = kPadY * 2.0f + static_cast<float>(items.size()) * kItemH;
 
-    auto widget = std::make_shared<Widget>();
+    auto widget = std::make_shared<EditorWidget>();
     widget->setName("DropdownMenu");
     widget->setSizePixels(Vec2{ menuW, menuH });
     widget->setPositionPixels(Vec2{ anchorPixels.x, anchorPixels.y });
@@ -6130,12 +5917,14 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
     const std::string rightWidgetId = "WidgetEditor.Right." + tabId;
     const std::string canvasWidgetId = "WidgetEditor.Canvas." + tabId;
     const std::string toolbarWidgetId = "WidgetEditor.Toolbar." + tabId;
+    const std::string bottomWidgetId = "WidgetEditor.Bottom." + tabId;
 
     unregisterWidget(contentWidgetId);
     unregisterWidget(leftWidgetId);
     unregisterWidget(rightWidgetId);
     unregisterWidget(canvasWidgetId);
     unregisterWidget(toolbarWidgetId);
+    unregisterWidget(bottomWidgetId);
 
     // Store editor state
     WidgetEditorState state;
@@ -6147,13 +5936,14 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
     state.rightWidgetId = rightWidgetId;
     state.canvasWidgetId = canvasWidgetId;
     state.toolbarWidgetId = toolbarWidgetId;
+    state.bottomWidgetId = bottomWidgetId;
     state.assetId = static_cast<unsigned int>(assetId);
     state.isDirty = false;
     m_widgetEditorStates[tabId] = std::move(state);
 
     // --- Top toolbar: save button + dirty indicator ---
     {
-        auto toolbarWidget = std::make_shared<Widget>();
+        auto toolbarWidget = std::make_shared<EditorWidget>();
         toolbarWidget->setName(toolbarWidgetId);
         toolbarWidget->setAnchor(WidgetAnchor::TopLeft);
         toolbarWidget->setFillX(true);
@@ -6178,11 +5968,11 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             saveBtn.id = "WidgetEditor.Toolbar.Save";
             saveBtn.type = WidgetElementType::Button;
             saveBtn.text = "Save";
-            saveBtn.font = "default.ttf";
-            saveBtn.fontSize = 13.0f;
-            saveBtn.style.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
-            saveBtn.style.color = Vec4{ 0.22f, 0.24f, 0.30f, 1.0f };
-            saveBtn.style.hoverColor = Vec4{ 0.30f, 0.34f, 0.42f, 1.0f };
+            saveBtn.font = EditorTheme::Get().fontDefault;
+            saveBtn.fontSize = EditorTheme::Get().fontSizeBody;
+            saveBtn.style.textColor = EditorTheme::Get().textPrimary;
+            saveBtn.style.color = EditorTheme::Get().buttonDefault;
+            saveBtn.style.hoverColor = EditorTheme::Get().buttonHover;
             saveBtn.textAlignH = TextAlignH::Center;
             saveBtn.textAlignV = TextAlignV::Center;
             saveBtn.minSize = Vec2{ 60.0f, 24.0f };
@@ -6199,15 +5989,36 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             dirtyLabel.id = "WidgetEditor.Toolbar.DirtyLabel";
             dirtyLabel.type = WidgetElementType::Text;
             dirtyLabel.text = "";
-            dirtyLabel.font = "default.ttf";
-            dirtyLabel.fontSize = 13.0f;
-            dirtyLabel.style.textColor = Vec4{ 0.85f, 0.65f, 0.20f, 1.0f };
+            dirtyLabel.font = EditorTheme::Get().fontDefault;
+            dirtyLabel.fontSize = EditorTheme::Get().fontSizeBody;
+            dirtyLabel.style.textColor = EditorTheme::Get().warningColor;
             dirtyLabel.textAlignH = TextAlignH::Left;
             dirtyLabel.textAlignV = TextAlignV::Center;
             dirtyLabel.minSize = Vec2{ 0.0f, 24.0f };
             dirtyLabel.padding = Vec2{ 8.0f, 0.0f };
             dirtyLabel.runtimeOnly = true;
             root.children.push_back(std::move(dirtyLabel));
+        }
+
+        // Timeline toggle button
+        {
+            WidgetElement timelineBtn{};
+            timelineBtn.id = "WidgetEditor.Toolbar.Timeline";
+            timelineBtn.type = WidgetElementType::Button;
+            timelineBtn.text = "Timeline";
+            timelineBtn.font = EditorTheme::Get().fontDefault;
+            timelineBtn.fontSize = EditorTheme::Get().fontSizeBody;
+            timelineBtn.style.textColor = EditorTheme::Get().textPrimary;
+            timelineBtn.style.color = EditorTheme::Get().buttonDefault;
+            timelineBtn.style.hoverColor = EditorTheme::Get().buttonHover;
+            timelineBtn.textAlignH = TextAlignH::Center;
+            timelineBtn.textAlignV = TextAlignV::Center;
+            timelineBtn.minSize = Vec2{ 80.0f, 24.0f };
+            timelineBtn.padding = Vec2{ 10.0f, 2.0f };
+            timelineBtn.hitTestMode = HitTestMode::Enabled;
+            timelineBtn.runtimeOnly = true;
+            timelineBtn.clickEvent = "WidgetEditor.Toolbar.Timeline." + tabId;
+            root.children.push_back(std::move(timelineBtn));
         }
 
         toolbarWidget->setElements({ std::move(root) });
@@ -6218,11 +6029,21 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
         {
             saveWidgetEditorAsset(capturedTabId);
         });
+
+        registerClickEvent("WidgetEditor.Toolbar.Timeline." + tabId, [this, capturedTabId]()
+        {
+            auto it = m_widgetEditorStates.find(capturedTabId);
+            if (it == m_widgetEditorStates.end())
+                return;
+            it->second.showAnimationsPanel = !it->second.showAnimationsPanel;
+            refreshWidgetEditorTimeline(capturedTabId);
+            refreshWidgetEditorToolbar(capturedTabId);
+        });
     }
 
     // --- Left panel: available controls + hierarchy ---
     {
-        auto leftWidget = std::make_shared<Widget>();
+        auto leftWidget = std::make_shared<EditorWidget>();
         leftWidget->setName(leftWidgetId);
         leftWidget->setAnchor(WidgetAnchor::TopLeft);
         leftWidget->setFillY(true);
@@ -6259,9 +6080,9 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
                 title.id = "WidgetEditor.Left.Title";
                 title.type = WidgetElementType::Text;
                 title.text = "Controls";
-                title.font = "default.ttf";
-                title.fontSize = 16.0f;
-                title.style.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+                title.font = EditorTheme::Get().fontDefault;
+                title.fontSize = EditorTheme::Get().fontSizeHeading;
+                title.style.textColor = EditorTheme::Get().textPrimary;
                 title.textAlignH = TextAlignH::Left;
                 title.textAlignV = TextAlignV::Center;
                 title.fillX = true;
@@ -6283,11 +6104,11 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
                 item.id = "WidgetEditor.Left.Control." + std::to_string(i);
                 item.type = WidgetElementType::Button;
                 item.text = "  " + controls[i];
-                item.font = "default.ttf";
-                item.fontSize = 14.0f;
-                item.style.textColor = Vec4{ 0.78f, 0.80f, 0.85f, 1.0f };
-                item.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-                item.style.hoverColor = Vec4{ 0.18f, 0.20f, 0.28f, 0.8f };
+                item.font = EditorTheme::Get().fontDefault;
+                item.fontSize = EditorTheme::Get().fontSizeSubheading;
+                item.style.textColor = EditorTheme::Get().textSecondary;
+                item.style.color = EditorTheme::Get().transparent;
+                item.style.hoverColor = EditorTheme::Get().buttonSubtleHover;
                 item.textAlignH = TextAlignH::Left;
                 item.textAlignV = TextAlignV::Center;
                 item.fillX = true;
@@ -6333,9 +6154,9 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
                 treeTitle.id = "WidgetEditor.Left.TreeTitle";
                 treeTitle.type = WidgetElementType::Text;
                 treeTitle.text = "Hierarchy";
-                treeTitle.font = "default.ttf";
-                treeTitle.fontSize = 16.0f;
-                treeTitle.style.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+                treeTitle.font = EditorTheme::Get().fontDefault;
+                treeTitle.fontSize = EditorTheme::Get().fontSizeHeading;
+                treeTitle.style.textColor = EditorTheme::Get().textPrimary;
                 treeTitle.textAlignH = TextAlignH::Left;
                 treeTitle.textAlignV = TextAlignV::Center;
                 treeTitle.fillX = true;
@@ -6366,7 +6187,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
 
     // --- Right panel: element details (populated by refreshWidgetEditorDetails) ---
     {
-        auto rightWidget = std::make_shared<Widget>();
+        auto rightWidget = std::make_shared<EditorWidget>();
         rightWidget->setName(rightWidgetId);
         rightWidget->setAnchor(WidgetAnchor::TopRight);
         rightWidget->setFillY(true);
@@ -6391,9 +6212,9 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             title.id = "WidgetEditor.Right.Title";
             title.type = WidgetElementType::Text;
             title.text = "Details";
-            title.font = "default.ttf";
-            title.fontSize = 16.0f;
-            title.style.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+            title.font = EditorTheme::Get().fontDefault;
+            title.fontSize = EditorTheme::Get().fontSizeHeading;
+            title.style.textColor = EditorTheme::Get().textPrimary;
             title.textAlignH = TextAlignH::Left;
             title.textAlignV = TextAlignV::Center;
             title.fillX = true;
@@ -6408,9 +6229,9 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             hint.id = "WidgetEditor.Right.Hint";
             hint.type = WidgetElementType::Text;
             hint.text = "Select an element in the hierarchy or preview to see its properties.";
-            hint.font = "default.ttf";
-            hint.fontSize = 13.0f;
-            hint.style.textColor = Vec4{ 0.62f, 0.66f, 0.75f, 1.0f };
+            hint.font = EditorTheme::Get().fontDefault;
+            hint.fontSize = EditorTheme::Get().fontSizeBody;
+            hint.style.textColor = EditorTheme::Get().textMuted;
             hint.textAlignH = TextAlignH::Left;
             hint.textAlignV = TextAlignV::Center;
             hint.fillX = true;
@@ -6425,7 +6246,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
 
     // --- Center canvas background ---
     {
-        auto canvasWidget = std::make_shared<Widget>();
+        auto canvasWidget = std::make_shared<EditorWidget>();
         canvasWidget->setName(canvasWidgetId);
         canvasWidget->setAnchor(WidgetAnchor::TopLeft);
         canvasWidget->setFillX(true);
@@ -6716,7 +6537,10 @@ void UIManager::refreshWidgetEditorToolbar(const std::string& tabId)
         if (auto* dirtyLabel = findById(el, "WidgetEditor.Toolbar.DirtyLabel"))
         {
             dirtyLabel->text = stateIt->second.isDirty ? "  * Unsaved changes" : "";
-            break;
+        }
+        if (auto* timelineBtn = findById(el, "WidgetEditor.Toolbar.Timeline"))
+        {
+            timelineBtn->text = stateIt->second.showAnimationsPanel ? "Hide Timeline" : "Timeline";
         }
     }
 
@@ -7810,27 +7634,27 @@ void UIManager::refreshWidgetEditorHierarchy(const std::string& tabId)
             row.id = "WidgetEditor.Left.TreeRow." + std::to_string(lineIndex);
             row.type = WidgetElementType::Button;
             row.text = label;
-            row.font = "default.ttf";
-            row.fontSize = 11.0f;
+            row.font = EditorTheme::Get().fontDefault;
+            row.fontSize = EditorTheme::Get().fontSizeSmall;
             row.textAlignH = TextAlignH::Left;
             row.textAlignV = TextAlignV::Center;
             row.fillX = true;
-            row.minSize = Vec2{ 0.0f, 20.0f };
+            row.minSize = Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall };
             row.padding = Vec2{ 4.0f, 1.0f };
             row.hitTestMode = HitTestMode::Enabled;
             row.runtimeOnly = true;
 
             if (isSelected)
             {
-                row.style.color = Vec4{ 0.20f, 0.30f, 0.55f, 0.9f };
-                row.style.hoverColor = Vec4{ 0.25f, 0.35f, 0.60f, 1.0f };
-                row.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+                row.style.color = EditorTheme::Get().selectionHighlight;
+                row.style.hoverColor = EditorTheme::Get().selectionHighlightHover;
+                row.style.textColor = EditorTheme::Get().textPrimary;
             }
             else
             {
-                row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-                row.style.hoverColor = Vec4{ 0.18f, 0.20f, 0.28f, 0.8f };
-                row.style.textColor = Vec4{ 0.75f, 0.78f, 0.84f, 1.0f };
+                row.style.color = EditorTheme::Get().transparent;
+                row.style.hoverColor = EditorTheme::Get().buttonSubtleHover;
+                row.style.textColor = EditorTheme::Get().textSecondary;
             }
 
             const std::string capturedTabId = tabId;
@@ -7879,20 +7703,21 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
 
     m_lastHoveredElement = nullptr;
 
-    const auto makeLabel = [](const std::string& id, const std::string& text, float fontSize = 12.0f,
-        const Vec4& color = Vec4{ 0.78f, 0.80f, 0.85f, 1.0f }, float minH = 20.0f) -> WidgetElement
+    const auto makeLabel = [](const std::string& id, const std::string& text, float fontSize = 0.0f,
+        const Vec4& color = Vec4{ -1.0f, 0.0f, 0.0f, 0.0f }, float minH = 0.0f) -> WidgetElement
     {
+        auto& t = EditorTheme::Get();
         WidgetElement lbl{};
         lbl.id = id;
         lbl.type = WidgetElementType::Text;
         lbl.text = text;
-        lbl.font = "default.ttf";
-        lbl.fontSize = fontSize;
-        lbl.style.textColor = color;
+        lbl.font = t.fontDefault;
+        lbl.fontSize = (fontSize > 0.0f) ? fontSize : t.fontSizeSmall;
+        lbl.style.textColor = (color.x >= 0.0f) ? color : t.textSecondary;
         lbl.textAlignH = TextAlignH::Left;
         lbl.textAlignV = TextAlignV::Center;
         lbl.fillX = true;
-        lbl.minSize = Vec2{ 0.0f, minH };
+        lbl.minSize = Vec2{ 0.0f, (minH > 0.0f) ? minH : t.rowHeightSmall };
         lbl.runtimeOnly = true;
         return lbl;
     };
@@ -8006,9 +7831,9 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
 
         EntryBarWidget entry;
         entry.setValue(value);
-        entry.setFont("default.ttf");
-        entry.setFontSize(12.0f);
-        entry.setMinSize(Vec2{ 0.0f, 22.0f });
+        entry.setFont(EditorTheme::Get().fontDefault);
+        entry.setFontSize(EditorTheme::Get().fontSizeSmall);
+        entry.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
         entry.setPadding(Vec2{ 4.0f, 2.0f });
         entry.setOnValueChanged(onChange);
 
@@ -8021,7 +7846,7 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         return row;
     };
 
-    // Editable ID field (part of Identity section)
+    // Editable ID field
     rootPanel->children.push_back(makePropertyRow("WE.Det.Id", "ID", sel->id.empty() ? "" : sel->id,
         [sel, applyChange, this, capturedTabId](const std::string& v) {
             sel->id = v;
@@ -8101,13 +7926,13 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             DropDownWidget anchorDd;
             anchorDd.setItems({ "TopLeft", "TopRight", "BottomLeft", "BottomRight", "Top", "Bottom", "Left", "Right", "Center", "Stretch" });
             anchorDd.setSelectedIndex(anchorIndex);
-            anchorDd.setFont("default.ttf");
-            anchorDd.setFontSize(12.0f);
-            anchorDd.setMinSize(Vec2{ 0.0f, 22.0f });
+            anchorDd.setFont(EditorTheme::Get().fontDefault);
+            anchorDd.setFontSize(EditorTheme::Get().fontSizeSmall);
+            anchorDd.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
             anchorDd.setPadding(Vec2{ 4.0f, 2.0f });
-            anchorDd.setBackgroundColor(Vec4{ 0.16f, 0.16f, 0.20f, 1.0f });
-            anchorDd.setHoverColor(Vec4{ 0.22f, 0.22f, 0.27f, 1.0f });
-            anchorDd.setTextColor(Vec4{ 0.92f, 0.92f, 0.95f, 1.0f });
+            anchorDd.setBackgroundColor(EditorTheme::Get().inputBackground);
+            anchorDd.setHoverColor(EditorTheme::Get().inputBackgroundHover);
+            anchorDd.setTextColor(EditorTheme::Get().inputText);
             anchorDd.setOnSelectionChanged([sel, applyChange](int idx) {
                 sel->anchor = static_cast<WidgetAnchor>(idx);
                 applyChange();
@@ -8166,13 +7991,13 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             DropDownWidget htDd;
             htDd.setItems({ "Enabled", "Disabled (Self)", "Disabled (Self + Children)" });
             htDd.setSelectedIndex(htIndex);
-            htDd.setFont("default.ttf");
-            htDd.setFontSize(12.0f);
-            htDd.setMinSize(Vec2{ 0.0f, 22.0f });
+            htDd.setFont(EditorTheme::Get().fontDefault);
+            htDd.setFontSize(EditorTheme::Get().fontSizeSmall);
+            htDd.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
             htDd.setPadding(Vec2{ 4.0f, 2.0f });
-            htDd.setBackgroundColor(Vec4{ 0.16f, 0.16f, 0.20f, 1.0f });
-            htDd.setHoverColor(Vec4{ 0.22f, 0.22f, 0.27f, 1.0f });
-            htDd.setTextColor(Vec4{ 0.92f, 0.92f, 0.95f, 1.0f });
+            htDd.setBackgroundColor(EditorTheme::Get().inputBackground);
+            htDd.setHoverColor(EditorTheme::Get().inputBackgroundHover);
+            htDd.setTextColor(EditorTheme::Get().inputText);
             htDd.setOnSelectionChanged([sel, applyChange](int idx) {
                 sel->hitTestMode = static_cast<HitTestMode>(idx);
                 applyChange();
@@ -8247,13 +8072,13 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             DropDownWidget hAlignDd;
             hAlignDd.setItems({ "Left", "Center", "Right", "Fill" });
             hAlignDd.setSelectedIndex(hAlignIndex);
-            hAlignDd.setFont("default.ttf");
-            hAlignDd.setFontSize(12.0f);
-            hAlignDd.setMinSize(Vec2{ 0.0f, 22.0f });
+            hAlignDd.setFont(EditorTheme::Get().fontDefault);
+            hAlignDd.setFontSize(EditorTheme::Get().fontSizeSmall);
+            hAlignDd.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
             hAlignDd.setPadding(Vec2{ 4.0f, 2.0f });
-            hAlignDd.setBackgroundColor(Vec4{ 0.16f, 0.16f, 0.20f, 1.0f });
-            hAlignDd.setHoverColor(Vec4{ 0.22f, 0.22f, 0.27f, 1.0f });
-            hAlignDd.setTextColor(Vec4{ 0.92f, 0.92f, 0.95f, 1.0f });
+            hAlignDd.setBackgroundColor(EditorTheme::Get().inputBackground);
+            hAlignDd.setHoverColor(EditorTheme::Get().inputBackgroundHover);
+            hAlignDd.setTextColor(EditorTheme::Get().inputText);
             hAlignDd.setOnSelectionChanged([sel, applyChange](int idx) {
                 if (idx == 3) { sel->fillX = true; }
                 else {
@@ -8298,13 +8123,13 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
             DropDownWidget vAlignDd;
             vAlignDd.setItems({ "Top", "Center", "Bottom", "Fill" });
             vAlignDd.setSelectedIndex(vAlignIndex);
-            vAlignDd.setFont("default.ttf");
-            vAlignDd.setFontSize(12.0f);
-            vAlignDd.setMinSize(Vec2{ 0.0f, 22.0f });
+            vAlignDd.setFont(EditorTheme::Get().fontDefault);
+            vAlignDd.setFontSize(EditorTheme::Get().fontSizeSmall);
+            vAlignDd.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
             vAlignDd.setPadding(Vec2{ 4.0f, 2.0f });
-            vAlignDd.setBackgroundColor(Vec4{ 0.16f, 0.16f, 0.20f, 1.0f });
-            vAlignDd.setHoverColor(Vec4{ 0.22f, 0.22f, 0.27f, 1.0f });
-            vAlignDd.setTextColor(Vec4{ 0.92f, 0.92f, 0.95f, 1.0f });
+            vAlignDd.setBackgroundColor(EditorTheme::Get().inputBackground);
+            vAlignDd.setHoverColor(EditorTheme::Get().inputBackgroundHover);
+            vAlignDd.setTextColor(EditorTheme::Get().inputText);
             vAlignDd.setOnSelectionChanged([sel, applyChange](int idx) {
                 if (idx == 3) { sel->fillY = true; }
                 else {
@@ -8410,13 +8235,13 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
                 DropDownWidget smDd;
                 smDd.setItems({ "Contain", "Cover", "Fill", "ScaleDown", "UserSpecified" });
                 smDd.setSelectedIndex(smIndex);
-                smDd.setFont("default.ttf");
-                smDd.setFontSize(12.0f);
-                smDd.setMinSize(Vec2{ 0.0f, 22.0f });
+                smDd.setFont(EditorTheme::Get().fontDefault);
+                smDd.setFontSize(EditorTheme::Get().fontSizeSmall);
+                smDd.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
                 smDd.setPadding(Vec2{ 4.0f, 2.0f });
-                smDd.setBackgroundColor(Vec4{ 0.16f, 0.16f, 0.20f, 1.0f });
-                smDd.setHoverColor(Vec4{ 0.22f, 0.22f, 0.27f, 1.0f });
-                smDd.setTextColor(Vec4{ 0.92f, 0.92f, 0.95f, 1.0f });
+                smDd.setBackgroundColor(EditorTheme::Get().inputBackground);
+                smDd.setHoverColor(EditorTheme::Get().inputBackgroundHover);
+                smDd.setTextColor(EditorTheme::Get().inputText);
                 smDd.setOnSelectionChanged([sel, applyChange](int idx) {
                     sel->scaleMode = static_cast<ScaleMode>(idx);
                     applyChange();
@@ -8666,13 +8491,13 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
                 DropDownWidget dd;
                 dd.setItems({ "None", "SolidColor", "Image", "NineSlice", "LinearGradient" });
                 dd.setSelectedIndex(btIdx);
-                dd.setFont("default.ttf");
-                dd.setFontSize(12.0f);
-                dd.setMinSize(Vec2{ 0.0f, 22.0f });
+                dd.setFont(EditorTheme::Get().fontDefault);
+                dd.setFontSize(EditorTheme::Get().fontSizeSmall);
+                dd.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
                 dd.setPadding(Vec2{ 4.0f, 2.0f });
-                dd.setBackgroundColor(Vec4{ 0.16f, 0.16f, 0.20f, 1.0f });
-                dd.setHoverColor(Vec4{ 0.22f, 0.22f, 0.27f, 1.0f });
-                dd.setTextColor(Vec4{ 0.92f, 0.92f, 0.95f, 1.0f });
+                dd.setBackgroundColor(EditorTheme::Get().inputBackground);
+                dd.setHoverColor(EditorTheme::Get().inputBackgroundHover);
+                dd.setTextColor(EditorTheme::Get().inputText);
                 dd.setOnSelectionChanged([sel, this](int idx) {
                     sel->background.type = static_cast<BrushType>(idx);
                     markAllWidgetsDirty();
@@ -8732,13 +8557,13 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
                 DropDownWidget cmDd;
                 cmDd.setItems({ "None", "ClipToBounds", "InheritFromParent" });
                 cmDd.setSelectedIndex(cmIdx);
-                cmDd.setFont("default.ttf");
-                cmDd.setFontSize(12.0f);
-                cmDd.setMinSize(Vec2{ 0.0f, 22.0f });
+                cmDd.setFont(EditorTheme::Get().fontDefault);
+                cmDd.setFontSize(EditorTheme::Get().fontSizeSmall);
+                cmDd.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
                 cmDd.setPadding(Vec2{ 4.0f, 2.0f });
-                cmDd.setBackgroundColor(Vec4{ 0.16f, 0.16f, 0.20f, 1.0f });
-                cmDd.setHoverColor(Vec4{ 0.22f, 0.22f, 0.27f, 1.0f });
-                cmDd.setTextColor(Vec4{ 0.92f, 0.92f, 0.95f, 1.0f });
+                cmDd.setBackgroundColor(EditorTheme::Get().inputBackground);
+                cmDd.setHoverColor(EditorTheme::Get().inputBackgroundHover);
+                cmDd.setTextColor(EditorTheme::Get().inputText);
                 cmDd.setOnSelectionChanged([sel, this](int idx) {
                     sel->clipMode = static_cast<ClipMode>(idx);
                     markAllWidgetsDirty();
@@ -9157,7 +8982,7 @@ void UIManager::openLandscapeManagerPopup()
         elements.push_back(btn);
     }
 
-    auto widget = std::make_shared<Widget>();
+    auto widget = std::make_shared<EditorWidget>();
     widget->setName("LandscapeManagerWidget");
     widget->setFillX(true);
     widget->setFillY(true);
@@ -9634,7 +9459,7 @@ void UIManager::openEngineSettingsPopup()
         elements.push_back(content);
     }
 
-    auto widget = std::make_shared<Widget>();
+    auto widget = std::make_shared<EditorWidget>();
     widget->setName("EngineSettingsWidget");
     widget->setFillX(true);
     widget->setFillY(true);
@@ -9827,8 +9652,8 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             sec.type      = WidgetElementType::Text;
             sec.id        = id;
             sec.text      = label;
-            sec.fontSize  = 14.0f;
-            sec.style.textColor = Vec4{ 0.45f, 0.60f, 0.90f, 1.0f };
+            sec.fontSize  = EditorTheme::Get().fontSizeSubheading;
+            sec.style.textColor = EditorTheme::Get().textLink;
             sec.textAlignV = TextAlignV::Center;
             sec.padding   = Vec2{ 4.0f, 2.0f };
             sec.minSize   = Vec2{ contentW - kContentPad * 2.0f, kRowH };
@@ -9840,7 +9665,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             WidgetElement sep;
             sep.type    = WidgetElementType::Panel;
             sep.id      = id;
-            sep.style.color   = Vec4{ 0.28f, 0.30f, 0.38f, 1.0f };
+            sep.style.color   = EditorTheme::Get().panelBorder;
             sep.minSize = Vec2{ contentW - kContentPad * 2.0f, 1.0f };
             entry->children.push_back(sep);
         };
@@ -9852,10 +9677,10 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             btn.type          = WidgetElementType::Button;
             btn.id            = id;
             btn.text          = label;
-            btn.fontSize      = 14.0f;
+            btn.fontSize      = EditorTheme::Get().fontSizeSubheading;
             btn.style.color         = bgColor;
             btn.style.hoverColor    = hoverColor;
-            btn.style.textColor     = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+            btn.style.textColor     = EditorTheme::Get().textPrimary;
             btn.textAlignH    = TextAlignH::Center;
             btn.textAlignV    = TextAlignV::Center;
             btn.padding       = Vec2{ 16.0f, 8.0f };
@@ -9870,14 +9695,15 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         const auto addSmallButton = [&](const std::string& id, const std::string& label,
             std::function<void()> onClick)
         {
+            const auto& theme = EditorTheme::Get();
             WidgetElement btn;
             btn.type          = WidgetElementType::Button;
             btn.id            = id;
             btn.text          = label;
-            btn.fontSize      = 12.0f;
-            btn.style.color         = Vec4{ 0.18f, 0.20f, 0.26f, 1.0f };
-            btn.style.hoverColor    = Vec4{ 0.25f, 0.28f, 0.36f, 1.0f };
-            btn.style.textColor     = Vec4{ 0.85f, 0.88f, 0.95f, 1.0f };
+            btn.fontSize      = theme.fontSizeSmall;
+            btn.style.color         = theme.buttonDefault;
+            btn.style.hoverColor    = theme.buttonHover;
+            btn.style.textColor     = theme.textPrimary;
             btn.textAlignH    = TextAlignH::Center;
             btn.textAlignV    = TextAlignV::Center;
             btn.padding       = Vec2{ 12.0f, 6.0f };
@@ -9892,20 +9718,21 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         const auto addEntryRow = [&](const std::string& id, const std::string& label,
             const std::string& value, std::function<void(const std::string&)> onChange)
         {
+            const auto& theme = EditorTheme::Get();
             WidgetElement rowPanel;
             rowPanel.type        = WidgetElementType::StackPanel;
             rowPanel.id          = id + ".Row";
             rowPanel.orientation = StackOrientation::Horizontal;
             rowPanel.minSize     = Vec2{ contentW - kContentPad * 2.0f, kRowH };
-            rowPanel.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            rowPanel.style.color       = theme.transparent;
             rowPanel.padding     = Vec2{ 6.0f, 2.0f };
 
             WidgetElement lbl;
             lbl.type      = WidgetElementType::Text;
             lbl.id        = id + ".Lbl";
             lbl.text      = label;
-            lbl.fontSize  = 13.0f;
-            lbl.style.textColor = Vec4{ 0.80f, 0.82f, 0.88f, 1.0f };
+            lbl.fontSize  = theme.fontSizeBody;
+            lbl.style.textColor = theme.textSecondary;
             lbl.textAlignV = TextAlignV::Center;
             lbl.minSize   = Vec2{ 120.0f, kRowH };
             rowPanel.children.push_back(lbl);
@@ -9914,10 +9741,10 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             eb.type          = WidgetElementType::EntryBar;
             eb.id            = id;
             eb.value         = value;
-            eb.fontSize      = 13.0f;
-            eb.style.color         = Vec4{ 0.15f, 0.16f, 0.20f, 1.0f };
-            eb.style.hoverColor    = Vec4{ 0.20f, 0.22f, 0.28f, 1.0f };
-            eb.style.textColor     = Vec4{ 0.95f, 0.95f, 0.97f, 1.0f };
+            eb.fontSize      = theme.fontSizeBody;
+            eb.style.color         = theme.inputBackground;
+            eb.style.hoverColor    = theme.buttonHover;
+            eb.style.textColor     = theme.inputText;
             eb.padding       = Vec2{ 8.0f, 5.0f };
             eb.hitTestMode = HitTestMode::Enabled;
             eb.minSize       = Vec2{ contentW - kContentPad * 2.0f - 120.0f - 12.0f, kRowH };
@@ -9940,8 +9767,8 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 noProjects.type      = WidgetElementType::Text;
                 noProjects.id        = "PS.C.NoProjects";
                 noProjects.text      = "No known projects yet.\nOpen or create a project to get started.";
-                noProjects.fontSize  = 13.0f;
-                noProjects.style.textColor = Vec4{ 0.45f, 0.47f, 0.55f, 1.0f };
+                noProjects.fontSize  = EditorTheme::Get().fontSizeBody;
+                noProjects.style.textColor = EditorTheme::Get().textMuted;
                 noProjects.textAlignV = TextAlignV::Center;
                 noProjects.padding   = Vec2{ 10.0f, 16.0f };
                 noProjects.minSize   = Vec2{ contentW - kContentPad * 2.0f, 80.0f };
@@ -9956,15 +9783,15 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     hdrRow.id          = "PS.C.ListHdr";
                     hdrRow.orientation = StackOrientation::Horizontal;
                     hdrRow.minSize     = Vec2{ contentW - kContentPad * 2.0f, 26.0f };
-                    hdrRow.style.color       = Vec4{ 0.10f, 0.10f, 0.13f, 1.0f };
+                    hdrRow.style.color       = EditorTheme::Get().panelBackgroundAlt;
                     hdrRow.padding     = Vec2{ 18.0f, 2.0f };
 
                     WidgetElement hdrName;
                     hdrName.type      = WidgetElementType::Text;
                     hdrName.id        = "PS.C.ListHdr.Name";
                     hdrName.text      = "Project";
-                    hdrName.fontSize  = 11.0f;
-                    hdrName.style.textColor = Vec4{ 0.45f, 0.50f, 0.65f, 1.0f };
+                    hdrName.fontSize  = EditorTheme::Get().fontSizeSmall;
+                    hdrName.style.textColor = EditorTheme::Get().textMuted;
                     hdrName.textAlignV = TextAlignV::Center;
                     hdrName.minSize   = Vec2{ 180.0f, 24.0f };
                     hdrRow.children.push_back(hdrName);
@@ -9973,8 +9800,8 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     hdrPath.type      = WidgetElementType::Text;
                     hdrPath.id        = "PS.C.ListHdr.Path";
                     hdrPath.text      = "Location";
-                    hdrPath.fontSize  = 11.0f;
-                    hdrPath.style.textColor = Vec4{ 0.45f, 0.50f, 0.65f, 1.0f };
+                    hdrPath.fontSize  = EditorTheme::Get().fontSizeSmall;
+                    hdrPath.style.textColor = EditorTheme::Get().textMuted;
                     hdrPath.textAlignV = TextAlignV::Center;
                     hdrPath.fillX     = true;
                     hdrPath.minSize   = Vec2{ 0.0f, 24.0f };
@@ -10051,10 +9878,10 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     removeBtn.type = WidgetElementType::Button;
                     removeBtn.id = rowId + ".Remove";
                     removeBtn.text = "X";
-                    removeBtn.fontSize = 12.0f;
-                    removeBtn.style.color = Vec4{ 0.35f, 0.16f, 0.16f, 0.95f };
-                    removeBtn.style.hoverColor = Vec4{ 0.55f, 0.22f, 0.22f, 1.0f };
-                    removeBtn.style.textColor = Vec4{ 0.95f, 0.88f, 0.88f, 1.0f };
+                    removeBtn.fontSize = EditorTheme::Get().fontSizeSmall;
+                    removeBtn.style.color = EditorTheme::Get().buttonDanger;
+                    removeBtn.style.hoverColor = EditorTheme::Get().buttonDangerHover;
+                    removeBtn.style.textColor = EditorTheme::Get().buttonDangerText;
                     removeBtn.textAlignH = TextAlignH::Center;
                     removeBtn.textAlignV = TextAlignV::Center;
                     removeBtn.padding = Vec2{ 0.0f, 0.0f };
@@ -10449,14 +10276,14 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         catBtn.from          = Vec2{ nx(6.0f), ny(by0) };
         catBtn.to            = Vec2{ nx(kSidebarW - 6.0f), ny(by1) };
         catBtn.text          = categories[ci];
-        catBtn.fontSize      = 13.0f;
+        catBtn.fontSize      = EditorTheme::Get().fontSizeBody;
         catBtn.style.color         = active
-            ? Vec4{ 0.20f, 0.26f, 0.40f, 1.0f }
-            : Vec4{ 0.09f, 0.09f, 0.11f, 0.0f };
-        catBtn.style.hoverColor    = Vec4{ 0.22f, 0.28f, 0.42f, 1.0f };
+            ? EditorTheme::Get().selectionHighlight
+            : EditorTheme::Get().transparent;
+        catBtn.style.hoverColor    = EditorTheme::Get().buttonSubtleHover;
         catBtn.style.textColor     = active
-            ? Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }
-            : Vec4{ 0.65f, 0.68f, 0.72f, 1.0f };
+            ? EditorTheme::Get().textPrimary
+            : EditorTheme::Get().textSecondary;
         catBtn.textAlignH    = TextAlignH::Left;
         catBtn.textAlignV    = TextAlignV::Center;
         catBtn.padding       = Vec2{ 14.0f, 4.0f };
@@ -10493,7 +10320,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         elements.push_back(content);
     }
 
-    auto widget = std::make_shared<Widget>();
+    auto widget = std::make_shared<EditorWidget>();
     widget->setName("ProjectScreenWidget");
     widget->setFillX(true);
     widget->setFillY(true);
@@ -10504,6 +10331,1040 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
     {
         (*rebuildContentPtr)();
     }
+}
+
+// ===========================================================================
+// Widget Editor: Animation Timeline
+// ===========================================================================
+
+static std::string AnimatablePropertyToString(AnimatableProperty prop)
+{
+    switch (prop)
+    {
+    case AnimatableProperty::RenderTranslationX: return "TranslationX";
+    case AnimatableProperty::RenderTranslationY: return "TranslationY";
+    case AnimatableProperty::RenderRotation:     return "Rotation";
+    case AnimatableProperty::RenderScaleX:       return "ScaleX";
+    case AnimatableProperty::RenderScaleY:       return "ScaleY";
+    case AnimatableProperty::RenderShearX:       return "ShearX";
+    case AnimatableProperty::RenderShearY:       return "ShearY";
+    case AnimatableProperty::Opacity:            return "Opacity";
+    case AnimatableProperty::ColorR:             return "ColorR";
+    case AnimatableProperty::ColorG:             return "ColorG";
+    case AnimatableProperty::ColorB:             return "ColorB";
+    case AnimatableProperty::ColorA:             return "ColorA";
+    case AnimatableProperty::PositionX:          return "PositionX";
+    case AnimatableProperty::PositionY:          return "PositionY";
+    case AnimatableProperty::SizeX:              return "SizeX";
+    case AnimatableProperty::SizeY:              return "SizeY";
+    case AnimatableProperty::FontSize:           return "FontSize";
+    default:                                     return "Unknown";
+    }
+}
+
+void UIManager::refreshWidgetEditorTimeline(const std::string& tabId)
+{
+    auto stateIt = m_widgetEditorStates.find(tabId);
+    if (stateIt == m_widgetEditorStates.end())
+        return;
+
+    auto& edState = stateIt->second;
+    const std::string& bottomId = edState.bottomWidgetId;
+
+    // If panel is hidden, remove the bottom widget entirely
+    if (!edState.showAnimationsPanel)
+    {
+        unregisterWidget(bottomId);
+        markAllWidgetsDirty();
+        return;
+    }
+
+    // Create or update the bottom animation panel widget
+    auto bottomWidget = std::make_shared<EditorWidget>();
+    bottomWidget->setName(bottomId);
+    bottomWidget->setAnchor(WidgetAnchor::BottomLeft);
+    bottomWidget->setFillX(true);
+    bottomWidget->setSizePixels(Vec2{ 0.0f, 260.0f });
+    bottomWidget->setZOrder(2);
+
+    WidgetElement root{};
+    root.id = "WE.Timeline.Root";
+    root.type = WidgetElementType::StackPanel;
+    root.from = Vec2{ 0.0f, 0.0f };
+    root.to = Vec2{ 1.0f, 1.0f };
+    root.fillX = true;
+    root.fillY = true;
+    root.orientation = StackOrientation::Horizontal;
+    root.style.color = Vec4{ 0.10f, 0.11f, 0.14f, 0.98f };
+    root.runtimeOnly = true;
+
+    // --- Left side: animation list (150px) ---
+    {
+        WidgetElement leftPanel{};
+        leftPanel.id = "WE.Timeline.Left";
+        leftPanel.type = WidgetElementType::StackPanel;
+        leftPanel.orientation = StackOrientation::Vertical;
+        leftPanel.minSize = Vec2{ 150.0f, 0.0f };
+        leftPanel.fillY = true;
+        leftPanel.padding = Vec2{ 6.0f, 6.0f };
+        leftPanel.style.color = Vec4{ 0.12f, 0.13f, 0.17f, 1.0f };
+        leftPanel.scrollable = true;
+        leftPanel.runtimeOnly = true;
+
+        // Header row: "Animations" + "+" button
+        {
+            WidgetElement headerRow{};
+            headerRow.id = "WE.Timeline.Left.Header";
+            headerRow.type = WidgetElementType::StackPanel;
+            headerRow.orientation = StackOrientation::Horizontal;
+            headerRow.fillX = true;
+            headerRow.minSize = Vec2{ 0.0f, 24.0f };
+            headerRow.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            headerRow.runtimeOnly = true;
+
+            WidgetElement title{};
+            title.id = "WE.Timeline.Left.Title";
+            title.type = WidgetElementType::Text;
+            title.text = "Animations";
+            title.font = EditorTheme::Get().fontDefault;
+            title.fontSize = EditorTheme::Get().fontSizeBody;
+            title.fillX = true;
+            title.style.textColor = EditorTheme::Get().textPrimary;
+            title.textAlignH = TextAlignH::Left;
+            title.textAlignV = TextAlignV::Center;
+            title.runtimeOnly = true;
+            headerRow.children.push_back(std::move(title));
+
+            WidgetElement addBtn{};
+            addBtn.id = "WE.Timeline.Left.Add";
+            addBtn.type = WidgetElementType::Button;
+            addBtn.text = "+";
+            addBtn.font = EditorTheme::Get().fontDefault;
+            addBtn.fontSize = EditorTheme::Get().fontSizeSubheading;
+            addBtn.minSize = Vec2{ 24.0f, EditorTheme::Get().rowHeight };
+            addBtn.style.color = EditorTheme::Get().buttonDefault;
+            addBtn.style.hoverColor = EditorTheme::Get().buttonHover;
+            addBtn.style.textColor = EditorTheme::Get().accentGreen;
+            addBtn.textAlignH = TextAlignH::Center;
+            addBtn.textAlignV = TextAlignV::Center;
+            addBtn.hitTestMode = HitTestMode::Enabled;
+            addBtn.runtimeOnly = true;
+            const std::string capturedTabId = tabId;
+            addBtn.onClicked = [this, capturedTabId]()
+            {
+                auto it = m_widgetEditorStates.find(capturedTabId);
+                if (it == m_widgetEditorStates.end() || !it->second.editedWidget)
+                    return;
+                auto& anims = it->second.editedWidget->getAnimationsMutable();
+                std::string newName = "Anim_" + std::to_string(anims.size());
+                WidgetAnimation newAnim;
+                newAnim.name = newName;
+                newAnim.duration = 1.0f;
+                anims.push_back(std::move(newAnim));
+                it->second.selectedAnimationName = newName;
+                markWidgetEditorDirty(capturedTabId);
+                refreshWidgetEditorTimeline(capturedTabId);
+            };
+            headerRow.children.push_back(std::move(addBtn));
+
+            leftPanel.children.push_back(std::move(headerRow));
+        }
+
+        // Animation entries
+        if (edState.editedWidget)
+        {
+            const auto& anims = edState.editedWidget->getAnimations();
+            for (size_t i = 0; i < anims.size(); ++i)
+            {
+                const auto& anim = anims[i];
+                const bool selected = (anim.name == edState.selectedAnimationName);
+
+                WidgetElement row{};
+                row.id = "WE.Timeline.Left.Anim." + std::to_string(i);
+                row.type = WidgetElementType::StackPanel;
+                row.orientation = StackOrientation::Horizontal;
+                row.fillX = true;
+                row.minSize = Vec2{ 0.0f, 22.0f };
+                row.style.color = selected ? Vec4{ 0.20f, 0.30f, 0.55f, 0.9f } : Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                row.style.hoverColor = selected ? Vec4{ 0.25f, 0.35f, 0.60f, 1.0f } : Vec4{ 0.18f, 0.20f, 0.28f, 0.8f };
+                row.hitTestMode = HitTestMode::Enabled;
+                row.runtimeOnly = true;
+
+                WidgetElement nameLabel{};
+                nameLabel.id = "WE.Timeline.Left.AnimName." + std::to_string(i);
+                nameLabel.type = WidgetElementType::Text;
+                nameLabel.text = "  " + anim.name;
+                nameLabel.font = EditorTheme::Get().fontDefault;
+                nameLabel.fontSize = EditorTheme::Get().fontSizeSmall;
+                nameLabel.fillX = true;
+                nameLabel.style.textColor = selected ? EditorTheme::Get().textPrimary : EditorTheme::Get().textSecondary;
+                nameLabel.textAlignH = TextAlignH::Left;
+                nameLabel.textAlignV = TextAlignV::Center;
+                nameLabel.runtimeOnly = true;
+                row.children.push_back(std::move(nameLabel));
+
+                // Delete button
+                WidgetElement delBtn{};
+                delBtn.id = "WE.Timeline.Left.AnimDel." + std::to_string(i);
+                delBtn.type = WidgetElementType::Button;
+                delBtn.text = "x";
+                delBtn.font = EditorTheme::Get().fontDefault;
+                delBtn.fontSize = EditorTheme::Get().fontSizeSmall;
+                delBtn.minSize = Vec2{ 20.0f, EditorTheme::Get().rowHeightSmall };
+                delBtn.style.color = EditorTheme::Get().transparent;
+                delBtn.style.hoverColor = EditorTheme::Get().buttonDangerHover;
+                delBtn.style.textColor = EditorTheme::Get().buttonDanger;
+                delBtn.textAlignH = TextAlignH::Center;
+                delBtn.textAlignV = TextAlignV::Center;
+                delBtn.hitTestMode = HitTestMode::Enabled;
+                delBtn.runtimeOnly = true;
+                const std::string capturedTabId2 = tabId;
+                const std::string animName = anim.name;
+                delBtn.onClicked = [this, capturedTabId2, animName]()
+                {
+                    auto it = m_widgetEditorStates.find(capturedTabId2);
+                    if (it == m_widgetEditorStates.end() || !it->second.editedWidget)
+                        return;
+                    auto& anims2 = it->second.editedWidget->getAnimationsMutable();
+                    anims2.erase(std::remove_if(anims2.begin(), anims2.end(),
+                        [&](const WidgetAnimation& a) { return a.name == animName; }), anims2.end());
+                    if (it->second.selectedAnimationName == animName)
+                        it->second.selectedAnimationName.clear();
+                    markWidgetEditorDirty(capturedTabId2);
+                    refreshWidgetEditorTimeline(capturedTabId2);
+                };
+                row.children.push_back(std::move(delBtn));
+
+                // Click to select
+                const std::string capturedTabId3 = tabId;
+                const std::string capturedAnimName = anim.name;
+                row.onClicked = [this, capturedTabId3, capturedAnimName]()
+                {
+                    auto it = m_widgetEditorStates.find(capturedTabId3);
+                    if (it != m_widgetEditorStates.end())
+                    {
+                        it->second.selectedAnimationName = capturedAnimName;
+                        refreshWidgetEditorTimeline(capturedTabId3);
+                    }
+                };
+                leftPanel.children.push_back(std::move(row));
+            }
+        }
+
+        root.children.push_back(std::move(leftPanel));
+    }
+
+    // --- Right side: timeline content ---
+    {
+        WidgetElement rightPanel{};
+        rightPanel.id = "WE.Timeline.Right";
+        rightPanel.type = WidgetElementType::StackPanel;
+        rightPanel.orientation = StackOrientation::Vertical;
+        rightPanel.fillX = true;
+        rightPanel.fillY = true;
+        rightPanel.padding = Vec2{ 6.0f, 6.0f };
+        rightPanel.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        rightPanel.runtimeOnly = true;
+
+        // Toolbar row: +Track, Play, Stop, Duration, Loop
+        {
+            WidgetElement toolbar{};
+            toolbar.id = "WE.Timeline.Right.Toolbar";
+            toolbar.type = WidgetElementType::StackPanel;
+            toolbar.orientation = StackOrientation::Horizontal;
+            toolbar.fillX = true;
+            toolbar.minSize = Vec2{ 0.0f, 26.0f };
+            toolbar.spacing = 4.0f;
+            toolbar.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            toolbar.runtimeOnly = true;
+
+            auto makeToolBtn = [&](const std::string& id, const std::string& text, std::function<void()> onClick) {
+                WidgetElement btn{};
+                btn.id = id;
+                btn.type = WidgetElementType::Button;
+                btn.text = text;
+                btn.font = EditorTheme::Get().fontDefault;
+                btn.fontSize = EditorTheme::Get().fontSizeBody;
+                btn.minSize = Vec2{ 28.0f, EditorTheme::Get().rowHeight };
+                btn.padding = Vec2{ 6.0f, 2.0f };
+                btn.style.color = EditorTheme::Get().buttonDefault;
+                btn.style.hoverColor = EditorTheme::Get().buttonHover;
+                btn.style.textColor = EditorTheme::Get().textPrimary;
+                btn.textAlignH = TextAlignH::Center;
+                btn.textAlignV = TextAlignV::Center;
+                btn.hitTestMode = HitTestMode::Enabled;
+                btn.runtimeOnly = true;
+                btn.onClicked = std::move(onClick);
+                return btn;
+            };
+
+            const std::string capturedTabId = tabId;
+
+            // + Track button
+            toolbar.children.push_back(makeToolBtn("WE.Timeline.AddTrack", "+ Track", [this, capturedTabId]()
+            {
+                auto it = m_widgetEditorStates.find(capturedTabId);
+                if (it == m_widgetEditorStates.end() || !it->second.editedWidget)
+                    return;
+                auto* anim = it->second.editedWidget->findAnimationByNameMutable(it->second.selectedAnimationName);
+                if (!anim) return;
+                AnimationTrack track;
+                track.targetElementId = "root";
+                track.property = AnimatableProperty::Opacity;
+                anim->tracks.push_back(std::move(track));
+                markWidgetEditorDirty(capturedTabId);
+                refreshWidgetEditorTimeline(capturedTabId);
+            }));
+
+            // Play button
+            toolbar.children.push_back(makeToolBtn("WE.Timeline.Play", "\xe2\x96\xb6", [this, capturedTabId]()
+            {
+                auto it = m_widgetEditorStates.find(capturedTabId);
+                if (it == m_widgetEditorStates.end() || !it->second.editedWidget)
+                    return;
+                auto& player = it->second.editedWidget->animationPlayer();
+                if (!player.isPlaying())
+                    player.play(it->second.selectedAnimationName);
+                else
+                    player.pause();
+                it->second.previewDirty = true;
+            }));
+
+            // Stop button
+            toolbar.children.push_back(makeToolBtn("WE.Timeline.Stop", "\xe2\x96\xa0", [this, capturedTabId]()
+            {
+                auto it = m_widgetEditorStates.find(capturedTabId);
+                if (it == m_widgetEditorStates.end() || !it->second.editedWidget)
+                    return;
+                it->second.editedWidget->animationPlayer().stop();
+                it->second.timelineScrubTime = 0.0f;
+                it->second.previewDirty = true;
+                refreshWidgetEditorTimeline(capturedTabId);
+            }));
+
+            // Duration label + value
+            {
+                WidgetElement durLabel{};
+                durLabel.id = "WE.Timeline.DurLabel";
+                durLabel.type = WidgetElementType::Text;
+                durLabel.text = "Duration:";
+                durLabel.font = EditorTheme::Get().fontDefault;
+                durLabel.fontSize = EditorTheme::Get().fontSizeSmall;
+                durLabel.style.textColor = EditorTheme::Get().textMuted;
+                durLabel.textAlignV = TextAlignV::Center;
+                durLabel.minSize = Vec2{ 60.0f, 24.0f };
+                durLabel.runtimeOnly = true;
+                toolbar.children.push_back(std::move(durLabel));
+            }
+
+            if (edState.editedWidget)
+            {
+                const auto* anim = edState.editedWidget->findAnimationByName(edState.selectedAnimationName);
+                float dur = anim ? anim->duration : 1.0f;
+
+                WidgetElement durEntry{};
+                durEntry.id = "WE.Timeline.DurEntry";
+                durEntry.type = WidgetElementType::EntryBar;
+                durEntry.text = std::to_string(dur).substr(0, 5);
+                durEntry.font = EditorTheme::Get().fontDefault;
+                durEntry.fontSize = EditorTheme::Get().fontSizeSmall;
+                durEntry.minSize = Vec2{ 50.0f, EditorTheme::Get().rowHeightSmall };
+                durEntry.style.color = EditorTheme::Get().inputBackground;
+                durEntry.style.textColor = EditorTheme::Get().inputText;
+                durEntry.hitTestMode = HitTestMode::Enabled;
+                durEntry.runtimeOnly = true;
+                const std::string capturedTabId2 = tabId;
+                durEntry.onValueChanged = [this, capturedTabId2](const std::string& val)
+                {
+                    auto it = m_widgetEditorStates.find(capturedTabId2);
+                    if (it == m_widgetEditorStates.end() || !it->second.editedWidget)
+                        return;
+                    auto* a = it->second.editedWidget->findAnimationByNameMutable(it->second.selectedAnimationName);
+                    if (a) { try { a->duration = std::max(0.01f, std::stof(val)); } catch (...) {} }
+                    markWidgetEditorDirty(capturedTabId2);
+                    refreshWidgetEditorTimeline(capturedTabId2);
+                };
+                toolbar.children.push_back(std::move(durEntry));
+
+                // Loop checkbox
+                bool isLoop = anim ? anim->isLooping : false;
+                WidgetElement loopCb{};
+                loopCb.id = "WE.Timeline.Loop";
+                loopCb.type = WidgetElementType::CheckBox;
+                loopCb.text = "Loop";
+                loopCb.font = EditorTheme::Get().fontDefault;
+                loopCb.fontSize = EditorTheme::Get().fontSizeSmall;
+                loopCb.isChecked = isLoop;
+                loopCb.minSize = Vec2{ 55.0f, EditorTheme::Get().rowHeightSmall };
+                loopCb.style.color = EditorTheme::Get().inputBackground;
+                loopCb.style.textColor = EditorTheme::Get().textSecondary;
+                loopCb.hitTestMode = HitTestMode::Enabled;
+                loopCb.runtimeOnly = true;
+                const std::string capturedTabId3 = tabId;
+                loopCb.onCheckedChanged = [this, capturedTabId3](bool checked)
+                {
+                    auto it = m_widgetEditorStates.find(capturedTabId3);
+                    if (it == m_widgetEditorStates.end() || !it->second.editedWidget)
+                        return;
+                    auto* a = it->second.editedWidget->findAnimationByNameMutable(it->second.selectedAnimationName);
+                    if (a) a->isLooping = checked;
+                    markWidgetEditorDirty(capturedTabId3);
+                };
+                toolbar.children.push_back(std::move(loopCb));
+            }
+
+            rightPanel.children.push_back(std::move(toolbar));
+        }
+
+        // Track area: left = track tree, right = keyframe ruler
+        if (edState.editedWidget && !edState.selectedAnimationName.empty())
+        {
+            const auto* anim = edState.editedWidget->findAnimationByName(edState.selectedAnimationName);
+            if (anim)
+            {
+                WidgetElement trackArea{};
+                trackArea.id = "WE.Timeline.TrackArea";
+                trackArea.type = WidgetElementType::StackPanel;
+                trackArea.orientation = StackOrientation::Horizontal;
+                trackArea.fillX = true;
+                trackArea.fillY = true;
+                trackArea.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                trackArea.runtimeOnly = true;
+
+                // Track tree (left, 200px)
+                {
+                    WidgetElement trackTree{};
+                    trackTree.id = "WE.Timeline.TrackTree";
+                    trackTree.type = WidgetElementType::StackPanel;
+                    trackTree.orientation = StackOrientation::Vertical;
+                    trackTree.minSize = Vec2{ 200.0f, 0.0f };
+                    trackTree.fillY = true;
+                    trackTree.scrollable = true;
+                    trackTree.style.color = Vec4{ 0.11f, 0.12f, 0.15f, 1.0f };
+                    trackTree.runtimeOnly = true;
+
+                    buildTimelineTrackRows(tabId, trackTree);
+                    trackArea.children.push_back(std::move(trackTree));
+                }
+
+                // Keyframe ruler + diamonds (right, fills remaining)
+                {
+                    WidgetElement rulerArea{};
+                    rulerArea.id = "WE.Timeline.Ruler";
+                    rulerArea.type = WidgetElementType::Panel;
+                    rulerArea.fillX = true;
+                    rulerArea.fillY = true;
+                    rulerArea.style.color = Vec4{ 0.08f, 0.09f, 0.12f, 1.0f };
+                    rulerArea.runtimeOnly = true;
+
+                    buildTimelineRulerAndKeyframes(tabId, rulerArea);
+                    trackArea.children.push_back(std::move(rulerArea));
+                }
+
+                rightPanel.children.push_back(std::move(trackArea));
+            }
+        }
+
+        root.children.push_back(std::move(rightPanel));
+    }
+
+    bottomWidget->setElements({ std::move(root) });
+    unregisterWidget(bottomId);
+    registerWidget(bottomId, bottomWidget, tabId);
+    markAllWidgetsDirty();
+}
+
+void UIManager::buildTimelineTrackRows(const std::string& tabId, WidgetElement& container)
+{
+    auto stateIt = m_widgetEditorStates.find(tabId);
+    if (stateIt == m_widgetEditorStates.end() || !stateIt->second.editedWidget)
+        return;
+
+    auto& edState = stateIt->second;
+    const auto* anim = edState.editedWidget->findAnimationByName(edState.selectedAnimationName);
+    if (!anim)
+        return;
+
+    int rowIndex = 0;
+    for (size_t ti = 0; ti < anim->tracks.size(); ++ti)
+    {
+        const auto& track = anim->tracks[ti];
+        bool isExpanded = edState.expandedTimelineElements.count(track.targetElementId) > 0;
+
+        // Element header row
+        {
+            WidgetElement headerRow{};
+            headerRow.id = "WE.TL.Track." + std::to_string(ti);
+            headerRow.type = WidgetElementType::StackPanel;
+            headerRow.orientation = StackOrientation::Horizontal;
+            headerRow.fillX = true;
+            headerRow.minSize = Vec2{ 0.0f, 20.0f };
+            bool evenRow = (rowIndex % 2 == 0);
+            headerRow.style.color = evenRow ? Vec4{ 0.13f, 0.14f, 0.18f, 1.0f } : Vec4{ 0.11f, 0.12f, 0.15f, 1.0f };
+            headerRow.style.hoverColor = Vec4{ 0.18f, 0.20f, 0.28f, 0.8f };
+            headerRow.hitTestMode = HitTestMode::Enabled;
+            headerRow.runtimeOnly = true;
+
+            // Expand/collapse chevron
+            WidgetElement chevron{};
+            chevron.id = "WE.TL.Chev." + std::to_string(ti);
+            chevron.type = WidgetElementType::Text;
+            chevron.text = isExpanded ? " \xe2\x96\xbe " : " \xe2\x96\xb8 ";
+            chevron.font = EditorTheme::Get().fontDefault;
+            chevron.fontSize = EditorTheme::Get().fontSizeSmall;
+            chevron.style.textColor = EditorTheme::Get().textMuted;
+            chevron.minSize = Vec2{ 20.0f, 20.0f };
+            chevron.textAlignV = TextAlignV::Center;
+            chevron.runtimeOnly = true;
+            headerRow.children.push_back(std::move(chevron));
+
+            // Element ID + property name
+            WidgetElement label{};
+            label.id = "WE.TL.Label." + std::to_string(ti);
+            label.type = WidgetElementType::Text;
+            label.text = track.targetElementId + " : " + AnimatablePropertyToString(track.property);
+            label.font = EditorTheme::Get().fontDefault;
+            label.fontSize = EditorTheme::Get().fontSizeSmall;
+            label.fillX = true;
+            label.style.textColor = EditorTheme::Get().textSecondary;
+            label.textAlignH = TextAlignH::Left;
+            label.textAlignV = TextAlignV::Center;
+            label.runtimeOnly = true;
+            headerRow.children.push_back(std::move(label));
+
+            // Remove track button
+            WidgetElement removeBtn{};
+            removeBtn.id = "WE.TL.Rem." + std::to_string(ti);
+            removeBtn.type = WidgetElementType::Button;
+            removeBtn.text = "x";
+            removeBtn.font = EditorTheme::Get().fontDefault;
+            removeBtn.fontSize = EditorTheme::Get().fontSizeSmall;
+            removeBtn.minSize = Vec2{ 18.0f, 18.0f };
+            removeBtn.style.color = EditorTheme::Get().transparent;
+            removeBtn.style.hoverColor = EditorTheme::Get().buttonDangerHover;
+            removeBtn.style.textColor = EditorTheme::Get().buttonDanger;
+            removeBtn.textAlignH = TextAlignH::Center;
+            removeBtn.textAlignV = TextAlignV::Center;
+            removeBtn.hitTestMode = HitTestMode::Enabled;
+            removeBtn.runtimeOnly = true;
+            const std::string capturedTabId = tabId;
+            const size_t trackIdx = ti;
+            removeBtn.onClicked = [this, capturedTabId, trackIdx]()
+            {
+                auto it = m_widgetEditorStates.find(capturedTabId);
+                if (it == m_widgetEditorStates.end() || !it->second.editedWidget)
+                    return;
+                auto* a = it->second.editedWidget->findAnimationByNameMutable(it->second.selectedAnimationName);
+                if (a && trackIdx < a->tracks.size())
+                {
+                    a->tracks.erase(a->tracks.begin() + static_cast<ptrdiff_t>(trackIdx));
+                    markWidgetEditorDirty(capturedTabId);
+                    refreshWidgetEditorTimeline(capturedTabId);
+                }
+            };
+            headerRow.children.push_back(std::move(removeBtn));
+
+            // Toggle expand on click
+            const std::string capturedTabId2 = tabId;
+            const std::string elemId = track.targetElementId;
+            headerRow.onClicked = [this, capturedTabId2, elemId]()
+            {
+                auto it = m_widgetEditorStates.find(capturedTabId2);
+                if (it == m_widgetEditorStates.end()) return;
+                auto& expanded = it->second.expandedTimelineElements;
+                if (expanded.count(elemId))
+                    expanded.erase(elemId);
+                else
+                    expanded.insert(elemId);
+                refreshWidgetEditorTimeline(capturedTabId2);
+            };
+
+            container.children.push_back(std::move(headerRow));
+            ++rowIndex;
+        }
+
+        // Expanded keyframe rows
+        if (isExpanded)
+        {
+            for (size_t ki = 0; ki < track.keyframes.size(); ++ki)
+            {
+                const auto& kf = track.keyframes[ki];
+                WidgetElement kfRow{};
+                kfRow.id = "WE.TL.KF." + std::to_string(ti) + "." + std::to_string(ki);
+                kfRow.type = WidgetElementType::StackPanel;
+                kfRow.orientation = StackOrientation::Horizontal;
+                kfRow.fillX = true;
+                kfRow.minSize = Vec2{ 0.0f, 18.0f };
+                kfRow.padding = Vec2{ 20.0f, 0.0f };
+                bool evenRow = (rowIndex % 2 == 0);
+                kfRow.style.color = evenRow ? Vec4{ 0.14f, 0.15f, 0.19f, 1.0f } : Vec4{ 0.12f, 0.13f, 0.16f, 1.0f };
+                kfRow.runtimeOnly = true;
+
+                // Diamond marker
+                WidgetElement diamond{};
+                diamond.id = "WE.TL.KFD." + std::to_string(ti) + "." + std::to_string(ki);
+                diamond.type = WidgetElementType::Text;
+                diamond.text = "\xe2\x97\x86";
+                diamond.font = EditorTheme::Get().fontDefault;
+                diamond.fontSize = 7.0f;
+                diamond.style.textColor = EditorTheme::Get().tlKeyframeDiamond;
+                diamond.minSize = Vec2{ 14.0f, 18.0f };
+                diamond.textAlignH = TextAlignH::Center;
+                diamond.textAlignV = TextAlignV::Center;
+                diamond.runtimeOnly = true;
+                kfRow.children.push_back(std::move(diamond));
+
+                // Time label (prefix)
+                WidgetElement timePre{};
+                timePre.id = "WE.TL.KFTpre." + std::to_string(ti) + "." + std::to_string(ki);
+                timePre.type = WidgetElementType::Text;
+                timePre.text = "t=";
+                timePre.font = EditorTheme::Get().fontDefault;
+                timePre.fontSize = EditorTheme::Get().fontSizeCaption;
+                timePre.minSize = Vec2{ 14.0f, 18.0f };
+                timePre.style.textColor = EditorTheme::Get().textMuted;
+                timePre.textAlignH = TextAlignH::Right;
+                timePre.textAlignV = TextAlignV::Center;
+                timePre.runtimeOnly = true;
+                kfRow.children.push_back(std::move(timePre));
+
+                // Time entry bar (editable)
+                std::string timeStr = std::to_string(kf.time);
+                if (timeStr.size() > 5) timeStr = timeStr.substr(0, 5);
+                WidgetElement timeEntry{};
+                timeEntry.id = "WE.TL.KFT." + std::to_string(ti) + "." + std::to_string(ki);
+                timeEntry.type = WidgetElementType::EntryBar;
+                timeEntry.value = timeStr;
+                timeEntry.font = EditorTheme::Get().fontDefault;
+                timeEntry.fontSize = EditorTheme::Get().fontSizeCaption;
+                timeEntry.fillX = true;
+                timeEntry.minSize = Vec2{ 40.0f, 18.0f };
+                timeEntry.padding = Vec2{ 2.0f, 1.0f };
+                timeEntry.style.color = EditorTheme::Get().inputBackground;
+                timeEntry.style.textColor = EditorTheme::Get().inputText;
+                timeEntry.hitTestMode = HitTestMode::Enabled;
+                timeEntry.runtimeOnly = true;
+                {
+                    const std::string capturedTabIdT = tabId;
+                    const size_t trackIdxT = ti;
+                    const size_t kfIdxT = ki;
+                    timeEntry.onValueChanged = [this, capturedTabIdT, trackIdxT, kfIdxT](const std::string& newVal)
+                    {
+                        auto it = m_widgetEditorStates.find(capturedTabIdT);
+                        if (it == m_widgetEditorStates.end() || !it->second.editedWidget)
+                            return;
+                        auto* a = it->second.editedWidget->findAnimationByNameMutable(it->second.selectedAnimationName);
+                        if (a && trackIdxT < a->tracks.size() && kfIdxT < a->tracks[trackIdxT].keyframes.size())
+                        {
+                            try { a->tracks[trackIdxT].keyframes[kfIdxT].time = std::stof(newVal); }
+                            catch (...) {}
+                            std::sort(a->tracks[trackIdxT].keyframes.begin(), a->tracks[trackIdxT].keyframes.end(),
+                                [](const AnimationKeyframe& a2, const AnimationKeyframe& b) { return a2.time < b.time; });
+                            markWidgetEditorDirty(capturedTabIdT);
+                            refreshWidgetEditorTimeline(capturedTabIdT);
+                        }
+                    };
+                }
+                kfRow.children.push_back(std::move(timeEntry));
+
+                // Value label (prefix)
+                WidgetElement valPre{};
+                valPre.id = "WE.TL.KFVpre." + std::to_string(ti) + "." + std::to_string(ki);
+                valPre.type = WidgetElementType::Text;
+                valPre.text = "v=";
+                valPre.font = EditorTheme::Get().fontDefault;
+                valPre.fontSize = EditorTheme::Get().fontSizeCaption;
+                valPre.minSize = Vec2{ 14.0f, 18.0f };
+                valPre.style.textColor = EditorTheme::Get().textMuted;
+                valPre.textAlignH = TextAlignH::Right;
+                valPre.textAlignV = TextAlignV::Center;
+                valPre.runtimeOnly = true;
+                kfRow.children.push_back(std::move(valPre));
+
+                // Value entry bar (editable)
+                std::string valStr = std::to_string(kf.value.x);
+                if (valStr.size() > 6) valStr = valStr.substr(0, 6);
+                WidgetElement valEntry{};
+                valEntry.id = "WE.TL.KFV." + std::to_string(ti) + "." + std::to_string(ki);
+                valEntry.type = WidgetElementType::EntryBar;
+                valEntry.value = valStr;
+                valEntry.font = EditorTheme::Get().fontDefault;
+                valEntry.fontSize = EditorTheme::Get().fontSizeCaption;
+                valEntry.minSize = Vec2{ 50.0f, 18.0f };
+                valEntry.padding = Vec2{ 2.0f, 1.0f };
+                valEntry.style.color = EditorTheme::Get().inputBackground;
+                valEntry.style.textColor = EditorTheme::Get().inputText;
+                valEntry.hitTestMode = HitTestMode::Enabled;
+                valEntry.runtimeOnly = true;
+                {
+                    const std::string capturedTabIdV = tabId;
+                    const size_t trackIdxV = ti;
+                    const size_t kfIdxV = ki;
+                    valEntry.onValueChanged = [this, capturedTabIdV, trackIdxV, kfIdxV](const std::string& newVal)
+                    {
+                        auto it = m_widgetEditorStates.find(capturedTabIdV);
+                        if (it == m_widgetEditorStates.end() || !it->second.editedWidget)
+                            return;
+                        auto* a = it->second.editedWidget->findAnimationByNameMutable(it->second.selectedAnimationName);
+                        if (a && trackIdxV < a->tracks.size() && kfIdxV < a->tracks[trackIdxV].keyframes.size())
+                        {
+                            try { a->tracks[trackIdxV].keyframes[kfIdxV].value.x = std::stof(newVal); }
+                            catch (...) {}
+                            markWidgetEditorDirty(capturedTabIdV);
+                            refreshWidgetEditorTimeline(capturedTabIdV);
+                        }
+                    };
+                }
+                kfRow.children.push_back(std::move(valEntry));
+
+                // Delete keyframe button
+                WidgetElement delBtn{};
+                delBtn.id = "WE.TL.KFDel." + std::to_string(ti) + "." + std::to_string(ki);
+                delBtn.type = WidgetElementType::Button;
+                delBtn.text = "\xc3\x97"; // × symbol
+                delBtn.font = EditorTheme::Get().fontDefault;
+                delBtn.fontSize = EditorTheme::Get().fontSizeCaption;
+                delBtn.minSize = Vec2{ 18.0f, 18.0f };
+                delBtn.style.color = EditorTheme::Get().transparent;
+                delBtn.style.hoverColor = EditorTheme::Get().buttonDangerHover;
+                delBtn.style.textColor = EditorTheme::Get().buttonDanger;
+                delBtn.textAlignH = TextAlignH::Center;
+                delBtn.textAlignV = TextAlignV::Center;
+                delBtn.hitTestMode = HitTestMode::Enabled;
+                delBtn.runtimeOnly = true;
+                {
+                    const std::string capturedTabIdD = tabId;
+                    const size_t trackIdxD = ti;
+                    const size_t kfIdxD = ki;
+                    delBtn.onClicked = [this, capturedTabIdD, trackIdxD, kfIdxD]()
+                    {
+                        auto it = m_widgetEditorStates.find(capturedTabIdD);
+                        if (it == m_widgetEditorStates.end() || !it->second.editedWidget)
+                            return;
+                        auto* a = it->second.editedWidget->findAnimationByNameMutable(it->second.selectedAnimationName);
+                        if (a && trackIdxD < a->tracks.size() && kfIdxD < a->tracks[trackIdxD].keyframes.size())
+                        {
+                            a->tracks[trackIdxD].keyframes.erase(a->tracks[trackIdxD].keyframes.begin() + static_cast<ptrdiff_t>(kfIdxD));
+                            markWidgetEditorDirty(capturedTabIdD);
+                            refreshWidgetEditorTimeline(capturedTabIdD);
+                        }
+                    };
+                }
+                kfRow.children.push_back(std::move(delBtn));
+
+                container.children.push_back(std::move(kfRow));
+                ++rowIndex;
+            }
+
+            // + Keyframe button
+            {
+                WidgetElement addKfBtn{};
+                addKfBtn.id = "WE.TL.AddKF." + std::to_string(ti);
+                addKfBtn.type = WidgetElementType::Button;
+                addKfBtn.text = "  + Keyframe";
+                addKfBtn.font = EditorTheme::Get().fontDefault;
+                addKfBtn.fontSize = EditorTheme::Get().fontSizeCaption;
+                addKfBtn.fillX = true;
+                addKfBtn.minSize = Vec2{ 0.0f, 18.0f };
+                addKfBtn.padding = Vec2{ 20.0f, 0.0f };
+                addKfBtn.style.color = EditorTheme::Get().transparent;
+                addKfBtn.style.hoverColor = EditorTheme::Get().buttonSubtleHover;
+                addKfBtn.style.textColor = EditorTheme::Get().accentGreen;
+                addKfBtn.textAlignH = TextAlignH::Left;
+                addKfBtn.textAlignV = TextAlignV::Center;
+                addKfBtn.hitTestMode = HitTestMode::Enabled;
+                addKfBtn.runtimeOnly = true;
+                const std::string capturedTabId3 = tabId;
+                const size_t trackIdx2 = ti;
+                addKfBtn.onClicked = [this, capturedTabId3, trackIdx2]()
+                {
+                    auto it = m_widgetEditorStates.find(capturedTabId3);
+                    if (it == m_widgetEditorStates.end() || !it->second.editedWidget)
+                        return;
+                    auto* a = it->second.editedWidget->findAnimationByNameMutable(it->second.selectedAnimationName);
+                    if (a && trackIdx2 < a->tracks.size())
+                    {
+                        AnimationKeyframe kf;
+                        kf.time = it->second.timelineScrubTime;
+                        kf.value = Vec4{ 1.0f, 0.0f, 0.0f, 0.0f };
+                        a->tracks[trackIdx2].keyframes.push_back(std::move(kf));
+                        std::sort(a->tracks[trackIdx2].keyframes.begin(), a->tracks[trackIdx2].keyframes.end(),
+                            [](const AnimationKeyframe& a2, const AnimationKeyframe& b) { return a2.time < b.time; });
+                        markWidgetEditorDirty(capturedTabId3);
+                        refreshWidgetEditorTimeline(capturedTabId3);
+                    }
+                };
+                container.children.push_back(std::move(addKfBtn));
+                ++rowIndex;
+            }
+        }
+    }
+}
+
+void UIManager::buildTimelineRulerAndKeyframes(const std::string& tabId, WidgetElement& container)
+{
+    auto stateIt = m_widgetEditorStates.find(tabId);
+    if (stateIt == m_widgetEditorStates.end() || !stateIt->second.editedWidget)
+        return;
+
+    auto& edState = stateIt->second;
+    const auto* anim = edState.editedWidget->findAnimationByName(edState.selectedAnimationName);
+    if (!anim)
+        return;
+
+    const float duration = std::max(0.1f, anim->duration);
+
+    // Count total rows to compute normalized Y positions for the flat layout.
+    // All elements are direct children of the container Panel using from/to.
+    int totalRows = 0;
+    for (size_t ti = 0; ti < anim->tracks.size(); ++ti)
+    {
+        const auto& track = anim->tracks[ti];
+        ++totalRows; // track header
+        if (edState.expandedTimelineElements.count(track.targetElementId) > 0)
+        {
+            totalRows += static_cast<int>(track.keyframes.size()); // keyframe detail rows
+            ++totalRows; // "+ Keyframe" row
+        }
+    }
+    if (totalRows == 0)
+        totalRows = 1;
+
+    const float rulerFrac = 0.08f; // top 8% for ruler ticks
+    const float lanesFrac = 1.0f - rulerFrac;
+    const float laneFrac = lanesFrac / static_cast<float>(totalRows);
+
+    // ── Ruler background ─────────────────────────────────────────────────
+    {
+        WidgetElement rulerBg{};
+        rulerBg.id = "WE.TL.RulerBg";
+        rulerBg.type = WidgetElementType::Panel;
+        rulerBg.from = Vec2{ 0.0f, 0.0f };
+        rulerBg.to = Vec2{ 1.0f, rulerFrac };
+        rulerBg.style.color = Vec4{ 0.06f, 0.07f, 0.10f, 1.0f };
+        rulerBg.hitTestMode = HitTestMode::DisabledAll;
+        rulerBg.runtimeOnly = true;
+        container.children.push_back(std::move(rulerBg));
+    }
+
+    // ── Ruler tick marks ─────────────────────────────────────────────────
+    {
+        float step = 0.25f;
+        if (duration > 5.0f) step = 1.0f;
+        else if (duration > 2.0f) step = 0.5f;
+
+        for (float t = 0.0f; t <= duration + 0.001f; t += step)
+        {
+            const float frac = std::clamp(t / duration, 0.0f, 1.0f);
+            const float halfW = 0.03f;
+
+            WidgetElement tick{};
+            tick.id = "WE.TL.Tick." + std::to_string(static_cast<int>(t * 100));
+            tick.type = WidgetElementType::Text;
+            std::string tickStr = std::to_string(t);
+            if (tickStr.size() > 4) tickStr = tickStr.substr(0, 4);
+            tick.text = tickStr;
+            tick.font = EditorTheme::Get().fontDefault;
+            tick.fontSize = 9.0f;
+            tick.style.textColor = EditorTheme::Get().textMuted;
+            tick.from = Vec2{ std::max(0.0f, frac - halfW), 0.0f };
+            tick.to = Vec2{ std::min(1.0f, frac + halfW), rulerFrac };
+            tick.textAlignH = TextAlignH::Center;
+            tick.textAlignV = TextAlignV::Center;
+            tick.hitTestMode = HitTestMode::DisabledAll;
+            tick.runtimeOnly = true;
+            container.children.push_back(std::move(tick));
+        }
+    }
+
+    // ── Lane backgrounds + keyframe markers ──────────────────────────────
+    int rowIndex = 0;
+    for (size_t ti = 0; ti < anim->tracks.size(); ++ti)
+    {
+        const auto& track = anim->tracks[ti];
+        const bool isExpanded = edState.expandedTimelineElements.count(track.targetElementId) > 0;
+
+        // Track header lane background
+        {
+            const float laneTop = rulerFrac + static_cast<float>(rowIndex) * laneFrac;
+            const float laneBot = laneTop + laneFrac;
+            const bool evenRow = (rowIndex % 2 == 0);
+
+            WidgetElement laneBg{};
+            laneBg.id = "WE.TL.Lane." + std::to_string(ti);
+            laneBg.type = WidgetElementType::Panel;
+            laneBg.from = Vec2{ 0.0f, laneTop };
+            laneBg.to = Vec2{ 1.0f, laneBot };
+            laneBg.style.color = evenRow
+                ? Vec4{ 0.10f, 0.11f, 0.14f, 0.5f }
+                : Vec4{ 0.08f, 0.09f, 0.12f, 0.5f };
+            laneBg.hitTestMode = HitTestMode::Enabled;
+            laneBg.runtimeOnly = true;
+            container.children.push_back(std::move(laneBg));
+
+            // Keyframe diamond markers (colored Panel blocks)
+            for (size_t ki = 0; ki < track.keyframes.size(); ++ki)
+            {
+                const auto& kf = track.keyframes[ki];
+                const float timeFrac = std::clamp(kf.time / duration, 0.0f, 1.0f);
+                const float halfDia = 0.006f;
+                const float diaTop = laneTop + laneFrac * 0.15f;
+                const float diaBot = laneBot - laneFrac * 0.15f;
+
+                WidgetElement diamond{};
+                diamond.id = "WE.TL.Dia." + std::to_string(ti) + "." + std::to_string(ki);
+                diamond.type = WidgetElementType::Panel;
+                diamond.from = Vec2{ std::max(0.0f, timeFrac - halfDia), diaTop };
+                diamond.to = Vec2{ std::min(1.0f, timeFrac + halfDia), diaBot };
+                diamond.style.color = Vec4{ 0.95f, 0.75f, 0.15f, 1.0f };
+                diamond.style.hoverColor = Vec4{ 1.0f, 0.90f, 0.40f, 1.0f };
+                diamond.hitTestMode = HitTestMode::Enabled;
+                diamond.runtimeOnly = true;
+                container.children.push_back(std::move(diamond));
+            }
+
+            ++rowIndex;
+        }
+
+        // Expanded: spacer lanes for detail rows + "Add Keyframe"
+        if (isExpanded)
+        {
+            for (size_t ki = 0; ki < track.keyframes.size(); ++ki)
+            {
+                const float laneTop = rulerFrac + static_cast<float>(rowIndex) * laneFrac;
+                const float laneBot = laneTop + laneFrac;
+
+                WidgetElement spacer{};
+                spacer.id = "WE.TL.LaneKF." + std::to_string(ti) + "." + std::to_string(ki);
+                spacer.type = WidgetElementType::Panel;
+                spacer.from = Vec2{ 0.0f, laneTop };
+                spacer.to = Vec2{ 1.0f, laneBot };
+                spacer.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                spacer.hitTestMode = HitTestMode::DisabledAll;
+                spacer.runtimeOnly = true;
+                container.children.push_back(std::move(spacer));
+
+                // Show a small diamond marker at the keyframe time on this detail row too
+                const auto& kf = anim->tracks[ti].keyframes[ki];
+                const float timeFrac = std::clamp(kf.time / duration, 0.0f, 1.0f);
+                const float halfDia = 0.004f;
+
+                WidgetElement kfMark{};
+                kfMark.id = "WE.TL.DiaKF." + std::to_string(ti) + "." + std::to_string(ki);
+                kfMark.type = WidgetElementType::Panel;
+                kfMark.from = Vec2{ std::max(0.0f, timeFrac - halfDia), laneTop + laneFrac * 0.25f };
+                kfMark.to = Vec2{ std::min(1.0f, timeFrac + halfDia), laneBot - laneFrac * 0.25f };
+                kfMark.style.color = Vec4{ 0.7f, 0.55f, 0.1f, 0.8f };
+                kfMark.hitTestMode = HitTestMode::DisabledAll;
+                kfMark.runtimeOnly = true;
+                container.children.push_back(std::move(kfMark));
+
+                ++rowIndex;
+            }
+
+            // + Keyframe row spacer
+            {
+                const float laneTop = rulerFrac + static_cast<float>(rowIndex) * laneFrac;
+                const float laneBot = laneTop + laneFrac;
+
+                WidgetElement spacer{};
+                spacer.id = "WE.TL.LaneAddKF." + std::to_string(ti);
+                spacer.type = WidgetElementType::Panel;
+                spacer.from = Vec2{ 0.0f, laneTop };
+                spacer.to = Vec2{ 1.0f, laneBot };
+                spacer.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                spacer.hitTestMode = HitTestMode::DisabledAll;
+                spacer.runtimeOnly = true;
+                container.children.push_back(std::move(spacer));
+                ++rowIndex;
+            }
+        }
+    }
+
+    // ── Scrubber indicator (orange line) ─────────────────────────────────
+    {
+        const float scrubFrac = (duration > 0.0f) ? std::clamp(edState.timelineScrubTime / duration, 0.0f, 1.0f) : 0.0f;
+
+        WidgetElement scrubber{};
+        scrubber.id = "WE.TL.Scrubber";
+        scrubber.type = WidgetElementType::Panel;
+        scrubber.from = Vec2{ scrubFrac, 0.0f };
+        scrubber.to = Vec2{ scrubFrac + 0.003f, 1.0f };
+        scrubber.style.color = Vec4{ 1.0f, 0.6f, 0.1f, 0.9f };
+        scrubber.hitTestMode = HitTestMode::DisabledAll;
+        scrubber.runtimeOnly = true;
+        container.children.push_back(std::move(scrubber));
+    }
+
+    // ── End-of-animation line (red) ──────────────────────────────────────
+    {
+        WidgetElement endLine{};
+        endLine.id = "WE.TL.EndLine";
+        endLine.type = WidgetElementType::Panel;
+        endLine.from = Vec2{ 1.0f - 0.003f, 0.0f };
+        endLine.to = Vec2{ 1.0f, 1.0f };
+        endLine.style.color = Vec4{ 0.9f, 0.2f, 0.2f, 0.8f };
+        endLine.hitTestMode = HitTestMode::DisabledAll;
+        endLine.runtimeOnly = true;
+        container.children.push_back(std::move(endLine));
+    }
+}
+
+void UIManager::handleTimelineMouseDown(const std::string& tabId, const Vec2& localPos, float trackAreaWidth)
+{
+    auto stateIt = m_widgetEditorStates.find(tabId);
+    if (stateIt == m_widgetEditorStates.end() || !stateIt->second.editedWidget)
+        return;
+
+    auto& edState = stateIt->second;
+    const auto* anim = edState.editedWidget->findAnimationByName(edState.selectedAnimationName);
+    if (!anim || trackAreaWidth <= 0.0f)
+        return;
+
+    float duration = std::max(0.1f, anim->duration);
+    float timeFrac = std::clamp(localPos.x / trackAreaWidth, 0.0f, 1.0f);
+    edState.timelineScrubTime = timeFrac * duration;
+    edState.isDraggingScrubber = true;
+
+    // Apply the animation at the scrub time for preview
+    edState.editedWidget->applyAnimationAtTime(edState.selectedAnimationName, edState.timelineScrubTime);
+    edState.previewDirty = true;
+    refreshWidgetEditorTimeline(tabId);
+}
+
+void UIManager::handleTimelineMouseMove(const std::string& tabId, const Vec2& localPos, float trackAreaWidth)
+{
+    auto stateIt = m_widgetEditorStates.find(tabId);
+    if (stateIt == m_widgetEditorStates.end() || !stateIt->second.editedWidget)
+        return;
+
+    auto& edState = stateIt->second;
+    if (!edState.isDraggingScrubber)
+        return;
+
+    const auto* anim = edState.editedWidget->findAnimationByName(edState.selectedAnimationName);
+    if (!anim || trackAreaWidth <= 0.0f)
+        return;
+
+    float duration = std::max(0.1f, anim->duration);
+    float timeFrac = std::clamp(localPos.x / trackAreaWidth, 0.0f, 1.0f);
+    edState.timelineScrubTime = timeFrac * duration;
+
+    edState.editedWidget->applyAnimationAtTime(edState.selectedAnimationName, edState.timelineScrubTime);
+    edState.previewDirty = true;
+    refreshWidgetEditorTimeline(tabId);
+}
+
+void UIManager::handleTimelineMouseUp(const std::string& tabId)
+{
+    auto stateIt = m_widgetEditorStates.find(tabId);
+    if (stateIt == m_widgetEditorStates.end())
+        return;
+
+    stateIt->second.isDraggingScrubber = false;
+    stateIt->second.isDraggingEndLine = false;
+    stateIt->second.draggingKeyframeTrack = -1;
+    stateIt->second.draggingKeyframeIndex = -1;
 }
 
 // ===========================================================================
@@ -10560,7 +11421,7 @@ void UIManager::openUIDesignerTab()
 
     // --- Top toolbar: widget selector + new / delete buttons ---
     {
-        auto toolbarWidget = std::make_shared<Widget>();
+        auto toolbarWidget = std::make_shared<EditorWidget>();
         toolbarWidget->setName(toolbarWidgetId);
         toolbarWidget->setAnchor(WidgetAnchor::TopLeft);
         toolbarWidget->setFillX(true);
@@ -10585,11 +11446,11 @@ void UIManager::openUIDesignerTab()
             btn.id            = "UIDesigner.Toolbar.NewWidget";
             btn.type          = WidgetElementType::Button;
             btn.text          = "+ Widget";
-            btn.font          = "default.ttf";
-            btn.fontSize      = 13.0f;
-            btn.style.textColor     = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
-            btn.style.color         = Vec4{ 0.22f, 0.24f, 0.30f, 1.0f };
-            btn.style.hoverColor    = Vec4{ 0.30f, 0.34f, 0.42f, 1.0f };
+            btn.font          = EditorTheme::Get().fontDefault;
+            btn.fontSize      = EditorTheme::Get().fontSizeBody;
+            btn.style.textColor     = EditorTheme::Get().textPrimary;
+            btn.style.color         = EditorTheme::Get().buttonDefault;
+            btn.style.hoverColor    = EditorTheme::Get().buttonHover;
             btn.textAlignH    = TextAlignH::Center;
             btn.textAlignV    = TextAlignV::Center;
             btn.minSize       = Vec2{ 80.0f, 24.0f };
@@ -10606,11 +11467,11 @@ void UIManager::openUIDesignerTab()
             btn.id            = "UIDesigner.Toolbar.DeleteWidget";
             btn.type          = WidgetElementType::Button;
             btn.text          = "- Widget";
-            btn.font          = "default.ttf";
-            btn.fontSize      = 13.0f;
-            btn.style.textColor     = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
-            btn.style.color         = Vec4{ 0.22f, 0.24f, 0.30f, 1.0f };
-            btn.style.hoverColor    = Vec4{ 0.50f, 0.25f, 0.25f, 1.0f };
+            btn.font          = EditorTheme::Get().fontDefault;
+            btn.fontSize      = EditorTheme::Get().fontSizeBody;
+            btn.style.textColor     = EditorTheme::Get().textPrimary;
+            btn.style.color         = EditorTheme::Get().buttonDefault;
+            btn.style.hoverColor    = EditorTheme::Get().buttonDangerHover;
             btn.textAlignH    = TextAlignH::Center;
             btn.textAlignV    = TextAlignV::Center;
             btn.minSize       = Vec2{ 80.0f, 24.0f };
@@ -10638,9 +11499,9 @@ void UIManager::openUIDesignerTab()
             lbl.id          = "UIDesigner.Toolbar.Status";
             lbl.type        = WidgetElementType::Text;
             lbl.text        = "";
-            lbl.font        = "default.ttf";
-            lbl.fontSize    = 12.0f;
-            lbl.style.textColor   = Vec4{ 0.65f, 0.68f, 0.75f, 1.0f };
+            lbl.font        = EditorTheme::Get().fontDefault;
+            lbl.fontSize    = EditorTheme::Get().fontSizeSmall;
+            lbl.style.textColor   = EditorTheme::Get().textMuted;
             lbl.textAlignH  = TextAlignH::Right;
             lbl.textAlignV  = TextAlignV::Center;
             lbl.minSize     = Vec2{ 0.0f, 24.0f };
@@ -10682,7 +11543,7 @@ void UIManager::openUIDesignerTab()
 
     // --- Left panel: control palette + hierarchy ---
     {
-        auto leftWidget = std::make_shared<Widget>();
+        auto leftWidget = std::make_shared<EditorWidget>();
         leftWidget->setName(leftWidgetId);
         leftWidget->setAnchor(WidgetAnchor::TopLeft);
         leftWidget->setFillY(true);
@@ -10719,9 +11580,9 @@ void UIManager::openUIDesignerTab()
                 title.id         = "UIDesigner.Left.Title";
                 title.type       = WidgetElementType::Text;
                 title.text       = "Controls";
-                title.font       = "default.ttf";
-                title.fontSize   = 16.0f;
-                title.style.textColor  = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+                title.font       = EditorTheme::Get().fontDefault;
+                title.fontSize   = EditorTheme::Get().fontSizeHeading;
+                title.style.textColor  = EditorTheme::Get().textPrimary;
                 title.textAlignH = TextAlignH::Left;
                 title.textAlignV = TextAlignV::Center;
                 title.fillX      = true;
@@ -10742,11 +11603,11 @@ void UIManager::openUIDesignerTab()
                 item.id            = "UIDesigner.Left.Control." + std::to_string(i);
                 item.type          = WidgetElementType::Button;
                 item.text          = "  " + controls[i];
-                item.font          = "default.ttf";
-                item.fontSize      = 14.0f;
-                item.style.textColor     = Vec4{ 0.78f, 0.80f, 0.85f, 1.0f };
-                item.style.color         = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-                item.style.hoverColor    = Vec4{ 0.18f, 0.20f, 0.28f, 0.8f };
+                item.font          = EditorTheme::Get().fontDefault;
+                item.fontSize      = EditorTheme::Get().fontSizeSubheading;
+                item.style.textColor     = EditorTheme::Get().textSecondary;
+                item.style.color         = EditorTheme::Get().transparent;
+                item.style.hoverColor    = EditorTheme::Get().buttonSubtleHover;
                 item.textAlignH    = TextAlignH::Left;
                 item.textAlignV    = TextAlignV::Center;
                 item.fillX         = true;
@@ -10797,9 +11658,9 @@ void UIManager::openUIDesignerTab()
                 treeTitle.id         = "UIDesigner.Left.TreeTitle";
                 treeTitle.type       = WidgetElementType::Text;
                 treeTitle.text       = "Hierarchy";
-                treeTitle.font       = "default.ttf";
-                treeTitle.fontSize   = 16.0f;
-                treeTitle.style.textColor  = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+                treeTitle.font       = EditorTheme::Get().fontDefault;
+                treeTitle.fontSize   = EditorTheme::Get().fontSizeHeading;
+                treeTitle.style.textColor  = EditorTheme::Get().textPrimary;
                 treeTitle.textAlignH = TextAlignH::Left;
                 treeTitle.textAlignV = TextAlignV::Center;
                 treeTitle.fillX      = true;
@@ -10830,7 +11691,7 @@ void UIManager::openUIDesignerTab()
 
     // --- Right panel: element details (populated by refreshUIDesignerDetails) ---
     {
-        auto rightWidget = std::make_shared<Widget>();
+        auto rightWidget = std::make_shared<EditorWidget>();
         rightWidget->setName(rightWidgetId);
         rightWidget->setAnchor(WidgetAnchor::TopRight);
         rightWidget->setFillY(true);
@@ -10855,9 +11716,9 @@ void UIManager::openUIDesignerTab()
             title.id         = "UIDesigner.Right.Title";
             title.type       = WidgetElementType::Text;
             title.text       = "Properties";
-            title.font       = "default.ttf";
-            title.fontSize   = 16.0f;
-            title.style.textColor  = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
+            title.font       = EditorTheme::Get().fontDefault;
+            title.fontSize   = EditorTheme::Get().fontSizeHeading;
+            title.style.textColor  = EditorTheme::Get().textPrimary;
             title.textAlignH = TextAlignH::Left;
             title.textAlignV = TextAlignV::Center;
             title.fillX      = true;
@@ -10872,9 +11733,9 @@ void UIManager::openUIDesignerTab()
             hint.id         = "UIDesigner.Right.Hint";
             hint.type       = WidgetElementType::Text;
             hint.text       = "Select an element in the hierarchy\nto see its properties.";
-            hint.font       = "default.ttf";
-            hint.fontSize   = 13.0f;
-            hint.style.textColor  = Vec4{ 0.62f, 0.66f, 0.75f, 1.0f };
+            hint.font       = EditorTheme::Get().fontDefault;
+            hint.fontSize   = EditorTheme::Get().fontSizeBody;
+            hint.style.textColor  = EditorTheme::Get().textMuted;
             hint.textAlignH = TextAlignH::Left;
             hint.textAlignV = TextAlignV::Center;
             hint.fillX      = true;
@@ -11361,27 +12222,27 @@ void UIManager::refreshUIDesignerHierarchy()
             row.id   = "UIDesigner.HRow." + std::to_string(lineIndex);
             row.type = WidgetElementType::Button;
             row.text = (isWidgetSelected ? "v " : "> ") + widgetEntry.name;
-            row.font     = "default.ttf";
-            row.fontSize = 13.0f;
+            row.font     = EditorTheme::Get().fontDefault;
+            row.fontSize = EditorTheme::Get().fontSizeBody;
             row.textAlignH    = TextAlignH::Left;
             row.textAlignV    = TextAlignV::Center;
             row.fillX         = true;
-            row.minSize       = Vec2{ 0.0f, 22.0f };
+            row.minSize       = Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall };
             row.padding       = Vec2{ 4.0f, 1.0f };
             row.hitTestMode = HitTestMode::Enabled;
             row.runtimeOnly   = true;
 
             if (isWidgetSelected && selectedElement.empty())
             {
-                row.style.color     = Vec4{ 0.20f, 0.30f, 0.55f, 0.9f };
-                row.style.hoverColor = Vec4{ 0.25f, 0.35f, 0.60f, 1.0f };
-                row.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+                row.style.color     = EditorTheme::Get().selectionHighlight;
+                row.style.hoverColor = EditorTheme::Get().selectionHighlightHover;
+                row.style.textColor = EditorTheme::Get().textPrimary;
             }
             else
             {
                 row.style.color     = Vec4{ 0.14f, 0.15f, 0.20f, 0.6f };
-                row.style.hoverColor = Vec4{ 0.20f, 0.22f, 0.30f, 0.8f };
-                row.style.textColor = Vec4{ 0.90f, 0.90f, 0.95f, 1.0f };
+                row.style.hoverColor = EditorTheme::Get().buttonSubtleHover;
+                row.style.textColor = EditorTheme::Get().textPrimary;
             }
 
             const std::string capturedName = widgetEntry.name;
@@ -11414,27 +12275,27 @@ void UIManager::refreshUIDesignerHierarchy()
                     row.id   = "UIDesigner.HRow." + std::to_string(lineIndex);
                     row.type = WidgetElementType::Button;
                     row.text = label;
-                    row.font     = "default.ttf";
-                    row.fontSize = 11.0f;
+                    row.font     = EditorTheme::Get().fontDefault;
+                    row.fontSize = EditorTheme::Get().fontSizeSmall;
                     row.textAlignH    = TextAlignH::Left;
                     row.textAlignV    = TextAlignV::Center;
                     row.fillX         = true;
-                    row.minSize       = Vec2{ 0.0f, 20.0f };
+                    row.minSize       = Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall };
                     row.padding       = Vec2{ 4.0f, 1.0f };
                     row.hitTestMode = HitTestMode::Enabled;
                     row.runtimeOnly   = true;
 
                     if (isElementSelected)
                     {
-                        row.style.color     = Vec4{ 0.20f, 0.30f, 0.55f, 0.9f };
-                        row.style.hoverColor = Vec4{ 0.25f, 0.35f, 0.60f, 1.0f };
-                        row.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+                        row.style.color     = EditorTheme::Get().selectionHighlight;
+                        row.style.hoverColor = EditorTheme::Get().selectionHighlightHover;
+                        row.style.textColor = EditorTheme::Get().textPrimary;
                     }
                     else
                     {
-                        row.style.color     = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-                        row.style.hoverColor = Vec4{ 0.18f, 0.20f, 0.28f, 0.8f };
-                        row.style.textColor = Vec4{ 0.75f, 0.78f, 0.84f, 1.0f };
+                        row.style.color     = EditorTheme::Get().transparent;
+                        row.style.hoverColor = EditorTheme::Get().buttonSubtleHover;
+                        row.style.textColor = EditorTheme::Get().textSecondary;
                     }
 
                     const std::string capturedWidgetName = widgetEntry.name;
@@ -11473,20 +12334,21 @@ void UIManager::refreshUIDesignerDetails()
 
     m_lastHoveredElement = nullptr;
 
-    const auto makeLabel = [](const std::string& id, const std::string& text, float fontSize = 12.0f,
-        const Vec4& color = Vec4{ 0.78f, 0.80f, 0.85f, 1.0f }, float minH = 20.0f) -> WidgetElement
+    const auto makeLabel = [](const std::string& id, const std::string& text, float fontSize = 0.0f,
+        const Vec4& color = Vec4{ -1.0f, 0.0f, 0.0f, 0.0f }, float minH = 0.0f) -> WidgetElement
     {
+        auto& t = EditorTheme::Get();
         WidgetElement lbl{};
         lbl.id         = id;
         lbl.type       = WidgetElementType::Text;
         lbl.text       = text;
-        lbl.font       = "default.ttf";
-        lbl.fontSize   = fontSize;
-        lbl.style.textColor  = color;
+        lbl.font       = t.fontDefault;
+        lbl.fontSize   = (fontSize > 0.0f) ? fontSize : t.fontSizeSmall;
+        lbl.style.textColor  = (color.x >= 0.0f) ? color : t.textSecondary;
         lbl.textAlignH = TextAlignH::Left;
         lbl.textAlignV = TextAlignV::Center;
         lbl.fillX      = true;
-        lbl.minSize    = Vec2{ 0.0f, minH };
+        lbl.minSize    = Vec2{ 0.0f, (minH > 0.0f) ? minH : t.rowHeightSmall };
         lbl.runtimeOnly = true;
         return lbl;
     };
@@ -11599,9 +12461,9 @@ void UIManager::refreshUIDesignerDetails()
 
         EntryBarWidget entry;
         entry.setValue(value);
-        entry.setFont("default.ttf");
-        entry.setFontSize(12.0f);
-        entry.setMinSize(Vec2{ 0.0f, 22.0f });
+        entry.setFont(EditorTheme::Get().fontDefault);
+        entry.setFontSize(EditorTheme::Get().fontSizeSmall);
+        entry.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
         entry.setPadding(Vec2{ 4.0f, 2.0f });
         entry.setOnValueChanged(onChange);
 
@@ -11666,13 +12528,13 @@ void UIManager::refreshUIDesignerDetails()
             anchorDd.setItems({ "TopLeft", "TopRight", "BottomLeft", "BottomRight",
                                 "Top", "Bottom", "Left", "Right", "Center", "Stretch" });
             anchorDd.setSelectedIndex(anchorIdx);
-            anchorDd.setFont("default.ttf");
-            anchorDd.setFontSize(12.0f);
-            anchorDd.setMinSize(Vec2{ 0.0f, 22.0f });
+            anchorDd.setFont(EditorTheme::Get().fontDefault);
+            anchorDd.setFontSize(EditorTheme::Get().fontSizeSmall);
+            anchorDd.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
             anchorDd.setPadding(Vec2{ 4.0f, 2.0f });
-            anchorDd.setBackgroundColor(Vec4{ 0.16f, 0.16f, 0.20f, 1.0f });
-            anchorDd.setHoverColor(Vec4{ 0.22f, 0.22f, 0.27f, 1.0f });
-            anchorDd.setTextColor(Vec4{ 0.92f, 0.92f, 0.95f, 1.0f });
+            anchorDd.setBackgroundColor(EditorTheme::Get().inputBackground);
+            anchorDd.setHoverColor(EditorTheme::Get().inputBackgroundHover);
+            anchorDd.setTextColor(EditorTheme::Get().inputText);
             anchorDd.setOnSelectionChanged([sel, applyChange](int idx) {
                 sel->anchor = static_cast<WidgetAnchor>(idx);
                 applyChange();
@@ -11858,11 +12720,11 @@ void UIManager::refreshUIDesignerDetails()
         delBtn.id            = "UID.Delete";
         delBtn.type          = WidgetElementType::Button;
         delBtn.text          = "Delete Element";
-        delBtn.font          = "default.ttf";
-        delBtn.fontSize      = 13.0f;
-        delBtn.style.textColor     = Vec4{ 1.0f, 0.85f, 0.85f, 1.0f };
-        delBtn.style.color         = Vec4{ 0.45f, 0.18f, 0.18f, 1.0f };
-        delBtn.style.hoverColor    = Vec4{ 0.60f, 0.22f, 0.22f, 1.0f };
+        delBtn.font          = EditorTheme::Get().fontDefault;
+        delBtn.fontSize      = EditorTheme::Get().fontSizeBody;
+        delBtn.style.textColor     = EditorTheme::Get().buttonDangerText;
+        delBtn.style.color         = EditorTheme::Get().buttonDanger;
+        delBtn.style.hoverColor    = EditorTheme::Get().buttonDangerHover;
         delBtn.textAlignH    = TextAlignH::Center;
         delBtn.textAlignV    = TextAlignV::Center;
         delBtn.fillX         = true;

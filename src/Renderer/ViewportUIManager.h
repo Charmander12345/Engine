@@ -8,8 +8,12 @@
 
 #include "../Core/MathTypes.h"
 #include "UIWidget.h"
+#include "GameplayUI/GameplayWidget.h"
+#include "ViewportUITheme.h"
 #include "../AssetManager/json.hpp"
 
+/// Manages gameplay / viewport UI widgets (GameplayWidget).
+/// Fully customisable at runtime by game developers via Python scripting.
 class ViewportUIManager
 {
 public:
@@ -18,6 +22,10 @@ public:
     ViewportUIManager();
     ~ViewportUIManager();
 
+    /// Access the viewport UI theme (customisable by game developers at runtime).
+    ViewportUITheme& getTheme() { return m_theme; }
+    const ViewportUITheme& getTheme() const { return m_theme; }
+
     void setViewportRect(float x, float y, float width, float height);
     Vec4 getViewportRect() const;
     Vec2 getViewportSize() const;
@@ -25,15 +33,15 @@ public:
     // --- Multi-widget management ---
     bool createWidget(const std::string& name, int zOrder = 0);
     bool removeWidget(const std::string& name);
-    Widget* getWidget(const std::string& name);
-    const Widget* getWidget(const std::string& name) const;
+    GameplayWidget* getWidget(const std::string& name);
+    const GameplayWidget* getWidget(const std::string& name) const;
     void clearAllWidgets();
     bool hasWidgets() const;
 
     struct WidgetEntry
     {
         std::string name;
-        std::shared_ptr<Widget> widget;
+        std::shared_ptr<GameplayWidget> widget;
     };
     const std::vector<WidgetEntry>& getSortedWidgets() const;
 
@@ -107,6 +115,7 @@ private:
     void activateFocusedElement();
 
 private:
+    ViewportUITheme m_theme;
     Vec4 m_viewportRect{};
     std::vector<WidgetEntry> m_widgets;
     bool m_widgetOrderDirty{ false };

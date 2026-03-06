@@ -12,6 +12,7 @@
 #include "../AssetManager/AssetTypes.h"
 #include "../Diagnostics/DiagnosticsManager.h"
 #include "UIWidget.h"
+#include "EditorUI/EditorWidget.h"
 
 class EngineLevel;
 class Renderer;
@@ -21,18 +22,18 @@ class ViewportUIManager;
 class UIManager
 {
 public:
-    struct UIEntry
-    {
-        std::string id;
-    };
+	struct UIEntry
+	{
+		std::string id;
+	};
 
-    struct WidgetEntry
-    {
-        std::string id;
-        std::shared_ptr<Widget> widget;
-        uint64_t runtimeId{ 0 };
-        std::string tabId;  // empty = global (always visible), non-empty = only visible when this tab is active
-    };
+	struct WidgetEntry
+	{
+		std::string id;
+		std::shared_ptr<EditorWidget> widget;
+		uint64_t runtimeId{ 0 };
+		std::string tabId;  // empty = global (always visible), non-empty = only visible when this tab is active
+	};
 
     UIManager();
     ~UIManager();
@@ -46,12 +47,15 @@ public:
     void registerUI(const std::string& id);
     const std::vector<UIEntry>& getRegisteredUI() const;
 
-    void registerWidget(const std::string& id, const std::shared_ptr<Widget>& widget);
-    void registerWidget(const std::string& id, const std::shared_ptr<Widget>& widget, const std::string& tabId);
-    const std::vector<WidgetEntry>& getRegisteredWidgets() const;
-    const std::vector<const WidgetEntry*>& getWidgetsOrderedByZ() const;
-    void unregisterWidget(const std::string& id);
-    WidgetElement* findElementById(const std::string& elementId);
+	void registerWidget(const std::string& id, const std::shared_ptr<EditorWidget>& widget);
+	void registerWidget(const std::string& id, const std::shared_ptr<EditorWidget>& widget, const std::string& tabId);
+	// Transition overload: accept gameplay Widget and convert to EditorWidget internally
+	void registerWidget(const std::string& id, const std::shared_ptr<Widget>& widget);
+	void registerWidget(const std::string& id, const std::shared_ptr<Widget>& widget, const std::string& tabId);
+	const std::vector<WidgetEntry>& getRegisteredWidgets() const;
+	const std::vector<const WidgetEntry*>& getWidgetsOrderedByZ() const;
+	void unregisterWidget(const std::string& id);
+	WidgetElement* findElementById(const std::string& elementId);
 
     void setActiveTabId(const std::string& tabId);
     const std::string& getActiveTabId() const;
@@ -113,14 +117,14 @@ private:
     WidgetEntry* findWidgetEntry(const std::string& id);
     const WidgetEntry* findWidgetEntry(const std::string& id) const;
     WidgetElement* hitTest(const Vec2& screenPos, bool logDetails = false) const;
-    void populateOutlinerWidget(const std::shared_ptr<Widget>& widget);
-    void populateOutlinerDetails(unsigned int entity);
-    void populateContentBrowserWidget(const std::shared_ptr<Widget>& widget);
+	void populateOutlinerWidget(const std::shared_ptr<EditorWidget>& widget);
+	void populateOutlinerDetails(unsigned int entity);
+	void populateContentBrowserWidget(const std::shared_ptr<EditorWidget>& widget);
     void applyAssetToEntity(AssetType type, const std::string& assetPath, unsigned int entity);
     void updateHoverStates();
     void setFocusedEntry(WidgetElement* element);
     void ensureModalWidget();
-    std::shared_ptr<Widget> createToastWidget(const std::string& message, const std::string& name) const;
+	std::shared_ptr<EditorWidget> createToastWidget(const std::string& message, const std::string& name) const;
     void updateToastStackLayout();
 
     Renderer* m_renderer{ nullptr };
@@ -142,7 +146,7 @@ private:
     bool m_renderDirty{ true };
     std::string m_activeTabId{ "Viewport" };
 
-    std::shared_ptr<Widget> m_modalWidget;
+	std::shared_ptr<EditorWidget> m_modalWidget;
     std::string m_modalMessage;
     bool m_modalVisible{ false };
     std::function<void()> m_modalOnClosed;
@@ -152,23 +156,23 @@ private:
         std::string message;
         std::function<void()> onClosed;
     };
-    struct ToastNotification
-    {
-        std::string id;
-        std::shared_ptr<Widget> widget;
-        float timer{ 0.0f };
-        float duration{ 0.0f };
-    };
+	struct ToastNotification
+	{
+		std::string id;
+		std::shared_ptr<EditorWidget> widget;
+		float timer{ 0.0f };
+		float duration{ 0.0f };
+	};
     std::vector<ModalRequest> m_modalQueue;
     std::vector<ToastNotification> m_toasts;
     uint64_t m_nextToastId{ 1 };
 
     // Dropdown menu state
-    std::shared_ptr<Widget> m_dropdownWidget;
+	std::shared_ptr<EditorWidget> m_dropdownWidget;
     bool m_dropdownVisible{ false };
     std::string m_dropdownSourceId;  // id of the DropdownButton that opened the menu
 
-	void bindClickEventsForWidget(const std::shared_ptr<Widget>& widget);
+	void bindClickEventsForWidget(const std::shared_ptr<EditorWidget>& widget);
 	void bindClickEventsForElement(WidgetElement& element);
 	EngineLevel* m_outlinerLevel{ nullptr };
 	size_t m_levelChangedCallbackToken{ 0 };
@@ -191,7 +195,7 @@ private:
 	WidgetElement* m_lastHoveredElement{ nullptr };
 
 	// Save progress modal state
-	std::shared_ptr<Widget> m_saveProgressWidget;
+	std::shared_ptr<EditorWidget> m_saveProgressWidget;
 	bool m_saveProgressVisible{ false };
 	size_t m_saveProgressTotal{ 0 };
 	size_t m_saveProgressSaved{ 0 };

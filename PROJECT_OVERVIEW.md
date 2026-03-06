@@ -86,6 +86,10 @@
 - `UIWidget` (WidgetElementStyle-Refactoring): 14 visuelle Felder (`color`, `hoverColor`, `pressedColor`, `disabledColor`, `textColor`, `textHoverColor`, `textPressedColor`, `fillColor`, `opacity`, `borderThickness`, `borderRadius`, `isVisible`, `isBold`, `isItalic`) aus `WidgetElement` in neues Sub-Struct `WidgetElementStyle style` konsolidiert. Zugriff einheitlich über `element.style.*`. Alle Renderer-, Layout-, Editor- und Scripting-Pfade migriert. JSON-Serialisierung rückwärtskompatibel.
 - `UIWidget` (Bugfix): Fehlende Implementierungen für `Widget`-Konstruktor, `animationPlayer()`, `findAnimationByName()`, `applyAnimationTrackValue()`, `applyAnimationAtTime()` und alle `WidgetAnimationPlayer`-Methoden in `UIWidget.cpp` ergänzt.
 - `engine.pyi`: `WidgetElementStyle`-Struct-Dokumentation mit allen 14 Feldern und `element.style.*`-Zugriffsmuster hinzugefügt.
+- `UIManager` (Widget Editor): Timeline-Keyframe-Visualisierung überarbeitet – `buildTimelineRulerAndKeyframes` nutzt jetzt flache Panel-basierte Struktur (alle Elemente als direkte Kinder des Containers mit from/to-Positionierung) statt verschachtelter StackPanel→Panel→Text-Hierarchie. Keyframe-Marker als gold-farbene Panel-Blöcke auf den Track-Lanes, Ruler-Ticks als Text, Scrubber/End-Linie als Overlays.
+- `UIManager` (Widget Editor): Editierbare Keyframes in `buildTimelineTrackRows` – expandierte Keyframe-Zeilen verwenden EntryBar-Elemente für Time- und Value-Felder (inline editierbar, `onValueChanged`-Callbacks aktualisieren `AnimationKeyframe::time`/`value.x`). Zusätzlich ×-Delete-Button pro Keyframe-Zeile.
+- `Editor Theme System`: Zentralisiertes Theme-System für einheitliches Editor-Design. `EditorTheme.h` (Singleton, ~60 Vec4-Farben, 6 Schriftgrößen, 7 Spacing-Werte für alle Editor-UI-Bereiche). `EditorUIBuilder.h/.cpp` (17+ statische Factory-Methoden: makeLabel, makeButton, makePrimaryButton, makeDangerButton, makeEntryBar, makeCheckBox, makeDropDown, makeFloatRow, makeVec3Row etc.). `ViewportUITheme.h` (separate, anpassbare Runtime-Theme-Klasse für Viewport/Gameplay-UI mit halbtransparenten Defaults). Systematischer Ersatz aller hardcoded Farben/Fonts in `UIManager.cpp` (~13.000 Zeilen): Outliner, Details-Panel, Modals, Toasts, Content Browser, Dropdowns, Projekt-Screen, Widget Editor (Controls, Hierarchy, Details, Toolbar, Timeline inkl. Tracks/Keyframes/Ruler), UIDesigner (Toolbar, Controls, Hierarchy, Properties). `OpenGLRenderer.cpp`: Mesh-Viewer (Titel, Pfad, Stats, Transform/Material-Header, Float-Rows, Material-Pfad) und Tab-Bar auf EditorTheme umgestellt. `ViewportUIManager.h` erweitert um `ViewportUITheme m_theme` Member mit `getTheme()`-Accessors.
+- `EditorWidget / GameplayWidget Trennung`: Architektonische Aufspaltung des UI-Systems in Editor-Widgets (`EditorWidget`, `src/Renderer/EditorUI/EditorWidget.h`) und Gameplay-Widgets (`GameplayWidget = Widget`, `src/Renderer/GameplayUI/GameplayWidget.h`). Editor-Widgets sind schlank (kein EngineObject, kein JSON, keine Animationen), Gameplay-Widgets behalten volles Feature-Set. `UIManager` nutzt `EditorWidget`, `ViewportUIManager` nutzt `GameplayWidget`. Übergangsüberladungen in `registerWidget` konvertieren bestehende Widget-Instanzen via `EditorWidget::fromWidget()`.
 
 ## Inhaltsverzeichnis
 
@@ -117,6 +121,8 @@
     - 10.1 [UIManager](#101-uimanager)
     - 10.2 [Widget & WidgetElement](#102-widget--widgetelement)
     - 10.3 [UIWidgets (Einzelne Controls)](#103-uiwidgets-einzelne-controls)
+    - 10.4 [Editor Theme System](#104-editor-theme-system)
+    - 10.5 [EditorWidget / GameplayWidget Trennung](#105-editorwidget--gameplaywidget-trennung)
 11. [Scripting (Python)](#11-scripting-python)
     - 11.1 [Initialisierung](#111-initialisierung)
     - 11.2 [Script-API (engine-Modul)](#112-script-api-engine-modul)
@@ -192,6 +198,13 @@ Engine/
 │   │   ├── UIManager.h/.cpp        # Kompletter UI-Manager (nutzt nur Renderer*, kein OpenGL)
 │   │   ├── UIWidget.h/.cpp         # Widget + WidgetElement Datenmodell
 │   │   ├── ViewportUIManager.h/.cpp # Viewport-UI-Manager (Runtime-UI, unabhängig vom Editor-UI)
+│   │   ├── EditorTheme.h           # Zentrales Editor-Theme (Singleton, Farben/Fonts/Spacing)
+│   │   ├── EditorUIBuilder.h/.cpp  # Statische Factory-Methoden für theme-basierte UI-Elemente
+│   │   ├── ViewportUITheme.h       # Anpassbare Runtime-Theme-Klasse für Viewport/Gameplay-UI
+│   │   ├── EditorUI/
+│   │   │   └── EditorWidget.h      # Einfache Editor-Widget-Basisklasse (kein EngineObject/JSON/Animations)
+│   │   ├── GameplayUI/
+│   │   │   └── GameplayWidget.h    # Gameplay-Widget-Alias (= Widget, volles Feature-Set)
 │   │   ├── IRenderContext.h         # Abstrakte Render-Context-Schnittstelle
 │   │   ├── IRenderTarget.h          # Abstrakte Render-Target-Schnittstelle (FBO-Abstraktion für Editor-Tabs)
 │   │   ├── SplashWindow.h          # Abstrakte Splash-Fenster-Basisklasse (6 reine virtuelle Methoden)
@@ -1174,7 +1187,39 @@ Alle Komponentenwerte sind über passende Steuerelemente direkt im Details-Panel
 ---
 
 ### 10.2 Widget & WidgetElement
-**Datei:** `src/Renderer/UIWidget.h/.cpp`
+**Dateien:** `src/Renderer/UIWidget.h/.cpp`, `src/Renderer/EditorUI/EditorWidget.h`, `src/Renderer/GameplayUI/GameplayWidget.h`
+
+Das Widget-System ist in zwei Basisklassen aufgeteilt:
+
+#### EditorWidget (einfache Editor-UI):
+**Datei:** `src/Renderer/EditorUI/EditorWidget.h`
+
+Schlanke Basisklasse für alle Editor-UI-Widgets. Kein `EngineObject`, keine JSON-Serialisierung, kein Animationssystem.
+```cpp
+class EditorWidget {
+    std::string m_name;
+    Vec2 m_sizePixels, m_positionPixels;
+    WidgetAnchor m_anchor;
+    bool m_fillX, m_fillY;
+    int m_zOrder;
+    std::vector<WidgetElement> m_elements;
+
+    // Statische Factory für Übergangskonvertierung:
+    static std::shared_ptr<EditorWidget> fromWidget(std::shared_ptr<Widget> w);
+};
+```
+- Wird vom `UIManager` für alle Editor-Panels (Outliner, Details, Content Browser, Widget Editor, Modals, Toasts, etc.) verwendet.
+- `WidgetEntry` im `UIManager` hält `shared_ptr<EditorWidget>`.
+
+#### GameplayWidget (= Widget, volles Feature-Set):
+**Datei:** `src/Renderer/GameplayUI/GameplayWidget.h`
+
+```cpp
+using GameplayWidget = Widget;  // Alias für Widget mit allen Features
+```
+- Erbt von `EngineObject`, unterstützt JSON-Serialisierung, Animationen, Focus, Drag & Drop.
+- Wird vom `ViewportUIManager` für Gameplay-/Viewport-UI verwendet.
+- `WidgetEditorState.editedWidget` bleibt `Widget` (bearbeitet Gameplay-Widgets im Editor).
 
 #### Widget (erbt von EngineObject):
 ```cpp
@@ -1371,6 +1416,57 @@ Jedes Widget ist als eigene Klasse implementiert (gemäß Projekt-Richtlinien):
 | `RichTextWidget`     | `RichTextWidget.h`          | Formatierter Textblock mit Inline-Markup (Bold, Italic, Color) |
 | `ListViewWidget`     | `ListViewWidget.h`          | Virtualisierte scrollbare Liste mit Item-Template-Callback |
 | `TileViewWidget`     | `TileViewWidget.h`          | Grid-basierte Tile-Ansicht mit konfigurierbaren Spalten/Größen |
+
+---
+
+### 10.4 Editor Theme System
+**Dateien:** `src/Renderer/EditorTheme.h`, `src/Renderer/EditorUIBuilder.h/.cpp`, `src/Renderer/ViewportUITheme.h`
+
+Zentralisiertes Theme-System für einheitliches Editor-Design und anpassbare Viewport-UI:
+
+#### EditorTheme (Singleton)
+- **Zugriff:** `EditorTheme::Get()` — liefert statische Referenz
+- **Inhalt:** ~60 `Vec4`-Farbkonstanten (Window/Panel/Button/Text/Input/Accent/Selection/Modal/Toast/Scrollbar/TreeView/ContentBrowser/Timeline/StatusBar), 6 Schriftgrößen (`fontSizeHeading` 16px bis `fontSizeCaption` 10px), 7 Spacing-Werte (`rowHeight`, `paddingSmall/Normal/Large` etc.), Font-Name (`fontFamily = "default.ttf"`)
+- **Verwendung:** Alle Editor-UI-Elemente in `UIManager.cpp` und `OpenGLRenderer.cpp` referenzieren ausschließlich Theme-Konstanten statt hardcoded Werte
+
+#### EditorUIBuilder (Statische Factory)
+- 17+ Methoden: `makeLabel`, `makeSecondaryLabel`, `makeHeading`, `makeButton`, `makePrimaryButton`, `makeDangerButton`, `makeSubtleButton`, `makeEntryBar`, `makeCheckBox`, `makeDropDown`, `makeFloatRow`, `makeVec3Row`, `makeHorizontalRow`, `makeVerticalStack`, `makeDivider`, `makeSection`, `fmtFloat`, `sanitizeId`
+- Erzeugt fertig konfigurierte `WidgetElement`-Objekte mit Theme-Farben, Fonts und Spacing
+- Reduziert Boilerplate bei der Editor-UI-Erstellung erheblich
+
+#### ViewportUITheme (Runtime-Theme)
+- **Klasse:** `ViewportUITheme` — instanziierbar, nicht Singleton
+- **Integration:** `ViewportUIManager` hält `m_theme`-Member mit `getTheme()`-Accessors
+- **Defaults:** Halbtransparente Farben für In-Game-Overlay-Look (z.B. `panelBg {0.05, 0.05, 0.05, 0.75}`)
+- **Anpassbar:** Gameplay-Code kann Viewport-UI-Theme zur Laufzeit ändern
+
+---
+
+### 10.5 EditorWidget / GameplayWidget Trennung
+**Dateien:** `src/Renderer/EditorUI/EditorWidget.h`, `src/Renderer/GameplayUI/GameplayWidget.h`
+
+Architektonische Aufspaltung des UI-Widget-Systems in zwei separate Basisklassen für Editor- und Gameplay-UI:
+
+#### Designziel
+- **Editor-Widgets** sollen so einfach wie möglich sein: fest definiert, vom UIManager statisch platziert, einheitliches Theme, keine JSON-Serialisierung, keine Animationen.
+- **Gameplay-Widgets** behalten das volle Feature-Set: EngineObject-Vererbung, JSON-Persistenz, Animationssystem, Focus, Drag & Drop.
+
+#### EditorWidget (`src/Renderer/EditorUI/EditorWidget.h`)
+- Einfache C++-Klasse ohne `EngineObject`-Vererbung
+- Felder: `name`, `sizePixels`, `positionPixels`, `anchor` (WidgetAnchor), `fillX`/`fillY`, `absolutePosition`, `computedSize`/`computedPosition`, `layoutDirty`, `elements` (vector\<WidgetElement\>), `zOrder`
+- Statische Factory: `EditorWidget::fromWidget(shared_ptr<Widget>)` — konvertiert ein bestehendes `Widget` für Übergangskompatibilität
+- Verwendet im `UIManager` (`WidgetEntry` hält `shared_ptr<EditorWidget>`)
+
+#### GameplayWidget (`src/Renderer/GameplayUI/GameplayWidget.h`)
+- Type-Alias: `using GameplayWidget = Widget;`
+- Behält alle Features: EngineObject, JSON load/save, Animationen (`WidgetAnimationPlayer`), Focus (`FocusConfig`), Drag & Drop
+- Verwendet im `ViewportUIManager` (`WidgetEntry` hält `shared_ptr<GameplayWidget>`)
+
+#### Übergangskompatibilität
+- `UIManager::registerWidget` bietet duale Überladungen: `shared_ptr<EditorWidget>` (primär) und `shared_ptr<Widget>` (Transition, ruft `EditorWidget::fromWidget()` intern auf)
+- `main.cpp` und bestehender Code, der `Widget`-Instanzen aus JSON lädt, funktioniert weiterhin über die Transition-Überladung
+- `WidgetEditorState.editedWidget` bleibt `shared_ptr<Widget>`, da der Widget-Editor Gameplay-Widgets bearbeitet
+- Renderer (`OpenGLRenderer`) arbeitet weiterhin mit `vector<WidgetElement>&`, das beide Widget-Typen über `getElements()`/`getElementsMutable()` bereitstellen
 
 ---
 

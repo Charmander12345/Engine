@@ -261,7 +261,7 @@ bool ViewportUIManager::createWidget(const std::string& name, int zOrder)
             return false;
     }
 
-    auto widget = std::make_shared<Widget>();
+    auto widget = std::make_shared<GameplayWidget>();
     widget->setName(name);
     widget->setZOrder(zOrder);
 
@@ -298,7 +298,7 @@ bool ViewportUIManager::removeWidget(const std::string& name)
     return false;
 }
 
-Widget* ViewportUIManager::getWidget(const std::string& name)
+GameplayWidget* ViewportUIManager::getWidget(const std::string& name)
 {
     for (auto& entry : m_widgets)
     {
@@ -308,7 +308,7 @@ Widget* ViewportUIManager::getWidget(const std::string& name)
     return nullptr;
 }
 
-const Widget* ViewportUIManager::getWidget(const std::string& name) const
+const GameplayWidget* ViewportUIManager::getWidget(const std::string& name) const
 {
     for (const auto& entry : m_widgets)
     {
@@ -381,7 +381,7 @@ WidgetElement* ViewportUIManager::findElementById(const std::string& widgetName,
     if (widgetName.empty() || elementId.empty())
         return nullptr;
 
-    Widget* w = getWidget(widgetName);
+    GameplayWidget* w = getWidget(widgetName);
     if (!w)
         return nullptr;
 

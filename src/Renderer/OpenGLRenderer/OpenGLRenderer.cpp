@@ -28,6 +28,7 @@
 
 #include "../../Core/Asset.h"
 #include "../../Core/MathTypes.h"
+#include "../EditorTheme.h"
 #include "../../AssetManager/AssetManager.h"
 #include "../../Core/UndoRedoManager.h"
 #include "../Texture.h"
@@ -2592,9 +2593,9 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
         title.type = WidgetElementType::Text;
         title.id = "MeshViewer.Details.Title";
         title.text = displayName;
-        title.font = "default.ttf";
-        title.fontSize = 16.0f;
-        title.style.textColor = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+        title.font = EditorTheme::Get().fontDefault;
+        title.fontSize = EditorTheme::Get().fontSizeHeading;
+        title.style.textColor = EditorTheme::Get().textPrimary;
         title.fillX = true;
         title.minSize = Vec2{ 0.0f, 28.0f };
         title.runtimeOnly = true;
@@ -2604,9 +2605,9 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
         pathLine.type = WidgetElementType::Text;
         pathLine.id = "MeshViewer.Details.Path";
         pathLine.text = "Path: " + assetPath;
-        pathLine.font = "default.ttf";
-        pathLine.fontSize = 12.0f;
-        pathLine.style.textColor = Vec4{ 0.7f, 0.7f, 0.75f, 1.0f };
+        pathLine.font = EditorTheme::Get().fontDefault;
+        pathLine.fontSize = EditorTheme::Get().fontSizeSmall;
+        pathLine.style.textColor = EditorTheme::Get().textMuted;
         pathLine.fillX = true;
         pathLine.minSize = Vec2{ 0.0f, 20.0f };
         pathLine.runtimeOnly = true;
@@ -2617,9 +2618,9 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
         statsLine.id = "MeshViewer.Details.Stats";
         statsLine.text = "Vertices: " + std::to_string(ptr->getVertexCount())
             + "  Indices: " + std::to_string(ptr->getIndexCount());
-        statsLine.font = "default.ttf";
-        statsLine.fontSize = 12.0f;
-        statsLine.style.textColor = Vec4{ 0.7f, 0.7f, 0.75f, 1.0f };
+        statsLine.font = EditorTheme::Get().fontDefault;
+        statsLine.fontSize = EditorTheme::Get().fontSizeSmall;
+        statsLine.style.textColor = EditorTheme::Get().textMuted;
         statsLine.fillX = true;
         statsLine.minSize = Vec2{ 0.0f, 20.0f };
         statsLine.runtimeOnly = true;
@@ -2641,9 +2642,9 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             WidgetElement header{};
             header.type = WidgetElementType::Text;
             header.text = "Transform";
-            header.font = "default.ttf";
-            header.fontSize = 13.0f;
-            header.style.textColor = Vec4{ 0.85f, 0.85f, 0.9f, 1.0f };
+            header.font = EditorTheme::Get().fontDefault;
+            header.fontSize = EditorTheme::Get().fontSizeBody;
+            header.style.textColor = EditorTheme::Get().textSecondary;
             header.fillX = true;
             header.minSize = Vec2{ 0.0f, 24.0f };
             header.runtimeOnly = true;
@@ -2665,9 +2666,9 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             WidgetElement lbl{};
             lbl.type = WidgetElementType::Text;
             lbl.text = label;
-            lbl.font = "default.ttf";
-            lbl.fontSize = 12.0f;
-            lbl.style.textColor = Vec4{ 0.7f, 0.7f, 0.75f, 1.0f };
+            lbl.font = EditorTheme::Get().fontDefault;
+            lbl.fontSize = EditorTheme::Get().fontSizeSmall;
+            lbl.style.textColor = EditorTheme::Get().textMuted;
             lbl.minSize = Vec2{ 80.0f, 26.0f };
             lbl.textAlignV = TextAlignV::Center;
             lbl.runtimeOnly = true;
@@ -2682,18 +2683,18 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             {
                 entry.value.erase(entry.value.find_last_not_of('0') + 1, std::string::npos);
                 if (entry.value.back() == '.') entry.value.push_back('0');
-            }
-            entry.font = "default.ttf";
-            entry.fontSize = 12.0f;
-            entry.fillX = true;
-            entry.minSize = Vec2{ 60.0f, 24.0f };
-            entry.style.color = Vec4{ 0.1f, 0.1f, 0.13f, 1.0f };
-            entry.style.textColor = Vec4{ 0.9f, 0.9f, 0.92f, 1.0f };
-            entry.style.hoverColor = Vec4{ 0.15f, 0.15f, 0.18f, 1.0f };
-            entry.padding = Vec2{ 6.0f, 4.0f };
-            entry.hitTestMode = HitTestMode::Enabled;
-            entry.runtimeOnly = true;
-            entry.onValueChanged = std::move(onChange);
+                }
+                entry.font = EditorTheme::Get().fontDefault;
+                entry.fontSize = EditorTheme::Get().fontSizeSmall;
+                entry.fillX = true;
+                entry.minSize = Vec2{ 60.0f, EditorTheme::Get().rowHeight };
+                entry.style.color = EditorTheme::Get().inputBackground;
+                entry.style.textColor = EditorTheme::Get().inputText;
+                entry.style.hoverColor = EditorTheme::Get().inputBackgroundHover;
+                entry.padding = Vec2{ 6.0f, 4.0f };
+                entry.hitTestMode = HitTestMode::Enabled;
+                entry.runtimeOnly = true;
+                entry.onValueChanged = std::move(onChange);
             row.children.push_back(std::move(entry));
 
             root.children.push_back(std::move(row));
@@ -2776,9 +2777,9 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             WidgetElement header{};
             header.type = WidgetElementType::Text;
             header.text = "Material";
-            header.font = "default.ttf";
-            header.fontSize = 13.0f;
-            header.style.textColor = Vec4{ 0.85f, 0.85f, 0.9f, 1.0f };
+            header.font = EditorTheme::Get().fontDefault;
+            header.fontSize = EditorTheme::Get().fontSizeBody;
+            header.style.textColor = EditorTheme::Get().textSecondary;
             header.fillX = true;
             header.minSize = Vec2{ 0.0f, 24.0f };
             header.runtimeOnly = true;
@@ -2798,9 +2799,9 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             WidgetElement lbl{};
             lbl.type = WidgetElementType::Text;
             lbl.text = "Path";
-            lbl.font = "default.ttf";
-            lbl.fontSize = 12.0f;
-            lbl.style.textColor = Vec4{ 0.7f, 0.7f, 0.75f, 1.0f };
+            lbl.font = EditorTheme::Get().fontDefault;
+            lbl.fontSize = EditorTheme::Get().fontSizeSmall;
+            lbl.style.textColor = EditorTheme::Get().textMuted;
             lbl.minSize = Vec2{ 80.0f, 26.0f };
             lbl.textAlignV = TextAlignV::Center;
             lbl.runtimeOnly = true;
@@ -2810,13 +2811,13 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             entry.type = WidgetElementType::EntryBar;
             entry.id = "MeshViewer.Details.MaterialPath";
             entry.value = currentMaterialPath;
-            entry.font = "default.ttf";
-            entry.fontSize = 12.0f;
+            entry.font = EditorTheme::Get().fontDefault;
+            entry.fontSize = EditorTheme::Get().fontSizeSmall;
             entry.fillX = true;
-            entry.minSize = Vec2{ 60.0f, 24.0f };
-            entry.style.color = Vec4{ 0.1f, 0.1f, 0.13f, 1.0f };
-            entry.style.textColor = Vec4{ 0.9f, 0.9f, 0.92f, 1.0f };
-            entry.style.hoverColor = Vec4{ 0.15f, 0.15f, 0.18f, 1.0f };
+            entry.minSize = Vec2{ 60.0f, EditorTheme::Get().rowHeight };
+            entry.style.color = EditorTheme::Get().inputBackground;
+            entry.style.textColor = EditorTheme::Get().inputText;
+            entry.style.hoverColor = EditorTheme::Get().inputBackgroundHover;
             entry.padding = Vec2{ 6.0f, 4.0f };
             entry.hitTestMode = HitTestMode::Enabled;
             entry.runtimeOnly = true;
@@ -7281,14 +7282,14 @@ void OpenGLRenderer::rebuildTitleBarTabs()
         tabBtn.id = tabBtnId;
         tabBtn.clickEvent = tabBtnId;
         tabBtn.text = tab.name;
-        tabBtn.font = "default.ttf";
-        tabBtn.fontSize = 12.0f;
+        tabBtn.font = EditorTheme::Get().fontDefault;
+        tabBtn.fontSize = EditorTheme::Get().fontSizeSmall;
         tabBtn.textAlignH = TextAlignH::Center;
         tabBtn.textAlignV = TextAlignV::Center;
         tabBtn.fillY = true;
-        tabBtn.style.color = Vec4{ 0.14f, 0.14f, 0.14f, 1.0f };
-        tabBtn.style.hoverColor = Vec4{ 0.2f, 0.2f, 0.2f, 1.0f };
-        tabBtn.style.textColor = Vec4{ 0.9f, 0.9f, 0.9f, 1.0f };
+        tabBtn.style.color = EditorTheme::Get().panelBackground;
+        tabBtn.style.hoverColor = EditorTheme::Get().buttonHover;
+        tabBtn.style.textColor = EditorTheme::Get().textPrimary;
         tabBtn.minSize = Vec2{ 90.0f, 0.0f };
         tabBtn.padding = Vec2{ 6.0f, 0.0f };
         tabBtn.hitTestMode = HitTestMode::Enabled;
@@ -7303,14 +7304,14 @@ void OpenGLRenderer::rebuildTitleBarTabs()
             closeBtn.id = closeBtnId;
             closeBtn.clickEvent = closeBtnId;
             closeBtn.text = "x";
-            closeBtn.font = "default.ttf";
-            closeBtn.fontSize = 12.0f;
+            closeBtn.font = EditorTheme::Get().fontDefault;
+            closeBtn.fontSize = EditorTheme::Get().fontSizeSmall;
             closeBtn.textAlignH = TextAlignH::Center;
             closeBtn.textAlignV = TextAlignV::Center;
             closeBtn.fillY = true;
-            closeBtn.style.color = Vec4{ 0.14f, 0.14f, 0.14f, 1.0f };
-            closeBtn.style.hoverColor = Vec4{ 0.6f, 0.15f, 0.15f, 1.0f };
-            closeBtn.style.textColor = Vec4{ 0.7f, 0.7f, 0.7f, 1.0f };
+            closeBtn.style.color = EditorTheme::Get().panelBackground;
+            closeBtn.style.hoverColor = EditorTheme::Get().buttonDangerHover;
+            closeBtn.style.textColor = EditorTheme::Get().textMuted;
             closeBtn.minSize = Vec2{ 24.0f, 0.0f };
             closeBtn.padding = Vec2{ 2.0f, 0.0f };
             closeBtn.hitTestMode = HitTestMode::Enabled;

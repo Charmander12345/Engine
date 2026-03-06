@@ -542,11 +542,13 @@ public:
     void setZOrder(int zOrder);
     int getZOrder() const;
 
+    const WidgetAnimation* findAnimationByName(const std::string& animationName) const;
+    WidgetAnimation* findAnimationByNameMutable(const std::string& animationName);
+
     bool loadFromJson(const json& data);
     json toJson() const;
 
 private:
-    const WidgetAnimation* findAnimationByName(const std::string& animationName) const;
     void applyAnimationTrackValue(const AnimationTrack& track, const Vec4& value);
 
     Vec2 m_sizePixels{};

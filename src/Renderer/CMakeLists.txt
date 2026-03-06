@@ -21,6 +21,12 @@ add_library(RendererCore OBJECT
     ViewportUIManager.h
     UIWidget.cpp
     UIWidget.h
+    EditorTheme.h
+    EditorUIBuilder.h
+    EditorUIBuilder.cpp
+    ViewportUITheme.h
+    EditorUI/EditorWidget.h
+    GameplayUI/GameplayWidget.h
     UIWidgets/ButtonWidget.cpp
     UIWidgets/ButtonWidget.h
     UIWidgets/GridWidget.cpp
