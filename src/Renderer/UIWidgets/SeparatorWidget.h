@@ -5,6 +5,7 @@
 
 #include "../../Core/MathTypes.h"
 #include "../UIWidget.h"
+#include "../EditorTheme.h"
 
 class SeparatorWidget
 {
@@ -72,7 +73,7 @@ public:
         header.textAlignH = TextAlignH::Left;
         header.textAlignV = TextAlignV::Center;
         header.padding = Vec2{ 8.0f, 3.0f };
-        header.minSize = Vec2{ 0.0f, 22.0f };
+        header.minSize = Vec2{ 0.0f, EditorTheme::Scaled(22.0f) };
         header.style.color = m_headerColor;
         header.style.hoverColor = m_headerHoverColor;
         header.style.textColor = m_titleColor;

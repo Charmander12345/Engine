@@ -748,3 +748,33 @@ DiagnosticsManager::WindowState DiagnosticsManager::getWindowState() const
 {
     return m_windowState;
 }
+
+// ??? Hardware info ???????????????????????????????????????????????????????????
+
+const HardwareInfo& DiagnosticsManager::getHardwareInfo()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (!m_hardwareInfoQueried)
+    {
+        m_hardwareInfo.cpu      = queryCpuInfo();
+        m_hardwareInfo.ram      = queryRamInfo();
+        m_hardwareInfo.monitors = queryMonitorInfo();
+        m_hardwareInfoQueried   = true;
+    }
+    return m_hardwareInfo;
+}
+
+void DiagnosticsManager::setGpuInfo(const GpuInfo& gpu)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_hardwareInfo.gpu = gpu;
+}
+
+void DiagnosticsManager::refreshHardwareInfo()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_hardwareInfo.cpu      = queryCpuInfo();
+    m_hardwareInfo.ram      = queryRamInfo();
+    m_hardwareInfo.monitors = queryMonitorInfo();
+    m_hardwareInfoQueried   = true;
+}

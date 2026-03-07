@@ -1,6 +1,8 @@
 add_library(Diagnostics SHARED
     DiagnosticsManager.cpp
     DiagnosticsManager.h
+    HardwareInfo.cpp
+    HardwareInfo.h
 )
 
 set_target_properties(Diagnostics PROPERTIES

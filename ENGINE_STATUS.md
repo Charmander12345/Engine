@@ -146,6 +146,8 @@
 - ✅ `Theme Update Bugfixes`: `applyThemeToAllEditorWidgets()` erfasst jetzt auch Dropdown-Menü-, Modal-Dialog- und Save-Progress-Widgets, die zuvor beim Theme-Wechsel unberücksichtigt blieben. Popup-Fenster (`renderPopupWindows()`) verwenden `EditorTheme::Get().windowBackground` für `glClearColor` statt hardcoded Farben. Mesh-Viewer-Details-Panel-Root nutzt `EditorTheme::Get().panelBackground`. `applyPendingThemeUpdate()` wird pro Frame auf Popup-UIManagern aufgerufen. `UIManager::applyPendingThemeUpdate()` von `private` auf `public` verschoben (benötigt vom Renderer für Popup-Kontext).
 - ✅ `Dropdown Flip-Above Positionierung`: `showDropdownMenu()` prüft verfügbaren Platz unterhalb des Auslöser-Elements; reicht der Platz nicht, wird das Menü oberhalb positioniert (Flip-Above-Logik). Verhindert abgeschnittene Dropdown-Listen am unteren Fensterrand.
 - ✅ `WidgetDetailSchema`: Schema-basierter Property-Editor (`WidgetDetailSchema.h/.cpp`) ersetzt ~1500 Zeilen manuellen Detail-Panel-Code in `UIManager.cpp`. Zentraler Einstiegspunkt `buildDetailPanel(prefix, selected, applyChange, rootPanel, options)` baut komplettes Detail-Panel für beliebiges `WidgetElement`. 9 Shared Sections (Identity, Transform, Anchor, Hit Test, Layout, Style/Colors, Brush, Render Transform, Shadow) + 12 per-type Sections (Text, Image, Value, EntryBar, Container, Border, Spinner, RichText, ListView, TileView, Focus, Drag & Drop) + optionaler Delete-Button. `Options`-Struct konfiguriert kontextspezifisches Verhalten (editierbare IDs, onIdRenamed, showDeleteButton, onDelete, onRefreshHierarchy). `refreshWidgetEditorDetails()` (~1060→75 Zeilen) und `refreshUIDesignerDetails()` (~420→99 Zeilen) nutzen jetzt ausschließlich `WidgetDetailSchema::buildDetailPanel()`.
+- ✅ `DPI-Aware UI Scaling`: Neues `dpiScale`-Feld in `EditorTheme` mit `applyDpiScale(float)` Methode — skaliert alle Font-Größen, Row-Heights, Padding, Icon-Sizes, Border-Radius und Separator-Thickness relativ zum aktuellen DPI-Faktor. Beim Startup wird die DPI-Skalierung automatisch vom primären Monitor erkannt (`MonitorInfo::dpiScale` aus `HardwareInfo`). Gespeicherter Override (`UIScale` Key in `config.ini`) hat Vorrang. Theme-JSON-Dateien speichern immer DPI-unabhängige Basiswerte; `toJson()` dividiert durch `dpiScale`, `fromJson()` multipliziert beim Laden. `loadThemeByName()` und `loadFromFile()` bewahren den aktiven `dpiScale` über Theme-Wechsel hinweg. Editor Settings Popup um "UI Scale" Sektion erweitert mit Dropdown: Auto/100%/125%/150%/175%/200%/250%/300%. Änderungen werden sofort angewendet (`applyDpiScale` + `rebuildAllEditorUI`) und in `config.ini` persistiert.
+- ✅ `DPI Scaling – Vollständige UI-Abdeckung`: Neue statische Hilfsmethoden `EditorTheme::Scaled(float)` und `EditorTheme::Scaled(Vec2)` für beliebige Pixelwert-Skalierung. Systematischer Umbau aller hardcoded Pixelwerte im gesamten Editor-UI: **UIManager.cpp** – alle 37 `fontSize`-Literale durch Theme-Felder ersetzt (`fontSizeHeading`/`Subheading`/`Body`/`Small`/`Caption`/`Monospace`); Engine-Settings-Popup (620×480), Editor-Settings-Popup (480×380), Projekt-Auswahl-Screen (720×540) und Landscape-Manager-Popup (420×340) – alle Popup-Dimensionen, Layout-Konstanten (Row-Heights, Label-Widths, Sidebar, Title-Heights, Paddings) via `Scaled()` skaliert; `measureElementSize()` – Slider-Defaults (140×18), Image-Defaults (24), Checkbox-Box/Gap (16/6), Dropdown-Arrow (16), DropdownButton-Arrow (12) und alle Fallback-FontSizes via `Scaled()` oder Theme-Werte. **main.cpp** – New-Material-Popup (460×400): Popup-Dimensionen, fontSize-Werte (15→Heading, 13→Body, 14→Subheading), minSize-Werte (20, 24) und Paddings skaliert. **OpenGLRenderer.cpp** – 15 hardcoded `minSize`-Werte in Mesh-/Material-Editor-Popups und Tab-Buttons skaliert. **UIWidgets** – `SeparatorWidget.h` (22px Header), `TabViewWidget.h` (26px Tab), `TreeViewWidget.h` (22px Row) via `Scaled()` skaliert. Normalisierte Popup-Layouts (nx/ny) nutzen Basis-Pixelwerte für korrekte proportionale Skalierung bei vergrößerten Popup-Fenstern.
 
 ## Legende
 
@@ -230,6 +232,8 @@
 | Known Projects Liste (max. 20, config.ini) | ✅ |
 | Default-Startup-Projekt (config.ini) | ✅     |
 | Projekt-Auswahl-Screen (Recent/Open/New) | ✅ |
+| Hardware-Diagnostics (CPU/GPU/RAM/VRAM/Monitor) | ✅ |
+| DPI-Aware UI Scaling (Auto-Detect + Manual Override) | ✅ |
 
 **Offene Punkte:**
 - RHI-Auswahl existiert als Enum, aber nur OpenGL ist tatsächlich implementiert (DirectX 11/12 nicht vorhanden)
@@ -468,7 +472,7 @@
 | **Renderer-Abstrahierung (Multi-Backend-Vorbereitung)** | 🟡 |
 
 **Offene Punkte:**
-- Post-Processing Pipeline vollständig: HDR FBO, Gamma Correction, ACES Tone Mapping, FXAA, MSAA 2x/4x, Bloom (5-Mip Downsample + Gaussian Blur), SSAO (32-Sample Hemisphere Kernel, Half-Res, 4×4 Box Blur).
+- Post-Processing Pipeline vollständig: HDR FBO, Gamma Correction, ACES Tone Mapping, FXAA 3.11 Quality (9-Sample, Edge Walking, Subpixel Correction), MSAA 2x/4x, Bloom (5-Mip Downsample + Gaussian Blur), SSAO (32-Sample Hemisphere Kernel, Half-Res, Bilateral Depth-Aware 5×5 Blur).
 - Transparenz nur eingeschränkt (kein korrektes Order-Independent-Transparency)
 - Instancing existiert auf CPU-/Level-Seite, aber kein GPU-Instanced-Rendering
 - Keine Alternative zu OpenGL (DirectX / Vulkan nicht implementiert, nur als Enum-Placeholder)
@@ -955,7 +959,9 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | Fenstergröße dynamisch (refreshSize)             | ✅ |
 | Docking / Snapping                               | ❌ |
 | Mehrere Popups gleichzeitig                      | ✅ |
-| Engine Settings Popup (Sidebar-Layout, Kategorien: General, Rendering, Debug, Physics) | ✅ |
+| Engine Settings Popup (Sidebar-Layout, Kategorien: General, Rendering, Debug, Physics, Info) | ✅ |
+| Engine Settings Info-Tab: CPU, GPU, VRAM, RAM, Monitor Hardware-Infos (read-only) | ✅ |
+| DPI-Aware UI Scaling (Auto-Detect + manuelle Auswahl in Editor Settings) | ✅ |
 | Dropdown-Menü als Overlay-Widget (z-Order 9000, Click-Outside-Dismiss) | ✅ |
 | Engine Settings Persistenz via `config.ini` (Shadows, Occlusion, Debug, VSync, Wireframe, Physics, HeightField Debug, Post Processing, Gamma, Tone Mapping, AA, Bloom, SSAO, CSM) — sofortige Speicherung bei jeder Änderung (`saveConfig()` in allen Callbacks) | ✅ |
 | Physics-Kategorie (Gravity X/Y/Z, Fixed Timestep, Sleep Threshold) | ✅ |
@@ -1198,7 +1204,7 @@ Gameplay-UI wird ausschließlich über Widget-Assets gesteuert. Widgets werden i
 | engine.input              | ✅     |
 | engine.ui                 | ✅     |
 | engine.camera             | ✅     |
-| engine.diagnostics (delta_time, engine_time, state) | ✅     |
+| engine.diagnostics (delta_time, engine_time, state, cpu_info, gpu_info, ram_info, monitor_info) | ✅     |
 | engine.logging            | ✅     |
 | engine.physics            | ✅     |
 | engine.math (Vec2, Vec3, Quat, Scalar, Trig — C++-Berechnung) | ✅ |
@@ -1254,7 +1260,7 @@ Große Feature-Blöcke, die noch nicht existieren:
 | **Entity-Kamera (Runtime)**      | ✅     | Entity-Kamera via `setActiveCameraEntity()` mit FOV/NearClip/FarClip aus CameraComponent |
 | **PBR-Material**                 | ✅     | Cook-Torrance BRDF (GGX NDF + Smith-Schlick Geometry + Fresnel-Schlick), Metallic/Roughness Workflow, glTF-kompatible metallicRoughness Map (G=Roughness, B=Metallic, Slot 4), Scalar-Fallback (uMetallic/uRoughness), auto-PBR-Erkennung beim Assimp-Import, abwärtskompatibel mit Blinn-Phong |
 | **Normal Mapping**               | ✅     | TBN-Matrix (Gram-Schmidt), Tangent/Bitangent pro Vertex, material.normalMap (Slot 2), uHasNormalMap Uniform |
-| **Post-Processing**              | ✅     | HDR FBO, Gamma Correction, ACES Tone Mapping, FXAA (deferred, nach Gizmo/Outline), MSAA 2x/4x, Bloom (5-Mip Gaussian), SSAO (32-Sample, Half-Res, Bilateral Depth-Aware 5×5 Blur). |
+| **Post-Processing**              | ✅     | HDR FBO, Gamma Correction, ACES Tone Mapping, FXAA 3.11 Quality (deferred, nach Gizmo/Outline, Content-Rect Viewport, 9-Sample Neighbourhood, Edge Walking 12 Steps, Subpixel Correction), MSAA 2x/4x, Bloom (5-Mip Gaussian), SSAO (32-Sample, Half-Res, Bilateral Depth-Aware 5×5 Blur). |
 | **Cascaded Shadow Maps**         | ✅     | 4-Kaskaden CSM für Directional Lights: Practical Split (λ=0.75), 2048² pro Kaskade, tight Ortho-Projektion, View-Space Cascade Selection, 5×5 PCF, Toggle in Engine Settings (Lighting) |
 | **Skeletal Animation**           | Mittel    | Bone-System, Skinning, Animation-Blending                                    |
 | **Cubemap / Skybox**            | ✅     | 6-Face Cubemap Rendering, Skybox-Shader, Skybox-Pfad pro Level (JSON), WorldSettings UI, Drag&Drop |

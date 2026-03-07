@@ -433,6 +433,39 @@ bool OpenGLRenderer::initialize()
 
     logger.log(Logger::Category::Rendering, "GLAD initialised.", Logger::LogLevel::INFO);
 
+    // Populate GPU / VRAM info for hardware diagnostics
+    {
+        GpuInfo gpuInfo;
+        const char* r = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+        const char* v = reinterpret_cast<const char*>(glGetString(GL_VENDOR));
+        const char* ver = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        if (r) gpuInfo.renderer      = r;
+        if (v) gpuInfo.vendor        = v;
+        if (ver) gpuInfo.driverVersion = ver;
+
+        // NVIDIA: GL_NVX_gpu_memory_info
+        GLint totalKB = 0;
+        glGetIntegerv(0x9048, &totalKB); // GL_GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX
+        if (totalKB > 0)
+        {
+            gpuInfo.vramTotalMB = totalKB / 1024;
+            GLint freeKB = 0;
+            glGetIntegerv(0x9049, &freeKB); // GL_GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX
+            gpuInfo.vramFreeMB = freeKB / 1024;
+        }
+        else
+        {
+            // AMD: GL_ATI_meminfo  (GL_VBO_FREE_MEMORY_ATI = 0x87FB)
+            GLint atiInfo[4] = {};
+            glGetIntegerv(0x87FB, atiInfo);
+            glGetError(); // clear potential GL_INVALID_ENUM
+            if (atiInfo[0] > 0)
+                gpuInfo.vramFreeMB = atiInfo[0] / 1024;
+        }
+
+        DiagnosticsManager::Instance().setGpuInfo(gpuInfo);
+    }
+
     int nrAttributes;
     glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &nrAttributes);
     logger.log(Logger::Category::Rendering, "Max number of vertex attributes: " + std::to_string(nrAttributes), Logger::LogLevel::INFO);
@@ -1426,7 +1459,8 @@ void OpenGLRenderer::renderWorld()
 		renderGizmo(view, m_projectionMatrix);
 	}
 
-	// Deferred FXAA pass: apply after overlays (gizmos, outlines) so they also get AA
+	// Deferred FXAA pass: apply after overlays (gizmos, outlines) so they also get AA.
+	// Use content-rect viewport so FXAA does not process the clear-colour border.
 	if (usePostProcess && m_aaMode == AntiAliasingMode::FXAA)
 	{
 		EditorTab* activeTab = m_cachedActiveTab;
@@ -1434,7 +1468,7 @@ void OpenGLRenderer::renderWorld()
 		{
 			auto* glRT = static_cast<OpenGLRenderTarget*>(activeTab->renderTarget.get());
 			m_postProcessStack.setAntiAliasingMode(static_cast<int>(m_aaMode));
-			m_postProcessStack.executeFxaaPass(glRT->getGLFramebuffer(), 0, 0, fullWidth, fullHeight);
+			m_postProcessStack.executeFxaaPass(glRT->getGLFramebuffer(), vpX, viewportY, width, height);
 
 			// Restore content-rect viewport for any subsequent rendering
 			glViewport(vpX, viewportY, width, height);
@@ -2715,7 +2749,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
         title.fontSize = EditorTheme::Get().fontSizeHeading;
         title.style.textColor = EditorTheme::Get().textPrimary;
         title.fillX = true;
-        title.minSize = Vec2{ 0.0f, 28.0f };
+        title.minSize = Vec2{ 0.0f, EditorTheme::Scaled(28.0f) };
         title.runtimeOnly = true;
         root.children.push_back(std::move(title));
 
@@ -2727,7 +2761,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
         pathLine.fontSize = EditorTheme::Get().fontSizeSmall;
         pathLine.style.textColor = EditorTheme::Get().textMuted;
         pathLine.fillX = true;
-        pathLine.minSize = Vec2{ 0.0f, 20.0f };
+        pathLine.minSize = Vec2{ 0.0f, EditorTheme::Scaled(20.0f) };
         pathLine.runtimeOnly = true;
         root.children.push_back(std::move(pathLine));
 
@@ -2740,7 +2774,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
         statsLine.fontSize = EditorTheme::Get().fontSizeSmall;
         statsLine.style.textColor = EditorTheme::Get().textMuted;
         statsLine.fillX = true;
-        statsLine.minSize = Vec2{ 0.0f, 20.0f };
+        statsLine.minSize = Vec2{ 0.0f, EditorTheme::Scaled(20.0f) };
         statsLine.runtimeOnly = true;
         root.children.push_back(std::move(statsLine));
 
@@ -2764,7 +2798,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             header.fontSize = EditorTheme::Get().fontSizeBody;
             header.style.textColor = EditorTheme::Get().textSecondary;
             header.fillX = true;
-            header.minSize = Vec2{ 0.0f, 24.0f };
+            header.minSize = Vec2{ 0.0f, EditorTheme::Scaled(24.0f) };
             header.runtimeOnly = true;
             root.children.push_back(std::move(header));
         }
@@ -2776,7 +2810,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             WidgetElement row{};
             row.type = WidgetElementType::StackPanel;
             row.fillX = true;
-            row.minSize = Vec2{ 0.0f, 26.0f };
+            row.minSize = Vec2{ 0.0f, EditorTheme::Scaled(26.0f) };
             row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             row.runtimeOnly = true;
             row.orientation = StackOrientation::Horizontal;
@@ -2787,7 +2821,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             lbl.font = EditorTheme::Get().fontDefault;
             lbl.fontSize = EditorTheme::Get().fontSizeSmall;
             lbl.style.textColor = EditorTheme::Get().textMuted;
-            lbl.minSize = Vec2{ 80.0f, 26.0f };
+            lbl.minSize = Vec2{ EditorTheme::Scaled(80.0f), EditorTheme::Scaled(26.0f) };
             lbl.textAlignV = TextAlignV::Center;
             lbl.runtimeOnly = true;
             row.children.push_back(std::move(lbl));
@@ -2805,7 +2839,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
                 entry.font = EditorTheme::Get().fontDefault;
                 entry.fontSize = EditorTheme::Get().fontSizeSmall;
                 entry.fillX = true;
-                entry.minSize = Vec2{ 60.0f, EditorTheme::Get().rowHeight };
+                entry.minSize = Vec2{ EditorTheme::Scaled(60.0f), EditorTheme::Get().rowHeight };
                 entry.style.color = EditorTheme::Get().inputBackground;
                 entry.style.textColor = EditorTheme::Get().inputText;
                 entry.style.hoverColor = EditorTheme::Get().inputBackgroundHover;
@@ -2899,7 +2933,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             header.fontSize = EditorTheme::Get().fontSizeBody;
             header.style.textColor = EditorTheme::Get().textSecondary;
             header.fillX = true;
-            header.minSize = Vec2{ 0.0f, 24.0f };
+            header.minSize = Vec2{ 0.0f, EditorTheme::Scaled(24.0f) };
             header.runtimeOnly = true;
             root.children.push_back(std::move(header));
         }
@@ -2909,7 +2943,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             WidgetElement row{};
             row.type = WidgetElementType::StackPanel;
             row.fillX = true;
-            row.minSize = Vec2{ 0.0f, 26.0f };
+            row.minSize = Vec2{ 0.0f, EditorTheme::Scaled(26.0f) };
             row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             row.runtimeOnly = true;
             row.orientation = StackOrientation::Horizontal;
@@ -2920,7 +2954,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             lbl.font = EditorTheme::Get().fontDefault;
             lbl.fontSize = EditorTheme::Get().fontSizeSmall;
             lbl.style.textColor = EditorTheme::Get().textMuted;
-            lbl.minSize = Vec2{ 80.0f, 26.0f };
+            lbl.minSize = Vec2{ EditorTheme::Scaled(80.0f), EditorTheme::Scaled(26.0f) };
             lbl.textAlignV = TextAlignV::Center;
             lbl.runtimeOnly = true;
             row.children.push_back(std::move(lbl));
@@ -2932,7 +2966,7 @@ MeshViewerWindow* OpenGLRenderer::openMeshViewer(const std::string& assetPath)
             entry.font = EditorTheme::Get().fontDefault;
             entry.fontSize = EditorTheme::Get().fontSizeSmall;
             entry.fillX = true;
-            entry.minSize = Vec2{ 60.0f, EditorTheme::Get().rowHeight };
+            entry.minSize = Vec2{ EditorTheme::Scaled(60.0f), EditorTheme::Get().rowHeight };
             entry.style.color = EditorTheme::Get().inputBackground;
             entry.style.textColor = EditorTheme::Get().inputText;
             entry.style.hoverColor = EditorTheme::Get().inputBackgroundHover;
@@ -7605,7 +7639,7 @@ void OpenGLRenderer::rebuildTitleBarTabs()
         tabBtn.style.color = EditorTheme::Get().panelBackground;
         tabBtn.style.hoverColor = EditorTheme::Get().buttonHover;
         tabBtn.style.textColor = EditorTheme::Get().textPrimary;
-        tabBtn.minSize = Vec2{ 90.0f, 0.0f };
+        tabBtn.minSize = Vec2{ EditorTheme::Scaled(90.0f), 0.0f };
         tabBtn.padding = Vec2{ 6.0f, 0.0f };
         tabBtn.hitTestMode = HitTestMode::Enabled;
         tabBtn.runtimeOnly = true;
@@ -7627,7 +7661,7 @@ void OpenGLRenderer::rebuildTitleBarTabs()
             closeBtn.style.color = EditorTheme::Get().panelBackground;
             closeBtn.style.hoverColor = EditorTheme::Get().buttonDangerHover;
             closeBtn.style.textColor = EditorTheme::Get().textMuted;
-            closeBtn.minSize = Vec2{ 24.0f, 0.0f };
+            closeBtn.minSize = Vec2{ EditorTheme::Scaled(24.0f), 0.0f };
             closeBtn.padding = Vec2{ 2.0f, 0.0f };
             closeBtn.hitTestMode = HitTestMode::Enabled;
             closeBtn.runtimeOnly = true;

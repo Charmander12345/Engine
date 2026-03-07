@@ -6,8 +6,9 @@
 #include <fstream>
 #include <filesystem>
 #include "../AssetManager/json.hpp"
+#include <cmath>
 
-/// Centralized editor theme — all editor UI colors, fonts, and spacing live here.
+/// Centralized editor theme
 /// Change values in one place to restyle the entire editor.
 ///
 /// **Viewport/gameplay UI** has its own theme (`ViewportUITheme`) so game
@@ -157,6 +158,57 @@ struct EditorTheme
     float borderRadius        = 3.0f;
     float separatorThickness  = 1.0f;
 
+    // ── DPI scaling ──────────────────────────────────────────────────────
+    /// Current DPI scale factor applied to all sizing values.
+    /// 1.0 = 96 DPI (100%), 1.25 = 120 DPI (125%), 1.5 = 144 DPI (150%) etc.
+    float dpiScale            = 1.0f;
+
+    /// Change the DPI scale: rescales every font-size, spacing, padding,
+    /// and icon-size field from the current scale to @p newScale.
+    void applyDpiScale(float newScale)
+    {
+        if (newScale <= 0.0f) newScale = 1.0f;
+        if (std::abs(newScale - dpiScale) < 0.001f) return;
+
+        const float ratio = newScale / dpiScale;
+        dpiScale = newScale;
+
+        // Fonts
+        fontSizeHeading    *= ratio;
+        fontSizeSubheading *= ratio;
+        fontSizeBody       *= ratio;
+        fontSizeSmall      *= ratio;
+        fontSizeCaption    *= ratio;
+        fontSizeMonospace  *= ratio;
+
+        // Row / toolbar heights
+        rowHeight          *= ratio;
+        rowHeightSmall     *= ratio;
+        rowHeightLarge     *= ratio;
+        sectionHeaderHeight *= ratio;
+        toolbarHeight      *= ratio;
+
+        // Padding
+        paddingSmall   = { paddingSmall.x   * ratio, paddingSmall.y   * ratio };
+        paddingNormal  = { paddingNormal.x  * ratio, paddingNormal.y  * ratio };
+        paddingLarge   = { paddingLarge.x   * ratio, paddingLarge.y   * ratio };
+        paddingSection = { paddingSection.x * ratio, paddingSection.y * ratio };
+
+        // Icons / indent
+        indentSize     *= ratio;
+        iconSize       *= ratio;
+        iconSizeLarge  *= ratio;
+
+        // Geometry
+        borderRadius       *= ratio;
+        separatorThickness *= ratio;
+    }
+
+    /// Scale an arbitrary pixel value by the current DPI factor.
+    /// Use for hardcoded sizes that don't have a dedicated theme field.
+    static float Scaled(float px) { return px * Get().dpiScale; }
+    static Vec2  Scaled(Vec2 v)   { return { v.x * Get().dpiScale, v.y * Get().dpiScale }; }
+
     // ── Theme identity ───────────────────────────────────────────────────
     std::string themeName = "Dark";
 
@@ -260,29 +312,30 @@ struct EditorTheme
         j["statusBarText"]        = v4(statusBarText);
         // Transparent
         j["transparent"]          = v4(transparent);
-        // Fonts
+        // Fonts — save base (unscaled) values so theme files stay DPI-independent
+        const float inv = (dpiScale > 0.0f) ? (1.0f / dpiScale) : 1.0f;
         j["fontDefault"]          = std::string(fontDefault);
-        j["fontSizeHeading"]      = fontSizeHeading;
-        j["fontSizeSubheading"]   = fontSizeSubheading;
-        j["fontSizeBody"]         = fontSizeBody;
-        j["fontSizeSmall"]        = fontSizeSmall;
-        j["fontSizeCaption"]      = fontSizeCaption;
-        j["fontSizeMonospace"]    = fontSizeMonospace;
+        j["fontSizeHeading"]      = fontSizeHeading    * inv;
+        j["fontSizeSubheading"]   = fontSizeSubheading * inv;
+        j["fontSizeBody"]         = fontSizeBody       * inv;
+        j["fontSizeSmall"]        = fontSizeSmall      * inv;
+        j["fontSizeCaption"]      = fontSizeCaption    * inv;
+        j["fontSizeMonospace"]    = fontSizeMonospace  * inv;
         // Spacing / sizing
-        j["rowHeight"]            = rowHeight;
-        j["rowHeightSmall"]       = rowHeightSmall;
-        j["rowHeightLarge"]       = rowHeightLarge;
-        j["sectionHeaderHeight"]  = sectionHeaderHeight;
-        j["toolbarHeight"]        = toolbarHeight;
-        j["paddingSmall"]         = v2(paddingSmall);
-        j["paddingNormal"]        = v2(paddingNormal);
-        j["paddingLarge"]         = v2(paddingLarge);
-        j["paddingSection"]       = v2(paddingSection);
-        j["indentSize"]           = indentSize;
-        j["iconSize"]             = iconSize;
-        j["iconSizeLarge"]        = iconSizeLarge;
-        j["borderRadius"]         = borderRadius;
-        j["separatorThickness"]   = separatorThickness;
+        j["rowHeight"]            = rowHeight          * inv;
+        j["rowHeightSmall"]       = rowHeightSmall     * inv;
+        j["rowHeightLarge"]       = rowHeightLarge     * inv;
+        j["sectionHeaderHeight"]  = sectionHeaderHeight * inv;
+        j["toolbarHeight"]        = toolbarHeight      * inv;
+        j["paddingSmall"]         = v2({ paddingSmall.x   * inv, paddingSmall.y   * inv });
+        j["paddingNormal"]        = v2({ paddingNormal.x  * inv, paddingNormal.y  * inv });
+        j["paddingLarge"]         = v2({ paddingLarge.x   * inv, paddingLarge.y   * inv });
+        j["paddingSection"]       = v2({ paddingSection.x * inv, paddingSection.y * inv });
+        j["indentSize"]           = indentSize         * inv;
+        j["iconSize"]             = iconSize           * inv;
+        j["iconSizeLarge"]        = iconSizeLarge      * inv;
+        j["borderRadius"]         = borderRadius       * inv;
+        j["separatorThickness"]   = separatorThickness * inv;
 
         return j;
     }
@@ -413,6 +466,24 @@ struct EditorTheme
         rf("iconSizeLarge",         iconSizeLarge);
         rf("borderRadius",          borderRadius);
         rf("separatorThickness",    separatorThickness);
+
+        // JSON stores base (unscaled) values — re-apply current DPI scale
+        if (dpiScale > 0.0f && std::abs(dpiScale - 1.0f) > 0.001f)
+        {
+            const float s = dpiScale;
+            fontSizeHeading    *= s;  fontSizeSubheading *= s;
+            fontSizeBody       *= s;  fontSizeSmall      *= s;
+            fontSizeCaption    *= s;  fontSizeMonospace  *= s;
+            rowHeight          *= s;  rowHeightSmall     *= s;
+            rowHeightLarge     *= s;  sectionHeaderHeight *= s;
+            toolbarHeight      *= s;
+            paddingSmall   = { paddingSmall.x   * s, paddingSmall.y   * s };
+            paddingNormal  = { paddingNormal.x  * s, paddingNormal.y  * s };
+            paddingLarge   = { paddingLarge.x   * s, paddingLarge.y   * s };
+            paddingSection = { paddingSection.x * s, paddingSection.y * s };
+            indentSize     *= s;  iconSize       *= s;  iconSizeLarge  *= s;
+            borderRadius   *= s;  separatorThickness *= s;
+        }
     }
 
     bool saveToFile(const std::string& path) const
@@ -432,9 +503,11 @@ struct EditorTheme
     {
         try
         {
+            const float savedScale = dpiScale;
             std::ifstream ifs(path);
             if (!ifs.is_open()) return false;
             nlohmann::json j = nlohmann::json::parse(ifs);
+            dpiScale = savedScale;   // preserve scale before fromJson applies it
             fromJson(j);
             return true;
         }
@@ -594,14 +667,19 @@ struct EditorTheme
 
     /// Load a theme by name from the themes directory.
     /// Falls back to default dark theme if loading fails.
+    /// Preserves the current DPI scale so the new theme is
+    /// automatically scaled to the active display density.
     bool loadThemeByName(const std::string& name)
     {
+        const float savedScale = dpiScale;
         const std::string path = (std::filesystem::path(GetThemesDirectory()) / (name + ".json")).string();
         if (loadFromFile(path))
             return true;
         // Fallback: reset to default dark theme
         *this = EditorTheme{};
         themeName = "Dark";
+        dpiScale = 1.0f;
+        applyDpiScale(savedScale);
         return false;
     }
 

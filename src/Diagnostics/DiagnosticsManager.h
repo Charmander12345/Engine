@@ -11,6 +11,7 @@
 #include <functional>
 #include "../Core/EngineLevel.h"
 #include "../Core/MathTypes.h"
+#include "HardwareInfo.h"
 
 class DiagnosticsManager
 {
@@ -161,6 +162,11 @@ public:
 	void setWindowState(WindowState state);
 	WindowState getWindowState() const;
 
+	// Hardware info (lazy-cached)
+	const HardwareInfo& getHardwareInfo();
+	void setGpuInfo(const GpuInfo& gpu);
+	void refreshHardwareInfo();
+
 private:
     DiagnosticsManager();
     ~DiagnosticsManager() = default;
@@ -207,4 +213,7 @@ private:
     std::unordered_set<std::string> m_modalNotificationCache;
     std::vector<std::string> m_modalNotifications;
     std::vector<ToastNotification> m_toastNotifications;
+
+    HardwareInfo m_hardwareInfo;
+    bool m_hardwareInfoQueried{ false };
 };

@@ -36,48 +36,126 @@ vec3 acesToneMap(vec3 x)
     return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
-// Simple FXAA (quality-tuned luminance-based edge AA)
+// FXAA 3.11 Quality – 9-sample neighborhood, edge-orientation detection,
+// edge endpoint walking (12 steps with variable stride), and subpixel
+// aliasing correction.  Returns a single offset-sampled colour per pixel.
 float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 
 vec3 fxaa(sampler2D tex, vec2 uv, vec2 texel)
 {
+    // 1. Sample 3x3 neighbourhood
     vec3 rgbM  = texture(tex, uv).rgb;
+    vec3 rgbN  = texture(tex, uv + vec2( 0.0, -1.0) * texel).rgb;
+    vec3 rgbS  = texture(tex, uv + vec2( 0.0,  1.0) * texel).rgb;
+    vec3 rgbW  = texture(tex, uv + vec2(-1.0,  0.0) * texel).rgb;
+    vec3 rgbE  = texture(tex, uv + vec2( 1.0,  0.0) * texel).rgb;
     vec3 rgbNW = texture(tex, uv + vec2(-1.0, -1.0) * texel).rgb;
     vec3 rgbNE = texture(tex, uv + vec2( 1.0, -1.0) * texel).rgb;
     vec3 rgbSW = texture(tex, uv + vec2(-1.0,  1.0) * texel).rgb;
     vec3 rgbSE = texture(tex, uv + vec2( 1.0,  1.0) * texel).rgb;
 
     float lumM  = luma(rgbM);
+    float lumN  = luma(rgbN);
+    float lumS  = luma(rgbS);
+    float lumW  = luma(rgbW);
+    float lumE  = luma(rgbE);
     float lumNW = luma(rgbNW);
     float lumNE = luma(rgbNE);
     float lumSW = luma(rgbSW);
     float lumSE = luma(rgbSE);
 
-    float lumMin = min(lumM, min(min(lumNW, lumNE), min(lumSW, lumSE)));
-    float lumMax = max(lumM, max(max(lumNW, lumNE), max(lumSW, lumSE)));
+    // 2. Local contrast – early-out on low-contrast areas
+    float lumMin = min(lumM, min(min(lumN, lumS), min(lumW, lumE)));
+    float lumMax = max(lumM, max(max(lumN, lumS), max(lumW, lumE)));
     float lumRange = lumMax - lumMin;
-
-    // Skip edge detection on low-contrast areas
     if (lumRange < max(0.0312, lumMax * 0.125))
         return rgbM;
 
-    vec2 dir;
-    dir.x = -((lumNW + lumNE) - (lumSW + lumSE));
-    dir.y =  ((lumNW + lumSW) - (lumNE + lumSE));
+    // 3. Edge orientation (horizontal vs vertical second-derivative comparison)
+    float edgeH = abs(-2.0 * lumN + lumNW + lumNE)
+                + abs(-2.0 * lumM + lumW  + lumE ) * 2.0
+                + abs(-2.0 * lumS + lumSW + lumSE);
+    float edgeV = abs(-2.0 * lumW + lumNW + lumSW)
+                + abs(-2.0 * lumM + lumN  + lumS ) * 2.0
+                + abs(-2.0 * lumE + lumNE + lumSE);
+    bool isHorizontal = (edgeH >= edgeV);
 
-    float dirReduce = max((lumNW + lumNE + lumSW + lumSE) * 0.03125, 0.0078125);
-    float rcpDirMin = 1.0 / (min(abs(dir.x), abs(dir.y)) + dirReduce);
-    dir = clamp(dir * rcpDirMin, vec2(-8.0), vec2(8.0)) * texel;
+    // 4. Select edge-normal direction (perpendicular to the edge)
+    float stepLen = isHorizontal ? texel.y : texel.x;
+    float lumPos  = isHorizontal ? lumS : lumE;
+    float lumNeg  = isHorizontal ? lumN : lumW;
+    float gradPos = abs(lumPos - lumM);
+    float gradNeg = abs(lumNeg - lumM);
 
-    vec3 rgbA = 0.5 * (
-        texture(tex, uv + dir * (1.0 / 3.0 - 0.5)).rgb +
-        texture(tex, uv + dir * (2.0 / 3.0 - 0.5)).rgb);
-    vec3 rgbB = rgbA * 0.5 + 0.25 * (
-        texture(tex, uv + dir * -0.5).rgb +
-        texture(tex, uv + dir *  0.5).rgb);
-    float lumB = luma(rgbB);
+    float lumEdge;
+    if (gradPos >= gradNeg)
+        lumEdge = lumPos;
+    else
+    {
+        stepLen = -stepLen;
+        lumEdge = lumNeg;
+    }
 
-    return (lumB < lumMin || lumB > lumMax) ? rgbA : rgbB;
+    // UV at half-texel offset perpendicular to the edge
+    vec2 edgeUV = uv;
+    if (isHorizontal) edgeUV.y += stepLen * 0.5;
+    else              edgeUV.x += stepLen * 0.5;
+
+    float lumAvgEdge    = 0.5 * (lumM + lumEdge);
+    float gradThreshold = lumRange * 0.25;
+
+    // 5. Edge endpoint walking – variable stride for quality/performance balance
+    vec2 edgeStep = isHorizontal ? vec2(texel.x, 0.0) : vec2(0.0, texel.y);
+    const float steps[12] = float[12](1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 4.0, 8.0);
+
+    vec2  uvP = edgeUV + edgeStep;
+    vec2  uvN = edgeUV - edgeStep;
+    float lumEndP = luma(texture(tex, uvP).rgb) - lumAvgEdge;
+    float lumEndN = luma(texture(tex, uvN).rgb) - lumAvgEdge;
+    bool  doneP = abs(lumEndP) >= gradThreshold;
+    bool  doneN = abs(lumEndN) >= gradThreshold;
+
+    for (int i = 1; i < 12 && !(doneP && doneN); ++i)
+    {
+        if (!doneP)
+        {
+            uvP     += edgeStep * steps[i];
+            lumEndP  = luma(texture(tex, uvP).rgb) - lumAvgEdge;
+            doneP    = abs(lumEndP) >= gradThreshold;
+        }
+        if (!doneN)
+        {
+            uvN     -= edgeStep * steps[i];
+            lumEndN  = luma(texture(tex, uvN).rgb) - lumAvgEdge;
+            doneN    = abs(lumEndN) >= gradThreshold;
+        }
+    }
+
+    // 6. Compute edge pixel offset
+    float distP = isHorizontal ? (uvP.x - uv.x) : (uvP.y - uv.y);
+    float distN = isHorizontal ? (uv.x - uvN.x) : (uv.y - uvN.y);
+    float distNearest = min(distP, distN);
+    float edgeLength  = distP + distN;
+
+    bool lumMIsNeg   = (lumM - lumAvgEdge) < 0.0;
+    bool correctSide = ((distP <= distN) ? (lumEndP < 0.0) : (lumEndN < 0.0)) != lumMIsNeg;
+    float pixelOff   = correctSide ? (0.5 - distNearest / edgeLength) : 0.0;
+
+    // 7. Subpixel aliasing correction
+    float lumAvg = (1.0 / 12.0) * (2.0 * (lumN + lumS + lumW + lumE)
+                 + (lumNW + lumNE + lumSW + lumSE));
+    float subOff = clamp(abs(lumAvg - lumM) / lumRange, 0.0, 1.0);
+    subOff = smoothstep(0.0, 1.0, subOff);
+    subOff = subOff * subOff * 0.75;
+
+    pixelOff = max(pixelOff, subOff);
+
+    // 8. Final single-offset sample
+    vec2 finalUV = uv;
+    if (isHorizontal) finalUV.y += pixelOff * stepLen;
+    else              finalUV.x += pixelOff * stepLen;
+
+    return texture(tex, finalUV).rgb;
 }
 
 void main()

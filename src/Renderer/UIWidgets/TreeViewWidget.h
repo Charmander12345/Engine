@@ -6,6 +6,7 @@
 
 #include "../../Core/MathTypes.h"
 #include "../UIWidget.h"
+#include "../EditorTheme.h"
 
 struct TreeViewNode
 {
@@ -79,7 +80,7 @@ private:
             row.fontSize = m_fontSize;
             row.textAlignH = TextAlignH::Left;
             row.textAlignV = TextAlignV::Center;
-            row.minSize = Vec2{ 0.0f, 22.0f };
+            row.minSize = Vec2{ 0.0f, EditorTheme::Scaled(22.0f) };
             row.hitTestMode = HitTestMode::Enabled;
             row.runtimeOnly = true;
             row.style.color = m_itemColor;

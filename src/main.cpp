@@ -490,6 +490,30 @@ int main()
 
     // --- Phase 2b: Load saved editor theme ---
     {
+        // Detect DPI scale from primary monitor (or use saved override)
+        float dpiScale = 1.0f;
+        if (auto savedScale = diagnostics.getState("UIScale"); savedScale && !savedScale->empty())
+        {
+            try { dpiScale = std::stof(*savedScale); }
+            catch (...) { dpiScale = 1.0f; }
+        }
+        else
+        {
+            const auto& hwInfo = diagnostics.getHardwareInfo();
+            for (const auto& mon : hwInfo.monitors)
+            {
+                if (mon.primary && mon.dpiScale > 0.0f)
+                {
+                    dpiScale = mon.dpiScale;
+                    break;
+                }
+            }
+        }
+        if (dpiScale < 0.5f)  dpiScale = 0.5f;
+        if (dpiScale > 4.0f)  dpiScale = 4.0f;
+
+        EditorTheme::Get().applyDpiScale(dpiScale);
+
         if (auto savedTheme = diagnostics.getState("EditorTheme"); savedTheme && !savedTheme->empty())
             EditorTheme::Get().loadThemeByName(*savedTheme);
     }
@@ -2283,15 +2307,17 @@ int main()
                                 const auto& folder = uiMgr.getSelectedBrowserFolder();
                                 if (folder == "__Shaders__") return;
 
-                                constexpr int kPopupW = 460;
-                                constexpr int kPopupH = 400;
+                                constexpr float kBaseW = 460.0f;
+                                constexpr float kBaseH = 400.0f;
+                                const int kPopupW = static_cast<int>(EditorTheme::Scaled(kBaseW));
+                                const int kPopupH = static_cast<int>(EditorTheme::Scaled(kBaseH));
                                 PopupWindow* popup = renderer->openPopupWindow(
                                     "NewMaterial", "New Material", kPopupW, kPopupH);
                                 if (!popup) return;
                                 if (!popup->uiManager().getRegisteredWidgets().empty()) return;
 
-                                const float W = static_cast<float>(kPopupW);
-                                const float H = static_cast<float>(kPopupH);
+                                constexpr float W = kBaseW;
+                                constexpr float H = kBaseH;
                                 auto nx = [&](float px) { return px / W; };
                                 auto ny = [&](float py) { return py / H; };
 
@@ -2329,10 +2355,10 @@ int main()
                                     title.from = Vec2{ nx(8.0f), 0.0f };
                                     title.to = Vec2{ 1.0f, ny(36.0f) };
                                     title.text = "New Material";
-                                    title.fontSize = 15.0f;
+                                    title.fontSize = EditorTheme::Get().fontSizeHeading;
                                     title.style.textColor = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
                                     title.textAlignV = TextAlignV::Center;
-                                    title.padding = Vec2{ 6.0f, 0.0f };
+                                    title.padding = EditorTheme::Scaled(Vec2{ 6.0f, 0.0f });
                                     elements.push_back(title);
                                 }
 
@@ -2342,7 +2368,7 @@ int main()
                                 formStack.id = "NM.Form";
                                 formStack.from = Vec2{ nx(16.0f), ny(44.0f) };
                                 formStack.to = Vec2{ nx(W - 16.0f), ny(H - 50.0f) };
-                                formStack.padding = Vec2{ 4.0f, 4.0f };
+                                formStack.padding = EditorTheme::Scaled(Vec2{ 4.0f, 4.0f });
                                 formStack.scrollable = true;
 
                                 auto makeLabel = [](const std::string& id, const std::string& text) {
@@ -2350,10 +2376,10 @@ int main()
                                     lbl.type = WidgetElementType::Text;
                                     lbl.id = id;
                                     lbl.text = text;
-                                    lbl.fontSize = 13.0f;
+                                    lbl.fontSize = EditorTheme::Get().fontSizeBody;
                                     lbl.style.textColor = Vec4{ 0.7f, 0.75f, 0.85f, 1.0f };
                                     lbl.fillX = true;
-                                    lbl.minSize = Vec2{ 0.0f, 20.0f };
+                                    lbl.minSize = Vec2{ 0.0f, EditorTheme::Scaled(20.0f) };
                                     lbl.runtimeOnly = true;
                                     return lbl;
                                 };
@@ -2363,12 +2389,12 @@ int main()
                                     entry.type = WidgetElementType::EntryBar;
                                     entry.id = id;
                                     entry.value = value;
-                                    entry.fontSize = 13.0f;
+                                    entry.fontSize = EditorTheme::Get().fontSizeBody;
                                     entry.style.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
                                     entry.style.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.9f };
                                     entry.fillX = true;
-                                    entry.minSize = Vec2{ 0.0f, 24.0f };
-                                    entry.padding = Vec2{ 6.0f, 4.0f };
+                                    entry.minSize = Vec2{ 0.0f, EditorTheme::Scaled(24.0f) };
+                                    entry.padding = EditorTheme::Scaled(Vec2{ 6.0f, 4.0f });
                                     entry.hitTestMode = HitTestMode::Enabled;
                                     entry.runtimeOnly = true;
                                     return entry;
@@ -2428,7 +2454,7 @@ int main()
                                     createBtn.from = Vec2{ nx(W - 180.0f), ny(H - 44.0f) };
                                     createBtn.to = Vec2{ nx(W - 100.0f), ny(H - 12.0f) };
                                     createBtn.text = "Create";
-                                    createBtn.fontSize = 14.0f;
+                                    createBtn.fontSize = EditorTheme::Get().fontSizeSubheading;
                                     createBtn.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
                                     createBtn.textAlignH = TextAlignH::Center;
                                     createBtn.textAlignV = TextAlignV::Center;
@@ -2511,7 +2537,7 @@ int main()
                                     cancelBtn.from = Vec2{ nx(W - 90.0f), ny(H - 44.0f) };
                                     cancelBtn.to = Vec2{ nx(W - 16.0f), ny(H - 12.0f) };
                                     cancelBtn.text = "Cancel";
-                                    cancelBtn.fontSize = 14.0f;
+                                    cancelBtn.fontSize = EditorTheme::Get().fontSizeSubheading;
                                     cancelBtn.style.textColor = Vec4{ 0.9f, 0.9f, 0.9f, 1.0f };
                                     cancelBtn.textAlignH = TextAlignH::Center;
                                     cancelBtn.textAlignV = TextAlignV::Center;
@@ -2526,7 +2552,7 @@ int main()
 
                                 auto widget = std::make_shared<Widget>();
                                 widget->setName("NewMaterial");
-                                widget->setSizePixels(Vec2{ W, H });
+                                widget->setSizePixels(Vec2{ static_cast<float>(kPopupW), static_cast<float>(kPopupH) });
                                 widget->setElements(std::move(elements));
                                 popup->uiManager().registerWidget("NewMaterial", widget);
                             }});

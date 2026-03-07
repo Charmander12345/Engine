@@ -6,6 +6,7 @@
 
 #include "../../Core/MathTypes.h"
 #include "../UIWidget.h"
+#include "../EditorTheme.h"
 
 struct TabPage
 {
@@ -92,7 +93,7 @@ public:
             tabButton.textAlignH = TextAlignH::Center;
             tabButton.textAlignV = TextAlignV::Center;
             tabButton.padding = Vec2{ 10.0f, 4.0f };
-            tabButton.minSize = Vec2{ 0.0f, 26.0f };
+            tabButton.minSize = Vec2{ 0.0f, EditorTheme::Scaled(26.0f) };
             tabButton.style.textColor = m_textColor;
             tabButton.shaderVertex = "button_vertex.glsl";
             tabButton.shaderFragment = "button_fragment.glsl";

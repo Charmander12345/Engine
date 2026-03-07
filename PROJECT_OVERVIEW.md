@@ -181,8 +181,9 @@ Engine/
 │   │   │   └── DataStructs/
 │   │   │       └── SparseSet.h     # Generisches SparseSet<T, Max>
 │   │   └── CMakeLists.txt
-│   ├── Diagnostics/                # Zustandsverwaltung, Config, PIE, Fenster
+│   ├── Diagnostics/                # Zustandsverwaltung, Config, PIE, Fenster, Hardware-Info
 │   │   ├── DiagnosticsManager.h/.cpp
+│   │   ├── HardwareInfo.h/.cpp        # Hardware-Abfrage (CPU, RAM, Monitor via Win32; GPU via Renderer)
 │   │   └── CMakeLists.txt
 │   ├── Landscape/                  # Landscape-/Terrain-Verwaltung
 │   │   ├── LandscapeManager.h/.cpp
@@ -233,7 +234,7 @@ Engine/
 │   │   │   ├── OpenGLTextRenderer.h/.cpp
 │   │   │   ├── OpenGLRenderContext.h    # OpenGL-Implementierung von IRenderContext
 │   │   │   ├── OpenGLRenderTarget.h/.cpp # OpenGL-FBO-Implementierung von IRenderTarget (Editor-Tab-FBOs)
-│   │   │   ├── PostProcessStack.h/.cpp   # Post-Processing-Pipeline (HDR FBO, MSAA 2x/4x, Fullscreen-Resolve, Bloom 5-Mip Gaussian, SSAO 32-Sample Half-Res Bilateral Blur, Deferred FXAA nach Gizmo/Outline)
+│   │   │   ├── PostProcessStack.h/.cpp   # Post-Processing-Pipeline (HDR FBO, MSAA 2x/4x, Fullscreen-Resolve, Bloom 5-Mip Gaussian, SSAO 32-Sample Half-Res Bilateral Blur, Deferred FXAA 3.11 Quality nach Gizmo/Outline)
 │   │   │   ├── OpenGLSplashWindow.h/.cpp # OpenGL-Implementierung des Splash-Fensters (Shader, VAOs, FreeType-Atlas)
 │   │   │   ├── glad/               # OpenGL-Loader (GLAD)
 │   │   │   ├── shaders/            # GLSL-Shader-Dateien
@@ -246,7 +247,7 @@ Engine/
 │   │   │       ├── ui_vertex/fragment.glsl           # UI-Bild/Textur
 │   │   │       ├── progress_fragment.glsl            # Fortschrittsbalken
 │   │   │       ├── slider_fragment.glsl              # Schieberegler
-│   │   │       ├── resolve_vertex.glsl / resolve_fragment.glsl  # Post-Processing Fullscreen-Resolve (Gamma, Tone Mapping, FXAA/MSAA, Bloom, SSAO)
+│   │   │       ├── resolve_vertex.glsl / resolve_fragment.glsl  # Post-Processing Fullscreen-Resolve (Gamma, Tone Mapping, FXAA 3.11 Quality/MSAA, Bloom, SSAO)
 │   │   │       ├── bloom_downsample.glsl            # Bloom Bright-Pass + Progressive Downsample
 │   │   │       ├── bloom_blur.glsl                  # Bloom 9-Tap Separable Gaussian Blur
 │   │   │       ├── ssao_fragment.glsl               # SSAO 32-Sample Hemisphere (Depth-Only, Half-Res R8)
@@ -433,7 +434,7 @@ Logger::Instance().log(Logger::Category::Engine, "Nachricht", Logger::LogLevel::
 
 ## 6. Diagnostics Manager
 
-**Dateien:** `src/Diagnostics/DiagnosticsManager.h`, `src/Diagnostics/DiagnosticsManager.cpp`
+**Dateien:** `src/Diagnostics/DiagnosticsManager.h`, `src/Diagnostics/DiagnosticsManager.cpp`, `src/Diagnostics/HardwareInfo.h`, `src/Diagnostics/HardwareInfo.cpp`
 
 ### 6.1 Übersicht
 Zentrale Zustandsverwaltung der Engine (Singleton). Verwaltet:
@@ -450,6 +451,7 @@ Zentrale Zustandsverwaltung der Engine (Singleton). Verwaltet:
 - **Benachrichtigungen**: Modal- und Toast-Notifications (Queue-basiert)
 - **Shutdown-Request**: `requestShutdown()` → sauberes Beenden; `resetShutdownRequest()` → setzt Flag zurück (wird vor Main-Loop aufgerufen um verwaiste Flags aus der Startup-Phase zu entfernen)
 - **Entity-Dirty-Queue**: `invalidateEntity(entityId)` → markiert einzelne Entitäten für Render-Refresh. `consumeDirtyEntities()` liefert und leert die Queue (thread-safe via `m_mutex`). `hasDirtyEntities()` prüft ob Dirty-Entitäten vorhanden sind. Wird von `renderWorld()` pro Frame konsumiert.
+- **Hardware-Diagnostics**: `getHardwareInfo()` liefert gecachte `HardwareInfo` (CPU Brand/Cores, GPU Renderer/Vendor/VRAM, RAM Total/Available, Monitor Name/Resolution/RefreshRate/DPI). CPU/RAM/Monitor via Win32-APIs (CPUID, GlobalMemoryStatusEx, EnumDisplayDevices), GPU/VRAM via OpenGL (glGetString + NVX/ATI Extensions), gesetzt durch `setGpuInfo()` im Renderer nach GL-Kontext-Erstellung.
 
 ### 6.2 Config-Persistierung
 - **Engine-Config**: `config/config.ini` (Key=Value-Format) — sofortige Speicherung bei jeder Setting-Änderung (`saveConfig()` in allen Engine-Settings-Callbacks)
@@ -843,7 +845,7 @@ render()
      → Post-Processing Resolve (Gamma, Tone Mapping, Bloom, SSAO, MSAA — FXAA hier übersprungen)
      → Pick-Buffer + Selection-Outline nur bei Bedarf (On-Demand)
      → Editor-Gizmos (Translate/Rotate/Scale Overlay)
-     → Deferred FXAA Pass (nach Gizmo/Outline, damit AA auf gesamtes Bild wirkt)
+     → Deferred FXAA 3.11 Quality Pass (nach Gizmo/Outline, Content-Rect Viewport, damit AA auf gesamtes Bild wirkt)
   → Default-Framebuffer mit m_clearColor leeren (verhindert undefinierte Inhalte bei Nicht-Viewport-Tabs)
   → Aktiven Tab-FBO per glBlitFramebuffer auf Bildschirm (Hardware-Blit, kein Shader)
   → renderUI()
@@ -1449,7 +1451,7 @@ Zentralisiertes Theme-System für einheitliches Editor-Design und anpassbare Vie
 
 #### EditorTheme (Singleton)
 - **Zugriff:** `EditorTheme::Get()` — liefert statische Referenz
-- **Inhalt:** ~60 `Vec4`-Farbkonstanten (Window/Panel/Button/Text/Input/Accent/Selection/Modal/Toast/Scrollbar/TreeView/ContentBrowser/Timeline/StatusBar), 6 Schriftgrößen (`fontSizeHeading` 16px bis `fontSizeCaption` 10px), 7 Spacing-Werte (`rowHeight`, `paddingSmall/Normal/Large` etc.), Font-Name (`fontFamily = "default.ttf"`)
+- **Inhalt:** ~60 `Vec4`-Farbkonstanten (Window/Panel/Button/Text/Input/Accent/Selection/Modal/Toast/Scrollbar/TreeView/ContentBrowser/Timeline/StatusBar), 6 Schriftgrößen (`fontSizeHeading` 16px bis `fontSizeCaption` 10px), 7 Spacing-Werte (`rowHeight`, `paddingSmall/Normal/Large` etc.), Font-Name (`fontFamily = "default.ttf"`), DPI-Scaling (`dpiScale`, `applyDpiScale()`, `Scaled(float)`/`Scaled(Vec2)` Hilfsmethoden)
 - **Verwendung:** Alle Editor-UI-Elemente in `UIManager.cpp` und `OpenGLRenderer.cpp` referenzieren ausschließlich Theme-Konstanten statt hardcoded Werte
 
 #### EditorUIBuilder (Statische Factory)
@@ -1523,8 +1525,10 @@ Editor-Settings-Popup erreichbar über Settings-Dropdown im ViewportOverlay (zwi
 - PopupWindow (480×380) mit dunklem Theme-Styling aus `EditorTheme::Get()`
 
 **Sektionen:**
-1. **Font Sizes** – 6 EntryBar-Einträge: Heading, Subheading, Body, Small, Caption, Monospace (Bereich 6–48px)
-2. **Spacing** – 5 EntryBar-Einträge: Row Height (16–48), Row Height Small (14–40), Row Height Large (20–56), Toolbar Height (24–64), Border Radius (0–12)
+1. **Theme** – Active Theme DropDown (zeigt alle .json-Dateien aus Editor/Themes/)
+2. **UI Scale** – DPI Scale DropDown (Auto/100%/125%/150%/175%/200%/250%/300%). "Auto" erkennt den DPI-Wert des primären Monitors automatisch. Änderungen werden live über `applyDpiScale()` + `rebuildAllEditorUI()` angewendet und in `config.ini` persistiert (`UIScale` Key).
+3. **Font Sizes** – 6 EntryBar-Einträge: Heading, Subheading, Body, Small, Caption, Monospace (Bereich 6–48px)
+4. **Spacing** – 5 EntryBar-Einträge: Row Height (16–48), Row Height Small (14–40), Row Height Large (20–56), Toolbar Height (24–64), Border Radius (0–12)
 
 **Mechanik:**
 - Jeder Eintrag schreibt direkt in den `EditorTheme`-Singleton via `float*`-Pointer
@@ -1543,9 +1547,22 @@ Editor-Settings-Popup erreichbar über Settings-Dropdown im ViewportOverlay (zwi
 Vollständige Theme-Persistierung mit JSON-Serialisierung und automatischer Default-Theme-Erstellung.
 
 **Serialisierung:**
-- `toJson()` / `fromJson()`: Konvertiert alle ~60 Vec4-Farben, Fonts, Spacing-Werte zu/von `nlohmann::json`
-- `saveToFile(path)` / `loadFromFile(path)`: Schreibt/liest Theme-JSON-Dateien
+- `toJson()` / `fromJson()`: Konvertiert alle ~60 Vec4-Farben, Fonts, Spacing-Werte zu/von `nlohmann::json`. Font-/Spacing-Werte werden DPI-unabhängig gespeichert (`toJson()` dividiert durch `dpiScale`, `fromJson()` multipliziert beim Laden)
+- `saveToFile(path)` / `loadFromFile(path)`: Schreibt/liest Theme-JSON-Dateien. `loadFromFile()` bewahrt den aktiven `dpiScale` über Theme-Wechsel hinweg
 - `discoverThemes()`: Scannt `Editor/Themes/`-Verzeichnis nach `.json`-Dateien, gibt Namensliste zurück
+
+**DPI-Aware Scaling:**
+- `float dpiScale`: Aktueller DPI-Skalierungsfaktor (1.0 = 96 DPI / 100%). Wird beim Startup aus dem primären Monitor oder gespeichertem Override (`UIScale` Key in `config.ini`) ermittelt
+- `applyDpiScale(float newScale)`: Skaliert alle Font-Größen, Row-Heights, Padding, Icon-Sizes, Border-Radius und Separator-Thickness vom aktuellen zum neuen Skalierungsfaktor
+- `static float Scaled(float px)` / `static Vec2 Scaled(Vec2 v)`: Hilfsmethoden für beliebige Pixelwert-Skalierung (`px * dpiScale`). Verwendet für alle Layout-Konstanten, die nicht über Theme-Felder abgebildet werden (Popup-Dimensionen, Row-Heights, Label-Widths, Widget-Fallback-Größen)
+- `loadThemeByName()` / `loadFromFile()` bewahren `dpiScale` automatisch — neue Themes werden sofort mit dem aktiven Skalierungsfaktor geladen
+
+**Vollständige UI-Abdeckung:**
+- **UIManager.cpp**: Alle 37 hardcoded `fontSize`-Literale → Theme-Felder; Engine-Settings/Editor-Settings/Projekt-Auswahl/Landscape-Manager-Popup-Dimensionen und Layout-Konstanten via `Scaled()`; `measureElementSize()` Fallback-Größen (Slider, Image, Checkbox, Dropdown-Arrow) via `Scaled()` oder Theme-Werte
+- **main.cpp**: New-Material-Popup Dimensionen, FontSizes, MinSizes und Paddings skaliert
+- **OpenGLRenderer.cpp**: 15 `minSize`-Werte in Mesh-/Material-Editor-Popups und Tab-Buttons skaliert
+- **UIWidgets**: SeparatorWidget (22px Header), TabViewWidget (26px Tab), TreeViewWidget (22px Row) via `Scaled()` skaliert
+- **Popup-Layout-Strategie**: Popup-Fenster werden mit `Scaled(baseW/H)` vergrößert; interne Positionen nutzen normalisierte Koordinaten (`from/to` 0-1) berechnet aus Basis-Pixelwerten, sodass Layouts proportional mitskalieren
 
 **Default-Themes:**
 - `EnsureDefaultThemes()`: Erstellt `Dark.json` (Standard-Defaults) und `Light.json` (helle Farbpalette mit ~50 Overrides) falls nicht vorhanden
@@ -1554,7 +1571,7 @@ Vollständige Theme-Persistierung mit JSON-Serialisierung und automatischer Defa
 
 **Startup-Flow:**
 1. `AssetManager::ensureDefaultAssetsCreated()` → `EditorTheme::EnsureDefaultThemes()` (erstellt Dark.json + Light.json)
-2. `main.cpp` Phase 2b: Liest gespeichertes Theme aus `DiagnosticsManager::getState("EditorTheme")` und lädt es via `loadThemeByName()`
+2. `main.cpp` Phase 2b: Erkennt DPI-Skalierung vom primären Monitor (oder liest gespeicherten `UIScale`-Override aus `config.ini`), wendet `applyDpiScale()` an, und lädt gespeichertes Theme via `loadThemeByName()`
 
 **Hilfsmethoden:**
 - `GetThemesDirectory()`: Gibt `Editor/Themes/`-Pfad zurück
@@ -1791,7 +1808,7 @@ struct PhysicsComponent {
 - Popup-UI über `UIManager::openLandscapeManagerPopup()` mit Formular (Name, Width, Depth, SubdivX, SubdivZ, Create/Cancel). Die Widget-Erstellung wurde aus `main.cpp` in den UIManager verschoben. Landscape-Erstellung erzeugt eine Undo/Redo-Action (Undo entfernt das Entity).
 - **Dropdown-Menü-System**: `UIManager::showDropdownMenu(anchor, items)` / `closeDropdownMenu()` — zeigt ein Overlay-Widget (z-Order 9000) mit klickbaren Menüeinträgen an einer Pixelposition. Unterstützt zusätzlich visuelle Separator-Einträge (`DropdownMenuItem::isSeparator`). Click-Outside schließt das Menü automatisch.
 - **Content-Browser-Kontextmenü (Grid, Rechtsklick)**: enthält `New Folder`, anschließend Separator, dann `New Script`, `New Level`, `New Material`.
-- **Engine Settings Popup** über `UIManager::openEngineSettingsPopup()` (aufgerufen aus `ViewportOverlay.Settings` → Dropdown-Menü → "Engine Settings"): Links Sidebar mit Kategorie-Buttons (General, Rendering, Debug, Physics), rechts scrollbarer Content-Bereich mit Checkboxen und Float-Eingabefeldern. General-Kategorie enthält: Splash Screen. Rendering-Kategorie enthält: Display (Shadows, VSync, Wireframe Mode, Occlusion Culling), Post-Processing (Post Processing Toggle, Gamma Correction, Tone Mapping, Anti-Aliasing Dropdown, Bloom, SSAO), Lighting (CSM Toggle). Debug-Kategorie enthält: UI Debug Outlines, Bounding Box Debug, HeightField Debug. Physics-Kategorie enthält: Backend-Dropdown (Jolt / PhysX, PhysX nur sichtbar wenn `ENGINE_PHYSX_BACKEND_AVAILABLE` definiert), Gravity X/Y/Z (Float-Eingabefelder, Default 0/-9.81/0), Fixed Timestep (Default 1/60 s), Sleep Threshold (Default 0.05). Die Backend-Auswahl wird als `PhysicsBackend`-Key in `DiagnosticsManager` persistiert und beim PIE-Start ausgelesen, um `PhysicsWorld::initialize(Backend)` mit dem gewählten Backend aufzurufen. Kategoriewechsel baut den Content-Bereich dynamisch um. Alle Änderungen werden **sofort** in `config.ini` via `DiagnosticsManager::setState()` + `saveConfig()` persistiert (nicht erst beim Shutdown). Die Widget-Erstellung wurde aus `main.cpp` in den UIManager verschoben.
+- **Engine Settings Popup** über `UIManager::openEngineSettingsPopup()` (aufgerufen aus `ViewportOverlay.Settings` → Dropdown-Menü → "Engine Settings"): Links Sidebar mit Kategorie-Buttons (General, Rendering, Debug, Physics, Info), rechts scrollbarer Content-Bereich mit Checkboxen und Float-Eingabefeldern. General-Kategorie enthält: Splash Screen. Rendering-Kategorie enthält: Display (Shadows, VSync, Wireframe Mode, Occlusion Culling), Post-Processing (Post Processing Toggle, Gamma Correction, Tone Mapping, Anti-Aliasing Dropdown, Bloom, SSAO), Lighting (CSM Toggle). Debug-Kategorie enthält: UI Debug Outlines, Bounding Box Debug, HeightField Debug. Physics-Kategorie enthält: Backend-Dropdown (Jolt / PhysX, PhysX nur sichtbar wenn `ENGINE_PHYSX_BACKEND_AVAILABLE` definiert), Gravity X/Y/Z (Float-Eingabefelder, Default 0/-9.81/0), Fixed Timestep (Default 1/60 s), Sleep Threshold (Default 0.05). Info-Kategorie zeigt Hardware-Informationen (read-only): CPU (Brand, Physical/Logical Cores), GPU (Renderer, Vendor, Driver Version, VRAM Total/Free), RAM (Total/Available), Monitors (Name, Resolution, Refresh Rate, DPI Scale). Die Backend-Auswahl wird als `PhysicsBackend`-Key in `DiagnosticsManager` persistiert und beim PIE-Start ausgelesen, um `PhysicsWorld::initialize(Backend)` mit dem gewählten Backend aufzurufen. Kategoriewechsel baut den Content-Bereich dynamisch um. Alle Änderungen werden **sofort** in `config.ini` via `DiagnosticsManager::setState()` + `saveConfig()` persistiert (nicht erst beim Shutdown). Die Widget-Erstellung wurde aus `main.cpp` in den UIManager verschoben.
 - Grid-Shader (`grid_fragment.glsl`) nutzt vollständige Lichtberechnung (Multi-Light, Schatten, Blinn-Phong) — Landscape wird von allen Lichtquellen der Szene beeinflusst.
 - `EngineLevel::onEntityAdded()` / `onEntityRemoved()` setzen automatisch das Level-Dirty-Flag (`setIsSaved(false)`) und `setScenePrepared(false)` via Callback, sodass alle Aufrufer (Spawn, Delete, Landscape) einheitlich behandelt werden.
 
@@ -1825,6 +1842,10 @@ struct PhysicsComponent {
 | `get_engine_time()`         | Sekunden seit Engine-Start (SDL)      |
 | `get_state(key)`            | Engine-State abfragen                 |
 | `set_state(key, value)`     | Engine-State setzen                   |
+| `get_cpu_info()`            | CPU-Info Dict (brand, physical_cores, logical_cores) |
+| `get_gpu_info()`            | GPU-Info Dict (renderer, vendor, driver_version, vram_total_mb, vram_free_mb) |
+| `get_ram_info()`            | RAM-Info Dict (total_mb, available_mb) |
+| `get_monitor_info()`        | Liste von Monitor-Dicts (name, width, height, refresh_rate, dpi_scale, primary) |
 
 #### engine.physics
 | Funktion                              | Beschreibung                          |

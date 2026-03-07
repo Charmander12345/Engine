@@ -865,6 +865,26 @@ class diagnostics:
         """Set engine state string."""
         ...
 
+    @staticmethod
+    def get_cpu_info() -> dict:
+        """Get CPU info: {'brand': str, 'physical_cores': int, 'logical_cores': int}."""
+        ...
+
+    @staticmethod
+    def get_gpu_info() -> dict:
+        """Get GPU info: {'renderer': str, 'vendor': str, 'driver_version': str, 'vram_total_mb': int, 'vram_free_mb': int}."""
+        ...
+
+    @staticmethod
+    def get_ram_info() -> dict:
+        """Get RAM info: {'total_mb': int, 'available_mb': int}."""
+        ...
+
+    @staticmethod
+    def get_monitor_info() -> list:
+        """Get list of monitor dicts: [{'name': str, 'width': int, 'height': int, 'refresh_rate': int, 'dpi_scale': float, 'primary': bool}, ...]."""
+        ...
+
 # ---------------------------------------------------------------------------
 # engine.logging
 # ---------------------------------------------------------------------------

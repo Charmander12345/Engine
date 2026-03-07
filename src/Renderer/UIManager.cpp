@@ -200,8 +200,8 @@ namespace
         case WidgetElementType::ProgressBar:
         case WidgetElementType::Slider:
         {
-            const float width = (element.minSize.x > 0.0f) ? element.minSize.x : 140.0f;
-            const float height = (element.minSize.y > 0.0f) ? element.minSize.y : 18.0f;
+            const float width = (element.minSize.x > 0.0f) ? element.minSize.x : EditorTheme::Scaled(140.0f);
+            const float height = (element.minSize.y > 0.0f) ? element.minSize.y : EditorTheme::Scaled(18.0f);
             size = Vec2{ width, height };
             element.contentSizePixels = size;
             element.hasContentSize = true;
@@ -218,9 +218,7 @@ namespace
             size.y = textSize.y + element.padding.y * 2.0f;
             if (!element.imagePath.empty() && element.text.empty())
             {
-                const float imgDefault = 24.0f;
-                size.x = std::max(size.x, imgDefault + element.padding.x * 2.0f);
-                size.y = std::max(size.y, imgDefault + element.padding.y * 2.0f);
+                const float imgDefault = EditorTheme::Scaled(24.0f);
             }
             size.x = std::max(size.x, element.minSize.x);
             size.y = std::max(size.y, element.minSize.y);
@@ -230,7 +228,7 @@ namespace
         }
         case WidgetElementType::EntryBar:
         {
-            const float fontSize = (element.fontSize > 0.0f) ? element.fontSize : 14.0f;
+            const float fontSize = (element.fontSize > 0.0f) ? element.fontSize : EditorTheme::Get().fontSizeSubheading;
             const float scale = fontSize / 48.0f;
             std::string display = element.value;
             if (element.isPassword)
@@ -290,11 +288,11 @@ namespace
         }
         case WidgetElementType::CheckBox:
         {
-            const float boxSize = 16.0f;
-            const float fontSize = (element.fontSize > 0.0f) ? element.fontSize : 14.0f;
+            const float boxSize = EditorTheme::Scaled(16.0f);
+            const float fontSize = (element.fontSize > 0.0f) ? element.fontSize : EditorTheme::Get().fontSizeSubheading;
             const float scale = fontSize / 48.0f;
             const Vec2 textSize = (!element.text.empty() && measureText) ? measureText(element.text, scale) : Vec2{};
-            size.x = element.padding.x + boxSize + 6.0f + textSize.x + element.padding.x;
+            size.x = element.padding.x + boxSize + EditorTheme::Scaled(6.0f) + textSize.x + element.padding.x;
             size.y = std::max(boxSize, textSize.y) + element.padding.y * 2.0f;
             size.x = std::max(size.x, element.minSize.x);
             size.y = std::max(size.y, element.minSize.y);
@@ -304,7 +302,7 @@ namespace
         }
         case WidgetElementType::DropDown:
         {
-            const float fontSize = (element.fontSize > 0.0f) ? element.fontSize : 14.0f;
+            const float fontSize = (element.fontSize > 0.0f) ? element.fontSize : EditorTheme::Get().fontSizeSubheading;
             const float scale = fontSize / 48.0f;
             std::string display = element.text;
             if (display.empty() && element.selectedIndex >= 0 &&
@@ -313,7 +311,7 @@ namespace
                 display = element.items[static_cast<size_t>(element.selectedIndex)];
             }
             const Vec2 textSize = (!display.empty() && measureText) ? measureText(display, scale) : Vec2{};
-            size.x = textSize.x + element.padding.x * 2.0f + 16.0f;
+            size.x = textSize.x + element.padding.x * 2.0f + EditorTheme::Scaled(16.0f);
             size.y = textSize.y + element.padding.y * 2.0f;
             size.x = std::max(size.x, element.minSize.x);
             size.y = std::max(size.y, element.minSize.y);
@@ -323,15 +321,15 @@ namespace
         }
         case WidgetElementType::DropdownButton:
         {
-            const float scale = (element.fontSize > 0.0f) ? (element.fontSize / 48.0f) : 14.0f / 48.0f;
+            const float scale = (element.fontSize > 0.0f) ? (element.fontSize / 48.0f) : EditorTheme::Get().fontSizeSubheading / 48.0f;
             const Vec2 textSize = (!element.text.empty() && measureText) ? measureText(element.text, scale) : Vec2{};
-            // Text + padding + arrow indicator space (12px)
-            size.x = textSize.x + element.padding.x * 2.0f + 12.0f;
+            // Text + padding + arrow indicator space
+            size.x = textSize.x + element.padding.x * 2.0f + EditorTheme::Scaled(12.0f);
             size.y = textSize.y + element.padding.y * 2.0f;
             if (!element.imagePath.empty() && element.text.empty())
             {
-                const float imgDefault = 24.0f;
-                size.x = std::max(size.x, imgDefault + element.padding.x * 2.0f + 12.0f);
+                const float imgDefault = EditorTheme::Scaled(24.0f);
+                size.x = std::max(size.x, imgDefault + element.padding.x * 2.0f + EditorTheme::Scaled(12.0f));
                 size.y = std::max(size.y, imgDefault + element.padding.y * 2.0f);
             }
             size.x = std::max(size.x, element.minSize.x);
@@ -7117,7 +7115,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.to = Vec2{ 0.95f, 0.15f };
         newEl.text = "New Text";
         newEl.font = "default.ttf";
-        newEl.fontSize = 16.0f;
+        newEl.fontSize = EditorTheme::Get().fontSizeHeading;
         newEl.style.textColor = Vec4{ 0.95f, 0.95f, 0.95f, 1.0f };
     }
     else if (elementType == "Button")
@@ -7127,7 +7125,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.to = Vec2{ 0.7f, 0.55f };
         newEl.text = "Button";
         newEl.font = "default.ttf";
-        newEl.fontSize = 14.0f;
+        newEl.fontSize = EditorTheme::Get().fontSizeSubheading;
         newEl.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
         newEl.textAlignH = TextAlignH::Center;
         newEl.textAlignV = TextAlignV::Center;
@@ -7146,7 +7144,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.from = Vec2{ 0.1f, 0.4f };
         newEl.to = Vec2{ 0.9f, 0.52f };
         newEl.value = "";
-        newEl.fontSize = 14.0f;
+        newEl.fontSize = EditorTheme::Get().fontSizeSubheading;
         newEl.style.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
         newEl.style.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.9f };
     }
@@ -7181,7 +7179,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.to = Vec2{ 0.5f, 0.52f };
         newEl.text = "Checkbox";
         newEl.font = "default.ttf";
-        newEl.fontSize = 14.0f;
+        newEl.fontSize = EditorTheme::Get().fontSizeSubheading;
         newEl.style.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
     }
     else if (elementType == "DropDown")
@@ -7222,7 +7220,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.to = Vec2{ 0.95f, 0.15f };
         newEl.text = "Label";
         newEl.font = "default.ttf";
-        newEl.fontSize = 14.0f;
+        newEl.fontSize = EditorTheme::Get().fontSizeSubheading;
         newEl.style.textColor = Vec4{ 0.85f, 0.85f, 0.90f, 1.0f };
         newEl.hitTestMode = HitTestMode::DisabledSelf;
     }
@@ -7233,7 +7231,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.to = Vec2{ 0.7f, 0.55f };
         newEl.text = "Toggle";
         newEl.font = "default.ttf";
-        newEl.fontSize = 14.0f;
+        newEl.fontSize = EditorTheme::Get().fontSizeSubheading;
         newEl.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
         newEl.textAlignH = TextAlignH::Center;
         newEl.textAlignV = TextAlignV::Center;
@@ -7248,7 +7246,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.to = Vec2{ 0.7f, 0.55f };
         newEl.text = "Radio";
         newEl.font = "default.ttf";
-        newEl.fontSize = 14.0f;
+        newEl.fontSize = EditorTheme::Get().fontSizeSubheading;
         newEl.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
         newEl.textAlignH = TextAlignH::Center;
         newEl.textAlignV = TextAlignV::Center;
@@ -7346,7 +7344,7 @@ void UIManager::addElementToEditedWidget(const std::string& tabId, const std::st
         newEl.to = Vec2{ 0.95f, 0.5f };
         newEl.richText = "<b>Bold</b> and <i>italic</i> text";
         newEl.font = "default.ttf";
-        newEl.fontSize = 14.0f;
+        newEl.fontSize = EditorTheme::Get().fontSizeSubheading;
         newEl.style.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
     }
     else if (elementType == "ListView")
@@ -7818,8 +7816,8 @@ void UIManager::openLandscapeManagerPopup()
         return;
     }
 
-    constexpr int kPopupW = 420;
-    constexpr int kPopupH = 340;
+    const int kPopupW = static_cast<int>(EditorTheme::Scaled(420.0f));
+    const int kPopupH = static_cast<int>(EditorTheme::Scaled(340.0f));
     PopupWindow* popup = m_renderer->openPopupWindow(
         "LandscapeManager", "Landscape Manager", kPopupW, kPopupH);
     if (!popup) return;
@@ -7836,8 +7834,8 @@ void UIManager::openLandscapeManagerPopup()
     };
     auto state = std::make_shared<LandscapeFormState>();
 
-    const float W = static_cast<float>(kPopupW);
-    const float H = static_cast<float>(kPopupH);
+    constexpr float W = 420.0f;
+    constexpr float H = 340.0f;
 
     auto nx = [&](float px) { return px / W; };
     auto ny = [&](float py) { return py / H; };
@@ -7851,10 +7849,10 @@ void UIManager::openLandscapeManagerPopup()
         e.from      = Vec2{ nx(x0), ny(y0) };
         e.to        = Vec2{ nx(x1), ny(y1) };
         e.text      = text;
-        e.fontSize  = 13.0f;
+        e.fontSize  = EditorTheme::Get().fontSizeBody;
         e.style.textColor = EditorTheme::Get().textPrimary;
         e.textAlignV = TextAlignV::Center;
-        e.padding   = Vec2{ 6.0f, 0.0f };
+        e.padding   = EditorTheme::Scaled(Vec2{ 6.0f, 0.0f });
         return e;
     };
 
@@ -7867,11 +7865,11 @@ void UIManager::openLandscapeManagerPopup()
         e.from         = Vec2{ nx(x0), ny(y0) };
         e.to           = Vec2{ nx(x1), ny(y1) };
         e.value        = val;
-        e.fontSize     = 13.0f;
+        e.fontSize     = EditorTheme::Get().fontSizeBody;
         e.style.color        = EditorTheme::Get().inputBackground;
         e.style.hoverColor   = EditorTheme::Get().inputBackgroundHover;
         e.style.textColor    = EditorTheme::Get().inputText;
-        e.padding      = Vec2{ 6.0f, 4.0f };
+        e.padding      = EditorTheme::Scaled(Vec2{ 6.0f, 4.0f });
         e.hitTestMode = HitTestMode::Enabled;
         return e;
     };
@@ -7908,7 +7906,7 @@ void UIManager::openLandscapeManagerPopup()
     constexpr float kFormY0 = 54.0f;
     constexpr float kLabelX1 = 130.0f;
     constexpr float kEntryX0 = 138.0f;
-    const float kEntryX1 = W - 12.0f;
+    constexpr float kEntryX1 = W - 12.0f;
 
     const auto rowY0 = [&](int row) { return kFormY0 + row * (kRowH + kRowGap); };
     const auto rowY1 = [&](int row) { return rowY0(row) + kRowH; };
@@ -7975,13 +7973,13 @@ void UIManager::openLandscapeManagerPopup()
         btn.from          = Vec2{ nx(W - 220.0f), ny(btnY0) };
         btn.to            = Vec2{ nx(W - 114.0f), ny(btnY1) };
         btn.text          = "Create";
-        btn.fontSize      = 13.0f;
+        btn.fontSize      = EditorTheme::Get().fontSizeBody;
         btn.style.color         = EditorTheme::Get().accentGreen;
         btn.style.hoverColor    = Vec4{ 0.40f, 0.78f, 0.44f, 1.0f };
         btn.style.textColor     = EditorTheme::Get().buttonPrimaryText;
         btn.textAlignH    = TextAlignH::Center;
         btn.textAlignV    = TextAlignV::Center;
-        btn.padding       = Vec2{ 8.0f, 4.0f };
+        btn.padding       = EditorTheme::Scaled(Vec2{ 8.0f, 4.0f });
         btn.hitTestMode = HitTestMode::Enabled;
         btn.onClicked     = [state, this]()
         {
@@ -8029,13 +8027,13 @@ void UIManager::openLandscapeManagerPopup()
         btn.from          = Vec2{ nx(W - 104.0f), ny(btnY0) };
         btn.to            = Vec2{ nx(W - 12.0f),  ny(btnY1) };
         btn.text          = "Cancel";
-        btn.fontSize      = 13.0f;
+        btn.fontSize      = EditorTheme::Get().fontSizeBody;
         btn.style.color         = EditorTheme::Get().buttonDefault;
         btn.style.hoverColor    = EditorTheme::Get().buttonHover;
         btn.style.textColor     = EditorTheme::Get().buttonText;
         btn.textAlignH    = TextAlignH::Center;
         btn.textAlignV    = TextAlignV::Center;
-        btn.padding       = Vec2{ 8.0f, 4.0f };
+        btn.padding       = EditorTheme::Scaled(Vec2{ 8.0f, 4.0f });
         btn.hitTestMode = HitTestMode::Enabled;
         btn.onClicked     = [this]()
         {
@@ -8057,8 +8055,8 @@ void UIManager::openEngineSettingsPopup()
     if (!m_renderer)
         return;
 
-    constexpr int kPopupW = 620;
-    constexpr int kPopupH = 480;
+    const int kPopupW = static_cast<int>(EditorTheme::Scaled(620.0f));
+    const int kPopupH = static_cast<int>(EditorTheme::Scaled(480.0f));
     PopupWindow* popup = m_renderer->openPopupWindow(
         "EngineSettings", "Engine Settings", kPopupW, kPopupH);
     if (!popup) return;
@@ -8072,9 +8070,9 @@ void UIManager::openEngineSettingsPopup()
     struct SettingsState { int activeCategory{ 0 }; };
     auto state = std::make_shared<SettingsState>();
 
-    const std::vector<std::string> categories = { "General", "Rendering", "Debug", "Physics" };
-    constexpr float kSidebarW = 140.0f;
-    constexpr float kTitleH = 44.0f;
+    const std::vector<std::string> categories = { "General", "Rendering", "Debug", "Physics", "Info" };
+    const float kSidebarW = EditorTheme::Scaled(140.0f);
+    const float kTitleH = EditorTheme::Scaled(44.0f);
 
     std::vector<WidgetElement> elements;
 
@@ -8105,7 +8103,7 @@ void UIManager::openEngineSettingsPopup()
         titleText.from      = Vec2{ nx(8.0f), 0.0f };
         titleText.to        = Vec2{ nx(W - 8.0f), ny(kTitleH) };
         titleText.text      = "Engine Settings";
-        titleText.fontSize  = 14.0f;
+        titleText.fontSize  = EditorTheme::Get().fontSizeSubheading;
         titleText.style.textColor = EditorTheme::Get().titleBarText;
         titleText.textAlignV = TextAlignV::Center;
         titleText.padding   = Vec2{ 6.0f, 0.0f };
@@ -8134,9 +8132,9 @@ void UIManager::openEngineSettingsPopup()
         elements.push_back(sep);
     }
 
-    constexpr float kCatBtnH = 32.0f;
-    constexpr float kCatBtnGap = 2.0f;
-    constexpr float kCatBtnY0 = kTitleH + 8.0f;
+    const float kCatBtnH = EditorTheme::Scaled(32.0f);
+    const float kCatBtnGap = EditorTheme::Scaled(2.0f);
+    const float kCatBtnY0 = kTitleH + EditorTheme::Scaled(8.0f);
 
     Renderer* renderer = m_renderer;
     auto rebuildContent = [state, popup, categories, nx, ny, W, H, kSidebarW, kTitleH, renderer]()
@@ -8147,9 +8145,11 @@ void UIManager::openEngineSettingsPopup()
 
         entry->children.clear();
 
-        constexpr float kRowH = 30.0f;
-        constexpr float kRowGap = 6.0f;
-        constexpr float kContentPad = 16.0f;
+        const float kRowH = EditorTheme::Scaled(30.0f);
+        const float kRowGap = EditorTheme::Scaled(6.0f);
+        const float kContentPad = EditorTheme::Scaled(16.0f);
+        const float kLabelW = EditorTheme::Scaled(140.0f);
+        const float kGapW = EditorTheme::Scaled(12.0f);
         const float contentW = W - kSidebarW;
         int row = 0;
 
@@ -8159,7 +8159,7 @@ void UIManager::openEngineSettingsPopup()
             sec.type      = WidgetElementType::Text;
             sec.id        = id;
             sec.text      = label;
-            sec.fontSize  = 13.0f;
+            sec.fontSize  = EditorTheme::Get().fontSizeBody;
             sec.style.textColor = EditorTheme::Get().textMuted;
             sec.textAlignV = TextAlignV::Center;
             sec.padding   = Vec2{ 4.0f, 0.0f };
@@ -8194,10 +8194,10 @@ void UIManager::openEngineSettingsPopup()
             lbl.type      = WidgetElementType::Text;
             lbl.id        = id + ".Lbl";
             lbl.text      = label;
-            lbl.fontSize  = 13.0f;
+            lbl.fontSize  = EditorTheme::Get().fontSizeBody;
             lbl.style.textColor = EditorTheme::Get().textPrimary;
             lbl.textAlignV = TextAlignV::Center;
-            lbl.minSize   = Vec2{ 140.0f, kRowH };
+            lbl.minSize   = Vec2{ kLabelW, kRowH };
             lbl.padding   = Vec2{ 0.0f, 0.0f };
             rowPanel.children.push_back(lbl);
 
@@ -8205,13 +8205,13 @@ void UIManager::openEngineSettingsPopup()
             eb.type          = WidgetElementType::EntryBar;
             eb.id            = id;
             eb.value         = value;
-            eb.fontSize      = 12.0f;
+            eb.fontSize      = EditorTheme::Get().fontSizeMonospace;
             eb.style.color         = EditorTheme::Get().inputBackground;
             eb.style.hoverColor    = EditorTheme::Get().inputBackgroundHover;
             eb.style.textColor     = EditorTheme::Get().inputText;
             eb.padding       = Vec2{ 6.0f, 4.0f };
             eb.hitTestMode = HitTestMode::Enabled;
-            eb.minSize       = Vec2{ contentW - kContentPad * 2.0f - 140.0f - 12.0f, kRowH };
+            eb.minSize       = Vec2{ contentW - kContentPad * 2.0f - kLabelW - kGapW, kRowH };
             eb.onValueChanged = std::move(onChange);
             rowPanel.children.push_back(eb);
 
@@ -8226,7 +8226,7 @@ void UIManager::openEngineSettingsPopup()
             cb.type          = WidgetElementType::CheckBox;
             cb.id            = id;
             cb.text          = label;
-            cb.fontSize      = 13.0f;
+            cb.fontSize      = EditorTheme::Get().fontSizeBody;
             cb.isChecked     = checked;
             cb.style.color         = EditorTheme::Get().inputBackground;
             cb.style.hoverColor    = EditorTheme::Get().checkboxHover;
@@ -8256,10 +8256,10 @@ void UIManager::openEngineSettingsPopup()
             lbl.type      = WidgetElementType::Text;
             lbl.id        = id + ".Lbl";
             lbl.text      = label;
-            lbl.fontSize  = 13.0f;
+            lbl.fontSize  = EditorTheme::Get().fontSizeBody;
             lbl.style.textColor = EditorTheme::Get().textPrimary;
             lbl.textAlignV = TextAlignV::Center;
-            lbl.minSize   = Vec2{ 140.0f, kRowH };
+            lbl.minSize   = Vec2{ kLabelW, kRowH };
             lbl.padding   = Vec2{ 0.0f, 0.0f };
             rowPanel.children.push_back(lbl);
 
@@ -8268,13 +8268,13 @@ void UIManager::openEngineSettingsPopup()
             dd.id            = id;
             dd.items         = items;
             dd.selectedIndex = selected;
-            dd.fontSize      = 12.0f;
+            dd.fontSize      = EditorTheme::Get().fontSizeMonospace;
             dd.style.color         = EditorTheme::Get().inputBackground;
             dd.style.hoverColor    = EditorTheme::Get().inputBackgroundHover;
             dd.style.textColor     = EditorTheme::Get().inputText;
             dd.padding       = Vec2{ 6.0f, 4.0f };
             dd.hitTestMode = HitTestMode::Enabled;
-            dd.minSize       = Vec2{ contentW - kContentPad * 2.0f - 140.0f - 12.0f, kRowH };
+            dd.minSize       = Vec2{ contentW - kContentPad * 2.0f - kLabelW - kGapW, kRowH };
             dd.onSelectionChanged = std::move(onChange);
             rowPanel.children.push_back(dd);
 
@@ -8537,6 +8537,89 @@ void UIManager::openEngineSettingsPopup()
                     DiagnosticsManager::Instance().saveConfig();
                 });
         }
+        else if (state->activeCategory == 4) // Info
+        {
+            const auto& hw = DiagnosticsManager::Instance().getHardwareInfo();
+
+            const auto addInfoRow = [&](const std::string& id, const std::string& label, const std::string& value)
+            {
+                WidgetElement rowPanel;
+                rowPanel.type        = WidgetElementType::StackPanel;
+                rowPanel.id          = id + ".Row";
+                rowPanel.orientation = StackOrientation::Horizontal;
+                rowPanel.minSize     = Vec2{ contentW - kContentPad * 2.0f, kRowH };
+                rowPanel.style.color = EditorTheme::Get().transparent;
+                rowPanel.padding     = Vec2{ 6.0f, 2.0f };
+
+                WidgetElement lbl;
+                lbl.type      = WidgetElementType::Text;
+                lbl.id        = id + ".Lbl";
+                lbl.text      = label;
+                lbl.fontSize  = EditorTheme::Get().fontSizeBody;
+                lbl.style.textColor = EditorTheme::Get().textPrimary;
+                lbl.textAlignV = TextAlignV::Center;
+                lbl.minSize   = Vec2{ kLabelW, kRowH };
+                rowPanel.children.push_back(lbl);
+
+                WidgetElement val;
+                val.type      = WidgetElementType::Text;
+                val.id        = id + ".Val";
+                val.text      = value;
+                val.fontSize  = EditorTheme::Get().fontSizeMonospace;
+                val.style.textColor = EditorTheme::Get().textSecondary;
+                val.textAlignV = TextAlignV::Center;
+                val.minSize   = Vec2{ contentW - kContentPad * 2.0f - kLabelW - kGapW, kRowH };
+                rowPanel.children.push_back(val);
+
+                entry->children.push_back(rowPanel);
+                ++row;
+            };
+
+            // CPU
+            addSectionLabel("ES.C.Sec.CPU", "CPU");
+            addSeparator("ES.C.Sep.CPU");
+            addInfoRow("ES.C.CpuBrand",    "Brand",          hw.cpu.brand.empty() ? "Unknown" : hw.cpu.brand);
+            addInfoRow("ES.C.CpuPhys",     "Physical Cores", std::to_string(hw.cpu.physicalCores));
+            addInfoRow("ES.C.CpuLogical",  "Logical Cores",  std::to_string(hw.cpu.logicalCores));
+
+            // GPU
+            addSeparator("ES.C.Sep.GPU");
+            addSectionLabel("ES.C.Sec.GPU", "GPU");
+            addSeparator("ES.C.Sep.GPU2");
+            addInfoRow("ES.C.GpuRenderer", "Renderer",       hw.gpu.renderer.empty() ? "Unknown" : hw.gpu.renderer);
+            addInfoRow("ES.C.GpuVendor",   "Vendor",         hw.gpu.vendor.empty() ? "Unknown" : hw.gpu.vendor);
+            addInfoRow("ES.C.GpuDriver",   "Driver Version", hw.gpu.driverVersion.empty() ? "Unknown" : hw.gpu.driverVersion);
+            if (hw.gpu.vramTotalMB > 0)
+                addInfoRow("ES.C.GpuVram", "VRAM Total",     std::to_string(hw.gpu.vramTotalMB) + " MB");
+            if (hw.gpu.vramFreeMB > 0)
+                addInfoRow("ES.C.GpuVramFree", "VRAM Free",  std::to_string(hw.gpu.vramFreeMB) + " MB");
+
+            // RAM
+            addSeparator("ES.C.Sep.RAM");
+            addSectionLabel("ES.C.Sec.RAM", "RAM");
+            addSeparator("ES.C.Sep.RAM2");
+            addInfoRow("ES.C.RamTotal",    "Total",          std::to_string(hw.ram.totalMB) + " MB");
+            addInfoRow("ES.C.RamAvail",    "Available",      std::to_string(hw.ram.availableMB) + " MB");
+
+            // Monitors
+            addSeparator("ES.C.Sep.Mon");
+            addSectionLabel("ES.C.Sec.Mon", "Monitors");
+            addSeparator("ES.C.Sep.Mon2");
+            for (size_t mi = 0; mi < hw.monitors.size(); ++mi)
+            {
+                const auto& mon = hw.monitors[mi];
+                const std::string idx = std::to_string(mi);
+                std::string label = mon.name;
+                if (mon.primary) label += " (Primary)";
+                addInfoRow("ES.C.Mon" + idx + ".Name", "Display " + std::to_string(mi + 1), label);
+                addInfoRow("ES.C.Mon" + idx + ".Res",  "Resolution",
+                    std::to_string(mon.width) + " x " + std::to_string(mon.height)
+                    + " @ " + std::to_string(mon.refreshRate) + " Hz");
+                std::ostringstream dpiStr;
+                dpiStr << std::fixed << std::setprecision(0) << (mon.dpiScale * 100.0f) << "%";
+                addInfoRow("ES.C.Mon" + idx + ".DPI",  "DPI Scale", dpiStr.str());
+            }
+        }
 
         for (size_t ci = 0; ci < categories.size(); ++ci)
         {
@@ -8564,7 +8647,7 @@ void UIManager::openEngineSettingsPopup()
         catBtn.from          = Vec2{ nx(4.0f), ny(by0) };
         catBtn.to            = Vec2{ nx(kSidebarW - 4.0f), ny(by1) };
         catBtn.text          = categories[ci];
-        catBtn.fontSize      = 13.0f;
+        catBtn.fontSize      = EditorTheme::Get().fontSizeBody;
         catBtn.style.color         = (static_cast<int>(ci) == state->activeCategory)
             ? EditorTheme::Get().accentMuted
             : EditorTheme::Get().transparent;
@@ -8619,8 +8702,8 @@ void UIManager::openEditorSettingsPopup()
     if (!m_renderer)
         return;
 
-    constexpr int kPopupW = 480;
-    constexpr int kPopupH = 380;
+    const int kPopupW = static_cast<int>(EditorTheme::Scaled(480.0f));
+    const int kPopupH = static_cast<int>(EditorTheme::Scaled(380.0f));
     PopupWindow* popup = m_renderer->openPopupWindow(
         "EditorSettings", "Editor Settings", kPopupW, kPopupH);
     if (!popup) return;
@@ -8646,7 +8729,7 @@ void UIManager::openEditorSettingsPopup()
         elements.push_back(bg);
     }
 
-    constexpr float kTitleH = 40.0f;
+    const float kTitleH = EditorTheme::Scaled(40.0f);
 
     // Title bar
     {
@@ -8684,8 +8767,8 @@ void UIManager::openEditorSettingsPopup()
         content.scrollable  = true;
 
         const float contentW = W - 32.0f;
-        constexpr float kRowH = 28.0f;
-        constexpr float kLabelW = 150.0f;
+        const float kRowH = EditorTheme::Scaled(28.0f);
+        const float kLabelW = EditorTheme::Scaled(150.0f);
 
         // -- Section: Theme --
         {
@@ -8767,6 +8850,118 @@ void UIManager::openEditorSettingsPopup()
             WidgetElement spacer;
             spacer.type    = WidgetElementType::Panel;
             spacer.id      = "EdS.Spacer.Theme";
+            spacer.style.color   = theme.transparent;
+            spacer.minSize = Vec2{ contentW - 8.0f, 8.0f };
+            content.children.push_back(spacer);
+        }
+
+        // ── Section: UI Scale ──
+        {
+            WidgetElement secLabel;
+            secLabel.type      = WidgetElementType::Text;
+            secLabel.id        = "EdS.Sec.Scale";
+            secLabel.text      = "UI Scale";
+            secLabel.fontSize  = theme.fontSizeSubheading;
+            secLabel.style.textColor = theme.textSecondary;
+            secLabel.textAlignV = TextAlignV::Center;
+            secLabel.minSize   = Vec2{ contentW - 8.0f, kRowH };
+            secLabel.padding   = Vec2{ 2.0f, 0.0f };
+            content.children.push_back(secLabel);
+
+            WidgetElement sep;
+            sep.type    = WidgetElementType::Panel;
+            sep.id      = "EdS.Sep.Scale";
+            sep.style.color   = theme.panelBorder;
+            sep.minSize = Vec2{ contentW - 8.0f, 1.0f };
+            content.children.push_back(sep);
+
+            const std::vector<std::string> scaleItems = {
+                "Auto", "100%", "125%", "150%", "175%", "200%", "250%", "300%"
+            };
+            const float scaleValues[] = { 0.0f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f, 2.5f, 3.0f };
+
+            // Determine current selection
+            int scaleIdx = 0; // default: Auto
+            {
+                auto savedScale = DiagnosticsManager::Instance().getState("UIScale");
+                if (savedScale && !savedScale->empty())
+                {
+                    try {
+                        float sv = std::stof(*savedScale);
+                        for (int i = 1; i < static_cast<int>(std::size(scaleValues)); ++i)
+                        {
+                            if (std::abs(sv - scaleValues[i]) < 0.01f)
+                            { scaleIdx = i; break; }
+                        }
+                    } catch (...) {}
+                }
+            }
+
+            WidgetElement row;
+            row.type        = WidgetElementType::StackPanel;
+            row.id          = "EdS.ScaleDD.Row";
+            row.orientation = StackOrientation::Horizontal;
+            row.minSize     = Vec2{ contentW - 8.0f, kRowH };
+            row.style.color = theme.transparent;
+            row.padding     = Vec2{ 4.0f, 2.0f };
+
+            WidgetElement lbl;
+            lbl.type      = WidgetElementType::Text;
+            lbl.id        = "EdS.ScaleDD.Lbl";
+            lbl.text      = "DPI Scale";
+            lbl.fontSize  = theme.fontSizeBody;
+            lbl.style.textColor = theme.textPrimary;
+            lbl.textAlignV = TextAlignV::Center;
+            lbl.minSize   = Vec2{ kLabelW, kRowH };
+            row.children.push_back(lbl);
+
+            WidgetElement dd;
+            dd.type          = WidgetElementType::DropDown;
+            dd.id            = "EdS.ScaleDD";
+            dd.items         = scaleItems;
+            dd.selectedIndex = scaleIdx;
+            dd.fontSize      = theme.fontSizeSmall;
+            dd.style.color         = theme.inputBackground;
+            dd.style.hoverColor    = theme.inputBackgroundHover;
+            dd.style.textColor     = theme.inputText;
+            dd.padding       = Vec2{ 6.0f, 4.0f };
+            dd.hitTestMode   = HitTestMode::Enabled;
+            dd.minSize       = Vec2{ contentW - 8.0f - kLabelW - 12.0f, kRowH };
+
+            UIManager* selfScale = this;
+            dd.onSelectionChanged = [selfScale, scaleItems](int idx) {
+                if (idx < 0 || idx >= static_cast<int>(scaleItems.size())) return;
+
+                float newScale = 1.0f;
+                if (idx == 0) // Auto — detect from primary monitor
+                {
+                    DiagnosticsManager::Instance().setState("UIScale", "");
+                    const auto& hwInfo = DiagnosticsManager::Instance().getHardwareInfo();
+                    for (const auto& mon : hwInfo.monitors)
+                    {
+                        if (mon.primary && mon.dpiScale > 0.0f)
+                        { newScale = mon.dpiScale; break; }
+                    }
+                }
+                else
+                {
+                    const float scaleVals[] = { 0.0f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f, 2.5f, 3.0f };
+                    newScale = scaleVals[idx];
+                    DiagnosticsManager::Instance().setState("UIScale", std::to_string(newScale));
+                }
+
+                auto& t = EditorTheme::Get();
+                t.applyDpiScale(newScale);
+                selfScale->rebuildAllEditorUI();
+                DiagnosticsManager::Instance().saveConfig();
+            };
+            row.children.push_back(dd);
+            content.children.push_back(row);
+        }
+        {
+            WidgetElement spacer;
+            spacer.type    = WidgetElementType::Panel;
+            spacer.id      = "EdS.Spacer.Scale";
             spacer.style.color   = theme.transparent;
             spacer.minSize = Vec2{ contentW - 8.0f, 8.0f };
             content.children.push_back(spacer);
@@ -8971,8 +9166,8 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
     if (findWidgetEntry("ProjectScreen.Main"))
         return;
 
-    constexpr float kScreenW = 720.0f;
-    constexpr float kScreenH = 540.0f;
+    const float kScreenW = EditorTheme::Scaled(720.0f);
+    const float kScreenH = EditorTheme::Scaled(540.0f);
     Renderer* renderer = m_renderer;
     UIManager* screenMgr = this;
     SDL_Window* hostWindow = renderer ? renderer->window() : nullptr;
@@ -9004,9 +9199,9 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         state->newProjectLocation = std::filesystem::current_path().string();
 
     const std::vector<std::string> categories = { "Recent Projects", "Open Project", "New Project" };
-    constexpr float kSidebarW = 170.0f;
-    constexpr float kTitleH = 48.0f;
-    constexpr float kFooterH = 40.0f;
+    const float kSidebarW = EditorTheme::Scaled(170.0f);
+    const float kTitleH = EditorTheme::Scaled(48.0f);
+    const float kFooterH = EditorTheme::Scaled(40.0f);
 
     std::vector<WidgetElement> elements;
 
@@ -9044,7 +9239,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         titleText.from      = Vec2{ nx(12.0f), 0.0f };
         titleText.to        = Vec2{ nx(W - 12.0f), ny(kTitleH - 2.0f) };
         titleText.text      = "HorizonEngine  â€”  Project Selection";
-        titleText.fontSize  = 16.0f;
+        titleText.fontSize  = EditorTheme::Get().fontSizeHeading;
         titleText.style.textColor = EditorTheme::Get().buttonPrimaryText;
         titleText.padding   = Vec2{ 6.0f, 0.0f };
         elements.push_back(titleText);
@@ -9094,7 +9289,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         cb.type          = WidgetElementType::CheckBox;
         cb.id            = "PS.DefaultCB";
         cb.text          = "Set as default project (skip this screen on next start)";
-        cb.fontSize      = 12.0f;
+        cb.fontSize      = EditorTheme::Get().fontSizeMonospace;
         cb.isChecked     = state->setAsDefault;
         cb.style.color         = EditorTheme::Get().checkboxDefault;
         cb.style.hoverColor    = EditorTheme::Get().checkboxHover;
@@ -9108,9 +9303,9 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         elements.push_back(cb);
     }
 
-    constexpr float kCatBtnH = 34.0f;
-    constexpr float kCatBtnGap = 2.0f;
-    constexpr float kCatBtnY0 = kTitleH + 10.0f;
+    const float kCatBtnH = EditorTheme::Scaled(34.0f);
+    const float kCatBtnGap = EditorTheme::Scaled(2.0f);
+    const float kCatBtnY0 = kTitleH + EditorTheme::Scaled(10.0f);
 
     auto callbackPtr = std::make_shared<std::function<void(const std::string&, bool, bool, bool, DiagnosticsManager::RHIType)>>(std::move(onProjectChosen));
     auto closeScreen = [screenMgr]()
@@ -9131,8 +9326,8 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
 
         entry->children.clear();
 
-        constexpr float kRowH = 32.0f;
-        constexpr float kContentPad = 16.0f;
+        const float kRowH = EditorTheme::Scaled(32.0f);
+        const float kContentPad = EditorTheme::Scaled(16.0f);
         const float contentW = W - kSidebarW;
 
         const auto addSectionLabel = [&](const std::string& id, const std::string& label)
@@ -9172,9 +9367,9 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             btn.style.textColor     = EditorTheme::Get().textPrimary;
             btn.textAlignH    = TextAlignH::Center;
             btn.textAlignV    = TextAlignV::Center;
-            btn.padding       = Vec2{ 16.0f, 8.0f };
+            btn.padding       = Vec2{ EditorTheme::Scaled(16.0f), EditorTheme::Scaled(8.0f) };
             btn.hitTestMode = HitTestMode::Enabled;
-            btn.minSize       = Vec2{ contentW - kContentPad * 2.0f, 38.0f };
+            btn.minSize       = Vec2{ contentW - kContentPad * 2.0f, EditorTheme::Scaled(38.0f) };
             btn.shaderVertex   = "button_vertex.glsl";
             btn.shaderFragment = "button_fragment.glsl";
             btn.onClicked     = std::move(onClick);
@@ -9197,7 +9392,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             btn.textAlignV    = TextAlignV::Center;
             btn.padding       = Vec2{ 12.0f, 6.0f };
             btn.hitTestMode = HitTestMode::Enabled;
-            btn.minSize       = Vec2{ 160.0f, 30.0f };
+            btn.minSize       = Vec2{ EditorTheme::Scaled(160.0f), EditorTheme::Scaled(30.0f) };
             btn.shaderVertex   = "button_vertex.glsl";
             btn.shaderFragment = "button_fragment.glsl";
             btn.onClicked     = std::move(onClick);
@@ -9223,7 +9418,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             lbl.fontSize  = theme.fontSizeBody;
             lbl.style.textColor = theme.textSecondary;
             lbl.textAlignV = TextAlignV::Center;
-            lbl.minSize   = Vec2{ 120.0f, kRowH };
+            lbl.minSize   = Vec2{ EditorTheme::Scaled(120.0f), kRowH };
             rowPanel.children.push_back(lbl);
 
             WidgetElement eb;
@@ -9236,7 +9431,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             eb.style.textColor     = theme.inputText;
             eb.padding       = Vec2{ 8.0f, 5.0f };
             eb.hitTestMode = HitTestMode::Enabled;
-            eb.minSize       = Vec2{ contentW - kContentPad * 2.0f - 120.0f - 12.0f, kRowH };
+            eb.minSize       = Vec2{ contentW - kContentPad * 2.0f - EditorTheme::Scaled(120.0f) - EditorTheme::Scaled(12.0f), kRowH };
             eb.onValueChanged = std::move(onChange);
             rowPanel.children.push_back(eb);
 
@@ -9314,7 +9509,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     row.type        = WidgetElementType::StackPanel;
                     row.id          = rowId + ".Row";
                     row.orientation = StackOrientation::Horizontal;
-                    row.minSize     = Vec2{ contentW - kContentPad * 2.0f, 44.0f };
+                    row.minSize     = Vec2{ contentW - kContentPad * 2.0f, EditorTheme::Scaled(44.0f) };
                     row.style.color       = isEven
                         ? EditorTheme::Get().treeRowEven
                         : EditorTheme::Get().treeRowOdd;
@@ -9331,7 +9526,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     accent.style.color   = exists
                         ? EditorTheme::Get().accent
                         : Vec4{ EditorTheme::Get().errorColor.x, EditorTheme::Get().errorColor.y, EditorTheme::Get().errorColor.z, 0.6f };
-                    accent.minSize = Vec2{ 4.0f, 44.0f };
+                    accent.minSize = Vec2{ EditorTheme::Scaled(4.0f), EditorTheme::Scaled(44.0f) };
                     row.children.push_back(accent);
 
                     // Project name column
@@ -9339,13 +9534,13 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     nameCol.type      = WidgetElementType::Text;
                     nameCol.id        = rowId + ".Name";
                     nameCol.text      = projName;
-                    nameCol.fontSize  = 14.0f;
+                    nameCol.fontSize  = EditorTheme::Get().fontSizeSubheading;
                     nameCol.style.textColor = exists
                         ? EditorTheme::Get().textPrimary
                         : Vec4{ EditorTheme::Get().errorColor.x, 0.38f, 0.38f, 1.0f };
                     nameCol.textAlignV = TextAlignV::Center;
                     nameCol.padding   = Vec2{ 12.0f, 0.0f };
-                    nameCol.minSize   = Vec2{ 180.0f, 44.0f };
+                    nameCol.minSize   = Vec2{ EditorTheme::Scaled(180.0f), EditorTheme::Scaled(44.0f) };
                     row.children.push_back(nameCol);
 
                     // Path column
@@ -9353,14 +9548,14 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     pathCol.type      = WidgetElementType::Text;
                     pathCol.id        = rowId + ".Path";
                     pathCol.text      = exists ? projPath : (projPath + "  (not found)");
-                    pathCol.fontSize  = 11.0f;
+                    pathCol.fontSize  = EditorTheme::Get().fontSizeSmall;
                     pathCol.style.textColor = exists
                         ? EditorTheme::Get().textMuted
                         : Vec4{ 0.45f, 0.30f, 0.30f, 0.8f };
                     pathCol.textAlignV = TextAlignV::Center;
                     pathCol.fillX     = true;
                     pathCol.padding   = Vec2{ 4.0f, 0.0f };
-                    pathCol.minSize   = Vec2{ 0.0f, 44.0f };
+                    pathCol.minSize   = Vec2{ 0.0f, EditorTheme::Scaled(44.0f) };
                     row.children.push_back(pathCol);
 
                     WidgetElement removeBtn;
@@ -9375,7 +9570,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     removeBtn.textAlignV = TextAlignV::Center;
                     removeBtn.padding = Vec2{ 0.0f, 0.0f };
                     removeBtn.fillY = true;
-                    removeBtn.minSize = Vec2{ 44.0f, 44.0f };
+                    removeBtn.minSize = Vec2{ EditorTheme::Scaled(44.0f), EditorTheme::Scaled(44.0f) };
                     removeBtn.hitTestMode = HitTestMode::Enabled;
                     removeBtn.shaderVertex = "button_vertex.glsl";
                     removeBtn.shaderFragment = "button_fragment.glsl";
@@ -9459,7 +9654,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             desc.type      = WidgetElementType::Text;
             desc.id        = "PS.C.OpenDesc";
             desc.text      = "Select a .project file to open an existing project.";
-            desc.fontSize  = 13.0f;
+            desc.fontSize  = EditorTheme::Get().fontSizeBody;
             desc.style.textColor = EditorTheme::Get().textSecondary;
             desc.padding   = Vec2{ 10.0f, 12.0f };
             desc.minSize   = Vec2{ contentW - kContentPad * 2.0f, 44.0f };
@@ -9604,10 +9799,10 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 preview.type      = WidgetElementType::Text;
                 preview.id        = "PS.C.Preview";
                 preview.text      = "Target:  " + previewPath;
-                preview.fontSize  = 11.0f;
+                preview.fontSize  = EditorTheme::Get().fontSizeSmall;
                 preview.style.textColor = EditorTheme::Get().textLink;
                 preview.padding   = Vec2{ 10.0f, 6.0f };
-                preview.minSize   = Vec2{ contentW - kContentPad * 2.0f, 26.0f };
+                preview.minSize   = Vec2{ contentW - kContentPad * 2.0f, EditorTheme::Scaled(26.0f) };
                 entry->children.push_back(preview);
             }
 
@@ -9625,7 +9820,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 includeDefaultContentCb.type = WidgetElementType::CheckBox;
                 includeDefaultContentCb.id = "PS.C.IncludeDefaultContent";
                 includeDefaultContentCb.text = "Include default content";
-                includeDefaultContentCb.fontSize = 12.0f;
+                includeDefaultContentCb.fontSize = EditorTheme::Get().fontSizeMonospace;
                 includeDefaultContentCb.isChecked = state->includeDefaultContent;
                 includeDefaultContentCb.style.color = EditorTheme::Get().checkboxDefault;
                 includeDefaultContentCb.style.hoverColor = EditorTheme::Get().checkboxHover;
@@ -9633,7 +9828,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 includeDefaultContentCb.style.textColor = EditorTheme::Get().textPrimary;
                 includeDefaultContentCb.padding = Vec2{ 8.0f, 4.0f };
                 includeDefaultContentCb.hitTestMode = HitTestMode::Enabled;
-                includeDefaultContentCb.minSize = Vec2{ contentW - kContentPad * 2.0f, 24.0f };
+                includeDefaultContentCb.minSize = Vec2{ contentW - kContentPad * 2.0f, EditorTheme::Scaled(24.0f) };
                 includeDefaultContentCb.onCheckedChanged = [state](bool v)
                 {
                     state->includeDefaultContent = v;
@@ -9655,10 +9850,10 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 rhiLbl.type      = WidgetElementType::Text;
                 rhiLbl.id        = "PS.C.RHI.Lbl";
                 rhiLbl.text      = "Graphics API";
-                rhiLbl.fontSize  = 13.0f;
+                rhiLbl.fontSize  = EditorTheme::Get().fontSizeBody;
                 rhiLbl.style.textColor = EditorTheme::Get().textSecondary;
                 rhiLbl.textAlignV = TextAlignV::Center;
-                rhiLbl.minSize   = Vec2{ 120.0f, kRowH };
+                rhiLbl.minSize   = Vec2{ EditorTheme::Scaled(120.0f), kRowH };
                 rhiRow.children.push_back(rhiLbl);
 
                 WidgetElement rhiDd;
@@ -9666,13 +9861,13 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 rhiDd.id            = "PS.C.RHI";
                 rhiDd.items         = { "OpenGL" };
                 rhiDd.selectedIndex = state->selectedRHI;
-                rhiDd.fontSize      = 12.0f;
+                rhiDd.fontSize      = EditorTheme::Get().fontSizeMonospace;
                 rhiDd.style.color         = EditorTheme::Get().inputBackground;
                 rhiDd.style.hoverColor    = EditorTheme::Get().inputBackgroundHover;
                 rhiDd.style.textColor     = EditorTheme::Get().textPrimary;
                 rhiDd.padding       = Vec2{ 6.0f, 4.0f };
                 rhiDd.hitTestMode = HitTestMode::Enabled;
-                rhiDd.minSize       = Vec2{ contentW - kContentPad * 2.0f - 120.0f - 12.0f, kRowH };
+                rhiDd.minSize       = Vec2{ contentW - kContentPad * 2.0f - EditorTheme::Scaled(120.0f) - EditorTheme::Scaled(12.0f), kRowH };
                 rhiDd.onSelectionChanged = [state](int idx)
                 {
                     state->selectedRHI = idx;
@@ -10395,7 +10590,7 @@ void UIManager::buildTimelineTrackRows(const std::string& tabId, WidgetElement& 
                 diamond.type = WidgetElementType::Text;
                 diamond.text = "\xe2\x97\x86";
                 diamond.font = EditorTheme::Get().fontDefault;
-                diamond.fontSize = 7.0f;
+                diamond.fontSize = EditorTheme::Scaled(7.0f);
                 diamond.style.textColor = EditorTheme::Get().tlKeyframeDiamond;
                 diamond.minSize = Vec2{ 14.0f, 18.0f };
                 diamond.textAlignH = TextAlignH::Center;
@@ -10654,7 +10849,7 @@ void UIManager::buildTimelineRulerAndKeyframes(const std::string& tabId, WidgetE
             if (tickStr.size() > 4) tickStr = tickStr.substr(0, 4);
             tick.text = tickStr;
             tick.font = EditorTheme::Get().fontDefault;
-            tick.fontSize = 9.0f;
+            tick.fontSize = EditorTheme::Scaled(9.0f);
             tick.style.textColor = EditorTheme::Get().textMuted;
             tick.from = Vec2{ std::max(0.0f, frac - halfW), 0.0f };
             tick.to = Vec2{ std::min(1.0f, frac + halfW), rulerFrac };
@@ -11404,7 +11599,7 @@ void UIManager::addElementToViewportWidget(const std::string& elementType)
         newEl.to        = Vec2{ 150.0f, 30.0f };
         newEl.text      = "Text";
         newEl.font      = "default.ttf";
-        newEl.fontSize  = 14.0f;
+        newEl.fontSize  = EditorTheme::Get().fontSizeSubheading;
         newEl.style.textColor = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
     }
     else if (elementType == "Label")
@@ -11414,7 +11609,7 @@ void UIManager::addElementToViewportWidget(const std::string& elementType)
         newEl.to        = Vec2{ 100.0f, 24.0f };
         newEl.text      = "Label";
         newEl.font      = "default.ttf";
-        newEl.fontSize  = 13.0f;
+        newEl.fontSize  = EditorTheme::Get().fontSizeBody;
         newEl.style.textColor = Vec4{ 0.85f, 0.85f, 0.88f, 1.0f };
     }
     else if (elementType == "Button")
@@ -11424,7 +11619,7 @@ void UIManager::addElementToViewportWidget(const std::string& elementType)
         newEl.to            = Vec2{ 120.0f, 36.0f };
         newEl.text          = "Button";
         newEl.font          = "default.ttf";
-        newEl.fontSize      = 14.0f;
+        newEl.fontSize      = EditorTheme::Get().fontSizeSubheading;
         newEl.style.textColor     = Vec4{ 0.95f, 0.95f, 0.98f, 1.0f };
         newEl.style.color         = Vec4{ 0.22f, 0.24f, 0.32f, 1.0f };
         newEl.style.hoverColor    = Vec4{ 0.30f, 0.34f, 0.44f, 1.0f };
@@ -11538,7 +11733,7 @@ void UIManager::addElementToViewportWidget(const std::string& elementType)
         newEl.to    = Vec2{ 300.0f, 100.0f };
         newEl.richText = "<b>Bold</b> and <i>italic</i> text";
         newEl.font = "default.ttf";
-        newEl.fontSize = 14.0f;
+        newEl.fontSize = EditorTheme::Get().fontSizeSubheading;
         newEl.style.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
     }
     else if (elementType == "ListView")
