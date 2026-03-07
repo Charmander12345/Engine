@@ -83,6 +83,17 @@ public:
     static constexpr int kMaxPointShadowLights = 4;
     void setPointShadowData(GLuint cubeArray, const glm::vec3* positions, const float* farPlanes, const int* lightIndices, int count);
 
+    // Fog
+    void setFogData(bool enabled, const glm::vec3& color, float density);
+
+    // Cascaded Shadow Maps (directional light)
+    static constexpr int kMaxCsmCascades = 4;
+    void setCsmData(GLuint texArray, const glm::mat4* matrices, const float* splits,
+                    int lightIndex, bool enabled, const glm::mat4& viewMatrix);
+
+    // PBR (Metallic/Roughness)
+    void setPbrData(bool enabled, float metallic, float roughness);
+
 private:
     void bindTextures();
 
@@ -127,6 +138,8 @@ private:
     GLint m_locMaterialShininess{-1};
     GLint m_locHasSpecularMap{-1};
     GLint m_locHasDiffuseMap{-1};
+    GLint m_locHasNormalMap{-1};
+    GLint m_locHasEmissiveMap{-1};
     GLint m_locLightCount{-1};
     struct LightUniformLocs
     {
@@ -169,4 +182,35 @@ private:
         GLint lightIndex{-1};
     };
     PointShadowUniformLocs m_pointShadowLocs[kMaxPointShadowLights]{};
+
+    // Fog data
+    bool m_fogEnabled{false};
+    glm::vec3 m_fogColor{0.7f, 0.7f, 0.8f};
+    float m_fogDensity{0.02f};
+    GLint m_locFogEnabled{-1};
+    GLint m_locFogColor{-1};
+    GLint m_locFogDensity{-1};
+
+    // CSM data
+    GLuint m_csmMapArray{0};
+    bool m_csmEnabled{false};
+    int m_csmLightIndex{-1};
+    glm::mat4 m_csmMatrices[kMaxCsmCascades]{};
+    float m_csmSplits[kMaxCsmCascades]{};
+    glm::mat4 m_csmViewMatrix{1.0f};
+    GLint m_locCsmMaps{-1};
+    GLint m_locCsmEnabled{-1};
+    GLint m_locCsmLightIndex{-1};
+    GLint m_locCsmMatrices[kMaxCsmCascades]{-1, -1, -1, -1};
+    GLint m_locCsmSplits[kMaxCsmCascades]{-1, -1, -1, -1};
+    GLint m_locViewMatrix{-1};
+
+    // PBR data
+    bool  m_pbrEnabled{false};
+    float m_pbrMetallic{0.0f};
+    float m_pbrRoughness{0.5f};
+    GLint m_locPbrEnabled{-1};
+    GLint m_locMetallic{-1};
+    GLint m_locRoughness{-1};
+    GLint m_locHasMetallicRoughnessMap{-1};
 };

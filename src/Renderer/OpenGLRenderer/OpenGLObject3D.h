@@ -24,6 +24,10 @@ public:
     void setLights(const std::vector<OpenGLMaterial::LightData>& lights);
     void setShadowData(GLuint shadowMapArray, const glm::mat4* matrices, const int* lightIndices, int count);
     void setPointShadowData(GLuint cubeArray, const glm::vec3* positions, const float* farPlanes, const int* lightIndices, int count);
+    void setFogData(bool enabled, const glm::vec3& color, float density);
+    void setCsmData(GLuint texArray, const glm::mat4* matrices, const float* splits,
+                    int lightIndex, bool enabled, const glm::mat4& viewMatrix);
+    void setPbrData(bool enabled, float metallic, float roughness);
     void render() override;
     void renderBatchContinuation();
     void setTextures(const std::vector<std::shared_ptr<Texture>>& textures) override;

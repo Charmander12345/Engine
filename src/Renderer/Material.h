@@ -30,9 +30,21 @@ public:
     void setShininess(float shininess) { m_shininess = shininess; }
     float getShininess() const { return m_shininess; }
 
+    void setMetallic(float metallic) { m_metallic = metallic; }
+    float getMetallic() const { return m_metallic; }
+
+    void setRoughness(float roughness) { m_roughness = roughness; }
+    float getRoughness() const { return m_roughness; }
+
+    void setPbrEnabled(bool enabled) { m_pbrEnabled = enabled; }
+    bool getPbrEnabled() const { return m_pbrEnabled; }
+
 private:
 protected:
     std::vector<std::string> m_textureAssetPaths;
     std::vector<std::shared_ptr<Texture>> m_textures;
     float m_shininess{32.0f};
+    float m_metallic{0.0f};
+    float m_roughness{0.5f};
+    bool m_pbrEnabled{false};
 };

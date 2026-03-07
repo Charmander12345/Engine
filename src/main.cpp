@@ -351,6 +351,32 @@ int main()
             renderer->setVSyncEnabled(*v == "1");
         if (auto v = diag.getState("WireframeEnabled"))
             renderer->setWireframeEnabled(*v == "1");
+        if (auto v = diag.getState("PostProcessingEnabled"))
+            renderer->setPostProcessingEnabled(*v != "0");
+        if (auto v = diag.getState("GammaCorrectionEnabled"))
+            renderer->setGammaCorrectionEnabled(*v != "0");
+        if (auto v = diag.getState("ToneMappingEnabled"))
+            renderer->setToneMappingEnabled(*v != "0");
+        if (auto v = diag.getState("AntiAliasingMode"))
+        {
+            int mode = 0;
+            try { mode = std::stoi(*v); } catch (...) {}
+            renderer->setAntiAliasingMode(static_cast<Renderer::AntiAliasingMode>(mode));
+        }
+        // Legacy: migrate old FxaaEnabled to new mode
+        else if (auto fv = diag.getState("FxaaEnabled"))
+        {
+            if (*fv == "1")
+                renderer->setAntiAliasingMode(Renderer::AntiAliasingMode::FXAA);
+        }
+        if (auto v = diag.getState("FogEnabled"))
+            renderer->setFogEnabled(*v == "1");
+        if (auto v = diag.getState("BloomEnabled"))
+            renderer->setBloomEnabled(*v == "1");
+        if (auto v = diag.getState("SsaoEnabled"))
+            renderer->setSsaoEnabled(*v == "1");
+        if (auto v = diag.getState("CsmEnabled"))
+            renderer->setCsmEnabled(*v != "0");
     }
 
     // In fast mode, show the main window immediately (splash mode keeps it hidden until ready).

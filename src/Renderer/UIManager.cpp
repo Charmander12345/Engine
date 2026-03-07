@@ -24,6 +24,7 @@
 #include "UIWidgets/ColorPickerWidget.h"
 #include "EditorTheme.h"
 #include "EditorUIBuilder.h"
+#include "WidgetDetailSchema.h"
 #include "../AssetManager/AssetManager.h"
 #include "../AssetManager/AssetTypes.h"
 #include "Renderer.h"
@@ -5065,6 +5066,11 @@ void UIManager::rebuildAllEditorUI()
 
 void UIManager::applyThemeToAllEditorWidgets()
 {
+    // Close any open dropdown – its Panel/Button elements would receive
+    // generic panelBackground/buttonDefault colors instead of the
+    // dropdown-specific ones.  Next open will pick up the new theme.
+    closeDropdownMenu();
+
     const auto& theme = EditorTheme::Get();
     for (auto& entry : m_widgets)
     {
@@ -5073,6 +5079,19 @@ void UIManager::applyThemeToAllEditorWidgets()
             EditorTheme::ApplyThemeToElement(element, theme);
         entry.widget->markLayoutDirty();
     }
+
+    // Also theme transient widgets not in the main list.
+    auto applyToTransient = [&](const std::shared_ptr<EditorWidget>& w)
+    {
+        if (!w) return;
+        for (auto& element : w->getElementsMutable())
+            EditorTheme::ApplyThemeToElement(element, theme);
+        w->markLayoutDirty();
+    };
+    applyToTransient(m_modalWidget);
+    applyToTransient(m_saveProgressWidget);
+    for (auto& toast : m_toasts)
+        applyToTransient(toast.widget);
 }
 
 void UIManager::applyPendingThemeUpdate()
@@ -7736,37 +7755,11 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
 
     m_lastHoveredElement = nullptr;
 
-    const auto makeLabel = [](const std::string& id, const std::string& text, float fontSize = 0.0f,
-        const Vec4& color = Vec4{ -1.0f, 0.0f, 0.0f, 0.0f }, float minH = 0.0f) -> WidgetElement
-    {
-        auto& t = EditorTheme::Get();
-        WidgetElement lbl{};
-        lbl.id = id;
-        lbl.type = WidgetElementType::Text;
-        lbl.text = text;
-        lbl.font = t.fontDefault;
-        lbl.fontSize = (fontSize > 0.0f) ? fontSize : t.fontSizeSmall;
-        lbl.style.textColor = (color.x >= 0.0f) ? color : t.textSecondary;
-        lbl.textAlignH = TextAlignH::Left;
-        lbl.textAlignV = TextAlignV::Center;
-        lbl.fillX = true;
-        lbl.minSize = Vec2{ 0.0f, (minH > 0.0f) ? minH : t.rowHeightSmall };
-        lbl.runtimeOnly = true;
-        return lbl;
-    };
-
-    auto fmtF = [](float v) -> std::string {
-        char buf[32];
-        std::snprintf(buf, sizeof(buf), "%.2f", v);
-        return std::string(buf);
-    };
-
     // If no element is selected, show a hint
     if (editorState.selectedElementId.empty() || !editorState.editedWidget)
     {
-        rootPanel->children.push_back(makeLabel("WidgetEditor.Right.Hint",
-            "Select an element to view its properties.", 11.0f,
-            EditorTheme::Get().textMuted, 36.0f));
+        rootPanel->children.push_back(EditorUIBuilder::makeSecondaryLabel(
+            "Select an element to view its properties."));
         rightEntry->widget->markLayoutDirty();
         return;
     }
@@ -7780,63 +7773,14 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
 
     if (!selected)
     {
-        rootPanel->children.push_back(makeLabel("WidgetEditor.Right.NotFound",
-            "Element not found: " + editorState.selectedElementId, 11.0f,
-            Vec4{ 0.85f, 0.55f, 0.55f, 1.0f }, 24.0f));
+        rootPanel->children.push_back(EditorUIBuilder::makeSecondaryLabel(
+            "Element not found: " + editorState.selectedElementId));
         rightEntry->widget->markLayoutDirty();
         return;
     }
 
-    // --- Section: Identity ---
-    {
-        rootPanel->children.push_back(makeLabel("WE.Det.SecIdentity", "Identity", 13.0f,
-            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
-
-        // Type (read-only)
-        std::string typeName;
-        switch (selected->type)
-        {
-        case WidgetElementType::Panel:       typeName = "Panel"; break;
-        case WidgetElementType::Text:        typeName = "Text"; break;
-        case WidgetElementType::Button:      typeName = "Button"; break;
-        case WidgetElementType::Image:       typeName = "Image"; break;
-        case WidgetElementType::EntryBar:    typeName = "EntryBar"; break;
-        case WidgetElementType::StackPanel:  typeName = "StackPanel"; break;
-        case WidgetElementType::Grid:        typeName = "Grid"; break;
-        case WidgetElementType::Slider:      typeName = "Slider"; break;
-        case WidgetElementType::CheckBox:    typeName = "CheckBox"; break;
-        case WidgetElementType::DropDown:    typeName = "DropDown"; break;
-        case WidgetElementType::ColorPicker: typeName = "ColorPicker"; break;
-        case WidgetElementType::ProgressBar: typeName = "ProgressBar"; break;
-        case WidgetElementType::DropdownButton: typeName = "DropdownButton"; break;
-        case WidgetElementType::TreeView:    typeName = "TreeView"; break;
-        case WidgetElementType::TabView:     typeName = "TabView"; break;
-        case WidgetElementType::Label:       typeName = "Label"; break;
-        case WidgetElementType::Separator:   typeName = "Separator"; break;
-        case WidgetElementType::ScrollView:  typeName = "ScrollView"; break;
-        case WidgetElementType::ToggleButton: typeName = "ToggleButton"; break;
-        case WidgetElementType::RadioButton: typeName = "RadioButton"; break;
-        case WidgetElementType::WrapBox:      typeName = "WrapBox"; break;
-        case WidgetElementType::UniformGrid:  typeName = "UniformGrid"; break;
-        case WidgetElementType::SizeBox:      typeName = "SizeBox"; break;
-        case WidgetElementType::ScaleBox:     typeName = "ScaleBox"; break;
-        case WidgetElementType::WidgetSwitcher: typeName = "WidgetSwitcher"; break;
-        case WidgetElementType::Overlay:      typeName = "Overlay"; break;
-        case WidgetElementType::Border:       typeName = "Border"; break;
-        case WidgetElementType::Spinner:      typeName = "Spinner"; break;
-        case WidgetElementType::RichText:     typeName = "RichText"; break;
-        case WidgetElementType::ListView:     typeName = "ListView"; break;
-        case WidgetElementType::TileView:     typeName = "TileView"; break;
-        default:                             typeName = "Unknown"; break;
-        }
-        rootPanel->children.push_back(makeLabel("WE.Det.Type", "Type: " + typeName));
-    }
-
-    // Helper to build an editable entry row
     const std::string capturedTabId = tabId;
-    WidgetElement* sel = selected;
 
-    // Helper to propagate property changes to the FBO preview
     const auto applyChange = [this, capturedTabId]() {
         markWidgetEditorDirty(capturedTabId);
         auto it2 = m_widgetEditorStates.find(capturedTabId);
@@ -7845,933 +7789,18 @@ void UIManager::refreshWidgetEditorDetails(const std::string& tabId)
         markAllWidgetsDirty();
     };
 
-    const auto makePropertyRow = [&](const std::string& id, const std::string& label,
-        const std::string& value, std::function<void(const std::string&)> onChange) -> WidgetElement
-    {
-        WidgetElement row{};
-        row.type = WidgetElementType::StackPanel;
-        row.orientation = StackOrientation::Horizontal;
-        row.fillX = true;
-        row.sizeToContent = true;
-        row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-        row.padding = Vec2{ 0.0f, 1.0f };
-        row.runtimeOnly = true;
-
-        WidgetElement lbl = makeLabel(id + ".Lbl", label);
-        lbl.minSize = Vec2{ 90.0f, 22.0f };
-        lbl.fillX = false;
-        row.children.push_back(std::move(lbl));
-
-        EntryBarWidget entry;
-        entry.setValue(value);
-        entry.setFont(EditorTheme::Get().fontDefault);
-        entry.setFontSize(EditorTheme::Get().fontSizeSmall);
-        entry.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
-        entry.setPadding(Vec2{ 4.0f, 2.0f });
-        entry.setOnValueChanged(onChange);
-
-        WidgetElement entryEl = entry.toElement();
-        entryEl.id = id + ".Entry";
-        entryEl.fillX = true;
-        entryEl.runtimeOnly = true;
-        row.children.push_back(std::move(entryEl));
-
-        return row;
+    WidgetDetailSchema::Options opts;
+    opts.showEditableId = true;
+    opts.onIdRenamed = [this, capturedTabId](const std::string& newId) {
+        auto it2 = m_widgetEditorStates.find(capturedTabId);
+        if (it2 != m_widgetEditorStates.end())
+            it2->second.selectedElementId = newId;
+    };
+    opts.onRefreshHierarchy = [this, capturedTabId]() {
+        refreshWidgetEditorHierarchy(capturedTabId);
     };
 
-    // Editable ID field
-    rootPanel->children.push_back(makePropertyRow("WE.Det.Id", "ID", sel->id.empty() ? "" : sel->id,
-        [sel, applyChange, this, capturedTabId](const std::string& v) {
-            sel->id = v;
-            auto it2 = m_widgetEditorStates.find(capturedTabId);
-            if (it2 != m_widgetEditorStates.end())
-                it2->second.selectedElementId = v;
-            applyChange();
-            refreshWidgetEditorHierarchy(capturedTabId);
-        }));
-
-    // --- Section: Transform ---
-    {
-        WidgetElement sep{};
-        sep.type = WidgetElementType::Panel;
-        sep.fillX = true;
-        sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color = EditorTheme::Get().panelBorder;
-        sep.runtimeOnly = true;
-        rootPanel->children.push_back(std::move(sep));
-
-        rootPanel->children.push_back(makeLabel("WE.Det.SecTransform", "Transform", 13.0f,
-            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
-
-        rootPanel->children.push_back(makePropertyRow("WE.Det.FromX", "From X", fmtF(sel->from.x),
-            [sel, applyChange](const std::string& v) {
-                try { sel->from.x = std::stof(v); } catch (...) {}
-                applyChange();
-            }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.FromY", "From Y", fmtF(sel->from.y),
-            [sel, applyChange](const std::string& v) {
-                try { sel->from.y = std::stof(v); } catch (...) {}
-                applyChange();
-            }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.ToX", "To X", fmtF(sel->to.x),
-            [sel, applyChange](const std::string& v) {
-                try { sel->to.x = std::stof(v); } catch (...) {}
-                applyChange();
-            }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.ToY", "To Y", fmtF(sel->to.y),
-            [sel, applyChange](const std::string& v) {
-                try { sel->to.y = std::stof(v); } catch (...) {}
-                applyChange();
-            }));
-    }
-
-    // --- Section: Anchor ---
-    {
-        WidgetElement sep{};
-        sep.type = WidgetElementType::Panel;
-        sep.fillX = true;
-        sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color = EditorTheme::Get().panelBorder;
-        sep.runtimeOnly = true;
-        rootPanel->children.push_back(std::move(sep));
-
-        rootPanel->children.push_back(makeLabel("WE.Det.SecAnchor", "Anchor", 13.0f,
-            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
-
-        // Anchor dropdown
-        {
-            int anchorIndex = static_cast<int>(sel->anchor);
-
-            WidgetElement row{};
-            row.type = WidgetElementType::StackPanel;
-            row.orientation = StackOrientation::Horizontal;
-            row.fillX = true;
-            row.sizeToContent = true;
-            row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-            row.padding = Vec2{ 0.0f, 1.0f };
-            row.runtimeOnly = true;
-
-            WidgetElement lbl = makeLabel("WE.Det.Anchor.Lbl", "Anchor");
-            lbl.minSize = Vec2{ 90.0f, 22.0f };
-            lbl.fillX = false;
-            row.children.push_back(std::move(lbl));
-
-            DropDownWidget anchorDd;
-            anchorDd.setItems({ "TopLeft", "TopRight", "BottomLeft", "BottomRight", "Top", "Bottom", "Left", "Right", "Center", "Stretch" });
-            anchorDd.setSelectedIndex(anchorIndex);
-            anchorDd.setFont(EditorTheme::Get().fontDefault);
-            anchorDd.setFontSize(EditorTheme::Get().fontSizeSmall);
-            anchorDd.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
-            anchorDd.setPadding(Vec2{ 4.0f, 2.0f });
-            anchorDd.setBackgroundColor(EditorTheme::Get().inputBackground);
-            anchorDd.setHoverColor(EditorTheme::Get().inputBackgroundHover);
-            anchorDd.setTextColor(EditorTheme::Get().inputText);
-            anchorDd.setOnSelectionChanged([sel, applyChange](int idx) {
-                sel->anchor = static_cast<WidgetAnchor>(idx);
-                applyChange();
-            });
-            WidgetElement ddEl = anchorDd.toElement();
-            ddEl.id = "WE.Det.Anchor.DD";
-            ddEl.fillX = true;
-            ddEl.runtimeOnly = true;
-            row.children.push_back(std::move(ddEl));
-
-            rootPanel->children.push_back(std::move(row));
-        }
-
-        rootPanel->children.push_back(makePropertyRow("WE.Det.AnchorOffX", "Offset X", fmtF(sel->anchorOffset.x),
-            [sel, applyChange](const std::string& v) {
-                try { sel->anchorOffset.x = std::stof(v); } catch (...) {}
-                applyChange();
-            }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.AnchorOffY", "Offset Y", fmtF(sel->anchorOffset.y),
-            [sel, applyChange](const std::string& v) {
-                try { sel->anchorOffset.y = std::stof(v); } catch (...) {}
-                applyChange();
-            }));
-    }
-
-    // --- Section: Hit Test ---
-    {
-        WidgetElement sep{};
-        sep.type = WidgetElementType::Panel;
-        sep.fillX = true;
-        sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color = EditorTheme::Get().panelBorder;
-        sep.runtimeOnly = true;
-        rootPanel->children.push_back(std::move(sep));
-
-        rootPanel->children.push_back(makeLabel("WE.Det.SecHitTest", "Hit Test", 13.0f,
-            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
-
-        {
-            int htIndex = static_cast<int>(sel->hitTestMode);
-
-            WidgetElement row{};
-            row.type = WidgetElementType::StackPanel;
-            row.orientation = StackOrientation::Horizontal;
-            row.fillX = true;
-            row.sizeToContent = true;
-            row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-            row.padding = Vec2{ 0.0f, 1.0f };
-            row.runtimeOnly = true;
-
-            WidgetElement lbl = makeLabel("WE.Det.HitTest.Lbl", "Mode");
-            lbl.minSize = Vec2{ 90.0f, 22.0f };
-            lbl.fillX = false;
-            row.children.push_back(std::move(lbl));
-
-            DropDownWidget htDd;
-            htDd.setItems({ "Enabled", "Disabled (Self)", "Disabled (Self + Children)" });
-            htDd.setSelectedIndex(htIndex);
-            htDd.setFont(EditorTheme::Get().fontDefault);
-            htDd.setFontSize(EditorTheme::Get().fontSizeSmall);
-            htDd.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
-            htDd.setPadding(Vec2{ 4.0f, 2.0f });
-            htDd.setBackgroundColor(EditorTheme::Get().inputBackground);
-            htDd.setHoverColor(EditorTheme::Get().inputBackgroundHover);
-            htDd.setTextColor(EditorTheme::Get().inputText);
-            htDd.setOnSelectionChanged([sel, applyChange](int idx) {
-                sel->hitTestMode = static_cast<HitTestMode>(idx);
-                applyChange();
-            });
-            WidgetElement ddEl = htDd.toElement();
-            ddEl.id = "WE.Det.HitTest.DD";
-            ddEl.fillX = true;
-            ddEl.runtimeOnly = true;
-            row.children.push_back(std::move(ddEl));
-
-            rootPanel->children.push_back(std::move(row));
-        }
-    }
-
-    // --- Section: Layout ---
-    {
-        WidgetElement sep{};
-        sep.type = WidgetElementType::Panel;
-        sep.fillX = true;
-        sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color = EditorTheme::Get().panelBorder;
-        sep.runtimeOnly = true;
-        rootPanel->children.push_back(std::move(sep));
-
-        rootPanel->children.push_back(makeLabel("WE.Det.SecLayout", "Layout", 13.0f,
-            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
-
-        rootPanel->children.push_back(makePropertyRow("WE.Det.MinW", "Min Width", fmtF(sel->minSize.x),
-            [sel, applyChange](const std::string& v) {
-                try { sel->minSize.x = std::stof(v); } catch (...) {}
-                applyChange();
-            }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.MinH", "Min Height", fmtF(sel->minSize.y),
-            [sel, applyChange](const std::string& v) {
-                try { sel->minSize.y = std::stof(v); } catch (...) {}
-                applyChange();
-            }));
-
-        rootPanel->children.push_back(makePropertyRow("WE.Det.PadX", "Padding X", fmtF(sel->padding.x),
-            [sel, applyChange](const std::string& v) {
-                try { sel->padding.x = std::stof(v); } catch (...) {}
-                applyChange();
-            }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.PadY", "Padding Y", fmtF(sel->padding.y),
-            [sel, applyChange](const std::string& v) {
-                try { sel->padding.y = std::stof(v); } catch (...) {}
-                applyChange();
-            }));
-
-        // Horizontal alignment dropdown
-        {
-            int hAlignIndex = 0;
-            if (sel->fillX) hAlignIndex = 3;
-            else if (sel->textAlignH == TextAlignH::Center) hAlignIndex = 1;
-            else if (sel->textAlignH == TextAlignH::Right) hAlignIndex = 2;
-            else hAlignIndex = 0;
-
-            WidgetElement row{};
-            row.type = WidgetElementType::StackPanel;
-            row.orientation = StackOrientation::Horizontal;
-            row.fillX = true;
-            row.sizeToContent = true;
-            row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-            row.padding = Vec2{ 0.0f, 1.0f };
-            row.runtimeOnly = true;
-
-            WidgetElement lbl = makeLabel("WE.Det.HAlign.Lbl", "H Align");
-            lbl.minSize = Vec2{ 90.0f, 22.0f };
-            lbl.fillX = false;
-            row.children.push_back(std::move(lbl));
-
-            DropDownWidget hAlignDd;
-            hAlignDd.setItems({ "Left", "Center", "Right", "Fill" });
-            hAlignDd.setSelectedIndex(hAlignIndex);
-            hAlignDd.setFont(EditorTheme::Get().fontDefault);
-            hAlignDd.setFontSize(EditorTheme::Get().fontSizeSmall);
-            hAlignDd.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
-            hAlignDd.setPadding(Vec2{ 4.0f, 2.0f });
-            hAlignDd.setBackgroundColor(EditorTheme::Get().inputBackground);
-            hAlignDd.setHoverColor(EditorTheme::Get().inputBackgroundHover);
-            hAlignDd.setTextColor(EditorTheme::Get().inputText);
-            hAlignDd.setOnSelectionChanged([sel, applyChange](int idx) {
-                if (idx == 3) { sel->fillX = true; }
-                else {
-                    sel->fillX = false;
-                    if (idx == 1) sel->textAlignH = TextAlignH::Center;
-                    else if (idx == 2) sel->textAlignH = TextAlignH::Right;
-                    else sel->textAlignH = TextAlignH::Left;
-                }
-                applyChange();
-            });
-            WidgetElement ddEl = hAlignDd.toElement();
-            ddEl.id = "WE.Det.HAlign.DD";
-            ddEl.fillX = true;
-            ddEl.runtimeOnly = true;
-            row.children.push_back(std::move(ddEl));
-
-            rootPanel->children.push_back(std::move(row));
-        }
-
-        // Vertical alignment dropdown
-        {
-            int vAlignIndex = 0;
-            if (sel->fillY) vAlignIndex = 3;
-            else if (sel->textAlignV == TextAlignV::Center) vAlignIndex = 1;
-            else if (sel->textAlignV == TextAlignV::Bottom) vAlignIndex = 2;
-            else vAlignIndex = 0;
-
-            WidgetElement row{};
-            row.type = WidgetElementType::StackPanel;
-            row.orientation = StackOrientation::Horizontal;
-            row.fillX = true;
-            row.sizeToContent = true;
-            row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-            row.padding = Vec2{ 0.0f, 1.0f };
-            row.runtimeOnly = true;
-
-            WidgetElement lbl = makeLabel("WE.Det.VAlign.Lbl", "V Align");
-            lbl.minSize = Vec2{ 90.0f, 22.0f };
-            lbl.fillX = false;
-            row.children.push_back(std::move(lbl));
-
-            DropDownWidget vAlignDd;
-            vAlignDd.setItems({ "Top", "Center", "Bottom", "Fill" });
-            vAlignDd.setSelectedIndex(vAlignIndex);
-            vAlignDd.setFont(EditorTheme::Get().fontDefault);
-            vAlignDd.setFontSize(EditorTheme::Get().fontSizeSmall);
-            vAlignDd.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
-            vAlignDd.setPadding(Vec2{ 4.0f, 2.0f });
-            vAlignDd.setBackgroundColor(EditorTheme::Get().inputBackground);
-            vAlignDd.setHoverColor(EditorTheme::Get().inputBackgroundHover);
-            vAlignDd.setTextColor(EditorTheme::Get().inputText);
-            vAlignDd.setOnSelectionChanged([sel, applyChange](int idx) {
-                if (idx == 3) { sel->fillY = true; }
-                else {
-                    sel->fillY = false;
-                    if (idx == 1) sel->textAlignV = TextAlignV::Center;
-                    else if (idx == 2) sel->textAlignV = TextAlignV::Bottom;
-                    else sel->textAlignV = TextAlignV::Top;
-                }
-                applyChange();
-            });
-            WidgetElement ddEl = vAlignDd.toElement();
-            ddEl.id = "WE.Det.VAlign.DD";
-            ddEl.fillX = true;
-            ddEl.runtimeOnly = true;
-            row.children.push_back(std::move(ddEl));
-
-            rootPanel->children.push_back(std::move(row));
-        }
-
-        // Size to content
-        {
-            CheckBoxWidget stcCb;
-            stcCb.setLabel("Size to Content");
-            stcCb.setChecked(sel->sizeToContent);
-            stcCb.setOnCheckedChanged([sel, this](bool c) { sel->sizeToContent = c; markAllWidgetsDirty(); });
-            WidgetElement stcEl = stcCb.toElement();
-            stcEl.id = "WE.Det.SizeToContent";
-            stcEl.runtimeOnly = true;
-            rootPanel->children.push_back(std::move(stcEl));
-        }
-
-        // Max size constraints
-        rootPanel->children.push_back(makePropertyRow("WE.Det.MaxW", "Max Width", fmtF(sel->maxSize.x),
-            [sel, this](const std::string& v) {
-                try { sel->maxSize.x = std::stof(v); } catch (...) {}
-                markAllWidgetsDirty();
-            }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.MaxH", "Max Height", fmtF(sel->maxSize.y),
-            [sel, this](const std::string& v) {
-                try { sel->maxSize.y = std::stof(v); } catch (...) {}
-                markAllWidgetsDirty();
-            }));
-
-        // Spacing (for containers)
-        if (sel->type == WidgetElementType::StackPanel || sel->type == WidgetElementType::ScrollView
-            || sel->type == WidgetElementType::WrapBox || sel->type == WidgetElementType::UniformGrid)
-        {
-            rootPanel->children.push_back(makePropertyRow("WE.Det.Spacing", "Spacing", fmtF(sel->spacing),
-                [sel, this](const std::string& v) {
-                    try { sel->spacing = std::stof(v); } catch (...) {}
-                    markAllWidgetsDirty();
-                }));
-        }
-
-        // UniformGrid specific: columns / rows
-        if (sel->type == WidgetElementType::UniformGrid)
-        {
-            rootPanel->children.push_back(makePropertyRow("WE.Det.Columns", "Columns", std::to_string(sel->columns),
-                [sel, applyChange](const std::string& v) {
-                    try { sel->columns = std::max(0, std::stoi(v)); } catch (...) {}
-                    applyChange();
-                }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.Rows", "Rows", std::to_string(sel->rows),
-                [sel, applyChange](const std::string& v) {
-                    try { sel->rows = std::max(0, std::stoi(v)); } catch (...) {}
-                    applyChange();
-                }));
-        }
-
-        // SizeBox specific: widthOverride / heightOverride
-        if (sel->type == WidgetElementType::SizeBox)
-        {
-            rootPanel->children.push_back(makePropertyRow("WE.Det.WidthOvr", "Width Override", fmtF(sel->widthOverride),
-                [sel, applyChange](const std::string& v) {
-                    try { sel->widthOverride = std::max(0.0f, std::stof(v)); } catch (...) {}
-                    applyChange();
-                }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.HeightOvr", "Height Override", fmtF(sel->heightOverride),
-                [sel, applyChange](const std::string& v) {
-                    try { sel->heightOverride = std::max(0.0f, std::stof(v)); } catch (...) {}
-                    applyChange();
-                }));
-        }
-
-        // ScaleBox specific: scaleMode / userScale
-        if (sel->type == WidgetElementType::ScaleBox)
-        {
-            {
-                int smIndex = static_cast<int>(sel->scaleMode);
-                WidgetElement row{};
-                row.type = WidgetElementType::StackPanel;
-                row.orientation = StackOrientation::Horizontal;
-                row.fillX = true;
-                row.sizeToContent = true;
-                row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-                row.runtimeOnly = true;
-
-                WidgetElement lbl = makeLabel("WE.Det.ScaleMode.Lbl", "Scale Mode");
-                lbl.minSize = Vec2{ 90.0f, 22.0f };
-                lbl.fillX = false;
-                row.children.push_back(std::move(lbl));
-
-                DropDownWidget smDd;
-                smDd.setItems({ "Contain", "Cover", "Fill", "ScaleDown", "UserSpecified" });
-                smDd.setSelectedIndex(smIndex);
-                smDd.setFont(EditorTheme::Get().fontDefault);
-                smDd.setFontSize(EditorTheme::Get().fontSizeSmall);
-                smDd.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
-                smDd.setPadding(Vec2{ 4.0f, 2.0f });
-                smDd.setBackgroundColor(EditorTheme::Get().inputBackground);
-                smDd.setHoverColor(EditorTheme::Get().inputBackgroundHover);
-                smDd.setTextColor(EditorTheme::Get().inputText);
-                smDd.setOnSelectionChanged([sel, applyChange](int idx) {
-                    sel->scaleMode = static_cast<ScaleMode>(idx);
-                    applyChange();
-                });
-                WidgetElement ddEl = smDd.toElement();
-                ddEl.id = "WE.Det.ScaleMode.DD";
-                ddEl.fillX = true;
-                ddEl.runtimeOnly = true;
-                row.children.push_back(std::move(ddEl));
-
-                rootPanel->children.push_back(std::move(row));
-            }
-
-            rootPanel->children.push_back(makePropertyRow("WE.Det.UserScale", "User Scale", fmtF(sel->userScale),
-                [sel, applyChange](const std::string& v) {
-                    try { sel->userScale = std::max(0.01f, std::stof(v)); } catch (...) {}
-                    applyChange();
-                }));
-        }
-
-        // WidgetSwitcher specific: activeChildIndex
-        if (sel->type == WidgetElementType::WidgetSwitcher)
-        {
-            rootPanel->children.push_back(makePropertyRow("WE.Det.ActiveIdx", "Active Index", std::to_string(sel->activeChildIndex),
-                [sel, applyChange](const std::string& v) {
-                    try { sel->activeChildIndex = std::max(0, std::stoi(v)); } catch (...) {}
-                    applyChange();
-                }));
-        }
-
-        // Border widget specific: per-side thickness, content padding, border brush
-        if (sel->type == WidgetElementType::Border)
-        {
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrThkL", "Border Left", fmtF(sel->borderThicknessLeft),
-                [sel, applyChange](const std::string& v) { try { sel->borderThicknessLeft = std::stof(v); } catch (...) {} applyChange(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrThkT", "Border Top", fmtF(sel->borderThicknessTop),
-                [sel, applyChange](const std::string& v) { try { sel->borderThicknessTop = std::stof(v); } catch (...) {} applyChange(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrThkR", "Border Right", fmtF(sel->borderThicknessRight),
-                [sel, applyChange](const std::string& v) { try { sel->borderThicknessRight = std::stof(v); } catch (...) {} applyChange(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrThkB", "Border Bottom", fmtF(sel->borderThicknessBottom),
-                [sel, applyChange](const std::string& v) { try { sel->borderThicknessBottom = std::stof(v); } catch (...) {} applyChange(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrPadX", "Content Pad X", fmtF(sel->contentPadding.x),
-                [sel, applyChange](const std::string& v) { try { sel->contentPadding.x = std::stof(v); } catch (...) {} applyChange(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrPadY", "Content Pad Y", fmtF(sel->contentPadding.y),
-                [sel, applyChange](const std::string& v) { try { sel->contentPadding.y = std::stof(v); } catch (...) {} applyChange(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrBrR", "Brush Col R", fmtF(sel->borderBrush.color.x),
-                [sel, applyChange](const std::string& v) { try { sel->borderBrush.color.x = std::stof(v); } catch (...) {} applyChange(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrBrG", "Brush Col G", fmtF(sel->borderBrush.color.y),
-                [sel, applyChange](const std::string& v) { try { sel->borderBrush.color.y = std::stof(v); } catch (...) {} applyChange(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrBrB", "Brush Col B", fmtF(sel->borderBrush.color.z),
-                [sel, applyChange](const std::string& v) { try { sel->borderBrush.color.z = std::stof(v); } catch (...) {} applyChange(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BdrBrA", "Brush Col A", fmtF(sel->borderBrush.color.w),
-                [sel, applyChange](const std::string& v) { try { sel->borderBrush.color.w = std::stof(v); } catch (...) {} applyChange(); }));
-        }
-
-        // Spinner specific: dot count, speed
-        if (sel->type == WidgetElementType::Spinner)
-        {
-            rootPanel->children.push_back(makePropertyRow("WE.Det.SpnDots", "Dot Count", std::to_string(sel->spinnerDotCount),
-                [sel, applyChange](const std::string& v) { try { sel->spinnerDotCount = std::max(1, std::stoi(v)); } catch (...) {} applyChange(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.SpnSpd", "Speed", fmtF(sel->spinnerSpeed),
-                [sel, applyChange](const std::string& v) { try { sel->spinnerSpeed = std::stof(v); } catch (...) {} applyChange(); }));
-        }
-
-        // RichText specific: rich text markup
-        if (sel->type == WidgetElementType::RichText)
-        {
-            rootPanel->children.push_back(makePropertyRow("WE.Det.RichTxt", "Rich Text", sel->richText,
-                [sel, applyChange](const std::string& v) { sel->richText = v; applyChange(); }));
-        }
-
-        // ListView specific: total items, item height
-        if (sel->type == WidgetElementType::ListView)
-        {
-            rootPanel->children.push_back(makePropertyRow("WE.Det.LvCount", "Item Count", std::to_string(sel->totalItemCount),
-                [sel, applyChange](const std::string& v) { try { sel->totalItemCount = std::max(0, std::stoi(v)); } catch (...) {} applyChange(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.LvItemH", "Item Height", fmtF(sel->itemHeight),
-                [sel, applyChange](const std::string& v) { try { sel->itemHeight = std::stof(v); } catch (...) {} applyChange(); }));
-        }
-
-        // TileView specific: total items, item dimensions, columns
-        if (sel->type == WidgetElementType::TileView)
-        {
-            rootPanel->children.push_back(makePropertyRow("WE.Det.TvCount", "Item Count", std::to_string(sel->totalItemCount),
-                [sel, applyChange](const std::string& v) { try { sel->totalItemCount = std::max(0, std::stoi(v)); } catch (...) {} applyChange(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.TvItemH", "Item Height", fmtF(sel->itemHeight),
-                [sel, applyChange](const std::string& v) { try { sel->itemHeight = std::stof(v); } catch (...) {} applyChange(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.TvItemW", "Item Width", fmtF(sel->itemWidth),
-                [sel, applyChange](const std::string& v) { try { sel->itemWidth = std::stof(v); } catch (...) {} applyChange(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.TvCols", "Columns", std::to_string(sel->columnsPerRow),
-                [sel, applyChange](const std::string& v) { try { sel->columnsPerRow = std::max(1, std::stoi(v)); } catch (...) {} applyChange(); }));
-        }
-    }
-
-    // --- Section: Appearance ---
-    {
-        WidgetElement sep{};
-        sep.type = WidgetElementType::Panel;
-        sep.fillX = true;
-        sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color = EditorTheme::Get().panelBorder;
-        sep.runtimeOnly = true;
-        rootPanel->children.push_back(std::move(sep));
-
-        rootPanel->children.push_back(makeLabel("WE.Det.SecAppearance", "Appearance", 13.0f,
-            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
-
-        // Color (RGBA as individual fields)
-        rootPanel->children.push_back(makePropertyRow("WE.Det.ColR", "Color R", fmtF(sel->style.color.x),
-            [sel, applyChange](const std::string& v) { try { sel->style.color.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.ColG", "Color G", fmtF(sel->style.color.y),
-            [sel, applyChange](const std::string& v) { try { sel->style.color.y = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.ColB", "Color B", fmtF(sel->style.color.z),
-            [sel, applyChange](const std::string& v) { try { sel->style.color.z = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.ColA", "Color A", fmtF(sel->style.color.w),
-            [sel, this](const std::string& v) { try { sel->style.color.w = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-
-        // Hover color
-        rootPanel->children.push_back(makePropertyRow("WE.Det.HColR", "Hover R", fmtF(sel->style.hoverColor.x),
-            [sel, applyChange](const std::string& v) { try { sel->style.hoverColor.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.HColG", "Hover G", fmtF(sel->style.hoverColor.y),
-            [sel, applyChange](const std::string& v) { try { sel->style.hoverColor.y = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.HColB", "Hover B", fmtF(sel->style.hoverColor.z),
-            [sel, applyChange](const std::string& v) { try { sel->style.hoverColor.z = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.HColA", "Hover A", fmtF(sel->style.hoverColor.w),
-            [sel, applyChange](const std::string& v) { try { sel->style.hoverColor.w = std::stof(v); } catch (...) {} applyChange(); }));
-
-        // Pressed color
-        rootPanel->children.push_back(makePropertyRow("WE.Det.PColR", "Pressed R", fmtF(sel->style.pressedColor.x),
-            [sel, applyChange](const std::string& v) { try { sel->style.pressedColor.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.PColG", "Pressed G", fmtF(sel->style.pressedColor.y),
-            [sel, applyChange](const std::string& v) { try { sel->style.pressedColor.y = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.PColB", "Pressed B", fmtF(sel->style.pressedColor.z),
-            [sel, applyChange](const std::string& v) { try { sel->style.pressedColor.z = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.PColA", "Pressed A", fmtF(sel->style.pressedColor.w),
-            [sel, applyChange](const std::string& v) { try { sel->style.pressedColor.w = std::stof(v); } catch (...) {} applyChange(); }));
-
-        // Disabled color
-        rootPanel->children.push_back(makePropertyRow("WE.Det.DColR", "Disabled R", fmtF(sel->style.disabledColor.x),
-            [sel, applyChange](const std::string& v) { try { sel->style.disabledColor.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.DColG", "Disabled G", fmtF(sel->style.disabledColor.y),
-            [sel, applyChange](const std::string& v) { try { sel->style.disabledColor.y = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.DColB", "Disabled B", fmtF(sel->style.disabledColor.z),
-            [sel, applyChange](const std::string& v) { try { sel->style.disabledColor.z = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.DColA", "Disabled A", fmtF(sel->style.disabledColor.w),
-            [sel, applyChange](const std::string& v) { try { sel->style.disabledColor.w = std::stof(v); } catch (...) {} applyChange(); }));
-
-        // Opacity
-        rootPanel->children.push_back(makePropertyRow("WE.Det.Opacity", "Opacity", fmtF(sel->style.opacity),
-            [sel, this](const std::string& v) { try { sel->style.opacity = std::max(0.0f, std::min(1.0f, std::stof(v))); } catch (...) {} markAllWidgetsDirty(); }));
-
-        // Visibility
-        {
-            CheckBoxWidget visCb;
-            visCb.setLabel("Visible");
-            visCb.setChecked(sel->style.isVisible);
-            visCb.setOnCheckedChanged([sel, this](bool c) { sel->style.isVisible = c; markAllWidgetsDirty(); });
-            WidgetElement visEl = visCb.toElement();
-            visEl.id = "WE.Det.Visible";
-            visEl.runtimeOnly = true;
-            rootPanel->children.push_back(std::move(visEl));
-        }
-
-        // Border
-        rootPanel->children.push_back(makePropertyRow("WE.Det.BorderW", "Border Width", fmtF(sel->style.borderThickness),
-            [sel, this](const std::string& v) { try { sel->style.borderThickness = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.BorderR", "Border Radius", fmtF(sel->style.borderRadius),
-            [sel, this](const std::string& v) { try { sel->style.borderRadius = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-
-        // Border color
-        rootPanel->children.push_back(makePropertyRow("WE.Det.BrdColR", "Border Col R", fmtF(sel->style.borderColor.x),
-            [sel, applyChange](const std::string& v) { try { sel->style.borderColor.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.BrdColG", "Border Col G", fmtF(sel->style.borderColor.y),
-            [sel, applyChange](const std::string& v) { try { sel->style.borderColor.y = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.BrdColB", "Border Col B", fmtF(sel->style.borderColor.z),
-            [sel, applyChange](const std::string& v) { try { sel->style.borderColor.z = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.BrdColA", "Border Col A", fmtF(sel->style.borderColor.w),
-            [sel, applyChange](const std::string& v) { try { sel->style.borderColor.w = std::stof(v); } catch (...) {} applyChange(); }));
-
-        // Outline color
-        rootPanel->children.push_back(makePropertyRow("WE.Det.OutColR", "Outline R", fmtF(sel->style.outlineColor.x),
-            [sel, applyChange](const std::string& v) { try { sel->style.outlineColor.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.OutColG", "Outline G", fmtF(sel->style.outlineColor.y),
-            [sel, applyChange](const std::string& v) { try { sel->style.outlineColor.y = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.OutColB", "Outline B", fmtF(sel->style.outlineColor.z),
-            [sel, applyChange](const std::string& v) { try { sel->style.outlineColor.z = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.OutColA", "Outline A", fmtF(sel->style.outlineColor.w),
-            [sel, applyChange](const std::string& v) { try { sel->style.outlineColor.w = std::stof(v); } catch (...) {} applyChange(); }));
-
-        // Gradient color
-        rootPanel->children.push_back(makePropertyRow("WE.Det.GradR", "Gradient R", fmtF(sel->style.gradientColor.x),
-            [sel, applyChange](const std::string& v) { try { sel->style.gradientColor.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.GradG", "Gradient G", fmtF(sel->style.gradientColor.y),
-            [sel, applyChange](const std::string& v) { try { sel->style.gradientColor.y = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.GradB", "Gradient B", fmtF(sel->style.gradientColor.z),
-            [sel, applyChange](const std::string& v) { try { sel->style.gradientColor.z = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.GradA", "Gradient A", fmtF(sel->style.gradientColor.w),
-            [sel, applyChange](const std::string& v) { try { sel->style.gradientColor.w = std::stof(v); } catch (...) {} applyChange(); }));
-
-        // Shadow
-        rootPanel->children.push_back(makePropertyRow("WE.Det.ShadR", "Shadow R", fmtF(sel->style.shadowColor.x),
-            [sel, applyChange](const std::string& v) { try { sel->style.shadowColor.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.ShadG", "Shadow G", fmtF(sel->style.shadowColor.y),
-            [sel, applyChange](const std::string& v) { try { sel->style.shadowColor.y = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.ShadB", "Shadow B", fmtF(sel->style.shadowColor.z),
-            [sel, applyChange](const std::string& v) { try { sel->style.shadowColor.z = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.ShadA", "Shadow A", fmtF(sel->style.shadowColor.w),
-            [sel, applyChange](const std::string& v) { try { sel->style.shadowColor.w = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.ShadOX", "Shadow Off X", fmtF(sel->style.shadowOffset.x),
-            [sel, applyChange](const std::string& v) { try { sel->style.shadowOffset.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.ShadOY", "Shadow Off Y", fmtF(sel->style.shadowOffset.y),
-            [sel, applyChange](const std::string& v) { try { sel->style.shadowOffset.y = std::stof(v); } catch (...) {} applyChange(); }));
-
-        // Tooltip
-        rootPanel->children.push_back(makePropertyRow("WE.Det.Tooltip", "Tooltip", sel->tooltipText,
-            [sel, this](const std::string& v) { sel->tooltipText = v; markAllWidgetsDirty(); }));
-
-        // â”€â”€ Phase 2: Brush & Transform â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        {
-            WidgetElement sep{};
-            sep.type = WidgetElementType::Panel;
-            sep.fillX = true;
-            sep.minSize = Vec2{ 0.0f, 1.0f };
-            sep.style.color = EditorTheme::Get().panelBorder;
-            sep.runtimeOnly = true;
-            rootPanel->children.push_back(std::move(sep));
-
-            rootPanel->children.push_back(makeLabel("WE.Det.SecBrush", "Brush / Transform", 13.0f,
-                Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
-
-            // Background BrushType
-            {
-                int btIdx = static_cast<int>(sel->background.type);
-                WidgetElement row{};
-                row.type = WidgetElementType::StackPanel;
-                row.orientation = StackOrientation::Horizontal;
-                row.fillX = true;
-                row.sizeToContent = true;
-                row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-                row.runtimeOnly = true;
-
-                WidgetElement lbl = makeLabel("WE.Det.BgBrush.Lbl", "Bg Brush");
-                lbl.minSize = Vec2{ 90.0f, 22.0f };
-                lbl.fillX = false;
-                row.children.push_back(std::move(lbl));
-
-                DropDownWidget dd;
-                dd.setItems({ "None", "SolidColor", "Image", "NineSlice", "LinearGradient" });
-                dd.setSelectedIndex(btIdx);
-                dd.setFont(EditorTheme::Get().fontDefault);
-                dd.setFontSize(EditorTheme::Get().fontSizeSmall);
-                dd.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
-                dd.setPadding(Vec2{ 4.0f, 2.0f });
-                dd.setBackgroundColor(EditorTheme::Get().inputBackground);
-                dd.setHoverColor(EditorTheme::Get().inputBackgroundHover);
-                dd.setTextColor(EditorTheme::Get().inputText);
-                dd.setOnSelectionChanged([sel, this](int idx) {
-                    sel->background.type = static_cast<BrushType>(idx);
-                    markAllWidgetsDirty();
-                });
-                WidgetElement ddEl = dd.toElement();
-                ddEl.id = "WE.Det.BgBrush.DD";
-                ddEl.fillX = true;
-                ddEl.runtimeOnly = true;
-                row.children.push_back(std::move(ddEl));
-                rootPanel->children.push_back(std::move(row));
-            }
-
-            // Background brush color
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BgColR", "Bg Color R", fmtF(sel->background.color.x),
-                [sel, this](const std::string& v) { try { sel->background.color.x = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BgColG", "Bg Color G", fmtF(sel->background.color.y),
-                [sel, this](const std::string& v) { try { sel->background.color.y = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BgColB", "Bg Color B", fmtF(sel->background.color.z),
-                [sel, this](const std::string& v) { try { sel->background.color.z = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BgColA", "Bg Color A", fmtF(sel->background.color.w),
-                [sel, this](const std::string& v) { try { sel->background.color.w = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-
-            // Background gradient end color (only relevant for LinearGradient)
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BgEndR", "Bg End R", fmtF(sel->background.colorEnd.x),
-                [sel, this](const std::string& v) { try { sel->background.colorEnd.x = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BgEndG", "Bg End G", fmtF(sel->background.colorEnd.y),
-                [sel, this](const std::string& v) { try { sel->background.colorEnd.y = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BgEndB", "Bg End B", fmtF(sel->background.colorEnd.z),
-                [sel, this](const std::string& v) { try { sel->background.colorEnd.z = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BgEndA", "Bg End A", fmtF(sel->background.colorEnd.w),
-                [sel, this](const std::string& v) { try { sel->background.colorEnd.w = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-
-            // Gradient angle
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BgAngle", "Gradient Angle", fmtF(sel->background.gradientAngle),
-                [sel, this](const std::string& v) { try { sel->background.gradientAngle = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-
-            // Background image path
-            rootPanel->children.push_back(makePropertyRow("WE.Det.BgImage", "Bg Image", sel->background.imagePath,
-                [sel, this](const std::string& v) { sel->background.imagePath = v; sel->background.textureId = 0; markAllWidgetsDirty(); }));
-
-            // ClipMode
-            {
-                int cmIdx = static_cast<int>(sel->clipMode);
-                WidgetElement row{};
-                row.type = WidgetElementType::StackPanel;
-                row.orientation = StackOrientation::Horizontal;
-                row.fillX = true;
-                row.sizeToContent = true;
-                row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-                row.runtimeOnly = true;
-
-                WidgetElement lbl = makeLabel("WE.Det.ClipMode.Lbl", "Clip Mode");
-                lbl.minSize = Vec2{ 90.0f, 22.0f };
-                lbl.fillX = false;
-                row.children.push_back(std::move(lbl));
-
-                DropDownWidget cmDd;
-                cmDd.setItems({ "None", "ClipToBounds", "InheritFromParent" });
-                cmDd.setSelectedIndex(cmIdx);
-                cmDd.setFont(EditorTheme::Get().fontDefault);
-                cmDd.setFontSize(EditorTheme::Get().fontSizeSmall);
-                cmDd.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
-                cmDd.setPadding(Vec2{ 4.0f, 2.0f });
-                cmDd.setBackgroundColor(EditorTheme::Get().inputBackground);
-                cmDd.setHoverColor(EditorTheme::Get().inputBackgroundHover);
-                cmDd.setTextColor(EditorTheme::Get().inputText);
-                cmDd.setOnSelectionChanged([sel, this](int idx) {
-                    sel->clipMode = static_cast<ClipMode>(idx);
-                    markAllWidgetsDirty();
-                });
-                WidgetElement ddEl = cmDd.toElement();
-                ddEl.id = "WE.Det.ClipMode.DD";
-                ddEl.fillX = true;
-                ddEl.runtimeOnly = true;
-                row.children.push_back(std::move(ddEl));
-                rootPanel->children.push_back(std::move(row));
-            }
-
-            // RenderTransform
-            rootPanel->children.push_back(makePropertyRow("WE.Det.RT.TX", "Translate X", fmtF(sel->renderTransform.translation.x),
-                [sel, this](const std::string& v) { try { sel->renderTransform.translation.x = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.RT.TY", "Translate Y", fmtF(sel->renderTransform.translation.y),
-                [sel, this](const std::string& v) { try { sel->renderTransform.translation.y = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.RT.Rot", "Rotation", fmtF(sel->renderTransform.rotation),
-                [sel, this](const std::string& v) { try { sel->renderTransform.rotation = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.RT.SX", "Scale X", fmtF(sel->renderTransform.scale.x),
-                [sel, this](const std::string& v) { try { sel->renderTransform.scale.x = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.RT.SY", "Scale Y", fmtF(sel->renderTransform.scale.y),
-                [sel, this](const std::string& v) { try { sel->renderTransform.scale.y = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.RT.ShX", "Shear X", fmtF(sel->renderTransform.shear.x),
-                [sel, this](const std::string& v) { try { sel->renderTransform.shear.x = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.RT.ShY", "Shear Y", fmtF(sel->renderTransform.shear.y),
-                [sel, this](const std::string& v) { try { sel->renderTransform.shear.y = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.RT.PX", "Pivot X", fmtF(sel->renderTransform.pivot.x),
-                [sel, this](const std::string& v) { try { sel->renderTransform.pivot.x = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-            rootPanel->children.push_back(makePropertyRow("WE.Det.RT.PY", "Pivot Y", fmtF(sel->renderTransform.pivot.y),
-                [sel, this](const std::string& v) { try { sel->renderTransform.pivot.y = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-        }
-    }
-
-    // --- Section: Text (for elements with text) ---
-    if (sel->type == WidgetElementType::Text || sel->type == WidgetElementType::Button ||
-        sel->type == WidgetElementType::EntryBar || sel->type == WidgetElementType::DropdownButton ||
-        sel->type == WidgetElementType::Label || sel->type == WidgetElementType::ToggleButton ||
-        sel->type == WidgetElementType::RadioButton || sel->type == WidgetElementType::CheckBox)
-    {
-        WidgetElement sep{};
-        sep.type = WidgetElementType::Panel;
-        sep.fillX = true;
-        sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color = EditorTheme::Get().panelBorder;
-        sep.runtimeOnly = true;
-        rootPanel->children.push_back(std::move(sep));
-
-        rootPanel->children.push_back(makeLabel("WE.Det.SecText", "Text", 13.0f,
-            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
-
-        rootPanel->children.push_back(makePropertyRow("WE.Det.Text", "Text", sel->text,
-            [sel, applyChange](const std::string& v) { sel->text = v; applyChange(); }));
-
-        rootPanel->children.push_back(makePropertyRow("WE.Det.Font", "Font", sel->font,
-            [sel, applyChange](const std::string& v) { sel->font = v; applyChange(); }));
-
-        rootPanel->children.push_back(makePropertyRow("WE.Det.FontSz", "Font Size", fmtF(sel->fontSize),
-            [sel, applyChange](const std::string& v) { try { sel->fontSize = std::stof(v); } catch (...) {} applyChange(); }));
-
-        // Text color
-        rootPanel->children.push_back(makePropertyRow("WE.Det.TColR", "Text R", fmtF(sel->style.textColor.x),
-            [sel, applyChange](const std::string& v) { try { sel->style.textColor.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.TColG", "Text G", fmtF(sel->style.textColor.y),
-            [sel, applyChange](const std::string& v) { try { sel->style.textColor.y = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.TColB", "Text B", fmtF(sel->style.textColor.z),
-            [sel, applyChange](const std::string& v) { try { sel->style.textColor.z = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.TColA", "Text A", fmtF(sel->style.textColor.w),
-            [sel, this](const std::string& v) { try { sel->style.textColor.w = std::stof(v); } catch (...) {} markAllWidgetsDirty(); }));
-
-        // Text hover color
-        rootPanel->children.push_back(makePropertyRow("WE.Det.THColR", "Text Hover R", fmtF(sel->style.textHoverColor.x),
-            [sel, applyChange](const std::string& v) { try { sel->style.textHoverColor.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.THColG", "Text Hover G", fmtF(sel->style.textHoverColor.y),
-            [sel, applyChange](const std::string& v) { try { sel->style.textHoverColor.y = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.THColB", "Text Hover B", fmtF(sel->style.textHoverColor.z),
-            [sel, applyChange](const std::string& v) { try { sel->style.textHoverColor.z = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.THColA", "Text Hover A", fmtF(sel->style.textHoverColor.w),
-            [sel, applyChange](const std::string& v) { try { sel->style.textHoverColor.w = std::stof(v); } catch (...) {} applyChange(); }));
-
-        // Text pressed color
-        rootPanel->children.push_back(makePropertyRow("WE.Det.TPColR", "Text Press R", fmtF(sel->style.textPressedColor.x),
-            [sel, applyChange](const std::string& v) { try { sel->style.textPressedColor.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.TPColG", "Text Press G", fmtF(sel->style.textPressedColor.y),
-            [sel, applyChange](const std::string& v) { try { sel->style.textPressedColor.y = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.TPColB", "Text Press B", fmtF(sel->style.textPressedColor.z),
-            [sel, applyChange](const std::string& v) { try { sel->style.textPressedColor.z = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.TPColA", "Text Press A", fmtF(sel->style.textPressedColor.w),
-            [sel, applyChange](const std::string& v) { try { sel->style.textPressedColor.w = std::stof(v); } catch (...) {} applyChange(); }));
-
-        // Bold / Italic
-        {
-            CheckBoxWidget boldCb;
-            boldCb.setLabel("Bold");
-            boldCb.setChecked(sel->style.isBold);
-            boldCb.setOnCheckedChanged([sel, this](bool c) { sel->style.isBold = c; markAllWidgetsDirty(); });
-            WidgetElement boldEl = boldCb.toElement();
-            boldEl.id = "WE.Det.Bold";
-            boldEl.runtimeOnly = true;
-            rootPanel->children.push_back(std::move(boldEl));
-        }
-        {
-            CheckBoxWidget italicCb;
-            italicCb.setLabel("Italic");
-            italicCb.setChecked(sel->style.isItalic);
-            italicCb.setOnCheckedChanged([sel, this](bool c) { sel->style.isItalic = c; markAllWidgetsDirty(); });
-            WidgetElement italicEl = italicCb.toElement();
-            italicEl.id = "WE.Det.Italic";
-            italicEl.runtimeOnly = true;
-            rootPanel->children.push_back(std::move(italicEl));
-        }
-
-        // Letter spacing / Line spacing
-        rootPanel->children.push_back(makePropertyRow("WE.Det.LetterSp", "Letter Spacing", fmtF(sel->style.letterSpacing),
-            [sel, applyChange](const std::string& v) { try { sel->style.letterSpacing = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.LineSp", "Line Spacing", fmtF(sel->style.lineSpacing),
-            [sel, applyChange](const std::string& v) { try { sel->style.lineSpacing = std::stof(v); } catch (...) {} applyChange(); }));
-
-        // RadioGroup for RadioButton
-        if (sel->type == WidgetElementType::RadioButton)
-        {
-            rootPanel->children.push_back(makePropertyRow("WE.Det.RadioGrp", "Radio Group", sel->radioGroup,
-                [sel, this](const std::string& v) { sel->radioGroup = v; markAllWidgetsDirty(); }));
-        }
-    }
-
-    // --- Section: Image ---
-    if (sel->type == WidgetElementType::Image)
-    {
-        WidgetElement sep{};
-        sep.type = WidgetElementType::Panel;
-        sep.fillX = true;
-        sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color = EditorTheme::Get().panelBorder;
-        sep.runtimeOnly = true;
-        rootPanel->children.push_back(std::move(sep));
-
-        rootPanel->children.push_back(makeLabel("WE.Det.SecImage", "Image", 13.0f,
-            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
-
-        rootPanel->children.push_back(makePropertyRow("WE.Det.ImgPath", "Image Path", sel->imagePath,
-            [sel, applyChange](const std::string& v) { sel->imagePath = v; applyChange(); }));
-    }
-
-    // --- Section: Slider ---
-    if (sel->type == WidgetElementType::Slider || sel->type == WidgetElementType::ProgressBar)
-    {
-        WidgetElement sep{};
-        sep.type = WidgetElementType::Panel;
-        sep.fillX = true;
-        sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color = EditorTheme::Get().panelBorder;
-        sep.runtimeOnly = true;
-        rootPanel->children.push_back(std::move(sep));
-
-        rootPanel->children.push_back(makeLabel("WE.Det.SecValue", "Value", 13.0f,
-            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
-
-        rootPanel->children.push_back(makePropertyRow("WE.Det.MinVal", "Min", fmtF(sel->minValue),
-            [sel, applyChange](const std::string& v) { try { sel->minValue = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.MaxVal", "Max", fmtF(sel->maxValue),
-            [sel, applyChange](const std::string& v) { try { sel->maxValue = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.CurVal", "Value", fmtF(sel->valueFloat),
-            [sel, applyChange](const std::string& v) { try { sel->valueFloat = std::stof(v); } catch (...) {} applyChange(); }));
-
-        // Fill color
-        rootPanel->children.push_back(makePropertyRow("WE.Det.FillR", "Fill R", fmtF(sel->style.fillColor.x),
-            [sel, applyChange](const std::string& v) { try { sel->style.fillColor.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.FillG", "Fill G", fmtF(sel->style.fillColor.y),
-            [sel, applyChange](const std::string& v) { try { sel->style.fillColor.y = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.FillB", "Fill B", fmtF(sel->style.fillColor.z),
-            [sel, applyChange](const std::string& v) { try { sel->style.fillColor.z = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("WE.Det.FillA", "Fill A", fmtF(sel->style.fillColor.w),
-            [sel, applyChange](const std::string& v) { try { sel->style.fillColor.w = std::stof(v); } catch (...) {} applyChange(); }));
-    }
+    WidgetDetailSchema::buildDetailPanel("WE.Det", selected, applyChange, rootPanel, opts);
 
     rightEntry->widget->markLayoutDirty();
 }
@@ -9264,6 +8293,7 @@ void UIManager::openEngineSettingsPopup()
             addCheckbox("ES.C.SplashScreen", "Splash Screen (Normal Startup)", isSplash,
                 [](bool v) {
                     DiagnosticsManager::Instance().setState("StartupMode", v ? "normal" : "fast");
+                    DiagnosticsManager::Instance().saveConfig();
                 });
 
             addSeparator("ES.C.Sep.Input");
@@ -9276,6 +8306,7 @@ void UIManager::openEngineSettingsPopup()
             addCheckbox("ES.C.LaptopMode", "Laptop Mode (WASD without right-click)", isLaptop,
                 [](bool v) {
                     DiagnosticsManager::Instance().setState("LaptopMode", v ? "1" : "0");
+                    DiagnosticsManager::Instance().saveConfig();
                 });
 
             addSeparator("ES.C.Sep.Project");
@@ -9296,6 +8327,7 @@ void UIManager::openEngineSettingsPopup()
                         if (!info.projectPath.empty())
                             DiagnosticsManager::Instance().setState("DefaultProject", info.projectPath);
                     }
+                    DiagnosticsManager::Instance().saveConfig();
                 });
         }
         else if (state->activeCategory == 1) // Rendering
@@ -9306,6 +8338,14 @@ void UIManager::openEngineSettingsPopup()
                 [renderer](bool v) {
                     renderer->setShadowsEnabled(v);
                     DiagnosticsManager::Instance().setState("ShadowsEnabled", v ? "1" : "0");
+                    DiagnosticsManager::Instance().saveConfig();
+                });
+            addCheckbox("ES.C.CSM", "Cascaded Shadow Maps",
+                renderer->isCsmEnabled(),
+                [renderer](bool v) {
+                    renderer->setCsmEnabled(v);
+                    DiagnosticsManager::Instance().setState("CsmEnabled", v ? "1" : "0");
+                    DiagnosticsManager::Instance().saveConfig();
                 });
             addSeparator("ES.C.Sep1");
             addSectionLabel("ES.C.Sec.Display", "Display");
@@ -9314,20 +8354,80 @@ void UIManager::openEngineSettingsPopup()
                 [renderer](bool v) {
                     renderer->setVSyncEnabled(v);
                     DiagnosticsManager::Instance().setState("VSyncEnabled", v ? "1" : "0");
+                    DiagnosticsManager::Instance().saveConfig();
                 });
             addCheckbox("ES.C.Wireframe", "Wireframe Mode",
                 renderer->isWireframeEnabled(),
                 [renderer](bool v) {
                     renderer->setWireframeEnabled(v);
                     DiagnosticsManager::Instance().setState("WireframeEnabled", v ? "1" : "0");
+                    DiagnosticsManager::Instance().saveConfig();
                 });
             addSeparator("ES.C.Sep2");
+            addSectionLabel("ES.C.Sec.PostProcess", "Post-Processing");
+            addCheckbox("ES.C.PostProcess", "Post Processing",
+                renderer->isPostProcessingEnabled(),
+                [renderer](bool v) {
+                    renderer->setPostProcessingEnabled(v);
+                    DiagnosticsManager::Instance().setState("PostProcessingEnabled", v ? "1" : "0");
+                    DiagnosticsManager::Instance().saveConfig();
+                });
+            addCheckbox("ES.C.Gamma", "Gamma Correction",
+                renderer->isGammaCorrectionEnabled(),
+                [renderer](bool v) {
+                    renderer->setGammaCorrectionEnabled(v);
+                    DiagnosticsManager::Instance().setState("GammaCorrectionEnabled", v ? "1" : "0");
+                    DiagnosticsManager::Instance().saveConfig();
+                });
+            addCheckbox("ES.C.ToneMapping", "Tone Mapping (ACES)",
+                renderer->isToneMappingEnabled(),
+                [renderer](bool v) {
+                    renderer->setToneMappingEnabled(v);
+                    DiagnosticsManager::Instance().setState("ToneMappingEnabled", v ? "1" : "0");
+                    DiagnosticsManager::Instance().saveConfig();
+                });
+            {
+                const std::vector<std::string> aaItems = { "None", "FXAA", "MSAA 2x", "MSAA 4x" };
+                const int aaIdx = static_cast<int>(renderer->getAntiAliasingMode());
+                addDropdown("ES.C.AA", "Anti-Aliasing",
+                    aaItems, aaIdx,
+                    [renderer](int index) {
+                        renderer->setAntiAliasingMode(static_cast<Renderer::AntiAliasingMode>(index));
+                        DiagnosticsManager::Instance().setState("AntiAliasingMode", std::to_string(index));
+                        DiagnosticsManager::Instance().saveConfig();
+                    });
+            }
+            addCheckbox("ES.C.Bloom", "Bloom",
+                renderer->isBloomEnabled(),
+                [renderer](bool v) {
+                    renderer->setBloomEnabled(v);
+                    DiagnosticsManager::Instance().setState("BloomEnabled", v ? "1" : "0");
+                    DiagnosticsManager::Instance().saveConfig();
+                });
+            addCheckbox("ES.C.SSAO", "SSAO (Ambient Occlusion)",
+                renderer->isSsaoEnabled(),
+                [renderer](bool v) {
+                    renderer->setSsaoEnabled(v);
+                    DiagnosticsManager::Instance().setState("SsaoEnabled", v ? "1" : "0");
+                    DiagnosticsManager::Instance().saveConfig();
+                });
+            addSeparator("ES.C.Sep2b");
+            addSectionLabel("ES.C.Sec.Effects", "Scene Effects");
+            addCheckbox("ES.C.Fog", "Fog",
+                renderer->isFogEnabled(),
+                [renderer](bool v) {
+                    renderer->setFogEnabled(v);
+                    DiagnosticsManager::Instance().setState("FogEnabled", v ? "1" : "0");
+                    DiagnosticsManager::Instance().saveConfig();
+                });
+            addSeparator("ES.C.Sep3");
             addSectionLabel("ES.C.Sec.Perf", "Performance");
             addCheckbox("ES.C.Occlusion", "Occlusion Culling",
                 renderer->isOcclusionCullingEnabled(),
                 [renderer](bool v) {
                     renderer->setOcclusionCullingEnabled(v);
                     DiagnosticsManager::Instance().setState("OcclusionCullingEnabled", v ? "1" : "0");
+                    DiagnosticsManager::Instance().saveConfig();
                 });
         }
         else if (state->activeCategory == 2) // Debug
@@ -9338,18 +8438,21 @@ void UIManager::openEngineSettingsPopup()
                 [renderer](bool v) {
                     if (v != renderer->isUIDebugEnabled()) renderer->toggleUIDebug();
                     DiagnosticsManager::Instance().setState("UIDebugEnabled", v ? "1" : "0");
+                    DiagnosticsManager::Instance().saveConfig();
                 });
             addCheckbox("ES.C.BoundsDebug", "Bounding Box Debug",
                 renderer->isBoundsDebugEnabled(),
                 [renderer](bool v) {
                     if (v != renderer->isBoundsDebugEnabled()) renderer->toggleBoundsDebug();
                     DiagnosticsManager::Instance().setState("BoundsDebugEnabled", v ? "1" : "0");
+                    DiagnosticsManager::Instance().saveConfig();
                 });
             addCheckbox("ES.C.HFDebug", "HeightField Debug",
                 renderer->isHeightFieldDebugEnabled(),
                 [renderer](bool v) {
                     renderer->setHeightFieldDebugEnabled(v);
                     DiagnosticsManager::Instance().setState("HeightFieldDebugEnabled", v ? "1" : "0");
+                    DiagnosticsManager::Instance().saveConfig();
                 });
         }
         else if (state->activeCategory == 3) // Physics
@@ -9381,6 +8484,7 @@ void UIManager::openEngineSettingsPopup()
                         if (index == 1) name = "PhysX";
 #endif
                         DiagnosticsManager::Instance().setState("PhysicsBackend", name);
+                        DiagnosticsManager::Instance().saveConfig();
                     });
             }
 
@@ -9398,16 +8502,19 @@ void UIManager::openEngineSettingsPopup()
                 readFloat("PhysicsGravityX", 0.0f),
                 [](const std::string& v) {
                     DiagnosticsManager::Instance().setState("PhysicsGravityX", v);
+                    DiagnosticsManager::Instance().saveConfig();
                 });
             addFloatEntry("ES.C.GravityY", "Gravity Y",
                 readFloat("PhysicsGravityY", -9.81f),
                 [](const std::string& v) {
                     DiagnosticsManager::Instance().setState("PhysicsGravityY", v);
+                    DiagnosticsManager::Instance().saveConfig();
                 });
             addFloatEntry("ES.C.GravityZ", "Gravity Z",
                 readFloat("PhysicsGravityZ", 0.0f),
                 [](const std::string& v) {
                     DiagnosticsManager::Instance().setState("PhysicsGravityZ", v);
+                    DiagnosticsManager::Instance().saveConfig();
                 });
 
             addSeparator("ES.C.Sep.Phys1");
@@ -9417,6 +8524,7 @@ void UIManager::openEngineSettingsPopup()
                 readFloat("PhysicsFixedTimestep", 1.0f / 60.0f),
                 [](const std::string& v) {
                     DiagnosticsManager::Instance().setState("PhysicsFixedTimestep", v);
+                    DiagnosticsManager::Instance().saveConfig();
                 });
 
             addSeparator("ES.C.Sep.Phys2");
@@ -9426,6 +8534,7 @@ void UIManager::openEngineSettingsPopup()
                 readFloat("PhysicsSleepThreshold", 0.05f),
                 [](const std::string& v) {
                     DiagnosticsManager::Instance().setState("PhysicsSleepThreshold", v);
+                    DiagnosticsManager::Instance().saveConfig();
                 });
         }
 
@@ -12695,7 +11804,7 @@ void UIManager::refreshUIDesignerHierarchy()
 }
 
 // ---------------------------------------------------------------------------
-// refreshUIDesignerDetails â€” properties panel for selected element
+// refreshUIDesignerDetails - properties panel for selected element
 // ---------------------------------------------------------------------------
 void UIManager::refreshUIDesignerDetails()
 {
@@ -12714,37 +11823,11 @@ void UIManager::refreshUIDesignerDetails()
 
     m_lastHoveredElement = nullptr;
 
-    const auto makeLabel = [](const std::string& id, const std::string& text, float fontSize = 0.0f,
-        const Vec4& color = Vec4{ -1.0f, 0.0f, 0.0f, 0.0f }, float minH = 0.0f) -> WidgetElement
-    {
-        auto& t = EditorTheme::Get();
-        WidgetElement lbl{};
-        lbl.id         = id;
-        lbl.type       = WidgetElementType::Text;
-        lbl.text       = text;
-        lbl.font       = t.fontDefault;
-        lbl.fontSize   = (fontSize > 0.0f) ? fontSize : t.fontSizeSmall;
-        lbl.style.textColor  = (color.x >= 0.0f) ? color : t.textSecondary;
-        lbl.textAlignH = TextAlignH::Left;
-        lbl.textAlignV = TextAlignV::Center;
-        lbl.fillX      = true;
-        lbl.minSize    = Vec2{ 0.0f, (minH > 0.0f) ? minH : t.rowHeightSmall };
-        lbl.runtimeOnly = true;
-        return lbl;
-    };
-
-    auto fmtF = [](float v) -> std::string {
-        char buf[32];
-        std::snprintf(buf, sizeof(buf), "%.2f", v);
-        return std::string(buf);
-    };
-
     auto* vpUI = getViewportUIManager();
     if (!vpUI)
     {
-        rootPanel->children.push_back(makeLabel("UID.Hint",
-            "No ViewportUIManager available.", 11.0f,
-            Vec4{ 0.85f, 0.55f, 0.55f, 1.0f }, 36.0f));
+        rootPanel->children.push_back(EditorUIBuilder::makeSecondaryLabel(
+            "No ViewportUIManager available."));
         rightEntry->widget->markLayoutDirty();
         return;
     }
@@ -12755,23 +11838,21 @@ void UIManager::refreshUIDesignerDetails()
         Widget* w = vpUI->getWidget(m_uiDesignerState.selectedWidgetName);
         if (!w)
         {
-            rootPanel->children.push_back(makeLabel("UID.NotFound",
-                "Widget not found.", 11.0f,
-                Vec4{ 0.85f, 0.55f, 0.55f, 1.0f }, 24.0f));
+            rootPanel->children.push_back(EditorUIBuilder::makeSecondaryLabel(
+                "Widget not found."));
             rightEntry->widget->markLayoutDirty();
             return;
         }
 
-        rootPanel->children.push_back(makeLabel("UID.SecWidget", "Widget", 13.0f,
-            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
-        rootPanel->children.push_back(makeLabel("UID.WidgetName",
+        rootPanel->children.push_back(EditorUIBuilder::makeHeading("Widget"));
+        rootPanel->children.push_back(EditorUIBuilder::makeSecondaryLabel(
             "Name: " + m_uiDesignerState.selectedWidgetName));
 
         int childCount = 0;
         const auto& elems = w->getElements();
         if (!elems.empty())
             childCount = static_cast<int>(elems[0].children.size());
-        rootPanel->children.push_back(makeLabel("UID.WidgetChildren",
+        rootPanel->children.push_back(EditorUIBuilder::makeSecondaryLabel(
             "Elements: " + std::to_string(childCount)));
 
         rightEntry->widget->markLayoutDirty();
@@ -12781,9 +11862,8 @@ void UIManager::refreshUIDesignerDetails()
     // No selection
     if (m_uiDesignerState.selectedElementId.empty())
     {
-        rootPanel->children.push_back(makeLabel("UID.Hint",
-            "Select an element in the hierarchy\nto see its properties.", 11.0f,
-            Vec4{ 0.62f, 0.66f, 0.75f, 1.0f }, 36.0f));
+        rootPanel->children.push_back(EditorUIBuilder::makeSecondaryLabel(
+            "Select an element in the hierarchy\nto see its properties."));
         rightEntry->widget->markLayoutDirty();
         return;
     }
@@ -12793,328 +11873,32 @@ void UIManager::refreshUIDesignerDetails()
         m_uiDesignerState.selectedWidgetName, m_uiDesignerState.selectedElementId);
     if (!selected)
     {
-        rootPanel->children.push_back(makeLabel("UID.NotFound",
-            "Element not found: " + m_uiDesignerState.selectedElementId, 11.0f,
-            Vec4{ 0.85f, 0.55f, 0.55f, 1.0f }, 24.0f));
+        rootPanel->children.push_back(EditorUIBuilder::makeSecondaryLabel(
+            "Element not found: " + m_uiDesignerState.selectedElementId));
         rightEntry->widget->markLayoutDirty();
         return;
     }
 
-    const auto getTypeName = [](WidgetElementType t) -> std::string
-    {
-        switch (t)
-        {
-        case WidgetElementType::Panel:       return "Panel";
-        case WidgetElementType::Text:        return "Text";
-        case WidgetElementType::Button:      return "Button";
-        case WidgetElementType::Image:       return "Image";
-        case WidgetElementType::Label:       return "Label";
-        case WidgetElementType::Slider:      return "Slider";
-        case WidgetElementType::ProgressBar: return "ProgressBar";
-        default:                             return "Element";
-        }
-    };
-
-    // Lambda to apply changes and refresh
     const auto applyChange = [this]() {
         auto* vp = getViewportUIManager();
         if (vp) vp->markLayoutDirty();
         markAllWidgetsDirty();
     };
 
-    const auto makePropertyRow = [&](const std::string& id, const std::string& label,
-        const std::string& value, std::function<void(const std::string&)> onChange) -> WidgetElement
-    {
-        WidgetElement row{};
-        row.type        = WidgetElementType::StackPanel;
-        row.orientation = StackOrientation::Horizontal;
-        row.fillX       = true;
-        row.sizeToContent = true;
-        row.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-        row.padding     = Vec2{ 0.0f, 1.0f };
-        row.runtimeOnly = true;
-
-        WidgetElement lbl = makeLabel(id + ".Lbl", label);
-        lbl.minSize = Vec2{ 80.0f, 22.0f };
-        lbl.fillX   = false;
-        row.children.push_back(std::move(lbl));
-
-        EntryBarWidget entry;
-        entry.setValue(value);
-        entry.setFont(EditorTheme::Get().fontDefault);
-        entry.setFontSize(EditorTheme::Get().fontSizeSmall);
-        entry.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
-        entry.setPadding(Vec2{ 4.0f, 2.0f });
-        entry.setOnValueChanged(onChange);
-
-        WidgetElement entryEl = entry.toElement();
-        entryEl.id         = id + ".Entry";
-        entryEl.fillX      = true;
-        entryEl.runtimeOnly = true;
-        row.children.push_back(std::move(entryEl));
-
-        return row;
+    WidgetDetailSchema::Options opts;
+    opts.showEditableId    = true;
+    opts.showDeleteButton  = true;
+    opts.onIdRenamed = [this](const std::string& newId) {
+        m_uiDesignerState.selectedElementId = newId;
+    };
+    opts.onRefreshHierarchy = [this]() {
+        refreshUIDesignerHierarchy();
+    };
+    opts.onDelete = [this]() {
+        deleteSelectedUIDesignerElement();
     };
 
-    WidgetElement* sel = selected;
-
-    // --- Section: Identity ---
-    {
-        rootPanel->children.push_back(makeLabel("UID.SecIdentity", "Identity", 13.0f,
-            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
-        rootPanel->children.push_back(makeLabel("UID.Type", "Type: " + getTypeName(sel->type)));
-
-        rootPanel->children.push_back(makePropertyRow("UID.Id", "ID", sel->id,
-            [sel, applyChange, this](const std::string& v) {
-                sel->id = v;
-                m_uiDesignerState.selectedElementId = v;
-                applyChange();
-                refreshUIDesignerHierarchy();
-            }));
-    }
-
-    // --- Section: Anchor ---
-    {
-        WidgetElement sep{};
-        sep.type    = WidgetElementType::Panel;
-        sep.fillX   = true;
-        sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color   = EditorTheme::Get().panelBorder;
-        sep.runtimeOnly = true;
-        rootPanel->children.push_back(std::move(sep));
-
-        rootPanel->children.push_back(makeLabel("UID.SecAnchor", "Anchor & Position", 13.0f,
-            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
-
-        // Anchor dropdown
-        {
-            int anchorIdx = static_cast<int>(sel->anchor);
-
-            WidgetElement row{};
-            row.type        = WidgetElementType::StackPanel;
-            row.orientation = StackOrientation::Horizontal;
-            row.fillX       = true;
-            row.sizeToContent = true;
-            row.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-            row.padding     = Vec2{ 0.0f, 1.0f };
-            row.runtimeOnly = true;
-
-            WidgetElement lbl = makeLabel("UID.Anchor.Lbl", "Anchor");
-            lbl.minSize = Vec2{ 80.0f, 22.0f };
-            lbl.fillX   = false;
-            row.children.push_back(std::move(lbl));
-
-            DropDownWidget anchorDd;
-            anchorDd.setItems({ "TopLeft", "TopRight", "BottomLeft", "BottomRight",
-                                "Top", "Bottom", "Left", "Right", "Center", "Stretch" });
-            anchorDd.setSelectedIndex(anchorIdx);
-            anchorDd.setFont(EditorTheme::Get().fontDefault);
-            anchorDd.setFontSize(EditorTheme::Get().fontSizeSmall);
-            anchorDd.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
-            anchorDd.setPadding(Vec2{ 4.0f, 2.0f });
-            anchorDd.setBackgroundColor(EditorTheme::Get().inputBackground);
-            anchorDd.setHoverColor(EditorTheme::Get().inputBackgroundHover);
-            anchorDd.setTextColor(EditorTheme::Get().inputText);
-            anchorDd.setOnSelectionChanged([sel, applyChange](int idx) {
-                sel->anchor = static_cast<WidgetAnchor>(idx);
-                applyChange();
-            });
-            WidgetElement ddEl = anchorDd.toElement();
-            ddEl.id         = "UID.Anchor.DD";
-            ddEl.fillX      = true;
-            ddEl.runtimeOnly = true;
-            row.children.push_back(std::move(ddEl));
-
-            rootPanel->children.push_back(std::move(row));
-        }
-
-        rootPanel->children.push_back(makePropertyRow("UID.OffsetX", "Offset X", fmtF(sel->anchorOffset.x),
-            [sel, applyChange](const std::string& v) { try { sel->anchorOffset.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.OffsetY", "Offset Y", fmtF(sel->anchorOffset.y),
-            [sel, applyChange](const std::string& v) { try { sel->anchorOffset.y = std::stof(v); } catch (...) {} applyChange(); }));
-    }
-
-    // --- Section: Size ---
-    {
-        WidgetElement sep{};
-        sep.type    = WidgetElementType::Panel;
-        sep.fillX   = true;
-        sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color   = EditorTheme::Get().panelBorder;
-        sep.runtimeOnly = true;
-        rootPanel->children.push_back(std::move(sep));
-
-        rootPanel->children.push_back(makeLabel("UID.SecSize", "Size", 13.0f,
-            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
-
-        rootPanel->children.push_back(makePropertyRow("UID.Width", "Width", fmtF(sel->to.x - sel->from.x),
-            [sel, applyChange](const std::string& v) { try { sel->to.x = sel->from.x + std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.Height", "Height", fmtF(sel->to.y - sel->from.y),
-            [sel, applyChange](const std::string& v) { try { sel->to.y = sel->from.y + std::stof(v); } catch (...) {} applyChange(); }));
-    }
-
-    // --- Section: Appearance ---
-    {
-        WidgetElement sep{};
-        sep.type    = WidgetElementType::Panel;
-        sep.fillX   = true;
-        sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color   = EditorTheme::Get().panelBorder;
-        sep.runtimeOnly = true;
-        rootPanel->children.push_back(std::move(sep));
-
-        rootPanel->children.push_back(makeLabel("UID.SecAppearance", "Appearance", 13.0f,
-            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
-
-        rootPanel->children.push_back(makePropertyRow("UID.ColR", "Color R", fmtF(sel->style.color.x),
-            [sel, applyChange](const std::string& v) { try { sel->style.color.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.ColG", "Color G", fmtF(sel->style.color.y),
-            [sel, applyChange](const std::string& v) { try { sel->style.color.y = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.ColB", "Color B", fmtF(sel->style.color.z),
-            [sel, applyChange](const std::string& v) { try { sel->style.color.z = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.ColA", "Color A", fmtF(sel->style.color.w),
-            [sel, applyChange](const std::string& v) { try { sel->style.color.w = std::stof(v); } catch (...) {} applyChange(); }));
-
-        rootPanel->children.push_back(makePropertyRow("UID.Opacity", "Opacity", fmtF(sel->style.opacity),
-            [sel, applyChange](const std::string& v) { try { sel->style.opacity = std::max(0.0f, std::min(1.0f, std::stof(v))); } catch (...) {} applyChange(); }));
-
-        // Visibility
-        {
-            CheckBoxWidget visCb;
-            visCb.setLabel("Visible");
-            visCb.setChecked(sel->style.isVisible);
-            visCb.setOnCheckedChanged([sel, applyChange](bool c) { sel->style.isVisible = c; applyChange(); });
-            WidgetElement visEl = visCb.toElement();
-            visEl.id         = "UID.Visible";
-            visEl.runtimeOnly = true;
-            rootPanel->children.push_back(std::move(visEl));
-        }
-
-        rootPanel->children.push_back(makePropertyRow("UID.BorderW", "Border", fmtF(sel->style.borderThickness),
-            [sel, applyChange](const std::string& v) { try { sel->style.borderThickness = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.BorderR", "Radius", fmtF(sel->style.borderRadius),
-            [sel, applyChange](const std::string& v) { try { sel->style.borderRadius = std::stof(v); } catch (...) {} applyChange(); }));
-    }
-
-    // --- Section: Text (for elements with text) ---
-    if (sel->type == WidgetElementType::Text || sel->type == WidgetElementType::Button ||
-        sel->type == WidgetElementType::Label)
-    {
-        WidgetElement sep{};
-        sep.type    = WidgetElementType::Panel;
-        sep.fillX   = true;
-        sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color   = EditorTheme::Get().panelBorder;
-        sep.runtimeOnly = true;
-        rootPanel->children.push_back(std::move(sep));
-
-        rootPanel->children.push_back(makeLabel("UID.SecText", "Text", 13.0f,
-            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
-
-        rootPanel->children.push_back(makePropertyRow("UID.Text", "Text", sel->text,
-            [sel, applyChange](const std::string& v) { sel->text = v; applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.FontSz", "Font Size", fmtF(sel->fontSize),
-            [sel, applyChange](const std::string& v) { try { sel->fontSize = std::stof(v); } catch (...) {} applyChange(); }));
-
-        rootPanel->children.push_back(makePropertyRow("UID.TColR", "Text R", fmtF(sel->style.textColor.x),
-            [sel, applyChange](const std::string& v) { try { sel->style.textColor.x = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.TColG", "Text G", fmtF(sel->style.textColor.y),
-            [sel, applyChange](const std::string& v) { try { sel->style.textColor.y = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.TColB", "Text B", fmtF(sel->style.textColor.z),
-            [sel, applyChange](const std::string& v) { try { sel->style.textColor.z = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.TColA", "Text A", fmtF(sel->style.textColor.w),
-            [sel, applyChange](const std::string& v) { try { sel->style.textColor.w = std::stof(v); } catch (...) {} applyChange(); }));
-
-        // Bold / Italic
-        {
-            CheckBoxWidget boldCb;
-            boldCb.setLabel("Bold");
-            boldCb.setChecked(sel->style.isBold);
-            boldCb.setOnCheckedChanged([sel, applyChange](bool c) { sel->style.isBold = c; applyChange(); });
-            WidgetElement boldEl = boldCb.toElement();
-            boldEl.id         = "UID.Bold";
-            boldEl.runtimeOnly = true;
-            rootPanel->children.push_back(std::move(boldEl));
-        }
-        {
-            CheckBoxWidget italicCb;
-            italicCb.setLabel("Italic");
-            italicCb.setChecked(sel->style.isItalic);
-            italicCb.setOnCheckedChanged([sel, applyChange](bool c) { sel->style.isItalic = c; applyChange(); });
-            WidgetElement italicEl = italicCb.toElement();
-            italicEl.id         = "UID.Italic";
-            italicEl.runtimeOnly = true;
-            rootPanel->children.push_back(std::move(italicEl));
-        }
-    }
-
-    // --- Section: Image ---
-    if (sel->type == WidgetElementType::Image)
-    {
-        WidgetElement sep{};
-        sep.type    = WidgetElementType::Panel;
-        sep.fillX   = true;
-        sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color   = EditorTheme::Get().panelBorder;
-        sep.runtimeOnly = true;
-        rootPanel->children.push_back(std::move(sep));
-
-        rootPanel->children.push_back(makeLabel("UID.SecImage", "Image", 13.0f,
-            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
-        rootPanel->children.push_back(makePropertyRow("UID.ImgPath", "Path", sel->imagePath,
-            [sel, applyChange](const std::string& v) { sel->imagePath = v; applyChange(); }));
-    }
-
-    // --- Section: Value (Slider / ProgressBar) ---
-    if (sel->type == WidgetElementType::Slider || sel->type == WidgetElementType::ProgressBar)
-    {
-        WidgetElement sep{};
-        sep.type    = WidgetElementType::Panel;
-        sep.fillX   = true;
-        sep.minSize = Vec2{ 0.0f, 1.0f };
-        sep.style.color   = EditorTheme::Get().panelBorder;
-        sep.runtimeOnly = true;
-        rootPanel->children.push_back(std::move(sep));
-
-        rootPanel->children.push_back(makeLabel("UID.SecValue", "Value", 13.0f,
-            Vec4{ 0.95f, 0.85f, 0.55f, 1.0f }, 26.0f));
-        rootPanel->children.push_back(makePropertyRow("UID.MinVal", "Min", fmtF(sel->minValue),
-            [sel, applyChange](const std::string& v) { try { sel->minValue = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.MaxVal", "Max", fmtF(sel->maxValue),
-            [sel, applyChange](const std::string& v) { try { sel->maxValue = std::stof(v); } catch (...) {} applyChange(); }));
-        rootPanel->children.push_back(makePropertyRow("UID.CurVal", "Value", fmtF(sel->valueFloat),
-            [sel, applyChange](const std::string& v) { try { sel->valueFloat = std::stof(v); } catch (...) {} applyChange(); }));
-    }
-
-    // --- Delete button ---
-    {
-        WidgetElement sep{};
-        sep.type    = WidgetElementType::Panel;
-        sep.fillX   = true;
-        sep.minSize = Vec2{ 0.0f, 8.0f };
-        sep.style.color   = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-        sep.runtimeOnly = true;
-        rootPanel->children.push_back(std::move(sep));
-
-        WidgetElement delBtn{};
-        delBtn.id            = "UID.Delete";
-        delBtn.type          = WidgetElementType::Button;
-        delBtn.text          = "Delete Element";
-        delBtn.font          = EditorTheme::Get().fontDefault;
-        delBtn.fontSize      = EditorTheme::Get().fontSizeBody;
-        delBtn.style.textColor     = EditorTheme::Get().buttonDangerText;
-        delBtn.style.color         = EditorTheme::Get().buttonDanger;
-        delBtn.style.hoverColor    = EditorTheme::Get().buttonDangerHover;
-        delBtn.textAlignH    = TextAlignH::Center;
-        delBtn.textAlignV    = TextAlignV::Center;
-        delBtn.fillX         = true;
-        delBtn.minSize       = Vec2{ 0.0f, 28.0f };
-        delBtn.padding       = Vec2{ 8.0f, 4.0f };
-        delBtn.hitTestMode = HitTestMode::Enabled;
-        delBtn.runtimeOnly   = true;
-        delBtn.onClicked     = [this]() { deleteSelectedUIDesignerElement(); };
-        rootPanel->children.push_back(std::move(delBtn));
-    }
+    WidgetDetailSchema::buildDetailPanel("UID.Det", selected, applyChange, rootPanel, opts);
 
     rightEntry->widget->markLayoutDirty();
 }

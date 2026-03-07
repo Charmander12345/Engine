@@ -143,6 +143,9 @@
 - ✅ `Full UI Rebuild on Theme Change`: Neue Methode `rebuildAllEditorUI()` in UIManager mit deferred Update-Mechanismus. Beim Theme-Wechsel wird ein `m_themeDirty`-Flag gesetzt; die eigentliche Aktualisierung erfolgt verzögert im nächsten Frame via `applyPendingThemeUpdate()` in `updateLayouts()`. Private Methode `applyPendingThemeUpdate()` ruft `applyThemeToAllEditorWidgets()` auf (rekursiver Farb-Walk über alle registrierten Editor-Widgets via `EditorTheme::ApplyThemeToElement`) und markiert alle Widgets dirty. Deferred-Ansatz verhindert Freeze/Crash bei synchroner UI-Rekonstruktion innerhalb von Dropdown-Callbacks.
 - ✅ `Theme-Driven Editor Widget Styling`: Neue statische Methode `EditorTheme::ApplyThemeToElement(WidgetElement&, const EditorTheme&)` in `EditorTheme.h` – mappt jeden `WidgetElementType` auf die passenden Theme-Farben (color, hoverColor, pressedColor, textColor, borderColor, fillColor, font, fontSize). Spezialbehandlung: ColorPicker wird übersprungen (Benutzer-Daten), Image-Elemente behalten ihren Tint, intentional transparente Spacer (`alpha < 0.01`) bleiben transparent. ID-basierte Overrides: Close-Buttons → `buttonDanger`-Hover, Save-Buttons → `buttonPrimary`. Abdeckt alle ~25 Element-Typen (Panel, StackPanel, Grid, Button, ToggleButton, DropdownButton, Text, Label, EntryBar, CheckBox, RadioButton, DropDown, Slider, ProgressBar, Separator, ScrollView, TreeView, TabView, ListView, TileView, Spinner, Border, RichText, WrapBox, UniformGrid, SizeBox, ScaleBox, Overlay, WidgetSwitcher). Rekursive Anwendung auf Kind-Elemente. Neue Methode `UIManager::applyThemeToAllEditorWidgets()` iteriert über alle registrierten Editor-Widgets und ruft `ApplyThemeToElement` auf jedes Element auf. Integration in `applyPendingThemeUpdate()` – beim Theme-Wechsel werden alle Widgets (asset-basierte und dynamische) korrekt umgefärbt. Fallback in `loadThemeByName()`: Falls die Theme-Datei nicht existiert, wird auf den Dark-Theme-Default zurückgesetzt.
 - ✅ `Theme Switch Crash Fix`: Vereinfachung des Theme-Wechsel-Flows zur Vermeidung von Crashes. `applyPendingThemeUpdate()` ruft keine `populate*`-Funktionen mehr auf (Outliner, Details, ContentBrowser, StatusBar wurden vorher mid-frame neu aufgebaut, was zu ungültigem Zustand führte). Stattdessen werden nur noch die Farben bestehender Elemente via `ApplyThemeToElement` aktualisiert. Theme-Dropdown-Callback im Editor-Settings-Popup schließt und öffnet das Popup nicht mehr neu (verursachte Crash innerhalb des eigenen Callbacks). Neuer Flow: `loadThemeByName()` → `rebuildAllEditorUI()` (setzt `m_themeDirty`) → nächster Frame: `applyThemeToAllEditorWidgets()` + `markAllWidgetsDirty()`.
+- ✅ `Theme Update Bugfixes`: `applyThemeToAllEditorWidgets()` erfasst jetzt auch Dropdown-Menü-, Modal-Dialog- und Save-Progress-Widgets, die zuvor beim Theme-Wechsel unberücksichtigt blieben. Popup-Fenster (`renderPopupWindows()`) verwenden `EditorTheme::Get().windowBackground` für `glClearColor` statt hardcoded Farben. Mesh-Viewer-Details-Panel-Root nutzt `EditorTheme::Get().panelBackground`. `applyPendingThemeUpdate()` wird pro Frame auf Popup-UIManagern aufgerufen. `UIManager::applyPendingThemeUpdate()` von `private` auf `public` verschoben (benötigt vom Renderer für Popup-Kontext).
+- ✅ `Dropdown Flip-Above Positionierung`: `showDropdownMenu()` prüft verfügbaren Platz unterhalb des Auslöser-Elements; reicht der Platz nicht, wird das Menü oberhalb positioniert (Flip-Above-Logik). Verhindert abgeschnittene Dropdown-Listen am unteren Fensterrand.
+- ✅ `WidgetDetailSchema`: Schema-basierter Property-Editor (`WidgetDetailSchema.h/.cpp`) ersetzt ~1500 Zeilen manuellen Detail-Panel-Code in `UIManager.cpp`. Zentraler Einstiegspunkt `buildDetailPanel(prefix, selected, applyChange, rootPanel, options)` baut komplettes Detail-Panel für beliebiges `WidgetElement`. 9 Shared Sections (Identity, Transform, Anchor, Hit Test, Layout, Style/Colors, Brush, Render Transform, Shadow) + 12 per-type Sections (Text, Image, Value, EntryBar, Container, Border, Spinner, RichText, ListView, TileView, Focus, Drag & Drop) + optionaler Delete-Button. `Options`-Struct konfiguriert kontextspezifisches Verhalten (editierbare IDs, onIdRenamed, showDeleteButton, onDelete, onRefreshHierarchy). `refreshWidgetEditorDetails()` (~1060→75 Zeilen) und `refreshUIDesignerDetails()` (~420→99 Zeilen) nutzen jetzt ausschließlich `WidgetDetailSchema::buildDetailPanel()`.
 
 ## Legende
 
@@ -453,8 +456,8 @@
 | Toter Code entfernt (isRenderEntryRelevant) | ✅ |
 | Shadow Mapping (Multi-Light, Directional/Spot) | ✅     |
 | Shadow Mapping (Point Light Cube Maps)      | ✅     |
-| Post-Processing (Bloom, SSAO, HDR)       | ❌     |
-| Anti-Aliasing (MSAA, FXAA)               | ❌     |
+| Post-Processing (Bloom, SSAO, HDR)       | ✅     |
+| Anti-Aliasing (FXAA, MSAA 2x/4x)        | ✅     |
 | Transparenz / Alpha-Sorting               | 🟡     |
 | Instanced Rendering (GPU)                | ❌     |
 | Skeletal Animation Rendering              | ❌     |
@@ -465,8 +468,7 @@
 | **Renderer-Abstrahierung (Multi-Backend-Vorbereitung)** | 🟡 |
 
 **Offene Punkte:**
-- Kein Post-Processing (Bloom, SSAO, HDR, Tonemapping)
-- Kein Anti-Aliasing
+- Post-Processing Pipeline vollständig: HDR FBO, Gamma Correction, ACES Tone Mapping, FXAA, MSAA 2x/4x, Bloom (5-Mip Downsample + Gaussian Blur), SSAO (32-Sample Hemisphere Kernel, Half-Res, 4×4 Box Blur).
 - Transparenz nur eingeschränkt (kein korrektes Order-Independent-Transparency)
 - Instancing existiert auf CPU-/Level-Seite, aber kein GPU-Instanced-Rendering
 - Keine Alternative zu OpenGL (DirectX / Vulkan nicht implementiert, nur als Enum-Placeholder)
@@ -549,14 +551,18 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | Batch-Rendering (renderBatchCont.)  | ✅     |
 | Default World-Grid-Material (eigener Shader + .asset) | ✅ |
 | Material-Shader-Override (m_shaderFragment in .asset) | ✅ |
-| PBR-Material (Metallic/Roughness)   | ❌     |
-| Normal Mapping                      | ❌     |
+| PBR-Material (Metallic/Roughness)   | ✅     |
+| Normal Mapping                      | ✅     |
+| Emissive Maps                       | ✅     |
 | Material-Editor (UI)                | ❌     |
 | Material-Instancing / Overrides     | ❌     |
 
 **Offene Punkte:**
-- Nur Blinn-Phong-ähnliche Beleuchtung – kein PBR (Physically Based Rendering)
-- Kein Normal Mapping / Displacement
+- Kein Displacement Mapping
+- Kein Material-Editor in der Editor-UI
+- Normal Mapping implementiert (TBN-Matrix im Vertex-Shader, Tangent-Space Normal Maps im Fragment-Shader, Slot 2)
+- Emissive Maps implementiert (material.emissiveMap Slot 3, additive Emission vor Fog/Tone Mapping)
+- Kein Displacement Mapping
 - Kein Material-Editor in der Editor-UI
 - Default-Grid-Material (`Content/Materials/WorldGrid.asset`) liegt im Engine-Verzeichnis (neben der Executable, wie Editor-Widgets) und nutzt eigenen Shader (`grid_fragment.glsl`) mit World-Space XZ-Koordinaten, Major/Minor-Grid (1.0 / 0.25 Einheiten)
 - Grid-Shader unterstützt vollständige Lichtberechnung (Multi-Light, Schatten, Blinn-Phong) wie `fragment.glsl` — Landscape wird von allen Lichtquellen beeinflusst
@@ -576,12 +582,11 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | Mipmaps                              | 🟡     |
 | Texture-Compression (S3TC/BC)       | ❌     |
 | Texture-Streaming                   | ❌     |
-| Cubemap / Skybox                    | ❌     |
+| Cubemap / Skybox                    | ✅     |
 
 **Offene Punkte:**
 - Mipmaps: Grundlegende Unterstützung möglich, aber nicht systematisch aktiv
 - Keine Textur-Komprimierung
-- Keine Cubemaps / Skybox
 - Kein Texture-Streaming für große Texturen
 
 ---
@@ -890,6 +895,18 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
     - `findPointShadowLightIndices()` sammelt Point Lights, `renderPointShadowMaps()` rendert Cube Maps
     - `ensurePointShadowResources()` / `releasePointShadowResources()` verwalten GPU-Ressourcen
     - `OpenGLMaterial`: Uniforms `uPointShadowMaps`, `uPointShadowCount`, `uPointShadowPositions[4]`, `uPointShadowFarPlanes[4]`, `uPointShadowLightIndices[4]`
+  - **Cascaded Shadow Maps (CSM) für Directional Lights:**
+    - 4 Kaskaden mit Practical Split Scheme (λ=0.75, Blend aus logarithmisch und uniform)
+    - 2048×2048 Depth-Texture pro Kaskade (GL_TEXTURE_2D_ARRAY, 4 Schichten)
+    - Frustum-Corners-basierte tight orthographische Projektion pro Kaskade
+    - View-Space Depth für Kaskaden-Auswahl im Fragment-Shader
+    - 5×5 PCF pro Kaskade mit kaskadenabhängigem Bias (nähere Kaskaden = kleinerer Bias)
+    - Erster Directional Light wird automatisch für CSM verwendet, übersprungen in regulärer Shadow-Map-Liste
+    - CSM Maps auf Texture Unit 6 gebunden (separates sampler2DArray)
+    - Shader-Uniforms: `uCsmMaps`, `uCsmEnabled`, `uCsmLightIndex`, `uCsmMatrices[4]`, `uCsmSplits[4]`, `uViewMatrix`
+    - `OpenGLRenderer`: `ensureCsmResources()`, `releaseCsmResources()`, `computeCsmMatrices()`, `renderCsmShadowMaps()`
+    - `OpenGLMaterial::setCsmData()` + `OpenGLObject3D::setCsmData()` delegieren CSM-Parameter
+    - Beide Fragment-Shader (`fragment.glsl`, `grid_fragment.glsl`) unterstützen CSM via `calcCsmShadow()`
     - Point Shadow Maps auf Texture Unit 5 gebunden
 
 ---
@@ -940,10 +957,17 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | Mehrere Popups gleichzeitig                      | ✅ |
 | Engine Settings Popup (Sidebar-Layout, Kategorien: General, Rendering, Debug, Physics) | ✅ |
 | Dropdown-Menü als Overlay-Widget (z-Order 9000, Click-Outside-Dismiss) | ✅ |
-| Engine Settings Persistenz via `config.ini` (Shadows, Occlusion, Debug, VSync, Wireframe, Physics, HeightField Debug) | ✅ |
+| Engine Settings Persistenz via `config.ini` (Shadows, Occlusion, Debug, VSync, Wireframe, Physics, HeightField Debug, Post Processing, Gamma, Tone Mapping, AA, Bloom, SSAO, CSM) — sofortige Speicherung bei jeder Änderung (`saveConfig()` in allen Callbacks) | ✅ |
 | Physics-Kategorie (Gravity X/Y/Z, Fixed Timestep, Sleep Threshold) | ✅ |
 | VSync Toggle (Engine Settings → Rendering → Display) | ✅ |
 | Wireframe Mode (Engine Settings → Rendering → Display) | ✅ |
+| Post Processing Toggle (Engine Settings → Rendering → Post-Processing) | ✅ |
+| Gamma Correction Toggle (Engine Settings → Rendering → Post-Processing) | ✅ |
+| Tone Mapping Toggle (Engine Settings → Rendering → Post-Processing) | ✅ |
+| Anti-Aliasing Dropdown (Engine Settings → Rendering → Post-Processing: None/FXAA/MSAA 2x/MSAA 4x) | ✅ |
+| Bloom Toggle (Engine Settings → Rendering → Post-Processing) | ✅ |
+| SSAO Toggle (Engine Settings → Rendering → Post-Processing) | ✅ |
+| CSM Toggle (Engine Settings → Rendering → Lighting) | ✅ |
 | Absolute Widget-Positionierung (`setAbsolutePosition`) | ✅ |
 
 **Offene Punkte:**
@@ -1225,14 +1249,15 @@ Große Feature-Blöcke, die noch nicht existieren:
 |-----------------------------------|-----------|--------------------------------------------------------------------------------|
 | **Physik-Engine (Jolt)**         | ✅     | Jolt Physics v5.5.1 Backend: Fixed Timestep, Box/Sphere-Kollision, Constraint-Solving, Sleep, Raycast. `PhysicsWorld`-Singleton, `engine.physics` Python-API |
 | **Physik-Engine (PhysX)**        | ✅     | NVIDIA PhysX 5.6.1 Backend (optional, `ENGINE_PHYSX_BACKEND`): Box/Sphere/Capsule/Cylinder/HeightField-Collider, Kontakt-Callbacks, Raycast, Sleep. Statische Libs, DLL-CRT, `/WX-` Override. |
-| **3D-Modell-Import (Assimp)**    | ✅     | Import von OBJ, FBX, glTF, GLB, DAE, 3DS, STL, PLY, X3D via Assimp inkl. automatischer Material- und Textur-Extraktion (Diffuse, Specular, Normal; extern + eingebettet) |
+| **3D-Modell-Import (Assimp)**    | ✅     | Import von OBJ, FBX, glTF, GLB, DAE, 3DS, STL, PLY, X3D via Assimp inkl. automatischer Material- und Textur-Extraktion (Diffuse, Specular, Normal, Emissive; extern + eingebettet) |
 | **Entity-Hierarchie**            | Mittel    | Parent-Child-Beziehungen für Entities (kein ParentComponent im ECS)           |
 | **Entity-Kamera (Runtime)**      | ✅     | Entity-Kamera via `setActiveCameraEntity()` mit FOV/NearClip/FarClip aus CameraComponent |
-| **PBR-Material + Normal Mapping**| Mittel    | Physically Based Rendering, Normal/Roughness/Metallic-Maps (aktuell nur Blinn-Phong) |
-| **Post-Processing**              | Mittel    | Bloom, SSAO, HDR, Tonemapping, Anti-Aliasing                                |
-| **Cascaded Shadow Maps**         | Mittel    | CSM für Directional Lights (aktuell feste ortho-Projektion, kein Cascading)  |
+| **PBR-Material**                 | ✅     | Cook-Torrance BRDF (GGX NDF + Smith-Schlick Geometry + Fresnel-Schlick), Metallic/Roughness Workflow, glTF-kompatible metallicRoughness Map (G=Roughness, B=Metallic, Slot 4), Scalar-Fallback (uMetallic/uRoughness), auto-PBR-Erkennung beim Assimp-Import, abwärtskompatibel mit Blinn-Phong |
+| **Normal Mapping**               | ✅     | TBN-Matrix (Gram-Schmidt), Tangent/Bitangent pro Vertex, material.normalMap (Slot 2), uHasNormalMap Uniform |
+| **Post-Processing**              | ✅     | HDR FBO, Gamma Correction, ACES Tone Mapping, FXAA (deferred, nach Gizmo/Outline), MSAA 2x/4x, Bloom (5-Mip Gaussian), SSAO (32-Sample, Half-Res, Bilateral Depth-Aware 5×5 Blur). |
+| **Cascaded Shadow Maps**         | ✅     | 4-Kaskaden CSM für Directional Lights: Practical Split (λ=0.75), 2048² pro Kaskade, tight Ortho-Projektion, View-Space Cascade Selection, 5×5 PCF, Toggle in Engine Settings (Lighting) |
 | **Skeletal Animation**           | Mittel    | Bone-System, Skinning, Animation-Blending                                    |
-| **Cubemap / Skybox**            | Mittel    | Umgebungstexturen für Himmel                                                  |
+| **Cubemap / Skybox**            | ✅     | 6-Face Cubemap Rendering, Skybox-Shader, Skybox-Pfad pro Level (JSON), WorldSettings UI, Drag&Drop |
 | **Drag & Drop (Editor)**        | ✅     | Model3D→Spawn (Depth-Raycast + Undo/Redo), Material/Script→Apply (pickEntityAtImmediate), Asset-Move mit tiefem Referenz-Scan aller .asset-Dateien, Entf zum Löschen (mit Undo/Redo), EntityDetails Drop-Zones mit Typ-Validierung |
 | **Asset Rename (Editor)**       | ✅     | Rename-Button in Content-Browser PathBar (aktiv bei selektiertem Asset) + F2-Tastenkürzel. Inline-EntryBar im Grid-Tile zum Eingeben des neuen Namens. `AssetManager::renameAsset()` benennt Datei + Source-File um, aktualisiert Registry (Name/Pfad/Index), geladene AssetData, ECS-Komponenten (Mesh/Material/Script) und scannt Cross-Asset-Referenzen in .asset-Dateien. Escape bricht ab. |
 | **Audio-Formate (OGG/MP3)**     | Niedrig   | Weitere Audio-Formate unterstützen (aktuell nur WAV)                         |

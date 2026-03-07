@@ -57,6 +57,7 @@ class Renderer
 public:
     enum class GizmoMode { None, Translate, Rotate, Scale };
     enum class GizmoAxis { None, X, Y, Z };
+    enum class AntiAliasingMode { None = 0, FXAA = 1, MSAA_2x = 2, MSAA_4x = 3 };
 
     virtual ~Renderer() = default;
 
@@ -104,6 +105,32 @@ public:
     virtual void setWireframeEnabled(bool /*enabled*/) {}
     virtual bool isOcclusionCullingEnabled() const { return false; }
     virtual void setOcclusionCullingEnabled(bool /*enabled*/) {}
+    virtual bool isPostProcessingEnabled() const { return false; }
+    virtual void setPostProcessingEnabled(bool /*enabled*/) {}
+    virtual bool isGammaCorrectionEnabled() const { return true; }
+    virtual void setGammaCorrectionEnabled(bool /*enabled*/) {}
+    virtual bool isToneMappingEnabled() const { return true; }
+    virtual void setToneMappingEnabled(bool /*enabled*/) {}
+    virtual float getExposure() const { return 1.0f; }
+    virtual void setExposure(float /*exposure*/) {}
+    virtual AntiAliasingMode getAntiAliasingMode() const { return AntiAliasingMode::None; }
+    virtual void setAntiAliasingMode(AntiAliasingMode /*mode*/) {}
+    virtual bool isFogEnabled() const { return false; }
+    virtual void setFogEnabled(bool /*enabled*/) {}
+    virtual Vec4 getFogParams() const { return {}; }
+    virtual void setFogParams(const Vec4& /*params*/) {}
+    virtual Vec3 getFogColor() const { return {0.7f, 0.7f, 0.8f}; }
+    virtual void setFogColor(const Vec3& /*color*/) {}
+    virtual bool isBloomEnabled() const { return false; }
+    virtual void setBloomEnabled(bool /*enabled*/) {}
+    virtual float getBloomThreshold() const { return 1.0f; }
+    virtual void setBloomThreshold(float /*threshold*/) {}
+    virtual float getBloomIntensity() const { return 0.3f; }
+    virtual void setBloomIntensity(float /*intensity*/) {}
+    virtual bool isSsaoEnabled() const { return false; }
+    virtual void setSsaoEnabled(bool /*enabled*/) {}
+    virtual bool isCsmEnabled() const { return true; }
+    virtual void setCsmEnabled(bool /*enabled*/) {}
 
     // --- Debug visualizations ---
     virtual bool isUIDebugEnabled() const { return false; }

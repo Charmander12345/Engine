@@ -286,12 +286,14 @@ void OpenGLRenderer::shutdown()
         m_gpuQueriesInitialized = false;
         m_gpuTimerQueries.fill(0);
     }
+    m_postProcessStack.shutdown();
     releaseHzbResources();
     releaseBoundsDebugResources();
     releaseHeightFieldDebugResources();
     releaseSkyboxResources();
     releaseShadowResources();
     releasePointShadowResources();
+    releaseCsmResources();
     releasePickFbo();
     releaseOutlineResources();
     releaseUiFbo();
@@ -674,12 +676,34 @@ void OpenGLRenderer::renderWorld()
     const int height = hasContentRect ? static_cast<int>(vpRect.w) : fullHeight;
     const int viewportY = fullHeight - vpY - height;
 
-    // Render into the active tab's FBO
+    // Render into the active tab's FBO (or HDR FBO when post-processing)
+    const bool usePostProcess = m_postProcessEnabled && ensurePostProcessResources();
     {
         EditorTab* activeTab = m_cachedActiveTab;
         if (activeTab && activeTab->renderTarget && activeTab->renderTarget->isValid())
         {
-            activeTab->renderTarget->bind();
+            if (usePostProcess)
+            {
+                // Scene renders into the HDR FBO; resolved to tab FBO at end
+                m_postProcessStack.resize(fullWidth, fullHeight);
+
+                // When MSAA is selected, ensure the multisampled FBO exists
+                const int aaModeInt = static_cast<int>(m_aaMode);
+                int msaaSamples = 0;
+                if (m_aaMode == AntiAliasingMode::MSAA_2x) msaaSamples = 2;
+                else if (m_aaMode == AntiAliasingMode::MSAA_4x) msaaSamples = 4;
+                m_postProcessStack.setAntiAliasingMode(aaModeInt);
+                if (msaaSamples > 0)
+                    m_postProcessStack.ensureMsaaFbo(fullWidth, fullHeight, msaaSamples);
+                else
+                    m_postProcessStack.ensureMsaaFbo(fullWidth, fullHeight, 0);
+
+                m_postProcessStack.bindHdrTarget();
+            }
+            else
+            {
+                activeTab->renderTarget->bind();
+            }
         }
     }
 
@@ -858,6 +882,9 @@ void OpenGLRenderer::renderWorld()
 					camComp->nearClip,
 					camComp->farClip
 				);
+				activeFov = camComp->fov;
+				activeNear = camComp->nearClip;
+				activeFar = camComp->farClip;
 			}
 			usedEntityCamera = true;
 		}
@@ -1223,6 +1250,8 @@ void OpenGLRenderer::renderWorld()
 
 	// ---- Shadow map pass (multi-light) ----
 	m_shadowCount = 0;
+	m_csmEnabled = false;
+	m_csmLightIndex = -1;
 	if (m_shadowEnabled && ensureShadowResources())
 	{
 		findShadowLightIndices();
@@ -1237,6 +1266,17 @@ void OpenGLRenderer::renderWorld()
 			// Restore main viewport
 			glViewport(vpX, viewportY, width, height);
 		}
+	}
+
+	// ---- Cascaded Shadow Maps (first directional light) ----
+	if (m_shadowEnabled && m_csmUserEnabled && m_csmLightIndex >= 0 && ensureCsmResources())
+	{
+		computeCsmMatrices(m_sceneLights[m_csmLightIndex], view, m_projectionMatrix, activeNear, activeFar);
+		renderCsmShadowMaps(m_shadowCasterList);
+		m_csmEnabled = true;
+
+		// Restore main viewport
+		glViewport(vpX, viewportY, width, height);
 	}
 
 	// ---- Point light shadow map pass (cube maps) ----
@@ -1259,11 +1299,14 @@ void OpenGLRenderer::renderWorld()
 		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 	}
 	GLuint lastProgram = 0;
+	const glm::vec3 fogColor(m_fogColor.x, m_fogColor.y, m_fogColor.z);
 	for (const auto& cmd : m_drawList)
 	{
 		cmd.obj->setMatrices(cmd.modelMatrix, view, m_projectionMatrix);
 		cmd.obj->setShadowData(m_shadowDepthArray, m_shadowLightSpaceMatrices, m_shadowLightIndices, m_shadowCount);
 		cmd.obj->setPointShadowData(m_pointShadowCubeArray, m_pointShadowPositions, m_pointShadowFarPlanes, m_pointShadowLightIndices, m_pointShadowCount);
+		cmd.obj->setFogData(m_fogEnabled, fogColor, m_fogParams.z);
+		cmd.obj->setCsmData(m_csmDepthArray, m_csmMatrices, m_csmSplits, m_csmLightIndex, m_csmEnabled, view);
 		if (cmd.hasEmission)
 		{
 			cmd.obj->setLightData(lightPosition, cmd.emissionColor, lightIntensity);
@@ -1324,16 +1367,12 @@ void OpenGLRenderer::renderWorld()
 		}
 	}
 
-	// Draw selection outline: render only the selected entity into pick buffer (1 draw call)
+	// Render selected entity into pick buffer (needed for outline + picking before resolve)
 	if (m_selectedEntity != 0 && !diagnostics.isPIEActive())
 	{
 		if (ensurePickFbo(fullWidth, fullHeight))
 		{
 			renderPickBufferSingleEntity(view, m_projectionMatrix, m_selectedEntity);
-		}
-		if (m_pickColorTex != 0)
-		{
-			drawSelectionOutline();
 		}
 
 		// Update gizmo hover highlight
@@ -1343,9 +1382,63 @@ void OpenGLRenderer::renderWorld()
 			m_gizmoHoveredAxis = pickGizmoAxis(view, m_projectionMatrix,
 				static_cast<int>(mousePos.x), static_cast<int>(mousePos.y));
 		}
+	}
+
+	// Resolve HDR FBO → tab FBO via post-process resolve pass.
+	// Use the full FBO dimensions so the fullscreen triangle's 0..1 UV maps
+	// 1:1 to the HDR texture pixels (the scene was rendered into a sub-rect,
+	// but the clear colour fills the rest, preserving the correct layout).
+	// FXAA is deferred to after gizmo/outline so those overlays also get AA.
+	if (usePostProcess)
+	{
+		EditorTab* activeTab = m_cachedActiveTab;
+		if (activeTab && activeTab->renderTarget && activeTab->renderTarget->isValid())
+		{
+			auto* glRT = static_cast<OpenGLRenderTarget*>(activeTab->renderTarget.get());
+			m_postProcessStack.setGammaEnabled(m_gammaEnabled);
+			m_postProcessStack.setToneMappingEnabled(m_toneMappingEnabled);
+			m_postProcessStack.setExposure(m_exposure);
+			// Defer FXAA to after overlays; MSAA modes pass through for resolve
+			const int resolveAaMode = (m_aaMode == AntiAliasingMode::FXAA)
+				? 0 : static_cast<int>(m_aaMode);
+			m_postProcessStack.setAntiAliasingMode(resolveAaMode);
+			m_postProcessStack.setBloomEnabled(m_bloomEnabled);
+			m_postProcessStack.setBloomThreshold(m_bloomThreshold);
+			m_postProcessStack.setBloomIntensity(m_bloomIntensity);
+			m_postProcessStack.setSsaoEnabled(m_ssaoEnabled);
+			m_postProcessStack.setProjectionMatrix(m_projectionMatrix);
+			m_postProcessStack.execute(glRT->getGLFramebuffer(), 0, 0, fullWidth, fullHeight);
+
+			// Restore content-rect viewport so outline/gizmo draw in the right area
+			glViewport(vpX, viewportY, width, height);
+		}
+	}
+
+	// Draw selection outline + gizmo AFTER post-process resolve so they are not overwritten
+	if (m_selectedEntity != 0 && !diagnostics.isPIEActive())
+	{
+		if (m_pickColorTex != 0)
+		{
+			drawSelectionOutline();
+		}
 
 		// Draw gizmo overlay on top of the scene
 		renderGizmo(view, m_projectionMatrix);
+	}
+
+	// Deferred FXAA pass: apply after overlays (gizmos, outlines) so they also get AA
+	if (usePostProcess && m_aaMode == AntiAliasingMode::FXAA)
+	{
+		EditorTab* activeTab = m_cachedActiveTab;
+		if (activeTab && activeTab->renderTarget && activeTab->renderTarget->isValid())
+		{
+			auto* glRT = static_cast<OpenGLRenderTarget*>(activeTab->renderTarget.get());
+			m_postProcessStack.setAntiAliasingMode(static_cast<int>(m_aaMode));
+			m_postProcessStack.executeFxaaPass(glRT->getGLFramebuffer(), 0, 0, fullWidth, fullHeight);
+
+			// Restore content-rect viewport for any subsequent rendering
+			glViewport(vpX, viewportY, width, height);
+		}
 	}
 }
 
@@ -1520,6 +1613,27 @@ void OpenGLRenderer::releaseUiFbo()
     m_uiFboWidth = 0;
     m_uiFboHeight = 0;
     m_uiFboCacheValid = false;
+}
+
+bool OpenGLRenderer::ensurePostProcessResources()
+{
+    if (m_postProcessStack.isInitialized())
+        return true;
+
+    const std::filesystem::path shadersDir = std::filesystem::current_path() / "shaders";
+    const std::string vertPath = (shadersDir / "resolve_vertex.glsl").string();
+    const std::string fragPath = (shadersDir / "resolve_fragment.glsl").string();
+    if (!m_postProcessStack.init(vertPath.c_str(), fragPath.c_str()))
+        return false;
+
+    const std::string bloomDownPath = (shadersDir / "bloom_downsample.glsl").string();
+    const std::string bloomBlurPath = (shadersDir / "bloom_blur.glsl").string();
+    m_postProcessStack.initBloom(vertPath.c_str(), bloomDownPath.c_str(), bloomBlurPath.c_str());
+
+    const std::string ssaoFragPath = (shadersDir / "ssao_fragment.glsl").string();
+    const std::string ssaoBlurPath = (shadersDir / "ssao_blur.glsl").string();
+    m_postProcessStack.initSsao(vertPath.c_str(), ssaoFragPath.c_str(), ssaoBlurPath.c_str());
+    return true;
 }
 
 void OpenGLRenderer::blitUiCache(int width, int height)
@@ -2326,8 +2440,12 @@ void OpenGLRenderer::renderPopupWindows()
 
         glViewport(0, 0, pw, ph);
         glDisable(GL_DEPTH_TEST);
-        glClearColor(0.13f, 0.13f, 0.16f, 1.0f);
+        const auto& bg = EditorTheme::Get().windowBackground;
+        glClearColor(bg.x, bg.y, bg.z, bg.w);
         glClear(GL_COLOR_BUFFER_BIT);
+
+        // Propagate pending theme changes to the popup's own UIManager.
+        popup->uiManager().applyPendingThemeUpdate();
 
         // Temporarily swap in the popup VAOs so drawUIPanel/drawUIImage/drawText use them.
         const GLuint savedVao = m_uiQuadVao;
@@ -5545,12 +5663,208 @@ void OpenGLRenderer::releaseShadowResources()
     if (m_shadowFbo)        { glDeleteFramebuffers(1, &m_shadowFbo); m_shadowFbo = 0; }
 }
 
+// ---- Cascaded Shadow Maps ----
+
+bool OpenGLRenderer::ensureCsmResources()
+{
+    if (m_csmFbo != 0)
+        return true;
+
+    glGenTextures(1, &m_csmDepthArray);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_csmDepthArray);
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24,
+                 kCsmMapSize, kCsmMapSize, kNumCsmCascades,
+                 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    float borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    glTexParameterfv(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BORDER_COLOR, borderColor);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+
+    glGenFramebuffers(1, &m_csmFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_csmFbo);
+    glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_csmDepthArray, 0, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    return true;
+}
+
+void OpenGLRenderer::releaseCsmResources()
+{
+    if (m_csmDepthArray) { glDeleteTextures(1, &m_csmDepthArray); m_csmDepthArray = 0; }
+    if (m_csmFbo)        { glDeleteFramebuffers(1, &m_csmFbo); m_csmFbo = 0; }
+}
+
+void OpenGLRenderer::computeCsmMatrices(const OpenGLMaterial::LightData& light,
+                                        const glm::mat4& view, const glm::mat4& proj,
+                                        float nearPlane, float farPlane)
+{
+    const glm::vec3 lightDir = glm::normalize(light.direction);
+
+    // Choose stable up vector
+    glm::vec3 up(0.0f, 1.0f, 0.0f);
+    if (std::abs(glm::dot(lightDir, up)) > 0.99f)
+        up = glm::vec3(0.0f, 0.0f, 1.0f);
+
+    // Compute cascade split distances (practical split scheme: blend of log and uniform)
+    constexpr float lambda = 0.75f;
+    float splits[kNumCsmCascades];
+    for (int i = 0; i < kNumCsmCascades; ++i)
+    {
+        float p = static_cast<float>(i + 1) / static_cast<float>(kNumCsmCascades);
+        float logSplit = nearPlane * std::pow(farPlane / nearPlane, p);
+        float uniSplit = nearPlane + (farPlane - nearPlane) * p;
+        splits[i] = lambda * logSplit + (1.0f - lambda) * uniSplit;
+        m_csmSplits[i] = splits[i];
+    }
+
+    // Inverse view-projection to go from NDC back to world space
+    const glm::mat4 invViewProj = glm::inverse(proj * view);
+
+    for (int c = 0; c < kNumCsmCascades; ++c)
+    {
+        float cascadeNear = (c == 0) ? nearPlane : splits[c - 1];
+        float cascadeFar = splits[c];
+
+        // Map near/far to NDC z (perspective projection)
+        // NDC_z = (2*near*far / (far-near)) / depth + (far+near)/(far-near)
+        // Simpler: use linearized approach — project corners at cascadeNear/cascadeFar
+        float nearNdc = (cascadeNear - nearPlane) / (farPlane - nearPlane) * 2.0f - 1.0f;
+        float farNdc  = (cascadeFar  - nearPlane) / (farPlane - nearPlane) * 2.0f - 1.0f;
+
+        // Use proper perspective z mapping
+        // z_ndc = (far+near)/(far-near) + (2*far*near)/((far-near)*z_eye) ... but this is non-linear
+        // Better approach: just compute the 8 frustum corners directly
+        // Frustum corners in NDC: (-1,-1,-1) to (1,1,1), we remap z for the sub-frustum
+
+        // Build sub-projection that covers [cascadeNear, cascadeFar]
+        // Extract FOV and aspect from projection matrix
+        float tanHalfFovY = 1.0f / proj[1][1];
+        float aspect = proj[1][1] / proj[0][0];
+
+        // Compute frustum corners in view space
+        float nearH = cascadeNear * tanHalfFovY;
+        float nearW = nearH * aspect;
+        float farH  = cascadeFar * tanHalfFovY;
+        float farW  = farH * aspect;
+
+        glm::mat4 invView = glm::inverse(view);
+
+        glm::vec3 corners[8] = {
+            // Near plane (z = -cascadeNear in view space)
+            glm::vec3(invView * glm::vec4(-nearW, -nearH, -cascadeNear, 1.0f)),
+            glm::vec3(invView * glm::vec4( nearW, -nearH, -cascadeNear, 1.0f)),
+            glm::vec3(invView * glm::vec4( nearW,  nearH, -cascadeNear, 1.0f)),
+            glm::vec3(invView * glm::vec4(-nearW,  nearH, -cascadeNear, 1.0f)),
+            // Far plane (z = -cascadeFar in view space)
+            glm::vec3(invView * glm::vec4(-farW, -farH, -cascadeFar, 1.0f)),
+            glm::vec3(invView * glm::vec4( farW, -farH, -cascadeFar, 1.0f)),
+            glm::vec3(invView * glm::vec4( farW,  farH, -cascadeFar, 1.0f)),
+            glm::vec3(invView * glm::vec4(-farW,  farH, -cascadeFar, 1.0f)),
+        };
+
+        // Compute center of the frustum slice
+        glm::vec3 center(0.0f);
+        for (int i = 0; i < 8; ++i)
+            center += corners[i];
+        center /= 8.0f;
+
+        // Light view matrix looking at the center
+        const glm::mat4 lightView = glm::lookAt(center - lightDir * 50.0f, center, up);
+
+        // Find bounding box in light space
+        float minX =  std::numeric_limits<float>::max();
+        float maxX = -std::numeric_limits<float>::max();
+        float minY =  std::numeric_limits<float>::max();
+        float maxY = -std::numeric_limits<float>::max();
+        float minZ =  std::numeric_limits<float>::max();
+        float maxZ = -std::numeric_limits<float>::max();
+
+        for (int i = 0; i < 8; ++i)
+        {
+            glm::vec4 lsCorner = lightView * glm::vec4(corners[i], 1.0f);
+            minX = std::min(minX, lsCorner.x);
+            maxX = std::max(maxX, lsCorner.x);
+            minY = std::min(minY, lsCorner.y);
+            maxY = std::max(maxY, lsCorner.y);
+            minZ = std::min(minZ, lsCorner.z);
+            maxZ = std::max(maxZ, lsCorner.z);
+        }
+
+        // Extend the depth range to catch shadow casters behind the camera
+        constexpr float zMult = 3.0f;
+        if (minZ < 0.0f)
+            minZ *= zMult;
+        else
+            minZ /= zMult;
+
+        const glm::mat4 lightProj = glm::ortho(minX, maxX, minY, maxY, minZ, maxZ);
+        m_csmMatrices[c] = lightProj * lightView;
+    }
+}
+
+void OpenGLRenderer::renderCsmShadowMaps(const std::vector<DrawCmd>& drawList)
+{
+    GLint prevFbo = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFbo);
+
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_FRONT);
+    glUseProgram(m_shadowProgram);
+
+    for (int c = 0; c < kNumCsmCascades; ++c)
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, m_csmFbo);
+        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_csmDepthArray, 0, c);
+        glViewport(0, 0, kCsmMapSize, kCsmMapSize);
+        glClear(GL_DEPTH_BUFFER_BIT);
+
+        glUniformMatrix4fv(m_shadowLocLightSpace, 1, GL_FALSE, &m_csmMatrices[c][0][0]);
+
+        for (const auto& cmd : drawList)
+        {
+            glUniformMatrix4fv(m_shadowLocModel, 1, GL_FALSE, &cmd.modelMatrix[0][0]);
+
+            auto* mat = cmd.obj->getMaterial();
+            if (!mat)
+                continue;
+            glBindVertexArray(mat->getVao());
+            if (mat->getIndexCount() > 0)
+            {
+                glDrawElements(GL_TRIANGLES, mat->getIndexCount(), GL_UNSIGNED_INT, nullptr);
+            }
+            else
+            {
+                glDrawArrays(GL_TRIANGLES, 0, mat->getVertexCount());
+            }
+        }
+    }
+
+    glCullFace(GL_BACK);
+    glDisable(GL_CULL_FACE);
+    glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(prevFbo));
+}
+
 void OpenGLRenderer::findShadowLightIndices()
 {
     m_shadowCount = 0;
+    m_csmLightIndex = -1;
     for (int i = 0; i < static_cast<int>(m_sceneLights.size()) && m_shadowCount < kMaxShadowLights; ++i)
     {
         const int type = m_sceneLights[i].type;
+        if (type == 1) // directional — use CSM for the first one
+        {
+            if (m_csmLightIndex < 0)
+            {
+                m_csmLightIndex = i; // handled by CSM, skip regular shadow map
+                continue;
+            }
+        }
         if (type == 1 || type == 2) // directional or spot
         {
             m_shadowLightIndices[m_shadowCount] = i;
@@ -6747,7 +7061,8 @@ RendererCapabilities OpenGLRenderer::getCapabilities() const
     caps.supportsEntityPicking = true;
     caps.supportsGizmos        = true;
     caps.supportsSkybox        = true;
-    caps.supportsPopupWindows  = true;
+    caps.supportsPopupWindows   = true;
+    caps.supportsPostProcessing = true;
     return caps;
 }
 

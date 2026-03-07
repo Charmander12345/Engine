@@ -292,6 +292,9 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
         std::vector<std::shared_ptr<Texture>> textures;
         std::string materialCacheKey;
         float shininess = 32.0f;
+        float metallic = 0.0f;
+        float roughness = 0.5f;
+        bool pbrEnabled = false;
         std::string fragmentShaderOverride;
         if (!match.material.materialAssetPath.empty())
         {
@@ -302,6 +305,9 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
             {
                 textures = cachedMat->second.textures;
                 shininess = cachedMat->second.shininess;
+                metallic = cachedMat->second.metallic;
+                roughness = cachedMat->second.roughness;
+                pbrEnabled = cachedMat->second.pbrEnabled;
                 fragmentShaderOverride = cachedMat->second.shaderFragment;
             }
             else
@@ -322,6 +328,18 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
                             if (matData.contains("m_shininess"))
                             {
                                 shininess = matData.at("m_shininess").get<float>();
+                            }
+                            if (matData.contains("m_metallic"))
+                            {
+                                metallic = matData.at("m_metallic").get<float>();
+                            }
+                            if (matData.contains("m_roughness"))
+                            {
+                                roughness = matData.at("m_roughness").get<float>();
+                            }
+                            if (matData.contains("m_pbrEnabled"))
+                            {
+                                pbrEnabled = matData.at("m_pbrEnabled").get<bool>();
                             }
                             if (matData.contains("m_textureAssetPaths"))
                             {
@@ -377,7 +395,7 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
 
                 if (!materialCacheKey.empty())
                 {
-                    m_materialDataCache[materialCacheKey] = { textures, shininess, fragmentShaderOverride };
+                    m_materialDataCache[materialCacheKey] = { textures, shininess, metallic, roughness, pbrEnabled, fragmentShaderOverride };
                 }
             }
         }
@@ -408,6 +426,9 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
         renderable.textures = textures;
         renderable.assetType = asset->getAssetType();
         renderable.shininess = shininess;
+        renderable.metallic = metallic;
+        renderable.roughness = roughness;
+        renderable.pbrEnabled = pbrEnabled;
 
         // Determine effective fragment shader override: material > default parameter
         std::string effectiveFragShader = fragmentShaderOverride;
@@ -448,6 +469,7 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
                 {
                     obj->setTextures(textures);
                     obj->setShininess(shininess);
+                    obj->setPbrData(pbrEnabled, metallic, roughness);
                     renderable.object3D = obj;
                     m_object3DCache[obj3DCacheKey] = obj;
                     AssetManager::Instance().registerRuntimeResource(obj);
@@ -662,6 +684,9 @@ RenderResourceManager::RenderableAsset RenderResourceManager::refreshEntityRende
 	std::vector<std::shared_ptr<Texture>> textures;
 	std::string materialCacheKey;
 	float shininess = 32.0f;
+	float metallic = 0.0f;
+	float roughness = 0.5f;
+	bool pbrEnabled = false;
 	std::string fragmentShaderOverride;
 
 	if (matComp && !matComp->materialAssetPath.empty())
@@ -674,6 +699,9 @@ RenderResourceManager::RenderableAsset RenderResourceManager::refreshEntityRende
 		{
 			textures = cachedMat->second.textures;
 			shininess = cachedMat->second.shininess;
+			metallic = cachedMat->second.metallic;
+			roughness = cachedMat->second.roughness;
+			pbrEnabled = cachedMat->second.pbrEnabled;
 			fragmentShaderOverride = cachedMat->second.shaderFragment;
 		}
 		else
@@ -690,6 +718,12 @@ RenderResourceManager::RenderableAsset RenderResourceManager::refreshEntityRende
 							fragmentShaderOverride = matData.at("m_shaderFragment").get<std::string>();
 						if (matData.contains("m_shininess"))
 							shininess = matData.at("m_shininess").get<float>();
+						if (matData.contains("m_metallic"))
+							metallic = matData.at("m_metallic").get<float>();
+						if (matData.contains("m_roughness"))
+							roughness = matData.at("m_roughness").get<float>();
+						if (matData.contains("m_pbrEnabled"))
+							pbrEnabled = matData.at("m_pbrEnabled").get<bool>();
 						if (matData.contains("m_textureAssetPaths"))
 						{
 							const auto& paths = matData.at("m_textureAssetPaths");
@@ -723,7 +757,7 @@ RenderResourceManager::RenderableAsset RenderResourceManager::refreshEntityRende
 			}
 			if (!materialCacheKey.empty())
 			{
-				m_materialDataCache[materialCacheKey] = { textures, shininess, fragmentShaderOverride };
+				m_materialDataCache[materialCacheKey] = { textures, shininess, metallic, roughness, pbrEnabled, fragmentShaderOverride };
 			}
 		}
 	}
@@ -750,6 +784,9 @@ RenderResourceManager::RenderableAsset RenderResourceManager::refreshEntityRende
 	result.textures = textures;
 	result.assetType = asset->getAssetType();
 	result.shininess = shininess;
+	result.metallic = metallic;
+	result.roughness = roughness;
+	result.pbrEnabled = pbrEnabled;
 
 	std::string effectiveFragShader = fragmentShaderOverride.empty() ? defaultFragmentShader : fragmentShaderOverride;
 	result.fragmentShaderOverride = effectiveFragShader;
@@ -779,6 +816,7 @@ RenderResourceManager::RenderableAsset RenderResourceManager::refreshEntityRende
 			{
 				obj->setTextures(textures);
 				obj->setShininess(shininess);
+				obj->setPbrData(pbrEnabled, metallic, roughness);
 				result.object3D = obj;
 				m_object3DCache[obj3DCacheKey] = obj;
 				AssetManager::Instance().registerRuntimeResource(obj);

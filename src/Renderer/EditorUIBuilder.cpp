@@ -6,6 +6,9 @@
 #include "UIWidgets/EntryBarWidget.h"
 #include "UIWidgets/CheckBoxWidget.h"
 #include "UIWidgets/SeparatorWidget.h"
+#include "UIWidgets/ColorPickerWidget.h"
+#include "UIWidgets/SliderWidget.h"
+#include "UIWidgets/DropDownWidget.h"
 
 // ── Text / labels ────────────────────────────────────────────────────────
 
@@ -278,6 +281,169 @@ WidgetElement EditorUIBuilder::makeVec3Row(const std::string& idPrefix,
         entryEl.runtimeOnly = true;
         row.children.push_back(std::move(entryEl));
     }
+
+    return row;
+}
+
+WidgetElement EditorUIBuilder::makeVec2Row(const std::string& idPrefix,
+                                           const std::string& label,
+                                           const Vec2& values,
+                                           std::function<void(int axis, float value)> onChange)
+{
+    const auto& t = EditorTheme::Get();
+
+    WidgetElement row = makeHorizontalRow(idPrefix, Vec2{ 0.0f, 1.0f });
+
+    WidgetElement lbl = makeLabel(label, 100.0f);
+    lbl.fillX = false;
+    row.children.push_back(std::move(lbl));
+
+    const char* axes[] = { "X", "Y" };
+    const Vec4 axisColors[] = {
+        { 0.22f, 0.10f, 0.10f, 0.9f },
+        { 0.10f, 0.20f, 0.10f, 0.9f },
+    };
+    const float vals[] = { values.x, values.y };
+
+    for (int i = 0; i < 2; ++i)
+    {
+        EntryBarWidget entry;
+        entry.setValue(fmtFloat(vals[i]));
+        entry.setFont(t.fontDefault);
+        entry.setFontSize(t.fontSizeSmall);
+        entry.setMinSize(Vec2{ 0.0f, t.rowHeightSmall });
+        entry.setPadding(t.paddingSmall);
+        entry.setBackgroundColor(axisColors[i]);
+        entry.setTextColor(t.inputText);
+
+        int axis = i;
+        entry.setOnValueChanged([onChange, axis](const std::string& val) {
+            try { onChange(axis, std::stof(val)); } catch (...) {}
+        });
+
+        WidgetElement entryEl = entry.toElement();
+        entryEl.id          = idPrefix + "." + axes[i];
+        entryEl.fillX       = true;
+        entryEl.runtimeOnly = true;
+        row.children.push_back(std::move(entryEl));
+    }
+
+    return row;
+}
+
+WidgetElement EditorUIBuilder::makeStringRow(const std::string& id,
+                                             const std::string& label,
+                                             const std::string& value,
+                                             std::function<void(const std::string&)> onChange)
+{
+    WidgetElement row = makeHorizontalRow(id, Vec2{ 0.0f, 1.0f });
+
+    WidgetElement lbl = makeLabel(label, 100.0f);
+    lbl.fillX = false;
+    row.children.push_back(std::move(lbl));
+
+    WidgetElement entry = makeEntryBar(id + ".Value", value, std::move(onChange));
+    row.children.push_back(std::move(entry));
+
+    return row;
+}
+
+WidgetElement EditorUIBuilder::makeColorPickerRow(const std::string& id,
+                                                  const std::string& label,
+                                                  const Vec4& color,
+                                                  std::function<void(const Vec4&)> onChange)
+{
+    const auto& t = EditorTheme::Get();
+
+    WidgetElement row = makeHorizontalRow(id, Vec2{ 0.0f, 1.0f });
+
+    WidgetElement lbl = makeLabel(label, 100.0f);
+    lbl.fillX = false;
+    row.children.push_back(std::move(lbl));
+
+    ColorPickerWidget picker;
+    picker.setColor(color);
+    picker.setCompact(true);
+    picker.setMinSize(Vec2{ 0.0f, t.rowHeightSmall });
+    picker.setHitTestable(true);
+    if (onChange) picker.setOnColorChanged(std::move(onChange));
+
+    WidgetElement cpEl = picker.toElement();
+    cpEl.id          = id + ".Picker";
+    cpEl.fillX       = true;
+    cpEl.runtimeOnly = true;
+    row.children.push_back(std::move(cpEl));
+
+    return row;
+}
+
+WidgetElement EditorUIBuilder::makeSliderRow(const std::string& id,
+                                             const std::string& label,
+                                             float value,
+                                             float minValue,
+                                             float maxValue,
+                                             std::function<void(float)> onChange)
+{
+    const auto& t = EditorTheme::Get();
+
+    WidgetElement row = makeHorizontalRow(id, Vec2{ 0.0f, 1.0f });
+
+    WidgetElement lbl = makeLabel(label, 100.0f);
+    lbl.fillX = false;
+    row.children.push_back(std::move(lbl));
+
+    SliderWidget slider;
+    slider.setValue(value);
+    slider.setRange(minValue, maxValue);
+    slider.setMinSize(Vec2{ 0.0f, t.rowHeightSmall });
+    slider.setTrackColor(t.inputBackground);
+    slider.setFillColor(t.accent);
+    slider.setHandleColor(t.inputText);
+    if (onChange) slider.setOnValueChanged(std::move(onChange));
+
+    WidgetElement slEl = slider.toElement();
+    slEl.id          = id + ".Slider";
+    slEl.fillX       = true;
+    slEl.runtimeOnly = true;
+    row.children.push_back(std::move(slEl));
+
+    return row;
+}
+
+WidgetElement EditorUIBuilder::makeDropDownRow(const std::string& id,
+                                               const std::string& label,
+                                               const std::vector<std::string>& items,
+                                               int selectedIndex,
+                                               std::function<void(int)> onChange)
+{
+    WidgetElement row = makeHorizontalRow(id, Vec2{ 0.0f, 1.0f });
+
+    WidgetElement lbl = makeLabel(label, 100.0f);
+    lbl.fillX = false;
+    row.children.push_back(std::move(lbl));
+
+    WidgetElement dd = makeDropDown(id + ".DD", items, selectedIndex, std::move(onChange));
+    row.children.push_back(std::move(dd));
+
+    return row;
+}
+
+WidgetElement EditorUIBuilder::makeIntRow(const std::string& id,
+                                          const std::string& label,
+                                          int value,
+                                          std::function<void(int)> onChange)
+{
+    WidgetElement row = makeHorizontalRow(id, Vec2{ 0.0f, 1.0f });
+
+    WidgetElement lbl = makeLabel(label, 100.0f);
+    lbl.fillX = false;
+    row.children.push_back(std::move(lbl));
+
+    WidgetElement entry = makeEntryBar(id + ".Value", std::to_string(value),
+        [onChange = std::move(onChange)](const std::string& val) {
+            try { onChange(std::stoi(val)); } catch (...) {}
+        });
+    row.children.push_back(std::move(entry));
 
     return row;
 }

@@ -91,6 +91,45 @@ public:
                                      const float values[3],
                                      std::function<void(int axis, float value)> onChange);
 
+    /// Label + 2 colour-tinted entry bars (X / Y) in a horizontal row.
+    static WidgetElement makeVec2Row(const std::string& idPrefix,
+                                     const std::string& label,
+                                     const Vec2& values,
+                                     std::function<void(int axis, float value)> onChange);
+
+    /// Label + string entry bar in a horizontal row.
+    static WidgetElement makeStringRow(const std::string& id,
+                                       const std::string& label,
+                                       const std::string& value,
+                                       std::function<void(const std::string&)> onChange);
+
+    /// Label + compact ColorPicker in a horizontal row.
+    static WidgetElement makeColorPickerRow(const std::string& id,
+                                            const std::string& label,
+                                            const Vec4& color,
+                                            std::function<void(const Vec4&)> onChange);
+
+    /// Label + Slider in a horizontal row.
+    static WidgetElement makeSliderRow(const std::string& id,
+                                       const std::string& label,
+                                       float value,
+                                       float minValue,
+                                       float maxValue,
+                                       std::function<void(float)> onChange);
+
+    /// Label + themed DropDown in a horizontal row.
+    static WidgetElement makeDropDownRow(const std::string& id,
+                                         const std::string& label,
+                                         const std::vector<std::string>& items,
+                                         int selectedIndex,
+                                         std::function<void(int)> onChange);
+
+    /// Label + integer entry bar in a horizontal row.
+    static WidgetElement makeIntRow(const std::string& id,
+                                    const std::string& label,
+                                    int value,
+                                    std::function<void(int)> onChange);
+
     // ── Layout helpers ───────────────────────────────────────────────────
 
     /// Transparent horizontal StackPanel.

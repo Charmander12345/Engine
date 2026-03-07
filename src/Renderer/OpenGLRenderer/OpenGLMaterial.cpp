@@ -58,6 +58,34 @@ void OpenGLMaterial::setPointShadowData(GLuint cubeArray, const glm::vec3* posit
     }
 }
 
+void OpenGLMaterial::setFogData(bool enabled, const glm::vec3& color, float density)
+{
+    m_fogEnabled = enabled;
+    m_fogColor = color;
+    m_fogDensity = density;
+}
+
+void OpenGLMaterial::setCsmData(GLuint texArray, const glm::mat4* matrices, const float* splits,
+                                int lightIndex, bool enabled, const glm::mat4& viewMatrix)
+{
+    m_csmMapArray = texArray;
+    m_csmEnabled = enabled;
+    m_csmLightIndex = lightIndex;
+    m_csmViewMatrix = viewMatrix;
+    for (int i = 0; i < kMaxCsmCascades; ++i)
+    {
+        m_csmMatrices[i] = matrices[i];
+        m_csmSplits[i] = splits[i];
+    }
+}
+
+void OpenGLMaterial::setPbrData(bool enabled, float metallic, float roughness)
+{
+    m_pbrEnabled = enabled;
+    m_pbrMetallic = metallic;
+    m_pbrRoughness = roughness;
+}
+
 bool OpenGLMaterial::build()
 {
     if (m_shaders.empty())
@@ -210,13 +238,35 @@ bool OpenGLMaterial::build()
         m_lightLocs[i].spotOuterCutoff = glGetUniformLocation(m_program, (prefix + "spotOuterCutoff").c_str());
         m_lightLocs[i].type           = glGetUniformLocation(m_program, (prefix + "type").c_str());
     }
+    // Fog uniform locations
+    m_locFogEnabled = glGetUniformLocation(m_program, "uFogEnabled");
+    m_locFogColor   = glGetUniformLocation(m_program, "uFogColor");
+    m_locFogDensity = glGetUniformLocation(m_program, "uFogDensity");
+    m_locHasNormalMap = glGetUniformLocation(m_program, "uHasNormalMap");
+    m_locHasEmissiveMap = glGetUniformLocation(m_program, "uHasEmissiveMap");
+    // CSM uniform locations
+    m_locCsmMaps       = glGetUniformLocation(m_program, "uCsmMaps");
+    m_locCsmEnabled    = glGetUniformLocation(m_program, "uCsmEnabled");
+    m_locCsmLightIndex = glGetUniformLocation(m_program, "uCsmLightIndex");
+    m_locViewMatrix    = glGetUniformLocation(m_program, "uViewMatrix");
+    for (int i = 0; i < kMaxCsmCascades; ++i)
+    {
+        const std::string idx = "[" + std::to_string(i) + "]";
+        m_locCsmMatrices[i] = glGetUniformLocation(m_program, ("uCsmMatrices" + idx).c_str());
+        m_locCsmSplits[i]   = glGetUniformLocation(m_program, ("uCsmSplits" + idx).c_str());
+    }
+    // PBR uniform locations
+    m_locPbrEnabled              = glGetUniformLocation(m_program, "uPbrEnabled");
+    m_locMetallic                = glGetUniformLocation(m_program, "uMetallic");
+    m_locRoughness               = glGetUniformLocation(m_program, "uRoughness");
+    m_locHasMetallicRoughnessMap = glGetUniformLocation(m_program, "uHasMetallicRoughnessMap");
 
     // Cache texture sampler locations.
     // Try material struct names first (material.diffuse, material.specular),
     // then fall back to textureN for backward compatibility.
     m_texUniformLocs.clear();
-    static const char* kMaterialSamplerNames[] = { "material.diffuse", "material.specular" };
-    static constexpr int kMaterialSamplerCount = 2;
+    static const char* kMaterialSamplerNames[] = { "material.diffuse", "material.specular", "material.normalMap", "material.emissiveMap", "material.metallicRoughness" };
+    static constexpr int kMaterialSamplerCount = 5;
     for (int i = 0; i < 16; ++i)
     {
         GLint loc = -1;
@@ -328,6 +378,14 @@ void OpenGLMaterial::bind()
     {
         glUniform1i(m_locHasDiffuseMap, (!m_textures.empty() && m_textures[0]) ? 1 : 0);
     }
+    if (m_locHasNormalMap >= 0)
+    {
+        glUniform1i(m_locHasNormalMap, (m_textures.size() >= 3 && m_textures[2]) ? 1 : 0);
+    }
+    if (m_locHasEmissiveMap >= 0)
+    {
+        glUniform1i(m_locHasEmissiveMap, (m_textures.size() >= 4 && m_textures[3]) ? 1 : 0);
+    }
 
     // Multi-light uniforms
     const int lightCount = static_cast<int>(std::min(m_lights.size(), static_cast<size_t>(kMaxLights)));
@@ -363,7 +421,7 @@ void OpenGLMaterial::bind()
     }
     if (m_locShadowMaps >= 0 && m_shadowMapArray != 0)
     {
-        constexpr int kShadowTexUnit = 4;
+        constexpr int kShadowTexUnit = 5;
         glActiveTexture(GL_TEXTURE0 + kShadowTexUnit);
         glBindTexture(GL_TEXTURE_2D_ARRAY, m_shadowMapArray);
         glUniform1i(m_locShadowMaps, kShadowTexUnit);
@@ -385,11 +443,51 @@ void OpenGLMaterial::bind()
     }
     if (m_locPointShadowMaps >= 0 && m_pointShadowCubeArray != 0)
     {
-        constexpr int kPointShadowTexUnit = 5;
+        constexpr int kPointShadowTexUnit = 6;
         glActiveTexture(GL_TEXTURE0 + kPointShadowTexUnit);
         glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, m_pointShadowCubeArray);
         glUniform1i(m_locPointShadowMaps, kPointShadowTexUnit);
     }
+
+    // Fog uniforms
+    if (m_locFogEnabled >= 0)
+        glUniform1i(m_locFogEnabled, m_fogEnabled ? 1 : 0);
+    if (m_locFogColor >= 0)
+        glUniform3fv(m_locFogColor, 1, glm::value_ptr(m_fogColor));
+    if (m_locFogDensity >= 0)
+        glUniform1f(m_locFogDensity, m_fogDensity);
+
+    // CSM uniforms
+    if (m_locCsmEnabled >= 0)
+        glUniform1i(m_locCsmEnabled, m_csmEnabled ? 1 : 0);
+    if (m_locCsmLightIndex >= 0)
+        glUniform1i(m_locCsmLightIndex, m_csmLightIndex);
+    if (m_locViewMatrix >= 0)
+        glUniformMatrix4fv(m_locViewMatrix, 1, GL_FALSE, glm::value_ptr(m_csmViewMatrix));
+    for (int i = 0; i < kMaxCsmCascades; ++i)
+    {
+        if (m_locCsmMatrices[i] >= 0)
+            glUniformMatrix4fv(m_locCsmMatrices[i], 1, GL_FALSE, glm::value_ptr(m_csmMatrices[i]));
+        if (m_locCsmSplits[i] >= 0)
+            glUniform1f(m_locCsmSplits[i], m_csmSplits[i]);
+    }
+    if (m_locCsmMaps >= 0 && m_csmMapArray != 0)
+    {
+        constexpr int kCsmTexUnit = 7;
+        glActiveTexture(GL_TEXTURE0 + kCsmTexUnit);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, m_csmMapArray);
+        glUniform1i(m_locCsmMaps, kCsmTexUnit);
+    }
+
+    // PBR uniforms
+    if (m_locPbrEnabled >= 0)
+        glUniform1i(m_locPbrEnabled, m_pbrEnabled ? 1 : 0);
+    if (m_locMetallic >= 0)
+        glUniform1f(m_locMetallic, m_pbrMetallic);
+    if (m_locRoughness >= 0)
+        glUniform1f(m_locRoughness, m_pbrRoughness);
+    if (m_locHasMetallicRoughnessMap >= 0)
+        glUniform1i(m_locHasMetallicRoughnessMap, (m_textures.size() >= 5 && m_textures[4]) ? 1 : 0);
 
     bindTextures();
 }
@@ -428,10 +526,26 @@ void OpenGLMaterial::renderBatchContinuation()
     {
         glUniform1i(m_locHasDiffuseMap, (!m_textures.empty() && m_textures[0]) ? 1 : 0);
     }
+    if (m_locHasNormalMap >= 0)
+    {
+        glUniform1i(m_locHasNormalMap, (m_textures.size() >= 3 && m_textures[2]) ? 1 : 0);
+    }
+    if (m_locHasEmissiveMap >= 0)
+    {
+        glUniform1i(m_locHasEmissiveMap, (m_textures.size() >= 4 && m_textures[3]) ? 1 : 0);
+    }
     if (m_locMaterialShininess >= 0)
     {
         glUniform1f(m_locMaterialShininess, m_shininess);
     }
+    if (m_locPbrEnabled >= 0)
+        glUniform1i(m_locPbrEnabled, m_pbrEnabled ? 1 : 0);
+    if (m_locMetallic >= 0)
+        glUniform1f(m_locMetallic, m_pbrMetallic);
+    if (m_locRoughness >= 0)
+        glUniform1f(m_locRoughness, m_pbrRoughness);
+    if (m_locHasMetallicRoughnessMap >= 0)
+        glUniform1i(m_locHasMetallicRoughnessMap, (m_textures.size() >= 5 && m_textures[4]) ? 1 : 0);
 
     bindTextures();
 

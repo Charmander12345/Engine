@@ -95,7 +95,10 @@
 - `UIManager` (EditorTheme-Migration): Vollständige Ersetzung aller verbliebenen hardcoded `Vec4`-Farbliterale in `UIManager.cpp` durch `EditorTheme::Get().*`-Referenzen. Betrifft: Engine-Settings-Popup (Checkbox-Farben, EntryBar-Text, Dropdown-Styling, Kategorie-Buttons), Projekt-Auswahl-Screen (Background, Titlebar, Sidebar, Footer, Projekt-Zeilen mit Akzentbalken, Buttons, Checkboxen, RHI-Dropdown, Create-Button, Pfad-Vorschau), Content-Browser-Selektionsfarben. ~53 verschiedene Theme-Konstanten im Einsatz.
 - `Editor Theme Serialization & Selection`: Vollständige Theme-Persistierung und Auswahl. `EditorTheme` um JSON-Serialisierung erweitert (`toJson()`/`fromJson()`, `saveToFile()`/`loadFromFile()`, `discoverThemes()`). Statische Methoden: `GetThemesDirectory()` (Editor/Themes/), `EnsureDefaultThemes()` (Dark.json + Light.json), `loadThemeByName()`, `saveActiveTheme()`. Default-Themes werden automatisch über `AssetManager::ensureDefaultAssetsCreated()` erzeugt. Gespeichertes Theme wird beim Start aus DiagnosticsManager geladen. Editor Settings Popup um Theme-Dropdown erweitert (Sektion "Theme" mit Live-Wechsel, Persistierung, Auto-Save bei Font/Spacing-Änderungen).
 - `Full UI Rebuild on Theme Change (Deferred)`: `rebuildAllEditorUI()` setzt nur `m_themeDirty = true` + `markAllWidgetsDirty()`. Die eigentliche Aktualisierung erfolgt verzögert im nächsten Frame über `applyPendingThemeUpdate()` (aufgerufen am Anfang von `updateLayouts()`). Private Methode populiert dynamische Panels gezielt neu (Outliner, Details, ContentBrowser, StatusBar) – die `populate*`-Funktionen erzeugen frische Elemente über `EditorUIBuilder` mit aktuellen `EditorTheme`-Farben – und markiert alles dirty. Asset-basierte Widget-Hintergründe (TitleBar, ViewportOverlay etc.) behalten ihre bewusst gesetzten JSON-Farben. Ein früherer generischer `applyThemeColors`-Walk wurde entfernt (überschrieb Sonderfarben wie rote Close-Button-Hover und deckte nicht alle Widget-Typen ab). Deferred-Ansatz verhindert Freeze/Crash bei Theme-Wechsel innerhalb von Dropdown-Callbacks.
+- `WidgetDetailSchema`: Schema-basierter Property-Editor (`WidgetDetailSchema.h/.cpp`) ersetzt ~1500 Zeilen manuellen Detail-Panel-Code in `UIManager.cpp`. Zentraler Einstiegspunkt `buildDetailPanel()` baut automatisch alle Sections (Identity, Transform, Anchor, Hit Test, Layout, Style/Colors, Brush, Render Transform, Shadow + per-type Sections für Text, Image, Value, EntryBar, Container, Border, Spinner, RichText, ListView, TileView, Drag & Drop). `Options`-Struct ermöglicht kontextspezifische Konfiguration (editierbare IDs, Delete-Button, Callbacks). Verwendet von `refreshWidgetEditorDetails()` und `refreshUIDesignerDetails()`.
 - `Theme-Driven Editor Widget Styling`: Neue statische Methode `EditorTheme::ApplyThemeToElement(WidgetElement&, const EditorTheme&)` mappt jeden `WidgetElementType` auf Theme-Farben (color, hoverColor, pressedColor, textColor, borderColor, fillColor, font, fontSize). Spezialbehandlung für ColorPicker (übersprungen), Image (Tint beibehalten), transparente Spacer (bleiben transparent). ID-basierte Overrides: Close → `buttonDanger`-Hover, Save → `buttonPrimary`. Alle ~25 Element-Typen abgedeckt, rekursive Kind-Anwendung. `UIManager::applyThemeToAllEditorWidgets()` iteriert über alle Editor-Widgets und wendet Theme per `ApplyThemeToElement` an. Integration in `applyPendingThemeUpdate()` – asset-basierte Widgets (TitleBar, ViewportOverlay, WorldOutliner, EntityDetails, ContentBrowser, StatusBar, WorldSettings) werden beim Theme-Wechsel jetzt korrekt umgefärbt. `loadThemeByName()`-Fallback auf Dark-Theme-Defaults bei fehlender Theme-Datei.
+- `Theme Update Bugfixes`: `applyThemeToAllEditorWidgets()` erfasst jetzt auch Dropdown-Menü-, Modal-Dialog- und Save-Progress-Widgets, die zuvor beim Theme-Wechsel nicht aktualisiert wurden. Popup-Fenster (`renderPopupWindows()`) nutzen jetzt `EditorTheme::Get().windowBackground` für `glClearColor` statt hardcoded Farben. Mesh-Viewer-Details-Panel-Root verwendet `EditorTheme::Get().panelBackground` statt eines festen RGBA-Literales. `applyPendingThemeUpdate()` wird in Popup-UIManagern per Frame aufgerufen, damit Theme-Änderungen auch in Popup-Fenstern wirksam werden. `UIManager::applyPendingThemeUpdate()` von `private` auf `public` verschoben, damit der Renderer sie auf Popup-UIManagern aufrufen kann.
+- `Dropdown Flip-Above Positionierung`: `showDropdownMenu()` prüft jetzt den verfügbaren Platz unterhalb des Auslöser-Elements. Reicht der Platz nicht für die Dropdown-Items, wird das Menü oberhalb des Auslösers positioniert (Flip-Above-Logik). Verhindert abgeschnittene Dropdown-Listen am unteren Fensterrand.
 
 ## Inhaltsverzeichnis
 
@@ -209,6 +212,7 @@ Engine/
 │   │   ├── ViewportUIManager.h/.cpp # Viewport-UI-Manager (Runtime-UI, unabhängig vom Editor-UI)
 │   │   ├── EditorTheme.h           # Zentrales Editor-Theme (Singleton, Farben/Fonts/Spacing)
 │   │   ├── EditorUIBuilder.h/.cpp  # Statische Factory-Methoden für theme-basierte UI-Elemente
+│   │   ├── WidgetDetailSchema.h/.cpp # Schema-basierter Property-Editor für Widget Editor & UI Designer
 │   │   ├── ViewportUITheme.h       # Anpassbare Runtime-Theme-Klasse für Viewport/Gameplay-UI
 │   │   ├── EditorUI/
 │   │   │   └── EditorWidget.h      # Einfache Editor-Widget-Basisklasse (kein EngineObject/JSON/Animations)
@@ -229,6 +233,7 @@ Engine/
 │   │   │   ├── OpenGLTextRenderer.h/.cpp
 │   │   │   ├── OpenGLRenderContext.h    # OpenGL-Implementierung von IRenderContext
 │   │   │   ├── OpenGLRenderTarget.h/.cpp # OpenGL-FBO-Implementierung von IRenderTarget (Editor-Tab-FBOs)
+│   │   │   ├── PostProcessStack.h/.cpp   # Post-Processing-Pipeline (HDR FBO, MSAA 2x/4x, Fullscreen-Resolve, Bloom 5-Mip Gaussian, SSAO 32-Sample Half-Res Bilateral Blur, Deferred FXAA nach Gizmo/Outline)
 │   │   │   ├── OpenGLSplashWindow.h/.cpp # OpenGL-Implementierung des Splash-Fensters (Shader, VAOs, FreeType-Atlas)
 │   │   │   ├── glad/               # OpenGL-Loader (GLAD)
 │   │   │   ├── shaders/            # GLSL-Shader-Dateien
@@ -240,8 +245,13 @@ Engine/
 │   │   │       ├── text_vertex/fragment.glsl         # Text
 │   │   │       ├── ui_vertex/fragment.glsl           # UI-Bild/Textur
 │   │   │       ├── progress_fragment.glsl            # Fortschrittsbalken
-│   │   │       └── slider_fragment.glsl              # Schieberegler
-│   │   │   └── CMakeLists.txt       # Renderer Target (OpenGL-Backend, wird zu Renderer.dll)
+│   │   │       ├── slider_fragment.glsl              # Schieberegler
+│   │   │       ├── resolve_vertex.glsl / resolve_fragment.glsl  # Post-Processing Fullscreen-Resolve (Gamma, Tone Mapping, FXAA/MSAA, Bloom, SSAO)
+│   │   │       ├── bloom_downsample.glsl            # Bloom Bright-Pass + Progressive Downsample
+│   │   │       ├── bloom_blur.glsl                  # Bloom 9-Tap Separable Gaussian Blur
+│   │   │       ├── ssao_fragment.glsl               # SSAO 32-Sample Hemisphere (Depth-Only, Half-Res R8)
+│   │   │       ├── ssao_blur.glsl                   # SSAO Bilateral Depth-Aware 5×5 Blur (verhindert AO-Bleeding an Tiefenkanten)
+│   │   │   └── CMakeLists.txt
 │   │   ├── UIWidgets/
 │   │   │   ├── ButtonWidget.h/.cpp
 │   │   │   ├── TextWidget.h/.cpp
@@ -442,7 +452,7 @@ Zentrale Zustandsverwaltung der Engine (Singleton). Verwaltet:
 - **Entity-Dirty-Queue**: `invalidateEntity(entityId)` → markiert einzelne Entitäten für Render-Refresh. `consumeDirtyEntities()` liefert und leert die Queue (thread-safe via `m_mutex`). `hasDirtyEntities()` prüft ob Dirty-Entitäten vorhanden sind. Wird von `renderWorld()` pro Frame konsumiert.
 
 ### 6.2 Config-Persistierung
-- **Engine-Config**: `config/config.ini` (Key=Value-Format)
+- **Engine-Config**: `config/config.ini` (Key=Value-Format) — sofortige Speicherung bei jeder Setting-Änderung (`saveConfig()` in allen Engine-Settings-Callbacks)
 - **Projekt-Config**: `<Projekt>/Config/defaults.ini`
 
 ### 6.3 Projekt-Info
@@ -827,9 +837,13 @@ render()
      → Level-Entities abfragen (ECS-Schema: Transform + Mesh)
      → Renderables erstellen (RenderResourceManager)
      → Lichter sammeln (Member-Vektor, keine Heap-Alloc)
+     → Shadow-Pässe (Regular, Point Cube Maps, CSM — CSM abschaltbar via Settings)
      → Hierarchical Z-Buffer (HZB) Occlusion Culling (liest Tiefe aus Tab-FBO)
      → Sortierung + Batch-Rendering
+     → Post-Processing Resolve (Gamma, Tone Mapping, Bloom, SSAO, MSAA — FXAA hier übersprungen)
      → Pick-Buffer + Selection-Outline nur bei Bedarf (On-Demand)
+     → Editor-Gizmos (Translate/Rotate/Scale Overlay)
+     → Deferred FXAA Pass (nach Gizmo/Outline, damit AA auf gesamtes Bild wirkt)
   → Default-Framebuffer mit m_clearColor leeren (verhindert undefinierte Inhalte bei Nicht-Viewport-Tabs)
   → Aktiven Tab-FBO per glBlitFramebuffer auf Bildschirm (Hardware-Blit, kein Shader)
   → renderUI()
@@ -943,8 +957,8 @@ virtual Mat4 getViewMatrixColumnMajor() const = 0;
 
 | Datei                     | Zweck                          |
 |---------------------------|--------------------------------|
-| `vertex.glsl`             | 3D-Welt Vertex-Shader          |
-| `fragment.glsl`           | 3D-Welt Fragment-Shader        |
+| `vertex.glsl`             | 3D-Welt Vertex-Shader (TBN-Matrix für Normal Mapping) |
+| `fragment.glsl`           | 3D-Welt Fragment-Shader (Blinn-Phong + PBR Cook-Torrance, Normal Mapping, Emissive Maps, CSM, Fog) |
 | `light_fragment.glsl`     | Beleuchtungs-Fragment-Shader   |
 | `panel_vertex/fragment`   | UI-Panel-Rendering             |
 | `button_vertex/fragment`  | UI-Button-Rendering            |
@@ -959,14 +973,14 @@ virtual Mat4 getViewMatrixColumnMajor() const = 0;
 **Dateien:** `src/Renderer/Material.h` (Basis), `OpenGLMaterial.h/.cpp`
 
 #### Material (CPU-seitig):
-- Hält Texturen (`std::vector<shared_ptr<Texture>>`)
+- Hält Texturen (`std::vector<shared_ptr<Texture>>`) — Slot 0: Diffuse, Slot 1: Specular, Slot 2: Normal Map, Slot 3: Emissive Map, Slot 4: MetallicRoughness (PBR)
 - Textur-Pfade für Serialisierung
-- Shininess-Wert
+- Shininess-Wert, Metallic/Roughness-Werte, PBR-Enabled Flag
 
 #### OpenGLMaterial:
 - Hält Shader-Liste, Vertex-Daten, Index-Daten, Layout
 - `build()` → Erstellt VAO, VBO, EBO, linkt Shader-Programm
-- `bind()` → Setzt Uniformen (Model/View/Projection, Lights, Shininess) und bindet Texturen
+- `bind()` → Setzt Uniformen (Model/View/Projection, Lights, Shininess, PBR-Parameter, uHasNormalMap, uHasEmissiveMap, uHasMetallicRoughnessMap) und bindet Texturen (Diffuse/Specular/Normal Map/Emissive Map/MetallicRoughness)
 - **Default World-Grid-Material**: Objekte ohne Diffuse-Textur zeigen automatisch ein World-Space-Grid-Muster (`uHasDiffuseMap` Uniform, `worldGrid()` in `fragment.glsl`). Das Grid nutzt XZ-Weltkoordinaten mit Major-Linien (1.0 Einheit) und Minor-Linien (0.25 Einheit).
 - **Beleuchtung**: Bis zu 8 Lichtquellen (`kMaxLights = 8`)
   - Typen: Point (0), Directional (1), Spot (2)
@@ -1429,7 +1443,7 @@ Jedes Widget ist als eigene Klasse implementiert (gemäß Projekt-Richtlinien):
 ---
 
 ### 10.4 Editor Theme System
-**Dateien:** `src/Renderer/EditorTheme.h`, `src/Renderer/EditorUIBuilder.h/.cpp`, `src/Renderer/ViewportUITheme.h`
+**Dateien:** `src/Renderer/EditorTheme.h`, `src/Renderer/EditorUIBuilder.h/.cpp`, `src/Renderer/WidgetDetailSchema.h/.cpp`, `src/Renderer/ViewportUITheme.h`
 
 Zentralisiertes Theme-System für einheitliches Editor-Design und anpassbare Viewport-UI:
 
@@ -1442,6 +1456,14 @@ Zentralisiertes Theme-System für einheitliches Editor-Design und anpassbare Vie
 - 17+ Methoden: `makeLabel`, `makeSecondaryLabel`, `makeHeading`, `makeButton`, `makePrimaryButton`, `makeDangerButton`, `makeSubtleButton`, `makeEntryBar`, `makeCheckBox`, `makeDropDown`, `makeFloatRow`, `makeVec3Row`, `makeHorizontalRow`, `makeVerticalStack`, `makeDivider`, `makeSection`, `fmtFloat`, `sanitizeId`
 - Erzeugt fertig konfigurierte `WidgetElement`-Objekte mit Theme-Farben, Fonts und Spacing
 - Reduziert Boilerplate bei der Editor-UI-Erstellung erheblich
+
+#### WidgetDetailSchema (Schema-basierter Property-Editor)
+- **Datei:** `WidgetDetailSchema.h/.cpp` — statische Klasse, ersetzt ~1500 Zeilen manuellen Property-Panel-Code
+- **Einstiegspunkt:** `buildDetailPanel(prefix, selected, applyChange, rootPanel, options)` — baut komplettes Detail-Panel für beliebiges `WidgetElement`
+- **Shared Sections (alle Typen):** Identity, Transform, Anchor, Hit Test, Layout, Style/Colors, Brush, Render Transform, Shadow, Drag & Drop
+- **Per-Type Sections:** Text (Text/Label/Button/ToggleButton/DropdownButton/RadioButton), Image, Value (Slider/ProgressBar), EntryBar, Container (StackPanel/ScrollView/WrapBox/UniformGrid/SizeBox/ScaleBox/WidgetSwitcher), Border, Spinner, RichText, ListView, TileView
+- **Options-Struct:** `showEditableId`, `onIdRenamed`, `showDeleteButton`, `onDelete`, `onRefreshHierarchy` — konfiguriert Verhalten pro Kontext (Widget Editor vs UI Designer)
+- **Verwendet von:** `UIManager::refreshWidgetEditorDetails()` und `UIManager::refreshUIDesignerDetails()`
 
 #### ViewportUITheme (Runtime-Theme)
 - **Klasse:** `ViewportUITheme` — instanziierbar, nicht Singleton
@@ -1769,7 +1791,7 @@ struct PhysicsComponent {
 - Popup-UI über `UIManager::openLandscapeManagerPopup()` mit Formular (Name, Width, Depth, SubdivX, SubdivZ, Create/Cancel). Die Widget-Erstellung wurde aus `main.cpp` in den UIManager verschoben. Landscape-Erstellung erzeugt eine Undo/Redo-Action (Undo entfernt das Entity).
 - **Dropdown-Menü-System**: `UIManager::showDropdownMenu(anchor, items)` / `closeDropdownMenu()` — zeigt ein Overlay-Widget (z-Order 9000) mit klickbaren Menüeinträgen an einer Pixelposition. Unterstützt zusätzlich visuelle Separator-Einträge (`DropdownMenuItem::isSeparator`). Click-Outside schließt das Menü automatisch.
 - **Content-Browser-Kontextmenü (Grid, Rechtsklick)**: enthält `New Folder`, anschließend Separator, dann `New Script`, `New Level`, `New Material`.
-- **Engine Settings Popup** über `UIManager::openEngineSettingsPopup()` (aufgerufen aus `ViewportOverlay.Settings` → Dropdown-Menü → "Engine Settings"): Links Sidebar mit Kategorie-Buttons (General, Rendering, Debug, Physics), rechts scrollbarer Content-Bereich mit Checkboxen und Float-Eingabefeldern. General-Kategorie enthält: Splash Screen. Rendering-Kategorie enthält: Shadows, VSync, Wireframe Mode, Occlusion Culling. Debug-Kategorie enthält: UI Debug Outlines, Bounding Box Debug. Physics-Kategorie enthält: Backend-Dropdown (Jolt / PhysX, PhysX nur sichtbar wenn `ENGINE_PHYSX_BACKEND_AVAILABLE` definiert), Gravity X/Y/Z (Float-Eingabefelder, Default 0/-9.81/0), Fixed Timestep (Default 1/60 s), Sleep Threshold (Default 0.05). Die Backend-Auswahl wird als `PhysicsBackend`-Key in `DiagnosticsManager` persistiert und beim PIE-Start ausgelesen, um `PhysicsWorld::initialize(Backend)` mit dem gewählten Backend aufzurufen. Kategoriewechsel baut den Content-Bereich dynamisch um. Alle Änderungen werden in `config.ini` via `DiagnosticsManager::setState()` persistiert und beim PIE-Start auf `PhysicsWorld` angewendet (Backend, Gravity, Timestep, Sleep Threshold). Die Widget-Erstellung wurde aus `main.cpp` in den UIManager verschoben.
+- **Engine Settings Popup** über `UIManager::openEngineSettingsPopup()` (aufgerufen aus `ViewportOverlay.Settings` → Dropdown-Menü → "Engine Settings"): Links Sidebar mit Kategorie-Buttons (General, Rendering, Debug, Physics), rechts scrollbarer Content-Bereich mit Checkboxen und Float-Eingabefeldern. General-Kategorie enthält: Splash Screen. Rendering-Kategorie enthält: Display (Shadows, VSync, Wireframe Mode, Occlusion Culling), Post-Processing (Post Processing Toggle, Gamma Correction, Tone Mapping, Anti-Aliasing Dropdown, Bloom, SSAO), Lighting (CSM Toggle). Debug-Kategorie enthält: UI Debug Outlines, Bounding Box Debug, HeightField Debug. Physics-Kategorie enthält: Backend-Dropdown (Jolt / PhysX, PhysX nur sichtbar wenn `ENGINE_PHYSX_BACKEND_AVAILABLE` definiert), Gravity X/Y/Z (Float-Eingabefelder, Default 0/-9.81/0), Fixed Timestep (Default 1/60 s), Sleep Threshold (Default 0.05). Die Backend-Auswahl wird als `PhysicsBackend`-Key in `DiagnosticsManager` persistiert und beim PIE-Start ausgelesen, um `PhysicsWorld::initialize(Backend)` mit dem gewählten Backend aufzurufen. Kategoriewechsel baut den Content-Bereich dynamisch um. Alle Änderungen werden **sofort** in `config.ini` via `DiagnosticsManager::setState()` + `saveConfig()` persistiert (nicht erst beim Shutdown). Die Widget-Erstellung wurde aus `main.cpp` in den UIManager verschoben.
 - Grid-Shader (`grid_fragment.glsl`) nutzt vollständige Lichtberechnung (Multi-Light, Schatten, Blinn-Phong) — Landscape wird von allen Lichtquellen der Szene beeinflusst.
 - `EngineLevel::onEntityAdded()` / `onEntityRemoved()` setzen automatisch das Level-Dirty-Flag (`setIsSaved(false)`) und `setScenePrepared(false)` via Callback, sodass alle Aufrufer (Spawn, Delete, Landscape) einheitlich behandelt werden.
 

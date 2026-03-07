@@ -18,6 +18,8 @@ add_library(Renderer SHARED
     OpenGLRenderContext.h
     OpenGLRenderTarget.cpp
     OpenGLRenderTarget.h
+    PostProcessStack.cpp
+    PostProcessStack.h
     OpenGLSplashWindow.cpp
     OpenGLSplashWindow.h
     RendererFactory.cpp

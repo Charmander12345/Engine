@@ -37,6 +37,9 @@ public:
         std::shared_ptr<IRenderObject3D> object3D;
         AssetType assetType{ AssetType::Unknown };
         float shininess{32.0f};
+        float metallic{0.0f};
+        float roughness{0.5f};
+        bool pbrEnabled{false};
         std::string fragmentShaderOverride;
     };
 
@@ -68,6 +71,9 @@ private:
     {
         std::vector<std::shared_ptr<Texture>> textures;
         float shininess{32.0f};
+        float metallic{0.0f};
+        float roughness{0.5f};
+        bool pbrEnabled{false};
         std::string shaderFragment;
     };
     std::unordered_map<std::string, CachedMaterialData> m_materialDataCache;

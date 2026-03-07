@@ -4181,17 +4181,9 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 
 				// Import diffuse texture
 				std::string diffuseTexPath = importTexture(aiTextureType_DIFFUSE, "Diffuse");
-				if (!diffuseTexPath.empty())
-				{
-					textureAssetPaths.push_back(diffuseTexPath);
-				}
 
 				// Import specular texture
 				std::string specularTexPath = importTexture(aiTextureType_SPECULAR, "Specular");
-				if (!specularTexPath.empty())
-				{
-					textureAssetPaths.push_back(specularTexPath);
-				}
 
 				// Import normal map
 				std::string normalTexPath = importTexture(aiTextureType_NORMALS, "Normal");
@@ -4199,9 +4191,40 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 				{
 					normalTexPath = importTexture(aiTextureType_HEIGHT, "Normal");
 				}
-				if (!normalTexPath.empty())
+
+				// Import emissive map
+				std::string emissiveTexPath = importTexture(aiTextureType_EMISSIVE, "Emissive");
+
+				// Import metallic/roughness map (PBR)
+				std::string metallicRoughnessTexPath = importTexture(aiTextureType_METALNESS, "MetallicRoughness");
+				if (metallicRoughnessTexPath.empty())
 				{
-					textureAssetPaths.push_back(normalTexPath);
+					metallicRoughnessTexPath = importTexture(aiTextureType_DIFFUSE_ROUGHNESS, "MetallicRoughness");
+				}
+				if (metallicRoughnessTexPath.empty())
+				{
+					metallicRoughnessTexPath = importTexture(aiTextureType_UNKNOWN, "MetallicRoughness");
+				}
+
+				// Build texture array with fixed slot ordering:
+				// Slot 0 = Diffuse, Slot 1 = Specular, Slot 2 = Normal, Slot 3 = Emissive, Slot 4 = MetallicRoughness
+				// Use null entries for missing intermediate slots so indices stay correct.
+				{
+					int lastSlot = -1;
+					if (!metallicRoughnessTexPath.empty()) lastSlot = 4;
+					else if (!emissiveTexPath.empty()) lastSlot = 3;
+					else if (!normalTexPath.empty()) lastSlot = 2;
+					else if (!specularTexPath.empty()) lastSlot = 1;
+					else if (!diffuseTexPath.empty()) lastSlot = 0;
+
+					const std::string* slotPaths[] = { &diffuseTexPath, &specularTexPath, &normalTexPath, &emissiveTexPath, &metallicRoughnessTexPath };
+					for (int s = 0; s <= lastSlot; ++s)
+					{
+						if (!slotPaths[s]->empty())
+							textureAssetPaths.push_back(*slotPaths[s]);
+						else
+							textureAssetPaths.push_back(nullptr); // null → RenderResourceManager pushes nullptr
+					}
 				}
 
 				if (!textureAssetPaths.empty())
@@ -4226,6 +4249,23 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 				if (aiMat->Get(AI_MATKEY_SHININESS, shininess) == AI_SUCCESS)
 				{
 					matData["m_shininess"] = shininess;
+				}
+
+				// PBR metallic/roughness properties
+				float metallicFactor = 0.0f;
+				if (aiMat->Get(AI_MATKEY_METALLIC_FACTOR, metallicFactor) == AI_SUCCESS)
+				{
+					matData["m_metallic"] = metallicFactor;
+				}
+				float roughnessFactor = 0.5f;
+				if (aiMat->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughnessFactor) == AI_SUCCESS)
+				{
+					matData["m_roughness"] = roughnessFactor;
+				}
+				// Auto-enable PBR when metallic/roughness data is present
+				if (matData.contains("m_metallic") || matData.contains("m_roughness") || !metallicRoughnessTexPath.empty())
+				{
+					matData["m_pbrEnabled"] = true;
 				}
 
 				// Write material .asset file

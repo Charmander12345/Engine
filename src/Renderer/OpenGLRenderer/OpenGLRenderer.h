@@ -9,6 +9,7 @@
 #include "../EditorWindows/MeshViewerWindow.h"
 #include "../IRenderTarget.h"
 #include "OpenGLRenderTarget.h"
+#include "PostProcessStack.h"
 
 #include "../../Core/MathTypes.h"
 #include "../../Core/EngineLevel.h"
@@ -305,6 +306,22 @@ private:
     bool m_wireframeEnabled{false};
     bool m_vsyncEnabled{false};
 
+    // Post-processing pipeline
+    PostProcessStack m_postProcessStack;
+    bool m_postProcessEnabled{true};
+    bool m_gammaEnabled{true};
+    bool m_toneMappingEnabled{true};
+    float m_exposure{1.0f};
+    AntiAliasingMode m_aaMode{AntiAliasingMode::None};
+    bool m_bloomEnabled{false};
+    float m_bloomThreshold{1.0f};
+    float m_bloomIntensity{0.3f};
+    bool m_ssaoEnabled{false};
+    bool m_fogEnabled{false};
+    Vec4 m_fogParams{20.0f, 100.0f, 0.02f, 0.0f}; // start, end, density, unused
+    Vec3 m_fogColor{0.7f, 0.7f, 0.8f};
+    bool ensurePostProcessResources();
+
     // Skybox
     GLuint m_skyboxVao{0};
     GLuint m_skyboxVbo{0};
@@ -383,6 +400,23 @@ private:
     float m_pointShadowFarPlanes[kMaxPointShadowLights]{};
     int m_pointShadowLightIndices[kMaxPointShadowLights]{};
     int m_pointShadowCount{0};
+
+    // Cascaded Shadow Maps (directional light)
+    bool ensureCsmResources();
+    void releaseCsmResources();
+    void computeCsmMatrices(const OpenGLMaterial::LightData& light, const glm::mat4& view, const glm::mat4& proj,
+                            float nearPlane, float farPlane);
+    void renderCsmShadowMaps(const std::vector<DrawCmd>& drawList);
+
+    static constexpr int kNumCsmCascades = OpenGLMaterial::kMaxCsmCascades;
+    static constexpr int kCsmMapSize = 2048;
+    GLuint m_csmFbo{0};
+    GLuint m_csmDepthArray{0};
+    glm::mat4 m_csmMatrices[kNumCsmCascades]{};
+    float m_csmSplits[kNumCsmCascades]{};
+    int m_csmLightIndex{-1};
+    bool m_csmEnabled{false};
+    bool m_csmUserEnabled{true};
 
     // Entity picking FBO
     GLuint m_pickFbo{0};
@@ -482,6 +516,32 @@ public:
     bool isWireframeEnabled() const override { return m_wireframeEnabled; }
     void setVSyncEnabled(bool enabled) override;
     bool isVSyncEnabled() const override { return m_vsyncEnabled; }
+    void setPostProcessingEnabled(bool enabled) override { m_postProcessEnabled = enabled; }
+    bool isPostProcessingEnabled() const override { return m_postProcessEnabled; }
+    void setGammaCorrectionEnabled(bool enabled) override { m_gammaEnabled = enabled; }
+    bool isGammaCorrectionEnabled() const override { return m_gammaEnabled; }
+    void setToneMappingEnabled(bool enabled) override { m_toneMappingEnabled = enabled; }
+    bool isToneMappingEnabled() const override { return m_toneMappingEnabled; }
+    void setExposure(float exposure) override { m_exposure = exposure; }
+    float getExposure() const override { return m_exposure; }
+    void setAntiAliasingMode(AntiAliasingMode mode) override { m_aaMode = mode; }
+    AntiAliasingMode getAntiAliasingMode() const override { return m_aaMode; }
+    void setFogEnabled(bool enabled) override { m_fogEnabled = enabled; }
+    bool isFogEnabled() const override { return m_fogEnabled; }
+    void setFogParams(const Vec4& params) override { m_fogParams = params; }
+    Vec4 getFogParams() const override { return m_fogParams; }
+    void setFogColor(const Vec3& color) override { m_fogColor = color; }
+    Vec3 getFogColor() const override { return m_fogColor; }
+    void setBloomEnabled(bool enabled) override { m_bloomEnabled = enabled; }
+    bool isBloomEnabled() const override { return m_bloomEnabled; }
+    void setBloomThreshold(float threshold) override { m_bloomThreshold = threshold; }
+    float getBloomThreshold() const override { return m_bloomThreshold; }
+    void setBloomIntensity(float intensity) override { m_bloomIntensity = intensity; }
+    float getBloomIntensity() const override { return m_bloomIntensity; }
+    void setSsaoEnabled(bool enabled) override { m_ssaoEnabled = enabled; }
+    bool isSsaoEnabled() const override { return m_ssaoEnabled; }
+    void setCsmEnabled(bool enabled) override { m_csmUserEnabled = enabled; }
+    bool isCsmEnabled() const override { return m_csmUserEnabled; }
     void setSkyboxPath(const std::string& pathOrFolder) override;
     std::string getSkyboxPath() const override { return m_skyboxLoadedPath; }
     void requestPick(int screenX, int screenY) override { m_pickRequested = true; m_pickX = screenX; m_pickY = screenY; }

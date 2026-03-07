@@ -24,6 +24,8 @@ add_library(RendererCore OBJECT
     EditorTheme.h
     EditorUIBuilder.h
     EditorUIBuilder.cpp
+    WidgetDetailSchema.h
+    WidgetDetailSchema.cpp
     ViewportUITheme.h
     EditorUI/EditorWidget.h
     GameplayUI/GameplayWidget.h

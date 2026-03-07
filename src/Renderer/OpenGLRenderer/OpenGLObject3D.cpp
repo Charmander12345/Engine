@@ -81,8 +81,9 @@ namespace
         {
             meshCenter /= static_cast<float>(vertexCount);
         }
+        // Output: pos3 + normal3 + uv2 + tangent3 + bitangent3 = 14 floats per vertex
         std::vector<float> result;
-        result.reserve((indices.empty() ? vertexCount : indices.size()) * 8);
+        result.reserve((indices.empty() ? vertexCount : indices.size()) * 14);
 
         const auto addTriangle = [&](uint32_t i0, uint32_t i1, uint32_t i2)
         {
@@ -113,16 +114,39 @@ namespace
                 faceNormal = -faceNormal;
             }
 
+            // Compute tangent/bitangent from UV edges
+            const glm::vec2 uv0(vertices[base0 + 3], vertices[base0 + 4]);
+            const glm::vec2 uv1(vertices[base1 + 3], vertices[base1 + 4]);
+            const glm::vec2 uv2(vertices[base2 + 3], vertices[base2 + 4]);
+            const glm::vec2 deltaUV1 = uv1 - uv0;
+            const glm::vec2 deltaUV2 = uv2 - uv0;
+
+            float denom = deltaUV1.x * deltaUV2.y - deltaUV2.x * deltaUV1.y;
+            glm::vec3 tangent(1.0f, 0.0f, 0.0f);
+            glm::vec3 bitangent(0.0f, 1.0f, 0.0f);
+            if (std::abs(denom) > 1e-6f)
+            {
+                float f = 1.0f / denom;
+                tangent = glm::normalize(f * (deltaUV2.y * edge1 - deltaUV1.y * edge2));
+                bitangent = glm::normalize(f * (-deltaUV2.x * edge1 + deltaUV1.x * edge2));
+            }
+
             auto appendVertex = [&](size_t base)
             {
-                result.push_back(vertices[base + 0]);
+                result.push_back(vertices[base + 0]); // pos
                 result.push_back(vertices[base + 1]);
                 result.push_back(vertices[base + 2]);
-                result.push_back(faceNormal.x);
+                result.push_back(faceNormal.x);        // normal
                 result.push_back(faceNormal.y);
                 result.push_back(faceNormal.z);
-                result.push_back(vertices[base + 3]);
+                result.push_back(vertices[base + 3]);  // uv
                 result.push_back(vertices[base + 4]);
+                result.push_back(tangent.x);           // tangent
+                result.push_back(tangent.y);
+                result.push_back(tangent.z);
+                result.push_back(bitangent.x);         // bitangent
+                result.push_back(bitangent.y);
+                result.push_back(bitangent.z);
             };
 
             appendVertex(base0);
@@ -318,12 +342,14 @@ bool OpenGLObject3D::prepare()
     mat->setVertexData(verticesWithNormals);
     mat->setIndexData({});
 
-    // Default layout: positions (x,y,z) + normals (x,y,z) + texcoords (u,v)
-    const GLsizei stride = static_cast<GLsizei>(8 * sizeof(float));
+    // Default layout: positions (x,y,z) + normals (x,y,z) + texcoords (u,v) + tangent (x,y,z) + bitangent (x,y,z)
+    const GLsizei stride = static_cast<GLsizei>(14 * sizeof(float));
     std::vector<OpenGLMaterial::LayoutElement> layout;
     layout.push_back(OpenGLMaterial::LayoutElement{ 0, 3, GL_FLOAT, GL_FALSE, stride, 0 });
     layout.push_back(OpenGLMaterial::LayoutElement{ 1, 3, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(3 * sizeof(float)) });
     layout.push_back(OpenGLMaterial::LayoutElement{ 2, 2, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(6 * sizeof(float)) });
+    layout.push_back(OpenGLMaterial::LayoutElement{ 3, 3, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(8 * sizeof(float)) });
+    layout.push_back(OpenGLMaterial::LayoutElement{ 4, 3, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(11 * sizeof(float)) });
     mat->setLayout(layout);
 
     if (!mat->build())
@@ -376,6 +402,25 @@ void OpenGLObject3D::setPointShadowData(GLuint cubeArray, const glm::vec3* posit
     m_material->setPointShadowData(cubeArray, positions, farPlanes, lightIndices, count);
 }
 
+void OpenGLObject3D::setFogData(bool enabled, const glm::vec3& color, float density)
+{
+    if (!m_material)
+    {
+        return;
+    }
+    m_material->setFogData(enabled, color, density);
+}
+
+void OpenGLObject3D::setCsmData(GLuint texArray, const glm::mat4* matrices, const float* splits,
+                                int lightIndex, bool enabled, const glm::mat4& viewMatrix)
+{
+    if (!m_material)
+    {
+        return;
+    }
+    m_material->setCsmData(texArray, matrices, splits, lightIndex, enabled, viewMatrix);
+}
+
 void OpenGLObject3D::setMatrices(const glm::mat4& model, const glm::mat4& view, const glm::mat4& projection)
 {
     if (!m_material)
@@ -415,5 +460,13 @@ void OpenGLObject3D::setShininess(float shininess)
     if (m_material)
     {
         m_material->setShininess(shininess);
+    }
+}
+
+void OpenGLObject3D::setPbrData(bool enabled, float metallic, float roughness)
+{
+    if (m_material)
+    {
+        m_material->setPbrData(enabled, metallic, roughness);
     }
 }

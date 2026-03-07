@@ -8,6 +8,7 @@ struct RendererCapabilities
     bool supportsVSync         = false;
     bool supportsEntityPicking = false;
     bool supportsGizmos        = false;
-    bool supportsSkybox        = false;
-    bool supportsPopupWindows  = false;
+    bool supportsSkybox         = false;
+    bool supportsPopupWindows   = false;
+    bool supportsPostProcessing = false;
 };

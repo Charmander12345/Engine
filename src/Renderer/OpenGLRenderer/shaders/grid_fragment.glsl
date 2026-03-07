@@ -51,6 +51,15 @@ uniform vec3 uPointShadowPositions[MAX_POINT_SHADOW_LIGHTS];
 uniform float uPointShadowFarPlanes[MAX_POINT_SHADOW_LIGHTS];
 uniform int uPointShadowLightIndices[MAX_POINT_SHADOW_LIGHTS];
 
+// Cascaded Shadow Maps (directional light)
+#define MAX_CSM_CASCADES 4
+uniform sampler2DArray uCsmMaps;
+uniform int   uCsmEnabled;
+uniform int   uCsmLightIndex;
+uniform mat4  uCsmMatrices[MAX_CSM_CASCADES];
+uniform float uCsmSplits[MAX_CSM_CASCADES];
+uniform mat4  uViewMatrix;
+
 float calcShadow(int shadowIdx, vec3 worldPos, vec3 normal, vec3 lightDir)
 {
     vec4 lightSpacePos = uLightSpaceMatrices[shadowIdx] * vec4(worldPos, 1.0);
@@ -89,6 +98,47 @@ float calcPointShadow(int shadowIdx, vec3 worldPos, vec3 lightPos, float farPlan
     return (currentDepth - bias > closestDepth) ? 1.0 : 0.0;
 }
 
+float calcCsmShadow(vec3 worldPos, vec3 normal, vec3 lightDir)
+{
+    float depth = -(uViewMatrix * vec4(worldPos, 1.0)).z;
+
+    int cascade = MAX_CSM_CASCADES - 1;
+    for (int i = 0; i < MAX_CSM_CASCADES; ++i)
+    {
+        if (depth < uCsmSplits[i])
+        {
+            cascade = i;
+            break;
+        }
+    }
+
+    vec4 lightSpacePos = uCsmMatrices[cascade] * vec4(worldPos, 1.0);
+    vec3 projCoords = lightSpacePos.xyz / lightSpacePos.w;
+    projCoords = projCoords * 0.5 + 0.5;
+
+    if (projCoords.x < 0.0 || projCoords.x > 1.0 ||
+        projCoords.y < 0.0 || projCoords.y > 1.0 ||
+        projCoords.z > 1.0)
+        return 0.0;
+
+    float bias = max(0.005 * (1.0 - dot(normal, lightDir)), 0.001);
+    bias *= 1.0 / (float(cascade + 1) * 0.5 + 0.5);
+
+    float shadow = 0.0;
+    vec2 texelSize = 1.0 / textureSize(uCsmMaps, 0).xy;
+
+    for (int x = -2; x <= 2; ++x)
+    {
+        for (int y = -2; y <= 2; ++y)
+        {
+            float pcfDepth = texture(uCsmMaps, vec3(projCoords.xy + vec2(x, y) * texelSize, float(cascade))).r;
+            shadow += (projCoords.z - bias > pcfDepth) ? 1.0 : 0.0;
+        }
+    }
+    shadow /= 25.0;
+    return shadow;
+}
+
 vec3 calcLight(Light light, vec3 normal, vec3 viewDir, vec3 diffColor, int lightIndex)
 {
     vec3 lightDir;
@@ -120,12 +170,19 @@ vec3 calcLight(Light light, vec3 normal, vec3 viewDir, vec3 diffColor, int light
     }
 
     float shadow = 0.0;
-    for (int s = 0; s < uShadowCount && s < MAX_SHADOW_LIGHTS; ++s)
+    if (uCsmEnabled != 0 && light.type == LIGHT_DIRECTIONAL && lightIndex == uCsmLightIndex)
     {
-        if (uShadowLightIndices[s] == lightIndex)
+        shadow = calcCsmShadow(vWorldPos, normal, lightDir);
+    }
+    else
+    {
+        for (int s = 0; s < uShadowCount && s < MAX_SHADOW_LIGHTS; ++s)
         {
-            shadow = calcShadow(s, vWorldPos, normal, lightDir);
-            break;
+            if (uShadowLightIndices[s] == lightIndex)
+            {
+                shadow = calcShadow(s, vWorldPos, normal, lightDir);
+                break;
+            }
         }
     }
 

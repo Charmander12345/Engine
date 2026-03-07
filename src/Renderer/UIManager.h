@@ -113,13 +113,14 @@ public:
     // Returns true if the active tab is a widget editor and had a selected element to delete
     bool tryDeleteWidgetEditorElement();
 
-    static UIManager* GetActiveInstance();
-    static void SetActiveInstance(UIManager* instance);
+	static UIManager* GetActiveInstance();
+	static void SetActiveInstance(UIManager* instance);
+
+	void applyPendingThemeUpdate();
 
 private:
 	WidgetEntry* findWidgetEntry(const std::string& id);
 	const WidgetEntry* findWidgetEntry(const std::string& id) const;
-	void applyPendingThemeUpdate();
     WidgetElement* hitTest(const Vec2& screenPos, bool logDetails = false) const;
 	void populateOutlinerWidget(const std::shared_ptr<EditorWidget>& widget);
 	void populateOutlinerDetails(unsigned int entity);
