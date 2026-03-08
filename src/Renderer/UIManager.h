@@ -68,7 +68,8 @@ public:
     bool handleScroll(const Vec2& screenPos, float delta);
     bool handleRightMouseDown(const Vec2& screenPos);
     bool handleRightMouseUp(const Vec2& screenPos);
-    void handleMouseMotionForPan(const Vec2& screenPos);
+	void handleMouseMotionForPan(const Vec2& screenPos);
+	void handleMouseMotion(const Vec2& screenPos);
     bool handleTextInput(const std::string& text);
     bool handleKeyDown(int key);
     void setMousePosition(const Vec2& screenPos);
@@ -101,11 +102,12 @@ public:
     void closeDropdownMenu();
     bool isDropdownMenuOpen() const { return m_dropdownVisible; }
 
-    void openLandscapeManagerPopup();
+	void openLandscapeManagerPopup();
 	void openEngineSettingsPopup();
 	void openEditorSettingsPopup();
 	void openWidgetEditorPopup(const std::string& relativeAssetPath);
-    void openUIDesignerTab();
+	void openMaterialEditorPopup(const std::string& materialAssetPath = {});
+	void openUIDesignerTab();
     void closeUIDesignerTab();
     bool isUIDesignerOpen() const;
     void openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)> onProjectChosen);
@@ -361,6 +363,7 @@ private:
 	std::string m_dragPayload;
 	std::string m_dragSourceId;
 	std::string m_dragLabel;
+	std::string m_sliderDragElementId;
 	DropOnViewportCallback m_onDropOnViewport;
 	DropOnFolderCallback m_onDropOnFolder;
 	DropOnEntityCallback m_onDropOnEntity;

@@ -3840,6 +3840,11 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
                     uiMgr->openWidgetEditorPopup(relPath);
                     return;
                 }
+                if (assetType == AssetType::Material)
+                {
+                    uiMgr->openMaterialEditorPopup(relPath);
+                    return;
+                }
                 Logger::Instance().log(Logger::Category::UI,
                     "Content Browser: open asset '" + relPath + "'",
                     Logger::LogLevel::INFO);
@@ -4448,6 +4453,19 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
             target->onColorChanged(target->style.color);
         }
     }
+    if (target->type == WidgetElementType::Slider)
+    {
+        const float relX = (screenPos.x - target->computedPositionPixels.x) / std::max(1.0f, target->computedSizePixels.x);
+        const float t = std::clamp(relX, 0.0f, 1.0f);
+        const float newVal = target->minValue + t * (target->maxValue - target->minValue);
+        target->valueFloat = newVal;
+        if (target->onValueChanged)
+        {
+            target->onValueChanged(std::to_string(newVal));
+        }
+        m_sliderDragElementId = target->id;
+        markAllWidgetsDirty();
+    }
     if (target->type == WidgetElementType::CheckBox)
     {
         target->isChecked = !target->isChecked;
@@ -4812,6 +4830,12 @@ bool UIManager::handleMouseUp(const Vec2& screenPos, int button)
     if (button != SDL_BUTTON_LEFT)
     {
         return false;
+    }
+
+    // End slider drag
+    if (!m_sliderDragElementId.empty())
+    {
+        m_sliderDragElementId.clear();
     }
 
     // End laptop-mode left-click panning
@@ -5791,7 +5815,34 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
     auto widget = std::make_shared<EditorWidget>();
     widget->setName("DropdownMenu");
     widget->setSizePixels(Vec2{ menuW, menuH });
-    widget->setPositionPixels(Vec2{ anchorPixels.x, anchorPixels.y });
+
+    // ── Clamp position so the menu stays on screen ───────────────────────
+    float posX = anchorPixels.x;
+    float posY = anchorPixels.y;
+    const float screenW = m_availableViewportSize.x;
+    const float screenH = m_availableViewportSize.y;
+
+    // Flip upward if the menu would overflow the bottom
+    if (posY + menuH > screenH && posY - menuH >= 0.0f)
+    {
+        posY = posY - menuH;
+    }
+    // Still overflows bottom (and can't flip) – clamp to bottom edge
+    if (posY + menuH > screenH)
+    {
+        posY = screenH - menuH;
+    }
+    // Clamp to top
+    if (posY < 0.0f) posY = 0.0f;
+
+    // Shift left if the menu would overflow the right edge
+    if (posX + menuW > screenW)
+    {
+        posX = screenW - menuW;
+    }
+    if (posX < 0.0f) posX = 0.0f;
+
+    widget->setPositionPixels(Vec2{ posX, posY });
     widget->setAnchor(WidgetAnchor::TopLeft);
     widget->setAbsolutePosition(true);
     widget->setZOrder(9000);
@@ -7081,6 +7132,36 @@ void UIManager::handleMouseMotionForPan(const Vec2& screenPos)
 }
 
 // ---------------------------------------------------------------------------
+// General mouse motion – handles slider drag and other continuous interactions
+// ---------------------------------------------------------------------------
+void UIManager::handleMouseMotion(const Vec2& screenPos)
+{
+    handleMouseMotionForPan(screenPos);
+
+    if (!m_sliderDragElementId.empty())
+    {
+        WidgetElement* slider = findElementById(m_sliderDragElementId);
+        if (slider && slider->type == WidgetElementType::Slider)
+        {
+            const float relX = (screenPos.x - slider->computedPositionPixels.x)
+                              / std::max(1.0f, slider->computedSizePixels.x);
+            const float t = std::clamp(relX, 0.0f, 1.0f);
+            const float newVal = slider->minValue + t * (slider->maxValue - slider->minValue);
+            slider->valueFloat = newVal;
+            if (slider->onValueChanged)
+            {
+                slider->onValueChanged(std::to_string(newVal));
+            }
+            m_renderDirty = true;
+        }
+        else
+        {
+            m_sliderDragElementId.clear();
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Widget Editor: add a new element of the given type to the edited widget
 // ---------------------------------------------------------------------------
 void UIManager::addElementToEditedWidget(const std::string& tabId, const std::string& elementType)
@@ -8048,6 +8129,384 @@ void UIManager::openLandscapeManagerPopup()
     widget->setFillY(true);
     widget->setElements(std::move(elements));
     popup->uiManager().registerWidget("LandscapeManager.Main", widget);
+}
+
+// ---------------------------------------------------------------------------
+// Material Editor Popup
+// ---------------------------------------------------------------------------
+void UIManager::openMaterialEditorPopup(const std::string& materialAssetPath)
+{
+    if (!m_renderer)
+        return;
+
+    Logger::Instance().log(Logger::Category::Input, "Material Editor opened.", Logger::LogLevel::INFO);
+
+    const int kPopupW = static_cast<int>(EditorTheme::Scaled(480.0f));
+    const int kPopupH = static_cast<int>(EditorTheme::Scaled(560.0f));
+    PopupWindow* popup = m_renderer->openPopupWindow(
+        "MaterialEditor", "Material Editor", kPopupW, kPopupH);
+    if (!popup) return;
+
+    if (!popup->uiManager().getRegisteredWidgets().empty()) return;
+
+    // ── Collect material assets from the registry ─────────────────────────
+    auto& assetMgr = AssetManager::Instance();
+    const auto& registry = assetMgr.getAssetRegistry();
+
+    struct MatEntry { std::string name; std::string path; };
+    std::vector<MatEntry> matEntries;
+    std::vector<std::string> matNames;
+    int initialSelection = 0;
+
+    for (const auto& entry : registry)
+    {
+        if (entry.type == AssetType::Material)
+        {
+            matEntries.push_back({ entry.name, entry.path });
+            matNames.push_back(entry.name);
+            if (!materialAssetPath.empty() && entry.path == materialAssetPath)
+                initialSelection = static_cast<int>(matEntries.size()) - 1;
+        }
+    }
+
+    if (matEntries.empty())
+    {
+        showToastMessage("No material assets found.", 3.0f);
+        m_renderer->closePopupWindow("MaterialEditor");
+        return;
+    }
+
+    // ── Shared form state ─────────────────────────────────────────────────
+    struct MaterialFormState
+    {
+        int selectedIndex{ 0 };
+        float shininess{ 32.0f };
+        float metallic{ 0.0f };
+        float roughness{ 0.5f };
+        bool pbrEnabled{ false };
+        std::string texDiffuse;
+        std::string texSpecular;
+        std::string texNormal;
+        std::string texEmissive;
+        std::string texMetallicRoughness;
+    };
+    auto state = std::make_shared<MaterialFormState>();
+    state->selectedIndex = initialSelection;
+
+    // ── Helper: load values from the selected asset ───────────────────────
+    auto loadFromAsset = [matEntries](MaterialFormState& s)
+    {
+        if (s.selectedIndex < 0 || s.selectedIndex >= static_cast<int>(matEntries.size()))
+            return;
+
+        auto& mgr = AssetManager::Instance();
+        const auto& path = matEntries[s.selectedIndex].path;
+        auto asset = mgr.getLoadedAssetByPath(path);
+        if (!asset)
+        {
+            int id = mgr.loadAsset(path, AssetType::Material);
+            if (id != 0)
+                asset = mgr.getLoadedAssetByID(static_cast<unsigned int>(id));
+        }
+        if (!asset) return;
+
+        const json& d = asset->getData();
+        s.shininess = d.value("m_shininess", 32.0f);
+        s.metallic  = d.value("m_metallic", 0.0f);
+        s.roughness = d.value("m_roughness", 0.5f);
+        s.pbrEnabled = d.value("m_pbrEnabled", false);
+
+        // Texture asset paths
+        s.texDiffuse.clear();
+        s.texSpecular.clear();
+        s.texNormal.clear();
+        s.texEmissive.clear();
+        s.texMetallicRoughness.clear();
+        if (d.contains("m_textureAssetPaths") && d["m_textureAssetPaths"].is_array())
+        {
+            const auto& arr = d["m_textureAssetPaths"];
+            auto getSlot = [&](size_t idx) -> std::string
+            {
+                if (idx < arr.size() && arr[idx].is_string())
+                    return arr[idx].get<std::string>();
+                return {};
+            };
+            s.texDiffuse            = getSlot(0);
+            s.texSpecular           = getSlot(1);
+            s.texNormal             = getSlot(2);
+            s.texEmissive           = getSlot(3);
+            s.texMetallicRoughness  = getSlot(4);
+        }
+    };
+
+    loadFromAsset(*state);
+
+    // ── Build UI ──────────────────────────────────────────────────────────
+    constexpr float W = 480.0f;
+    constexpr float H = 560.0f;
+    auto nx = [&](float px) { return px / W; };
+    auto ny = [&](float py) { return py / H; };
+
+    std::vector<WidgetElement> elements;
+
+    // Background
+    {
+        WidgetElement bg;
+        bg.type  = WidgetElementType::Panel;
+        bg.id    = "ME.Bg";
+        bg.from  = Vec2{ 0.0f, 0.0f };
+        bg.to    = Vec2{ 1.0f, 1.0f };
+        bg.style.color = EditorTheme::Get().panelBackground;
+        elements.push_back(bg);
+    }
+
+    // Title bar
+    {
+        WidgetElement titleBg;
+        titleBg.type  = WidgetElementType::Panel;
+        titleBg.id    = "ME.TitleBg";
+        titleBg.from  = Vec2{ 0.0f, 0.0f };
+        titleBg.to    = Vec2{ 1.0f, ny(44.0f) };
+        titleBg.style.color = EditorTheme::Get().titleBarBackground;
+        elements.push_back(titleBg);
+
+        WidgetElement titleText;
+        titleText.type      = WidgetElementType::Text;
+        titleText.id        = "ME.TitleText";
+        titleText.from      = Vec2{ nx(8.0f), 0.0f };
+        titleText.to        = Vec2{ nx(W - 8.0f), ny(44.0f) };
+        titleText.text      = "Material Editor";
+        titleText.fontSize  = EditorTheme::Get().fontSizeSubheading;
+        titleText.style.textColor = EditorTheme::Get().titleBarText;
+        titleText.textAlignV = TextAlignV::Center;
+        titleText.padding   = Vec2{ 6.0f, 0.0f };
+        elements.push_back(titleText);
+    }
+
+    // ── Content area (vertical StackPanel) ────────────────────────────────
+    WidgetElement contentStack;
+    contentStack.type        = WidgetElementType::StackPanel;
+    contentStack.id          = "ME.ContentArea";
+    contentStack.orientation = StackOrientation::Vertical;
+    contentStack.from        = Vec2{ nx(12.0f), ny(54.0f) };
+    contentStack.to          = Vec2{ nx(W - 12.0f), ny(H - 60.0f) };
+    contentStack.style.color = EditorTheme::Get().transparent;
+    contentStack.padding     = Vec2{ 0.0f, 4.0f };
+    contentStack.scrollable  = true;
+
+    // Material selector dropdown
+    {
+        auto row = EditorUIBuilder::makeDropDownRow("ME.MatSelect", "Material",
+            matNames, state->selectedIndex,
+            [state, popup, matEntries, loadFromAsset](int idx)
+            {
+                state->selectedIndex = idx;
+                loadFromAsset(*state);
+
+                // Rebuild the content area from the new state
+                auto& pMgr = popup->uiManager();
+                auto* content = pMgr.findElementById("ME.ContentArea");
+                if (!content) return;
+
+                // Update controls by finding them
+                auto* shininessSlider = pMgr.findElementById("ME.Shininess.Slider");
+                if (shininessSlider) shininessSlider->valueFloat = state->shininess;
+
+                auto* metallicSlider = pMgr.findElementById("ME.Metallic.Slider");
+                if (metallicSlider) metallicSlider->valueFloat = state->metallic;
+
+                auto* roughnessSlider = pMgr.findElementById("ME.Roughness.Slider");
+                if (roughnessSlider) roughnessSlider->valueFloat = state->roughness;
+
+                auto* pbrCheck = pMgr.findElementById("ME.PBR");
+                if (pbrCheck) pbrCheck->isChecked = state->pbrEnabled;
+
+                auto* diffEntry = pMgr.findElementById("ME.TexDiffuse.Value");
+                if (diffEntry) diffEntry->value = state->texDiffuse;
+                auto* specEntry = pMgr.findElementById("ME.TexSpecular.Value");
+                if (specEntry) specEntry->value = state->texSpecular;
+                auto* normEntry = pMgr.findElementById("ME.TexNormal.Value");
+                if (normEntry) normEntry->value = state->texNormal;
+                auto* emisEntry = pMgr.findElementById("ME.TexEmissive.Value");
+                if (emisEntry) emisEntry->value = state->texEmissive;
+                auto* mrEntry = pMgr.findElementById("ME.TexMR.Value");
+                if (mrEntry) mrEntry->value = state->texMetallicRoughness;
+            });
+        contentStack.children.push_back(std::move(row));
+    }
+
+    contentStack.children.push_back(EditorUIBuilder::makeDivider());
+
+    // ── PBR Section ───────────────────────────────────────────────────────
+    {
+        auto pbrCheck = EditorUIBuilder::makeCheckBox("ME.PBR", "PBR Enabled",
+            state->pbrEnabled, [state](bool checked) { state->pbrEnabled = checked; });
+        contentStack.children.push_back(std::move(pbrCheck));
+    }
+
+    {
+        auto row = EditorUIBuilder::makeSliderRow("ME.Metallic", "Metallic",
+            state->metallic, 0.0f, 1.0f,
+            [state](float v) { state->metallic = v; });
+        contentStack.children.push_back(std::move(row));
+    }
+
+    {
+        auto row = EditorUIBuilder::makeSliderRow("ME.Roughness", "Roughness",
+            state->roughness, 0.0f, 1.0f,
+            [state](float v) { state->roughness = v; });
+        contentStack.children.push_back(std::move(row));
+    }
+
+    {
+        auto row = EditorUIBuilder::makeSliderRow("ME.Shininess", "Shininess",
+            state->shininess, 1.0f, 128.0f,
+            [state](float v) { state->shininess = v; });
+        contentStack.children.push_back(std::move(row));
+    }
+
+    contentStack.children.push_back(EditorUIBuilder::makeDivider());
+
+    // ── Texture Slots ─────────────────────────────────────────────────────
+    {
+        auto row = EditorUIBuilder::makeStringRow("ME.TexDiffuse", "Diffuse",
+            state->texDiffuse, [state](const std::string& v) { state->texDiffuse = v; });
+        contentStack.children.push_back(std::move(row));
+    }
+    {
+        auto row = EditorUIBuilder::makeStringRow("ME.TexSpecular", "Specular",
+            state->texSpecular, [state](const std::string& v) { state->texSpecular = v; });
+        contentStack.children.push_back(std::move(row));
+    }
+    {
+        auto row = EditorUIBuilder::makeStringRow("ME.TexNormal", "Normal",
+            state->texNormal, [state](const std::string& v) { state->texNormal = v; });
+        contentStack.children.push_back(std::move(row));
+    }
+    {
+        auto row = EditorUIBuilder::makeStringRow("ME.TexEmissive", "Emissive",
+            state->texEmissive, [state](const std::string& v) { state->texEmissive = v; });
+        contentStack.children.push_back(std::move(row));
+    }
+    {
+        auto row = EditorUIBuilder::makeStringRow("ME.TexMR", "Metallic/Rough",
+            state->texMetallicRoughness, [state](const std::string& v) { state->texMetallicRoughness = v; });
+        contentStack.children.push_back(std::move(row));
+    }
+
+    elements.push_back(std::move(contentStack));
+
+    // ── Buttons: Save & Close ─────────────────────────────────────────────
+    const float btnY0 = H - 48.0f;
+    const float btnY1 = btnY0 + 34.0f;
+
+    // Save button
+    {
+        WidgetElement btn;
+        btn.type          = WidgetElementType::Button;
+        btn.id            = "ME.SaveBtn";
+        btn.from          = Vec2{ nx(W - 220.0f), ny(btnY0) };
+        btn.to            = Vec2{ nx(W - 114.0f), ny(btnY1) };
+        btn.text          = "Save";
+        btn.fontSize      = EditorTheme::Get().fontSizeBody;
+        btn.style.color         = EditorTheme::Get().accentGreen;
+        btn.style.hoverColor    = Vec4{ 0.40f, 0.78f, 0.44f, 1.0f };
+        btn.style.textColor     = EditorTheme::Get().buttonPrimaryText;
+        btn.textAlignH    = TextAlignH::Center;
+        btn.textAlignV    = TextAlignV::Center;
+        btn.padding       = EditorTheme::Scaled(Vec2{ 8.0f, 4.0f });
+        btn.hitTestMode = HitTestMode::Enabled;
+        btn.onClicked     = [state, matEntries, this]()
+        {
+            if (state->selectedIndex < 0 || state->selectedIndex >= static_cast<int>(matEntries.size()))
+                return;
+
+            auto& assetMgr = AssetManager::Instance();
+            const auto& path = matEntries[state->selectedIndex].path;
+            auto asset = assetMgr.getLoadedAssetByPath(path);
+            if (!asset)
+            {
+                int id = assetMgr.loadAsset(path, AssetType::Material);
+                if (id != 0)
+                    asset = assetMgr.getLoadedAssetByID(static_cast<unsigned int>(id));
+            }
+            if (!asset)
+            {
+                showToastMessage("Failed to load material for saving.", 3.0f);
+                return;
+            }
+
+            // Update the asset JSON data from form state
+            json& d = asset->getData();
+            d["m_shininess"]  = state->shininess;
+            d["m_metallic"]   = state->metallic;
+            d["m_roughness"]  = state->roughness;
+            d["m_pbrEnabled"] = state->pbrEnabled;
+
+            // Build texture paths array (5 fixed slots)
+            json texArr = json::array();
+            const std::string* slotPtrs[] = {
+                &state->texDiffuse, &state->texSpecular, &state->texNormal,
+                &state->texEmissive, &state->texMetallicRoughness };
+
+            int lastSlot = -1;
+            for (int i = 4; i >= 0; --i)
+            {
+                if (!slotPtrs[i]->empty()) { lastSlot = i; break; }
+            }
+            for (int i = 0; i <= lastSlot; ++i)
+            {
+                if (!slotPtrs[i]->empty())
+                    texArr.push_back(*slotPtrs[i]);
+                else
+                    texArr.push_back(nullptr);
+            }
+            if (!texArr.empty())
+                d["m_textureAssetPaths"] = texArr;
+            else
+                d.erase("m_textureAssetPaths");
+
+            asset->setIsSaved(false);
+            Asset a;
+            a.type = AssetType::Material;
+            a.ID   = asset->getId();
+            assetMgr.saveAsset(a, AssetManager::Sync);
+
+            showToastMessage("Material saved: " + matEntries[state->selectedIndex].name, 2.5f);
+            m_renderer->closePopupWindow("MaterialEditor");
+        };
+        elements.push_back(btn);
+    }
+
+    // Close button
+    {
+        WidgetElement btn;
+        btn.type          = WidgetElementType::Button;
+        btn.id            = "ME.CloseBtn";
+        btn.from          = Vec2{ nx(W - 104.0f), ny(btnY0) };
+        btn.to            = Vec2{ nx(W - 12.0f),  ny(btnY1) };
+        btn.text          = "Close";
+        btn.fontSize      = EditorTheme::Get().fontSizeBody;
+        btn.style.color         = EditorTheme::Get().buttonDefault;
+        btn.style.hoverColor    = EditorTheme::Get().buttonHover;
+        btn.style.textColor     = EditorTheme::Get().buttonText;
+        btn.textAlignH    = TextAlignH::Center;
+        btn.textAlignV    = TextAlignV::Center;
+        btn.padding       = EditorTheme::Scaled(Vec2{ 8.0f, 4.0f });
+        btn.hitTestMode = HitTestMode::Enabled;
+        btn.onClicked     = [this]()
+        {
+            m_renderer->closePopupWindow("MaterialEditor");
+        };
+        elements.push_back(btn);
+    }
+
+    auto widget = std::make_shared<EditorWidget>();
+    widget->setName("MaterialEditorWidget");
+    widget->setFillX(true);
+    widget->setFillY(true);
+    widget->setElements(std::move(elements));
+    popup->uiManager().registerWidget("MaterialEditor.Main", widget);
 }
 
 void UIManager::openEngineSettingsPopup()

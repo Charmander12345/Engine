@@ -632,6 +632,11 @@ int main()
                 renderer->getUIManager().openLandscapeManagerPopup();
             });
 
+        renderer->getUIManager().registerClickEvent("WorldSettings.Tools.MaterialEditor", [&renderer]()
+            {
+                renderer->getUIManager().openMaterialEditorPopup();
+            });
+
         renderer->getUIManager().registerClickEvent("TitleBar.Menu.Build", []()
             {
                 Logger::Instance().log(Logger::Category::Input, "Menu: Build clicked.", Logger::LogLevel::INFO);
@@ -660,6 +665,54 @@ int main()
         renderer->getUIManager().registerClickEvent("ViewportOverlay.Scale", []()
             {
                 Logger::Instance().log(Logger::Category::Input, "Toolbar: Scale mode.", Logger::LogLevel::INFO);
+            });
+
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.RenderMode", [&renderer]()
+            {
+                auto& uiMgr = renderer->getUIManager();
+
+                if (uiMgr.isDropdownMenuOpen())
+                {
+                    uiMgr.closeDropdownMenu();
+                    return;
+                }
+
+                auto* btn = uiMgr.findElementById("ViewportOverlay.RenderMode");
+                Vec2 anchor{ 0.0f, 0.0f };
+                if (btn && btn->hasBounds)
+                {
+                    anchor = Vec2{ btn->boundsMinPixels.x, btn->boundsMaxPixels.y + 2.0f };
+                }
+
+                struct ModeEntry { const char* label; Renderer::DebugRenderMode mode; };
+                static const ModeEntry modes[] = {
+                    { "Lit",              Renderer::DebugRenderMode::Lit },
+                    { "Unlit",            Renderer::DebugRenderMode::Unlit },
+                    { "Wireframe",        Renderer::DebugRenderMode::Wireframe },
+                    { "Shadow Map",       Renderer::DebugRenderMode::ShadowMap },
+                    { "Shadow Cascades",  Renderer::DebugRenderMode::ShadowCascades },
+                    { "Instance Groups",  Renderer::DebugRenderMode::InstanceGroups },
+                    { "Normals",          Renderer::DebugRenderMode::Normals },
+                    { "Depth",            Renderer::DebugRenderMode::Depth },
+                    { "Overdraw",         Renderer::DebugRenderMode::Overdraw },
+                };
+
+                std::vector<UIManager::DropdownMenuItem> items;
+                for (auto& m : modes)
+                {
+                    std::string label = m.label;
+                    auto mode = m.mode;
+                    items.push_back({ label, [&renderer, mode, label]()
+                        {
+                            renderer->setDebugRenderMode(mode);
+                            auto* elem = renderer->getUIManager().findElementById("ViewportOverlay.RenderMode");
+                            if (elem) elem->text = label;
+                            renderer->getUIManager().markAllWidgetsDirty();
+                        }
+                    });
+                }
+
+                uiMgr.showDropdownMenu(anchor, items);
             });
 
         renderer->getUIManager().registerClickEvent("ViewportOverlay.Settings", [&renderer]()
@@ -1929,7 +1982,7 @@ int main()
                     {
                         auto& uiManager = renderer->getUIManager();
                         uiManager.setMousePosition(mousePosPixels);
-                        uiManager.handleMouseMotionForPan(mousePosPixels);
+                        uiManager.handleMouseMotion(mousePosPixels);
                         if (auto* viewportUI = renderer->getViewportUIManagerPtr())
                         {
                             viewportUI->setMousePosition(mousePosPixels);
@@ -2343,7 +2396,7 @@ int main()
                                     bg.id = "NM.Bg";
                                     bg.from = Vec2{ 0.0f, 0.0f };
                                     bg.to = Vec2{ 1.0f, 1.0f };
-                                    bg.style.color = Vec4{ 0.13f, 0.13f, 0.16f, 1.0f };
+                                    bg.style.color = EditorTheme::Get().panelBackground;
                                     elements.push_back(bg);
                                 }
 
@@ -2356,7 +2409,7 @@ int main()
                                     title.to = Vec2{ 1.0f, ny(36.0f) };
                                     title.text = "New Material";
                                     title.fontSize = EditorTheme::Get().fontSizeHeading;
-                                    title.style.textColor = Vec4{ 0.92f, 0.92f, 0.95f, 1.0f };
+                                    title.style.textColor = EditorTheme::Get().titleBarText;
                                     title.textAlignV = TextAlignV::Center;
                                     title.padding = EditorTheme::Scaled(Vec2{ 6.0f, 0.0f });
                                     elements.push_back(title);
@@ -2550,9 +2603,10 @@ int main()
                                     elements.push_back(std::move(cancelBtn));
                                 }
 
-                                auto widget = std::make_shared<Widget>();
+                                auto widget = std::make_shared<EditorWidget>();
                                 widget->setName("NewMaterial");
-                                widget->setSizePixels(Vec2{ static_cast<float>(kPopupW), static_cast<float>(kPopupH) });
+                                widget->setFillX(true);
+                                widget->setFillY(true);
                                 widget->setElements(std::move(elements));
                                 popup->uiManager().registerWidget("NewMaterial", widget);
                             }});

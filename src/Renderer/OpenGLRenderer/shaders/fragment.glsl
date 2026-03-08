@@ -81,6 +81,13 @@ uniform int   uHasMetallicRoughnessMap;
 uniform float uMetallic;
 uniform float uRoughness;
 
+// Debug render mode (0=Lit, 1=Unlit, 2=Wireframe, 3=ShadowMap, 4=ShadowCascades,
+//                     5=InstanceGroups, 6=Normals, 7=Depth, 8=Overdraw)
+uniform int   uDebugMode;
+uniform vec3  uDebugColor; // per-batch tint for InstanceGroups mode
+uniform float uNearPlane;
+uniform float uFarPlane;
+
 const float PI = 3.14159265359;
 
 // GGX/Trowbridge-Reitz Normal Distribution Function
@@ -312,6 +319,79 @@ vec3 calcLight(Light light, vec3 normal, vec3 viewDir, vec3 diffColor, vec3 spec
 
 void main()
 {
+    // --- Debug: Normals ---
+    if (uDebugMode == 6)
+    {
+        vec3 n = normalize(vNormal);
+        if (uHasNormalMap != 0)
+        {
+            vec3 mapNormal = texture(material.normalMap, vTexCoord).rgb;
+            mapNormal = mapNormal * 2.0 - 1.0;
+            n = normalize(vTBN * mapNormal);
+        }
+        FragColor = vec4(n * 0.5 + 0.5, 1.0);
+        return;
+    }
+
+    // --- Debug: Depth (logarithmic mapping for better visual distribution) ---
+    if (uDebugMode == 7)
+    {
+        float z = gl_FragCoord.z;
+        float ndc = z * 2.0 - 1.0;
+        float near = uNearPlane;
+        float far  = uFarPlane;
+        float linearDepth = (2.0 * near * far) / (far + near - ndc * (far - near));
+        float d = log2(1.0 + linearDepth) / log2(1.0 + far);
+        FragColor = vec4(vec3(1.0 - d), 1.0);
+        return;
+    }
+
+    // --- Debug: Overdraw ---
+    if (uDebugMode == 8)
+    {
+        FragColor = vec4(0.1, 0.02, 0.0, 1.0);
+        return;
+    }
+
+    // --- Debug: Instance Groups ---
+    if (uDebugMode == 5)
+    {
+        vec4 diffTex = (uHasDiffuseMap != 0) ? texture(material.diffuse, vTexCoord) : vec4(1.0);
+        FragColor = vec4(diffTex.rgb * uDebugColor, diffTex.a > 0.0 ? diffTex.a : 1.0);
+        return;
+    }
+
+    // --- Debug: Shadow Map visualisation ---
+    if (uDebugMode == 3)
+    {
+        vec3 normal = normalize(vNormal);
+        float shadow = 0.0;
+        for (int s = 0; s < uShadowCount && s < MAX_SHADOW_LIGHTS; ++s)
+        {
+            shadow = max(shadow, calcShadow(s, vWorldPos, normal, vec3(0.0, -1.0, 0.0)));
+        }
+        if (uCsmEnabled != 0)
+        {
+            shadow = max(shadow, calcCsmShadow(vWorldPos, normal, vec3(0.0, -1.0, 0.0)));
+        }
+        FragColor = vec4(vec3(1.0 - shadow), 1.0);
+        return;
+    }
+
+    // --- Debug: Shadow Cascades ---
+    if (uDebugMode == 4)
+    {
+        float depth = -(uViewMatrix * vec4(vWorldPos, 1.0)).z;
+        vec3 cascadeColor = vec3(0.5);
+        if (depth < uCsmSplits[0])      cascadeColor = vec3(0.2, 1.0, 0.2);
+        else if (depth < uCsmSplits[1]) cascadeColor = vec3(0.2, 0.5, 1.0);
+        else if (depth < uCsmSplits[2]) cascadeColor = vec3(1.0, 1.0, 0.2);
+        else                            cascadeColor = vec3(1.0, 0.2, 0.2);
+        vec4 diffTex = (uHasDiffuseMap != 0) ? texture(material.diffuse, vTexCoord) : vec4(1.0);
+        FragColor = vec4(diffTex.rgb * 0.3 + cascadeColor * 0.7, 1.0);
+        return;
+    }
+
     vec4 diffTex;
     if (uHasDiffuseMap != 0)
     {
@@ -321,6 +401,15 @@ void main()
     {
         diffTex = vec4(1.0);
     }
+
+    // --- Debug: Unlit / Wireframe ---
+    if (uDebugMode == 1 || uDebugMode == 2)
+    {
+        FragColor = vec4(diffTex.rgb, diffTex.a > 0.0 ? diffTex.a : 1.0);
+        return;
+    }
+
+    // --- Normal Lit path (uDebugMode == 0) ---
     vec3 normal = normalize(vNormal);
     // Normal mapping: perturb normal using tangent-space map
     if (uHasNormalMap != 0)

@@ -466,6 +466,7 @@
 | Anti-Aliasing (FXAA, MSAA 2x/4x)        | ✅     |
 | Transparenz / Alpha-Sorting               | 🟡     |
 | Instanced Rendering (GPU)                | ✅     |
+| Debug Render Modes (Lit/Unlit/Wireframe/ShadowMap/Cascades/InstanceGroups/Normals/Depth/Overdraw) | ✅ |
 | Skeletal Animation Rendering              | ❌     |
 | Particle-Rendering                        | ❌     |
 | DirectX 11 Backend                        | ❌     |
@@ -477,6 +478,7 @@
 - Post-Processing Pipeline vollständig: HDR FBO, Gamma Correction, ACES Tone Mapping, FXAA 3.11 Quality (9-Sample, Edge Walking, Subpixel Correction), MSAA 2x/4x, Bloom (5-Mip Downsample + Gaussian Blur), SSAO (32-Sample Hemisphere Kernel, Half-Res, Bilateral Depth-Aware 5×5 Blur).
 - Transparenz nur eingeschränkt (kein korrektes Order-Independent-Transparency)
 - Instancing existiert auf CPU-/Level-Seite und GPU-Seite (SSBO-basiertes Instanced Rendering für Haupt-Render, Shadow Maps, CSM). Batching nur bei gleichem Mesh UND gleichem Material (Obj-Pointer-Check verhindert falsche Gruppierung unterschiedlicher Meshes). Buffer-Orphaning, SSBO-Cleanup nach Draws und `if/else`-Shader-Guard gegen Flicker implementiert
+- Debug Render Modes: 9 Modi (Lit, Unlit, Wireframe, Shadow Map, Shadow Cascades, Instance Groups, Normals, Depth, Overdraw) über Viewport-Toolbar-Dropdown umschaltbar. Uniform-basiertes Shader-Branching in `fragment.glsl` und `grid_fragment.glsl` (`uDebugMode`), pro Modus spezifische Render-Konfiguration (Shadow-Pass-Skip, Wireframe-Polygon-Mode, Overdraw-Additiv-Blending, HSL-Batch-Einfärbung für Instance Groups). Depth-Visualisierung mit logarithmischem Mapping (`log2`) für gleichmäßige Verteilung. Shadow Cascades färbt alle Objekte inkl. Landscape nach Kaskaden-Zugehörigkeit ein.
 - Keine Alternative zu OpenGL (DirectX / Vulkan nicht implementiert, nur als Enum-Placeholder)
 CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) eingebettet in `Renderer` (SHARED, Renderer.dll). Noch zu entkoppeln: `main.cpp` (direkte Instanziierung).
 - **Schritt 1.1 erledigt:** GLM von `src/Renderer/OpenGLRenderer/glm/` nach `external/glm/` verschoben. Include-Pfad `${CMAKE_SOURCE_DIR}/external` als PUBLIC in `src/Renderer/CMakeLists.txt` hinzugefügt. Build verifiziert ✅.
@@ -560,16 +562,14 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | PBR-Material (Metallic/Roughness)   | ✅     |
 | Normal Mapping                      | ✅     |
 | Emissive Maps                       | ✅     |
-| Material-Editor (UI)                | ❌     |
+| Material-Editor (UI)                | ✅     |
 | Material-Instancing / Overrides     | ❌     |
 
 **Offene Punkte:**
 - Kein Displacement Mapping
-- Kein Material-Editor in der Editor-UI
 - Normal Mapping implementiert (TBN-Matrix im Vertex-Shader, Tangent-Space Normal Maps im Fragment-Shader, Slot 2)
 - Emissive Maps implementiert (material.emissiveMap Slot 3, additive Emission vor Fog/Tone Mapping)
-- Kein Displacement Mapping
-- Kein Material-Editor in der Editor-UI
+- Material-Editor: Popup-basierter Editor (480×560) mit Material-Auswahl per Dropdown, PBR-Parameter-Editing (Metallic, Roughness, Shininess als Slider, PBR-Enabled-Checkbox), Textur-Slot-Bearbeitung (5 Slots: Diffuse, Specular, Normal, Emissive, MetallicRoughness) und Save/Close-Buttons. Erreichbar über Content-Browser-Doppelklick und World-Settings-Tools-Bereich.
 - Default-Grid-Material (`Content/Materials/WorldGrid.asset`) liegt im Engine-Verzeichnis (neben der Executable, wie Editor-Widgets) und nutzt eigenen Shader (`grid_fragment.glsl`) mit World-Space XZ-Koordinaten, Major/Minor-Grid (1.0 / 0.25 Einheiten)
 - Grid-Shader unterstützt vollständige Lichtberechnung (Multi-Light, Schatten, Blinn-Phong) wie `fragment.glsl` — Landscape wird von allen Lichtquellen beeinflusst
 - Landscape-Entities erhalten automatisch das WorldGrid-Material via MaterialComponent

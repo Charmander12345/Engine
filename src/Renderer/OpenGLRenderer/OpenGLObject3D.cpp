@@ -470,3 +470,27 @@ void OpenGLObject3D::setPbrData(bool enabled, float metallic, float roughness)
         m_material->setPbrData(enabled, metallic, roughness);
     }
 }
+
+void OpenGLObject3D::setDebugMode(int mode)
+{
+    if (m_material)
+    {
+        m_material->setDebugMode(mode);
+    }
+}
+
+void OpenGLObject3D::setDebugColor(const glm::vec3& color)
+{
+    if (m_material)
+    {
+        m_material->setDebugColor(color);
+    }
+}
+
+void OpenGLObject3D::setNearFarPlanes(float nearPlane, float farPlane)
+{
+    if (m_material)
+    {
+        m_material->setNearFarPlanes(nearPlane, farPlane);
+    }
+}

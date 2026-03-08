@@ -18,10 +18,10 @@ Draw-Liste wird jetzt nach (Material-Pointer, Obj-Pointer) sortiert und in Batch
 
 ---
 
-## 3. Material-Editor (UI)
+## ~~3. Material-Editor (UI)~~ ✅
 **Aufwand:** Mittel · **Nutzen:** Hoch
 
-Materialien lassen sich aktuell nur über `.asset`-JSON-Dateien bearbeiten. Ein Popup-basierter Editor (analog Landscape Manager) mit Live-Vorschau der Textur-Slots, PBR-Parameter und Shader-Auswahl macht das Material-System für Anwender zugänglich. Infrastruktur (PopupWindow, EditorUIBuilder, EditorTheme) ist komplett vorhanden.
+Popup-basierter Material-Editor (`openMaterialEditorPopup`) mit Material-Auswahl per Dropdown, PBR-Parameter-Editing (Metallic, Roughness, Shininess als Slider, PBR-Enabled-Checkbox), Textur-Slot-Bearbeitung (Diffuse, Specular, Normal, Emissive, MetallicRoughness) und Save/Close-Buttons. Erreichbar über Content-Browser-Doppelklick auf Material-Assets und über den Tools-Bereich in World Settings. Nutzt EditorUIBuilder-Helpers und speichert Änderungen direkt ins Asset-JSON.
 
 ---
 

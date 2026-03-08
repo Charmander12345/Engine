@@ -58,6 +58,17 @@ public:
     enum class GizmoMode { None, Translate, Rotate, Scale };
     enum class GizmoAxis { None, X, Y, Z };
     enum class AntiAliasingMode { None = 0, FXAA = 1, MSAA_2x = 2, MSAA_4x = 3 };
+    enum class DebugRenderMode {
+        Lit = 0,          // Normal PBR/Blinn-Phong shading (default)
+        Unlit,            // Diffuse texture only, no lighting
+        Wireframe,        // Wireframe overlay
+        ShadowMap,        // Visualise shadow map depth
+        ShadowCascades,   // Colour-code CSM cascade splits
+        InstanceGroups,   // Colour-code instanced batches
+        Normals,          // World-space normals as colour
+        Depth,            // Linearised depth buffer visualisation
+        Overdraw          // Additive overdraw heat-map
+    };
 
     virtual ~Renderer() = default;
 
@@ -131,6 +142,10 @@ public:
     virtual void setSsaoEnabled(bool /*enabled*/) {}
     virtual bool isCsmEnabled() const { return true; }
     virtual void setCsmEnabled(bool /*enabled*/) {}
+
+    // --- Debug render mode ---
+    virtual DebugRenderMode getDebugRenderMode() const { return DebugRenderMode::Lit; }
+    virtual void setDebugRenderMode(DebugRenderMode /*mode*/) {}
 
     // --- Debug visualizations ---
     virtual bool isUIDebugEnabled() const { return false; }

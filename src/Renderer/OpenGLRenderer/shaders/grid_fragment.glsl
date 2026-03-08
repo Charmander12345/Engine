@@ -60,6 +60,13 @@ uniform mat4  uCsmMatrices[MAX_CSM_CASCADES];
 uniform float uCsmSplits[MAX_CSM_CASCADES];
 uniform mat4  uViewMatrix;
 
+// Debug render mode (0=Lit, 1=Unlit, 2=Wireframe, 3=ShadowMap, 4=ShadowCascades,
+//                     5=InstanceGroups, 6=Normals, 7=Depth, 8=Overdraw)
+uniform int   uDebugMode;
+uniform vec3  uDebugColor;
+uniform float uNearPlane;
+uniform float uFarPlane;
+
 float calcShadow(int shadowIdx, vec3 worldPos, vec3 normal, vec3 lightDir)
 {
     vec4 lightSpacePos = uLightSpaceMatrices[shadowIdx] * vec4(worldPos, 1.0);
@@ -238,7 +245,83 @@ vec3 worldGrid(vec3 worldPos)
 
 void main()
 {
+    // --- Debug: Normals ---
+    if (uDebugMode == 6)
+    {
+        vec3 n = normalize(vNormal);
+        FragColor = vec4(n * 0.5 + 0.5, 1.0);
+        return;
+    }
+
+    // --- Debug: Depth (logarithmic mapping) ---
+    if (uDebugMode == 7)
+    {
+        float z = gl_FragCoord.z;
+        float ndc = z * 2.0 - 1.0;
+        float near = uNearPlane;
+        float far  = uFarPlane;
+        float linearDepth = (2.0 * near * far) / (far + near - ndc * (far - near));
+        float d = log2(1.0 + linearDepth) / log2(1.0 + far);
+        FragColor = vec4(vec3(1.0 - d), 1.0);
+        return;
+    }
+
+    // --- Debug: Overdraw ---
+    if (uDebugMode == 8)
+    {
+        FragColor = vec4(0.1, 0.02, 0.0, 1.0);
+        return;
+    }
+
+    // --- Debug: Instance Groups ---
+    if (uDebugMode == 5)
+    {
+        vec3 gridColor = worldGrid(vWorldPos);
+        FragColor = vec4(gridColor * uDebugColor, 1.0);
+        return;
+    }
+
+    // --- Debug: Shadow Map visualisation ---
+    if (uDebugMode == 3)
+    {
+        vec3 normal = normalize(vNormal);
+        float shadow = 0.0;
+        for (int s = 0; s < uShadowCount && s < MAX_SHADOW_LIGHTS; ++s)
+        {
+            shadow = max(shadow, calcShadow(s, vWorldPos, normal, vec3(0.0, -1.0, 0.0)));
+        }
+        if (uCsmEnabled != 0)
+        {
+            shadow = max(shadow, calcCsmShadow(vWorldPos, normal, vec3(0.0, -1.0, 0.0)));
+        }
+        FragColor = vec4(vec3(1.0 - shadow), 1.0);
+        return;
+    }
+
+    // --- Debug: Shadow Cascades ---
+    if (uDebugMode == 4)
+    {
+        float depth = -(uViewMatrix * vec4(vWorldPos, 1.0)).z;
+        vec3 cascadeColor = vec3(0.5);
+        if (depth < uCsmSplits[0])      cascadeColor = vec3(0.2, 1.0, 0.2);
+        else if (depth < uCsmSplits[1]) cascadeColor = vec3(0.2, 0.5, 1.0);
+        else if (depth < uCsmSplits[2]) cascadeColor = vec3(1.0, 1.0, 0.2);
+        else                            cascadeColor = vec3(1.0, 0.2, 0.2);
+        vec3 gridColor = worldGrid(vWorldPos);
+        FragColor = vec4(gridColor * 0.3 + cascadeColor * 0.7, 1.0);
+        return;
+    }
+
     vec3 gridColor = worldGrid(vWorldPos);
+
+    // --- Debug: Unlit / Wireframe ---
+    if (uDebugMode == 1 || uDebugMode == 2)
+    {
+        FragColor = vec4(gridColor, 1.0);
+        return;
+    }
+
+    // --- Normal Lit path (uDebugMode == 0) ---
     vec3 normal = normalize(vNormal);
     vec3 viewDir = normalize(uViewPos - vWorldPos);
 

@@ -305,6 +305,7 @@ private:
 
     bool m_wireframeEnabled{false};
     bool m_vsyncEnabled{false};
+    DebugRenderMode m_debugRenderMode{DebugRenderMode::Lit};
 
     // Post-processing pipeline
     PostProcessStack m_postProcessStack;
@@ -551,6 +552,8 @@ public:
     bool isSsaoEnabled() const override { return m_ssaoEnabled; }
     void setCsmEnabled(bool enabled) override { m_csmUserEnabled = enabled; }
     bool isCsmEnabled() const override { return m_csmUserEnabled; }
+    void setDebugRenderMode(DebugRenderMode mode) override { m_debugRenderMode = mode; }
+    DebugRenderMode getDebugRenderMode() const override { return m_debugRenderMode; }
     void setSkyboxPath(const std::string& pathOrFolder) override;
     std::string getSkyboxPath() const override { return m_skyboxLoadedPath; }
     void requestPick(int screenX, int screenY) override { m_pickRequested = true; m_pickX = screenX; m_pickY = screenY; }

@@ -28,6 +28,9 @@ public:
     void setCsmData(GLuint texArray, const glm::mat4* matrices, const float* splits,
                     int lightIndex, bool enabled, const glm::mat4& viewMatrix);
     void setPbrData(bool enabled, float metallic, float roughness);
+    void setDebugMode(int mode);
+    void setDebugColor(const glm::vec3& color);
+    void setNearFarPlanes(float nearPlane, float farPlane);
     void render() override;
     void renderBatchContinuation();
     void setTextures(const std::vector<std::shared_ptr<Texture>>& textures) override;

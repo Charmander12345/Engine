@@ -262,6 +262,11 @@ bool OpenGLMaterial::build()
     m_locHasMetallicRoughnessMap = glGetUniformLocation(m_program, "uHasMetallicRoughnessMap");
     // Instancing uniform
     m_locInstanced = glGetUniformLocation(m_program, "uInstanced");
+    // Debug render mode uniforms
+    m_locDebugMode  = glGetUniformLocation(m_program, "uDebugMode");
+    m_locDebugColor = glGetUniformLocation(m_program, "uDebugColor");
+    m_locNearPlane  = glGetUniformLocation(m_program, "uNearPlane");
+    m_locFarPlane   = glGetUniformLocation(m_program, "uFarPlane");
 
     // Cache texture sampler locations.
     // Try material struct names first (material.diffuse, material.specular),
@@ -495,6 +500,16 @@ void OpenGLMaterial::bind()
         glUniform1f(m_locRoughness, m_pbrRoughness);
     if (m_locHasMetallicRoughnessMap >= 0)
         glUniform1i(m_locHasMetallicRoughnessMap, (m_textures.size() >= 5 && m_textures[4]) ? 1 : 0);
+
+    // Debug render mode uniforms
+    if (m_locDebugMode >= 0)
+        glUniform1i(m_locDebugMode, m_debugMode);
+    if (m_locDebugColor >= 0)
+        glUniform3fv(m_locDebugColor, 1, glm::value_ptr(m_debugColor));
+    if (m_locNearPlane >= 0)
+        glUniform1f(m_locNearPlane, m_nearPlane);
+    if (m_locFarPlane >= 0)
+        glUniform1f(m_locFarPlane, m_farPlane);
 
     bindTextures();
 }

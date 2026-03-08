@@ -238,8 +238,8 @@ Engine/
 │   │   │   ├── OpenGLSplashWindow.h/.cpp # OpenGL-Implementierung des Splash-Fensters (Shader, VAOs, FreeType-Atlas)
 │   │   │   ├── glad/               # OpenGL-Loader (GLAD)
 │   │   │   ├── shaders/            # GLSL-Shader-Dateien
-│   │   │       ├── vertex.glsl / fragment.glsl       # 3D-Welt (Beleuchtung, Texturen)
-│   │   │       ├── grid_fragment.glsl                # Prozedurales Grid-Material (Multi-Light, Schatten, Blinn-Phong)
+│   │   │       ├── vertex.glsl / fragment.glsl       # 3D-Welt (Beleuchtung, Texturen, Debug Render Modes)
+│   │   │       ├── grid_fragment.glsl                # Prozedurales Grid-Material (Multi-Light, Schatten, Blinn-Phong, Debug Render Modes)
 │   │   │       ├── light_fragment.glsl               # Beleuchtung
 │   │   │       ├── panel_vertex/fragment.glsl        # UI-Panels
 │   │   │       ├── button_vertex/fragment.glsl       # UI-Buttons
@@ -376,7 +376,7 @@ Beim Start werden sechs Editor-Widgets geladen:
 | Widget-Name       | Asset-Datei              | Tab-Scope  | Funktion                                    |
 |-------------------|--------------------------|------------|---------------------------------------------|
 | TitleBar          | `TitleBar.asset`         | Global     | 100px: HorizonEngine-Titel links + Projektname mittig + Min/Max/Close rechts, Tab-Leiste unten (volle Breite) |
-| ViewportOverlay   | `ViewportOverlay.asset`  | Viewport   | Toolbar: Select/Move/Rotate/Scale + Play/Stop (PIE) zentriert + Settings rechts |
+| ViewportOverlay   | `ViewportOverlay.asset`  | Viewport   | Toolbar: Render-Mode-Dropdown links (Lit/Unlit/Wireframe/Shadow Map/Shadow Cascades/Instance Groups/Normals/Depth/Overdraw) + Play/Stop (PIE) zentriert + Settings rechts |
 | WorldSettings     | `WorldSettings.asset`    | Viewport   | Clear-Color-Picker (RGB-Einträge)           |
 | WorldOutliner     | `WorldOutliner.asset`    | Viewport   | Entitäten-Liste des aktiven Levels          |
 | EntityDetails     | `EntityDetails.asset`    | Viewport   | Komponenten-Details der ausgewählten Entität mit editierbaren Steuerelementen: Vec3-Eingabefelder (X/Y/Z farbcodiert) für Transform, EntryBars für Floats, CheckBoxen für Booleans, DropDowns für Enums, ColorPicker für Farben, Drag-and-Drop + Dropdown-Auswahl für Mesh/Material/Script-Assets, "+ Add Component"-Dropdown, Remove-Button (X) pro Komponente mit Bestätigungsdialog |
@@ -388,7 +388,7 @@ Die Engine unterstützt ein Tab-basiertes Editor-Layout:
 
 - **Titelleiste** (obere Reihe der TitleBar, 50px): "HorizonEngine" links + Projektname mittig + Min/Max/Close rechts (Drag-Bereich)
 - **Tab-Leiste** (untere Reihe der TitleBar, 50px): Dokument-/Level-Tabs horizontal von links nach rechts, volle Breite
-- **Toolbar** (ViewportOverlay, 34px): PIE-Controls zentriert, Settings rechts (Select/Move/Rotate/Scale temporär entfernt)
+- **Toolbar** (ViewportOverlay, 34px): Debug-Render-Mode-Dropdown links (9 Modi), PIE-Controls zentriert, Settings rechts (Select/Move/Rotate/Scale temporär entfernt)
 - **Viewport-Tab**: Immer geöffnet (nicht schließbar), zeigt die 3D-Szene
 - **Mesh-Viewer-Tabs**: Schließbare Tabs für 3D-Mesh-Vorschau mit Split-View (Viewport + Properties), geöffnet per Doppelklick auf Model3D im Content Browser. Jeder Tab besitzt ein eigenes Runtime-EngineLevel.
 - **Widget-Editor-Tabs**: Schließbare Tabs für Widget-Bearbeitung, geöffnet per Doppelklick auf Widget-Asset im Content Browser. Vier-Panel-Layout: Oben schmale Toolbar (Save-Button + Dirty-Indikator „* Unsaved changes", z=3), Links Steuerelement-Liste (Drag-&-Drop-fähig) + klickbare Hierarchie mit Drag-&-Drop-Reordering (z=2), Mitte FBO-basierte Widget-Vorschau (z=1), Rechts editierbares Details-Panel (z=2). Canvas-Hintergrund z=0. **FBO-Preview**: Das editierte Widget wird in einen eigenen OpenGLRenderTarget-FBO gerendert (bei (0,0) mit Design-Größe layoutet, nicht im UI-System registriert). Die FBO-Textur wird per `drawUIImage` als Quad im Canvas-Bereich angezeigt, mit Zoom (Scroll) und Pan (Rechtsklick-Drag). Scissor-Clipping begrenzt die Anzeige auf den Canvas. Selektierte Elemente werden per `drawUIOutline` mit orangefarbener Outline hervorgehoben. Linksklick im Canvas transformiert Screen-Koordinaten → Widget-lokale Koordinaten (via Zoom/Pan/Canvas-Rect) und selektiert das oberste Element per Bounds-Hit-Test. **Details-Panel**: Eigenschaftsänderungen (From/To, MinSize, Padding, FillX/Y, Farbe, Text, Font, Image-Path, Slider-Werte) werden sofort auf die FBO-Vorschau angewendet via `applyChange`-Helper (setzt `previewDirty` + `markLayoutDirty` + `markAllWidgetsDirty`). **Drag-&-Drop**: Steuerelemente aus der Toolbox können per Drag-&-Drop auf den Canvas gezogen werden — auch wenn das Widget noch keine Elemente hat (Root-Element wird automatisch erstellt). Hierarchie-Einträge im linken Panel sind per Drag-&-Drop verschiebbar (`moveWidgetEditorElement` entfernt das Element und fügt es als Sibling nach dem Ziel ein, mit Zyklus-Schutz). `WidgetEditorState` pro Tab in `UIManager` verwaltet (inkl. Zoom/Pan, `isDirty`-Flag, `previewDirty`-Flag, `assetId`, `toolbarWidgetId`). Speichern: `saveWidgetEditorAsset()` synchronisiert Widget-JSON zurück in AssetData und ruft `AssetManager::saveAsset()` auf. Dirty-Tracking: `markWidgetEditorDirty()` setzt `isDirty`- und `previewDirty`-Flags und aktualisiert Toolbar-Label. Tab-Level-Selektion: Delete-Taste löscht im Widget-Editor das selektierte Element statt das Asset im Content Browser. Undo/Redo: Hinzufügen und Löschen von Elementen werden als `UndoRedoManager::Command` registriert und sind per Ctrl+Z/Ctrl+Y rückgängig/wiederholbar. FBO-Cleanup: `cleanupWidgetEditorPreview(tabId)` wird beim Schließen des Tabs aufgerufen.
@@ -805,6 +805,7 @@ Abstrakte Schnittstelle für jeden Rendering-Backend (~130 Zeilen, ~60 virtuelle
 **Virtual mit Default-Implementierung (optional):**
 - Rendering-Toggles: Shadows, VSync, Wireframe, Occlusion Culling
 - Debug-Visualisierungen: UI Debug, Bounds Debug, HeightField Debug
+- Debug Render Modes: DebugRenderMode Enum (Lit, Unlit, Wireframe, ShadowMap, ShadowCascades, InstanceGroups, Normals, Depth, Overdraw), getDebugRenderMode, setDebugRenderMode
 - Entity Picking: pickEntityAt, requestPick, getSelectedEntity, setSelectedEntity
 - Gizmo: GizmoMode/GizmoAxis Enums, beginGizmoDrag, updateGizmoDrag, endGizmoDrag
 - Editor Tabs: addTab, removeTab, setActiveTab, getActiveTabId
@@ -1153,7 +1154,8 @@ registerClickEvent("TitleBar.Close", []() { ... });
 #### Popup-Fenster:
 - `openLandscapeManagerPopup()` — öffnet das Landscape-Manager-Popup mit Formular-UI (vormals in `main.cpp`).
 - `openEngineSettingsPopup()` — öffnet das Engine-Settings-Popup mit Sidebar-Navigation (vormals in `main.cpp`).
-- Beide Methoden nutzen den `m_renderer`-Back-Pointer (`setRenderer()`) um `OpenGLRenderer::openPopupWindow()` / `closePopupWindow()` aufzurufen.
+- `openMaterialEditorPopup(materialAssetPath)` — öffnet den Material-Editor als Popup (480×560). Material-Auswahl per Dropdown aus der Asset-Registry, PBR-Parameter (Metallic, Roughness, Shininess als Slider, PBR-Enabled-Checkbox), Textur-Slot-Bearbeitung (Diffuse, Specular, Normal, Emissive, MetallicRoughness als String-Rows) und Save/Close-Buttons. Erreichbar über Content-Browser-Doppelklick auf Material-Assets und über den Tools-Bereich in World Settings.
+- Alle Popup-Methoden nutzen den `m_renderer`-Back-Pointer (`setRenderer()`) um `OpenGLRenderer::openPopupWindow()` / `closePopupWindow()` aufzurufen.
 
 #### Mesh Viewer (Editor-Fenster):
 - **Klasse**: `MeshViewerWindow` (`src/Renderer/EditorWindows/MeshViewerWindow.h/.cpp`)

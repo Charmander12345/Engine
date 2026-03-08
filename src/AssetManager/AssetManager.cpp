@@ -1404,6 +1404,36 @@ void AssetManager::ensureEditorWidgetsCreated()
         bg["shaderFragment"] = "panel_fragment.glsl";
         elements.push_back(bg);
 
+        // Left section: Render mode dropdown button
+        json leftStack = json::object();
+        leftStack["id"] = "ViewportOverlay.Left";
+        leftStack["type"] = "StackPanel";
+        leftStack["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        leftStack["to"] = json{ {"x", 0.12f}, {"y", 1.0f} };
+        leftStack["orientation"] = "Horizontal";
+        leftStack["padding"] = json{ {"x", 2.0f}, {"y", 2.0f} };
+        leftStack["sizeToContent"] = true;
+
+        json btnRenderMode = json::object();
+        btnRenderMode["id"] = "ViewportOverlay.RenderMode";
+        btnRenderMode["type"] = "Button";
+        btnRenderMode["clickEvent"] = "ViewportOverlay.RenderMode";
+        btnRenderMode["color"] = json{ {"x", 0.12f}, {"y", 0.12f}, {"z", 0.12f}, {"w", 1.0f} };
+        btnRenderMode["hoverColor"] = json{ {"x", 0.22f}, {"y", 0.22f}, {"z", 0.22f}, {"w", 1.0f} };
+        btnRenderMode["textColor"] = json{ {"x", 0.85f}, {"y", 0.85f}, {"z", 0.85f}, {"w", 1.0f} };
+        btnRenderMode["text"] = "Lit";
+        btnRenderMode["font"] = "default.ttf";
+        btnRenderMode["fontSize"] = 12.0f;
+        btnRenderMode["textAlignH"] = "Center";
+        btnRenderMode["textAlignV"] = "Center";
+        btnRenderMode["minSize"] = json{ {"x", 55.0f}, {"y", 0.0f} };
+        btnRenderMode["padding"] = json{ {"x", 8.0f}, {"y", 2.0f} };
+        btnRenderMode["shaderVertex"] = "button_vertex.glsl";
+        btnRenderMode["shaderFragment"] = "button_fragment.glsl";
+
+        leftStack["children"] = json::array({ btnRenderMode });
+        elements.push_back(leftStack);
+
         // Center section: PIE controls (spacer + play + spacer)
         json centerStack = json::object();
         centerStack["id"] = "ViewportOverlay.Center";
@@ -1496,8 +1526,7 @@ void AssetManager::ensureEditorWidgetsCreated()
                 if (check.is_open())
                 {
                     const std::string content((std::istreambuf_iterator<char>(check)), std::istreambuf_iterator<char>());
-                    if (content.find("ViewportOverlay.Center") == std::string::npos
-                        || content.find("ViewportOverlay.Left") != std::string::npos)
+                    if (content.find("ViewportOverlay.RenderMode") == std::string::npos)
                     {
                         existsAndOk = false;
                     }
@@ -2214,7 +2243,25 @@ void AssetManager::ensureEditorWidgetsCreated()
     landscapeBtn["isHitTestable"] = true;
     landscapeBtn["clickEvent"] = "WorldSettings.Tools.Landscape";
 
-    stack["children"] = json::array({ title, clearLabel, colorPicker, separator, toolsLabel, landscapeBtn });
+    json materialEditorBtn = json::object();
+    materialEditorBtn["id"] = "WorldSettings.Tools.MaterialEditor";
+    materialEditorBtn["type"] = "Button";
+    materialEditorBtn["text"] = "Material Editor...";
+    materialEditorBtn["font"] = "default.ttf";
+    materialEditorBtn["fontSize"] = 13.0f;
+    materialEditorBtn["textAlignH"] = "Center";
+    materialEditorBtn["textAlignV"] = "Center";
+    materialEditorBtn["padding"] = json{ {"x", 8.0f}, {"y", 4.0f} };
+    materialEditorBtn["minSize"] = json{ {"x", 0.0f}, {"y", 28.0f} };
+    materialEditorBtn["color"] = json{ {"x", 0.15f}, {"y", 0.15f}, {"z", 0.18f}, {"w", 1.0f} };
+    materialEditorBtn["hoverColor"] = json{ {"x", 0.2f}, {"y", 0.2f}, {"z", 0.24f}, {"w", 1.0f} };
+    materialEditorBtn["textColor"] = json{ {"x", 0.8f}, {"y", 0.8f}, {"z", 0.85f}, {"w", 1.0f} };
+    materialEditorBtn["shaderVertex"] = "button_vertex.glsl";
+    materialEditorBtn["shaderFragment"] = "button_fragment.glsl";
+    materialEditorBtn["isHitTestable"] = true;
+    materialEditorBtn["clickEvent"] = "WorldSettings.Tools.MaterialEditor";
+
+    stack["children"] = json::array({ title, clearLabel, colorPicker, separator, toolsLabel, landscapeBtn, materialEditorBtn });
 
     elements.push_back(stack);
     widgetJson["m_elements"] = elements;
@@ -3155,13 +3202,33 @@ std::shared_ptr<AssetData> AssetManager::getLoadedAssetByPath(const std::string&
 	if (path.empty())
 		return nullptr;
 	std::lock_guard<std::mutex> lock(m_stateMutex);
-	auto pathIt = m_loadedAssetsByPath.find(path);
-	if (pathIt != m_loadedAssetsByPath.end())
+
+	auto tryFind = [&](const std::string& key) -> std::shared_ptr<AssetData>
 	{
-		auto assetIt = m_loadedAssets.find(pathIt->second);
-		if (assetIt != m_loadedAssets.end())
-			return assetIt->second;
+		auto pathIt = m_loadedAssetsByPath.find(key);
+		if (pathIt != m_loadedAssetsByPath.end())
+		{
+			auto assetIt = m_loadedAssets.find(pathIt->second);
+			if (assetIt != m_loadedAssets.end())
+				return assetIt->second;
+		}
+		return nullptr;
+	};
+
+	if (auto a = tryFind(path)) return a;
+
+	const std::string normalized = fs::path(path).lexically_normal().generic_string();
+	if (normalized != path)
+	{
+		if (auto a = tryFind(normalized)) return a;
 	}
+
+	const std::string absPath = getAbsoluteContentPath(path);
+	if (!absPath.empty() && absPath != path && absPath != normalized)
+	{
+		if (auto a = tryFind(absPath)) return a;
+	}
+
 	return nullptr;
 }
 
@@ -3645,6 +3712,15 @@ int AssetManager::loadAsset(const std::string& path, AssetType type, SyncState s
 		if (pathIt != m_loadedAssetsByPath.end())
 		{
 			return static_cast<int>(pathIt->second);
+		}
+		const std::string normalized = fs::path(path).lexically_normal().generic_string();
+		if (normalized != path)
+		{
+			pathIt = m_loadedAssetsByPath.find(normalized);
+			if (pathIt != m_loadedAssetsByPath.end())
+			{
+				return static_cast<int>(pathIt->second);
+			}
 		}
 	}
 

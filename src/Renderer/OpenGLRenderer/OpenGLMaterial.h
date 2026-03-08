@@ -95,6 +95,11 @@ public:
     // PBR (Metallic/Roughness)
     void setPbrData(bool enabled, float metallic, float roughness);
 
+    // Debug render mode
+    void setDebugMode(int mode) { m_debugMode = mode; }
+    void setDebugColor(const glm::vec3& color) { m_debugColor = color; }
+    void setNearFarPlanes(float nearPlane, float farPlane) { m_nearPlane = nearPlane; m_farPlane = farPlane; }
+
 private:
     void bindTextures();
 
@@ -217,4 +222,14 @@ private:
 
     // Instancing
     GLint m_locInstanced{-1};
+
+    // Debug render mode
+    int       m_debugMode{0};
+    glm::vec3 m_debugColor{1.0f};
+    float     m_nearPlane{0.1f};
+    float     m_farPlane{1000.0f};
+    GLint m_locDebugMode{-1};
+    GLint m_locDebugColor{-1};
+    GLint m_locNearPlane{-1};
+    GLint m_locFarPlane{-1};
 };

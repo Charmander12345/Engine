@@ -1299,10 +1299,12 @@ void OpenGLRenderer::renderWorld()
 		});
 
 	// ---- Shadow map pass (multi-light) ----
+	const int debugMode = static_cast<int>(m_debugRenderMode);
+	const bool debugNeedsShadows = (debugMode == 0 || debugMode == 3 || debugMode == 4); // Lit, ShadowMap, ShadowCascades
 	m_shadowCount = 0;
 	m_csmEnabled = false;
 	m_csmLightIndex = -1;
-	if (m_shadowEnabled && ensureShadowResources())
+	if (m_shadowEnabled && debugNeedsShadows && ensureShadowResources())
 	{
 		findShadowLightIndices();
 		for (int s = 0; s < m_shadowCount; ++s)
@@ -1319,7 +1321,7 @@ void OpenGLRenderer::renderWorld()
 	}
 
 	// ---- Cascaded Shadow Maps (first directional light) ----
-	if (m_shadowEnabled && m_csmUserEnabled && m_csmLightIndex >= 0 && ensureCsmResources())
+	if (m_shadowEnabled && debugNeedsShadows && m_csmUserEnabled && m_csmLightIndex >= 0 && ensureCsmResources())
 	{
 		computeCsmMatrices(m_sceneLights[m_csmLightIndex], view, m_projectionMatrix, activeNear, activeFar);
 		renderCsmShadowMaps(m_shadowCasterList);
@@ -1331,7 +1333,7 @@ void OpenGLRenderer::renderWorld()
 
 	// ---- Point light shadow map pass (cube maps) ----
 	m_pointShadowCount = 0;
-	if (m_shadowEnabled && ensurePointShadowResources())
+	if (m_shadowEnabled && debugNeedsShadows && ensurePointShadowResources())
 	{
 		findPointShadowLightIndices();
 		if (m_pointShadowCount > 0)
@@ -1344,15 +1346,43 @@ void OpenGLRenderer::renderWorld()
 	}
 
 	// Render sorted draw list (instanced batching by material)
-	if (m_wireframeEnabled)
+	const bool debugWireframe = (m_debugRenderMode == DebugRenderMode::Wireframe);
+	if (m_wireframeEnabled || debugWireframe)
 	{
 		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 	}
+	// Overdraw mode: additive blending
+	if (m_debugRenderMode == DebugRenderMode::Overdraw)
+	{
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_ONE, GL_ONE);
+		glDepthFunc(GL_ALWAYS);
+	}
 	const glm::vec3 fogColor(m_fogColor.x, m_fogColor.y, m_fogColor.z);
+	size_t batchIndex = 0; // for InstanceGroups coloring
 	size_t di = 0;
 	while (di < m_drawList.size())
 	{
 		const auto& first = m_drawList[di];
+
+		// Compute per-batch debug color for InstanceGroups mode
+		glm::vec3 batchDebugColor(1.0f);
+		if (m_debugRenderMode == DebugRenderMode::InstanceGroups)
+		{
+			// Deterministic hue from batch index
+			const float hue = static_cast<float>(batchIndex % 12) / 12.0f;
+			const float h6 = hue * 6.0f;
+			const int hi = static_cast<int>(h6);
+			const float f = h6 - static_cast<float>(hi);
+			switch (hi % 6) {
+				case 0: batchDebugColor = glm::vec3(1.0f, f, 0.0f); break;
+				case 1: batchDebugColor = glm::vec3(1.0f - f, 1.0f, 0.0f); break;
+				case 2: batchDebugColor = glm::vec3(0.0f, 1.0f, f); break;
+				case 3: batchDebugColor = glm::vec3(0.0f, 1.0f - f, 1.0f); break;
+				case 4: batchDebugColor = glm::vec3(f, 0.0f, 1.0f); break;
+				case 5: batchDebugColor = glm::vec3(1.0f, 0.0f, 1.0f - f); break;
+			}
+		}
 
 		// Emission objects always draw individually (per-object light override)
 		if (first.hasEmission)
@@ -1364,6 +1394,9 @@ void OpenGLRenderer::renderWorld()
 			first.obj->setCsmData(m_csmDepthArray, m_csmMatrices, m_csmSplits, m_csmLightIndex, m_csmEnabled, view);
 			first.obj->setLightData(lightPosition, first.emissionColor, lightIntensity);
 			first.obj->setLights(m_sceneLights);
+			first.obj->setDebugMode(debugMode);
+			first.obj->setDebugColor(batchDebugColor);
+			first.obj->setNearFarPlanes(activeNear, activeFar);
 			first.obj->render();
 			if (m_boundsDebugEnabled && first.hasBounds)
 			{
@@ -1372,6 +1405,7 @@ void OpenGLRenderer::renderWorld()
 				drawBoundsDebugBox(center, extent, viewProj);
 			}
 			++di;
+			++batchIndex;
 			continue;
 		}
 
@@ -1394,6 +1428,9 @@ void OpenGLRenderer::renderWorld()
 		first.obj->setCsmData(m_csmDepthArray, m_csmMatrices, m_csmSplits, m_csmLightIndex, m_csmEnabled, view);
 		first.obj->setLightData(lightPosition, lightColor, lightIntensity);
 		first.obj->setLights(m_sceneLights);
+		first.obj->setDebugMode(debugMode);
+		first.obj->setDebugColor(batchDebugColor);
+		first.obj->setNearFarPlanes(activeNear, activeFar);
 
 		if (batchSize > 1 && first.material)
 		{
@@ -1424,11 +1461,17 @@ void OpenGLRenderer::renderWorld()
 		}
 
 		di = batchEnd;
+		++batchIndex;
 	}
 
-	if (m_wireframeEnabled)
+	if (m_wireframeEnabled || debugWireframe)
 	{
 		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+	}
+	if (m_debugRenderMode == DebugRenderMode::Overdraw)
+	{
+		glDisable(GL_BLEND);
+		glDepthFunc(GL_LESS);
 	}
 
 	// HeightField debug wireframe overlay
@@ -2654,6 +2697,7 @@ bool OpenGLRenderer::routeEventToPopup(SDL_Event& event)
         {
             const Vec2 pos{ event.motion.x, event.motion.y };
             uiMgr.setMousePosition(pos);
+            uiMgr.handleMouseMotion(pos);
             return true;
         }
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
