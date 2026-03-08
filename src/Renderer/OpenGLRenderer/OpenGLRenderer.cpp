@@ -296,6 +296,7 @@ void OpenGLRenderer::shutdown()
     releaseCsmResources();
     releasePickFbo();
     releaseOutlineResources();
+    releaseInstanceResources();
     releaseUiFbo();
     releaseAllTabFbos();
 
@@ -1053,6 +1054,7 @@ void OpenGLRenderer::renderWorld()
 			++m_lastTotalCount;
 			DrawCmd cmd;
 			cmd.obj = entry.object3D.get();
+			cmd.material = entry.object3D->getMaterial();
 			cmd.modelMatrix = entry.cachedModelMatrix;
 			cmd.entityId = static_cast<unsigned int>(entry.entity);
 			bool isLight = false;
@@ -1118,6 +1120,7 @@ void OpenGLRenderer::renderWorld()
 
 			DrawCmd cmd;
 			cmd.obj = glObj.get();
+			cmd.material = glObj->getMaterial();
 			Mat4 engineMat = entry->transform.getMatrix4ColumnMajor();
 			cmd.modelMatrix = glm::make_mat4(engineMat.m);
 			cmd.modelMatrix = glm::rotate(cmd.modelMatrix, timeRotation, glm::vec3(0.0f, 1.0f, 0.0f));
@@ -1187,6 +1190,7 @@ void OpenGLRenderer::renderWorld()
 
 				DrawCmd cmd;
 				cmd.obj = glObj.get();
+				cmd.material = glObj->getMaterial();
 				Mat4 engineMat = t->getMatrix4ColumnMajor();
 				cmd.modelMatrix = glm::make_mat4(engineMat.m);
 
@@ -1234,6 +1238,7 @@ void OpenGLRenderer::renderWorld()
 			++m_lastTotalCount;
 			DrawCmd cmd;
 			cmd.obj = entry.object3D.get();
+			cmd.material = entry.object3D->getMaterial();
 			cmd.modelMatrix = entry.cachedModelMatrix;
 			cmd.entityId = static_cast<unsigned int>(entry.entity);
 			bool isLight = false;
@@ -1277,9 +1282,21 @@ void OpenGLRenderer::renderWorld()
 		}
 	}
 
-	// Sort by shader program to minimize state changes
+	// Sort by (material, obj) so only objects with same mesh AND material are batched
 	std::sort(m_drawList.begin(), m_drawList.end(),
-		[](const DrawCmd& a, const DrawCmd& b) { return a.program < b.program; });
+		[](const DrawCmd& a, const DrawCmd& b)
+		{
+			if (a.material != b.material) return a.material < b.material;
+			return a.obj < b.obj;
+		});
+
+	// Sort shadow caster list by (material, obj) for instanced shadow rendering
+	std::sort(m_shadowCasterList.begin(), m_shadowCasterList.end(),
+		[](const DrawCmd& a, const DrawCmd& b)
+		{
+			if (a.material != b.material) return a.material < b.material;
+			return a.obj < b.obj;
+		});
 
 	// ---- Shadow map pass (multi-light) ----
 	m_shadowCount = 0;
@@ -1326,46 +1343,87 @@ void OpenGLRenderer::renderWorld()
 		}
 	}
 
-	// Render sorted draw list
+	// Render sorted draw list (instanced batching by material)
 	if (m_wireframeEnabled)
 	{
 		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 	}
-	GLuint lastProgram = 0;
 	const glm::vec3 fogColor(m_fogColor.x, m_fogColor.y, m_fogColor.z);
-	for (const auto& cmd : m_drawList)
+	size_t di = 0;
+	while (di < m_drawList.size())
 	{
-		cmd.obj->setMatrices(cmd.modelMatrix, view, m_projectionMatrix);
-		cmd.obj->setShadowData(m_shadowDepthArray, m_shadowLightSpaceMatrices, m_shadowLightIndices, m_shadowCount);
-		cmd.obj->setPointShadowData(m_pointShadowCubeArray, m_pointShadowPositions, m_pointShadowFarPlanes, m_pointShadowLightIndices, m_pointShadowCount);
-		cmd.obj->setFogData(m_fogEnabled, fogColor, m_fogParams.z);
-		cmd.obj->setCsmData(m_csmDepthArray, m_csmMatrices, m_csmSplits, m_csmLightIndex, m_csmEnabled, view);
-		if (cmd.hasEmission)
+		const auto& first = m_drawList[di];
+
+		// Emission objects always draw individually (per-object light override)
+		if (first.hasEmission)
 		{
-			cmd.obj->setLightData(lightPosition, cmd.emissionColor, lightIntensity);
-			cmd.obj->setLights(m_sceneLights);
-			cmd.obj->render();
-			lastProgram = 0;
+			first.obj->setMatrices(first.modelMatrix, view, m_projectionMatrix);
+			first.obj->setShadowData(m_shadowDepthArray, m_shadowLightSpaceMatrices, m_shadowLightIndices, m_shadowCount);
+			first.obj->setPointShadowData(m_pointShadowCubeArray, m_pointShadowPositions, m_pointShadowFarPlanes, m_pointShadowLightIndices, m_pointShadowCount);
+			first.obj->setFogData(m_fogEnabled, fogColor, m_fogParams.z);
+			first.obj->setCsmData(m_csmDepthArray, m_csmMatrices, m_csmSplits, m_csmLightIndex, m_csmEnabled, view);
+			first.obj->setLightData(lightPosition, first.emissionColor, lightIntensity);
+			first.obj->setLights(m_sceneLights);
+			first.obj->render();
+			if (m_boundsDebugEnabled && first.hasBounds)
+			{
+				const glm::vec3 center = (first.boundsMin + first.boundsMax) * 0.5f;
+				const glm::vec3 extent = (first.boundsMax - first.boundsMin) * 0.5f;
+				drawBoundsDebugBox(center, extent, viewProj);
+			}
+			++di;
+			continue;
 		}
-		else if (cmd.program != lastProgram)
+
+		// Find batch: same mesh AND material, no emission
+		size_t batchEnd = di + 1;
+		while (batchEnd < m_drawList.size() &&
+			   m_drawList[batchEnd].obj == first.obj &&
+			   m_drawList[batchEnd].material == first.material &&
+			   !m_drawList[batchEnd].hasEmission)
 		{
-			cmd.obj->setLightData(lightPosition, lightColor, lightIntensity);
-			cmd.obj->setLights(m_sceneLights);
-			cmd.obj->render();
-			lastProgram = cmd.program;
+			++batchEnd;
+		}
+		const size_t batchSize = batchEnd - di;
+
+		// Set scene-level uniforms via first object in batch
+		first.obj->setMatrices(first.modelMatrix, view, m_projectionMatrix);
+		first.obj->setShadowData(m_shadowDepthArray, m_shadowLightSpaceMatrices, m_shadowLightIndices, m_shadowCount);
+		first.obj->setPointShadowData(m_pointShadowCubeArray, m_pointShadowPositions, m_pointShadowFarPlanes, m_pointShadowLightIndices, m_pointShadowCount);
+		first.obj->setFogData(m_fogEnabled, fogColor, m_fogParams.z);
+		first.obj->setCsmData(m_csmDepthArray, m_csmMatrices, m_csmSplits, m_csmLightIndex, m_csmEnabled, view);
+		first.obj->setLightData(lightPosition, lightColor, lightIntensity);
+		first.obj->setLights(m_sceneLights);
+
+		if (batchSize > 1 && first.material)
+		{
+			// GPU instanced draw: upload model matrices to SSBO
+			m_instanceMatrixBuffer.clear();
+			for (size_t j = di; j < batchEnd; ++j)
+				m_instanceMatrixBuffer.push_back(m_drawList[j].modelMatrix);
+			uploadInstanceData(m_instanceMatrixBuffer.data(), batchSize);
+			first.material->renderInstanced(static_cast<int>(batchSize));
 		}
 		else
 		{
-			cmd.obj->renderBatchContinuation();
+			first.obj->render();
 		}
 
-		if (m_boundsDebugEnabled && cmd.hasBounds)
+		// Debug bounds for all objects in the batch
+		if (m_boundsDebugEnabled)
 		{
-			const glm::vec3 center = (cmd.boundsMin + cmd.boundsMax) * 0.5f;
-			const glm::vec3 extent = (cmd.boundsMax - cmd.boundsMin) * 0.5f;
-			drawBoundsDebugBox(center, extent, viewProj);
-			lastProgram = 0;
+			for (size_t j = di; j < batchEnd; ++j)
+			{
+				if (m_drawList[j].hasBounds)
+				{
+					const glm::vec3 center = (m_drawList[j].boundsMin + m_drawList[j].boundsMax) * 0.5f;
+					const glm::vec3 extent = (m_drawList[j].boundsMax - m_drawList[j].boundsMin) * 0.5f;
+					drawBoundsDebugBox(center, extent, viewProj);
+				}
+			}
 		}
+
+		di = batchEnd;
 	}
 
 	if (m_wireframeEnabled)
@@ -5464,11 +5522,12 @@ bool OpenGLRenderer::loadSkyboxCubemap(const std::string& folderPath)
         }
     }
 
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
 
     if (!allLoaded)
     {
@@ -5628,6 +5687,42 @@ void OpenGLRenderer::renderSkybox(const glm::mat4& view, const glm::mat4& projec
     glDepthFunc(GL_LESS);
 }
 
+// ---- GPU Instanced Rendering (SSBO) ----
+
+void OpenGLRenderer::uploadInstanceData(const glm::mat4* data, size_t count)
+{
+    if (m_instanceSSBO == 0)
+    {
+        glGenBuffers(1, &m_instanceSSBO);
+    }
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_instanceSSBO);
+    const GLsizeiptr bytes = static_cast<GLsizeiptr>(count * sizeof(glm::mat4));
+    if (count > m_instanceSSBOCapacity)
+    {
+        m_instanceSSBOCapacity = std::max(count, m_instanceSSBOCapacity * 2);
+    }
+    // Orphan the entire buffer before writing to prevent GPU read/write hazards.
+    // glBufferData(nullptr) tells the driver to allocate new storage so the GPU
+    // can safely finish reading the previous contents.
+    glBufferData(GL_SHADER_STORAGE_BUFFER,
+                 static_cast<GLsizeiptr>(m_instanceSSBOCapacity * sizeof(glm::mat4)),
+                 nullptr, GL_DYNAMIC_DRAW);
+    glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, bytes, data);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_instanceSSBO);
+}
+
+void OpenGLRenderer::releaseInstanceResources()
+{
+    if (m_instanceSSBO)
+    {
+        glDeleteBuffers(1, &m_instanceSSBO);
+        m_instanceSSBO = 0;
+    }
+    m_instanceSSBOCapacity = 0;
+    m_instanceMatrixBuffer.clear();
+    m_instanceMatrixBuffer.shrink_to_fit();
+}
+
 // ---- Shadow Mapping ----
 
 bool OpenGLRenderer::ensureShadowResources()
@@ -5639,10 +5734,20 @@ bool OpenGLRenderer::ensureShadowResources()
     const char* vs = R"(
 #version 460 core
 layout(location = 0) in vec3 aPos;
+layout(std430, binding = 0) buffer InstanceModelMatrices {
+    mat4 instanceModels[];
+};
 uniform mat4 uLightSpaceMatrix;
 uniform mat4 uModel;
+uniform bool uInstanced;
 void main() {
-    gl_Position = uLightSpaceMatrix * uModel * vec4(aPos, 1.0);
+    mat4 model;
+    if (uInstanced) {
+        model = instanceModels[gl_InstanceID];
+    } else {
+        model = uModel;
+    }
+    gl_Position = uLightSpaceMatrix * model * vec4(aPos, 1.0);
 }
 )";
     const char* fs = R"(
@@ -5665,6 +5770,7 @@ void main() {}
 
     m_shadowLocModel = glGetUniformLocation(m_shadowProgram, "uModel");
     m_shadowLocLightSpace = glGetUniformLocation(m_shadowProgram, "uLightSpaceMatrix");
+    m_shadowLocInstanced = glGetUniformLocation(m_shadowProgram, "uInstanced");
 
     // Create shadow FBO + depth texture array (one layer per shadow-casting light)
     glGenTextures(1, &m_shadowDepthArray);
@@ -5860,22 +5966,47 @@ void OpenGLRenderer::renderCsmShadowMaps(const std::vector<DrawCmd>& drawList)
 
         glUniformMatrix4fv(m_shadowLocLightSpace, 1, GL_FALSE, &m_csmMatrices[c][0][0]);
 
-        for (const auto& cmd : drawList)
+        // Instanced CSM rendering: draw list is already sorted by (material, obj)
+        size_t i = 0;
+        while (i < drawList.size())
         {
-            glUniformMatrix4fv(m_shadowLocModel, 1, GL_FALSE, &cmd.modelMatrix[0][0]);
+            auto* mat = drawList[i].material;
+            if (!mat) { mat = drawList[i].obj->getMaterial(); }
+            if (!mat) { ++i; continue; }
+            auto* batchObj = drawList[i].obj;
 
-            auto* mat = cmd.obj->getMaterial();
-            if (!mat)
-                continue;
+            size_t batchEnd = i + 1;
+            while (batchEnd < drawList.size() && drawList[batchEnd].material == mat && drawList[batchEnd].obj == batchObj)
+                ++batchEnd;
+            const size_t batchSize = batchEnd - i;
+
             glBindVertexArray(mat->getVao());
-            if (mat->getIndexCount() > 0)
+
+            if (batchSize > 1)
             {
-                glDrawElements(GL_TRIANGLES, mat->getIndexCount(), GL_UNSIGNED_INT, nullptr);
+                m_instanceMatrixBuffer.clear();
+                for (size_t j = i; j < batchEnd; ++j)
+                    m_instanceMatrixBuffer.push_back(drawList[j].modelMatrix);
+                uploadInstanceData(m_instanceMatrixBuffer.data(), batchSize);
+                glUniform1i(m_shadowLocInstanced, 1);
+                if (mat->getIndexCount() > 0)
+                    glDrawElementsInstanced(GL_TRIANGLES, mat->getIndexCount(), GL_UNSIGNED_INT, nullptr, static_cast<GLsizei>(batchSize));
+                else
+                    glDrawArraysInstanced(GL_TRIANGLES, 0, mat->getVertexCount(), static_cast<GLsizei>(batchSize));
+                glUniform1i(m_shadowLocInstanced, 0);
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
             }
             else
             {
-                glDrawArrays(GL_TRIANGLES, 0, mat->getVertexCount());
+                glUniform1i(m_shadowLocInstanced, 0);
+                glUniformMatrix4fv(m_shadowLocModel, 1, GL_FALSE, &drawList[i].modelMatrix[0][0]);
+                if (mat->getIndexCount() > 0)
+                    glDrawElements(GL_TRIANGLES, mat->getIndexCount(), GL_UNSIGNED_INT, nullptr);
+                else
+                    glDrawArrays(GL_TRIANGLES, 0, mat->getVertexCount());
             }
+
+            i = batchEnd;
         }
     }
 
@@ -5966,22 +6097,47 @@ void OpenGLRenderer::renderShadowMap(const std::vector<DrawCmd>& drawList)
 
         glUniformMatrix4fv(m_shadowLocLightSpace, 1, GL_FALSE, &m_shadowLightSpaceMatrices[s][0][0]);
 
-        for (const auto& cmd : drawList)
+        // Instanced shadow rendering: draw list is already sorted by (material, obj)
+        size_t i = 0;
+        while (i < drawList.size())
         {
-            glUniformMatrix4fv(m_shadowLocModel, 1, GL_FALSE, &cmd.modelMatrix[0][0]);
+            auto* mat = drawList[i].material;
+            if (!mat) { mat = drawList[i].obj->getMaterial(); }
+            if (!mat) { ++i; continue; }
+            auto* batchObj = drawList[i].obj;
 
-            auto* mat = cmd.obj->getMaterial();
-            if (!mat)
-                continue;
+            size_t batchEnd = i + 1;
+            while (batchEnd < drawList.size() && drawList[batchEnd].material == mat && drawList[batchEnd].obj == batchObj)
+                ++batchEnd;
+            const size_t batchSize = batchEnd - i;
+
             glBindVertexArray(mat->getVao());
-            if (mat->getIndexCount() > 0)
+
+            if (batchSize > 1)
             {
-                glDrawElements(GL_TRIANGLES, mat->getIndexCount(), GL_UNSIGNED_INT, nullptr);
+                m_instanceMatrixBuffer.clear();
+                for (size_t j = i; j < batchEnd; ++j)
+                    m_instanceMatrixBuffer.push_back(drawList[j].modelMatrix);
+                uploadInstanceData(m_instanceMatrixBuffer.data(), batchSize);
+                glUniform1i(m_shadowLocInstanced, 1);
+                if (mat->getIndexCount() > 0)
+                    glDrawElementsInstanced(GL_TRIANGLES, mat->getIndexCount(), GL_UNSIGNED_INT, nullptr, static_cast<GLsizei>(batchSize));
+                else
+                    glDrawArraysInstanced(GL_TRIANGLES, 0, mat->getVertexCount(), static_cast<GLsizei>(batchSize));
+                glUniform1i(m_shadowLocInstanced, 0);
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
             }
             else
             {
-                glDrawArrays(GL_TRIANGLES, 0, mat->getVertexCount());
+                glUniform1i(m_shadowLocInstanced, 0);
+                glUniformMatrix4fv(m_shadowLocModel, 1, GL_FALSE, &drawList[i].modelMatrix[0][0]);
+                if (mat->getIndexCount() > 0)
+                    glDrawElements(GL_TRIANGLES, mat->getIndexCount(), GL_UNSIGNED_INT, nullptr);
+                else
+                    glDrawArrays(GL_TRIANGLES, 0, mat->getVertexCount());
             }
+
+            i = batchEnd;
         }
     }
 
@@ -6706,12 +6862,13 @@ GLuint OpenGLRenderer::getOrLoadUITexture(const std::string& path)
     GLuint tex = 0;
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(internalFormat), w, h, 0, format, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, 0);
 
     AssetManager::Instance().freeRawImageData(data);

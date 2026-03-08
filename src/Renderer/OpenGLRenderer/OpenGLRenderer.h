@@ -350,6 +350,7 @@ private:
     struct DrawCmd
     {
         OpenGLObject3D* obj{nullptr};
+        OpenGLMaterial* material{nullptr};
         glm::mat4 modelMatrix{1.0f};
         GLuint program{0};
         glm::vec3 boundsMin{};
@@ -361,6 +362,13 @@ private:
     };
     std::vector<DrawCmd> m_drawList;
     std::vector<DrawCmd> m_shadowCasterList;
+
+    // GPU Instanced Rendering (SSBO)
+    GLuint m_instanceSSBO{0};
+    size_t m_instanceSSBOCapacity{0};
+    std::vector<glm::mat4> m_instanceMatrixBuffer;
+    void uploadInstanceData(const glm::mat4* data, size_t count);
+    void releaseInstanceResources();
 
     // Shadow mapping
     bool ensureShadowResources();
@@ -376,6 +384,7 @@ private:
     GLuint m_shadowProgram{0};
     GLint m_shadowLocModel{-1};
     GLint m_shadowLocLightSpace{-1};
+    GLint m_shadowLocInstanced{-1};
     glm::mat4 m_shadowLightSpaceMatrices[kMaxShadowLights]{};
     int m_shadowLightIndices[kMaxShadowLights]{};
     int m_shadowCount{0};

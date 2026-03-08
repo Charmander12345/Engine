@@ -148,6 +148,8 @@
 - ✅ `WidgetDetailSchema`: Schema-basierter Property-Editor (`WidgetDetailSchema.h/.cpp`) ersetzt ~1500 Zeilen manuellen Detail-Panel-Code in `UIManager.cpp`. Zentraler Einstiegspunkt `buildDetailPanel(prefix, selected, applyChange, rootPanel, options)` baut komplettes Detail-Panel für beliebiges `WidgetElement`. 9 Shared Sections (Identity, Transform, Anchor, Hit Test, Layout, Style/Colors, Brush, Render Transform, Shadow) + 12 per-type Sections (Text, Image, Value, EntryBar, Container, Border, Spinner, RichText, ListView, TileView, Focus, Drag & Drop) + optionaler Delete-Button. `Options`-Struct konfiguriert kontextspezifisches Verhalten (editierbare IDs, onIdRenamed, showDeleteButton, onDelete, onRefreshHierarchy). `refreshWidgetEditorDetails()` (~1060→75 Zeilen) und `refreshUIDesignerDetails()` (~420→99 Zeilen) nutzen jetzt ausschließlich `WidgetDetailSchema::buildDetailPanel()`.
 - ✅ `DPI-Aware UI Scaling`: Neues `dpiScale`-Feld in `EditorTheme` mit `applyDpiScale(float)` Methode — skaliert alle Font-Größen, Row-Heights, Padding, Icon-Sizes, Border-Radius und Separator-Thickness relativ zum aktuellen DPI-Faktor. Beim Startup wird die DPI-Skalierung automatisch vom primären Monitor erkannt (`MonitorInfo::dpiScale` aus `HardwareInfo`). Gespeicherter Override (`UIScale` Key in `config.ini`) hat Vorrang. Theme-JSON-Dateien speichern immer DPI-unabhängige Basiswerte; `toJson()` dividiert durch `dpiScale`, `fromJson()` multipliziert beim Laden. `loadThemeByName()` und `loadFromFile()` bewahren den aktiven `dpiScale` über Theme-Wechsel hinweg. Editor Settings Popup um "UI Scale" Sektion erweitert mit Dropdown: Auto/100%/125%/150%/175%/200%/250%/300%. Änderungen werden sofort angewendet (`applyDpiScale` + `rebuildAllEditorUI`) und in `config.ini` persistiert.
 - ✅ `DPI Scaling – Vollständige UI-Abdeckung`: Neue statische Hilfsmethoden `EditorTheme::Scaled(float)` und `EditorTheme::Scaled(Vec2)` für beliebige Pixelwert-Skalierung. Systematischer Umbau aller hardcoded Pixelwerte im gesamten Editor-UI: **UIManager.cpp** – alle 37 `fontSize`-Literale durch Theme-Felder ersetzt (`fontSizeHeading`/`Subheading`/`Body`/`Small`/`Caption`/`Monospace`); Engine-Settings-Popup (620×480), Editor-Settings-Popup (480×380), Projekt-Auswahl-Screen (720×540) und Landscape-Manager-Popup (420×340) – alle Popup-Dimensionen, Layout-Konstanten (Row-Heights, Label-Widths, Sidebar, Title-Heights, Paddings) via `Scaled()` skaliert; `measureElementSize()` – Slider-Defaults (140×18), Image-Defaults (24), Checkbox-Box/Gap (16/6), Dropdown-Arrow (16), DropdownButton-Arrow (12) und alle Fallback-FontSizes via `Scaled()` oder Theme-Werte. **main.cpp** – New-Material-Popup (460×400): Popup-Dimensionen, fontSize-Werte (15→Heading, 13→Body, 14→Subheading), minSize-Werte (20, 24) und Paddings skaliert. **OpenGLRenderer.cpp** – 15 hardcoded `minSize`-Werte in Mesh-/Material-Editor-Popups und Tab-Buttons skaliert. **UIWidgets** – `SeparatorWidget.h` (22px Header), `TabViewWidget.h` (26px Tab), `TreeViewWidget.h` (22px Row) via `Scaled()` skaliert. Normalisierte Popup-Layouts (nx/ny) nutzen Basis-Pixelwerte für korrekte proportionale Skalierung bei vergrößerten Popup-Fenstern.
+- ✅ `OpenGLRenderer` / `OpenGLTexture`: Mipmaps systematisch aktiviert – `glGenerateMipmap` wird jetzt konsequent bei jedem GPU-Textur-Upload aufgerufen. Betrifft: `OpenGLTexture::initialize()` (bereits vorhanden), Skybox-Cubemap (`GL_LINEAR_MIPMAP_LINEAR` + `glGenerateMipmap(GL_TEXTURE_CUBE_MAP)`), UI-Textur-Cache (`GL_LINEAR_MIPMAP_LINEAR` + `glGenerateMipmap(GL_TEXTURE_2D)`). Framebuffer-/Shadow-/Depth-/Pick-Texturen bleiben ohne Mipmaps (korrekt, da 1:1 gesampelt). Reduziert Moiré/Flimmern bei entfernten Objekten und Skybox-Übergängen.
+- ✅ `OpenGLRenderer`: GPU Instanced Rendering – Draw-Liste wird nach (Material-Pointer, Obj-Pointer) sortiert und in Batches gruppiert. Nur Objekte mit gleichem Mesh UND gleichem Material werden per `glDrawElementsInstanced`/`glDrawArraysInstanced` in einem Draw-Call gerendert. Model-Matrizen über SSBO (`layout(std430, binding=0)`, `GL_DYNAMIC_DRAW`) an Shader übergeben, per `gl_InstanceID` indiziert. `uniform bool uInstanced` schaltet zwischen SSBO- und Uniform-Pfad. Betrifft: Haupt-Render-Pass (`renderWorld`), reguläre Shadow Maps (`renderShadowMap`), Cascaded Shadow Maps (`renderCsmShadowMaps`). Emission-Objekte weiterhin einzeln (per-Entity Light Override). Einzelobjekt-Batches nutzen klassischen Non-Instanced-Pfad. `uploadInstanceData()` verwaltet SSBO mit automatischem Grow und erzwingt Buffer-Orphaning (`glBufferData(nullptr)` vor `glBufferSubData`) zur Vermeidung von GPU-Read/Write-Hazards. Nach jedem Instanced-Draw wird SSBO explizit entbunden (`glBindBufferBase(0,0)`) und `uInstanced` auf `false` zurückgesetzt — verhindert stale SSBO-State bei nachfolgenden Non-Instanced-Draws. Vertex-Shader nutzt `if/else` statt Ternary für Model-Matrix-Auswahl (verhindert spekulative SSBO-Zugriffe auf SIMD-GPUs). `releaseInstanceResources()` in `shutdown()` für Cleanup.
 
 ## Legende
 
@@ -463,7 +465,7 @@
 | Post-Processing (Bloom, SSAO, HDR)       | ✅     |
 | Anti-Aliasing (FXAA, MSAA 2x/4x)        | ✅     |
 | Transparenz / Alpha-Sorting               | 🟡     |
-| Instanced Rendering (GPU)                | ❌     |
+| Instanced Rendering (GPU)                | ✅     |
 | Skeletal Animation Rendering              | ❌     |
 | Particle-Rendering                        | ❌     |
 | DirectX 11 Backend                        | ❌     |
@@ -474,7 +476,7 @@
 **Offene Punkte:**
 - Post-Processing Pipeline vollständig: HDR FBO, Gamma Correction, ACES Tone Mapping, FXAA 3.11 Quality (9-Sample, Edge Walking, Subpixel Correction), MSAA 2x/4x, Bloom (5-Mip Downsample + Gaussian Blur), SSAO (32-Sample Hemisphere Kernel, Half-Res, Bilateral Depth-Aware 5×5 Blur).
 - Transparenz nur eingeschränkt (kein korrektes Order-Independent-Transparency)
-- Instancing existiert auf CPU-/Level-Seite, aber kein GPU-Instanced-Rendering
+- Instancing existiert auf CPU-/Level-Seite und GPU-Seite (SSBO-basiertes Instanced Rendering für Haupt-Render, Shadow Maps, CSM). Batching nur bei gleichem Mesh UND gleichem Material (Obj-Pointer-Check verhindert falsche Gruppierung unterschiedlicher Meshes). Buffer-Orphaning, SSBO-Cleanup nach Draws und `if/else`-Shader-Guard gegen Flicker implementiert
 - Keine Alternative zu OpenGL (DirectX / Vulkan nicht implementiert, nur als Enum-Placeholder)
 CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) eingebettet in `Renderer` (SHARED, Renderer.dll). Noch zu entkoppeln: `main.cpp` (direkte Instanziierung).
 - **Schritt 1.1 erledigt:** GLM von `src/Renderer/OpenGLRenderer/glm/` nach `external/glm/` verschoben. Include-Pfad `${CMAKE_SOURCE_DIR}/external` als PUBLIC in `src/Renderer/CMakeLists.txt` hinzugefügt. Build verifiziert ✅.
@@ -583,13 +585,12 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | GPU-Upload (OpenGLTexture)           | ✅     |
 | Format: PNG, TGA, JPG, BMP          | ✅     |
 | Bind/Unbind (Texture Units)         | ✅     |
-| Mipmaps                              | 🟡     |
+| Mipmaps                              | ✅     |
 | Texture-Compression (S3TC/BC)       | ❌     |
 | Texture-Streaming                   | ❌     |
 | Cubemap / Skybox                    | ✅     |
 
 **Offene Punkte:**
-- Mipmaps: Grundlegende Unterstützung möglich, aber nicht systematisch aktiv
 - Keine Textur-Komprimierung
 - Kein Texture-Streaming für große Texturen
 

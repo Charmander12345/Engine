@@ -5,6 +5,10 @@ layout(location = 2) in vec2 aTexCoord;
 layout(location = 3) in vec3 aTangent;
 layout(location = 4) in vec3 aBitangent;
 
+layout(std430, binding = 0) buffer InstanceModelMatrices {
+    mat4 instanceModels[];
+};
+
 out vec2 vTexCoord;
 out vec3 vWorldPos;
 out vec3 vNormal;
@@ -13,12 +17,19 @@ out mat3 vTBN;
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProjection;
+uniform bool uInstanced;
 
 void main()
 {
-    vec4 worldPos = uModel * vec4(aPos, 1.0);
+    mat4 model;
+    if (uInstanced) {
+        model = instanceModels[gl_InstanceID];
+    } else {
+        model = uModel;
+    }
+    vec4 worldPos = model * vec4(aPos, 1.0);
     vWorldPos = worldPos.xyz;
-    mat3 normalMatrix = mat3(transpose(inverse(uModel)));
+    mat3 normalMatrix = mat3(transpose(inverse(model)));
     vNormal = normalize(normalMatrix * aNormal);
 
     vec3 T = normalize(normalMatrix * aTangent);

@@ -260,6 +260,8 @@ bool OpenGLMaterial::build()
     m_locMetallic                = glGetUniformLocation(m_program, "uMetallic");
     m_locRoughness               = glGetUniformLocation(m_program, "uRoughness");
     m_locHasMetallicRoughnessMap = glGetUniformLocation(m_program, "uHasMetallicRoughnessMap");
+    // Instancing uniform
+    m_locInstanced = glGetUniformLocation(m_program, "uInstanced");
 
     // Cache texture sampler locations.
     // Try material struct names first (material.diffuse, material.specular),
@@ -336,6 +338,11 @@ void OpenGLMaterial::bind()
 {
     glUseProgram(m_program);
     glBindVertexArray(m_vao);
+
+    if (m_locInstanced >= 0)
+    {
+        glUniform1i(m_locInstanced, 0);
+    }
 
     if (m_locModel >= 0)
     {
@@ -557,4 +564,29 @@ void OpenGLMaterial::renderBatchContinuation()
     {
         glDrawArrays(GL_TRIANGLES, 0, m_vertexCount);
     }
+}
+
+void OpenGLMaterial::renderInstanced(int instanceCount)
+{
+    bind();
+    if (m_locInstanced >= 0)
+    {
+        glUniform1i(m_locInstanced, 1);
+    }
+    if (m_indexCount > 0)
+    {
+        glDrawElementsInstanced(GL_TRIANGLES, m_indexCount, GL_UNSIGNED_INT, nullptr, instanceCount);
+    }
+    else
+    {
+        glDrawArraysInstanced(GL_TRIANGLES, 0, m_vertexCount, instanceCount);
+    }
+    // Reset instanced state so subsequent non-instanced draws cannot
+    // accidentally read stale SSBO data through the same binding point.
+    if (m_locInstanced >= 0)
+    {
+        glUniform1i(m_locInstanced, 0);
+    }
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
+    unbind();
 }

@@ -56,6 +56,7 @@ public:
     void unbind() override;
     void render() override;
     void renderBatchContinuation();
+    void renderInstanced(int instanceCount);
 
     GLuint getProgram() const { return m_program; }
     GLuint getVao() const { return m_vao; }
@@ -213,4 +214,7 @@ private:
     GLint m_locMetallic{-1};
     GLint m_locRoughness{-1};
     GLint m_locHasMetallicRoughnessMap{-1};
+
+    // Instancing
+    GLint m_locInstanced{-1};
 };

@@ -839,9 +839,9 @@ render()
      → Level-Entities abfragen (ECS-Schema: Transform + Mesh)
      → Renderables erstellen (RenderResourceManager)
      → Lichter sammeln (Member-Vektor, keine Heap-Alloc)
-     → Shadow-Pässe (Regular, Point Cube Maps, CSM — CSM abschaltbar via Settings)
+      → Shadow-Pässe (Regular, Point Cube Maps, CSM — CSM abschaltbar via Settings)
      → Hierarchical Z-Buffer (HZB) Occlusion Culling (liest Tiefe aus Tab-FBO)
-     → Sortierung + Batch-Rendering
+     → Sortierung nach (Material, Mesh) + GPU Instanced Batching (SSBO, glDrawElementsInstanced)
      → Post-Processing Resolve (Gamma, Tone Mapping, Bloom, SSAO, MSAA — FXAA hier übersprungen)
      → Pick-Buffer + Selection-Outline nur bei Bedarf (On-Demand)
      → Editor-Gizmos (Translate/Rotate/Scale Overlay)
@@ -996,6 +996,7 @@ virtual Mat4 getViewMatrixColumnMajor() const = 0;
 
 - `Texture` – CPU-seitige Pixel-Daten (width, height, channels, data[])
 - `OpenGLTexture` – GPU-Upload, `bind(unit)` / `unbind()`, Handle: `GLuint`
+- **Mipmaps:** Systematisch aktiv für alle Bild-Texturen (`glGenerateMipmap` bei jedem GPU-Upload). Min-Filter `GL_LINEAR_MIPMAP_LINEAR` für trilineare Filterung. Gilt für Material-Texturen (`OpenGLTexture`), Skybox-Cubemaps und UI-Textur-Cache. Framebuffer-/Shadow-/Depth-Texturen sind bewusst ausgenommen.
 
 ---
 
@@ -1018,7 +1019,21 @@ virtual Mat4 getViewMatrixColumnMajor() const = 0;
 - `prepare()` → Material + VAO/VBO aufbauen
 - Lokale Bounding Box (`getLocalBoundsMin/Max` via Interface, `localBoundsMinGLM/MaxGLM` für GL-Backend)
 - Batch-Rendering: `renderBatchContinuation()`
+- GPU Instanced Rendering: `renderInstanced(instanceCount)` via Material
 - Statischer Cache: `ClearCache()`
+
+#### GPU Instanced Rendering
+- Draw-Liste wird nach (`OpenGLMaterial*`, `OpenGLObject3D*`) sortiert — nur Objekte mit gleichem Mesh UND Material werden gruppiert
+- Aufeinanderfolgende DrawCmds mit gleichem Mesh und Material werden zu einem Batch zusammengefasst
+- Model-Matrizen über SSBO (`layout(std430, binding=0)`, `GL_DYNAMIC_DRAW`) an Shader übergeben
+- Shader nutzt `gl_InstanceID` zum Indizieren; `uniform bool uInstanced` schaltet zwischen SSBO und `uModel`
+- Vertex-Shader verwendet `if/else` statt Ternary für Model-Matrix-Auswahl (verhindert spekulative SSBO-Zugriffe auf SIMD-GPUs)
+- `uploadInstanceData()` verwaltet SSBO mit automatischem Grow (Kapazität verdoppelt sich bei Bedarf)
+- Buffer-Orphaning: `glBufferData(nullptr, GL_DYNAMIC_DRAW)` vor `glBufferSubData` verhindert GPU-Read/Write-Hazards
+- SSBO-Cleanup: Nach jedem Instanced-Draw wird SSBO explizit entbunden (`glBindBufferBase(0,0)`) und `uInstanced=false` gesetzt
+- Implementiert für: Haupt-Render-Pass, reguläre Shadow Maps, Cascaded Shadow Maps
+- Emission-Objekte und Einzelobjekt-Batches nutzen klassischen Non-Instanced-Pfad
+- Cleanup über `releaseInstanceResources()` in `shutdown()`
 
 ---
 
