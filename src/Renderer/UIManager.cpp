@@ -1,4 +1,4 @@
-#include "UIManager.h"
+﻿#include "UIManager.h"
 
 #include <algorithm>
 #include <numeric>
@@ -8279,6 +8279,7 @@ void UIManager::openMaterialEditorPopup(const std::string& materialAssetPath)
         titleText.fontSize  = EditorTheme::Get().fontSizeSubheading;
         titleText.style.textColor = EditorTheme::Get().titleBarText;
         titleText.textAlignV = TextAlignV::Center;
+        titleText.textAlignV = TextAlignV::Center;
         titleText.padding   = Vec2{ 6.0f, 0.0f };
         elements.push_back(titleText);
     }
@@ -8564,6 +8565,7 @@ void UIManager::openEngineSettingsPopup()
         titleText.text      = "Engine Settings";
         titleText.fontSize  = EditorTheme::Get().fontSizeSubheading;
         titleText.style.textColor = EditorTheme::Get().titleBarText;
+        titleText.textAlignV = TextAlignV::Center;
         titleText.textAlignV = TextAlignV::Center;
         titleText.padding   = Vec2{ 6.0f, 0.0f };
         elements.push_back(titleText);
@@ -9696,12 +9698,36 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         titleText.type      = WidgetElementType::Text;
         titleText.id        = "PS.TitleText";
         titleText.from      = Vec2{ nx(12.0f), 0.0f };
-        titleText.to        = Vec2{ nx(W - 12.0f), ny(kTitleH - 2.0f) };
+        titleText.to        = Vec2{ nx(W - 46.0f), ny(kTitleH - 2.0f) };
         titleText.text      = "HorizonEngine  â€”  Project Selection";
         titleText.fontSize  = EditorTheme::Get().fontSizeHeading;
         titleText.style.textColor = EditorTheme::Get().buttonPrimaryText;
+        titleText.textAlignV = TextAlignV::Center;
         titleText.padding   = Vec2{ 6.0f, 0.0f };
         elements.push_back(titleText);
+
+        WidgetElement closeBtn;
+        closeBtn.type  = WidgetElementType::Button;
+        closeBtn.id    = "PS.TitleBar.Close";
+        closeBtn.from  = Vec2{ nx(W - 46.0f), 0.0f };
+        closeBtn.to    = Vec2{ 1.0f, ny(kTitleH - 2.0f) };
+        closeBtn.text  = "X";
+        closeBtn.fontSize = EditorTheme::Get().fontSizeMonospace;
+        closeBtn.textAlignH = TextAlignH::Center;
+        closeBtn.textAlignV = TextAlignV::Center;
+        closeBtn.style.color = Vec4{ 0.1f, 0.1f, 0.1f, 1.0f };
+        closeBtn.style.hoverColor = Vec4{ 0.7f, 0.15f, 0.15f, 1.0f };
+        closeBtn.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+        closeBtn.shaderVertex = "button_vertex.glsl";
+        closeBtn.shaderFragment = "button_fragment.glsl";
+        closeBtn.hitTestMode = HitTestMode::Enabled;
+        closeBtn.onClicked = [screenMgr]()
+        {
+            DiagnosticsManager::Instance().requestShutdown();
+            if (screenMgr)
+                screenMgr->unregisterWidget("ProjectScreen.Main");
+        };
+        elements.push_back(closeBtn);
     }
 
     // â”€â”€ Sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

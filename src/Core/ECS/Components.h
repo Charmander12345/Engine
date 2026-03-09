@@ -110,4 +110,17 @@ namespace ECS
 		float scaleY{ 1.0f };
 		float scaleZ{ 1.0f };
 	};
+
+	/// Level of Detail – multiple mesh variants sorted by camera distance.
+	/// Levels must be ordered by ascending maxDistance.  The last level
+	/// (or any level with maxDistance <= 0) acts as the fallback.
+	struct LodComponent
+	{
+		struct LodLevel
+		{
+			std::string meshAssetPath;
+			float maxDistance{ 0.0f }; // 0 = fallback (lowest quality / farthest)
+		};
+		std::vector<LodLevel> levels;
+	};
 }

@@ -100,6 +100,9 @@ public:
     void setDebugColor(const glm::vec3& color) { m_debugColor = color; }
     void setNearFarPlanes(float nearPlane, float farPlane) { m_nearPlane = nearPlane; m_farPlane = farPlane; }
 
+    // OIT (Order-Independent Transparency)
+    void setOitEnabled(bool enabled) { m_oitEnabled = enabled; }
+
 private:
     void bindTextures();
 
@@ -232,4 +235,8 @@ private:
     GLint m_locDebugColor{-1};
     GLint m_locNearPlane{-1};
     GLint m_locFarPlane{-1};
+
+    // OIT
+    bool  m_oitEnabled{false};
+    GLint m_locOitEnabled{-1};
 };

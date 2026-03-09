@@ -25,24 +25,24 @@ Popup-basierter Material-Editor (`openMaterialEditorPopup`) mit Material-Auswahl
 
 ---
 
-## 4. Shader Hot-Reload
+## ~~4. Shader Hot-Reload~~ ✅
 **Aufwand:** Gering · **Nutzen:** Mittel
 
-Filewatcher auf das `shaders/`-Verzeichnis + Re-Compile/Re-Link bei Änderung. Spart bei Shader-Entwicklung den Engine-Neustart. Grundlage: Shader-Programm-Cache existiert bereits und kann per Key invalidiert werden.
+`ShaderHotReload`-Klasse überwacht das `shaders/`-Verzeichnis per `std::filesystem::last_write_time` (500 ms Poll-Intervall). Bei Änderung werden automatisch alle betroffenen Shader-Programme neu kompiliert und gelinkt: Material-Cache (`s_materialCache`) und RenderResourceManager-Cache werden invalidiert, UI-Quad-Programme gelöscht und neu erstellt, PostProcessStack-Programme (Resolve, Bloom, SSAO) über `reloadPrograms()` neu gebaut, und die Render-Entries komplett aus dem ECS neu aufgebaut. Kein Engine-Neustart nötig.
 
 ---
 
-## 5. Transparenz / Order-Independent Transparency
+## ~~5. Transparenz / Order-Independent Transparency~~ ✅
 **Aufwand:** Mittel · **Nutzen:** Mittel
 
-Alpha-Sorting existiert rudimentär (🟡). Für korrekte Transparenz bei überlappenden Objekten wird OIT benötigt (z.B. Weighted Blended OIT oder Linked-List). Ohne OIT sind Fenster, Glas, Wasser, Partikel etc. fehlerhaft.
+Weighted Blended OIT (McGuire & Bavoil 2013) implementiert. Draw-Liste wird automatisch in opake und transparente Objekte partitioniert (Auto-Detect über RGBA-Diffuse-Textur mit 4 Kanälen). Opaker Pass rendert normal mit Depth-Write, danach OIT Transparent Pass in separates FBO (RGBA16F Accumulation + R8 Revealage) mit Per-Attachment-Blending (`glBlendFunci`), Depth-Read ohne Write. Depth-Buffer wird per `glBlitFramebuffer` vom HDR-FBO übernommen. Abschließend Fullscreen-Composite-Pass über die opake Szene. OIT toggle über `setOitEnabled()`. Fragment-Shader unterstützt `uOitEnabled`-Uniform für dualen MRT-Output (`layout(location=0/1)`).
 
 ---
 
-## 6. LOD-System (Level of Detail)
+## ~~6. LOD-System (Level of Detail)~~ ✅
 **Aufwand:** Mittel · **Nutzen:** Hoch
 
-Automatischer Mesh-Wechsel basierend auf Kamera-Distanz. Reduziert Polygon-Last in großen Szenen drastisch. Benötigt LOD-Gruppen im Mesh-Asset und Distance-Thresholds im Render-Loop. Assimp importiert bereits LOD-Varianten wenn vorhanden.
+`LodComponent` im ECS ermöglicht pro Entity mehrere Mesh-Varianten mit aufsteigenden `maxDistance`-Schwellwerten. Alle LOD-Meshes werden beim Scene-Prepare geladen. Im Render-Loop wird die Kamera-Distanz zum Objekt berechnet und das passende Mesh ausgewählt. Letzte Stufe (`maxDistance <= 0`) dient als Fallback für maximale Entfernung. LOD-Daten werden mit dem Level serialisiert/deserialisiert (JSON „Lod“-Komponente).
 
 ---
 

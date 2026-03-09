@@ -115,8 +115,8 @@ int main()
             SDL_WindowID tempWindowId = 0;
             if (auto* w = tempRenderer->window())
             {
-                SDL_SetWindowHitTest(w, nullptr, nullptr); // use native titlebar hit-testing in startup window
-                SDL_SetWindowBordered(w, true);
+                SDL_SetWindowBordered(w, false);
+                SDL_SetWindowResizable(w, false);
                 SDL_SetWindowFullscreen(w, 0);
                 SDL_RestoreWindow(w);
                 SDL_SetWindowSize(w, 720, 540);
@@ -214,8 +214,10 @@ int main()
                         continue;
                 }
 
-                if (!tempWindowOpen)
+                if (!tempWindowOpen || diagnostics.isShutdownRequested())
                 {
+                    startupSelectionCancelled = true;
+                    tempWindowOpen = false;
                     logTimed(Logger::Category::Engine, "Project selection window was closed without choosing a project.", Logger::LogLevel::INFO);
                     break;
                 }

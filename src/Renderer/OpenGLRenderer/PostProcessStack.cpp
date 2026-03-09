@@ -16,6 +16,9 @@ bool PostProcessStack::init(const char* resolveVertPath, const char* resolveFrag
     if (m_initialized)
         return true;
 
+    m_resolveVertPath = resolveVertPath;
+    m_resolveFragPath = resolveFragPath;
+
     // Fullscreen triangle VAO (positions generated from gl_VertexID in the vertex shader)
     glGenVertexArrays(1, &m_fullscreenVao);
 
@@ -266,6 +269,9 @@ bool PostProcessStack::compileResolveProgram(const char* vertPath, const char* f
 
 bool PostProcessStack::initBloom(const char* vertPath, const char* downsampleFragPath, const char* blurFragPath)
 {
+    m_bloomVertPath = vertPath;
+    m_bloomDownsampleFragPath = downsampleFragPath;
+    m_bloomBlurFragPath = blurFragPath;
     return compileBloomPrograms(vertPath, downsampleFragPath, blurFragPath);
 }
 
@@ -528,6 +534,9 @@ void PostProcessStack::resolveMsaaToHdr()
 
 bool PostProcessStack::initSsao(const char* vertPath, const char* ssaoFragPath, const char* blurFragPath)
 {
+    m_ssaoVertPath = vertPath;
+    m_ssaoFragPath = ssaoFragPath;
+    m_ssaoBlurFragPath = blurFragPath;
     if (!compileSsaoPrograms(vertPath, ssaoFragPath, blurFragPath))
         return false;
     generateSsaoKernel();
@@ -882,4 +891,88 @@ void PostProcessStack::executeFxaaPass(GLuint dstFbo, int vpX, int vpY, int vpW,
     glBindTexture(GL_TEXTURE_2D, 0);
     glDepthMask(GL_TRUE);
     glEnable(GL_DEPTH_TEST);
+}
+
+// ---------------------------------------------------------------------------
+// reloadPrograms – re-compile all shader programs from stored file paths
+// ---------------------------------------------------------------------------
+bool PostProcessStack::reloadPrograms()
+{
+    if (!m_initialized)
+        return false;
+
+    auto& logger = Logger::Instance();
+    bool anyOk = false;
+
+    // Resolve program
+    if (!m_resolveVertPath.empty() && !m_resolveFragPath.empty())
+    {
+        if (m_resolveProgram)
+        {
+            glDeleteProgram(m_resolveProgram);
+            m_resolveProgram = 0;
+        }
+        if (compileResolveProgram(m_resolveVertPath.c_str(), m_resolveFragPath.c_str()))
+        {
+            anyOk = true;
+        }
+        else
+        {
+            logger.log(Logger::Category::Rendering,
+                "ShaderHotReload: failed to reload resolve program",
+                Logger::LogLevel::WARNING);
+        }
+    }
+
+    // Bloom programs
+    if (!m_bloomVertPath.empty() && !m_bloomDownsampleFragPath.empty() && !m_bloomBlurFragPath.empty())
+    {
+        if (m_bloomDownsampleProgram)
+        {
+            glDeleteProgram(m_bloomDownsampleProgram);
+            m_bloomDownsampleProgram = 0;
+        }
+        if (m_bloomBlurProgram)
+        {
+            glDeleteProgram(m_bloomBlurProgram);
+            m_bloomBlurProgram = 0;
+        }
+        if (compileBloomPrograms(m_bloomVertPath.c_str(), m_bloomDownsampleFragPath.c_str(), m_bloomBlurFragPath.c_str()))
+        {
+            anyOk = true;
+        }
+        else
+        {
+            logger.log(Logger::Category::Rendering,
+                "ShaderHotReload: failed to reload bloom programs",
+                Logger::LogLevel::WARNING);
+        }
+    }
+
+    // SSAO programs
+    if (!m_ssaoVertPath.empty() && !m_ssaoFragPath.empty() && !m_ssaoBlurFragPath.empty())
+    {
+        if (m_ssaoProgram)
+        {
+            glDeleteProgram(m_ssaoProgram);
+            m_ssaoProgram = 0;
+        }
+        if (m_ssaoBlurProgram)
+        {
+            glDeleteProgram(m_ssaoBlurProgram);
+            m_ssaoBlurProgram = 0;
+        }
+        if (compileSsaoPrograms(m_ssaoVertPath.c_str(), m_ssaoFragPath.c_str(), m_ssaoBlurFragPath.c_str()))
+        {
+            anyOk = true;
+        }
+        else
+        {
+            logger.log(Logger::Category::Rendering,
+                "ShaderHotReload: failed to reload SSAO programs",
+                Logger::LogLevel::WARNING);
+        }
+    }
+
+    return anyOk;
 }

@@ -3,7 +3,8 @@ in vec2 vTexCoord;
 in vec3 vWorldPos;
 in vec3 vNormal;
 in mat3 vTBN;
-out vec4 FragColor;
+layout(location = 0) out vec4 FragColor;
+layout(location = 1) out float oRevealage;
 
 struct Material {
     sampler2D diffuse;
@@ -87,6 +88,9 @@ uniform int   uDebugMode;
 uniform vec3  uDebugColor; // per-batch tint for InstanceGroups mode
 uniform float uNearPlane;
 uniform float uFarPlane;
+
+// Weighted Blended OIT (0 = opaque pass, 1 = transparent pass)
+uniform int uOitEnabled;
 
 const float PI = 3.14159265359;
 
@@ -468,5 +472,19 @@ void main()
         result = mix(uFogColor, result, fogFactor);
     }
 
-    FragColor = vec4(result, diffTex.a > 0.0 ? diffTex.a : 1.0);
+    float alpha = diffTex.a > 0.0 ? diffTex.a : 1.0;
+
+    // Weighted Blended OIT: output to accumulation + revealage targets
+    if (uOitEnabled != 0)
+    {
+        float z = gl_FragCoord.z;
+        // Weight function (McGuire & Bavoil 2013)
+        float weight = clamp(pow(min(1.0, alpha * max(max(result.r, result.g), result.b)), 3.0) * 1e8 *
+                             pow(1.0 - z * 0.9, 3.0), 1e-2, 3e3);
+        FragColor = vec4(result * alpha * weight, alpha * weight);
+        oRevealage = alpha;
+        return;
+    }
+
+    FragColor = vec4(result, alpha);
 }

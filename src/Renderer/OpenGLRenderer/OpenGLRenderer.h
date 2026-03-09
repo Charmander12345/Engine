@@ -10,6 +10,7 @@
 #include "../IRenderTarget.h"
 #include "OpenGLRenderTarget.h"
 #include "PostProcessStack.h"
+#include "ShaderHotReload.h"
 
 #include "../../Core/MathTypes.h"
 #include "../../Core/EngineLevel.h"
@@ -155,6 +156,14 @@ private:
         std::shared_ptr<OpenGLObject2D> object2D;
         std::shared_ptr<OpenGLObject3D> object3D;
         glm::mat4 cachedModelMatrix{1.0f};
+
+        // LOD variants (sorted by ascending maxDistance; empty = no LOD)
+        struct LodVariant
+        {
+            std::shared_ptr<OpenGLObject3D> object3D;
+            float maxDistance{0.0f}; // 0 = fallback
+        };
+        std::vector<LodVariant> lodLevels;
     };
 
     bool isRenderEntryRelevant(const RenderEntry& entry) const;
@@ -312,6 +321,10 @@ private:
     bool m_postProcessEnabled{true};
     bool m_gammaEnabled{true};
     bool m_toneMappingEnabled{true};
+
+    // Shader hot-reload
+    ShaderHotReload m_shaderHotReload;
+    void handleShaderHotReload();
     float m_exposure{1.0f};
     AntiAliasingMode m_aaMode{AntiAliasingMode::None};
     bool m_bloomEnabled{false};
@@ -360,8 +373,10 @@ private:
         unsigned int entityId{0};
         bool hasBounds{false};
         bool hasEmission{false};
+        bool isTransparent{false};
     };
     std::vector<DrawCmd> m_drawList;
+    std::vector<DrawCmd> m_transparentDrawList;
     std::vector<DrawCmd> m_shadowCasterList;
 
     // GPU Instanced Rendering (SSBO)
@@ -370,6 +385,25 @@ private:
     std::vector<glm::mat4> m_instanceMatrixBuffer;
     void uploadInstanceData(const glm::mat4* data, size_t count);
     void releaseInstanceResources();
+
+    // Order-Independent Transparency (Weighted Blended OIT)
+    bool ensureOitResources(int width, int height);
+    void releaseOitResources();
+    void renderOitTransparentPass(const glm::mat4& view, const glm::vec3& lightPosition,
+                                  const glm::vec3& lightColor, float lightIntensity,
+                                  const glm::vec3& fogColor, int debugMode, float activeNear, float activeFar);
+    void compositeOit(GLuint dstFbo, int vpX, int vpY, int vpW, int vpH);
+    GLuint m_oitFbo{0};
+    GLuint m_oitAccumTex{0};
+    GLuint m_oitRevealageTex{0};
+    GLuint m_oitDepthRbo{0};
+    int m_oitWidth{0};
+    int m_oitHeight{0};
+    GLuint m_oitCompositeProgram{0};
+    GLuint m_oitCompositeVao{0};
+    GLint m_oitCompLocAccum{-1};
+    GLint m_oitCompLocRevealage{-1};
+    bool m_oitEnabled{true};
 
     // Shadow mapping
     bool ensureShadowResources();
@@ -552,6 +586,8 @@ public:
     bool isSsaoEnabled() const override { return m_ssaoEnabled; }
     void setCsmEnabled(bool enabled) override { m_csmUserEnabled = enabled; }
     bool isCsmEnabled() const override { return m_csmUserEnabled; }
+    void setOitEnabled(bool enabled) override { m_oitEnabled = enabled; }
+    bool isOitEnabled() const override { return m_oitEnabled; }
     void setDebugRenderMode(DebugRenderMode mode) override { m_debugRenderMode = mode; }
     DebugRenderMode getDebugRenderMode() const override { return m_debugRenderMode; }
     void setSkyboxPath(const std::string& pathOrFolder) override;

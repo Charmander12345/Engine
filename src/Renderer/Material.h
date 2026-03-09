@@ -39,6 +39,9 @@ public:
     void setPbrEnabled(bool enabled) { m_pbrEnabled = enabled; }
     bool getPbrEnabled() const { return m_pbrEnabled; }
 
+    void setTransparent(bool transparent) { m_transparent = transparent; }
+    bool isTransparent() const { return m_transparent; }
+
 private:
 protected:
     std::vector<std::string> m_textureAssetPaths;
@@ -47,4 +50,5 @@ protected:
     float m_metallic{0.0f};
     float m_roughness{0.5f};
     bool m_pbrEnabled{false};
+    bool m_transparent{false};
 };

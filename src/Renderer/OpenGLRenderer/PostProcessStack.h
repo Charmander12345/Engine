@@ -2,6 +2,7 @@
 
 #include "glad/include/gl.h"
 #include <glm/glm.hpp>
+#include <string>
 #include <vector>
 
 /// @brief Manages the post-processing pipeline for the OpenGL renderer.
@@ -26,6 +27,10 @@ public:
 
     /// Compile resolve shaders and create fullscreen VAO.  Call once.
     bool init(const char* resolveVertPath, const char* resolveFragPath);
+
+    /// Re-compile all shader programs from the previously supplied file paths.
+    /// Returns true when at least one program was successfully reloaded.
+    bool reloadPrograms();
 
     /// (Re)create the HDR FBO to the given size.  No-op when size unchanged.
     bool resize(int width, int height);
@@ -196,4 +201,14 @@ private:
     glm::mat4 m_projection{ 1.0f };
 
     bool m_initialized{ false };
+
+    // Stored shader file paths for hot-reload
+    std::string m_resolveVertPath;
+    std::string m_resolveFragPath;
+    std::string m_bloomVertPath;
+    std::string m_bloomDownsampleFragPath;
+    std::string m_bloomBlurFragPath;
+    std::string m_ssaoVertPath;
+    std::string m_ssaoFragPath;
+    std::string m_ssaoBlurFragPath;
 };

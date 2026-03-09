@@ -342,6 +342,7 @@
 | ECS-Vorbereitung (prepareEcs)           | ✅     |
 | Entity-Serialisierung (JSON ↔ ECS)      | ✅     |
 | Alle 10 Komponentenarten serialisierbar (inkl. HeightFieldComponent) | ✅ |
+| LodComponent (LOD-Stufen pro Entity, Distance-Thresholds)           | ✅ |
 | Script-Entity-Cache                      | ✅     |
 | Objekt-Registrierung + Gruppen          | ✅     |
 | Instancing (enable/disable)             | ✅     |
@@ -464,8 +465,9 @@
 | Shadow Mapping (Point Light Cube Maps)      | ✅     |
 | Post-Processing (Bloom, SSAO, HDR)       | ✅     |
 | Anti-Aliasing (FXAA, MSAA 2x/4x)        | ✅     |
-| Transparenz / Alpha-Sorting               | 🟡     |
+| Transparenz / OIT (Weighted Blended)      | ✅     |
 | Instanced Rendering (GPU)                | ✅     |
+| LOD-System (Level of Detail)             | ✅     |
 | Debug Render Modes (Lit/Unlit/Wireframe/ShadowMap/Cascades/InstanceGroups/Normals/Depth/Overdraw) | ✅ |
 | Skeletal Animation Rendering              | ❌     |
 | Particle-Rendering                        | ❌     |
@@ -476,7 +478,7 @@
 
 **Offene Punkte:**
 - Post-Processing Pipeline vollständig: HDR FBO, Gamma Correction, ACES Tone Mapping, FXAA 3.11 Quality (9-Sample, Edge Walking, Subpixel Correction), MSAA 2x/4x, Bloom (5-Mip Downsample + Gaussian Blur), SSAO (32-Sample Hemisphere Kernel, Half-Res, Bilateral Depth-Aware 5×5 Blur).
-- Transparenz nur eingeschränkt (kein korrektes Order-Independent-Transparency)
+- Weighted Blended OIT (McGuire & Bavoil 2013): Auto-Detect transparenter Objekte (RGBA 4-Kanal Diffuse-Textur), separater OIT-Pass mit RGBA16F Accumulation + R8 Revealage FBO, Per-Attachment-Blending (`glBlendFunci`), Depth-Blit vom HDR-FBO, Fullscreen-Composite. Toggle über `setOitEnabled()`
 - Instancing existiert auf CPU-/Level-Seite und GPU-Seite (SSBO-basiertes Instanced Rendering für Haupt-Render, Shadow Maps, CSM). Batching nur bei gleichem Mesh UND gleichem Material (Obj-Pointer-Check verhindert falsche Gruppierung unterschiedlicher Meshes). Buffer-Orphaning, SSBO-Cleanup nach Draws und `if/else`-Shader-Guard gegen Flicker implementiert
 - Debug Render Modes: 9 Modi (Lit, Unlit, Wireframe, Shadow Map, Shadow Cascades, Instance Groups, Normals, Depth, Overdraw) über Viewport-Toolbar-Dropdown umschaltbar. Uniform-basiertes Shader-Branching in `fragment.glsl` und `grid_fragment.glsl` (`uDebugMode`), pro Modus spezifische Render-Konfiguration (Shadow-Pass-Skip, Wireframe-Polygon-Mode, Overdraw-Additiv-Blending, HSL-Batch-Einfärbung für Instance Groups). Depth-Visualisierung mit logarithmischem Mapping (`log2`) für gleichmäßige Verteilung. Shadow Cascades färbt alle Objekte inkl. Landscape nach Kaskaden-Zugehörigkeit ein.
 - Keine Alternative zu OpenGL (DirectX / Vulkan nicht implementiert, nur als Enum-Placeholder)
@@ -537,13 +539,13 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | Geometry-Shader (Enum vorhanden)    | 🟡     |
 | Compute-Shader (Enum vorhanden)     | 🟡     |
 | Hull-/Domain-Shader (Enum vorhanden)| 🟡     |
-| Shader Hot-Reload                   | ❌     |
+| Shader Hot-Reload                   | ✅     |
 | Shader-Variants / Permutationen     | ❌     |
 | Shader-Reflection                   | ❌     |
 
 **Offene Punkte:**
 - Geometry-, Compute-, Hull-, Domain-Shader sind im Enum definiert, werden aber nirgendwo aktiv genutzt
-- Kein Hot-Reload bei Shader-Änderungen
+- Shader Hot-Reload implementiert: `ShaderHotReload`-Klasse pollt `shaders/` alle 500 ms per `last_write_time`, invalidiert Material-Cache, UI-Quad-Programme und PostProcessStack-Programme, rebuildet Render-Entries automatisch
 - Keine Shader-Variants oder Permutations-System
 
 ---

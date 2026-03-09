@@ -363,6 +363,31 @@ static void deserializeHeightFieldComponent(const json& value, ECS::HeightFieldC
 	if (value.contains("scaleZ"))       component.scaleZ      = value.at("scaleZ").get<float>();
 }
 
+static json serializeLodComponent(const ECS::LodComponent& component)
+{
+	json levelsJson = json::array();
+	for (const auto& level : component.levels)
+	{
+		levelsJson.push_back(json{ {"meshAssetPath", level.meshAssetPath}, {"maxDistance", level.maxDistance} });
+	}
+	return json{ {"levels", levelsJson} };
+}
+
+static void deserializeLodComponent(const json& value, ECS::LodComponent& component)
+{
+	if (!value.is_object() || !value.contains("levels")) return;
+	const auto& levelsJson = value.at("levels");
+	if (!levelsJson.is_array()) return;
+	for (const auto& levelJson : levelsJson)
+	{
+		if (!levelJson.is_object()) continue;
+		ECS::LodComponent::LodLevel level;
+		if (levelJson.contains("meshAssetPath")) level.meshAssetPath = levelJson.at("meshAssetPath").get<std::string>();
+		if (levelJson.contains("maxDistance"))   level.maxDistance    = levelJson.at("maxDistance").get<float>();
+		component.levels.push_back(std::move(level));
+	}
+}
+
 static json serializeNameComponent(const ECS::NameComponent& component)
 {
 	return json{ {"displayName", component.displayName} };
@@ -532,6 +557,12 @@ bool EngineLevel::prepareEcs()
 					ECS::NameComponent component;
 					deserializeNameComponent(componentsJson.at("Name"), component);
 					m_ecs->addComponent<ECS::NameComponent>(entity, component);
+				}
+				if (componentsJson.contains("Lod"))
+				{
+					ECS::LodComponent component;
+					deserializeLodComponent(componentsJson.at("Lod"), component);
+					m_ecs->addComponent<ECS::LodComponent>(entity, component);
 				}
 			}
 		}
@@ -741,6 +772,10 @@ json EngineLevel::serializeEcsEntities() const
 		if (const auto* component = ecs.getComponent<ECS::NameComponent>(entity))
 		{
 			componentsJson["Name"] = serializeNameComponent(*component);
+		}
+		if (const auto* component = ecs.getComponent<ECS::LodComponent>(entity))
+		{
+			componentsJson["Lod"] = serializeLodComponent(*component);
 		}
 
 		entityJson["components"] = componentsJson;

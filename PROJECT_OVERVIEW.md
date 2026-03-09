@@ -235,6 +235,7 @@ Engine/
 │   │   │   ├── OpenGLRenderContext.h    # OpenGL-Implementierung von IRenderContext
 │   │   │   ├── OpenGLRenderTarget.h/.cpp # OpenGL-FBO-Implementierung von IRenderTarget (Editor-Tab-FBOs)
 │   │   │   ├── PostProcessStack.h/.cpp   # Post-Processing-Pipeline (HDR FBO, MSAA 2x/4x, Fullscreen-Resolve, Bloom 5-Mip Gaussian, SSAO 32-Sample Half-Res Bilateral Blur, Deferred FXAA 3.11 Quality nach Gizmo/Outline)
+│   │   │   ├── ShaderHotReload.h/.cpp    # Shader-Hot-Reload: Überwacht shaders/ per last_write_time (500 ms Poll), invalidiert Material-/UI-/PostProcess-Caches und rebuildet Render-Entries bei Dateiänderung
 │   │   │   ├── OpenGLSplashWindow.h/.cpp # OpenGL-Implementierung des Splash-Fensters (Shader, VAOs, FreeType-Atlas)
 │   │   │   ├── glad/               # OpenGL-Loader (GLAD)
 │   │   │   ├── shaders/            # GLSL-Shader-Dateien
@@ -252,6 +253,7 @@ Engine/
 │   │   │       ├── bloom_blur.glsl                  # Bloom 9-Tap Separable Gaussian Blur
 │   │   │       ├── ssao_fragment.glsl               # SSAO 32-Sample Hemisphere (Depth-Only, Half-Res R8)
 │   │   │       ├── ssao_blur.glsl                   # SSAO Bilateral Depth-Aware 5×5 Blur (verhindert AO-Bleeding an Tiefenkanten)
+│   │   │       ├── oit_composite_fragment.glsl      # Weighted Blended OIT Composite Pass (Accumulation + Revealage → opake Szene)
 │   │   │   └── CMakeLists.txt
 │   │   ├── UIWidgets/
 │   │   │   ├── ButtonWidget.h/.cpp
@@ -1801,6 +1803,7 @@ struct PhysicsComponent {
 
 ### 15.8 Serialisierung
 - **Neue Formate**: `CollisionComponent`, `PhysicsComponent` und `HeightFieldComponent` werden separat als "Collision", "Physics" und "HeightField" JSON-Keys serialisiert. Die `HeightFieldComponent`-Serialisierung umfasst: `heights`-Vektor, `sampleCount`, `offsetX/Y/Z`, `scaleX/Y/Z`.
+- **LodComponent**: Serialisiert als "Lod" JSON-Key mit `levels`-Array (je `meshAssetPath` + `maxDistance`). Ermöglicht distanzbasierte Mesh-LOD-Auswahl pro Entity im Render-Loop.
 - **Backward Compatibility**: `deserializeLegacyPhysics()` erkennt alte Formate (mit "isStatic"-Feld) und splittet sie automatisch in beide Komponenten.
 
 ### 15.9 Editor-UI

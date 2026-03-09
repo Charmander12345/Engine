@@ -267,6 +267,14 @@ bool OpenGLMaterial::build()
     m_locDebugColor = glGetUniformLocation(m_program, "uDebugColor");
     m_locNearPlane  = glGetUniformLocation(m_program, "uNearPlane");
     m_locFarPlane   = glGetUniformLocation(m_program, "uFarPlane");
+    // OIT uniform
+    m_locOitEnabled = glGetUniformLocation(m_program, "uOitEnabled");
+
+    // Auto-detect transparency from diffuse texture alpha channel
+    if (!m_textures.empty() && m_textures[0] && m_textures[0]->getChannels() == 4)
+    {
+        m_transparent = true;
+    }
 
     // Cache texture sampler locations.
     // Try material struct names first (material.diffuse, material.specular),
@@ -510,6 +518,10 @@ void OpenGLMaterial::bind()
         glUniform1f(m_locNearPlane, m_nearPlane);
     if (m_locFarPlane >= 0)
         glUniform1f(m_locFarPlane, m_farPlane);
+
+    // OIT uniform
+    if (m_locOitEnabled >= 0)
+        glUniform1i(m_locOitEnabled, m_oitEnabled ? 1 : 0);
 
     bindTextures();
 }

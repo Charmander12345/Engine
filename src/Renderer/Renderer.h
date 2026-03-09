@@ -142,6 +142,8 @@ public:
     virtual void setSsaoEnabled(bool /*enabled*/) {}
     virtual bool isCsmEnabled() const { return true; }
     virtual void setCsmEnabled(bool /*enabled*/) {}
+    virtual bool isOitEnabled() const { return false; }
+    virtual void setOitEnabled(bool /*enabled*/) {}
 
     // --- Debug render mode ---
     virtual DebugRenderMode getDebugRenderMode() const { return DebugRenderMode::Lit; }

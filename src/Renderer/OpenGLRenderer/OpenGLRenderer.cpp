@@ -297,6 +297,7 @@ void OpenGLRenderer::shutdown()
     releasePickFbo();
     releaseOutlineResources();
     releaseInstanceResources();
+    releaseOitResources();
     releaseUiFbo();
     releaseAllTabFbos();
 
@@ -550,6 +551,13 @@ bool OpenGLRenderer::initialize()
     {
         logger.log(Logger::Category::Rendering, "Window hit test enabled.", Logger::LogLevel::INFO);
     }
+
+    // Initialise shader hot-reload watcher on the shaders directory.
+    {
+        const std::string shadersDir = (std::filesystem::current_path() / "shaders").string();
+        m_shaderHotReload.init(shadersDir);
+    }
+
     return true;
 }
 
@@ -577,12 +585,78 @@ void OpenGLRenderer::present()
     }
 }
 
+// ---------------------------------------------------------------------------
+// Shader Hot-Reload
+// ---------------------------------------------------------------------------
+void OpenGLRenderer::handleShaderHotReload()
+{
+    auto changed = m_shaderHotReload.poll();
+    if (changed.empty())
+        return;
+
+    auto& logger = Logger::Instance();
+    for (const auto& path : changed)
+    {
+        logger.log(Logger::Category::Rendering,
+            "ShaderHotReload: changed -> " + path,
+            Logger::LogLevel::INFO);
+    }
+
+    // 1. Invalidate material cache (3D scene shaders loaded from files).
+    //    Existing render entries keep their old materials alive via shared_ptr
+    //    until we rebuild the entries below.
+    OpenGLObject3D::ClearCache();
+    m_resourceManager.clearCaches();
+
+    // 2. Delete and clear cached UI shader programs.
+    for (auto& [key, prog] : m_uiQuadPrograms)
+    {
+        if (prog)
+            glDeleteProgram(prog);
+    }
+    m_uiQuadPrograms.clear();
+    m_uiPanelUniformCache.clear();
+    m_uiQuadProgram = 0;
+
+    // 3. Reload PostProcessStack programs (resolve, bloom, SSAO).
+    m_postProcessStack.reloadPrograms();
+
+    // 4. Rebuild all render entries from the ECS so new materials are created.
+    {
+        auto& ecs = ECS::ECSManager::Instance();
+        m_renderEntries.clear();
+        const auto renderables = m_resourceManager.buildRenderablesForSchema(ecs.getRenderSchema());
+        m_renderEntries.reserve(renderables.size());
+        for (const auto& renderable : renderables)
+        {
+            RenderEntry entry;
+            entry.entity = renderable.entity;
+            entry.transform = renderable.transform;
+            entry.object3D = std::static_pointer_cast<OpenGLObject3D>(renderable.object3D);
+            entry.object2D = std::static_pointer_cast<OpenGLObject2D>(renderable.object2D);
+            if (!entry.object3D && !entry.object2D)
+                continue;
+            m_renderEntries.push_back(std::move(entry));
+        }
+    }
+
+    // 5. Mark UI cache as dirty so it redraws with the new programs.
+    m_uiFboCacheValid = false;
+
+    logger.log(Logger::Category::Rendering,
+        "ShaderHotReload: reloaded " + std::to_string(changed.size()) + " shader(s)",
+        Logger::LogLevel::INFO);
+}
+
 void OpenGLRenderer::render()
 {
     if (!m_initialized)
     {
         return;
     }
+
+    // Poll for shader file changes and hot-reload if needed.
+    handleShaderHotReload();
 
     const uint64_t freq = SDL_GetPerformanceFrequency();
 
@@ -823,6 +897,44 @@ void OpenGLRenderer::renderWorld()
             {
                 continue;
             }
+
+            // Load LOD variants if the entity has a LodComponent
+            if (entry.entity != 0)
+            {
+                if (const auto* lod = ecs.getComponent<ECS::LodComponent>(entry.entity))
+                {
+                    for (const auto& level : lod->levels)
+                    {
+                        if (level.meshAssetPath.empty())
+                            continue;
+                        const std::string resolvedPath = m_resourceManager.resolveContentPath(level.meshAssetPath);
+                        auto lodAsset = AssetManager::Instance().getLoadedAssetByPath(resolvedPath);
+                        if (!lodAsset)
+                        {
+                            int id = AssetManager::Instance().loadAsset(resolvedPath, AssetType::Model3D, AssetManager::Sync);
+                            if (id != 0)
+                                lodAsset = AssetManager::Instance().getLoadedAssetByID(static_cast<unsigned int>(id));
+                        }
+                        if (!lodAsset)
+                            continue;
+                        auto lodObj = std::make_shared<OpenGLObject3D>(lodAsset);
+                        if (lodObj->prepare())
+                        {
+                            if (renderable.object3D)
+                            {
+                                lodObj->setTextures(renderable.textures);
+                                lodObj->setShininess(renderable.shininess);
+                                lodObj->setPbrData(renderable.pbrEnabled, renderable.metallic, renderable.roughness);
+                            }
+                            RenderEntry::LodVariant variant;
+                            variant.object3D = std::move(lodObj);
+                            variant.maxDistance = level.maxDistance;
+                            entry.lodLevels.push_back(std::move(variant));
+                        }
+                    }
+                }
+            }
+
             m_renderEntries.push_back(std::move(entry));
         }
 
@@ -1044,6 +1156,10 @@ void OpenGLRenderer::renderWorld()
 	m_drawList.reserve(m_renderEntries.size() + objs.size() + m_meshEntries.size() + 16);
 	m_shadowCasterList.reserve(m_renderEntries.size() + objs.size() + m_meshEntries.size() + 16);
 
+	// Camera position for LOD distance calculations
+	const glm::mat4 invView = glm::inverse(view);
+	const glm::vec3 cameraPos(invView[3][0], invView[3][1], invView[3][2]);
+
 	const float timeRotation = static_cast<float>(SDL_GetTicks()) / 1000.0f;
 
 	// Gather ECS render entries
@@ -1052,9 +1168,33 @@ void OpenGLRenderer::renderWorld()
 		if (entry.object3D)
 		{
 			++m_lastTotalCount;
+
+			// LOD selection: pick the appropriate mesh variant based on camera distance
+			OpenGLObject3D* selectedObj = entry.object3D.get();
+			if (!entry.lodLevels.empty())
+			{
+				const glm::vec3 objPos(entry.cachedModelMatrix[3]);
+				const float dist = glm::length(cameraPos - objPos);
+				for (const auto& variant : entry.lodLevels)
+				{
+					if (variant.maxDistance > 0.0f && dist <= variant.maxDistance && variant.object3D)
+					{
+						selectedObj = variant.object3D.get();
+						break;
+					}
+				}
+				// If no level matched (distance beyond all thresholds), use the last level (fallback)
+				if (selectedObj == entry.object3D.get() && !entry.lodLevels.empty())
+				{
+					const auto& last = entry.lodLevels.back();
+					if (last.object3D && (last.maxDistance <= 0.0f))
+						selectedObj = last.object3D.get();
+				}
+			}
+
 			DrawCmd cmd;
-			cmd.obj = entry.object3D.get();
-			cmd.material = entry.object3D->getMaterial();
+			cmd.obj = selectedObj;
+			cmd.material = selectedObj->getMaterial();
 			cmd.modelMatrix = entry.cachedModelMatrix;
 			cmd.entityId = static_cast<unsigned int>(entry.entity);
 			bool isLight = false;
@@ -1298,6 +1438,31 @@ void OpenGLRenderer::renderWorld()
 			return a.obj < b.obj;
 		});
 
+	// Partition draw list into opaque and transparent for OIT
+	m_transparentDrawList.clear();
+	if (m_oitEnabled)
+	{
+		// Mark transparent objects based on material flag
+		for (auto& cmd : m_drawList)
+		{
+			if (cmd.material && cmd.material->isTransparent())
+				cmd.isTransparent = true;
+		}
+		// Move transparent objects to separate list
+		auto partIt = std::stable_partition(m_drawList.begin(), m_drawList.end(),
+			[](const DrawCmd& cmd) { return !cmd.isTransparent; });
+		m_transparentDrawList.assign(std::make_move_iterator(partIt), std::make_move_iterator(m_drawList.end()));
+		m_drawList.erase(partIt, m_drawList.end());
+
+		// Sort transparent list by (material, obj) for instanced batching
+		std::sort(m_transparentDrawList.begin(), m_transparentDrawList.end(),
+			[](const DrawCmd& a, const DrawCmd& b)
+			{
+				if (a.material != b.material) return a.material < b.material;
+				return a.obj < b.obj;
+			});
+	}
+
 	// ---- Shadow map pass (multi-light) ----
 	const int debugMode = static_cast<int>(m_debugRenderMode);
 	const bool debugNeedsShadows = (debugMode == 0 || debugMode == 3 || debugMode == 4); // Lit, ShadowMap, ShadowCascades
@@ -1472,6 +1637,32 @@ void OpenGLRenderer::renderWorld()
 	{
 		glDisable(GL_BLEND);
 		glDepthFunc(GL_LESS);
+	}
+
+	// ---- OIT Transparent Pass ----
+	if (m_oitEnabled && !m_transparentDrawList.empty() && ensureOitResources(fullWidth, fullHeight))
+	{
+		// Blit depth from the current render target (HDR or tab FBO) into the OIT FBO
+		// so transparent objects are correctly depth-tested against opaque geometry.
+		GLuint srcFbo = 0;
+		if (usePostProcess && m_postProcessStack.isInitialized())
+			srcFbo = m_postProcessStack.getHdrFbo();
+		else if (m_cachedActiveTab && m_cachedActiveTab->renderTarget && m_cachedActiveTab->renderTarget->isValid())
+			srcFbo = static_cast<OpenGLRenderTarget*>(m_cachedActiveTab->renderTarget.get())->getGLFramebuffer();
+
+		glBindFramebuffer(GL_READ_FRAMEBUFFER, srcFbo);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_oitFbo);
+		glBlitFramebuffer(0, 0, fullWidth, fullHeight, 0, 0, fullWidth, fullHeight,
+			GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+
+		glViewport(vpX, viewportY, width, height);
+
+		renderOitTransparentPass(view, lightPosition, lightColor, lightIntensity,
+			fogColor, debugMode, activeNear, activeFar);
+
+		// Composite OIT result over the scene in the tab/HDR FBO
+		GLuint dstFbo = srcFbo;
+		compositeOit(dstFbo, vpX, viewportY, width, height);
 	}
 
 	// HeightField debug wireframe overlay
@@ -5765,6 +5956,231 @@ void OpenGLRenderer::releaseInstanceResources()
     m_instanceSSBOCapacity = 0;
     m_instanceMatrixBuffer.clear();
     m_instanceMatrixBuffer.shrink_to_fit();
+}
+
+// ---- Order-Independent Transparency (Weighted Blended OIT) ----
+
+bool OpenGLRenderer::ensureOitResources(int width, int height)
+{
+    if (width <= 0 || height <= 0)
+        return false;
+
+    // Resize existing FBO if dimensions changed
+    if (m_oitFbo != 0 && (m_oitWidth != width || m_oitHeight != height))
+    {
+        releaseOitResources();
+    }
+
+    if (m_oitFbo != 0)
+        return true;
+
+    m_oitWidth = width;
+    m_oitHeight = height;
+
+    // Accumulation texture (RGBA16F) – additive blend of premultiplied colour * weight
+    glGenTextures(1, &m_oitAccumTex);
+    glBindTexture(GL_TEXTURE_2D, m_oitAccumTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    // Revealage texture (R8) – product of (1 – alpha)
+    glGenTextures(1, &m_oitRevealageTex);
+    glBindTexture(GL_TEXTURE_2D, m_oitRevealageTex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    // Depth RBO (shared with opaque pass via blit)
+    glGenRenderbuffers(1, &m_oitDepthRbo);
+    glBindRenderbuffer(GL_RENDERBUFFER, m_oitDepthRbo);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, width, height);
+
+    glGenFramebuffers(1, &m_oitFbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_oitFbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_oitAccumTex, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, m_oitRevealageTex, 0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_oitDepthRbo);
+
+    GLenum drawBuffers[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+    glDrawBuffers(2, drawBuffers);
+
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+    {
+        Logger::Instance().log(Logger::Category::Rendering,
+            "OIT: FBO incomplete", Logger::LogLevel::ERROR);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        releaseOitResources();
+        return false;
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    // Compile composite program (uses resolve_vertex.glsl for fullscreen triangle)
+    if (m_oitCompositeProgram == 0)
+    {
+        const std::filesystem::path shadersDir = std::filesystem::current_path() / "shaders";
+        const std::string vertPath = (shadersDir / "resolve_vertex.glsl").string();
+        const std::string fragPath = (shadersDir / "oit_composite_fragment.glsl").string();
+
+        OpenGLShader vertShader;
+        OpenGLShader fragShader;
+        if (!vertShader.loadFromFile(Shader::Type::Vertex, vertPath) ||
+            !fragShader.loadFromFile(Shader::Type::Fragment, fragPath))
+        {
+            Logger::Instance().log(Logger::Category::Rendering,
+                "OIT: failed to load composite shaders", Logger::LogLevel::ERROR);
+            return false;
+        }
+
+        m_oitCompositeProgram = glCreateProgram();
+        glAttachShader(m_oitCompositeProgram, vertShader.id());
+        glAttachShader(m_oitCompositeProgram, fragShader.id());
+        glLinkProgram(m_oitCompositeProgram);
+
+        GLint linked = 0;
+        glGetProgramiv(m_oitCompositeProgram, GL_LINK_STATUS, &linked);
+        if (!linked)
+        {
+            Logger::Instance().log(Logger::Category::Rendering,
+                "OIT: composite program link failed", Logger::LogLevel::ERROR);
+            glDeleteProgram(m_oitCompositeProgram);
+            m_oitCompositeProgram = 0;
+            return false;
+        }
+
+        m_oitCompLocAccum = glGetUniformLocation(m_oitCompositeProgram, "uAccumTexture");
+        m_oitCompLocRevealage = glGetUniformLocation(m_oitCompositeProgram, "uRevealageTexture");
+    }
+
+    return true;
+}
+
+void OpenGLRenderer::releaseOitResources()
+{
+    if (m_oitFbo)           { glDeleteFramebuffers(1, &m_oitFbo);       m_oitFbo = 0; }
+    if (m_oitAccumTex)      { glDeleteTextures(1, &m_oitAccumTex);      m_oitAccumTex = 0; }
+    if (m_oitRevealageTex)  { glDeleteTextures(1, &m_oitRevealageTex);  m_oitRevealageTex = 0; }
+    if (m_oitDepthRbo)      { glDeleteRenderbuffers(1, &m_oitDepthRbo); m_oitDepthRbo = 0; }
+    if (m_oitCompositeProgram) { glDeleteProgram(m_oitCompositeProgram); m_oitCompositeProgram = 0; }
+    if (m_oitCompositeVao)  { glDeleteVertexArrays(1, &m_oitCompositeVao); m_oitCompositeVao = 0; }
+    m_oitWidth = 0;
+    m_oitHeight = 0;
+}
+
+void OpenGLRenderer::renderOitTransparentPass(const glm::mat4& view,
+    const glm::vec3& lightPosition, const glm::vec3& lightColor, float lightIntensity,
+    const glm::vec3& fogColor, int debugMode, float activeNear, float activeFar)
+{
+    if (m_transparentDrawList.empty())
+        return;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, m_oitFbo);
+
+    // Clear accumulation to (0,0,0,0) and revealage to 1.0
+    const GLfloat clearAccum[] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    const GLfloat clearReveal[] = { 1.0f, 0.0f, 0.0f, 0.0f };
+    glClearBufferfv(GL_COLOR, 0, clearAccum);
+    glClearBufferfv(GL_COLOR, 1, clearReveal);
+
+    // Depth test ON but depth write OFF – transparent objects read opaque depth
+    glEnable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+
+    // Per-attachment blending:
+    // Attachment 0 (accumulation): additive
+    // Attachment 1 (revealage):    multiply by (1 - src_alpha)
+    glEnable(GL_BLEND);
+    glBlendFunci(0, GL_ONE, GL_ONE);
+    glBlendFunci(1, GL_ZERO, GL_ONE_MINUS_SRC_ALPHA);
+
+    // Render all transparent objects with OIT enabled
+    size_t di = 0;
+    while (di < m_transparentDrawList.size())
+    {
+        const auto& first = m_transparentDrawList[di];
+
+        first.obj->setMatrices(first.modelMatrix, view, m_projectionMatrix);
+        first.obj->setShadowData(m_shadowDepthArray, m_shadowLightSpaceMatrices, m_shadowLightIndices, m_shadowCount);
+        first.obj->setPointShadowData(m_pointShadowCubeArray, m_pointShadowPositions, m_pointShadowFarPlanes, m_pointShadowLightIndices, m_pointShadowCount);
+        first.obj->setFogData(m_fogEnabled, fogColor, m_fogParams.z);
+        first.obj->setCsmData(m_csmDepthArray, m_csmMatrices, m_csmSplits, m_csmLightIndex, m_csmEnabled, view);
+        first.obj->setLightData(lightPosition, lightColor, lightIntensity);
+        first.obj->setLights(m_sceneLights);
+        first.obj->setDebugMode(debugMode);
+        first.obj->setNearFarPlanes(activeNear, activeFar);
+
+        // Enable OIT mode on the material
+        if (first.material)
+            first.material->setOitEnabled(true);
+
+        // Find batch
+        size_t batchEnd = di + 1;
+        while (batchEnd < m_transparentDrawList.size() &&
+               m_transparentDrawList[batchEnd].obj == first.obj &&
+               m_transparentDrawList[batchEnd].material == first.material)
+        {
+            ++batchEnd;
+        }
+        const size_t batchSize = batchEnd - di;
+
+        if (batchSize > 1 && first.material)
+        {
+            m_instanceMatrixBuffer.clear();
+            for (size_t j = di; j < batchEnd; ++j)
+                m_instanceMatrixBuffer.push_back(m_transparentDrawList[j].modelMatrix);
+            uploadInstanceData(m_instanceMatrixBuffer.data(), batchSize);
+            first.material->renderInstanced(static_cast<int>(batchSize));
+        }
+        else
+        {
+            first.obj->render();
+        }
+
+        // Disable OIT mode
+        if (first.material)
+            first.material->setOitEnabled(false);
+
+        di = batchEnd;
+    }
+
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
+
+void OpenGLRenderer::compositeOit(GLuint dstFbo, int vpX, int vpY, int vpW, int vpH)
+{
+    if (m_transparentDrawList.empty() || m_oitCompositeProgram == 0)
+        return;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, dstFbo);
+    glViewport(vpX, vpY, vpW, vpH);
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_DEPTH_TEST);
+
+    glUseProgram(m_oitCompositeProgram);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_oitAccumTex);
+    if (m_oitCompLocAccum >= 0) glUniform1i(m_oitCompLocAccum, 0);
+
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, m_oitRevealageTex);
+    if (m_oitCompLocRevealage >= 0) glUniform1i(m_oitCompLocRevealage, 1);
+
+    // Fullscreen triangle – vertex positions generated from gl_VertexID in resolve_vertex.glsl
+    if (m_oitCompositeVao == 0)
+        glGenVertexArrays(1, &m_oitCompositeVao);
+    glBindVertexArray(m_oitCompositeVao);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+
+    glUseProgram(0);
+    glActiveTexture(GL_TEXTURE0);
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
 }
 
 // ---- Shadow Mapping ----

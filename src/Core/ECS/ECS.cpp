@@ -28,6 +28,7 @@ namespace ECS
 		m_nameComponents.clear();
 		m_collisionComponents.clear();
 		m_heightFieldComponents.clear();
+		m_lodComponents.clear();
 
 		m_renderSchema = Schema();
 		m_renderSchema.require<MeshComponent>().require<MaterialComponent>();

@@ -7,9 +7,6 @@
         "generator": "Visual Studio 18 2026",
         "binaryDir": "${sourceDir}/out/build/${presetName}",
         "installDir": "C:\\Users\\conno\\source\\repos\\EngineBuild",
-        "cacheVariables": {
-          "CMAKE_GENERATOR_TOOLSET": "v143"
-        },
         "condition": {
           "type": "equals",
           "lhs": "${hostSystemName}",
