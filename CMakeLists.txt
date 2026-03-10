@@ -312,6 +312,7 @@ endif()
 # NOTE: There are two shader directories in the repo; use Renderer/OpenGLRenderer/shaders as the authoritative one.
 set(SHADERS_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/Renderer/OpenGLRenderer/shaders")
 set(CONTENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Content")
+set(EDITOR_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Editor")
 
 add_custom_command(TARGET HorizonEngine POST_BUILD
     # Ensure deploy directory exists
@@ -329,6 +330,8 @@ add_custom_command(TARGET HorizonEngine POST_BUILD
 
     # Copy engine Content directory (textures, skyboxes, etc.) to deploy directory
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CONTENT_SOURCE_DIR}" "${ENGINE_DEPLOY_DIR}/Content"
+
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${EDITOR_SOURCE_DIR}" "${ENGINE_DEPLOY_DIR}/Editor"
 
     # Copy static engine.pyi type stub to deploy directory for project distribution
     COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/Content/Scripting"

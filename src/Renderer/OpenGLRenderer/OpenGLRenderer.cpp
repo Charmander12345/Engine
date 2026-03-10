@@ -300,6 +300,7 @@ void OpenGLRenderer::shutdown()
     releaseOitResources();
     releaseUiFbo();
     releaseAllTabFbos();
+    m_particleSystem.shutdown();
 
     // Release mesh viewer state before destroying GL resources.
     m_meshViewers.clear();
@@ -480,6 +481,15 @@ bool OpenGLRenderer::initialize()
 
     glGenQueries(static_cast<GLsizei>(m_gpuTimerQueries.size()), m_gpuTimerQueries.data());
     m_gpuQueriesInitialized = true;
+
+    // Initialize particle system (soft-fail: game runs without particles).
+    {
+        const auto shaderDir = (std::filesystem::current_path() / "shaders").string();
+        if (!m_particleSystem.initialize(shaderDir))
+        {
+            logger.log(Logger::Category::Rendering, "ParticleSystem: init failed (particles disabled).", Logger::LogLevel::WARNING);
+        }
+    }
 
     // Prime render resources as soon as the renderer is ready.
     {
@@ -1820,6 +1830,33 @@ void OpenGLRenderer::renderWorld()
 	{
 		glDisable(GL_BLEND);
 		glDepthFunc(GL_LESS);
+	}
+
+	// ---- Particle Pass (after opaque, before OIT) ----
+	if (pieActive)
+	{
+		// Compute frame dt from SDL performance counters
+		const uint64_t pFreq = SDL_GetPerformanceFrequency();
+		const uint64_t pNow = SDL_GetPerformanceCounter();
+		float pDt = 0.0f;
+		if (m_lastParticleTick > 0 && pFreq > 0)
+			pDt = static_cast<float>(static_cast<double>(pNow - m_lastParticleTick) / static_cast<double>(pFreq));
+		m_lastParticleTick = pNow;
+		if (pDt > 0.0f && pDt < 1.0f)
+		{
+			m_particleSystem.update(pDt);
+		}
+		// Extract camera world position from view matrix
+		const glm::mat4 invView = glm::inverse(view);
+		const glm::vec3 camWorldPos(invView[3][0], invView[3][1], invView[3][2]);
+		glEnable(GL_PROGRAM_POINT_SIZE);
+		m_particleSystem.render(view, m_projectionMatrix, camWorldPos);
+		glDisable(GL_PROGRAM_POINT_SIZE);
+	}
+	else
+	{
+		m_lastParticleTick = 0;
+		m_particleSystem.clear();
 	}
 
 	// ---- OIT Transparent Pass ----

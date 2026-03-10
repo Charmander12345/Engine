@@ -1,4 +1,4 @@
-﻿#include "UIManager.h"
+#include "UIManager.h"
 
 #include <algorithm>
 #include <numeric>
@@ -2858,6 +2858,228 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
         });
     }
 
+    // -- Particle Emitter Component ----------------------------------------
+    if (const auto* emitter = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+    {
+        std::vector<WidgetElement> lines;
+
+        lines.push_back(makeCheckBoxRow("Details.Particle.Enabled", "Enabled", emitter->enabled,
+            [entity](bool val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.enabled = val;
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeCheckBoxRow("Details.Particle.Loop", "Loop", emitter->loop,
+            [entity](bool val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.loop = val;
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Particle.MaxParticles", "Max Particles", static_cast<float>(emitter->maxParticles),
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.maxParticles = static_cast<int>(val);
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Particle.EmissionRate", "Emission Rate", emitter->emissionRate,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.emissionRate = val;
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Particle.Lifetime", "Lifetime", emitter->lifetime,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.lifetime = val;
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Particle.Speed", "Speed", emitter->speed,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.speed = val;
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Particle.SpeedVariance", "Speed Variance", emitter->speedVariance,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.speedVariance = val;
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Particle.Size", "Size", emitter->size,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.size = val;
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Particle.SizeEnd", "Size End", emitter->sizeEnd,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.sizeEnd = val;
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Particle.Gravity", "Gravity", emitter->gravity,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.gravity = val;
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Particle.ConeAngle", "Cone Angle", emitter->coneAngle,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.coneAngle = val;
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Particle.ColorR", "Color R", emitter->colorR,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.colorR = val;
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Particle.ColorG", "Color G", emitter->colorG,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.colorG = val;
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Particle.ColorB", "Color B", emitter->colorB,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.colorB = val;
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Particle.ColorA", "Color A", emitter->colorA,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.colorA = val;
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Particle.ColorEndR", "End Color R", emitter->colorEndR,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.colorEndR = val;
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Particle.ColorEndG", "End Color G", emitter->colorEndG,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.colorEndG = val;
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Particle.ColorEndB", "End Color B", emitter->colorEndB,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.colorEndB = val;
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Particle.ColorEndA", "End Color A", emitter->colorEndA,
+            [entity](float val) {
+                auto& ecs = ECS::ECSManager::Instance();
+                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+                {
+                    ECS::ParticleEmitterComponent updated = *comp;
+                    updated.colorEndA = val;
+                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
+                }
+            }));
+
+        addSeparator("Particle Emitter", lines, [this, entity]() {
+            ECS::ECSManager::Instance().removeComponent<ECS::ParticleEmitterComponent>(entity);
+            if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            populateOutlinerDetails(entity);
+        });
+    }
+
+
     // "Add Component" dropdown button
     {
         DropdownButtonWidget dropdown;
@@ -2890,6 +3112,8 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
               [entity]() { ECS::ECSManager::Instance().addComponent<ECS::ScriptComponent>(entity); } },
             { "Name", ecs.hasComponent<ECS::NameComponent>(entity),
               [entity]() { ECS::ECSManager::Instance().addComponent<ECS::NameComponent>(entity); } },
+            { "Particle Emitter", ecs.hasComponent<ECS::ParticleEmitterComponent>(entity),
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::ParticleEmitterComponent>(entity); } },
         };
 
         for (const auto& opt : options)

@@ -156,4 +156,29 @@ namespace ECS
 		};
 		std::vector<LodLevel> levels;
 	};
+
+	/// Particle emitter – spawns billboard particles from the entity's position.
+	struct ParticleEmitterComponent
+	{
+		int maxParticles{ 100 };
+		float emissionRate{ 20.0f };       ///< Particles per second
+		float lifetime{ 2.0f };            ///< Seconds each particle lives
+		float speed{ 2.0f };               ///< Initial speed (m/s)
+		float speedVariance{ 0.5f };       ///< Random speed ± variance
+		float size{ 0.2f };                ///< Billboard size (world units)
+		float sizeEnd{ 0.0f };             ///< Size at end of life (0 = shrink to nothing)
+		float gravity{ -9.81f };           ///< Y-axis gravity acceleration
+		float colorR{ 1.0f };              ///< Start color
+		float colorG{ 0.8f };
+		float colorB{ 0.2f };
+		float colorA{ 1.0f };
+		float colorEndR{ 1.0f };           ///< End color (at death)
+		float colorEndG{ 0.1f };
+		float colorEndB{ 0.0f };
+		float colorEndA{ 0.0f };
+		float coneAngle{ 30.0f };          ///< Emission cone half-angle (degrees), 0 = straight up
+		float emissionAccumulator{ 0.0f }; ///< Runtime accumulator (not serialized)
+		bool  enabled{ true };
+		bool  loop{ true };                ///< Restart emission when all particles dead
+	};
 }

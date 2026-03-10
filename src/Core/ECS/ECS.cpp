@@ -30,6 +30,7 @@ namespace ECS
 		m_heightFieldComponents.clear();
 		m_lodComponents.clear();
 		m_animationComponents.clear();
+		m_particleEmitterComponents.clear();
 
 		m_renderSchema = Schema();
 		m_renderSchema.require<MeshComponent>().require<MaterialComponent>();

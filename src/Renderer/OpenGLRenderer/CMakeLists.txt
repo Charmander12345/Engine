@@ -22,6 +22,8 @@ add_library(Renderer SHARED
     PostProcessStack.h
     ShaderHotReload.cpp
     ShaderHotReload.h
+    ParticleSystem.cpp
+    ParticleSystem.h
     OpenGLSplashWindow.cpp
     OpenGLSplashWindow.h
     RendererFactory.cpp

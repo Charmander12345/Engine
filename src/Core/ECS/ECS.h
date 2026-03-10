@@ -16,7 +16,7 @@ struct ECSConfig
 };
 
 using Entity = unsigned int;
-static constexpr size_t MaxComponentTypes = 12;
+static constexpr size_t MaxComponentTypes = 13;
 
 enum class ComponentKind : size_t
 {
@@ -31,7 +31,8 @@ enum class ComponentKind : size_t
 	Collision,
 	HeightField,
 	Lod,
-	Animation
+	Animation,
+	ParticleEmitter
 };
 
 template<typename T>
@@ -107,6 +108,12 @@ template<>
 struct ComponentTraits<AnimationComponent>
 {
 	static constexpr ComponentKind kind = ComponentKind::Animation;
+};
+
+template<>
+struct ComponentTraits<ParticleEmitterComponent>
+{
+	static constexpr ComponentKind kind = ComponentKind::ParticleEmitter;
 };
 
 class Schema
@@ -210,6 +217,7 @@ public:
 	SparseSet<HeightFieldComponent, MaxEntities> m_heightFieldComponents;
 	SparseSet<LodComponent, MaxEntities> m_lodComponents;
 	SparseSet<AnimationComponent, MaxEntities> m_animationComponents;
+	SparseSet<ParticleEmitterComponent, MaxEntities> m_particleEmitterComponents;
 
 	template<typename T>
 	SparseSet<T, MaxEntities>& getStorage();
@@ -327,10 +335,14 @@ inline SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage()
 	{
 		return m_lodComponents;
 	}
+	else if constexpr (std::is_same_v<T, AnimationComponent>)
+	{
+		return m_animationComponents;
+	}
 	else
 	{
-		static_assert(std::is_same_v<T, AnimationComponent>, "Unsupported component type");
-		return m_animationComponents;
+		static_assert(std::is_same_v<T, ParticleEmitterComponent>, "Unsupported component type");
+		return m_particleEmitterComponents;
 	}
 }
 
@@ -381,10 +393,14 @@ inline const SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage() con
 	{
 		return m_lodComponents;
 	}
+	else if constexpr (std::is_same_v<T, AnimationComponent>)
+	{
+		return m_animationComponents;
+	}
 	else
 	{
-		static_assert(std::is_same_v<T, AnimationComponent>, "Unsupported component type");
-		return m_animationComponents;
+		static_assert(std::is_same_v<T, ParticleEmitterComponent>, "Unsupported component type");
+		return m_particleEmitterComponents;
 	}
 }
 

@@ -11,6 +11,7 @@
 #include "OpenGLRenderTarget.h"
 #include "PostProcessStack.h"
 #include "ShaderHotReload.h"
+#include "ParticleSystem.h"
 
 #include "../../Core/MathTypes.h"
 #include "../../Core/EngineLevel.h"
@@ -190,6 +191,9 @@ private:
     unsigned int m_activeCameraEntity{ 0 };
     CameraTransition m_cameraTransition;
     uint64_t m_lastTransitionTick{0};
+
+    ParticleSystem m_particleSystem;
+    uint64_t m_lastParticleTick{0};
     glm::mat4 m_projectionMatrix;
     glm::mat4 m_lastViewMatrix{ 1.0f };
     std::vector<RenderEntry> m_renderEntries;
