@@ -455,51 +455,51 @@ static void deserializeAnimationComponent(const json& value, ECS::AnimationCompo
 
 static json serializeParticleEmitterComponent(const ECS::ParticleEmitterComponent& component)
 {
-return json{
-{"maxParticles",  component.maxParticles},
-{"emissionRate",  component.emissionRate},
-{"lifetime",      component.lifetime},
-{"speed",         component.speed},
-{"speedVariance", component.speedVariance},
-{"size",          component.size},
-{"sizeEnd",       component.sizeEnd},
-{"gravity",       component.gravity},
-{"colorR",        component.colorR},
-{"colorG",        component.colorG},
-{"colorB",        component.colorB},
-{"colorA",        component.colorA},
-{"colorEndR",     component.colorEndR},
-{"colorEndG",     component.colorEndG},
-{"colorEndB",     component.colorEndB},
-{"colorEndA",     component.colorEndA},
-{"coneAngle",     component.coneAngle},
-{"enabled",       component.enabled},
-{"loop",          component.loop}
-};
+	return json{
+		{"maxParticles",  component.maxParticles},
+		{"emissionRate",  component.emissionRate},
+		{"lifetime",      component.lifetime},
+		{"speed",         component.speed},
+		{"speedVariance", component.speedVariance},
+		{"size",          component.size},
+		{"sizeEnd",       component.sizeEnd},
+		{"gravity",       component.gravity},
+		{"colorR",        component.colorR},
+		{"colorG",        component.colorG},
+		{"colorB",        component.colorB},
+		{"colorA",        component.colorA},
+		{"colorEndR",     component.colorEndR},
+		{"colorEndG",     component.colorEndG},
+		{"colorEndB",     component.colorEndB},
+		{"colorEndA",     component.colorEndA},
+		{"coneAngle",     component.coneAngle},
+		{"enabled",       component.enabled},
+		{"loop",          component.loop}
+	};
 }
 
 static void deserializeParticleEmitterComponent(const json& value, ECS::ParticleEmitterComponent& component)
 {
-if (!value.is_object()) return;
-if (value.contains("maxParticles"))  component.maxParticles  = value.at("maxParticles").get<int>();
-if (value.contains("emissionRate"))  component.emissionRate  = value.at("emissionRate").get<float>();
-if (value.contains("lifetime"))      component.lifetime      = value.at("lifetime").get<float>();
-if (value.contains("speed"))         component.speed         = value.at("speed").get<float>();
-if (value.contains("speedVariance")) component.speedVariance = value.at("speedVariance").get<float>();
-if (value.contains("size"))          component.size          = value.at("size").get<float>();
-if (value.contains("sizeEnd"))       component.sizeEnd       = value.at("sizeEnd").get<float>();
-if (value.contains("gravity"))       component.gravity       = value.at("gravity").get<float>();
-if (value.contains("colorR"))        component.colorR        = value.at("colorR").get<float>();
-if (value.contains("colorG"))        component.colorG        = value.at("colorG").get<float>();
-if (value.contains("colorB"))        component.colorB        = value.at("colorB").get<float>();
-if (value.contains("colorA"))        component.colorA        = value.at("colorA").get<float>();
-if (value.contains("colorEndR"))     component.colorEndR     = value.at("colorEndR").get<float>();
-if (value.contains("colorEndG"))     component.colorEndG     = value.at("colorEndG").get<float>();
-if (value.contains("colorEndB"))     component.colorEndB     = value.at("colorEndB").get<float>();
-if (value.contains("colorEndA"))     component.colorEndA     = value.at("colorEndA").get<float>();
-if (value.contains("coneAngle"))     component.coneAngle     = value.at("coneAngle").get<float>();
-if (value.contains("enabled"))       component.enabled       = value.at("enabled").get<bool>();
-if (value.contains("loop"))          component.loop          = value.at("loop").get<bool>();
+	if (!value.is_object()) return;
+	if (value.contains("maxParticles"))  component.maxParticles  = value.at("maxParticles").get<int>();
+	if (value.contains("emissionRate"))  component.emissionRate  = value.at("emissionRate").get<float>();
+	if (value.contains("lifetime"))      component.lifetime      = value.at("lifetime").get<float>();
+	if (value.contains("speed"))         component.speed         = value.at("speed").get<float>();
+	if (value.contains("speedVariance")) component.speedVariance = value.at("speedVariance").get<float>();
+	if (value.contains("size"))          component.size          = value.at("size").get<float>();
+	if (value.contains("sizeEnd"))       component.sizeEnd       = value.at("sizeEnd").get<float>();
+	if (value.contains("gravity"))       component.gravity       = value.at("gravity").get<float>();
+	if (value.contains("colorR"))        component.colorR        = value.at("colorR").get<float>();
+	if (value.contains("colorG"))        component.colorG        = value.at("colorG").get<float>();
+	if (value.contains("colorB"))        component.colorB        = value.at("colorB").get<float>();
+	if (value.contains("colorA"))        component.colorA        = value.at("colorA").get<float>();
+	if (value.contains("colorEndR"))     component.colorEndR     = value.at("colorEndR").get<float>();
+	if (value.contains("colorEndG"))     component.colorEndG     = value.at("colorEndG").get<float>();
+	if (value.contains("colorEndB"))     component.colorEndB     = value.at("colorEndB").get<float>();
+	if (value.contains("colorEndA"))     component.colorEndA     = value.at("colorEndA").get<float>();
+	if (value.contains("coneAngle"))     component.coneAngle     = value.at("coneAngle").get<float>();
+	if (value.contains("enabled"))       component.enabled       = value.at("enabled").get<bool>();
+	if (value.contains("loop"))          component.loop          = value.at("loop").get<bool>();
 }
 
 static void deserializeNameComponent(const json& value, ECS::NameComponent& component)
@@ -681,9 +681,9 @@ bool EngineLevel::prepareEcs()
 				}
 if (componentsJson.contains("ParticleEmitter"))
 {
-ECS::ParticleEmitterComponent component;
-deserializeParticleEmitterComponent(componentsJson.at("ParticleEmitter"), component);
-m_ecs->addComponent<ECS::ParticleEmitterComponent>(entity, component);
+	ECS::ParticleEmitterComponent component;
+	deserializeParticleEmitterComponent(componentsJson.at("ParticleEmitter"), component);
+	m_ecs->addComponent<ECS::ParticleEmitterComponent>(entity, component);
 }
 			}
 		}
@@ -904,7 +904,7 @@ json EngineLevel::serializeEcsEntities() const
 		}
 if (const auto* component = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
 {
-componentsJson["ParticleEmitter"] = serializeParticleEmitterComponent(*component);
+	componentsJson["ParticleEmitter"] = serializeParticleEmitterComponent(*component);
 }
 
 		entityJson["components"] = componentsJson;

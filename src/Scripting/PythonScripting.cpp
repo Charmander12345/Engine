@@ -599,6 +599,8 @@ namespace
             return ECS::addComponent<ECS::ScriptComponent>(entity);
         case ECS::ComponentKind::Name:
             return ECS::addComponent<ECS::NameComponent>(entity);
+        case ECS::ComponentKind::ParticleEmitter:
+            return ECS::addComponent<ECS::ParticleEmitterComponent>(entity);
         default:
             return false;
         }
@@ -631,6 +633,8 @@ namespace
             return ECS::removeComponent<ECS::ScriptComponent>(entity);
         case ECS::ComponentKind::Name:
             return ECS::removeComponent<ECS::NameComponent>(entity);
+        case ECS::ComponentKind::ParticleEmitter:
+            return ECS::removeComponent<ECS::ParticleEmitterComponent>(entity);
         default:
             return false;
         }
@@ -666,6 +670,9 @@ namespace
             return true;
         case ECS::ComponentKind::Name:
             schema.require<ECS::NameComponent>();
+            return true;
+        case ECS::ComponentKind::ParticleEmitter:
+            schema.require<ECS::ParticleEmitterComponent>();
             return true;
         default:
             return false;
@@ -1311,6 +1318,75 @@ namespace
     {
         if (s_renderer)
             s_renderer->cancelCameraTransition();
+        Py_RETURN_TRUE;
+    }
+
+    // ---- Particle emitter API ----
+
+    PyObject* py_set_emitter(PyObject*, PyObject* args)
+    {
+        unsigned int entity = 0;
+        const char* key = nullptr;
+        float value = 0.0f;
+        if (!PyArg_ParseTuple(args, "Isf", &entity, &key, &value))
+            return nullptr;
+        auto* c = ECS::ECSManager::Instance().getComponent<ECS::ParticleEmitterComponent>(entity);
+        if (!c) { PyErr_SetString(PyExc_RuntimeError, "Entity has no ParticleEmitter."); return nullptr; }
+        std::string k(key);
+        if      (k == "emissionRate")  c->emissionRate  = value;
+        else if (k == "lifetime")      c->lifetime      = value;
+        else if (k == "speed")         c->speed         = value;
+        else if (k == "speedVariance") c->speedVariance = value;
+        else if (k == "size")          c->size          = value;
+        else if (k == "sizeEnd")       c->sizeEnd       = value;
+        else if (k == "gravity")       c->gravity       = value;
+        else if (k == "coneAngle")     c->coneAngle     = value;
+        else if (k == "maxParticles")  c->maxParticles  = static_cast<int>(value);
+        else if (k == "colorR")        c->colorR        = value;
+        else if (k == "colorG")        c->colorG        = value;
+        else if (k == "colorB")        c->colorB        = value;
+        else if (k == "colorA")        c->colorA        = value;
+        else if (k == "colorEndR")     c->colorEndR     = value;
+        else if (k == "colorEndG")     c->colorEndG     = value;
+        else if (k == "colorEndB")     c->colorEndB     = value;
+        else if (k == "colorEndA")     c->colorEndA     = value;
+        else { PyErr_Format(PyExc_KeyError, "Unknown emitter key: %s", key); return nullptr; }
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_set_emitter_enabled(PyObject*, PyObject* args)
+    {
+        unsigned int entity = 0;
+        int enabled = 1;
+        if (!PyArg_ParseTuple(args, "I|p", &entity, &enabled))
+            return nullptr;
+        auto* c = ECS::ECSManager::Instance().getComponent<ECS::ParticleEmitterComponent>(entity);
+        if (!c) { PyErr_SetString(PyExc_RuntimeError, "Entity has no ParticleEmitter."); return nullptr; }
+        c->enabled = (enabled != 0);
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_set_emitter_color(PyObject*, PyObject* args)
+    {
+        unsigned int entity = 0;
+        float r = 1, g = 1, b = 1, a = 1;
+        if (!PyArg_ParseTuple(args, "Iffff", &entity, &r, &g, &b, &a))
+            return nullptr;
+        auto* c = ECS::ECSManager::Instance().getComponent<ECS::ParticleEmitterComponent>(entity);
+        if (!c) { PyErr_SetString(PyExc_RuntimeError, "Entity has no ParticleEmitter."); return nullptr; }
+        c->colorR = r; c->colorG = g; c->colorB = b; c->colorA = a;
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_set_emitter_end_color(PyObject*, PyObject* args)
+    {
+        unsigned int entity = 0;
+        float r = 1, g = 0, b = 0, a = 0;
+        if (!PyArg_ParseTuple(args, "Iffff", &entity, &r, &g, &b, &a))
+            return nullptr;
+        auto* c = ECS::ECSManager::Instance().getComponent<ECS::ParticleEmitterComponent>(entity);
+        if (!c) { PyErr_SetString(PyExc_RuntimeError, "Entity has no ParticleEmitter."); return nullptr; }
+        c->colorEndR = r; c->colorEndG = g; c->colorEndB = b; c->colorEndA = a;
         Py_RETURN_TRUE;
     }
 
@@ -2438,6 +2514,14 @@ namespace
         { nullptr, nullptr, 0, nullptr }
     };
 
+    PyMethodDef ParticleMethods[] = {
+        { "set_emitter", py_set_emitter, METH_VARARGS, "Set a particle emitter property by key (entity, key, value)." },
+        { "set_enabled", py_set_emitter_enabled, METH_VARARGS, "Enable/disable a particle emitter (entity, enabled)." },
+        { "set_color", py_set_emitter_color, METH_VARARGS, "Set emitter start color (entity, r, g, b, a)." },
+        { "set_end_color", py_set_emitter_end_color, METH_VARARGS, "Set emitter end color (entity, r, g, b, a)." },
+        { nullptr, nullptr, 0, nullptr }
+    };
+
     PyMethodDef DiagnosticsMethods[] = {
         { "get_delta_time", py_get_delta_time, METH_NOARGS, "Get last frame delta time." },
         { "get_engine_time", py_get_engine_time, METH_NOARGS, "Get seconds elapsed since engine start." },
@@ -3059,6 +3143,14 @@ namespace
         MathMethods
     };
 
+    PyModuleDef ParticleModule = {
+        PyModuleDef_HEAD_INIT,
+        "engine.particle",
+        "Particle emitter scripting API",
+        -1,
+        ParticleMethods
+    };
+
     bool AddSubmodule(PyObject* parent, PyObject* submodule, const char* name)
     {
         if (!parent || !submodule || !name)
@@ -3123,6 +3215,8 @@ namespace
         PyModule_AddIntConstant(module, "Component_Script", static_cast<int>(ECS::ComponentKind::Script));
         PyModule_AddIntConstant(module, "Component_Name", static_cast<int>(ECS::ComponentKind::Name));
         PyModule_AddIntConstant(module, "Component_Collision", static_cast<int>(ECS::ComponentKind::Collision));
+        PyModule_AddIntConstant(module, "Component_Animation", static_cast<int>(ECS::ComponentKind::Animation));
+        PyModule_AddIntConstant(module, "Component_ParticleEmitter", static_cast<int>(ECS::ComponentKind::ParticleEmitter));
 
         PyModule_AddIntConstant(module, "Asset_Texture", static_cast<int>(AssetType::Texture));
         PyModule_AddIntConstant(module, "Asset_Material", static_cast<int>(AssetType::Material));
@@ -3149,8 +3243,9 @@ namespace
         PyObject* loggingModule = PyModule_Create(&LoggingModule);
         PyObject* physicsModule = PyModule_Create(&PhysicsModule);
         PyObject* mathModule = PyModule_Create(&MathModule);
+        PyObject* particleModule = PyModule_Create(&ParticleModule);
 
-        if (!entityModule || !assetModule || !audioModule || !inputModule || !uiModule || !cameraModule || !diagnosticsModule || !loggingModule || !physicsModule || !mathModule)
+        if (!entityModule || !assetModule || !audioModule || !inputModule || !uiModule || !cameraModule || !diagnosticsModule || !loggingModule || !physicsModule || !mathModule || !particleModule)
         {
             Py_XDECREF(entityModule);
             Py_XDECREF(assetModule);
@@ -3162,6 +3257,7 @@ namespace
             Py_XDECREF(loggingModule);
             Py_XDECREF(physicsModule);
             Py_XDECREF(mathModule);
+            Py_XDECREF(particleModule);
             Py_DECREF(module);
             return nullptr;
         }
@@ -3188,7 +3284,8 @@ namespace
             !AddSubmodule(module, diagnosticsModule, "diagnostics") ||
             !AddSubmodule(module, loggingModule, "logging") ||
             !AddSubmodule(module, physicsModule, "physics") ||
-            !AddSubmodule(module, mathModule, "math"))
+            !AddSubmodule(module, mathModule, "math") ||
+            !AddSubmodule(module, particleModule, "particle"))
         {
             Py_DECREF(module);
             return nullptr;

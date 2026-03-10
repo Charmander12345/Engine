@@ -16,6 +16,7 @@ Component_Script: int
 Component_Name: int
 Component_Collision: int
 Component_Animation: int
+Component_ParticleEmitter: int
 
 Asset_Texture: int
 Asset_Material: int
@@ -897,6 +898,36 @@ class camera:
     @staticmethod
     def cancel_transition() -> bool:
         """Cancel the active camera transition, keeping the current interpolated position."""
+        ...
+
+# ---------------------------------------------------------------------------
+# engine.particle
+# ---------------------------------------------------------------------------
+
+class particle:
+    @staticmethod
+    def set_emitter(entity: int, key: str, value: float) -> bool:
+        """Set a particle emitter property by key.
+
+        Valid keys: emissionRate, lifetime, speed, speedVariance, size, sizeEnd,
+        gravity, coneAngle, maxParticles, colorR, colorG, colorB, colorA,
+        colorEndR, colorEndG, colorEndB, colorEndA.
+        """
+        ...
+
+    @staticmethod
+    def set_enabled(entity: int, enabled: bool = True) -> bool:
+        """Enable or disable a particle emitter on the given entity."""
+        ...
+
+    @staticmethod
+    def set_color(entity: int, r: float, g: float, b: float, a: float) -> bool:
+        """Set the start color (RGBA) for a particle emitter."""
+        ...
+
+    @staticmethod
+    def set_end_color(entity: int, r: float, g: float, b: float, a: float) -> bool:
+        """Set the end-of-life color (RGBA) for a particle emitter."""
         ...
 
 # ---------------------------------------------------------------------------

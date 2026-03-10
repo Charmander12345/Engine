@@ -60,10 +60,10 @@ Per-Entity-Material-Overrides (Farb-Tint, Metallic, Roughness, Shininess, Emissi
 
 ---
 
-## 9. Particle-System
+## ~~9. Particle-System~~ ✅
 **Aufwand:** Hoch · **Nutzen:** Mittel
 
-GPU-Compute- oder Transform-Feedback-basierte Partikel für Feuer, Rauch, Funken, Magie. Benötigt eigenen Emitter-Component, Render-Pass mit Billboarding und ggf. Depth-Soft-Particles. Setzt funktionierendes Alpha-Blending / OIT voraus (→ Punkt 5).
+CPU-simuliertes, GPU-instanced Partikelsystem implementiert. `ParticleEmitterComponent` in ECS (13. ComponentKind) mit 20 konfigurierbaren Parametern (emissionRate, lifetime, speed, speedVariance, size, sizeEnd, gravity, coneAngle, colorStart RGBA, colorEnd RGBA, maxParticles, enabled, loop). `ParticleSystem` Klasse (`ParticleSystem.h/.cpp`): CPU-seitige Simulation mit Per-Emitter-Partikelpool, LCG-Pseudo-Random für Cone-Emission, Gravity, Lifetime-Decay, Color/Size-Interpolation über Lebenszeit. GPU-Rendering via Point-Sprites mit `GL_PROGRAM_POINT_SIZE`: Single VBO (`ParticleVertex`: pos3+rgba4+size1 = 8 floats), back-to-front Sortierung für korrektes Alpha-Blending, perspektivische Punkt-Größenskalierung. Billboard-Shaders (`particle_vertex.glsl`/`particle_fragment.glsl`) mit prozeduralem Soft-Circle via `gl_PointCoord` + smoothstep-Falloff. Render-Pass zwischen Opaque und OIT in `renderWorld()`, nur während PIE aktiv. Frame-Dt via SDL Performance Counter. JSON-Serialisierung in EngineLevel (save/load). Python-API: `engine.particle.set_emitter()`, `set_enabled()`, `set_color()`, `set_end_color()`. `engine.pyi` aktualisiert.
 
 ---
 
