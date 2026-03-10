@@ -85,7 +85,7 @@ target_link_libraries(RendererCore
         Core
         AssetManager
         Landscape
-        ${Python3_LIBRARY_RELEASE}
+        ${ENGINE_PYTHON_LIB}
 )
 
 add_subdirectory(OpenGLRenderer)

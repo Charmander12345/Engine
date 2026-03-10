@@ -1,7 +1,7 @@
 # Engine – Projektübersicht
 
 > Umfassende Dokumentation der gesamten Engine-Architektur, aller Komponenten und des Zusammenspiels.
-> Branch: `Json_and_ecs` | Build-System: CMake 3.12+ | Sprache: C++20 | Plattform: Windows (x64)
+> Branch: `Json_and_ecs` | Build-System: CMake 3.12+ | Sprache: C++20 | Plattform: Windows (x64), Linux, macOS
 
 ---
 
@@ -49,6 +49,7 @@
 - `OpenGLRenderer` (Phase 4): Rendering für Border (4 Kanten-Rects via `drawUIBrush` + Kind-Rekursion) und Spinner (N Punkte im Kreis mit Opacity-Falloff) in allen 3 Render-Pfaden (Viewport-UI, Editor-UI, Widget-Editor-Preview).
 - `ViewportUIManager` (Phase 4): Spinner-Tick via `tickSpinnersRecursive` in `tickAnimations()` – inkrementiert `spinnerElapsed` für alle Spinner-Elemente pro Frame.
 - `UIManager` (Phase 4): Spinner-Tick via `TickSpinnersRecursive` in `updateNotifications()` für Editor-Widgets.
+- `Build/CMake`: Cross-Platform-Vorbereitung – CMake-Konfiguration für Linux- und macOS-Builds erweitert. MSVC-spezifische Optionen (CRT-Flags, PDB-Pfade, `/FS`, `/WX-`) mit `if(MSVC)` bzw. `if(WIN32)` geschützt. `WINDOWS_EXPORT_ALL_SYMBOLS` plattformbedingt gesetzt. Neues `ENGINE_PYTHON_LIB` für plattformunabhängiges Python-Linking. `find_package(OpenGL REQUIRED)` und `find_package(Threads REQUIRED)` hinzugefügt. `OpenGL::GL` im Renderer verlinkt, `${CMAKE_DL_LIBS}` auf Linux für GLAD. `CMAKE_POSITION_INDEPENDENT_CODE ON` global gesetzt. Deploy-Pfade (`ENGINE_DEPLOY_DIR`, `ENGINE_TESTS_DEPLOY_DIR`) plattformabhängig konfigurierbar. Post-Build-DLL-Kopierschritte (`$<TARGET_RUNTIME_DLLS>`, Python-Runtime) mit `if(WIN32)` geschützt. PhysX-Backend: `TARGET_BUILD_PLATFORM` erkennt automatisch windows/linux/mac, freeglut-Stubs und CRT-Overrides nur auf Windows. GCC/Clang: `-Wall -Wextra` Warnflags.
 - `engine.pyi` (Phase 4): IntelliSense-Dokumentation für Border- und Spinner-Widgettypen mit allen Feldern, Layout- und Rendering-Beschreibung.
 - `UIWidget` (Phase 4 – Multiline EntryBar): Neue Felder `isMultiline` (bool, default false) und `maxLines` (int, 0 = unbegrenzt) für mehrzeilige Texteingabe. JSON-Serialisierung vollständig.
 - `UIManager` (Phase 4 – Multiline EntryBar): Enter-Taste fügt `\n` ein bei `isMultiline`-Modus (mit `maxLines`-Prüfung). Details-Panel: Multiline-Checkbox und Max-Lines-Property für EntryBar-Elemente.

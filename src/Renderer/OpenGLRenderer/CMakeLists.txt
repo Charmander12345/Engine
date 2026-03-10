@@ -33,8 +33,10 @@ set_target_properties(Renderer PROPERTIES
     CXX_STANDARD_REQUIRED ON
     C_STANDARD 99
     C_STANDARD_REQUIRED ON
-    WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
+if(WIN32)
+    set_target_properties(Renderer PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
 
 target_include_directories(Renderer
     PUBLIC
@@ -46,4 +48,10 @@ target_link_libraries(Renderer
     PUBLIC
         RendererCore
         freetype
+        OpenGL::GL
 )
+
+# On Linux, GLAD loads GL entry points via dlopen/dlsym.
+if(UNIX AND NOT APPLE)
+    target_link_libraries(Renderer PRIVATE ${CMAKE_DL_LIBS})
+endif()

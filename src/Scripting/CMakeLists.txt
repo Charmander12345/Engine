@@ -29,7 +29,7 @@ target_link_libraries(Scripting
         Diagnostics
         Core
         Physics
-        ${Python3_LIBRARY_RELEASE}
+        ${ENGINE_PYTHON_LIB}
 )
 
 if (WIN32)

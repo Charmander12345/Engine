@@ -16,7 +16,7 @@ add_subdirectory(
 set(BUILD_SHARED_LIBS ON CACHE BOOL "Restore shared default" FORCE)
 
 # Force GTest to use the same DLL runtime as the rest of the engine.
-if (MSVC)
+if(MSVC)
     set_property(TARGET gtest      PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
     set_property(TARGET gtest_main PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 endif()
@@ -48,7 +48,13 @@ set_target_properties(EngineTests PROPERTIES
 )
 
 # ── Deploy EngineTests to a separate directory next to EngineBuild ──────
-set(ENGINE_TESTS_DEPLOY_DIR "C:/Users/conno/source/repos/EngineTestsBuild")
+if(NOT DEFINED ENGINE_TESTS_DEPLOY_DIR)
+    if(WIN32)
+        set(ENGINE_TESTS_DEPLOY_DIR "$ENV{USERPROFILE}/source/repos/EngineTestsBuild")
+    else()
+        set(ENGINE_TESTS_DEPLOY_DIR "${CMAKE_BINARY_DIR}/tests_deploy")
+    endif()
+endif()
 
 set_target_properties(EngineTests PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY                "${ENGINE_TESTS_DEPLOY_DIR}"
@@ -63,11 +69,13 @@ set_target_properties(EngineTests PROPERTIES
     PDB_OUTPUT_DIRECTORY_MINSIZEREL         "${ENGINE_TESTS_DEPLOY_DIR}"
 )
 
-add_custom_command(TARGET EngineTests POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_TESTS_DEPLOY_DIR}"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:EngineTests> "${ENGINE_TESTS_DEPLOY_DIR}"
-    COMMAND_EXPAND_LISTS
-)
+if(WIN32)
+    add_custom_command(TARGET EngineTests POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_TESTS_DEPLOY_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:EngineTests> "${ENGINE_TESTS_DEPLOY_DIR}"
+        COMMAND_EXPAND_LISTS
+    )
+endif()
 
 # Register with CTest so `ctest` discovers the tests.
 include(GoogleTest)

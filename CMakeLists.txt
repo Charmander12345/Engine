@@ -4,6 +4,10 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Position-independent code for all targets (required on Linux when static
+# libraries are linked into shared libraries).
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 project ("HorizonEngine" LANGUAGES C CXX)
 
 # Prefer shared libraries for subprojects by default.
@@ -14,8 +18,17 @@ set(CMAKE_DEBUG_POSTFIX "" CACHE STRING "" FORCE)
 
 set(Python3_USE_DEBUG_LIBS OFF CACHE BOOL "" FORCE)
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
-if (Python3_LIBRARY_RELEASE)
+if(WIN32 AND Python3_LIBRARY_RELEASE)
     set(Python3_LIBRARY_DEBUG ${Python3_LIBRARY_RELEASE} CACHE FILEPATH "" FORCE)
+endif()
+
+# Cross-platform Python library reference.
+if(Python3_LIBRARY_RELEASE)
+    set(ENGINE_PYTHON_LIB ${Python3_LIBRARY_RELEASE})
+elseif(TARGET Python3::Python)
+    set(ENGINE_PYTHON_LIB Python3::Python)
+else()
+    set(ENGINE_PYTHON_LIB ${Python3_LIBRARIES})
 endif()
 
 # Ensure consistent MSVC runtime across all targets (prevents CRT/linker unresolved externals)
@@ -35,6 +48,15 @@ if (MSVC)
         set(CMAKE_EXE_LINKER_FLAGS_DEBUG "${CMAKE_EXE_LINKER_FLAGS_DEBUG} /PROFILE")
     endif()
 endif()
+
+# GCC / Clang common warning flags.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-Wall -Wextra)
+endif()
+
+# OpenGL & threading – needed on all platforms for the renderer.
+find_package(OpenGL REQUIRED)
+find_package(Threads REQUIRED)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
@@ -112,7 +134,13 @@ if(ENGINE_PHYSX_BACKEND AND EXISTS "${CMAKE_SOURCE_DIR}/external/PhysX/physx")
 
     # Required by PhysX build system.
     set(PHYSX_ROOT_DIR "${CMAKE_SOURCE_DIR}/external/PhysX/physx" CACHE PATH "" FORCE)
-    set(TARGET_BUILD_PLATFORM "windows" CACHE STRING "" FORCE)
+    if(WIN32)
+        set(TARGET_BUILD_PLATFORM "windows" CACHE STRING "" FORCE)
+    elseif(APPLE)
+        set(TARGET_BUILD_PLATFORM "mac" CACHE STRING "" FORCE)
+    elseif(UNIX)
+        set(TARGET_BUILD_PLATFORM "linux" CACHE STRING "" FORCE)
+    endif()
     set(PX_GENERATE_STATIC_LIBRARIES ON CACHE BOOL "Build PhysX as static libs" FORCE)
     set(PX_BUILDSNIPPETS OFF CACHE BOOL "" FORCE)
     set(PX_BUILDPVDRUNTIME OFF CACHE BOOL "" FORCE)
@@ -120,8 +148,10 @@ if(ENGINE_PHYSX_BACKEND AND EXISTS "${CMAKE_SOURCE_DIR}/external/PhysX/physx")
     set(PX_OUTPUT_LIB_DIR "${CMAKE_BINARY_DIR}/physx_lib" CACHE PATH "" FORCE)
     set(PX_OUTPUT_BIN_DIR "${CMAKE_BINARY_DIR}/physx_bin" CACHE PATH "" FORCE)
     set(PX_COPY_EXTERNAL_DLL OFF CACHE BOOL "Disable PhysX external DLL copy" FORCE)
-    set(NV_USE_STATIC_WINCRT OFF CACHE BOOL "Use DLL CRT for PhysX" FORCE)
-    set(NV_USE_DEBUG_WINCRT ON CACHE BOOL "Use debug CRT for PhysX debug builds" FORCE)
+    if(WIN32)
+        set(NV_USE_STATIC_WINCRT OFF CACHE BOOL "Use DLL CRT for PhysX" FORCE)
+        set(NV_USE_DEBUG_WINCRT ON CACHE BOOL "Use debug CRT for PhysX debug builds" FORCE)
+    endif()
 
     # Ensure CMP0091 is NEW so CMAKE_MSVC_RUNTIME_LIBRARY controls the CRT.
     # PhysX replaces CMAKE_CXX_FLAGS_<CONFIG> without explicit /MD or /MT flags,
@@ -129,11 +159,13 @@ if(ENGINE_PHYSX_BACKEND AND EXISTS "${CMAKE_SOURCE_DIR}/external/PhysX/physx")
     cmake_policy(SET CMP0091 NEW)
 
     # PhysX public cmake sets PUBLIC_RELEASE=1 which skips internal NVIDIA files,
-    # but also triggers a freeglut DLL copy.  Provide stub files so FILE(COPY) succeeds.
-    set(_physx_freeglut_stub "${CMAKE_BINARY_DIR}/_physx_freeglut_stub/win64")
-    file(MAKE_DIRECTORY "${_physx_freeglut_stub}")
-    file(TOUCH "${_physx_freeglut_stub}/freeglut.dll" "${_physx_freeglut_stub}/freeglutd.dll")
-    set(PHYSX_SLN_FREEGLUT_PATH "${CMAKE_BINARY_DIR}/_physx_freeglut_stub" CACHE INTERNAL "" FORCE)
+    # but also triggers a freeglut DLL copy on Windows.  Provide stub files so FILE(COPY) succeeds.
+    if(WIN32)
+        set(_physx_freeglut_stub "${CMAKE_BINARY_DIR}/_physx_freeglut_stub/win64")
+        file(MAKE_DIRECTORY "${_physx_freeglut_stub}")
+        file(TOUCH "${_physx_freeglut_stub}/freeglut.dll" "${_physx_freeglut_stub}/freeglutd.dll")
+        set(PHYSX_SLN_FREEGLUT_PATH "${CMAKE_BINARY_DIR}/_physx_freeglut_stub" CACHE INTERNAL "" FORCE)
+    endif()
 
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build PhysX as static" FORCE)
     add_subdirectory(external/PhysX/physx/compiler/public EXCLUDE_FROM_ALL)
@@ -149,15 +181,17 @@ if(ENGINE_PHYSX_BACKEND AND EXISTS "${CMAKE_SOURCE_DIR}/external/PhysX/physx")
                        LowLevel LowLevelAABB LowLevelDynamics
                        SceneQuery SimulationController)
         if(TARGET ${_px_target})
-            target_compile_options(${_px_target} PRIVATE
-                /WX-
-                $<$<CONFIG:Debug>:/MDd>
-                $<$<CONFIG:Release>:/MD>
-                $<$<CONFIG:RelWithDebInfo>:/MD>
-                $<$<CONFIG:MinSizeRel>:/MD>
-            )
-            set_property(TARGET ${_px_target} PROPERTY
-                         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+            if(MSVC)
+                target_compile_options(${_px_target} PRIVATE
+                    /WX-
+                    $<$<CONFIG:Debug>:/MDd>
+                    $<$<CONFIG:Release>:/MD>
+                    $<$<CONFIG:RelWithDebInfo>:/MD>
+                    $<$<CONFIG:MinSizeRel>:/MD>
+                )
+                set_property(TARGET ${_px_target} PROPERTY
+                             MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+            endif()
         endif()
     endforeach()
 
@@ -199,8 +233,10 @@ add_executable(HorizonEngine
     src/main.cpp
     )
 
-# Engine is a console executable
-set_target_properties(HorizonEngine PROPERTIES WIN32_EXECUTABLE OFF)
+# Engine is a console executable (WIN32_EXECUTABLE is Windows-only).
+if(WIN32)
+    set_target_properties(HorizonEngine PROPERTIES WIN32_EXECUTABLE OFF)
+endif()
 
 target_include_directories(HorizonEngine
     PRIVATE
@@ -226,10 +262,11 @@ target_link_libraries(HorizonEngine
         Scripting
         Landscape
         Physics
-        ${Python3_LIBRARY_RELEASE}
+        ${ENGINE_PYTHON_LIB}
+        Threads::Threads
 )
 
-if (Python3_LIBRARY_RELEASE)
+if(WIN32 AND Python3_LIBRARY_RELEASE)
     get_filename_component(PYTHON_LIB_BASENAME ${Python3_LIBRARY_RELEASE} NAME_WE)
     set(PYTHON_DEBUG_LIB_DIR "${CMAKE_BINARY_DIR}/python")
     set(PYTHON_DEBUG_LIB "${PYTHON_DEBUG_LIB_DIR}/${PYTHON_LIB_BASENAME}_d.lib")
@@ -240,7 +277,13 @@ if (Python3_LIBRARY_RELEASE)
     )
 endif()
 
-set(ENGINE_DEPLOY_DIR "C:/Users/conno/source/repos/EngineBuild")
+if(NOT DEFINED ENGINE_DEPLOY_DIR)
+    if(WIN32)
+        set(ENGINE_DEPLOY_DIR "$ENV{USERPROFILE}/source/repos/EngineBuild")
+    else()
+        set(ENGINE_DEPLOY_DIR "${CMAKE_BINARY_DIR}/deploy")
+    endif()
+endif()
 
 # Build outputs (exe + DLLs) should go directly to the deploy directory.
 # This is more reliable than post-build copying, especially with Ninja.
@@ -255,13 +298,15 @@ foreach(_cfg DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
     set(CMAKE_PDB_OUTPUT_DIRECTORY_${_cfg_upper} "${ENGINE_DEPLOY_DIR}")
 endforeach()
 
-set_target_properties(HorizonEngine PROPERTIES
-    PDB_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}"
-    PDB_OUTPUT_DIRECTORY_DEBUG "${ENGINE_DEPLOY_DIR}"
-    PDB_OUTPUT_DIRECTORY_RELWITHDEBINFO "${ENGINE_DEPLOY_DIR}"
-    PDB_OUTPUT_DIRECTORY_RELEASE "${ENGINE_DEPLOY_DIR}"
-    PDB_OUTPUT_DIRECTORY_MINSIZEREL "${ENGINE_DEPLOY_DIR}"
-)
+if(MSVC)
+    set_target_properties(HorizonEngine PROPERTIES
+        PDB_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}"
+        PDB_OUTPUT_DIRECTORY_DEBUG "${ENGINE_DEPLOY_DIR}"
+        PDB_OUTPUT_DIRECTORY_RELWITHDEBINFO "${ENGINE_DEPLOY_DIR}"
+        PDB_OUTPUT_DIRECTORY_RELEASE "${ENGINE_DEPLOY_DIR}"
+        PDB_OUTPUT_DIRECTORY_MINSIZEREL "${ENGINE_DEPLOY_DIR}"
+    )
+endif()
 
 # Always copy from the source tree to avoid stale files in the build directory.
 # NOTE: There are two shader directories in the repo; use Renderer/OpenGLRenderer/shaders as the authoritative one.
@@ -273,11 +318,8 @@ add_custom_command(TARGET HorizonEngine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/Content/Textures"
 
-    # Copy Engine exe to deploy directory
+    # Copy Engine executable to deploy directory
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:HorizonEngine>" "${ENGINE_DEPLOY_DIR}/$<TARGET_FILE_NAME:HorizonEngine>"
-
-    # Copy all runtime DLLs needed by Engine to deploy directory
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:HorizonEngine> "${ENGINE_DEPLOY_DIR}"
 
     # Clean shaders output dir first so removed/renamed shaders don't stay around
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${ENGINE_DEPLOY_DIR}/shaders"
@@ -292,7 +334,18 @@ add_custom_command(TARGET HorizonEngine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/Content/Scripting"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/src/Scripting/engine.pyi" "${ENGINE_DEPLOY_DIR}/Content/Scripting/engine.pyi"
 
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${Python3_RUNTIME_LIBRARY_RELEASE}" "${ENGINE_DEPLOY_DIR}"
-
     COMMAND_EXPAND_LISTS
 )
+
+# Windows-specific: copy runtime DLLs alongside the executable.
+if(WIN32)
+    add_custom_command(TARGET HorizonEngine POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:HorizonEngine> "${ENGINE_DEPLOY_DIR}"
+        COMMAND_EXPAND_LISTS
+    )
+    if(Python3_RUNTIME_LIBRARY_RELEASE)
+        add_custom_command(TARGET HorizonEngine POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${Python3_RUNTIME_LIBRARY_RELEASE}" "${ENGINE_DEPLOY_DIR}"
+        )
+    endif()
+endif()

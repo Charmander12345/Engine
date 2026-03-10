@@ -19,8 +19,10 @@ add_library(Physics SHARED ${PHYSICS_SOURCES})
 set_target_properties(Physics PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
-    WINDOWS_EXPORT_ALL_SYMBOLS ON
 )
+if(WIN32)
+    set_target_properties(Physics PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
 
 target_include_directories(Physics
     PUBLIC

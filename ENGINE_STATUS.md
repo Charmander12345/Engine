@@ -95,6 +95,7 @@
 - ✅ `UIManager`: Phase 4 Editor-Integration – Border/Spinner in Palette-Controls, Drag-&-Drop-Defaults (addElementToEditedWidget). Details-Panel: Border (Dicke L/T/R/B, ContentPadding X/Y, BorderBrush RGBA), Spinner (DotCount, Speed).
 - ✅ `ViewportUIManager`: Phase 4 Spinner-Tick – `tickSpinnersRecursive` im `tickAnimations()` Tick-Loop, inkl. `m_renderDirty`-Markierung.
 - ✅ `UIManager`: Phase 4 Spinner-Tick – `TickSpinnersRecursive` in `updateNotifications()` für Editor-Widgets.
+- ✅ `Build/CMake`: Cross-Platform-Vorbereitung – CMake-Konfiguration für Linux und macOS erweitert. MSVC/WIN32-Guards für plattformspezifische Optionen, `ENGINE_PYTHON_LIB` für portables Python-Linking, `find_package(OpenGL/Threads)`, `OpenGL::GL`/`CMAKE_DL_LIBS` im Renderer, `CMAKE_POSITION_INDEPENDENT_CODE ON`, plattformabhängige Deploy-Pfade, PhysX-Plattformerkennung (windows/linux/mac), GCC/Clang-Warnflags.
 - ✅ `UIWidgets`: 2 neue Helper-Header: `BorderWidget.h`, `SpinnerWidget.h`.
 - ✅ `Scripting`: `engine.pyi` mit Border- und Spinner-Typ-Dokumentation (Felder, Layout, Rendering) aktualisiert.
 - ✅ `UIWidget`: Phase 4 Multiline EntryBar – neue Felder `isMultiline` (bool, default false) und `maxLines` (int, 0 = unbegrenzt). JSON-Serialisierung vollständig.
