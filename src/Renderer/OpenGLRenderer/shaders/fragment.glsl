@@ -92,6 +92,9 @@ uniform float uFarPlane;
 // Weighted Blended OIT (0 = opaque pass, 1 = transparent pass)
 uniform int uOitEnabled;
 
+// Material-Instance override: multiplicative color tint (default = white = no tint)
+uniform vec3 uColorTint;
+
 const float PI = 3.14159265359;
 
 // GGX/Trowbridge-Reitz Normal Distribution Function
@@ -397,6 +400,9 @@ void main()
     }
 
     vec4 diffTex;
+#ifdef HAS_DIFFUSE_MAP
+    diffTex = texture(material.diffuse, vTexCoord);
+#else
     if (uHasDiffuseMap != 0)
     {
         diffTex = texture(material.diffuse, vTexCoord);
@@ -405,6 +411,9 @@ void main()
     {
         diffTex = vec4(1.0);
     }
+#endif
+    // Apply per-entity color tint
+    diffTex.rgb *= uColorTint;
 
     // --- Debug: Unlit / Wireframe ---
     if (uDebugMode == 1 || uDebugMode == 2)
@@ -416,16 +425,28 @@ void main()
     // --- Normal Lit path (uDebugMode == 0) ---
     vec3 normal = normalize(vNormal);
     // Normal mapping: perturb normal using tangent-space map
+#ifdef HAS_NORMAL_MAP
+    {
+        vec3 mapNormal = texture(material.normalMap, vTexCoord).rgb;
+        mapNormal = mapNormal * 2.0 - 1.0; // [0,1] -> [-1,1]
+        normal = normalize(vTBN * mapNormal);
+    }
+#else
     if (uHasNormalMap != 0)
     {
         vec3 mapNormal = texture(material.normalMap, vTexCoord).rgb;
         mapNormal = mapNormal * 2.0 - 1.0; // [0,1] -> [-1,1]
         normal = normalize(vTBN * mapNormal);
     }
+#endif
     vec3 viewDir = normalize(uViewPos - vWorldPos);
+#ifdef HAS_SPECULAR_MAP
+    vec3 specColor = texture(material.specular, vTexCoord).rgb;
+#else
     vec3 specColor = (uHasSpecularMap != 0)
         ? texture(material.specular, vTexCoord).rgb
         : vec3(1.0);
+#endif
 
     // Ambient
     vec3 ambient = diffTex.rgb * 0.1;
@@ -457,13 +478,28 @@ void main()
     }
 
     // Emissive contribution (added after lighting, before fog)
+#ifdef HAS_EMISSIVE_MAP
+    {
+        vec3 emissive = texture(material.emissiveMap, vTexCoord).rgb;
+        result += emissive;
+    }
+#else
     if (uHasEmissiveMap != 0)
     {
         vec3 emissive = texture(material.emissiveMap, vTexCoord).rgb;
         result += emissive;
     }
+#endif
 
     // Apply fog (exponential squared, based on view distance)
+#ifdef FOG_ENABLED
+    {
+        float dist = length(uViewPos - vWorldPos);
+        float fogFactor = exp(-uFogDensity * uFogDensity * dist * dist);
+        fogFactor = clamp(fogFactor, 0.0, 1.0);
+        result = mix(uFogColor, result, fogFactor);
+    }
+#else
     if (uFogEnabled != 0)
     {
         float dist = length(uViewPos - vWorldPos);
@@ -471,10 +507,21 @@ void main()
         fogFactor = clamp(fogFactor, 0.0, 1.0);
         result = mix(uFogColor, result, fogFactor);
     }
+#endif
 
     float alpha = diffTex.a > 0.0 ? diffTex.a : 1.0;
 
     // Weighted Blended OIT: output to accumulation + revealage targets
+#ifdef OIT_ENABLED
+    {
+        float z = gl_FragCoord.z;
+        float weight = clamp(pow(min(1.0, alpha * max(max(result.r, result.g), result.b)), 3.0) * 1e8 *
+                             pow(1.0 - z * 0.9, 3.0), 1e-2, 3e3);
+        FragColor = vec4(result * alpha * weight, alpha * weight);
+        oRevealage = alpha;
+        return;
+    }
+#else
     if (uOitEnabled != 0)
     {
         float z = gl_FragCoord.z;
@@ -485,6 +532,7 @@ void main()
         oRevealage = alpha;
         return;
     }
+#endif
 
     FragColor = vec4(result, alpha);
 }

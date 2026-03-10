@@ -1284,6 +1284,36 @@ namespace
         Py_RETURN_TRUE;
     }
 
+    PyObject* py_camera_transition_to(PyObject*, PyObject* args)
+    {
+        float x = 0, y = 0, z = 0, yaw = 0, pitch = 0, duration = 1.0f;
+        if (!PyArg_ParseTuple(args, "fffff|f", &x, &y, &z, &yaw, &pitch, &duration))
+            return nullptr;
+        if (!s_renderer)
+        {
+            PyErr_SetString(PyExc_RuntimeError, "Renderer not available.");
+            return nullptr;
+        }
+        s_renderer->startCameraTransition(Vec3{ x, y, z }, yaw, pitch, duration);
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_camera_is_transitioning(PyObject*, PyObject*)
+    {
+        if (!s_renderer)
+            Py_RETURN_FALSE;
+        if (s_renderer->isCameraTransitioning())
+            Py_RETURN_TRUE;
+        Py_RETURN_FALSE;
+    }
+
+    PyObject* py_camera_cancel_transition(PyObject*, PyObject*)
+    {
+        if (s_renderer)
+            s_renderer->cancelCameraTransition();
+        Py_RETURN_TRUE;
+    }
+
     PyObject* py_show_modal_message(PyObject*, PyObject* args)
     {
         const char* message = nullptr;
@@ -2402,6 +2432,9 @@ namespace
         { "set_camera_position", py_set_camera_position, METH_VARARGS, "Set the camera position." },
         { "get_camera_rotation", py_get_camera_rotation, METH_NOARGS, "Get the camera rotation (yaw, pitch)." },
         { "set_camera_rotation", py_set_camera_rotation, METH_VARARGS, "Set the camera rotation (yaw, pitch)." },
+        { "transition_to", py_camera_transition_to, METH_VARARGS, "Smooth camera transition to (x,y,z,yaw,pitch[,duration])." },
+        { "is_transitioning", py_camera_is_transitioning, METH_NOARGS, "Returns True while a camera transition is active." },
+        { "cancel_transition", py_camera_cancel_transition, METH_NOARGS, "Cancel the active camera transition." },
         { nullptr, nullptr, 0, nullptr }
     };
 

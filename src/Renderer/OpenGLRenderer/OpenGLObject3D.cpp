@@ -262,7 +262,13 @@ bool OpenGLObject3D::prepare()
         }
     }
 
-    const std::string vertexPath = ResolveShaderPath(vertexOverride.empty() ? "vertex.glsl" : vertexOverride);
+    // Detect skinned mesh
+    bool hasBones = data.is_object() && data.contains("m_hasBones") && data.at("m_hasBones").get<bool>();
+    m_isSkinned = hasBones;
+
+    // Use skinned vertex shader for meshes with bones
+    const std::string defaultVertexShader = hasBones ? "skinned_vertex.glsl" : "vertex.glsl";
+    const std::string vertexPath = ResolveShaderPath(vertexOverride.empty() ? defaultVertexShader : vertexOverride);
     const std::string fragmentName = !m_fragmentShaderOverride.empty() ? m_fragmentShaderOverride
                                    : !fragmentOverride.empty()       ? fragmentOverride
                                    :                                   "fragment.glsl";
@@ -290,6 +296,7 @@ bool OpenGLObject3D::prepare()
     auto mat = std::make_shared<OpenGLMaterial>();
     mat->addShader(vertexShader);
     mat->addShader(fragmentShader);
+    mat->setFragmentShaderPath(fragmentPath);
 
     auto vertices = ReadFloatArray(data, "m_vertices");
     auto indices = ReadIndexArray(data, "m_indices");
@@ -339,18 +346,208 @@ bool OpenGLObject3D::prepare()
         return false;
     }
 
-    mat->setVertexData(verticesWithNormals);
+    // For skinned meshes, append bone IDs (as floats) and bone weights per vertex
+    if (hasBones && data.contains("m_boneIds") && data.contains("m_boneWeights"))
+    {
+        auto boneIds = ReadFloatArray(data, "m_boneIds");       // 4 ints (as float) per original vertex
+        auto boneWeights = ReadFloatArray(data, "m_boneWeights"); // 4 floats per original vertex
+        const size_t origVertexCount = vCount / 5;
+        // BuildVerticesWithFlatNormals expands indexed vertices: each output vertex comes from
+        // an original vertex index. We need to re-expand bone data the same way.
+        // The output has verticesWithNormals.size()/14 vertices.
+        const size_t expandedCount = verticesWithNormals.size() / 14;
+
+        // Build an index list that maps expanded vertices to original vertices
+        std::vector<uint32_t> expandedToOrig;
+        expandedToOrig.reserve(expandedCount);
+        if (!indices.empty()) {
+            for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+                expandedToOrig.push_back(indices[i]);
+                expandedToOrig.push_back(indices[i+1]);
+                expandedToOrig.push_back(indices[i+2]);
+            }
+        } else {
+            for (size_t i = 0; i < origVertexCount; ++i) {
+                expandedToOrig.push_back(static_cast<uint32_t>(i));
+            }
+        }
+
+        // Rebuild with 22 floats per vertex: 14 (pos+norm+uv+tan+bitan) + 4 (boneIds as float) + 4 (boneWeights)
+        std::vector<float> skinnedVertices;
+        skinnedVertices.reserve(expandedCount * 22);
+        for (size_t v = 0; v < expandedCount; ++v)
+        {
+            // Copy existing 14 floats
+            for (int j = 0; j < 14; ++j)
+                skinnedVertices.push_back(verticesWithNormals[v * 14 + j]);
+
+            uint32_t origIdx = (v < expandedToOrig.size()) ? expandedToOrig[v] : 0;
+            // Bone IDs (4 floats representing ints)
+            for (int j = 0; j < 4; ++j) {
+                size_t bi = origIdx * 4 + j;
+                skinnedVertices.push_back((bi < boneIds.size()) ? boneIds[bi] : 0.0f);
+            }
+            // Bone Weights (4 floats)
+            for (int j = 0; j < 4; ++j) {
+                size_t bi = origIdx * 4 + j;
+                skinnedVertices.push_back((bi < boneWeights.size()) ? boneWeights[bi] : 0.0f);
+            }
+        }
+        mat->setVertexData(skinnedVertices);
+    }
+    else
+    {
+        mat->setVertexData(verticesWithNormals);
+    }
     mat->setIndexData({});
 
-    // Default layout: positions (x,y,z) + normals (x,y,z) + texcoords (u,v) + tangent (x,y,z) + bitangent (x,y,z)
-    const GLsizei stride = static_cast<GLsizei>(14 * sizeof(float));
-    std::vector<OpenGLMaterial::LayoutElement> layout;
-    layout.push_back(OpenGLMaterial::LayoutElement{ 0, 3, GL_FLOAT, GL_FALSE, stride, 0 });
-    layout.push_back(OpenGLMaterial::LayoutElement{ 1, 3, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(3 * sizeof(float)) });
-    layout.push_back(OpenGLMaterial::LayoutElement{ 2, 2, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(6 * sizeof(float)) });
-    layout.push_back(OpenGLMaterial::LayoutElement{ 3, 3, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(8 * sizeof(float)) });
-    layout.push_back(OpenGLMaterial::LayoutElement{ 4, 3, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(11 * sizeof(float)) });
-    mat->setLayout(layout);
+    if (hasBones && data.contains("m_boneIds"))
+    {
+        // Skinned layout: pos3 + norm3 + uv2 + tan3 + bitan3 + boneIds(4 int-as-float) + boneWeights4 = 22 floats
+        const GLsizei stride = static_cast<GLsizei>(22 * sizeof(float));
+        std::vector<OpenGLMaterial::LayoutElement> layout;
+        layout.push_back(OpenGLMaterial::LayoutElement{ 0, 3, GL_FLOAT, GL_FALSE, stride, 0 });
+        layout.push_back(OpenGLMaterial::LayoutElement{ 1, 3, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(3 * sizeof(float)) });
+        layout.push_back(OpenGLMaterial::LayoutElement{ 2, 2, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(6 * sizeof(float)) });
+        layout.push_back(OpenGLMaterial::LayoutElement{ 3, 3, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(8 * sizeof(float)) });
+        layout.push_back(OpenGLMaterial::LayoutElement{ 4, 3, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(11 * sizeof(float)) });
+        layout.push_back(OpenGLMaterial::LayoutElement{ 5, 4, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(14 * sizeof(float)) }); // boneIds (as float, cast to int in shader)
+        layout.push_back(OpenGLMaterial::LayoutElement{ 6, 4, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(18 * sizeof(float)) }); // boneWeights
+        mat->setLayout(layout);
+    }
+    else
+    {
+        // Default layout: positions (x,y,z) + normals (x,y,z) + texcoords (u,v) + tangent (x,y,z) + bitangent (x,y,z)
+        const GLsizei stride = static_cast<GLsizei>(14 * sizeof(float));
+        std::vector<OpenGLMaterial::LayoutElement> layout;
+        layout.push_back(OpenGLMaterial::LayoutElement{ 0, 3, GL_FLOAT, GL_FALSE, stride, 0 });
+        layout.push_back(OpenGLMaterial::LayoutElement{ 1, 3, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(3 * sizeof(float)) });
+        layout.push_back(OpenGLMaterial::LayoutElement{ 2, 2, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(6 * sizeof(float)) });
+        layout.push_back(OpenGLMaterial::LayoutElement{ 3, 3, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(8 * sizeof(float)) });
+        layout.push_back(OpenGLMaterial::LayoutElement{ 4, 3, GL_FLOAT, GL_FALSE, stride, static_cast<size_t>(11 * sizeof(float)) });
+        mat->setLayout(layout);
+    }
+
+    // Load skeleton from asset data if bones are present
+    if (hasBones && data.contains("m_bones"))
+    {
+        m_skeleton = std::make_shared<Skeleton>();
+        // Load bones
+        const auto& bonesJson = data.at("m_bones");
+        for (const auto& bj : bonesJson)
+        {
+            BoneInfo bone;
+            bone.name = bj.at("name").get<std::string>();
+            if (bj.contains("offsetMatrix"))
+            {
+                const auto& om = bj.at("offsetMatrix");
+                for (int i = 0; i < 16 && i < static_cast<int>(om.size()); ++i)
+                    bone.offsetMatrix.m[i] = om[i].get<float>();
+            }
+            m_skeleton->boneNameToIndex[bone.name] = static_cast<int>(m_skeleton->bones.size());
+            m_skeleton->bones.push_back(bone);
+        }
+        // Load node hierarchy
+        if (data.contains("m_nodes"))
+        {
+            const auto& nodesJson = data.at("m_nodes");
+            for (const auto& nj : nodesJson)
+            {
+                Skeleton::Node node;
+                node.name = nj.at("name").get<std::string>();
+                node.parentIndex = nj.value("parent", -1);
+                node.boneIndex = nj.value("boneIndex", -1);
+                if (nj.contains("transform"))
+                {
+                    const auto& t = nj.at("transform");
+                    for (int i = 0; i < 16 && i < static_cast<int>(t.size()); ++i)
+                        node.localTransform.m[i] = t[i].get<float>();
+                }
+                m_skeleton->nodes.push_back(node);
+            }
+            // Build children lists
+            for (int i = 0; i < static_cast<int>(m_skeleton->nodes.size()); ++i)
+            {
+                int parent = m_skeleton->nodes[i].parentIndex;
+                if (parent >= 0 && parent < static_cast<int>(m_skeleton->nodes.size()))
+                    m_skeleton->nodes[parent].children.push_back(i);
+            }
+        }
+        // Load animations
+        if (data.contains("m_animations"))
+        {
+            const auto& animsJson = data.at("m_animations");
+            for (const auto& aj : animsJson)
+            {
+                AnimationClip clip;
+                clip.name = aj.value("name", "");
+                clip.duration = aj.value("duration", 0.0f);
+                clip.ticksPerSecond = aj.value("ticksPerSecond", 25.0f);
+                if (aj.contains("channels"))
+                {
+                    for (const auto& cj : aj.at("channels"))
+                    {
+                        BoneChannel ch;
+                        ch.boneName = cj.value("boneName", "");
+                        auto bit = m_skeleton->boneNameToIndex.find(ch.boneName);
+                        ch.boneIndex = (bit != m_skeleton->boneNameToIndex.end()) ? bit->second : -1;
+                        if (cj.contains("positionKeys"))
+                        {
+                            for (const auto& pk : cj.at("positionKeys"))
+                            {
+                                VectorKey k;
+                                k.time = pk.value("t", 0.0f);
+                                if (pk.contains("v") && pk.at("v").size() >= 3)
+                                {
+                                    k.value[0] = pk.at("v")[0].get<float>();
+                                    k.value[1] = pk.at("v")[1].get<float>();
+                                    k.value[2] = pk.at("v")[2].get<float>();
+                                }
+                                ch.positionKeys.push_back(k);
+                            }
+                        }
+                        if (cj.contains("rotationKeys"))
+                        {
+                            for (const auto& rk : cj.at("rotationKeys"))
+                            {
+                                QuatKey k;
+                                k.time = rk.value("t", 0.0f);
+                                if (rk.contains("q") && rk.at("q").size() >= 4)
+                                {
+                                    k.value.x = rk.at("q")[0].get<float>();
+                                    k.value.y = rk.at("q")[1].get<float>();
+                                    k.value.z = rk.at("q")[2].get<float>();
+                                    k.value.w = rk.at("q")[3].get<float>();
+                                }
+                                ch.rotationKeys.push_back(k);
+                            }
+                        }
+                        if (cj.contains("scalingKeys"))
+                        {
+                            for (const auto& sk : cj.at("scalingKeys"))
+                            {
+                                VectorKey k;
+                                k.time = sk.value("t", 0.0f);
+                                if (sk.contains("v") && sk.at("v").size() >= 3)
+                                {
+                                    k.value[0] = sk.at("v")[0].get<float>();
+                                    k.value[1] = sk.at("v")[1].get<float>();
+                                    k.value[2] = sk.at("v")[2].get<float>();
+                                }
+                                ch.scalingKeys.push_back(k);
+                            }
+                        }
+                        clip.channels.push_back(ch);
+                    }
+                }
+                m_skeleton->animations.push_back(clip);
+            }
+        }
+        logger.log(Logger::Category::Rendering,
+            "OpenGLObject3D: Loaded skeleton with " + std::to_string(m_skeleton->bones.size()) + " bones, "
+            + std::to_string(m_skeleton->animations.size()) + " animation(s)",
+            Logger::LogLevel::INFO);
+    }
 
     if (!mat->build())
     {
@@ -452,6 +649,16 @@ void OpenGLObject3D::setTextures(const std::vector<std::shared_ptr<Texture>>& te
     if (m_material)
     {
         m_material->setTextures(textures);
+
+        // Compute shader variant key from active texture slots
+        ShaderVariantKey key = SVF_NONE;
+        if (!textures.empty() && textures[0])        key |= SVF_HAS_DIFFUSE_MAP;
+        if (textures.size() >= 2 && textures[1])     key |= SVF_HAS_SPECULAR_MAP;
+        if (textures.size() >= 3 && textures[2])     key |= SVF_HAS_NORMAL_MAP;
+        if (textures.size() >= 4 && textures[3])     key |= SVF_HAS_EMISSIVE_MAP;
+        if (textures.size() >= 5 && textures[4])     key |= SVF_HAS_METALLIC_ROUGHNESS;
+        m_variantKey = key;
+        m_material->setVariantKey(key);
     }
 }
 
@@ -468,6 +675,10 @@ void OpenGLObject3D::setPbrData(bool enabled, float metallic, float roughness)
     if (m_material)
     {
         m_material->setPbrData(enabled, metallic, roughness);
+        if (enabled)
+            m_variantKey |= SVF_PBR_ENABLED;
+        else
+            m_variantKey &= ~SVF_PBR_ENABLED;
     }
 }
 
@@ -492,5 +703,22 @@ void OpenGLObject3D::setNearFarPlanes(float nearPlane, float farPlane)
     if (m_material)
     {
         m_material->setNearFarPlanes(nearPlane, farPlane);
+    }
+}
+
+void OpenGLObject3D::setSkinned(bool skinned)
+{
+    m_isSkinned = skinned;
+    if (m_material)
+    {
+        m_material->setSkinned(skinned);
+    }
+}
+
+void OpenGLObject3D::setBoneMatrices(const float* data, int count)
+{
+    if (m_material)
+    {
+        m_material->setBoneMatrices(data, count);
     }
 }

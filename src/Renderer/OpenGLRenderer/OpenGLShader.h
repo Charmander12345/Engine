@@ -14,6 +14,7 @@ public:
 
     bool loadFromSource(Shader::Type type, const std::string& source) override;
     bool loadFromFile(Shader::Type type, const std::string& filePath) override;
+    bool loadFromFileWithDefines(Shader::Type type, const std::string& filePath, const std::string& defines);
     bool compile() override;
 
     Type type() const override { return static_cast<Type>(m_type); }

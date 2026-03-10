@@ -94,6 +94,7 @@ public:
 		ECS::ScriptComponent script{};
 		ECS::NameComponent name{};
 		ECS::HeightFieldComponent heightField{};
+		ECS::AnimationComponent animation{};
 		std::bitset<ECS::MaxComponentTypes> mask{};
 	};
 

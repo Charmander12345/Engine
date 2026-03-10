@@ -7,6 +7,7 @@
 
 ## Aktuelle Änderung (Viewport)
 
+- `Skeletal Animation`: Vollständiges Skeletal-Animation-System. Import von Bones, Weights und Animations aus FBX/glTF/DAE via Assimp (`aiProcess_LimitBoneWeights`). Daten im Asset-JSON (`m_hasBones`, `m_bones`, `m_boneIds`, `m_boneWeights`, `m_nodes`, `m_animations`). Erweiterter Vertex-Layout für Skinned Meshes (22 Floats: +boneIds4+boneWeights4). Neuer `skinned_vertex.glsl` mit `uSkinned`/`uBoneMatrices[128]` Uniforms. `SkeletalAnimator` (SkeletalData.h) für Runtime-Keyframe-Interpolation (Slerp/Lerp). Pro Skinned-Entity automatischer Animator + Auto-Play. Bone-Matrizen-Upload vor jedem Draw (einzeln, kein Instancing). Shadow-Shader mit Skinning-Support. `AnimationComponent` als 12. ECS-Komponente mit JSON-Serialisierung.
 - `OpenGLTextRenderer`: Bugfix – Horizontale Text-Spiegelung im Viewport behoben. `renderViewportUI()` rendert jetzt im Full-FBO-Viewport (`glViewport(0,0,wW,wH)`) mit offset-verschobener Ortho-Projektion und Scissor-Clip, statt mit Offset-glViewport. Dadurch stimmt das Rendering-Setup exakt mit dem Editor-UI-Pfad (`drawUIWidgetsToFramebuffer`) überein.
 - `UIWidget`: Neue `WidgetElement`-Properties ergänzt: `borderColor`, `borderThickness`, `borderRadius`, `opacity`, `isVisible`, `tooltipText`, `isBold`, `isItalic`, `gradientColor`, `maxSize`, `spacing`, `radioGroup`. Alle Properties werden serialisiert/deserialisiert (JSON).
 - `UIWidget`: Neue Widget-Typen hinzugefügt: `Label` (leichtgewichtiges Text-Element), `Separator` (visuelle Trennlinie), `ScrollView` (dedizierter scrollbarer Container), `ToggleButton` (Button mit An/Aus-Zustand), `RadioButton` (Radio-Button mit Gruppen-ID). Vollständige Rendering-Unterstützung in `renderUI()` und `renderViewportUI()`.
@@ -237,6 +238,7 @@ Engine/
 │   │   │   ├── OpenGLRenderTarget.h/.cpp # OpenGL-FBO-Implementierung von IRenderTarget (Editor-Tab-FBOs)
 │   │   │   ├── PostProcessStack.h/.cpp   # Post-Processing-Pipeline (HDR FBO, MSAA 2x/4x, Fullscreen-Resolve, Bloom 5-Mip Gaussian, SSAO 32-Sample Half-Res Bilateral Blur, Deferred FXAA 3.11 Quality nach Gizmo/Outline)
 │   │   │   ├── ShaderHotReload.h/.cpp    # Shader-Hot-Reload: Überwacht shaders/ per last_write_time (500 ms Poll), invalidiert Material-/UI-/PostProcess-Caches und rebuildet Render-Entries bei Dateiänderung
+│   │   │   ├── ShaderVariantKey.h        # Shader-Varianten-Bitmask (8 Feature-Flags: Diffuse/Specular/Normal/Emissive/MetallicRoughness/PBR/Fog/OIT), buildVariantDefines() generiert #define-Block
 │   │   │   ├── OpenGLSplashWindow.h/.cpp # OpenGL-Implementierung des Splash-Fensters (Shader, VAOs, FreeType-Atlas)
 │   │   │   ├── glad/               # OpenGL-Loader (GLAD)
 │   │   │   ├── shaders/            # GLSL-Shader-Dateien
@@ -1025,6 +1027,7 @@ virtual Mat4 getViewMatrixColumnMajor() const = 0;
 - Batch-Rendering: `renderBatchContinuation()`
 - GPU Instanced Rendering: `renderInstanced(instanceCount)` via Material
 - Statischer Cache: `ClearCache()`
+- Skeletal Animation: `isSkinned()` erkennt Meshes mit Bones, `getSkeleton()` gibt die geladene Bone-Hierarchie zurück. `setSkinned(bool)`/`setBoneMatrices(float*, int)` leiten Bone-Daten an `OpenGLMaterial` weiter. Bei `prepare()` wird automatisch `skinned_vertex.glsl` gewählt und der Vertex-Buffer mit 22 Floats/Vertex (14 Basis + 4 boneIds + 4 boneWeights) aufgebaut.
 
 #### GPU Instanced Rendering
 - Draw-Liste wird nach (`OpenGLMaterial*`, `OpenGLObject3D*`) sortiert — nur Objekte mit gleichem Mesh UND Material werden gruppiert

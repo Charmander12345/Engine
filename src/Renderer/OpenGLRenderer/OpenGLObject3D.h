@@ -5,8 +5,10 @@
 #include "glad/include/gl.h"
 
 #include "../../Core/EngineObject.h"
+#include "../../Core/SkeletalData.h"
 #include "../IRenderObject3D.h"
 #include "OpenGLMaterial.h"
+#include "ShaderVariantKey.h"
 
 class AssetData;
 class Texture;
@@ -31,6 +33,10 @@ public:
     void setDebugMode(int mode);
     void setDebugColor(const glm::vec3& color);
     void setNearFarPlanes(float nearPlane, float farPlane);
+    void setSkinned(bool skinned);
+    void setBoneMatrices(const float* data, int count);
+    bool isSkinned() const { return m_isSkinned; }
+    const Skeleton* getSkeleton() const { return m_skeleton ? m_skeleton.get() : nullptr; }
     void render() override;
     void renderBatchContinuation();
     void setTextures(const std::vector<std::shared_ptr<Texture>>& textures) override;
@@ -58,4 +64,7 @@ private:
     glm::vec3 m_localBoundsMin{0.0f};
     glm::vec3 m_localBoundsMax{0.0f};
     bool m_hasLocalBounds{false};
+    bool m_isSkinned{false};
+    std::shared_ptr<Skeleton> m_skeleton;
+    ShaderVariantKey m_variantKey{SVF_NONE};
 };

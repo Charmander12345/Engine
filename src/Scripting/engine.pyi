@@ -15,6 +15,7 @@ Component_Physics: int
 Component_Script: int
 Component_Name: int
 Component_Collision: int
+Component_Animation: int
 
 Asset_Texture: int
 Asset_Material: int
@@ -104,6 +105,37 @@ class entity:
     @staticmethod
     def set_light_color(entity: int, r: float, g: float, b: float) -> bool:
         """Set light color (r, g, b) for an entity with LightComponent."""
+        ...
+
+    @staticmethod
+    def set_material_override_color_tint(entity: int, r: float, g: float, b: float) -> bool:
+        """Set per-entity color tint override (multiplicative RGB, 1,1,1 = no tint).
+        Requires MaterialComponent on the entity."""
+        ...
+
+    @staticmethod
+    def get_material_override_color_tint(entity: int) -> Optional[tuple[float, float, float]]:
+        """Get per-entity color tint override. Returns None if no override is set."""
+        ...
+
+    @staticmethod
+    def set_material_override_metallic(entity: int, metallic: float) -> bool:
+        """Set per-entity metallic override (0.0 - 1.0)."""
+        ...
+
+    @staticmethod
+    def set_material_override_roughnessbbb(entity: int, roughness: float) -> bool:
+        """Set per-entity roughness override (0.0 - 1.0)."""
+        ...
+
+    @staticmethod
+    def set_material_override_shininess(entity: int, shininess: float) -> bool:
+        """Set per-entity shininess override."""
+        ...
+
+    @staticmethod
+    def clear_material_overrides(entity: int) -> bool:
+        """Clear all per-entity material overrides, reverting to base material."""
         ...
 
 # ---------------------------------------------------------------------------
@@ -840,6 +872,33 @@ class camera:
         """Set the camera rotation (yaw, pitch)."""
         ...
 
+    @staticmethod
+    def transition_to(x: float, y: float, z: float, yaw: float, pitch: float, duration: float = 1.0) -> bool:
+        """Start a smooth camera transition to the given position and rotation.
+
+        The camera interpolates from its current state to the target over
+        ``duration`` seconds using smooth-step (hermite) easing.  During
+        the transition, manual camera movement and rotation are blocked.
+
+        Args:
+            x, y, z: Target world-space position.
+            yaw: Target yaw in degrees.
+            pitch: Target pitch in degrees.
+            duration: Transition time in seconds (default 1.0).
+                      If ≤ 0, the camera snaps instantly.
+        """
+        ...
+
+    @staticmethod
+    def is_transitioning() -> bool:
+        """Returns True while a camera transition is in progress."""
+        ...
+
+    @staticmethod
+    def cancel_transition() -> bool:
+        """Cancel the active camera transition, keeping the current interpolated position."""
+        ...
+
 # ---------------------------------------------------------------------------
 # engine.diagnostics
 # ---------------------------------------------------------------------------
@@ -1127,3 +1186,62 @@ class math:
     def pi() -> float:
         """Return the constant pi."""
         ...
+
+# ---------------------------------------------------------------------------
+# Skeletal Animation System
+# ---------------------------------------------------------------------------
+#
+# **Overview**
+# When a 3D model asset (.fbx, .glTF, .dae, etc.) contains bones and
+# animations, the engine automatically extracts:
+#   - A Skeleton (bone hierarchy with offset/inverse-bind-pose matrices)
+#   - Per-vertex bone IDs (4) and bone weights (4)
+#   - AnimationClips with position/rotation/scaling keyframes per bone
+#
+# **Import**
+# During ``AssetManager::importAsset(AssetType::Model3D, path)`` the Assimp
+# importer now uses ``aiProcess_LimitBoneWeights`` in addition to the
+# existing flags.  Bone data is stored in the asset JSON under:
+#   - ``m_hasBones`` (bool)
+#   - ``m_bones``    (array of { name, offsetMatrix[16] })
+#   - ``m_boneIds``  (flat float array, 4 per original vertex)
+#   - ``m_boneWeights`` (flat float array, 4 per original vertex)
+#   - ``m_nodes``    (scene node hierarchy for animation traversal)
+#   - ``m_animations`` (array of clips with channels + keyframes)
+#
+# **Vertex Layout (skinned meshes)**
+# Non-skinned: 14 floats/vertex (pos3 + norm3 + uv2 + tan3 + bitan3)
+# Skinned:     22 floats/vertex (above + boneIds4 + boneWeights4)
+# Attribute locations: 0=pos, 1=norm, 2=uv, 3=tan, 4=bitan, 5=boneIds, 6=boneWeights
+#
+# **Shader**
+# ``skinned_vertex.glsl`` extends the standard vertex shader with:
+#   uniform bool uSkinned;
+#   uniform mat4 uBoneMatrices[128];
+# When uSkinned is true, the vertex position/normal/tangent/bitangent are
+# transformed by the weighted sum of up to 4 bone matrices before the
+# model matrix is applied.
+#
+# **Runtime Animation Playback**
+# ``SkeletalAnimator`` (SkeletalData.h) performs per-frame keyframe
+# interpolation (linear for position/scale, slerp for rotation) and
+# computes the final bone matrices (globalTransform * offsetMatrix).
+# The renderer automatically creates an animator per skinned entity and
+# auto-plays the first animation clip in a loop.
+#
+# **ECS Integration**
+# ``AnimationComponent`` stores runtime animation state:
+#   - currentClipIndex (int, -1 = none)
+#   - currentTime (float)
+#   - speed (float, default 1.0)
+#   - playing (bool)
+#   - loop (bool, default true)
+# Serialized in level JSON under "Animation" key.
+#
+# **Rendering**
+# Skinned meshes are drawn individually (not instanced) since each entity
+# has a unique bone pose.  Bone matrices are uploaded via
+# ``glUniformMatrix4fv(uBoneMatrices, count, GL_TRUE, data)`` before each
+# draw call.  Shadow passes use the standard shadow shader (no skinning)
+# which is acceptable for most use cases.
+#

@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include "../SkeletalData.h"
 
 
 namespace ECS
@@ -18,10 +19,32 @@ namespace ECS
 		unsigned int meshAssetId{ 0 };
 	};
 
+	/// Per-entity material parameter overrides.  When a flag is set the
+	/// corresponding value is used instead of the base material's value.
+	struct MaterialOverrides
+	{
+		float colorTint[3]{ 1.0f, 1.0f, 1.0f };   ///< Multiplicative RGB tint
+		float metallic{ 0.0f };
+		float roughness{ 0.5f };
+		float shininess{ 32.0f };
+		float emissiveColor[3]{ 0.0f, 0.0f, 0.0f };
+		bool hasColorTint{ false };
+		bool hasMetallic{ false };
+		bool hasRoughness{ false };
+		bool hasShininess{ false };
+		bool hasEmissive{ false };
+
+		bool hasAnyOverride() const
+		{
+			return hasColorTint || hasMetallic || hasRoughness || hasShininess || hasEmissive;
+		}
+	};
+
 	struct MaterialComponent
 	{
 		std::string materialAssetPath;
 		unsigned int materialAssetId{ 0 };
+		MaterialOverrides overrides;
 	};
 
 	struct LightComponent
@@ -109,6 +132,16 @@ namespace ECS
 		float scaleX{ 1.0f };
 		float scaleY{ 1.0f };
 		float scaleZ{ 1.0f };
+	};
+
+	/// Skeletal animation state – references the skeleton embedded in the mesh asset.
+	struct AnimationComponent
+	{
+		int currentClipIndex{-1};           ///< -1 = no animation playing
+		float currentTime{0.0f};
+		float speed{1.0f};
+		bool playing{false};
+		bool loop{true};
 	};
 
 	/// Level of Detail – multiple mesh variants sorted by camera distance.

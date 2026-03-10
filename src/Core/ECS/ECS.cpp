@@ -29,6 +29,7 @@ namespace ECS
 		m_collisionComponents.clear();
 		m_heightFieldComponents.clear();
 		m_lodComponents.clear();
+		m_animationComponents.clear();
 
 		m_renderSchema = Schema();
 		m_renderSchema.require<MeshComponent>().require<MaterialComponent>();
@@ -81,6 +82,8 @@ namespace ECS
 		removeComponent<NameComponent>(entity);
 		removeComponent<CollisionComponent>(entity);
 		removeComponent<HeightFieldComponent>(entity);
+		removeComponent<LodComponent>(entity);
+		removeComponent<AnimationComponent>(entity);
 		m_entityMasks[entity].reset();
 		m_entities.erase(std::remove(m_entities.begin(), m_entities.end(), entity), m_entities.end());
 		return true;

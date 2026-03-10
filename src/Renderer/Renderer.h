@@ -90,6 +90,32 @@ public:
     virtual Vec2 getCameraRotationDegrees() const = 0;
     virtual void setCameraRotationDegrees(float yawDegrees, float pitchDegrees) = 0;
 
+    // --- Camera transitions (smooth interpolation) ---
+    struct CameraTransition
+    {
+        Vec3 startPos{};
+        Vec3 endPos{};
+        float startYaw{0};
+        float startPitch{0};
+        float endYaw{0};
+        float endPitch{0};
+        float duration{1.0f};
+        float elapsed{0.0f};
+        bool active{false};
+    };
+
+    /// Start a smooth camera transition to the given position/rotation over `durationSec` seconds.
+    virtual void startCameraTransition(const Vec3& targetPos, float targetYaw, float targetPitch, float durationSec)
+    {
+        (void)targetPos; (void)targetYaw; (void)targetPitch; (void)durationSec;
+    }
+
+    /// Returns true while a camera transition is in progress.
+    virtual bool isCameraTransitioning() const { return false; }
+
+    /// Cancel an active camera transition, keeping the current interpolated position.
+    virtual void cancelCameraTransition() {}
+
     // Active entity camera (used at runtime / PIE)
     virtual void setActiveCameraEntity(unsigned int entity) = 0;
     virtual unsigned int getActiveCameraEntity() const = 0;

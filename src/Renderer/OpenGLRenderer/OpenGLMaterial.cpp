@@ -1,6 +1,7 @@
 #include "OpenGLMaterial.h"
 #include "Logger.h"
 #include <vector>
+#include <cstring>
 #include <glm/gtc/type_ptr.hpp>
 
 #include "OpenGLTexture.h"
@@ -84,6 +85,57 @@ void OpenGLMaterial::setPbrData(bool enabled, float metallic, float roughness)
     m_pbrEnabled = enabled;
     m_pbrMetallic = metallic;
     m_pbrRoughness = roughness;
+}
+
+void OpenGLMaterial::setVariantKey(ShaderVariantKey key)
+{
+    if (key == m_variantKey || m_fragmentShaderPath.empty())
+        return;
+    m_variantKey = key;
+
+    // Find the fragment shader in m_shaders and recompile with defines
+    const std::string defines = buildVariantDefines(key);
+    for (auto& s : m_shaders)
+    {
+        if (s && s->type() == Shader::Type::Fragment)
+        {
+            auto newFrag = std::make_shared<OpenGLShader>();
+            if (newFrag->loadFromFileWithDefines(Shader::Type::Fragment, m_fragmentShaderPath, defines))
+            {
+                s = newFrag;
+            }
+            break;
+        }
+    }
+    // Relink program (keep VAO/VBO)
+    if (m_program)
+    {
+        GLuint newProg = glCreateProgram();
+        for (auto& s : m_shaders)
+        {
+            if (s && s->id() != 0)
+                glAttachShader(newProg, s->id());
+        }
+        glLinkProgram(newProg);
+        GLint linked = 0;
+        glGetProgramiv(newProg, GL_LINK_STATUS, &linked);
+        if (linked)
+        {
+            for (auto& s : m_shaders)
+            {
+                if (s && s->id() != 0)
+                    glDetachShader(newProg, s->id());
+            }
+            glDeleteProgram(m_program);
+            m_program = newProg;
+            // Re-cache all uniform locations
+            cacheUniformLocations();
+        }
+        else
+        {
+            glDeleteProgram(newProg);
+        }
+    }
 }
 
 bool OpenGLMaterial::build()
@@ -196,79 +248,7 @@ bool OpenGLMaterial::build()
     }
     m_vertexCount = static_cast<GLsizei>((m_vertexData.size() * sizeof(float)) / stride);
 
-    // Cache uniform locations once
-    m_locModel = glGetUniformLocation(m_program, "uModel");
-    m_locView = glGetUniformLocation(m_program, "uView");
-    m_locProjection = glGetUniformLocation(m_program, "uProjection");
-    m_locLightPos = glGetUniformLocation(m_program, "uLightPos");
-    m_locLightColor = glGetUniformLocation(m_program, "uLightColor");
-    m_locLightIntensity = glGetUniformLocation(m_program, "uLightIntensity");
-    m_locViewPos = glGetUniformLocation(m_program, "uViewPos");
-    m_locMaterialShininess = glGetUniformLocation(m_program, "material.shininess");
-    m_locHasSpecularMap = glGetUniformLocation(m_program, "uHasSpecularMap");
-    m_locHasDiffuseMap = glGetUniformLocation(m_program, "uHasDiffuseMap");
-    m_locLightCount = glGetUniformLocation(m_program, "uLightCount");
-    m_locShadowMaps = glGetUniformLocation(m_program, "uShadowMaps");
-    m_locShadowCount = glGetUniformLocation(m_program, "uShadowCount");
-    for (int i = 0; i < kMaxShadowLights; ++i)
-    {
-        const std::string idx = "[" + std::to_string(i) + "]";
-        m_shadowLocs[i].lightSpaceMatrix = glGetUniformLocation(m_program, ("uLightSpaceMatrices" + idx).c_str());
-        m_shadowLocs[i].lightIndex       = glGetUniformLocation(m_program, ("uShadowLightIndices" + idx).c_str());
-    }
-    // Point shadow uniform locations
-    m_locPointShadowMaps = glGetUniformLocation(m_program, "uPointShadowMaps");
-    m_locPointShadowCount = glGetUniformLocation(m_program, "uPointShadowCount");
-    for (int i = 0; i < kMaxPointShadowLights; ++i)
-    {
-        const std::string idx = "[" + std::to_string(i) + "]";
-        m_pointShadowLocs[i].position  = glGetUniformLocation(m_program, ("uPointShadowPositions" + idx).c_str());
-        m_pointShadowLocs[i].farPlane  = glGetUniformLocation(m_program, ("uPointShadowFarPlanes" + idx).c_str());
-        m_pointShadowLocs[i].lightIndex = glGetUniformLocation(m_program, ("uPointShadowLightIndices" + idx).c_str());
-    }
-    for (int i = 0; i < kMaxLights; ++i)
-    {
-        const std::string prefix = "uLights[" + std::to_string(i) + "].";
-        m_lightLocs[i].position       = glGetUniformLocation(m_program, (prefix + "position").c_str());
-        m_lightLocs[i].direction      = glGetUniformLocation(m_program, (prefix + "direction").c_str());
-        m_lightLocs[i].color          = glGetUniformLocation(m_program, (prefix + "color").c_str());
-        m_lightLocs[i].intensity      = glGetUniformLocation(m_program, (prefix + "intensity").c_str());
-        m_lightLocs[i].range          = glGetUniformLocation(m_program, (prefix + "range").c_str());
-        m_lightLocs[i].spotCutoff     = glGetUniformLocation(m_program, (prefix + "spotCutoff").c_str());
-        m_lightLocs[i].spotOuterCutoff = glGetUniformLocation(m_program, (prefix + "spotOuterCutoff").c_str());
-        m_lightLocs[i].type           = glGetUniformLocation(m_program, (prefix + "type").c_str());
-    }
-    // Fog uniform locations
-    m_locFogEnabled = glGetUniformLocation(m_program, "uFogEnabled");
-    m_locFogColor   = glGetUniformLocation(m_program, "uFogColor");
-    m_locFogDensity = glGetUniformLocation(m_program, "uFogDensity");
-    m_locHasNormalMap = glGetUniformLocation(m_program, "uHasNormalMap");
-    m_locHasEmissiveMap = glGetUniformLocation(m_program, "uHasEmissiveMap");
-    // CSM uniform locations
-    m_locCsmMaps       = glGetUniformLocation(m_program, "uCsmMaps");
-    m_locCsmEnabled    = glGetUniformLocation(m_program, "uCsmEnabled");
-    m_locCsmLightIndex = glGetUniformLocation(m_program, "uCsmLightIndex");
-    m_locViewMatrix    = glGetUniformLocation(m_program, "uViewMatrix");
-    for (int i = 0; i < kMaxCsmCascades; ++i)
-    {
-        const std::string idx = "[" + std::to_string(i) + "]";
-        m_locCsmMatrices[i] = glGetUniformLocation(m_program, ("uCsmMatrices" + idx).c_str());
-        m_locCsmSplits[i]   = glGetUniformLocation(m_program, ("uCsmSplits" + idx).c_str());
-    }
-    // PBR uniform locations
-    m_locPbrEnabled              = glGetUniformLocation(m_program, "uPbrEnabled");
-    m_locMetallic                = glGetUniformLocation(m_program, "uMetallic");
-    m_locRoughness               = glGetUniformLocation(m_program, "uRoughness");
-    m_locHasMetallicRoughnessMap = glGetUniformLocation(m_program, "uHasMetallicRoughnessMap");
-    // Instancing uniform
-    m_locInstanced = glGetUniformLocation(m_program, "uInstanced");
-    // Debug render mode uniforms
-    m_locDebugMode  = glGetUniformLocation(m_program, "uDebugMode");
-    m_locDebugColor = glGetUniformLocation(m_program, "uDebugColor");
-    m_locNearPlane  = glGetUniformLocation(m_program, "uNearPlane");
-    m_locFarPlane   = glGetUniformLocation(m_program, "uFarPlane");
-    // OIT uniform
-    m_locOitEnabled = glGetUniformLocation(m_program, "uOitEnabled");
+    cacheUniformLocations();
 
     // Auto-detect transparency from diffuse texture alpha channel
     if (!m_textures.empty() && m_textures[0] && m_textures[0]->getChannels() == 4)
@@ -302,6 +282,78 @@ bool OpenGLMaterial::build()
     }
 
     return true;
+}
+
+void OpenGLMaterial::cacheUniformLocations()
+{
+    m_locModel = glGetUniformLocation(m_program, "uModel");
+    m_locView = glGetUniformLocation(m_program, "uView");
+    m_locProjection = glGetUniformLocation(m_program, "uProjection");
+    m_locLightPos = glGetUniformLocation(m_program, "uLightPos");
+    m_locLightColor = glGetUniformLocation(m_program, "uLightColor");
+    m_locLightIntensity = glGetUniformLocation(m_program, "uLightIntensity");
+    m_locViewPos = glGetUniformLocation(m_program, "uViewPos");
+    m_locMaterialShininess = glGetUniformLocation(m_program, "material.shininess");
+    m_locHasSpecularMap = glGetUniformLocation(m_program, "uHasSpecularMap");
+    m_locHasDiffuseMap = glGetUniformLocation(m_program, "uHasDiffuseMap");
+    m_locLightCount = glGetUniformLocation(m_program, "uLightCount");
+    m_locShadowMaps = glGetUniformLocation(m_program, "uShadowMaps");
+    m_locShadowCount = glGetUniformLocation(m_program, "uShadowCount");
+    for (int i = 0; i < kMaxShadowLights; ++i)
+    {
+        const std::string idx = "[" + std::to_string(i) + "]";
+        m_shadowLocs[i].lightSpaceMatrix = glGetUniformLocation(m_program, ("uLightSpaceMatrices" + idx).c_str());
+        m_shadowLocs[i].lightIndex       = glGetUniformLocation(m_program, ("uShadowLightIndices" + idx).c_str());
+    }
+    m_locPointShadowMaps = glGetUniformLocation(m_program, "uPointShadowMaps");
+    m_locPointShadowCount = glGetUniformLocation(m_program, "uPointShadowCount");
+    for (int i = 0; i < kMaxPointShadowLights; ++i)
+    {
+        const std::string idx = "[" + std::to_string(i) + "]";
+        m_pointShadowLocs[i].position  = glGetUniformLocation(m_program, ("uPointShadowPositions" + idx).c_str());
+        m_pointShadowLocs[i].farPlane  = glGetUniformLocation(m_program, ("uPointShadowFarPlanes" + idx).c_str());
+        m_pointShadowLocs[i].lightIndex = glGetUniformLocation(m_program, ("uPointShadowLightIndices" + idx).c_str());
+    }
+    for (int i = 0; i < kMaxLights; ++i)
+    {
+        const std::string prefix = "uLights[" + std::to_string(i) + "].";
+        m_lightLocs[i].position       = glGetUniformLocation(m_program, (prefix + "position").c_str());
+        m_lightLocs[i].direction      = glGetUniformLocation(m_program, (prefix + "direction").c_str());
+        m_lightLocs[i].color          = glGetUniformLocation(m_program, (prefix + "color").c_str());
+        m_lightLocs[i].intensity      = glGetUniformLocation(m_program, (prefix + "intensity").c_str());
+        m_lightLocs[i].range          = glGetUniformLocation(m_program, (prefix + "range").c_str());
+        m_lightLocs[i].spotCutoff     = glGetUniformLocation(m_program, (prefix + "spotCutoff").c_str());
+        m_lightLocs[i].spotOuterCutoff = glGetUniformLocation(m_program, (prefix + "spotOuterCutoff").c_str());
+        m_lightLocs[i].type           = glGetUniformLocation(m_program, (prefix + "type").c_str());
+    }
+    m_locFogEnabled = glGetUniformLocation(m_program, "uFogEnabled");
+    m_locFogColor   = glGetUniformLocation(m_program, "uFogColor");
+    m_locFogDensity = glGetUniformLocation(m_program, "uFogDensity");
+    m_locHasNormalMap = glGetUniformLocation(m_program, "uHasNormalMap");
+    m_locHasEmissiveMap = glGetUniformLocation(m_program, "uHasEmissiveMap");
+    m_locCsmMaps       = glGetUniformLocation(m_program, "uCsmMaps");
+    m_locCsmEnabled    = glGetUniformLocation(m_program, "uCsmEnabled");
+    m_locCsmLightIndex = glGetUniformLocation(m_program, "uCsmLightIndex");
+    m_locViewMatrix    = glGetUniformLocation(m_program, "uViewMatrix");
+    for (int i = 0; i < kMaxCsmCascades; ++i)
+    {
+        const std::string idx = "[" + std::to_string(i) + "]";
+        m_locCsmMatrices[i] = glGetUniformLocation(m_program, ("uCsmMatrices" + idx).c_str());
+        m_locCsmSplits[i]   = glGetUniformLocation(m_program, ("uCsmSplits" + idx).c_str());
+    }
+    m_locPbrEnabled              = glGetUniformLocation(m_program, "uPbrEnabled");
+    m_locMetallic                = glGetUniformLocation(m_program, "uMetallic");
+    m_locRoughness               = glGetUniformLocation(m_program, "uRoughness");
+    m_locHasMetallicRoughnessMap = glGetUniformLocation(m_program, "uHasMetallicRoughnessMap");
+    m_locInstanced = glGetUniformLocation(m_program, "uInstanced");
+    m_locDebugMode  = glGetUniformLocation(m_program, "uDebugMode");
+    m_locDebugColor = glGetUniformLocation(m_program, "uDebugColor");
+    m_locNearPlane  = glGetUniformLocation(m_program, "uNearPlane");
+    m_locFarPlane   = glGetUniformLocation(m_program, "uFarPlane");
+    m_locOitEnabled = glGetUniformLocation(m_program, "uOitEnabled");
+    m_locSkinned = glGetUniformLocation(m_program, "uSkinned");
+    m_locBoneMatrices = glGetUniformLocation(m_program, "uBoneMatrices[0]");
+    m_locColorTint = glGetUniformLocation(m_program, "uColorTint");
 }
 
 void OpenGLMaterial::bindTextures()
@@ -523,6 +575,16 @@ void OpenGLMaterial::bind()
     if (m_locOitEnabled >= 0)
         glUniform1i(m_locOitEnabled, m_oitEnabled ? 1 : 0);
 
+    // Skeletal animation uniforms
+    if (m_locSkinned >= 0)
+        glUniform1i(m_locSkinned, m_skinned ? 1 : 0);
+    if (m_skinned && m_locBoneMatrices >= 0 && m_boneCount > 0)
+        glUniformMatrix4fv(m_locBoneMatrices, m_boneCount, GL_TRUE, m_boneMatrixData);
+
+    // Material-instance color tint
+    if (m_locColorTint >= 0)
+        glUniform3fv(m_locColorTint, 1, glm::value_ptr(m_colorTint));
+
     bindTextures();
 }
 
@@ -616,4 +678,13 @@ void OpenGLMaterial::renderInstanced(int instanceCount)
     }
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
     unbind();
+}
+
+void OpenGLMaterial::setBoneMatrices(const float* data, int count)
+{
+    m_boneCount = std::min(count, kMaxBones);
+    if (m_boneCount > 0 && data)
+    {
+        std::memcpy(m_boneMatrixData, data, m_boneCount * 16 * sizeof(float));
+    }
 }

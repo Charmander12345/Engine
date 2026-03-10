@@ -8,6 +8,7 @@
 
 class AssetData;
 class Texture;
+struct Skeleton;
 
 class IRenderObject3D
 {
@@ -26,4 +27,6 @@ public:
     virtual Vec3 getLocalBoundsMax() const = 0;
     virtual int  getVertexCount() const = 0;
     virtual int  getIndexCount() const = 0;
+    virtual bool isSkinned() const { return false; }
+    virtual const Skeleton* getSkeleton() const { return nullptr; }
 };

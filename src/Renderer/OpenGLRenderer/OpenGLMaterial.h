@@ -6,6 +6,7 @@
 #include <cstdint>
 #include "../Material.h"
 #include "OpenGLShader.h"
+#include "ShaderVariantKey.h"
 #include "glad/include/gl.h"
 #include <glm/glm.hpp>
 
@@ -51,6 +52,14 @@ public:
     void setLayout(const std::vector<LayoutElement>& layout) { m_layout = layout; }
 
     bool build() override;
+
+    /// Set a shader variant key. If different from the current key, the
+    /// fragment shader is recompiled with preprocessor defines that
+    /// eliminate runtime branching for unused texture/feature paths.
+    void setVariantKey(ShaderVariantKey key);
+    ShaderVariantKey getVariantKey() const { return m_variantKey; }
+
+    void setFragmentShaderPath(const std::string& path) { m_fragmentShaderPath = path; }
 
     void bind() override;
     void unbind() override;
@@ -103,8 +112,19 @@ public:
     // OIT (Order-Independent Transparency)
     void setOitEnabled(bool enabled) { m_oitEnabled = enabled; }
 
+    // Material-Instance Overrides (per-entity)
+    void setColorTint(const glm::vec3& tint) { m_colorTint = tint; }
+    void setOverrideMetallic(float v) { m_pbrMetallic = v; }
+    void setOverrideRoughness(float v) { m_pbrRoughness = v; }
+    void setOverrideShininess(float v) { m_shininess = v; }
+
+    // Skeletal Animation
+    void setSkinned(bool skinned) { m_skinned = skinned; }
+    void setBoneMatrices(const float* data, int count);
+
 private:
     void bindTextures();
+    void cacheUniformLocations();
 
     std::vector<std::shared_ptr<OpenGLShader>> m_shaders;
     std::vector<float> m_vertexData;
@@ -116,6 +136,10 @@ private:
     GLuint m_ebo{0};
     GLsizei m_vertexCount{0};
     GLsizei m_indexCount{0};
+
+    // Shader variant
+    ShaderVariantKey m_variantKey{SVF_NONE};
+    std::string m_fragmentShaderPath;  ///< Stored for variant recompilation
 
     // Cache GPU textures per CPU-Texture pointer
     std::unordered_map<const Texture*, std::shared_ptr<OpenGLTexture>> m_textureCache;
@@ -239,4 +263,16 @@ private:
     // OIT
     bool  m_oitEnabled{false};
     GLint m_locOitEnabled{-1};
+
+    // Material-Instance color tint
+    glm::vec3 m_colorTint{1.0f, 1.0f, 1.0f};
+    GLint m_locColorTint{-1};
+
+    // Skeletal Animation
+    static constexpr int kMaxBones = 128;
+    bool  m_skinned{false};
+    int   m_boneCount{0};
+    float m_boneMatrixData[kMaxBones * 16]{}; // row-major float[16] per bone
+    GLint m_locSkinned{-1};
+    GLint m_locBoneMatrices{-1};
 };

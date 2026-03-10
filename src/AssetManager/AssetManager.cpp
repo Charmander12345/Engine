@@ -3991,7 +3991,8 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 			aiProcess_GenNormals |
 			aiProcess_FlipUVs |
 			aiProcess_JoinIdenticalVertices |
-			aiProcess_OptimizeMeshes);
+			aiProcess_OptimizeMeshes |
+			aiProcess_LimitBoneWeights);
 
 		if (!scene || !scene->mRootNode || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE))
 		{
@@ -4090,6 +4091,195 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 		logger.log(Logger::Category::AssetManagement,
 			"Import 3D model: " + std::to_string(vertices.size() / 5) + " vertices, " + std::to_string(indices.size()) + " indices",
 			Logger::LogLevel::INFO);
+
+		// ── Extract bone data for skeletal animation ──
+		bool hasBones = false;
+		for (unsigned int mi = 0; mi < scene->mNumMeshes && !hasBones; ++mi)
+		{
+			if (scene->mMeshes[mi]->mNumBones > 0)
+				hasBones = true;
+		}
+
+		if (hasBones)
+		{
+			data["m_hasBones"] = true;
+
+			// Build bone list and per-vertex bone weights
+			const size_t totalVertices = vertices.size() / 5;
+			std::vector<float> boneIdsFlat(totalVertices * 4, 0.0f);
+			std::vector<float> boneWeightsFlat(totalVertices * 4, 0.0f);
+
+			// Track per-vertex how many bones have been assigned
+			std::vector<int> boneSlots(totalVertices, 0);
+
+			std::unordered_map<std::string, int> boneNameToIndex;
+			json bonesJson = json::array();
+
+			uint32_t globalVertexOffset = 0;
+			for (unsigned int mi = 0; mi < scene->mNumMeshes; ++mi)
+			{
+				const aiMesh* mesh = scene->mMeshes[mi];
+				for (unsigned int bi = 0; bi < mesh->mNumBones; ++bi)
+				{
+					const aiBone* bone = mesh->mBones[bi];
+					std::string boneName = bone->mName.C_Str();
+
+					int boneIndex = -1;
+					auto it = boneNameToIndex.find(boneName);
+					if (it != boneNameToIndex.end())
+					{
+						boneIndex = it->second;
+					}
+					else
+					{
+						boneIndex = static_cast<int>(boneNameToIndex.size());
+						boneNameToIndex[boneName] = boneIndex;
+
+						// Store offset matrix (4x4, row-major)
+						json boneJson;
+						boneJson["name"] = boneName;
+						const auto& om = bone->mOffsetMatrix;
+						boneJson["offsetMatrix"] = {
+							om.a1, om.a2, om.a3, om.a4,
+							om.b1, om.b2, om.b3, om.b4,
+							om.c1, om.c2, om.c3, om.c4,
+							om.d1, om.d2, om.d3, om.d4
+						};
+						bonesJson.push_back(boneJson);
+					}
+
+					// Assign weights to vertices
+					for (unsigned int wi = 0; wi < bone->mNumWeights; ++wi)
+					{
+						unsigned int vertexId = globalVertexOffset + bone->mWeights[wi].mVertexId;
+						float weight = bone->mWeights[wi].mWeight;
+						if (vertexId < totalVertices)
+						{
+							int slot = boneSlots[vertexId];
+							if (slot < 4)
+							{
+								boneIdsFlat[vertexId * 4 + slot] = static_cast<float>(boneIndex);
+								boneWeightsFlat[vertexId * 4 + slot] = weight;
+								boneSlots[vertexId] = slot + 1;
+							}
+							else
+							{
+								// Replace the slot with smallest weight
+								int minSlot = 0;
+								for (int s = 1; s < 4; ++s)
+									if (boneWeightsFlat[vertexId*4+s] < boneWeightsFlat[vertexId*4+minSlot])
+										minSlot = s;
+								if (weight > boneWeightsFlat[vertexId*4+minSlot])
+								{
+									boneIdsFlat[vertexId*4+minSlot] = static_cast<float>(boneIndex);
+									boneWeightsFlat[vertexId*4+minSlot] = weight;
+								}
+							}
+						}
+					}
+				}
+				globalVertexOffset += mesh->mNumVertices;
+			}
+
+			// Normalize bone weights per vertex
+			for (size_t v = 0; v < totalVertices; ++v)
+			{
+				float total = 0;
+				for (int j = 0; j < 4; ++j) total += boneWeightsFlat[v*4+j];
+				if (total > 0.0f) {
+					float inv = 1.0f / total;
+					for (int j = 0; j < 4; ++j) boneWeightsFlat[v*4+j] *= inv;
+				}
+			}
+
+			data["m_bones"] = bonesJson;
+			data["m_boneIds"] = boneIdsFlat;
+			data["m_boneWeights"] = boneWeightsFlat;
+
+			// ── Build node hierarchy ──
+			{
+				json nodesJson = json::array();
+				std::unordered_map<const aiNode*, int> nodeMap;
+				std::function<void(const aiNode*, int)> buildNodes = [&](const aiNode* node, int parentIdx)
+				{
+					int idx = static_cast<int>(nodesJson.size());
+					nodeMap[node] = idx;
+					json nj;
+					nj["name"] = std::string(node->mName.C_Str());
+					nj["parent"] = parentIdx;
+					const auto& t = node->mTransformation;
+					nj["transform"] = {
+						t.a1, t.a2, t.a3, t.a4,
+						t.b1, t.b2, t.b3, t.b4,
+						t.c1, t.c2, t.c3, t.c4,
+						t.d1, t.d2, t.d3, t.d4
+					};
+					auto bit = boneNameToIndex.find(std::string(node->mName.C_Str()));
+					nj["boneIndex"] = (bit != boneNameToIndex.end()) ? bit->second : -1;
+					nodesJson.push_back(nj);
+					for (unsigned int c = 0; c < node->mNumChildren; ++c)
+						buildNodes(node->mChildren[c], idx);
+				};
+				buildNodes(scene->mRootNode, -1);
+				data["m_nodes"] = nodesJson;
+			}
+
+			// ── Extract animations ──
+			if (scene->mNumAnimations > 0)
+			{
+				json animsJson = json::array();
+				for (unsigned int ai = 0; ai < scene->mNumAnimations; ++ai)
+				{
+					const aiAnimation* anim = scene->mAnimations[ai];
+					json animJson;
+					animJson["name"] = std::string(anim->mName.C_Str());
+					animJson["duration"] = anim->mDuration;
+					animJson["ticksPerSecond"] = (anim->mTicksPerSecond > 0) ? anim->mTicksPerSecond : 25.0;
+
+					json channelsJson = json::array();
+					for (unsigned int ci = 0; ci < anim->mNumChannels; ++ci)
+					{
+						const aiNodeAnim* ch = anim->mChannels[ci];
+						json chJson;
+						chJson["boneName"] = std::string(ch->mNodeName.C_Str());
+
+						json posKeys = json::array();
+						for (unsigned int k = 0; k < ch->mNumPositionKeys; ++k)
+						{
+							const auto& pk = ch->mPositionKeys[k];
+							posKeys.push_back({ {"t", pk.mTime}, {"v", {pk.mValue.x, pk.mValue.y, pk.mValue.z}} });
+						}
+						chJson["positionKeys"] = posKeys;
+
+						json rotKeys = json::array();
+						for (unsigned int k = 0; k < ch->mNumRotationKeys; ++k)
+						{
+							const auto& rk = ch->mRotationKeys[k];
+							rotKeys.push_back({ {"t", rk.mTime}, {"q", {rk.mValue.x, rk.mValue.y, rk.mValue.z, rk.mValue.w}} });
+						}
+						chJson["rotationKeys"] = rotKeys;
+
+						json sclKeys = json::array();
+						for (unsigned int k = 0; k < ch->mNumScalingKeys; ++k)
+						{
+							const auto& sk = ch->mScalingKeys[k];
+							sclKeys.push_back({ {"t", sk.mTime}, {"v", {sk.mValue.x, sk.mValue.y, sk.mValue.z}} });
+						}
+						chJson["scalingKeys"] = sclKeys;
+
+						channelsJson.push_back(chJson);
+					}
+					animJson["channels"] = channelsJson;
+					animsJson.push_back(animJson);
+				}
+				data["m_animations"] = animsJson;
+			}
+
+			logger.log(Logger::Category::AssetManagement,
+				"Import 3D model: " + std::to_string(boneNameToIndex.size()) + " bones, "
+				+ std::to_string(scene->mNumAnimations) + " animation(s)",
+				Logger::LogLevel::INFO);
+		}
 
 		// ── Extract materials and textures from the Assimp scene ──
 		if (scene->HasMaterials())

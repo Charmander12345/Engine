@@ -508,6 +508,23 @@ bool OpenGLRenderer::initialize()
         }
         m_cachedLevel = DiagnosticsManager::Instance().getActiveLevelSoft();
 
+        // Create skeletal animators for skinned meshes
+        m_entityAnimators.clear();
+        for (const auto& entry : m_renderEntries)
+        {
+            if (entry.object3D && entry.object3D->isSkinned() && entry.object3D->getSkeleton())
+            {
+                auto animator = std::make_shared<SkeletalAnimator>();
+                animator->setSkeleton(entry.object3D->getSkeleton());
+                // Auto-play the first animation if available
+                if (!entry.object3D->getSkeleton()->animations.empty())
+                {
+                    animator->playAnimation(0, true);
+                }
+                m_entityAnimators[static_cast<unsigned int>(entry.entity)] = animator;
+            }
+        }
+
         // Restore editor camera from the level if available
         if (m_cachedLevel && m_cachedLevel->hasEditorCamera() && m_camera)
         {
@@ -688,6 +705,41 @@ void OpenGLRenderer::render()
     // Render content for the active tab (world or mesh viewer)
     const uint64_t worldStart = SDL_GetPerformanceCounter();
     {
+        // Tick camera transition (smooth interpolation)
+        if (m_cameraTransition.active && m_camera && freq > 0)
+        {
+            const uint64_t now = SDL_GetPerformanceCounter();
+            float dt = 0.0f;
+            if (m_lastTransitionTick > 0)
+                dt = static_cast<float>(static_cast<double>(now - m_lastTransitionTick) / static_cast<double>(freq));
+            m_lastTransitionTick = now;
+            if (dt > 0.0f && dt < 1.0f)
+            {
+                m_cameraTransition.elapsed += dt;
+                float t = m_cameraTransition.elapsed / m_cameraTransition.duration;
+                if (t >= 1.0f)
+                {
+                    t = 1.0f;
+                    m_cameraTransition.active = false;
+                }
+                // Smooth-step easing: 3t² - 2t³
+                const float st = t * t * (3.0f - 2.0f * t);
+                const Vec3 pos{
+                    m_cameraTransition.startPos.x + st * (m_cameraTransition.endPos.x - m_cameraTransition.startPos.x),
+                    m_cameraTransition.startPos.y + st * (m_cameraTransition.endPos.y - m_cameraTransition.startPos.y),
+                    m_cameraTransition.startPos.z + st * (m_cameraTransition.endPos.z - m_cameraTransition.startPos.z)
+                };
+                const float yaw = m_cameraTransition.startYaw + st * (m_cameraTransition.endYaw - m_cameraTransition.startYaw);
+                const float pitch = m_cameraTransition.startPitch + st * (m_cameraTransition.endPitch - m_cameraTransition.startPitch);
+                m_camera->setPosition(pos);
+                m_camera->setRotationDegrees(yaw, pitch);
+            }
+        }
+        else
+        {
+            m_lastTransitionTick = 0;
+        }
+
         if (activeTab)
         {
             renderWorld();
@@ -1193,11 +1245,20 @@ void OpenGLRenderer::renderWorld()
 			}
 
 			DrawCmd cmd;
-			cmd.obj = selectedObj;
-			cmd.material = selectedObj->getMaterial();
-			cmd.modelMatrix = entry.cachedModelMatrix;
-			cmd.entityId = static_cast<unsigned int>(entry.entity);
-			bool isLight = false;
+					cmd.obj = selectedObj;
+					cmd.material = selectedObj->getMaterial();
+					cmd.modelMatrix = entry.cachedModelMatrix;
+					cmd.entityId = static_cast<unsigned int>(entry.entity);
+					cmd.isSkinned = selectedObj->isSkinned();
+					// Read per-entity material overrides from ECS
+					if (entry.entity != 0)
+					{
+						if (const auto* matComp = ecs.getComponent<ECS::MaterialComponent>(entry.entity))
+						{
+							cmd.overrides = matComp->overrides;
+						}
+					}
+					bool isLight = false;
 			if (entry.entity != 0)
 			{
 				if (const auto* light = ecs.getComponent<ECS::LightComponent>(entry.entity))
@@ -1523,6 +1584,24 @@ void OpenGLRenderer::renderWorld()
 		glBlendFunc(GL_ONE, GL_ONE);
 		glDepthFunc(GL_ALWAYS);
 	}
+
+	// Tick skeletal animators
+	{
+		const uint64_t now = SDL_GetPerformanceCounter();
+		const uint64_t freq = SDL_GetPerformanceFrequency();
+		float animDt = 0.0f;
+		if (m_lastAnimTickCounter > 0 && freq > 0)
+			animDt = static_cast<float>(static_cast<double>(now - m_lastAnimTickCounter) / static_cast<double>(freq));
+		m_lastAnimTickCounter = now;
+		if (animDt > 0.0f && animDt < 1.0f)
+		{
+			for (auto& [entityId, animator] : m_entityAnimators)
+			{
+				animator->tick(animDt);
+			}
+		}
+	}
+
 	const glm::vec3 fogColor(m_fogColor.x, m_fogColor.y, m_fogColor.z);
 	size_t batchIndex = 0; // for InstanceGroups coloring
 	size_t di = 0;
@@ -1562,6 +1641,17 @@ void OpenGLRenderer::renderWorld()
 			first.obj->setDebugMode(debugMode);
 			first.obj->setDebugColor(batchDebugColor);
 			first.obj->setNearFarPlanes(activeNear, activeFar);
+			// Skinned emission objects: upload bone matrices
+			if (first.isSkinned)
+			{
+				auto ait = m_entityAnimators.find(first.entityId);
+				if (ait != m_entityAnimators.end())
+				{
+					const auto& bones = ait->second->getBoneMatrices();
+					first.obj->setSkinned(true);
+					first.obj->setBoneMatrices(bones.empty() ? nullptr : bones[0].m, static_cast<int>(bones.size()));
+				}
+			}
 			first.obj->render();
 			if (m_boundsDebugEnabled && first.hasBounds)
 			{
@@ -1574,12 +1664,105 @@ void OpenGLRenderer::renderWorld()
 			continue;
 		}
 
-		// Find batch: same mesh AND material, no emission
+		// Skinned objects must be drawn individually (each entity has unique bone pose)
+		if (first.isSkinned)
+		{
+			first.obj->setMatrices(first.modelMatrix, view, m_projectionMatrix);
+			first.obj->setShadowData(m_shadowDepthArray, m_shadowLightSpaceMatrices, m_shadowLightIndices, m_shadowCount);
+			first.obj->setPointShadowData(m_pointShadowCubeArray, m_pointShadowPositions, m_pointShadowFarPlanes, m_pointShadowLightIndices, m_pointShadowCount);
+			first.obj->setFogData(m_fogEnabled, fogColor, m_fogParams.z);
+			first.obj->setCsmData(m_csmDepthArray, m_csmMatrices, m_csmSplits, m_csmLightIndex, m_csmEnabled, view);
+			first.obj->setLightData(lightPosition, lightColor, lightIntensity);
+			first.obj->setLights(m_sceneLights);
+			first.obj->setDebugMode(debugMode);
+			first.obj->setDebugColor(batchDebugColor);
+			first.obj->setNearFarPlanes(activeNear, activeFar);
+			// Upload bone matrices for this entity
+			auto ait = m_entityAnimators.find(first.entityId);
+			if (ait != m_entityAnimators.end())
+			{
+				const auto& bones = ait->second->getBoneMatrices();
+				first.obj->setSkinned(true);
+				first.obj->setBoneMatrices(bones.empty() ? nullptr : bones[0].m, static_cast<int>(bones.size()));
+			}
+			// Apply material overrides for skinned entities too
+			if (first.overrides.hasAnyOverride() && first.material)
+			{
+				if (first.overrides.hasColorTint)
+					first.material->setColorTint(glm::vec3(first.overrides.colorTint[0], first.overrides.colorTint[1], first.overrides.colorTint[2]));
+				if (first.overrides.hasMetallic)
+					first.material->setOverrideMetallic(first.overrides.metallic);
+				if (first.overrides.hasRoughness)
+					first.material->setOverrideRoughness(first.overrides.roughness);
+				if (first.overrides.hasShininess)
+					first.material->setOverrideShininess(first.overrides.shininess);
+			}
+			first.obj->render();
+			// Restore defaults after override draw
+			if (first.overrides.hasAnyOverride() && first.material)
+			{
+				first.material->setColorTint(glm::vec3(1.0f));
+			}
+			if (m_boundsDebugEnabled && first.hasBounds)
+			{
+				const glm::vec3 center = (first.boundsMin + first.boundsMax) * 0.5f;
+				const glm::vec3 extent = (first.boundsMax - first.boundsMin) * 0.5f;
+				drawBoundsDebugBox(center, extent, viewProj);
+			}
+			++di;
+			++batchIndex;
+			continue;
+		}
+
+		// Material override objects: draw individually (per-entity uniforms)
+		if (first.overrides.hasAnyOverride())
+		{
+			first.obj->setMatrices(first.modelMatrix, view, m_projectionMatrix);
+			first.obj->setShadowData(m_shadowDepthArray, m_shadowLightSpaceMatrices, m_shadowLightIndices, m_shadowCount);
+			first.obj->setPointShadowData(m_pointShadowCubeArray, m_pointShadowPositions, m_pointShadowFarPlanes, m_pointShadowLightIndices, m_pointShadowCount);
+			first.obj->setFogData(m_fogEnabled, fogColor, m_fogParams.z);
+			first.obj->setCsmData(m_csmDepthArray, m_csmMatrices, m_csmSplits, m_csmLightIndex, m_csmEnabled, view);
+			first.obj->setLightData(lightPosition, lightColor, lightIntensity);
+			first.obj->setLights(m_sceneLights);
+			first.obj->setDebugMode(debugMode);
+			first.obj->setDebugColor(batchDebugColor);
+			first.obj->setNearFarPlanes(activeNear, activeFar);
+			if (first.material)
+			{
+				if (first.overrides.hasColorTint)
+					first.material->setColorTint(glm::vec3(first.overrides.colorTint[0], first.overrides.colorTint[1], first.overrides.colorTint[2]));
+				if (first.overrides.hasMetallic)
+					first.material->setOverrideMetallic(first.overrides.metallic);
+				if (first.overrides.hasRoughness)
+					first.material->setOverrideRoughness(first.overrides.roughness);
+				if (first.overrides.hasShininess)
+					first.material->setOverrideShininess(first.overrides.shininess);
+			}
+			first.obj->render();
+			// Restore defaults
+			if (first.material)
+			{
+				first.material->setColorTint(glm::vec3(1.0f));
+			}
+			if (m_boundsDebugEnabled && first.hasBounds)
+			{
+				const glm::vec3 center = (first.boundsMin + first.boundsMax) * 0.5f;
+				const glm::vec3 extent = (first.boundsMax - first.boundsMin) * 0.5f;
+				drawBoundsDebugBox(center, extent, viewProj);
+			}
+			++di;
+			++batchIndex;
+			continue;
+		}
+
+		// Find batch: same mesh AND material, no emission, no skinning, no overrides
 		size_t batchEnd = di + 1;
 		while (batchEnd < m_drawList.size() &&
 			   m_drawList[batchEnd].obj == first.obj &&
 			   m_drawList[batchEnd].material == first.material &&
-			   !m_drawList[batchEnd].hasEmission)
+			   !m_drawList[batchEnd].hasEmission &&
+			   !m_drawList[batchEnd].isSkinned &&
+			   !m_drawList[batchEnd].overrides.hasAnyOverride())
 		{
 			++batchEnd;
 		}
@@ -5085,7 +5268,7 @@ void OpenGLRenderer::renderUI()
 
 void OpenGLRenderer::moveCamera(float forward, float right, float up)
 {
-    if (!m_camera)
+    if (!m_camera || m_cameraTransition.active)
         return;
     m_camera->moveRelative(forward, right, up);
 }
@@ -6190,16 +6373,21 @@ bool OpenGLRenderer::ensureShadowResources()
     if (m_shadowProgram != 0)
         return true;
 
-    // Compile shadow depth shader
+    // Compile shadow depth shader (supports optional skeletal skinning)
     const char* vs = R"(
 #version 460 core
 layout(location = 0) in vec3 aPos;
+layout(location = 5) in vec4 aBoneIdsF;
+layout(location = 6) in vec4 aBoneWeights;
 layout(std430, binding = 0) buffer InstanceModelMatrices {
     mat4 instanceModels[];
 };
 uniform mat4 uLightSpaceMatrix;
 uniform mat4 uModel;
 uniform bool uInstanced;
+uniform bool uSkinned;
+#define MAX_BONES 128
+uniform mat4 uBoneMatrices[MAX_BONES];
 void main() {
     mat4 model;
     if (uInstanced) {
@@ -6207,7 +6395,20 @@ void main() {
     } else {
         model = uModel;
     }
-    gl_Position = uLightSpaceMatrix * model * vec4(aPos, 1.0);
+    vec4 localPos;
+    if (uSkinned) {
+        ivec4 boneIds = ivec4(aBoneIdsF);
+        mat4 boneTransform = mat4(0.0);
+        for (int i = 0; i < 4; ++i) {
+            if (boneIds[i] >= 0 && boneIds[i] < MAX_BONES) {
+                boneTransform += uBoneMatrices[boneIds[i]] * aBoneWeights[i];
+            }
+        }
+        localPos = boneTransform * vec4(aPos, 1.0);
+    } else {
+        localPos = vec4(aPos, 1.0);
+    }
+    gl_Position = uLightSpaceMatrix * model * localPos;
 }
 )";
     const char* fs = R"(
@@ -6231,6 +6432,8 @@ void main() {}
     m_shadowLocModel = glGetUniformLocation(m_shadowProgram, "uModel");
     m_shadowLocLightSpace = glGetUniformLocation(m_shadowProgram, "uLightSpaceMatrix");
     m_shadowLocInstanced = glGetUniformLocation(m_shadowProgram, "uInstanced");
+    m_shadowLocSkinned = glGetUniformLocation(m_shadowProgram, "uSkinned");
+    m_shadowLocBoneMatrices = glGetUniformLocation(m_shadowProgram, "uBoneMatrices[0]");
 
     // Create shadow FBO + depth texture array (one layer per shadow-casting light)
     glGenTextures(1, &m_shadowDepthArray);
@@ -6435,12 +6638,39 @@ void OpenGLRenderer::renderCsmShadowMaps(const std::vector<DrawCmd>& drawList)
             if (!mat) { ++i; continue; }
             auto* batchObj = drawList[i].obj;
 
+            // Skinned meshes: individual draw with bone matrices
+            if (drawList[i].isSkinned)
+            {
+                glBindVertexArray(mat->getVao());
+                glUniform1i(m_shadowLocInstanced, 0);
+                glUniformMatrix4fv(m_shadowLocModel, 1, GL_FALSE, &drawList[i].modelMatrix[0][0]);
+                auto ait = m_entityAnimators.find(drawList[i].entityId);
+                if (ait != m_entityAnimators.end() && !ait->second->getBoneMatrices().empty())
+                {
+                    glUniform1i(m_shadowLocSkinned, 1);
+                    const auto& bones = ait->second->getBoneMatrices();
+                    glUniformMatrix4fv(m_shadowLocBoneMatrices, static_cast<GLsizei>(bones.size()), GL_TRUE, bones[0].m);
+                }
+                else
+                {
+                    glUniform1i(m_shadowLocSkinned, 0);
+                }
+                if (mat->getIndexCount() > 0)
+                    glDrawElements(GL_TRIANGLES, mat->getIndexCount(), GL_UNSIGNED_INT, nullptr);
+                else
+                    glDrawArrays(GL_TRIANGLES, 0, mat->getVertexCount());
+                glUniform1i(m_shadowLocSkinned, 0);
+                ++i;
+                continue;
+            }
+
             size_t batchEnd = i + 1;
-            while (batchEnd < drawList.size() && drawList[batchEnd].material == mat && drawList[batchEnd].obj == batchObj)
+            while (batchEnd < drawList.size() && drawList[batchEnd].material == mat && drawList[batchEnd].obj == batchObj && !drawList[batchEnd].isSkinned)
                 ++batchEnd;
             const size_t batchSize = batchEnd - i;
 
             glBindVertexArray(mat->getVao());
+            glUniform1i(m_shadowLocSkinned, 0);
 
             if (batchSize > 1)
             {
@@ -6566,12 +6796,40 @@ void OpenGLRenderer::renderShadowMap(const std::vector<DrawCmd>& drawList)
             if (!mat) { ++i; continue; }
             auto* batchObj = drawList[i].obj;
 
+            // Skinned meshes must be drawn individually with bone matrices
+            if (drawList[i].isSkinned)
+            {
+                glBindVertexArray(mat->getVao());
+                glUniform1i(m_shadowLocInstanced, 0);
+                glUniformMatrix4fv(m_shadowLocModel, 1, GL_FALSE, &drawList[i].modelMatrix[0][0]);
+                // Upload bone matrices for shadow pass
+                auto ait = m_entityAnimators.find(drawList[i].entityId);
+                if (ait != m_entityAnimators.end() && !ait->second->getBoneMatrices().empty())
+                {
+                    glUniform1i(m_shadowLocSkinned, 1);
+                    const auto& bones = ait->second->getBoneMatrices();
+                    glUniformMatrix4fv(m_shadowLocBoneMatrices, static_cast<GLsizei>(bones.size()), GL_TRUE, bones[0].m);
+                }
+                else
+                {
+                    glUniform1i(m_shadowLocSkinned, 0);
+                }
+                if (mat->getIndexCount() > 0)
+                    glDrawElements(GL_TRIANGLES, mat->getIndexCount(), GL_UNSIGNED_INT, nullptr);
+                else
+                    glDrawArrays(GL_TRIANGLES, 0, mat->getVertexCount());
+                glUniform1i(m_shadowLocSkinned, 0);
+                ++i;
+                continue;
+            }
+
             size_t batchEnd = i + 1;
-            while (batchEnd < drawList.size() && drawList[batchEnd].material == mat && drawList[batchEnd].obj == batchObj)
+            while (batchEnd < drawList.size() && drawList[batchEnd].material == mat && drawList[batchEnd].obj == batchObj && !drawList[batchEnd].isSkinned)
                 ++batchEnd;
             const size_t batchSize = batchEnd - i;
 
             glBindVertexArray(mat->getVao());
+            glUniform1i(m_shadowLocSkinned, 0);
 
             if (batchSize > 1)
             {
@@ -7643,7 +7901,7 @@ bool OpenGLRenderer::isRenderEntryRelevant(const RenderEntry& entry) const
 
 void OpenGLRenderer::rotateCamera(float yawDeltaDegrees, float pitchDeltaDegrees)
 {
-    if (!m_camera)
+    if (!m_camera || m_cameraTransition.active)
         return;
     m_camera->rotate(yawDeltaDegrees, pitchDeltaDegrees);
 }
@@ -7695,6 +7953,41 @@ unsigned int OpenGLRenderer::getActiveCameraEntity() const
 void OpenGLRenderer::clearActiveCameraEntity()
 {
     m_activeCameraEntity = 0;
+}
+
+void OpenGLRenderer::startCameraTransition(const Vec3& targetPos, float targetYaw, float targetPitch, float durationSec)
+{
+    if (!m_camera || durationSec <= 0.0f)
+    {
+        // Instant snap
+        if (m_camera)
+        {
+            m_camera->setPosition(targetPos);
+            m_camera->setRotationDegrees(targetYaw, targetPitch);
+        }
+        m_cameraTransition.active = false;
+        return;
+    }
+    m_cameraTransition.startPos = m_camera->getPosition();
+    const Vec2 rot = m_camera->getRotationDegrees();
+    m_cameraTransition.startYaw = rot.x;
+    m_cameraTransition.startPitch = rot.y;
+    m_cameraTransition.endPos = targetPos;
+    m_cameraTransition.endYaw = targetYaw;
+    m_cameraTransition.endPitch = targetPitch;
+    m_cameraTransition.duration = durationSec;
+    m_cameraTransition.elapsed = 0.0f;
+    m_cameraTransition.active = true;
+}
+
+bool OpenGLRenderer::isCameraTransitioning() const
+{
+    return m_cameraTransition.active;
+}
+
+void OpenGLRenderer::cancelCameraTransition()
+{
+    m_cameraTransition.active = false;
 }
 
 const std::string& OpenGLRenderer::name() const

@@ -7,6 +7,19 @@
 
 ## Letzte Änderung (Viewport)
 
+- ✅ `Shader-Variants / Permutationen`: Präprozessor-basierte Shader-Varianten implementiert. `ShaderVariantKey.h` definiert 8 Feature-Flags (`SVF_HAS_DIFFUSE_MAP`, `SVF_HAS_SPECULAR_MAP`, `SVF_HAS_NORMAL_MAP`, `SVF_HAS_EMISSIVE_MAP`, `SVF_HAS_METALLIC_ROUGHNESS`, `SVF_PBR_ENABLED`, `SVF_FOG_ENABLED`, `SVF_OIT_ENABLED`) als Bitmask. `buildVariantDefines()` generiert `#define`-Block. `OpenGLShader::loadFromFileWithDefines()` injiziert Defines nach `#version`-Zeile. Fragment-Shader nutzt `#ifdef`/`#else`-Guards für Diffuse/Specular/Normal/Emissive-Sampling, Fog und OIT — eliminiert tote Branches bei gesetztem Define, Uniform-Fallback bleibt für unbekannte Varianten. `OpenGLMaterial::setVariantKey()` rekompiliert Fragment-Shader on-the-fly und relinkt Programm. `cacheUniformLocations()` als eigenständige Methode extrahiert. `OpenGLObject3D::setTextures()` berechnet automatisch den Variant-Key aus aktiven Textur-Slots. `setPbrData()` setzt `SVF_PBR_ENABLED`-Flag.
+- ✅ `Kamera-Überblendung`: Smooth-Interpolation zwischen Kamera-Positionen/-Orientierungen. `CameraTransition`-Struct in `Renderer.h`. `OpenGLRenderer` implementiert `startCameraTransition()`, `isCameraTransitioning()`, `cancelCameraTransition()` mit Smooth-Step-Easing (3t²−2t³). Während Transition sind `moveCamera()`/`rotateCamera()` blockiert. Python-API: `engine.camera.transition_to()`, `is_transitioning()`, `cancel_transition()`. `engine.pyi` aktualisiert.
+- ✅ `Material-Instancing / Overrides`: Per-Entity-Material-Overrides implementiert. Neue `MaterialOverrides`-Struct in `MaterialComponent` mit optionalen Overrides für `colorTint` (RGB), `metallic`, `roughness`, `shininess`, `emissiveColor` – jeweils mit `has*`-Flags. Fragment-Shader erweitert um `uniform vec3 uColorTint` (multiplikativer Farb-Tint auf diffuse Textur). `OpenGLMaterial` um `setColorTint()`, `setOverrideMetallic()`, `setOverrideRoughness()`, `setOverrideShininess()` erweitert, Uniform-Location `uColorTint` in `build()` gecacht und in `bind()` hochgeladen. Renderer wendet Overrides vor jedem individuellen Draw-Call an und stellt danach Defaults wieder her. Entities mit Overrides brechen GPU-Instancing-Batches auf (eigener Draw-Call wie bei Skinned/Emission-Entities). JSON-Serialisierung in EngineLevel (unter `MaterialComponent.overrides`). Scripting-API: `set_material_override_color_tint`, `get_material_override_color_tint`, `set_material_override_metallic`, `set_material_override_roughness`, `set_material_override_shininess`, `clear_material_overrides`. `engine.pyi` aktualisiert.
+- ✅ `Skeletal Animation`: Vollständiges Skeletal-Animation-System implementiert. Neue Datenstrukturen (`SkeletalData.h`): `Skeleton` (Bone-Hierarchie, Node-Tree, AnimationClips), `SkeletalAnimator` (Runtime-Playback mit Keyframe-Interpolation: linear für Position/Scale, Slerp für Rotation), `Mat4x4`/`Quat` Helfer-Typen. Per-Vertex Bone-Daten (4 IDs + 4 Weights) werden beim Assimp-Import extrahiert (`aiProcess_LimitBoneWeights`), Node-Hierarchie und Animations-Keyframes im Asset-JSON gespeichert (`m_hasBones`, `m_bones`, `m_boneIds`, `m_boneWeights`, `m_nodes`, `m_animations`).
+- ✅ `Skeletal Animation – Vertex Layout`: Skinned Meshes verwenden erweiterten Vertex-Layout (22 Floats/Vertex statt 14): pos3+norm3+uv2+tan3+bitan3+boneIds4+boneWeights4. Attribute-Locations 5 (boneIds als float, im Shader zu int gecastet) und 6 (boneWeights). Nicht-Skinned-Meshes bleiben bei 14 Floats.
+- ✅ `Skeletal Animation – Shader`: Neuer `skinned_vertex.glsl` erweitert den Standard-Vertex-Shader um `uniform bool uSkinned` und `uniform mat4 uBoneMatrices[128]`. Bei aktivem Skinning wird die gewichtete Summe der Bone-Matrizen auf Position/Normal/Tangent/Bitangent angewendet, bevor die Model-Matrix multipliziert wird.
+- ✅ `Skeletal Animation – Material`: `OpenGLMaterial` um `setSkinned(bool)` und `setBoneMatrices(float*, int)` erweitert. Uniform-Locations `uSkinned`/`uBoneMatrices[0]` werden in `build()` gecacht, in `bind()` hochgeladen (row-major, `GL_TRUE`).
+- ✅ `Skeletal Animation – Object3D`: `OpenGLObject3D::prepare()` erkennt `m_hasBones` im Asset-JSON, wählt automatisch `skinned_vertex.glsl`, baut erweiterten Vertex-Buffer mit Bone-Daten, lädt Skeleton (Bones, Node-Hierarchie, Animations) aus JSON. `isSkinned()`/`getSkeleton()` API exponiert.
+- ✅ `Skeletal Animation – Renderer-Integration`: Pro Skinned-Entity wird automatisch ein `SkeletalAnimator` erstellt und die erste Animation im Loop gestartet. Animatoren werden pro Frame per SDL-PerformanceCounter-Delta getickt. Bone-Matrizen werden vor jedem Draw-Call hochgeladen. Skinned Meshes werden einzeln gerendert (kein GPU-Instancing, da jede Entity eigene Bone-Pose hat).
+- ✅ `Skeletal Animation – Shadow Mapping`: Shadow-Vertex-Shader (`ensureShadowResources`) um Skinning erweitert (gleiche `uSkinned`/`uBoneMatrices`-Uniforms). Skinned Meshes werden in allen 3 Shadow-Passes (Regular, CSM, Point) einzeln mit Bone-Matrizen gerendert. Korrekte animierte Schatten.
+- ✅ `Skeletal Animation – ECS`: Neue `AnimationComponent` (currentClipIndex, currentTime, speed, playing, loop). `ComponentKind::Animation`, `MaxComponentTypes` auf 12 erhöht. JSON-Serialisierung in `EngineLevel.cpp`. `EntitySnapshot` um `animation`-Feld erweitert.
+- ✅ `Skeletal Animation – IRenderObject3D`: Interface um `isSkinned()` und `getSkeleton()` (mit Default-Implementierung) erweitert.
+- ✅ `Scripting`: `engine.pyi` mit vollständiger Skeletal-Animation-Dokumentation aktualisiert (Import-Pipeline, Vertex-Layout, Shader, Runtime-Playback, ECS-Integration).
 - ✅ `OpenGLTextRenderer`: Bugfix – Horizontale Text-Spiegelung im Viewport behoben. `renderViewportUI()` rendert jetzt im Full-FBO-Viewport (`glViewport(0,0,windowW,windowH)`) statt mit Offset-Viewport, um driverabhängige Quirks mit Offset-Viewport + Text-Rendering zu vermeiden. Die Ortho-Projektion wird mit Viewport-Offset verschoben, Scissor-Test clippt auf den Viewport-Bereich.
 - ✅ `UIWidget`: Neue `WidgetElement`-Properties: `borderColor`, `borderThickness`, `borderRadius`, `opacity`, `isVisible`, `tooltipText`, `isBold`, `isItalic`, `gradientColor`, `maxSize`, `spacing`, `radioGroup`. JSON-Serialisierung vollständig.
 - ✅ `UIWidget`: Neue Widget-Typen: `Label`, `Separator`, `ScrollView`, `ToggleButton`, `RadioButton`. Rendering in `renderUI()` und `renderViewportUI()` vollständig.
@@ -365,7 +378,7 @@
 | Feature                                 | Status |
 |-----------------------------------------|--------|
 | Entity-Erzeugung / -Löschung           | ✅     |
-| 10 Komponentenarten                    | ✅     |
+| 12 Komponentenarten                    | ✅     |
 | SparseSet-Speicherung (O(1)-Zugriff)   | ✅     |
 | Schema-basierte Abfragen               | ✅     |
 | Bitmasken-System                        | ✅     |
@@ -380,6 +393,8 @@
 | NameComponent                           | ✅     |
 | CollisionComponent (Box/Sphere/Capsule/Cylinder/HeightField) | ✅ |
 | HeightFieldComponent (Höhendaten, Skalierung, Offsets) | ✅ |
+| LodComponent (LOD-Stufen pro Entity)   | ✅     |
+| AnimationComponent (Skeletal Animation State) | ✅ |
 | Dirty-Flagging (m_componentVersion)     | ✅     |
 | Physik-Simulation (Kollision, Dynamik) | ✅     |
 | Hierarchie (Parent-Child-Entities)     | ❌     |
@@ -470,7 +485,7 @@
 | Instanced Rendering (GPU)                | ✅     |
 | LOD-System (Level of Detail)             | ✅     |
 | Debug Render Modes (Lit/Unlit/Wireframe/ShadowMap/Cascades/InstanceGroups/Normals/Depth/Overdraw) | ✅ |
-| Skeletal Animation Rendering              | ❌     |
+| Skeletal Animation Rendering              | ✅     |
 | Particle-Rendering                        | ❌     |
 | DirectX 11 Backend                        | ❌     |
 | DirectX 12 Backend                        | ❌     |
@@ -614,7 +629,7 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | FBX-Import (via Assimp)             | ✅     |
 | glTF-Import (via Assimp)            | ✅     |
 | LOD-System (Level of Detail)        | ❌     |
-| Skeletal Meshes / Animation         | ❌     |
+| Skeletal Meshes / Animation         | ✅     |
 
 **Abstraktion:** `IRenderObject2D` und `IRenderObject3D` definieren backend-agnostische Interfaces. OpenGL-Klassen erben davon. `MeshViewerWindow` und `RenderResourceManager` nutzen ausschließlich die abstrakten Interfaces.
 

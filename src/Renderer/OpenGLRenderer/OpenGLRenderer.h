@@ -14,6 +14,7 @@
 
 #include "../../Core/MathTypes.h"
 #include "../../Core/EngineLevel.h"
+#include "../../Core/SkeletalData.h"
 #include "glad/include/gl.h"
 #include <memory>
 #include <unordered_map>
@@ -76,6 +77,10 @@ public:
     void setCameraPosition(const Vec3& position) override;
     Vec2 getCameraRotationDegrees() const override;
     void setCameraRotationDegrees(float yawDegrees, float pitchDegrees) override;
+
+    void startCameraTransition(const Vec3& targetPos, float targetYaw, float targetPitch, float durationSec) override;
+    bool isCameraTransitioning() const override;
+    void cancelCameraTransition() override;
 
     void setActiveCameraEntity(unsigned int entity) override;
     unsigned int getActiveCameraEntity() const override;
@@ -183,6 +188,8 @@ private:
 
     std::unique_ptr<Camera> m_camera;
     unsigned int m_activeCameraEntity{ 0 };
+    CameraTransition m_cameraTransition;
+    uint64_t m_lastTransitionTick{0};
     glm::mat4 m_projectionMatrix;
     glm::mat4 m_lastViewMatrix{ 1.0f };
     std::vector<RenderEntry> m_renderEntries;
@@ -374,6 +381,8 @@ private:
         bool hasBounds{false};
         bool hasEmission{false};
         bool isTransparent{false};
+        bool isSkinned{false};
+        ECS::MaterialOverrides overrides{};
     };
     std::vector<DrawCmd> m_drawList;
     std::vector<DrawCmd> m_transparentDrawList;
@@ -405,6 +414,10 @@ private:
     GLint m_oitCompLocRevealage{-1};
     bool m_oitEnabled{true};
 
+    // Skeletal animation: per-entity animators
+    std::unordered_map<unsigned int, std::shared_ptr<SkeletalAnimator>> m_entityAnimators;
+    uint64_t m_lastAnimTickCounter{0};
+
     // Shadow mapping
     bool ensureShadowResources();
     void releaseShadowResources();
@@ -420,6 +433,8 @@ private:
     GLint m_shadowLocModel{-1};
     GLint m_shadowLocLightSpace{-1};
     GLint m_shadowLocInstanced{-1};
+    GLint m_shadowLocSkinned{-1};
+    GLint m_shadowLocBoneMatrices{-1};
     glm::mat4 m_shadowLightSpaceMatrices[kMaxShadowLights]{};
     int m_shadowLightIndices[kMaxShadowLights]{};
     int m_shadowCount{0};

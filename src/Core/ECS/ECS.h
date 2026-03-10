@@ -16,7 +16,7 @@ struct ECSConfig
 };
 
 using Entity = unsigned int;
-static constexpr size_t MaxComponentTypes = 11;
+static constexpr size_t MaxComponentTypes = 12;
 
 enum class ComponentKind : size_t
 {
@@ -30,7 +30,8 @@ enum class ComponentKind : size_t
 	Name,
 	Collision,
 	HeightField,
-	Lod
+	Lod,
+	Animation
 };
 
 template<typename T>
@@ -100,6 +101,12 @@ template<>
 struct ComponentTraits<LodComponent>
 {
 	static constexpr ComponentKind kind = ComponentKind::Lod;
+};
+
+template<>
+struct ComponentTraits<AnimationComponent>
+{
+	static constexpr ComponentKind kind = ComponentKind::Animation;
 };
 
 class Schema
@@ -202,6 +209,7 @@ public:
 	SparseSet<CollisionComponent, MaxEntities> m_collisionComponents;
 	SparseSet<HeightFieldComponent, MaxEntities> m_heightFieldComponents;
 	SparseSet<LodComponent, MaxEntities> m_lodComponents;
+	SparseSet<AnimationComponent, MaxEntities> m_animationComponents;
 
 	template<typename T>
 	SparseSet<T, MaxEntities>& getStorage();
@@ -315,10 +323,14 @@ inline SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage()
 	{
 		return m_heightFieldComponents;
 	}
+	else if constexpr (std::is_same_v<T, LodComponent>)
+	{
+		return m_lodComponents;
+	}
 	else
 	{
-		static_assert(std::is_same_v<T, LodComponent>, "Unsupported component type");
-		return m_lodComponents;
+		static_assert(std::is_same_v<T, AnimationComponent>, "Unsupported component type");
+		return m_animationComponents;
 	}
 }
 
@@ -365,10 +377,14 @@ inline const SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage() con
 	{
 		return m_heightFieldComponents;
 	}
+	else if constexpr (std::is_same_v<T, LodComponent>)
+	{
+		return m_lodComponents;
+	}
 	else
 	{
-		static_assert(std::is_same_v<T, LodComponent>, "Unsupported component type");
-		return m_lodComponents;
+		static_assert(std::is_same_v<T, AnimationComponent>, "Unsupported component type");
+		return m_animationComponents;
 	}
 }
 

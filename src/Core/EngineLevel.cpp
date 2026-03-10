@@ -136,7 +136,19 @@ static void deserializeMeshComponent(const json& value, ECS::MeshComponent& comp
 
 static json serializeMaterialComponent(const ECS::MaterialComponent& component)
 {
-	return json{ {"materialAssetPath", component.materialAssetPath} };
+	json j = json{ {"materialAssetPath", component.materialAssetPath} };
+	const auto& ov = component.overrides;
+	if (ov.hasAnyOverride())
+	{
+		json ovJson;
+		if (ov.hasColorTint)   ovJson["colorTint"]  = serializeFloat3(ov.colorTint);
+		if (ov.hasMetallic)    ovJson["metallic"]    = ov.metallic;
+		if (ov.hasRoughness)   ovJson["roughness"]   = ov.roughness;
+		if (ov.hasShininess)   ovJson["shininess"]   = ov.shininess;
+		if (ov.hasEmissive)    ovJson["emissive"]    = serializeFloat3(ov.emissiveColor);
+		j["overrides"] = ovJson;
+	}
+	return j;
 }
 
 static void deserializeMaterialComponent(const json& value, ECS::MaterialComponent& component)
@@ -144,6 +156,35 @@ static void deserializeMaterialComponent(const json& value, ECS::MaterialCompone
 	if (value.is_object() && value.contains("materialAssetPath"))
 	{
 		component.materialAssetPath = value.at("materialAssetPath").get<std::string>();
+	}
+	if (value.is_object() && value.contains("overrides"))
+	{
+		const auto& ov = value.at("overrides");
+		if (ov.contains("colorTint"))
+		{
+			deserializeFloat3(ov.at("colorTint"), component.overrides.colorTint);
+			component.overrides.hasColorTint = true;
+		}
+		if (ov.contains("metallic"))
+		{
+			component.overrides.metallic = ov.at("metallic").get<float>();
+			component.overrides.hasMetallic = true;
+		}
+		if (ov.contains("roughness"))
+		{
+			component.overrides.roughness = ov.at("roughness").get<float>();
+			component.overrides.hasRoughness = true;
+		}
+		if (ov.contains("shininess"))
+		{
+			component.overrides.shininess = ov.at("shininess").get<float>();
+			component.overrides.hasShininess = true;
+		}
+		if (ov.contains("emissive"))
+		{
+			deserializeFloat3(ov.at("emissive"), component.overrides.emissiveColor);
+			component.overrides.hasEmissive = true;
+		}
 	}
 }
 
@@ -393,6 +434,25 @@ static json serializeNameComponent(const ECS::NameComponent& component)
 	return json{ {"displayName", component.displayName} };
 }
 
+static json serializeAnimationComponent(const ECS::AnimationComponent& component)
+{
+	return json{
+		{"currentClipIndex", component.currentClipIndex},
+		{"speed", component.speed},
+		{"playing", component.playing},
+		{"loop", component.loop}
+	};
+}
+
+static void deserializeAnimationComponent(const json& value, ECS::AnimationComponent& component)
+{
+	if (!value.is_object()) return;
+	if (value.contains("currentClipIndex")) component.currentClipIndex = value.at("currentClipIndex").get<int>();
+	if (value.contains("speed"))            component.speed = value.at("speed").get<float>();
+	if (value.contains("playing"))          component.playing = value.at("playing").get<bool>();
+	if (value.contains("loop"))             component.loop = value.at("loop").get<bool>();
+}
+
 static void deserializeNameComponent(const json& value, ECS::NameComponent& component)
 {
 	if (value.is_object() && value.contains("displayName"))
@@ -563,6 +623,12 @@ bool EngineLevel::prepareEcs()
 					ECS::LodComponent component;
 					deserializeLodComponent(componentsJson.at("Lod"), component);
 					m_ecs->addComponent<ECS::LodComponent>(entity, component);
+				}
+				if (componentsJson.contains("Animation"))
+				{
+					ECS::AnimationComponent component;
+					deserializeAnimationComponent(componentsJson.at("Animation"), component);
+					m_ecs->addComponent<ECS::AnimationComponent>(entity, component);
 				}
 			}
 		}
@@ -776,6 +842,10 @@ json EngineLevel::serializeEcsEntities() const
 		if (const auto* component = ecs.getComponent<ECS::LodComponent>(entity))
 		{
 			componentsJson["Lod"] = serializeLodComponent(*component);
+		}
+		if (const auto* component = ecs.getComponent<ECS::AnimationComponent>(entity))
+		{
+			componentsJson["Animation"] = serializeAnimationComponent(*component);
 		}
 
 		entityJson["components"] = componentsJson;

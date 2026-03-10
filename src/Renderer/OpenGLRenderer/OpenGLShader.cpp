@@ -29,7 +29,7 @@ bool OpenGLShader::loadFromFile(Shader::Type type, const std::string& filePath)
     std::ifstream file(filePath, std::ios::in | std::ios::binary);
     if (!file)
     {
-        Logger::Instance().log("Shader-Datei konnte nicht geöffnet werden: " + filePath, Logger::LogLevel::ERROR);
+        Logger::Instance().log("Shader-Datei konnte nicht geoeffnet werden: " + filePath, Logger::LogLevel::ERROR);
         return false;
     }
 
@@ -37,6 +37,31 @@ bool OpenGLShader::loadFromFile(Shader::Type type, const std::string& filePath)
     buffer << file.rdbuf();
     m_source = buffer.str();
     m_type = type;
+    return compile();
+}
+
+bool OpenGLShader::loadFromFileWithDefines(Shader::Type type, const std::string& filePath, const std::string& defines)
+{
+    std::ifstream file(filePath, std::ios::in | std::ios::binary);
+    if (!file)
+    {
+        Logger::Instance().log("Shader-Datei konnte nicht geoeffnet werden: " + filePath, Logger::LogLevel::ERROR);
+        return false;
+    }
+
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    std::string src = buffer.str();
+    m_type = type;
+
+    // Insert defines right after the #version line
+    if (!defines.empty())
+    {
+        auto pos = src.find('\n');
+        if (pos != std::string::npos)
+            src.insert(pos + 1, defines);
+    }
+    m_source = std::move(src);
     return compile();
 }
 

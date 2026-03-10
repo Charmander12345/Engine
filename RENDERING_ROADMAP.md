@@ -46,17 +46,17 @@ Weighted Blended OIT (McGuire & Bavoil 2013) implementiert. Draw-Liste wird auto
 
 ---
 
-## 7. Skeletal Animation
+## ~~7. Skeletal Animation~~ ✅
 **Aufwand:** Hoch · **Nutzen:** Hoch
 
-Komplettfeature: Bone-Hierarchie parsen (Assimp liefert sie bereits), Skinning-Shader (Bone-Matrix-Palette im Vertex-Shader), Animation-Blending, AnimationComponent im ECS. Größtes fehlendes Render-Feature – ohne Skeletal Animation sind animierte Charaktere/Objekte nicht möglich.
+Komplettfeature implementiert: Bone-Hierarchie wird beim Assimp-Import extrahiert (`aiProcess_LimitBoneWeights`), inklusive Offset-Matrizen, Node-Hierarchie und Animation-Keyframes. Skinning-Shader (`skinned_vertex.glsl`) mit `uBoneMatrices[128]`-Palette im Vertex-Shader. `SkeletalAnimator` (SkeletalData.h) für Runtime-Playback mit Keyframe-Interpolation (Lerp/Slerp). `AnimationComponent` im ECS (12. Komponente). Erweiterter Vertex-Layout (22 Floats: +boneIds4+boneWeights4). Shadow-Passes mit Skinning-Support. Auto-Play der ersten Animation pro Skinned-Entity.
 
 ---
 
-## 8. Material-Instancing / Overrides
+## ~~8. Material-Instancing / Overrides~~ ✅
 **Aufwand:** Mittel · **Nutzen:** Mittel
 
-Erlaubt pro Entity individuelle Parameter-Overrides (z.B. Farbe, Roughness) ohne das Basis-Material zu duplizieren. Reduziert Asset-Anzahl und ermöglicht Runtime-Variation. Benötigt eine `MaterialInstance`-Schicht zwischen Asset und Render-Call.
+Per-Entity-Material-Overrides (Farb-Tint, Metallic, Roughness, Shininess, Emissive) ohne das Basis-Material zu duplizieren. `MaterialOverrides`-Struct in `MaterialComponent` speichert optionale Overrides mit `hasXxx`-Flags. Renderer wendet Overrides per Draw-Call an; Entities mit Overrides brechen GPU-Instancing-Batches auf. Vollständig serialisiert (JSON „MaterialOverrides") und per Python-Scripting-API (`entity.set_material_override_*`/`entity.get_material_override_*`) steuerbar.
 
 ---
 
@@ -67,10 +67,10 @@ GPU-Compute- oder Transform-Feedback-basierte Partikel für Feuer, Rauch, Funken
 
 ---
 
-## 10. Kamera-Überblendung
+## ~~10. Kamera-Überblendung~~ ✅
 **Aufwand:** Gering · **Nutzen:** Gering–Mittel
 
-Smooth-Interpolation zwischen zwei Kamera-Positionen/-Orientierungen über eine konfigurierbare Dauer. Nützlich für Cutscenes und Editor-Kamera-Transitions. Geringe Code-Menge (Lerp/Slerp im Kamera-Update), aber nur relevant wenn Cinematic-Content geplant ist.
+Smooth-Interpolation zwischen zwei Kamera-Positionen/-Orientierungen über eine konfigurierbare Dauer. `CameraTransition`-Struct in `Renderer.h` mit Start-/End-Pos/Rot, Duration und Elapsed. `OpenGLRenderer` implementiert `startCameraTransition()`, `isCameraTransitioning()`, `cancelCameraTransition()` mit Smooth-Step-Easing (3t²−2t³). Während einer Transition sind `moveCamera()` und `rotateCamera()` blockiert. Python-API: `engine.camera.transition_to(x,y,z,yaw,pitch,duration)`, `engine.camera.is_transitioning()`, `engine.camera.cancel_transition()`.
 
 ---
 
@@ -88,10 +88,10 @@ Lädt Texturen nach Bedarf und Detailstufe (Mip-Streaming). Reduziert Startup-La
 
 ---
 
-## 13. Shader-Variants / Permutationen
+## ~~13. Shader-Variants / Permutationen~~ ✅
 **Aufwand:** Mittel · **Nutzen:** Gering–Mittel
 
-Präprozessor-basierte Shader-Varianten (`#define HAS_NORMAL_MAP`, `#define USE_PBR`) statt Runtime-If-Branching. Verbessert GPU-Performance durch Branch-Elimination. Erfordert Variant-Registry und Cache-Management. Aktuell kein Bottleneck – eher relevant bei 50+ Materialtypen.
+Präprozessor-basierte Shader-Varianten implementiert. `ShaderVariantKey` (Bitmask mit 8 Feature-Flags: `HAS_DIFFUSE_MAP`, `HAS_SPECULAR_MAP`, `HAS_NORMAL_MAP`, `HAS_EMISSIVE_MAP`, `HAS_METALLIC_ROUGHNESS_MAP`, `PBR_ENABLED`, `FOG_ENABLED`, `OIT_ENABLED`). `buildVariantDefines()` generiert `#define`-Block der nach `#version` injiziert wird. `OpenGLShader::loadFromFileWithDefines()` kompiliert Shader mit Defines. Fragment-Shader nutzt `#ifdef`/`#else`-Guards für alle Textur-Sampling- und Feature-Branches (Diffuse, Specular, Normal, Emissive, Fog, OIT) – bei gesetztem Define wird der Branch eliminiert, ohne Define greift der bestehende Uniform-Fallback. `OpenGLMaterial::setVariantKey()` rekompiliert Fragment-Shader und relinkt Programm mit neuem Variant-Key. `cacheUniformLocations()` als eigenständige Methode extrahiert für Relink. `OpenGLObject3D::setTextures()` berechnet automatisch den Variant-Key aus aktiven Textur-Slots und aktiviert die passende Permutation.
 
 ---
 
