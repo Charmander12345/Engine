@@ -172,6 +172,8 @@ public:
     virtual void setOitEnabled(bool /*enabled*/) {}
     virtual bool isTextureCompressionEnabled() const { return false; }
     virtual void setTextureCompressionEnabled(bool /*enabled*/) {}
+    virtual bool isTextureStreamingEnabled() const { return false; }
+    virtual void setTextureStreamingEnabled(bool /*enabled*/) {}
 
     // --- Debug render mode ---
     virtual DebugRenderMode getDebugRenderMode() const { return DebugRenderMode::Lit; }

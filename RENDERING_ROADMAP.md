@@ -81,10 +81,10 @@ DDS-Dateiformat-Unterstützung implementiert. Neuer `DDSLoader` (`DDSLoader.h/.c
 
 ---
 
-## 12. Texture-Streaming
+## ~~12. Texture-Streaming~~ ✅
 **Aufwand:** Hoch · **Nutzen:** Mittel
 
-Lädt Texturen nach Bedarf und Detailstufe (Mip-Streaming). Reduziert Startup-Ladezeiten und Peak-VRAM. Komplex: Async-Upload-Queue, Mip-Tail-Resident, Feedback-Buffer. Erst sinnvoll nach Texture Compression (→ Punkt 11).
+Asynchrones Texture-Streaming implementiert. `TextureStreamingManager` (`TextureStreamingManager.h/.cpp`) verwaltet eine Background-Loader-Thread + GPU-Upload-Queue. Texturen werden sofort als 1×1 Magenta-Placeholder zurückgegeben und im Hintergrund geladen; `processUploads()` lädt pro Frame bis zu 4 Texturen per `OpenGLTexture::initialize()` auf die GPU hoch (ersetzt den Placeholder in-place). De-Duplikation über `m_streamCache` (CPU-Texture-Pointer → weak_ptr<OpenGLTexture>). `OpenGLMaterial::bindTextures()` nutzt den Streaming-Manager wenn verfügbar, fällt sonst auf synchronen Upload zurück. Integration in `OpenGLRenderer`: Initialisierung in `initialize()`, Shutdown in `shutdown()`, `processUploads(4)` pro Frame in `render()`, Streaming-Manager-Pointer wird nach Render-Entry-Aufbau auf alle Materialien propagiert. Toggle: `Renderer::isTextureStreamingEnabled()` / `setTextureStreamingEnabled()`. Engine Settings → Rendering → Performance: Checkbox „Texture Streaming". Config-Persistenz über `config.ini` (`TextureStreamingEnabled`).
 
 ---
 

@@ -301,6 +301,7 @@ void OpenGLRenderer::shutdown()
     releaseUiFbo();
     releaseAllTabFbos();
     m_particleSystem.shutdown();
+    m_textureStreaming.shutdown();
 
     // Release mesh viewer state before destroying GL resources.
     m_meshViewers.clear();
@@ -489,6 +490,12 @@ bool OpenGLRenderer::initialize()
         {
             logger.log(Logger::Category::Rendering, "ParticleSystem: init failed (particles disabled).", Logger::LogLevel::WARNING);
         }
+    }
+
+    // Initialize texture streaming manager (soft-fail: streaming disabled on failure).
+    if (!m_textureStreaming.initialize())
+    {
+        logger.log(Logger::Category::Rendering, "TextureStreamingManager: init failed (streaming disabled).", Logger::LogLevel::WARNING);
     }
 
     // Prime render resources as soon as the renderer is ready.
@@ -684,6 +691,12 @@ void OpenGLRenderer::render()
 
     // Poll for shader file changes and hot-reload if needed.
     handleShaderHotReload();
+
+    // Process pending texture streaming uploads (max 4 per frame).
+    if (m_textureStreamingEnabled && m_textureStreaming.isInitialized())
+    {
+        m_textureStreaming.processUploads(4);
+    }
 
     const uint64_t freq = SDL_GetPerformanceFrequency();
 
@@ -1005,6 +1018,27 @@ void OpenGLRenderer::renderWorld()
             }
 
             m_renderEntries.push_back(std::move(entry));
+        }
+
+        // Propagate texture streaming manager to all materials
+        if (m_textureStreamingEnabled && m_textureStreaming.isInitialized())
+        {
+            for (auto& entry : m_renderEntries)
+            {
+                if (entry.object3D)
+                {
+                    if (auto* mat = entry.object3D->getMaterial())
+                        mat->setTextureStreamingManager(&m_textureStreaming);
+                    for (auto& lod : entry.lodLevels)
+                    {
+                        if (auto glObj = std::dynamic_pointer_cast<OpenGLObject3D>(lod.object3D))
+                        {
+                            if (auto* lodMat = glObj->getMaterial())
+                                lodMat->setTextureStreamingManager(&m_textureStreaming);
+                        }
+                    }
+                }
+            }
         }
 
         ECS::Schema meshSchema;

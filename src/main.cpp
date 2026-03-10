@@ -381,6 +381,8 @@ int main()
             renderer->setCsmEnabled(*v != "0");
         if (auto v = diag.getState("TextureCompressionEnabled"))
             renderer->setTextureCompressionEnabled(*v == "1");
+        if (auto v = diag.getState("TextureStreamingEnabled"))
+            renderer->setTextureStreamingEnabled(*v == "1");
     }
 
     // In fast mode, show the main window immediately (splash mode keeps it hidden until ready).

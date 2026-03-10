@@ -12,6 +12,7 @@
 #include "PostProcessStack.h"
 #include "ShaderHotReload.h"
 #include "ParticleSystem.h"
+#include "TextureStreamingManager.h"
 
 #include "../../Core/MathTypes.h"
 #include "../../Core/EngineLevel.h"
@@ -97,6 +98,7 @@ public:
     ViewportUIManager* getViewportUIManagerPtr() override { return &m_viewportUIManager; }
     const ViewportUIManager* getViewportUIManagerPtr() const override { return &m_viewportUIManager; }
     ViewportUIManager& getViewportUIManager() { return m_viewportUIManager; }
+    TextureStreamingManager& getTextureStreamingManager() { return m_textureStreaming; }
     const ViewportUIManager& getViewportUIManager() const { return m_viewportUIManager; }
     std::shared_ptr<Widget> createWidgetFromAsset(const std::shared_ptr<AssetData>& asset) override;
     unsigned int preloadUITexture(const std::string& path) override;
@@ -336,6 +338,10 @@ private:
     // Shader hot-reload
     ShaderHotReload m_shaderHotReload;
     void handleShaderHotReload();
+
+    // Texture streaming
+    TextureStreamingManager m_textureStreaming;
+
     float m_exposure{1.0f};
     AntiAliasingMode m_aaMode{AntiAliasingMode::None};
     bool m_bloomEnabled{false};
@@ -418,6 +424,7 @@ private:
     GLint m_oitCompLocRevealage{-1};
     bool m_oitEnabled{true};
     bool m_textureCompressionEnabled{false};
+    bool m_textureStreamingEnabled{false};
     bool m_renderFrozen{false};
 
     // Skeletal animation: per-entity animators
@@ -611,6 +618,8 @@ public:
     bool isOitEnabled() const override { return m_oitEnabled; }
     void setTextureCompressionEnabled(bool enabled) override { m_textureCompressionEnabled = enabled; }
     bool isTextureCompressionEnabled() const override { return m_textureCompressionEnabled; }
+    void setTextureStreamingEnabled(bool enabled) override { m_textureStreamingEnabled = enabled; }
+    bool isTextureStreamingEnabled() const override { return m_textureStreamingEnabled; }
     void setRenderFrozen(bool frozen) override { m_renderFrozen = frozen; }
     bool isRenderFrozen() const override { return m_renderFrozen; }
     void setDebugRenderMode(DebugRenderMode mode) override { m_debugRenderMode = mode; }

@@ -1,4 +1,5 @@
 #include "OpenGLMaterial.h"
+#include "TextureStreamingManager.h"
 #include "Logger.h"
 #include <vector>
 #include <cstring>
@@ -376,14 +377,32 @@ void OpenGLMaterial::bindTextures()
         auto it = m_textureCache.find(key);
         if (it == m_textureCache.end())
         {
-            auto glTex = std::make_shared<OpenGLTexture>();
-            if (!glTex->initialize(*texCpu))
+            // When a streaming manager is available, use it to get a GPU
+            // texture that may initially be a placeholder.
+            if (m_textureStreamingMgr && m_textureStreamingMgr->isInitialized())
             {
-                Logger::Instance().log("OpenGLMaterial: Failed to initialize OpenGL texture from Texture asset.", Logger::LogLevel::ERROR);
-                ++unit;
-                continue;
+                auto streamed = m_textureStreamingMgr->streamTexture(texCpu);
+                if (streamed)
+                {
+                    it = m_textureCache.emplace(key, std::move(streamed)).first;
+                }
+                else
+                {
+                    ++unit;
+                    continue;
+                }
             }
-            it = m_textureCache.emplace(key, std::move(glTex)).first;
+            else
+            {
+                auto glTex = std::make_shared<OpenGLTexture>();
+                if (!glTex->initialize(*texCpu))
+                {
+                    Logger::Instance().log("OpenGLMaterial: Failed to initialize OpenGL texture from Texture asset.", Logger::LogLevel::ERROR);
+                    ++unit;
+                    continue;
+                }
+                it = m_textureCache.emplace(key, std::move(glTex)).first;
+            }
         }
 
         it->second->bind(unit);

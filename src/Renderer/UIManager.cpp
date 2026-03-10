@@ -9462,6 +9462,13 @@ void UIManager::openEngineSettingsPopup()
                     DiagnosticsManager::Instance().setState("TextureCompressionEnabled", v ? "1" : "0");
                     DiagnosticsManager::Instance().saveConfig();
                 });
+            addCheckbox("ES.C.TexStream", "Texture Streaming",
+                renderer->isTextureStreamingEnabled(),
+                [renderer](bool v) {
+                    renderer->setTextureStreamingEnabled(v);
+                    DiagnosticsManager::Instance().setState("TextureStreamingEnabled", v ? "1" : "0");
+                    DiagnosticsManager::Instance().saveConfig();
+                });
         }
         else if (state->activeCategory == 2) // Debug
         {

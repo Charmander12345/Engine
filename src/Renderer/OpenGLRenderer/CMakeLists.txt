@@ -24,6 +24,8 @@ add_library(Renderer SHARED
     ShaderHotReload.h
     ParticleSystem.cpp
     ParticleSystem.h
+    TextureStreamingManager.cpp
+    TextureStreamingManager.h
     OpenGLSplashWindow.cpp
     OpenGLSplashWindow.h
     RendererFactory.cpp

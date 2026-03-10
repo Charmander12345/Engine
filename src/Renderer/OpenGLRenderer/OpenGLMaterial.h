@@ -122,9 +122,14 @@ public:
     void setSkinned(bool skinned) { m_skinned = skinned; }
     void setBoneMatrices(const float* data, int count);
 
+    // Texture Streaming
+    void setTextureStreamingManager(class TextureStreamingManager* mgr) { m_textureStreamingMgr = mgr; }
+
 private:
     void bindTextures();
     void cacheUniformLocations();
+
+    class TextureStreamingManager* m_textureStreamingMgr{ nullptr };
 
     std::vector<std::shared_ptr<OpenGLShader>> m_shaders;
     std::vector<float> m_vertexData;
