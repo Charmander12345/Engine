@@ -208,6 +208,12 @@ private:
 	size_t m_saveProgressTotal{ 0 };
 	size_t m_saveProgressSaved{ 0 };
 
+	// Level load progress modal state
+	std::shared_ptr<EditorWidget> m_levelLoadProgressWidget;
+
+	// Level-load request callback
+	std::function<void(const std::string&)> m_onLevelLoadRequested;
+
 	// Widget editor state (per open editor tab)
 	struct WidgetEditorState
 	{
@@ -336,6 +342,19 @@ public:
 	void showSaveProgressModal(size_t total);
 	void updateSaveProgress(size_t saved, size_t total);
 	void closeSaveProgressModal(bool success);
+
+	// Unsaved-changes dialog: shows a checkbox list of all unsaved assets.
+	// onDone is called after saving completes (or user skips saving).
+	void showUnsavedChangesDialog(std::function<void()> onDone);
+
+	// Level load progress modal
+	void showLevelLoadProgress(const std::string& levelName);
+	void updateLevelLoadProgress(const std::string& status);
+	void closeLevelLoadProgress();
+
+	// Level-load request callback (registered by main.cpp to handle level switch orchestration)
+	using LevelLoadCallback = std::function<void(const std::string& levelRelPath)>;
+	void setOnLevelLoadRequested(LevelLoadCallback callback) { m_onLevelLoadRequested = std::move(callback); }
 
 	// Drag & Drop
 	bool isDragging() const { return m_dragging; }

@@ -113,8 +113,26 @@ public:
 	bool isAssetLoaded(const std::string& path) const;
 	size_t getUnsavedAssetCount() const;
 
+	// Information about a single unsaved asset for the save dialog.
+	struct UnsavedAssetInfo
+	{
+		unsigned int id{ 0 };
+		std::string name;
+		std::string path;
+		AssetType type{ AssetType::Unknown };
+		bool isLevel{ false };
+	};
+	// Returns a list of all currently unsaved assets (including the active level).
+	std::vector<UnsavedAssetInfo> getUnsavedAssetList() const;
+
 	// Async save with per-asset progress callback (called from worker thread).
 	void saveAllAssetsAsync(std::function<void(size_t saved, size_t total)> onProgress = {}, std::function<void(bool success)> onFinished = {});
+
+	// Async save only the selected assets. selectedIds contains asset runtime IDs;
+	// pass 0 to include the active level. Calls onFinished on completion.
+	void saveSelectedAssetsAsync(const std::vector<unsigned int>& selectedIds, bool includeLevel,
+		std::function<void(size_t saved, size_t total)> onProgress = {},
+		std::function<void(bool success)> onFinished = {});
 
 	//Project management
 	bool loadProject(const std::string& projectPath, SyncState syncState = Sync, bool ensureDefaultContent = true);
@@ -174,8 +192,16 @@ public:
 	// Load multiple assets in parallel. Returns map of path → asset ID for successfully loaded assets.
 	std::unordered_map<std::string, int> loadBatchParallel(const std::vector<std::pair<std::string, AssetType>>& requests);
 
+	// Load a level asset from an absolute file path. Sets the active level in DiagnosticsManager.
+	struct LoadResult
+	{
+		json j;
+		std::string errorMessage;
+		bool success{ false };
+	};
+	LoadResult loadLevelAsset(const std::string& path);
+
 private:
-	// Worker pool lifecycle
 	void startWorkerPool();
 	void stopWorkerPool();
 	void enqueueJob(std::function<void()> job);
@@ -211,20 +237,12 @@ private:
 	SaveResult saveSkyboxAsset(const std::shared_ptr<AssetData>& skybox);
 
 	//Loading specific assettypes
-    struct LoadResult
-    {
-		json j;
-		std::string errorMessage; 
-		bool success{ false };
-    };
-
 	LoadResult ReadAssetHeader(const std::string& path, AssetType& outType);
 	LoadResult loadTextureAsset(const std::string& path);
 	LoadResult loadAudioAsset(const std::string& path);
 	LoadResult loadMaterialAsset(const std::string& path);
 	LoadResult loadObject2DAsset(const std::string& path);
 	LoadResult loadObject3DAsset(const std::string& path);
-	LoadResult loadLevelAsset(const std::string& path);
 	LoadResult loadWidgetAsset(const std::string& path);
 	LoadResult loadSkyboxAsset(const std::string& path);
 

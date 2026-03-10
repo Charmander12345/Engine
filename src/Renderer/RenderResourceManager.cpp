@@ -10,6 +10,7 @@
 #include "../Core/Asset.h"
 #include "../AssetManager/AssetManager.h"
 #include "../Renderer/Texture.h"
+#include "../Renderer/DDSLoader.h"
 #include <filesystem>
 
 #include "OpenGLRenderer/OpenGLObject2D.h"
@@ -374,6 +375,25 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
                                             textures.push_back(nullptr);
                                             continue;
                                         }
+
+                                        // Check for compressed DDS texture
+                                        if (texData.contains("m_compressed") && texData["m_compressed"].get<bool>() && texData.contains("m_ddsPath"))
+                                        {
+                                            const std::string ddsPath = texData["m_ddsPath"].get<std::string>();
+                                            auto ddsTexture = loadDDS(ddsPath);
+                                            if (ddsTexture)
+                                            {
+                                                textures.push_back(std::move(ddsTexture));
+                                                logger.log(Logger::Category::Rendering, "RenderResourceManager: prepared compressed texture '" + texPath + "'", Logger::LogLevel::INFO);
+                                            }
+                                            else
+                                            {
+                                                logger.log(Logger::Category::Rendering, "RenderResourceManager: failed to load DDS texture '" + ddsPath + "'", Logger::LogLevel::WARNING);
+                                                textures.push_back(nullptr);
+                                            }
+                                            continue;
+                                        }
+
                                         if (!texData.contains("m_width") || !texData.contains("m_height") || !texData.contains("m_channels") || !texData.contains("m_data"))
                                         {
                                             textures.push_back(nullptr);
@@ -384,6 +404,15 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
                                         texture->setHeight(texData.at("m_height").get<int>());
                                         texture->setChannels(texData.at("m_channels").get<int>());
                                         texture->setData(texData.at("m_data").get<std::vector<unsigned char>>());
+
+                                        // Driver-side compression: request the GL driver to compress
+                                        // uncompressed textures into BCn format during upload.
+                                        if (auto tc = DiagnosticsManager::Instance().getState("TextureCompressionEnabled"))
+                                        {
+                                            if (*tc == "1")
+                                                texture->setRequestCompression(true);
+                                        }
+
                                         textures.push_back(std::move(texture));
                                         logger.log(Logger::Category::Rendering, "RenderResourceManager: prepared texture '" + texPath + "'", Logger::LogLevel::INFO);
                                     }
@@ -744,11 +773,16 @@ RenderResourceManager::RenderableAsset RenderResourceManager::refreshEntityRende
 										textures.push_back(nullptr); continue;
 									}
 									auto texture = std::make_shared<Texture>();
-									texture->setWidth(texData.at("m_width").get<int>());
-									texture->setHeight(texData.at("m_height").get<int>());
-									texture->setChannels(texData.at("m_channels").get<int>());
-									texture->setData(texData.at("m_data").get<std::vector<unsigned char>>());
-									textures.push_back(std::move(texture));
+										texture->setWidth(texData.at("m_width").get<int>());
+										texture->setHeight(texData.at("m_height").get<int>());
+										texture->setChannels(texData.at("m_channels").get<int>());
+										texture->setData(texData.at("m_data").get<std::vector<unsigned char>>());
+										if (auto tc = DiagnosticsManager::Instance().getState("TextureCompressionEnabled"))
+										{
+											if (*tc == "1")
+												texture->setRequestCompression(true);
+										}
+										textures.push_back(std::move(texture));
 								}
 							}
 						}

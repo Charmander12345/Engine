@@ -1,5 +1,11 @@
 add_library(RendererCore OBJECT
 
+    Texture.h
+    Material.h
+    Camera.h
+    DDSLoader.h
+    DDSLoader.cpp
+
     Renderer.h
     Shader.h
     RendererCapabilities.h

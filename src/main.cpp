@@ -379,6 +379,8 @@ int main()
             renderer->setSsaoEnabled(*v == "1");
         if (auto v = diag.getState("CsmEnabled"))
             renderer->setCsmEnabled(*v != "0");
+        if (auto v = diag.getState("TextureCompressionEnabled"))
+            renderer->setTextureCompressionEnabled(*v == "1");
     }
 
     // In fast mode, show the main window immediately (splash mode keeps it hidden until ready).
@@ -1621,24 +1623,119 @@ int main()
                 }
 
                 auto& am = AssetManager::Instance();
-                const size_t total = am.getUnsavedAssetCount();
-                if (total == 0)
+                if (am.getUnsavedAssetCount() == 0)
                 {
                     renderer->getUIManager().showToastMessage("Nothing to save.", 2.0f);
                     return;
                 }
-                auto& uiMgr = renderer->getUIManager();
-                uiMgr.showSaveProgressModal(total);
-                am.saveAllAssetsAsync(
-                    [&uiMgr](size_t saved, size_t total)
+                renderer->getUIManager().showUnsavedChangesDialog(nullptr);
+            });
+
+        // --- Level loading: double-click a .map in Content Browser ---
+        renderer->getUIManager().setOnLevelLoadRequested([&renderer](const std::string& levelRelPath)
+            {
+                auto& diag = DiagnosticsManager::Instance();
+
+                // Don't switch levels during PIE
+                if (diag.isPIEActive())
+                {
+                    renderer->getUIManager().showToastMessage("Cannot switch levels during Play-In-Editor.", 3.0f);
+                    return;
+                }
+
+                const std::string levelName = std::filesystem::path(levelRelPath).stem().string();
+
+                // Capture editor camera before switching
+                if (auto* lvl = diag.getActiveLevelSoft())
+                {
+                    lvl->setEditorCameraPosition(renderer->getCameraPosition());
+                    lvl->setEditorCameraRotation(renderer->getCameraRotationDegrees());
+                    lvl->setHasEditorCamera(true);
+                }
+
+                // The actual load procedure (called after save dialog resolves)
+                auto doLoad = [&renderer, levelRelPath, levelName]()
+                {
+                    auto& logger = Logger::Instance();
+                    auto& diag = DiagnosticsManager::Instance();
+                    auto& assetMgr = AssetManager::Instance();
+                    auto& uiMgr = renderer->getUIManager();
+
+                    // 1) Freeze rendering — last frame stays visible
+                    renderer->setRenderFrozen(true);
+
+                    // 2) Show loading progress modal
+                    uiMgr.showLevelLoadProgress(levelName);
+
+                    // 3) Clear UndoRedo for old level
+                    UndoRedoManager::Instance().clear();
+
+                    // 4) Deselect everything
+                    uiMgr.selectEntity(0);
+                    renderer->setSelectedEntity(0);
+
+                    // 5) Mark scene unprepared (forces re-prepare on next renderWorld)
+                    diag.setScenePrepared(false);
+
+                    // 6) Load the new level asset
+                    uiMgr.updateLevelLoadProgress("Loading level asset...");
+                    const std::string absPath = assetMgr.getAbsoluteContentPath(levelRelPath);
+                    if (absPath.empty())
                     {
-                        uiMgr.updateSaveProgress(saved, total);
-                    },
-                    [&uiMgr](bool success)
+                        logger.log(Logger::Category::AssetManagement,
+                            "Level load: failed to resolve path: " + levelRelPath, Logger::LogLevel::ERROR);
+                        uiMgr.closeLevelLoadProgress();
+                        renderer->setRenderFrozen(false);
+                        uiMgr.showToastMessage("Failed to load level: path not found.", 3.0f);
+                        return;
+                    }
+
+                    auto loadResult = assetMgr.loadLevelAsset(absPath);
+                    if (!loadResult.success)
                     {
-                        UndoRedoManager::Instance().clear();
-                        uiMgr.closeSaveProgressModal(success);
-                    });
+                        logger.log(Logger::Category::AssetManagement,
+                            "Level load: failed: " + loadResult.errorMessage, Logger::LogLevel::ERROR);
+                        uiMgr.closeLevelLoadProgress();
+                        renderer->setRenderFrozen(false);
+                        uiMgr.showToastMessage("Failed to load level: " + loadResult.errorMessage, 4.0f);
+                        return;
+                    }
+
+                    // 7) Restore editor camera if the level has one
+                    uiMgr.updateLevelLoadProgress("Restoring editor state...");
+                    if (auto* newLevel = diag.getActiveLevelSoft())
+                    {
+                        // Apply skybox
+                        renderer->setSkyboxPath(newLevel->getSkyboxPath());
+
+                        if (newLevel->hasEditorCamera())
+                        {
+                            renderer->setCameraPosition(newLevel->getEditorCameraPosition());
+                            const auto& rot = newLevel->getEditorCameraRotation();
+                            renderer->setCameraRotationDegrees(rot.x, rot.y);
+                        }
+                    }
+
+                    // 8) Unfreeze rendering — renderWorld will detect the new level
+                    //    and call prepareActiveLevel + buildRenderablesForSchema
+                    uiMgr.updateLevelLoadProgress("Preparing scene...");
+                    renderer->setRenderFrozen(false);
+
+                    // 9) Clean up modal and refresh UI
+                    uiMgr.closeLevelLoadProgress();
+                    uiMgr.refreshWorldOutliner();
+                    uiMgr.refreshContentBrowser();
+                    uiMgr.refreshStatusBar();
+                    uiMgr.markAllWidgetsDirty();
+
+                    logger.log(Logger::Category::Engine,
+                        "Level loaded: " + levelName + " (" + levelRelPath + ")",
+                        Logger::LogLevel::INFO);
+                    uiMgr.showToastMessage("Loaded: " + levelName, 3.0f);
+                };
+
+                // Show unsaved changes dialog (or proceed directly if nothing is dirty)
+                renderer->getUIManager().showUnsavedChangesDialog(std::move(doLoad));
             });
 
     }
@@ -2854,17 +2951,9 @@ int main()
                         }
 
                         auto& am = AssetManager::Instance();
-                        const size_t total = am.getUnsavedAssetCount();
-                        if (total > 0)
+                        if (am.getUnsavedAssetCount() > 0)
                         {
-                            auto& uiMgr = renderer->getUIManager();
-                            uiMgr.showSaveProgressModal(total);
-                            am.saveAllAssetsAsync(
-                                [&uiMgr = renderer->getUIManager()](size_t saved, size_t t) { uiMgr.updateSaveProgress(saved, t); },
-                                [&uiMgr = renderer->getUIManager()](bool ok) {
-                                    UndoRedoManager::Instance().clear();
-                                    uiMgr.closeSaveProgressModal(ok);
-                                });
+                            renderer->getUIManager().showUnsavedChangesDialog(nullptr);
                         }
                         else
                         {

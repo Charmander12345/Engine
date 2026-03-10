@@ -165,6 +165,9 @@
 - ✅ `DPI Scaling – Vollständige UI-Abdeckung`: Neue statische Hilfsmethoden `EditorTheme::Scaled(float)` und `EditorTheme::Scaled(Vec2)` für beliebige Pixelwert-Skalierung. Systematischer Umbau aller hardcoded Pixelwerte im gesamten Editor-UI: **UIManager.cpp** – alle 37 `fontSize`-Literale durch Theme-Felder ersetzt (`fontSizeHeading`/`Subheading`/`Body`/`Small`/`Caption`/`Monospace`); Engine-Settings-Popup (620×480), Editor-Settings-Popup (480×380), Projekt-Auswahl-Screen (720×540) und Landscape-Manager-Popup (420×340) – alle Popup-Dimensionen, Layout-Konstanten (Row-Heights, Label-Widths, Sidebar, Title-Heights, Paddings) via `Scaled()` skaliert; `measureElementSize()` – Slider-Defaults (140×18), Image-Defaults (24), Checkbox-Box/Gap (16/6), Dropdown-Arrow (16), DropdownButton-Arrow (12) und alle Fallback-FontSizes via `Scaled()` oder Theme-Werte. **main.cpp** – New-Material-Popup (460×400): Popup-Dimensionen, fontSize-Werte (15→Heading, 13→Body, 14→Subheading), minSize-Werte (20, 24) und Paddings skaliert. **OpenGLRenderer.cpp** – 15 hardcoded `minSize`-Werte in Mesh-/Material-Editor-Popups und Tab-Buttons skaliert. **UIWidgets** – `SeparatorWidget.h` (22px Header), `TabViewWidget.h` (26px Tab), `TreeViewWidget.h` (22px Row) via `Scaled()` skaliert. Normalisierte Popup-Layouts (nx/ny) nutzen Basis-Pixelwerte für korrekte proportionale Skalierung bei vergrößerten Popup-Fenstern.
 - ✅ `OpenGLRenderer` / `OpenGLTexture`: Mipmaps systematisch aktiviert – `glGenerateMipmap` wird jetzt konsequent bei jedem GPU-Textur-Upload aufgerufen. Betrifft: `OpenGLTexture::initialize()` (bereits vorhanden), Skybox-Cubemap (`GL_LINEAR_MIPMAP_LINEAR` + `glGenerateMipmap(GL_TEXTURE_CUBE_MAP)`), UI-Textur-Cache (`GL_LINEAR_MIPMAP_LINEAR` + `glGenerateMipmap(GL_TEXTURE_2D)`). Framebuffer-/Shadow-/Depth-/Pick-Texturen bleiben ohne Mipmaps (korrekt, da 1:1 gesampelt). Reduziert Moiré/Flimmern bei entfernten Objekten und Skybox-Übergängen.
 - ✅ `OpenGLRenderer`: GPU Instanced Rendering – Draw-Liste wird nach (Material-Pointer, Obj-Pointer) sortiert und in Batches gruppiert. Nur Objekte mit gleichem Mesh UND gleichem Material werden per `glDrawElementsInstanced`/`glDrawArraysInstanced` in einem Draw-Call gerendert. Model-Matrizen über SSBO (`layout(std430, binding=0)`, `GL_DYNAMIC_DRAW`) an Shader übergeben, per `gl_InstanceID` indiziert. `uniform bool uInstanced` schaltet zwischen SSBO- und Uniform-Pfad. Betrifft: Haupt-Render-Pass (`renderWorld`), reguläre Shadow Maps (`renderShadowMap`), Cascaded Shadow Maps (`renderCsmShadowMaps`). Emission-Objekte weiterhin einzeln (per-Entity Light Override). Einzelobjekt-Batches nutzen klassischen Non-Instanced-Pfad. `uploadInstanceData()` verwaltet SSBO mit automatischem Grow und erzwingt Buffer-Orphaning (`glBufferData(nullptr)` vor `glBufferSubData`) zur Vermeidung von GPU-Read/Write-Hazards. Nach jedem Instanced-Draw wird SSBO explizit entbunden (`glBindBufferBase(0,0)`) und `uInstanced` auf `false` zurückgesetzt — verhindert stale SSBO-State bei nachfolgenden Non-Instanced-Draws. Vertex-Shader nutzt `if/else` statt Ternary für Model-Matrix-Auswahl (verhindert spekulative SSBO-Zugriffe auf SIMD-GPUs). `releaseInstanceResources()` in `shutdown()` für Cleanup.
+- ✅ `Texture Compression (S3TC/BC)`: DDS-Dateiformat-Unterstützung implementiert. Neuer `DDSLoader` (`DDSLoader.h/.cpp`) parst DDS-Header (Standard + DX10-Extended) und lädt Block-Compressed Mip-Chains. Unterstützte Formate: BC1 (DXT1), BC2 (DXT3), BC3 (DXT5), BC4 (ATI1/RGTC1), BC5 (ATI2/RGTC2), BC7 (BPTC). `Texture`-Klasse um `CompressedFormat`-Enum, `CompressedMipLevel`-Struct und `compressedBlockSize()`-Helper erweitert. `OpenGLTexture::initialize()` nutzt `glCompressedTexImage2D` für komprimierte Texturen (S3TC-Extension-Konstanten als Fallback). `.dds` als Import-Format registriert. `readAssetFromDisk` speichert `m_ddsPath` statt stbi_load. `RenderResourceManager` delegiert an `loadDDS()`. `RendererCapabilities` um `supportsTextureCompression` erweitert.
+- ✅ `Runtime Texture Compression`: Unkomprimierte Texturen (PNG/JPG/TGA/BMP) können jetzt zur Laufzeit vom OpenGL-Treiber in S3TC/RGTC-Blockformate komprimiert werden. `Texture`-Klasse um `m_requestCompression`-Flag erweitert. `OpenGLTexture::initialize()` nutzt bei gesetztem Flag komprimierte `internalFormat`s (`GL_COMPRESSED_RGB_S3TC_DXT1_EXT` / `GL_COMPRESSED_RGBA_S3TC_DXT5_EXT` / `GL_COMPRESSED_RED_RGTC1` / `GL_COMPRESSED_RG_RGTC2`) mit normalem `glTexImage2D`-Aufruf — der Treiber übernimmt die Kompression beim Upload. Neuer Toggle: `Renderer::isTextureCompressionEnabled()` / `setTextureCompressionEnabled()` (virtual in `Renderer.h`, Override in `OpenGLRenderer`). `RenderResourceManager` liest `DiagnosticsManager::getState("TextureCompressionEnabled")` und setzt das Flag auf Texturen. Engine-Settings-Popup → Rendering → Performance: Checkbox „Texture Compression (S3TC)" hinzugefügt. Config-Persistenz über `config.ini` (`TextureCompressionEnabled`). Wirksam ab nächstem Level-Load (Texturen werden beim GPU-Upload komprimiert, nicht beim Import).
+- ✅ `Level Loading via Content Browser`: Doppelklick auf ein Level-Asset (`.map`) im Content Browser löst einen vollständigen Level-Wechsel aus. Ablauf: (1) Unsaved-Changes-Dialog mit Checkbox-Liste aller ungespeicherten Assets (alle standardmäßig ausgewählt, einzeln abwählbar) — erscheint auch beim normalen Speichern (Ctrl+S, StatusBar.Save). (2) Rendering wird eingefroren (`Renderer::setRenderFrozen`) — letzter Frame bleibt sichtbar, UI bleibt interaktiv. (3) Modaler Lade-Fortschritt (`showLevelLoadProgress`). (4) `AssetManager::loadLevelAsset()` (jetzt public) lädt neues Level, `DiagnosticsManager::setActiveLevel()` setzt es aktiv, `setScenePrepared(false)` erzwingt Neuaufbau. (5) Editor-Kamera wird aus dem neuen Level wiederhergestellt, Skybox wird gesetzt. (6) Rendering wird fortgesetzt — `renderWorld()` erkennt das neue Level, ruft `prepareActiveLevel()` + `buildRenderablesForSchema()` auf. Neue APIs: `AssetManager::getUnsavedAssetList()` (liefert Name/Pfad/Typ/ID jedes ungespeicherten Assets), `AssetManager::saveSelectedAssetsAsync()` (selektives Speichern), `UIManager::showUnsavedChangesDialog()`, `UIManager::showLevelLoadProgress()`/`updateLevelLoadProgress()`/`closeLevelLoadProgress()`, `UIManager::setOnLevelLoadRequested()`, `Renderer::setRenderFrozen()`/`isRenderFrozen()`.
 
 ## Legende
 
@@ -487,7 +490,7 @@
 | LOD-System (Level of Detail)             | ✅     |
 | Debug Render Modes (Lit/Unlit/Wireframe/ShadowMap/Cascades/InstanceGroups/Normals/Depth/Overdraw) | ✅ |
 | Skeletal Animation Rendering              | ✅     |
-| Particle-Rendering                        | ❌     |
+| Particle-Rendering (Point-Sprite, CPU-Sim) | ✅    |
 | DirectX 11 Backend                        | ❌     |
 | DirectX 12 Backend                        | ❌     |
 | Vulkan Backend                            | ❌     |
@@ -527,7 +530,7 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | Orbit-Kamera (Mesh Viewer)          | ✅     |
 | Cinematic-Kamera / Pfad-Follow      | ❌     |
 | Entity-Kamera (CameraComponent)     | ✅     |
-| Kamera-Überblendung                 | ❌     |
+| Kamera-Überblendung (Smooth-Step)   | ✅     |
 | Editor: WASD nur bei Rechtsklick    | ✅     |
 | Editor: Laptop-Modus (WASD frei)    | ✅     |
 | Editor: W/E/R Gizmo nur ohne RMB   | ✅     |
@@ -557,7 +560,7 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | Compute-Shader (Enum vorhanden)     | 🟡     |
 | Hull-/Domain-Shader (Enum vorhanden)| 🟡     |
 | Shader Hot-Reload                   | ✅     |
-| Shader-Variants / Permutationen     | ❌     |
+| Shader-Variants / Permutationen     | ✅     |
 | Shader-Reflection                   | ❌     |
 
 **Offene Punkte:**
@@ -582,7 +585,7 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | Normal Mapping                      | ✅     |
 | Emissive Maps                       | ✅     |
 | Material-Editor (UI)                | ✅     |
-| Material-Instancing / Overrides     | ❌     |
+| Material-Instancing / Overrides     | ✅     |
 
 **Offene Punkte:**
 - Kein Displacement Mapping
@@ -603,14 +606,14 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | CPU-Texturdaten (stb_image)          | ✅     |
 | GPU-Upload (OpenGLTexture)           | ✅     |
 | Format: PNG, TGA, JPG, BMP          | ✅     |
+| Format: DDS (BC1–BC7 komprimiert)   | ✅     |
 | Bind/Unbind (Texture Units)         | ✅     |
 | Mipmaps                              | ✅     |
-| Texture-Compression (S3TC/BC)       | ❌     |
+| Texture-Compression (S3TC/BC)       | ✅     |
 | Texture-Streaming                   | ❌     |
 | Cubemap / Skybox                    | ✅     |
 
 **Offene Punkte:**
-- Keine Textur-Komprimierung
 - Kein Texture-Streaming für große Texturen
 
 ---
@@ -629,7 +632,7 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | OBJ-Laden (Basis-Meshes)           | ✅     |
 | FBX-Import (via Assimp)             | ✅     |
 | glTF-Import (via Assimp)            | ✅     |
-| LOD-System (Level of Detail)        | ❌     |
+| LOD-System (Level of Detail)        | ✅     |
 | Skeletal Meshes / Animation         | ✅     |
 
 **Abstraktion:** `IRenderObject2D` und `IRenderObject3D` definieren backend-agnostische Interfaces. OpenGL-Klassen erben davon. `MeshViewerWindow` und `RenderResourceManager` nutzen ausschließlich die abstrakten Interfaces.

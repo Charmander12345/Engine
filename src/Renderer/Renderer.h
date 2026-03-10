@@ -170,6 +170,8 @@ public:
     virtual void setCsmEnabled(bool /*enabled*/) {}
     virtual bool isOitEnabled() const { return false; }
     virtual void setOitEnabled(bool /*enabled*/) {}
+    virtual bool isTextureCompressionEnabled() const { return false; }
+    virtual void setTextureCompressionEnabled(bool /*enabled*/) {}
 
     // --- Debug render mode ---
     virtual DebugRenderMode getDebugRenderMode() const { return DebugRenderMode::Lit; }
@@ -228,6 +230,10 @@ public:
 
     // --- Scene management ---
     virtual void refreshEntity(unsigned int /*entity*/) {}
+
+    // --- Render freeze (keeps last frame on screen while level is loading) ---
+    virtual void setRenderFrozen(bool /*frozen*/) {}
+    virtual bool isRenderFrozen() const { return false; }
 
     // --- Performance metrics ---
     virtual double getLastGpuFrameMs() const { return 0.0; }

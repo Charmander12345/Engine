@@ -4069,6 +4069,14 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
                     uiMgr->openMaterialEditorPopup(relPath);
                     return;
                 }
+                if (assetType == AssetType::Level)
+                {
+                    if (uiMgr->m_onLevelLoadRequested)
+                    {
+                        uiMgr->m_onLevelLoadRequested(relPath);
+                    }
+                    return;
+                }
                 Logger::Instance().log(Logger::Category::UI,
                     "Content Browser: open asset '" + relPath + "'",
                     Logger::LogLevel::INFO);
@@ -6021,6 +6029,339 @@ void UIManager::closeSaveProgressModal(bool success)
     }
 
     refreshStatusBar();
+}
+
+void UIManager::showUnsavedChangesDialog(std::function<void()> onDone)
+{
+    auto& assetMgr = AssetManager::Instance();
+    const auto unsavedList = assetMgr.getUnsavedAssetList();
+
+    // If nothing unsaved, proceed immediately
+    if (unsavedList.empty())
+    {
+        if (onDone) onDone();
+        return;
+    }
+
+    if (!m_renderer) { if (onDone) onDone(); return; }
+
+    const float kBaseW = 500.0f;
+    const float kBaseH = 420.0f;
+    const int kPopupW = static_cast<int>(EditorTheme::Scaled(kBaseW));
+    const int kPopupH = static_cast<int>(EditorTheme::Scaled(kBaseH));
+    PopupWindow* popup = m_renderer->openPopupWindow(
+        "UnsavedChanges", "Unsaved Changes", kPopupW, kPopupH);
+    if (!popup) { if (onDone) onDone(); return; }
+    if (!popup->uiManager().getRegisteredWidgets().empty()) return;
+
+    const float W = static_cast<float>(kPopupW);
+    const float H = static_cast<float>(kPopupH);
+    auto nx = [&](float px) { return px / W; };
+    auto ny = [&](float py) { return py / H; };
+
+    // Shared state: which items are selected for saving
+    struct DialogState
+    {
+        std::vector<AssetManager::UnsavedAssetInfo> items;
+        std::vector<bool> selected;
+    };
+    auto state = std::make_shared<DialogState>();
+    state->items = unsavedList;
+    state->selected.resize(unsavedList.size(), true); // all selected by default
+
+    std::vector<WidgetElement> elements;
+
+    // Background
+    {
+        WidgetElement bg;
+        bg.type = WidgetElementType::Panel;
+        bg.id = "UC.Bg";
+        bg.from = Vec2{ 0.0f, 0.0f };
+        bg.to = Vec2{ 1.0f, 1.0f };
+        bg.style.color = EditorTheme::Get().panelBackground;
+        elements.push_back(bg);
+    }
+
+    // Title
+    {
+        WidgetElement title;
+        title.type = WidgetElementType::Text;
+        title.id = "UC.Title";
+        title.from = Vec2{ nx(12.0f), 0.0f };
+        title.to = Vec2{ 1.0f, ny(40.0f) };
+        title.text = "Save Changes?";
+        title.fontSize = EditorTheme::Get().fontSizeHeading;
+        title.style.textColor = EditorTheme::Get().titleBarText;
+        title.textAlignV = TextAlignV::Center;
+        title.padding = Vec2{ 6.0f, 0.0f };
+        elements.push_back(title);
+    }
+
+    // Subtitle
+    {
+        WidgetElement sub;
+        sub.type = WidgetElementType::Text;
+        sub.id = "UC.Sub";
+        sub.from = Vec2{ nx(12.0f), ny(40.0f) };
+        sub.to = Vec2{ 1.0f, ny(62.0f) };
+        sub.text = "The following assets have unsaved changes:";
+        sub.fontSize = EditorTheme::Get().fontSizeBody;
+        sub.style.textColor = EditorTheme::Get().textSecondary;
+        sub.textAlignV = TextAlignV::Center;
+        sub.padding = Vec2{ 6.0f, 0.0f };
+        elements.push_back(sub);
+    }
+
+    // Scrollable list of checkboxes
+    WidgetElement listStack;
+    listStack.type = WidgetElementType::StackPanel;
+    listStack.id = "UC.List";
+    listStack.from = Vec2{ nx(12.0f), ny(66.0f) };
+    listStack.to = Vec2{ nx(W - 12.0f), ny(H - 56.0f) };
+    listStack.padding = Vec2{ 4.0f, 4.0f };
+    listStack.scrollable = true;
+    listStack.style.color = EditorTheme::Get().panelBackgroundAlt;
+
+    for (size_t i = 0; i < unsavedList.size(); ++i)
+    {
+        const auto& item = unsavedList[i];
+        std::string displayName = item.name;
+        if (displayName.empty()) displayName = item.path;
+        if (item.isLevel) displayName = "[Level] " + displayName;
+
+        WidgetElement row;
+        row.type = WidgetElementType::CheckBox;
+        row.id = "UC.Check." + std::to_string(i);
+        row.text = displayName;
+        row.isChecked = true;
+        row.font = EditorTheme::Get().fontDefault;
+        row.fontSize = EditorTheme::Get().fontSizeBody;
+        row.style.color = EditorTheme::Get().checkboxDefault;
+        row.style.hoverColor = EditorTheme::Get().checkboxHover;
+        row.style.fillColor = EditorTheme::Get().checkboxChecked;
+        row.style.textColor = EditorTheme::Get().checkboxText;
+        row.fillX = true;
+        row.minSize = Vec2{ 0.0f, EditorTheme::Scaled(26.0f) };
+        row.padding = EditorTheme::Get().paddingSmall;
+        row.hitTestMode = HitTestMode::Enabled;
+        row.runtimeOnly = true;
+        row.onCheckedChanged = [state, i](bool checked) { state->selected[i] = checked; };
+
+        listStack.children.push_back(std::move(row));
+    }
+    elements.push_back(std::move(listStack));
+
+    Renderer* renderer = m_renderer;
+
+    // Save & Continue button
+    {
+        WidgetElement saveBtn;
+        saveBtn.type = WidgetElementType::Button;
+        saveBtn.id = "UC.Save";
+        saveBtn.from = Vec2{ nx(W - 310.0f), ny(H - 46.0f) };
+        saveBtn.to = Vec2{ nx(W - 196.0f), ny(H - 14.0f) };
+        saveBtn.text = "Save Selected";
+        saveBtn.fontSize = EditorTheme::Get().fontSizeBody;
+        saveBtn.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+        saveBtn.textAlignH = TextAlignH::Center;
+        saveBtn.textAlignV = TextAlignV::Center;
+        saveBtn.style.color = Vec4{ 0.15f, 0.45f, 0.25f, 0.95f };
+        saveBtn.style.hoverColor = Vec4{ 0.2f, 0.6f, 0.35f, 1.0f };
+        saveBtn.shaderVertex = "button_vertex.glsl";
+        saveBtn.shaderFragment = "button_fragment.glsl";
+        saveBtn.hitTestMode = HitTestMode::Enabled;
+        saveBtn.onClicked = [state, popup, renderer, onDone]()
+        {
+            // Collect selected IDs
+            std::vector<unsigned int> ids;
+            bool includeLevel = false;
+            for (size_t i = 0; i < state->items.size(); ++i)
+            {
+                if (!state->selected[i]) continue;
+                if (state->items[i].isLevel)
+                    includeLevel = true;
+                else
+                    ids.push_back(state->items[i].id);
+            }
+
+            if (ids.empty() && !includeLevel)
+            {
+                popup->close();
+                if (onDone) onDone();
+                return;
+            }
+
+            auto& uiMgr = renderer->getUIManager();
+            const size_t total = ids.size() + (includeLevel ? 1 : 0);
+            uiMgr.showSaveProgressModal(total);
+
+            AssetManager::Instance().saveSelectedAssetsAsync(ids, includeLevel,
+                [renderer](size_t saved, size_t total)
+                {
+                    renderer->getUIManager().updateSaveProgress(saved, total);
+                },
+                [renderer, popup, onDone](bool success)
+                {
+                    UndoRedoManager::Instance().clear();
+                    renderer->getUIManager().closeSaveProgressModal(success);
+                    popup->close();
+                    if (onDone) onDone();
+                });
+        };
+        elements.push_back(std::move(saveBtn));
+    }
+
+    // Don't Save button
+    {
+        WidgetElement skipBtn;
+        skipBtn.type = WidgetElementType::Button;
+        skipBtn.id = "UC.Skip";
+        skipBtn.from = Vec2{ nx(W - 190.0f), ny(H - 46.0f) };
+        skipBtn.to = Vec2{ nx(W - 100.0f), ny(H - 14.0f) };
+        skipBtn.text = "Don't Save";
+        skipBtn.fontSize = EditorTheme::Get().fontSizeBody;
+        skipBtn.style.textColor = Vec4{ 0.9f, 0.7f, 0.7f, 1.0f };
+        skipBtn.textAlignH = TextAlignH::Center;
+        skipBtn.textAlignV = TextAlignV::Center;
+        skipBtn.style.color = Vec4{ 0.35f, 0.15f, 0.15f, 0.9f };
+        skipBtn.style.hoverColor = Vec4{ 0.5f, 0.2f, 0.2f, 1.0f };
+        skipBtn.shaderVertex = "button_vertex.glsl";
+        skipBtn.shaderFragment = "button_fragment.glsl";
+        skipBtn.hitTestMode = HitTestMode::Enabled;
+        skipBtn.onClicked = [popup, onDone]()
+        {
+            popup->close();
+            if (onDone) onDone();
+        };
+        elements.push_back(std::move(skipBtn));
+    }
+
+    // Cancel button
+    {
+        WidgetElement cancelBtn;
+        cancelBtn.type = WidgetElementType::Button;
+        cancelBtn.id = "UC.Cancel";
+        cancelBtn.from = Vec2{ nx(W - 92.0f), ny(H - 46.0f) };
+        cancelBtn.to = Vec2{ nx(W - 12.0f), ny(H - 14.0f) };
+        cancelBtn.text = "Cancel";
+        cancelBtn.fontSize = EditorTheme::Get().fontSizeBody;
+        cancelBtn.style.textColor = Vec4{ 0.9f, 0.9f, 0.9f, 1.0f };
+        cancelBtn.textAlignH = TextAlignH::Center;
+        cancelBtn.textAlignV = TextAlignV::Center;
+        cancelBtn.style.color = Vec4{ 0.25f, 0.25f, 0.3f, 0.95f };
+        cancelBtn.style.hoverColor = Vec4{ 0.35f, 0.35f, 0.42f, 1.0f };
+        cancelBtn.shaderVertex = "button_vertex.glsl";
+        cancelBtn.shaderFragment = "button_fragment.glsl";
+        cancelBtn.hitTestMode = HitTestMode::Enabled;
+        cancelBtn.onClicked = [popup]() { popup->close(); };
+        elements.push_back(std::move(cancelBtn));
+    }
+
+    auto widget = std::make_shared<EditorWidget>();
+    widget->setName("UnsavedChanges");
+    widget->setFillX(true);
+    widget->setFillY(true);
+    widget->setElements(std::move(elements));
+    popup->uiManager().registerWidget("UnsavedChanges", widget);
+}
+
+void UIManager::showLevelLoadProgress(const std::string& levelName)
+{
+    if (!m_levelLoadProgressWidget)
+    {
+        m_levelLoadProgressWidget = std::make_shared<EditorWidget>();
+        m_levelLoadProgressWidget->setName("LevelLoadProgress");
+        m_levelLoadProgressWidget->setAnchor(WidgetAnchor::TopLeft);
+        m_levelLoadProgressWidget->setFillX(true);
+        m_levelLoadProgressWidget->setFillY(true);
+        m_levelLoadProgressWidget->setZOrder(10002);
+    }
+
+    WidgetElement overlay{};
+    overlay.id = "LLP.Overlay";
+    overlay.type = WidgetElementType::Panel;
+    overlay.from = Vec2{ 0.0f, 0.0f };
+    overlay.to = Vec2{ 1.0f, 1.0f };
+    overlay.style.color = EditorTheme::Get().modalOverlay;
+    overlay.hitTestMode = HitTestMode::Enabled;
+    overlay.runtimeOnly = true;
+
+    WidgetElement panel{};
+    panel.id = "LLP.Panel";
+    panel.type = WidgetElementType::StackPanel;
+    panel.from = Vec2{ 0.3f, 0.38f };
+    panel.to = Vec2{ 0.7f, 0.62f };
+    panel.padding = Vec2{ 20.0f, 14.0f };
+    panel.orientation = StackOrientation::Vertical;
+    panel.style.color = EditorTheme::Get().modalBackground;
+    panel.runtimeOnly = true;
+
+    WidgetElement title{};
+    title.id = "LLP.Title";
+    title.type = WidgetElementType::Text;
+    title.text = "Loading Level...";
+    title.font = EditorTheme::Get().fontDefault;
+    title.fontSize = EditorTheme::Get().fontSizeHeading;
+    title.textAlignH = TextAlignH::Center;
+    title.style.textColor = EditorTheme::Get().textPrimary;
+    title.fillX = true;
+    title.minSize = Vec2{ 0.0f, 24.0f };
+    title.runtimeOnly = true;
+
+    WidgetElement nameLabel{};
+    nameLabel.id = "LLP.Name";
+    nameLabel.type = WidgetElementType::Text;
+    nameLabel.text = levelName;
+    nameLabel.font = EditorTheme::Get().fontDefault;
+    nameLabel.fontSize = EditorTheme::Get().fontSizeSubheading;
+    nameLabel.textAlignH = TextAlignH::Center;
+    nameLabel.style.textColor = EditorTheme::Get().textSecondary;
+    nameLabel.fillX = true;
+    nameLabel.minSize = Vec2{ 0.0f, 20.0f };
+    nameLabel.runtimeOnly = true;
+
+    WidgetElement status{};
+    status.id = "LLP.Status";
+    status.type = WidgetElementType::Text;
+    status.text = "Preparing...";
+    status.font = EditorTheme::Get().fontDefault;
+    status.fontSize = EditorTheme::Get().fontSizeBody;
+    status.textAlignH = TextAlignH::Center;
+    status.style.textColor = EditorTheme::Get().textMuted;
+    status.fillX = true;
+    status.minSize = Vec2{ 0.0f, 18.0f };
+    status.runtimeOnly = true;
+
+    panel.children.push_back(std::move(title));
+    panel.children.push_back(std::move(nameLabel));
+    panel.children.push_back(std::move(status));
+
+    std::vector<WidgetElement> elements;
+    elements.push_back(std::move(overlay));
+    elements.push_back(std::move(panel));
+    m_levelLoadProgressWidget->setElements(std::move(elements));
+    m_levelLoadProgressWidget->markLayoutDirty();
+
+    registerWidget("LevelLoadProgress", m_levelLoadProgressWidget);
+}
+
+void UIManager::updateLevelLoadProgress(const std::string& statusText)
+{
+    if (!m_levelLoadProgressWidget) return;
+
+    auto& elements = m_levelLoadProgressWidget->getElementsMutable();
+    WidgetElement* statusEl = FindElementById(elements, "LLP.Status");
+    if (statusEl)
+    {
+        statusEl->text = statusText;
+    }
+    m_levelLoadProgressWidget->markLayoutDirty();
+    m_renderDirty = true;
+}
+
+void UIManager::closeLevelLoadProgress()
+{
+    unregisterWidget("LevelLoadProgress");
 }
 
 void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<DropdownMenuItem>& items, float minWidth)
@@ -9112,6 +9453,13 @@ void UIManager::openEngineSettingsPopup()
                 [renderer](bool v) {
                     renderer->setOcclusionCullingEnabled(v);
                     DiagnosticsManager::Instance().setState("OcclusionCullingEnabled", v ? "1" : "0");
+                    DiagnosticsManager::Instance().saveConfig();
+                });
+            addCheckbox("ES.C.TexCompress", "Texture Compression (S3TC)",
+                renderer->isTextureCompressionEnabled(),
+                [renderer](bool v) {
+                    renderer->setTextureCompressionEnabled(v);
+                    DiagnosticsManager::Instance().setState("TextureCompressionEnabled", v ? "1" : "0");
                     DiagnosticsManager::Instance().saveConfig();
                 });
         }

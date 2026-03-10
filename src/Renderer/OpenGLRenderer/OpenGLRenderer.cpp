@@ -827,6 +827,13 @@ void OpenGLRenderer::renderWorld()
         return;
     }
 
+    // When rendering is frozen (e.g. during level load), skip the world pass
+    // entirely so the last frame stays on screen while the UI remains interactive.
+    if (m_renderFrozen)
+    {
+        return;
+    }
+
     m_lastVisibleCount = 0;
     m_lastHiddenCount = 0;
     m_lastTotalCount = 0;
@@ -8035,15 +8042,16 @@ const std::string& OpenGLRenderer::name() const
 RendererCapabilities OpenGLRenderer::getCapabilities() const
 {
     RendererCapabilities caps;
-    caps.supportsShadows       = true;
-    caps.supportsOcclusion     = true;
-    caps.supportsWireframe     = true;
-    caps.supportsVSync         = true;
-    caps.supportsEntityPicking = true;
-    caps.supportsGizmos        = true;
-    caps.supportsSkybox        = true;
-    caps.supportsPopupWindows   = true;
-    caps.supportsPostProcessing = true;
+    caps.supportsShadows            = true;
+    caps.supportsOcclusion          = true;
+    caps.supportsWireframe          = true;
+    caps.supportsVSync              = true;
+    caps.supportsEntityPicking      = true;
+    caps.supportsGizmos             = true;
+    caps.supportsSkybox             = true;
+    caps.supportsPopupWindows       = true;
+    caps.supportsPostProcessing     = true;
+    caps.supportsTextureCompression = true;
     return caps;
 }
 

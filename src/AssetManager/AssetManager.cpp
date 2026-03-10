@@ -45,7 +45,7 @@ namespace
             if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
         }
         // Textures
-        if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga" || ext == ".hdr")
+        if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga" || ext == ".hdr" || ext == ".dds")
             return AssetType::Texture;
 
         if (ext == ".wav")
@@ -3357,6 +3357,39 @@ size_t AssetManager::getUnsavedAssetCount() const
     return count;
 }
 
+std::vector<AssetManager::UnsavedAssetInfo> AssetManager::getUnsavedAssetList() const
+{
+    std::vector<UnsavedAssetInfo> result;
+    {
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        for (const auto& res : m_loadedAssets)
+        {
+            if (res.first != 0 && res.second && !res.second->getIsSaved())
+            {
+                UnsavedAssetInfo info;
+                info.id = res.first;
+                info.name = res.second->getName();
+                info.path = res.second->getPath();
+                info.type = res.second->getAssetType();
+                info.isLevel = false;
+                result.push_back(std::move(info));
+            }
+        }
+    }
+    auto* level = DiagnosticsManager::Instance().getActiveLevelSoft();
+    if (level && !level->getIsSaved())
+    {
+        UnsavedAssetInfo info;
+        info.id = 0;
+        info.name = level->getName().empty() ? "Active Level" : level->getName();
+        info.path = level->getPath();
+        info.type = AssetType::Level;
+        info.isLevel = true;
+        result.push_back(std::move(info));
+    }
+    return result;
+}
+
 void AssetManager::saveAllAssetsAsync(std::function<void(size_t saved, size_t total)> onProgress, std::function<void(bool success)> onFinished)
 {
     enqueueJob([this, onProgress = std::move(onProgress), onFinished = std::move(onFinished)]()
@@ -3430,6 +3463,71 @@ void AssetManager::saveAllAssetsAsync(std::function<void(size_t saved, size_t to
         {
             onFinished(allOk);
         }
+    });
+}
+
+void AssetManager::saveSelectedAssetsAsync(const std::vector<unsigned int>& selectedIds, bool includeLevel,
+    std::function<void(size_t saved, size_t total)> onProgress,
+    std::function<void(bool success)> onFinished)
+{
+    enqueueJob([this, selectedIds, includeLevel, onProgress = std::move(onProgress), onFinished = std::move(onFinished)]()
+    {
+        auto& logger = Logger::Instance();
+        auto& diagnostics = DiagnosticsManager::Instance();
+        diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingAsset, true);
+
+        std::vector<std::pair<unsigned int, AssetType>> toSave;
+        {
+            std::lock_guard<std::mutex> lock(m_stateMutex);
+            for (unsigned int id : selectedIds)
+            {
+                if (id == 0) continue; // level is handled separately
+                auto it = m_loadedAssets.find(id);
+                if (it != m_loadedAssets.end() && it->second)
+                {
+                    toSave.push_back({ id, it->second->getAssetType() });
+                }
+            }
+        }
+
+        const size_t total = toSave.size() + (includeLevel ? 1 : 0);
+        size_t saved = 0;
+        bool allOk = true;
+
+        for (const auto& [id, type] : toSave)
+        {
+            Asset asset;
+            asset.ID = id;
+            asset.type = type;
+            if (!saveAsset(asset))
+            {
+                logger.log(Logger::Category::AssetManagement, "saveSelectedAssetsAsync: failed asset ID=" + std::to_string(id), Logger::LogLevel::ERROR);
+                allOk = false;
+            }
+            ++saved;
+            if (onProgress)
+                onProgress(saved, total);
+        }
+
+        if (includeLevel)
+        {
+            auto* level = diagnostics.getActiveLevelSoft();
+            if (level)
+            {
+                if (!saveLevelAsset(level).success)
+                {
+                    logger.log(Logger::Category::AssetManagement, "saveSelectedAssetsAsync: failed to save active level", Logger::LogLevel::ERROR);
+                    allOk = false;
+                }
+            }
+            ++saved;
+            if (onProgress)
+                onProgress(saved, total);
+        }
+
+        diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingAsset, false);
+        if (onFinished)
+            onFinished(allOk);
     });
 }
 
@@ -3944,15 +4042,6 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 	{
 	case AssetType::Texture:
 	{
-		int width = 0, height = 0, channels = 0;
-		unsigned char* imgData = stbi_load(path.c_str(), &width, &height, &channels, 4);
-		if (!imgData)
-		{
-			logger.log(Logger::Category::AssetManagement, "Import failed: stb_image could not load: " + path, Logger::LogLevel::ERROR);
-			break;
-		}
-		channels = 4;
-
 		// Copy source file to Content folder
 		const fs::path destSourcePath = contentDir / sourcePath.filename();
 		std::error_code ec;
@@ -3960,11 +4049,37 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 
 		const std::string relSourcePath = fs::relative(destSourcePath, fs::path(diagnostics.getProjectInfo().projectPath)).generic_string();
 		data["m_sourcePath"] = relSourcePath;
-		data["m_width"] = width;
-		data["m_height"] = height;
-		data["m_channels"] = channels;
 
-		stbi_image_free(imgData);
+		std::string srcExt = sourcePath.extension().string();
+		for (auto& c : srcExt)
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+		if (srcExt == ".dds")
+		{
+			// DDS files are loaded at runtime via DDSLoader; store minimal metadata
+			data["m_compressed"] = true;
+			data["m_width"] = 0;
+			data["m_height"] = 0;
+			data["m_channels"] = 0;
+		}
+		else
+		{
+			int width = 0, height = 0, channels = 0;
+			unsigned char* imgData = stbi_load(path.c_str(), &width, &height, &channels, 4);
+			if (!imgData)
+			{
+				logger.log(Logger::Category::AssetManagement, "Import failed: stb_image could not load: " + path, Logger::LogLevel::ERROR);
+				break;
+			}
+			channels = 4;
+
+			data["m_width"] = width;
+			data["m_height"] = height;
+			data["m_channels"] = channels;
+
+			stbi_image_free(imgData);
+		}
+
 		success = true;
 		break;
 	}
@@ -6501,16 +6616,31 @@ RawAssetData AssetManager::readAssetFromDisk(const std::string& path, AssetType 
             }
             if (fs::exists(sourcePath))
             {
-                int width = 0, height = 0, channels = 0;
-                unsigned char* data = stbi_load(sourcePath.string().c_str(), &width, &height, &channels, 4);
-                if (data)
+                // Check if this is a DDS (compressed) texture
+                std::string srcExt = sourcePath.extension().string();
+                for (auto& c : srcExt)
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+                if (srcExt == ".dds" || (j.contains("m_compressed") && j["m_compressed"].get<bool>()))
                 {
-                    channels = 4;
-                    j["m_width"] = width;
-                    j["m_height"] = height;
-                    j["m_channels"] = channels;
-                    j["m_data"] = std::vector<unsigned char>(data, data + (static_cast<size_t>(width) * height * channels));
-                    stbi_image_free(data);
+                    // DDS files are loaded at runtime via DDSLoader on the GPU-upload side.
+                    // Store the resolved absolute path so the renderer can find the file.
+                    j["m_compressed"] = true;
+                    j["m_ddsPath"] = sourcePath.string();
+                }
+                else
+                {
+                    int width = 0, height = 0, channels = 0;
+                    unsigned char* data = stbi_load(sourcePath.string().c_str(), &width, &height, &channels, 4);
+                    if (data)
+                    {
+                        channels = 4;
+                        j["m_width"] = width;
+                        j["m_height"] = height;
+                        j["m_channels"] = channels;
+                        j["m_data"] = std::vector<unsigned char>(data, data + (static_cast<size_t>(width) * height * channels));
+                        stbi_image_free(data);
+                    }
                 }
             }
         }

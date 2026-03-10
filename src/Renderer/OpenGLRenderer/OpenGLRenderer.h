@@ -417,6 +417,8 @@ private:
     GLint m_oitCompLocAccum{-1};
     GLint m_oitCompLocRevealage{-1};
     bool m_oitEnabled{true};
+    bool m_textureCompressionEnabled{false};
+    bool m_renderFrozen{false};
 
     // Skeletal animation: per-entity animators
     std::unordered_map<unsigned int, std::shared_ptr<SkeletalAnimator>> m_entityAnimators;
@@ -607,6 +609,10 @@ public:
     bool isCsmEnabled() const override { return m_csmUserEnabled; }
     void setOitEnabled(bool enabled) override { m_oitEnabled = enabled; }
     bool isOitEnabled() const override { return m_oitEnabled; }
+    void setTextureCompressionEnabled(bool enabled) override { m_textureCompressionEnabled = enabled; }
+    bool isTextureCompressionEnabled() const override { return m_textureCompressionEnabled; }
+    void setRenderFrozen(bool frozen) override { m_renderFrozen = frozen; }
+    bool isRenderFrozen() const override { return m_renderFrozen; }
     void setDebugRenderMode(DebugRenderMode mode) override { m_debugRenderMode = mode; }
     DebugRenderMode getDebugRenderMode() const override { return m_debugRenderMode; }
     void setSkyboxPath(const std::string& pathOrFolder) override;

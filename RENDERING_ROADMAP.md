@@ -74,10 +74,10 @@ Smooth-Interpolation zwischen zwei Kamera-Positionen/-Orientierungen über eine 
 
 ---
 
-## 11. Texture Compression (S3TC/BC)
+## ~~11. Texture Compression (S3TC/BC)~~ ✅
 **Aufwand:** Mittel · **Nutzen:** Mittel
 
-GPU-native Kompression (BC1–BC7) reduziert VRAM-Verbrauch um 4–6× bei minimalem Qualitätsverlust. Benötigt Offline-Konvertierung (z.B. via `texconv`) und angepassten Upload-Pfad (`glCompressedTexImage2D`). Wichtig erst bei großen Szenen mit vielen hochauflösenden Texturen.
+DDS-Dateiformat-Unterstützung implementiert. Neuer `DDSLoader` (`DDSLoader.h/.cpp`) parst DDS-Header (Standard + DX10-Extended) und lädt Block-Compressed Mip-Chains. Unterstützte Formate: BC1 (DXT1), BC2 (DXT3), BC3 (DXT5), BC4 (ATI1/RGTC1), BC5 (ATI2/RGTC2), BC7 (BPTC) – erkennt FourCC-Codes und DXGI-Format-IDs. `Texture`-Klasse um `CompressedFormat`-Enum, `CompressedMipLevel`-Struct und `compressedBlockSize()`-Helper erweitert. `OpenGLTexture::initialize()` erkennt komprimierte Texturen und nutzt `glCompressedTexImage2D` für den GPU-Upload aller Mip-Levels (S3TC-Extension-Konstanten als Fallback definiert). `.dds` als Import-Format in `AssetManager::detectAssetType` und Import-Handler registriert – DDS-Dateien werden ins Content-Verzeichnis kopiert und mit `m_compressed`-Flag im Asset-JSON markiert. `readAssetFromDisk` speichert den aufgelösten DDS-Pfad (`m_ddsPath`) statt stbi_load-Dekodierung. `RenderResourceManager` erkennt komprimierte Assets und delegiert an `loadDDS()`. `RendererCapabilities` um `supportsTextureCompression` erweitert (OpenGL: true).
 
 ---
 
