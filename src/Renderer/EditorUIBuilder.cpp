@@ -23,7 +23,7 @@ WidgetElement EditorUIBuilder::makeLabel(const std::string& text, float minWidth
     el.fontSize    = t.fontSizeBody;
     el.textAlignH  = TextAlignH::Left;
     el.textAlignV  = TextAlignV::Center;
-    el.style.textColor = t.textPrimary;
+    el.style.textColor = t.textSecondary;
     el.fillX       = true;
     el.minSize     = Vec2{ EditorTheme::Scaled(minWidth), t.rowHeightSmall };
     el.runtimeOnly = true;
@@ -41,7 +41,7 @@ WidgetElement EditorUIBuilder::makeSecondaryLabel(const std::string& text, float
     el.fontSize    = t.fontSizeSmall;
     el.textAlignH  = TextAlignH::Left;
     el.textAlignV  = TextAlignV::Center;
-    el.style.textColor = t.textSecondary;
+    el.style.textColor = t.textMuted;
     el.fillX       = true;
     el.minSize     = Vec2{ EditorTheme::Scaled(minWidth), t.rowHeightSmall };
     el.runtimeOnly = true;
@@ -509,7 +509,7 @@ WidgetElement EditorUIBuilder::makeSection(const std::string& id,
     sep.setFontSize(t.fontSizeBody);
     sep.setHeaderColors(t.panelHeader, t.buttonHover);
     sep.setTitleColor(t.textPrimary);
-    sep.setContentPadding(Vec2{ 14.0f, t.paddingNormal.y });
+    sep.setContentPadding(EditorTheme::Scaled(Vec2{ 14.0f, t.paddingNormal.y }));
     sep.setChildren(children);
 
     return sep.toElement();

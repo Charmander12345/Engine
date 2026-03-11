@@ -1080,7 +1080,7 @@ void AssetManager::ensureEditorWidgetsCreated()
     auto& logger = Logger::Instance();
 
     // Current UI layout version. Bump this to force all editor widget assets to regenerate.
-    static constexpr int kEditorWidgetUIVersion = 5;
+    static constexpr int kEditorWidgetUIVersion = 8;
 
     // Returns true only when the file on disk contains a matching _uiVersion AND _dpiScale field.
     auto checkUIVersion = [&](const fs::path& abs) -> bool {
@@ -1295,6 +1295,7 @@ void AssetManager::ensureEditorWidgetsCreated()
         btnMin["minSize"] = json{ {"x", S(46.0f)}, {"y", 0.0f} };
         btnMin["padding"] = json{ {"x", S(2.0f)}, {"y", S(2.0f)} };
         btnMin["borderRadius"] = 0.0f;
+        btnMin["tooltipText"] = "Minimize";
         btnMin["shaderVertex"] = "button_vertex.glsl";
         btnMin["shaderFragment"] = "button_fragment.glsl";
 
@@ -1315,6 +1316,7 @@ void AssetManager::ensureEditorWidgetsCreated()
         btnMax["minSize"] = json{ {"x", S(46.0f)}, {"y", 0.0f} };
         btnMax["padding"] = json{ {"x", S(2.0f)}, {"y", S(2.0f)} };
         btnMax["borderRadius"] = 0.0f;
+        btnMax["tooltipText"] = "Maximize / Restore";
         btnMax["shaderVertex"] = "button_vertex.glsl";
         btnMax["shaderFragment"] = "button_fragment.glsl";
 
@@ -1335,6 +1337,7 @@ void AssetManager::ensureEditorWidgetsCreated()
         btnClose["minSize"] = json{ {"x", S(46.0f)}, {"y", 0.0f} };
         btnClose["padding"] = json{ {"x", S(2.0f)}, {"y", S(2.0f)} };
         btnClose["borderRadius"] = 0.0f;
+        btnClose["tooltipText"] = "Close";
         btnClose["shaderVertex"] = "button_vertex.glsl";
         btnClose["shaderFragment"] = "button_fragment.glsl";
 
@@ -1415,21 +1418,24 @@ void AssetManager::ensureEditorWidgetsCreated()
         bg["shaderFragment"] = "panel_fragment.glsl";
         elements.push_back(bg);
 
-        // Left section: Render mode dropdown button
-        json leftStack = json::object();
-        leftStack["id"] = "ViewportOverlay.Left";
-        leftStack["type"] = "StackPanel";
-        leftStack["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        leftStack["to"] = json{ {"x", 0.12f}, {"y", 1.0f} };
-        leftStack["orientation"] = "Horizontal";
-        leftStack["padding"] = json{ {"x", S(2.0f)}, {"y", S(2.0f)} };
-        leftStack["sizeToContent"] = true;
+        // Single horizontal StackPanel as the toolbar strip
+        json toolbar = json::object();
+        toolbar["id"] = "ViewportOverlay.Toolbar";
+        toolbar["type"] = "StackPanel";
+        toolbar["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        toolbar["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
+        toolbar["orientation"] = "Horizontal";
+        toolbar["fillX"] = true;
+        toolbar["fillY"] = true;
+        toolbar["padding"] = json{ {"x", S(2.0f)}, {"y", S(2.0f)} };
 
+        // ── Left group ──────────────────────────────────────────────────
+        // Render mode dropdown button
         json btnRenderMode = json::object();
         btnRenderMode["id"] = "ViewportOverlay.RenderMode";
         btnRenderMode["type"] = "Button";
         btnRenderMode["clickEvent"] = "ViewportOverlay.RenderMode";
-        btnRenderMode["color"] = json{ {"x", 0.12f}, {"y", 0.12f}, {"z", 0.12f}, {"w", 1.0f} };
+        btnRenderMode["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
         btnRenderMode["hoverColor"] = json{ {"x", 0.22f}, {"y", 0.22f}, {"z", 0.22f}, {"w", 1.0f} };
         btnRenderMode["textColor"] = json{ {"x", 0.85f}, {"y", 0.85f}, {"z", 0.85f}, {"w", 1.0f} };
         btnRenderMode["text"] = "Lit";
@@ -1437,26 +1443,59 @@ void AssetManager::ensureEditorWidgetsCreated()
         btnRenderMode["fontSize"] = t.fontSizeBody;
         btnRenderMode["textAlignH"] = "Center";
         btnRenderMode["textAlignV"] = "Center";
-        btnRenderMode["minSize"] = json{ {"x", S(55.0f)}, {"y", 0.0f} };
+        btnRenderMode["minSize"] = json{ {"x", S(50.0f)}, {"y", 0.0f} };
+        btnRenderMode["fillY"] = true;
         btnRenderMode["padding"] = json{ {"x", S(8.0f)}, {"y", S(2.0f)} };
-        btnRenderMode["borderRadius"] = S(4.0f);
+        btnRenderMode["tooltipText"] = "Render Mode";
         btnRenderMode["shaderVertex"] = "button_vertex.glsl";
         btnRenderMode["shaderFragment"] = "button_fragment.glsl";
 
-        leftStack["children"] = json::array({ btnRenderMode });
-        elements.push_back(leftStack);
+        // Thin separator
+        auto makeSep = [&](const std::string& sepId) -> json {
+            json s = json::object();
+            s["id"] = sepId;
+            s["type"] = "Panel";
+            s["minSize"] = json{ {"x", S(1.0f)}, {"y", 0.0f} };
+            s["fillY"] = true;
+            s["color"] = json{ {"x", 0.25f}, {"y", 0.25f}, {"z", 0.30f}, {"w", 0.6f} };
+            s["shaderVertex"] = "panel_vertex.glsl";
+            s["shaderFragment"] = "panel_fragment.glsl";
+            return s;
+        };
 
-        // Center section: PIE controls (spacer + play + spacer)
-        json centerStack = json::object();
-        centerStack["id"] = "ViewportOverlay.Center";
-        centerStack["type"] = "StackPanel";
-        centerStack["from"] = json{ {"x", 0.0f}, {"y", 0.0f} };
-        centerStack["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
-        centerStack["orientation"] = "Horizontal";
-        centerStack["fillX"] = true;
-        centerStack["fillY"] = true;
-        centerStack["padding"] = json{ {"x", 0.0f}, {"y", 0.0f} };
+        // Undo button (icon)
+        json btnUndo = json::object();
+        btnUndo["id"] = "ViewportOverlay.Undo";
+        btnUndo["type"] = "Button";
+        btnUndo["clickEvent"] = "ViewportOverlay.Undo";
+        btnUndo["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+        btnUndo["hoverColor"] = json{ {"x", 0.22f}, {"y", 0.22f}, {"z", 0.22f}, {"w", 1.0f} };
+        btnUndo["imagePath"] = "undo.png";
+        btnUndo["minSize"] = json{ {"x", S(28.0f)}, {"y", 0.0f} };
+        btnUndo["fillY"] = true;
+        btnUndo["sizeToContent"] = true;
+        btnUndo["padding"] = json{ {"x", S(5.0f)}, {"y", S(5.0f)} };
+        btnUndo["tooltipText"] = "Undo (Ctrl+Z)";
+        btnUndo["shaderVertex"] = "button_vertex.glsl";
+        btnUndo["shaderFragment"] = "button_fragment.glsl";
 
+        // Redo button (icon)
+        json btnRedo = json::object();
+        btnRedo["id"] = "ViewportOverlay.Redo";
+        btnRedo["type"] = "Button";
+        btnRedo["clickEvent"] = "ViewportOverlay.Redo";
+        btnRedo["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+        btnRedo["hoverColor"] = json{ {"x", 0.22f}, {"y", 0.22f}, {"z", 0.22f}, {"w", 1.0f} };
+        btnRedo["imagePath"] = "redo.png";
+        btnRedo["minSize"] = json{ {"x", S(28.0f)}, {"y", 0.0f} };
+        btnRedo["fillY"] = true;
+        btnRedo["sizeToContent"] = true;
+        btnRedo["padding"] = json{ {"x", S(5.0f)}, {"y", S(5.0f)} };
+        btnRedo["tooltipText"] = "Redo (Ctrl+Y)";
+        btnRedo["shaderVertex"] = "button_vertex.glsl";
+        btnRedo["shaderFragment"] = "button_fragment.glsl";
+
+        // ── Center spacer
         json spacerLeft = json::object();
         spacerLeft["id"] = "ViewportOverlay.SpacerL";
         spacerLeft["type"] = "Panel";
@@ -1464,16 +1503,19 @@ void AssetManager::ensureEditorWidgetsCreated()
         spacerLeft["fillY"] = true;
         spacerLeft["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
 
+        // PIE (Play) button – fills full toolbar height
         json btnPIE = json::object();
         btnPIE["id"] = "ViewportOverlay.PIE";
         btnPIE["type"] = "Button";
         btnPIE["clickEvent"] = "ViewportOverlay.PIE";
-        btnPIE["color"] = json{ {"x", 0.12f}, {"y", 0.12f}, {"z", 0.12f}, {"w", 1.0f} };
+        btnPIE["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
         btnPIE["hoverColor"] = json{ {"x", 0.22f}, {"y", 0.22f}, {"z", 0.22f}, {"w", 1.0f} };
         btnPIE["imagePath"] = "Play.tga";
-        btnPIE["minSize"] = json{ {"x", S(32.0f)}, {"y", S(24.0f)} };
+        btnPIE["minSize"] = json{ {"x", S(36.0f)}, {"y", 0.0f} };
+        btnPIE["fillY"] = true;
         btnPIE["sizeToContent"] = true;
-        btnPIE["padding"] = json{ {"x", S(4.0f)}, {"y", S(4.0f)} };
+        btnPIE["padding"] = json{ {"x", S(6.0f)}, {"y", S(2.0f)} };
+        btnPIE["tooltipText"] = "Play / Stop (F8)";
         btnPIE["shaderVertex"] = "button_vertex.glsl";
         btnPIE["shaderFragment"] = "button_fragment.glsl";
 
@@ -1484,39 +1526,92 @@ void AssetManager::ensureEditorWidgetsCreated()
         spacerRight["fillY"] = true;
         spacerRight["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
 
-        centerStack["children"] = json::array({ spacerLeft, btnPIE, spacerRight });
-        elements.push_back(centerStack);
+        // ── Right group ─────────────────────────────────────────────────
+        // Grid snap toggle (dummy)
+        json btnSnap = json::object();
+        btnSnap["id"] = "ViewportOverlay.Snap";
+        btnSnap["type"] = "Button";
+        btnSnap["clickEvent"] = "ViewportOverlay.Snap";
+        btnSnap["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+        btnSnap["hoverColor"] = json{ {"x", 0.22f}, {"y", 0.22f}, {"z", 0.22f}, {"w", 1.0f} };
+        btnSnap["textColor"] = json{ {"x", 0.70f}, {"y", 0.70f}, {"z", 0.70f}, {"w", 1.0f} };
+        btnSnap["text"] = "#";
+        btnSnap["font"] = "default.ttf";
+        btnSnap["fontSize"] = t.fontSizeBody;
+        btnSnap["textAlignH"] = "Center";
+        btnSnap["textAlignV"] = "Center";
+        btnSnap["minSize"] = json{ {"x", S(28.0f)}, {"y", 0.0f} };
+        btnSnap["fillY"] = true;
+        btnSnap["padding"] = json{ {"x", S(4.0f)}, {"y", S(2.0f)} };
+        btnSnap["tooltipText"] = "Grid Snap";
+        btnSnap["shaderVertex"] = "button_vertex.glsl";
+        btnSnap["shaderFragment"] = "button_fragment.glsl";
 
-        // Right section: Settings button
-        json rightStack = json::object();
-        rightStack["id"] = "ViewportOverlay.Right";
-        rightStack["type"] = "StackPanel";
-        rightStack["from"] = json{ {"x", 0.88f}, {"y", 0.0f} };
-        rightStack["to"] = json{ {"x", 1.0f}, {"y", 1.0f} };
-        rightStack["orientation"] = "Horizontal";
-        rightStack["padding"] = json{ {"x", S(2.0f)}, {"y", S(2.0f)} };
-        rightStack["sizeToContent"] = true;
+        // Camera speed button
+        json btnCamSpeed = json::object();
+        btnCamSpeed["id"] = "ViewportOverlay.CamSpeed";
+        btnCamSpeed["type"] = "Button";
+        btnCamSpeed["clickEvent"] = "ViewportOverlay.CamSpeed";
+        btnCamSpeed["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+        btnCamSpeed["hoverColor"] = json{ {"x", 0.22f}, {"y", 0.22f}, {"z", 0.22f}, {"w", 1.0f} };
+        btnCamSpeed["textColor"] = json{ {"x", 0.70f}, {"y", 0.70f}, {"z", 0.70f}, {"w", 1.0f} };
+        btnCamSpeed["text"] = "1.0x";
+        btnCamSpeed["font"] = "default.ttf";
+        btnCamSpeed["fontSize"] = t.fontSizeSmall;
+        btnCamSpeed["textAlignH"] = "Center";
+        btnCamSpeed["textAlignV"] = "Center";
+        btnCamSpeed["minSize"] = json{ {"x", S(36.0f)}, {"y", 0.0f} };
+        btnCamSpeed["fillY"] = true;
+        btnCamSpeed["padding"] = json{ {"x", S(4.0f)}, {"y", S(2.0f)} };
+        btnCamSpeed["tooltipText"] = "Camera Speed";
+        btnCamSpeed["shaderVertex"] = "button_vertex.glsl";
+        btnCamSpeed["shaderFragment"] = "button_fragment.glsl";
 
+        // Stats toggle
+        json btnStats = json::object();
+        btnStats["id"] = "ViewportOverlay.Stats";
+        btnStats["type"] = "Button";
+        btnStats["clickEvent"] = "ViewportOverlay.Stats";
+        btnStats["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+        btnStats["hoverColor"] = json{ {"x", 0.22f}, {"y", 0.22f}, {"z", 0.22f}, {"w", 1.0f} };
+        btnStats["textColor"] = json{ {"x", 0.70f}, {"y", 0.70f}, {"z", 0.70f}, {"w", 1.0f} };
+        btnStats["text"] = "Stats";
+        btnStats["font"] = "default.ttf";
+        btnStats["fontSize"] = t.fontSizeSmall;
+        btnStats["textAlignH"] = "Center";
+        btnStats["textAlignV"] = "Center";
+        btnStats["minSize"] = json{ {"x", S(38.0f)}, {"y", 0.0f} };
+        btnStats["fillY"] = true;
+        btnStats["padding"] = json{ {"x", S(4.0f)}, {"y", S(2.0f)} };
+        btnStats["tooltipText"] = "Performance Stats";
+        btnStats["shaderVertex"] = "button_vertex.glsl";
+        btnStats["shaderFragment"] = "button_fragment.glsl";
+
+        // Settings button
         json btnSettings = json::object();
         btnSettings["id"] = "ViewportOverlay.Settings";
         btnSettings["type"] = "Button";
         btnSettings["clickEvent"] = "ViewportOverlay.Settings";
-        btnSettings["color"] = json{ {"x", 0.12f}, {"y", 0.12f}, {"z", 0.12f}, {"w", 1.0f} };
+        btnSettings["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
         btnSettings["hoverColor"] = json{ {"x", 0.22f}, {"y", 0.22f}, {"z", 0.22f}, {"w", 1.0f} };
-        btnSettings["textColor"] = json{ {"x", 0.85f}, {"y", 0.85f}, {"z", 0.85f}, {"w", 1.0f} };
-        btnSettings["text"] = "Settings";
-        btnSettings["font"] = "default.ttf";
-        btnSettings["fontSize"] = t.fontSizeBody;
-        btnSettings["textAlignH"] = "Center";
-        btnSettings["textAlignV"] = "Center";
-        btnSettings["minSize"] = json{ {"x", S(70.0f)}, {"y", 0.0f} };
-        btnSettings["padding"] = json{ {"x", S(8.0f)}, {"y", S(2.0f)} };
-        btnSettings["borderRadius"] = S(4.0f);
+        btnSettings["imagePath"] = "Settings.png";
+        btnSettings["minSize"] = json{ {"x", S(28.0f)}, {"y", 0.0f} };
+        btnSettings["fillY"] = true;
+        btnSettings["sizeToContent"] = true;
+        btnSettings["padding"] = json{ {"x", S(5.0f)}, {"y", S(5.0f)} };
+        btnSettings["tooltipText"] = "Settings";
         btnSettings["shaderVertex"] = "button_vertex.glsl";
         btnSettings["shaderFragment"] = "button_fragment.glsl";
 
-        rightStack["children"] = json::array({ btnSettings });
-        elements.push_back(rightStack);
+        toolbar["children"] = json::array({
+            btnRenderMode, makeSep("ViewportOverlay.Sep1"),
+            btnUndo, btnRedo, makeSep("ViewportOverlay.Sep2"),
+            spacerLeft, btnPIE, spacerRight,
+            makeSep("ViewportOverlay.Sep3"),
+            btnSnap, btnCamSpeed, btnStats,
+            makeSep("ViewportOverlay.Sep4"), btnSettings
+        });
+        elements.push_back(toolbar);
 
         widgetJson["m_elements"] = elements;
 
@@ -1804,6 +1899,7 @@ void AssetManager::ensureEditorWidgetsCreated()
         undoBtn["shaderVertex"] = "button_vertex.glsl";
         undoBtn["shaderFragment"] = "button_fragment.glsl";
         undoBtn["isHitTestable"] = true;
+        undoBtn["tooltipText"] = "Undo last action (Ctrl+Z)";
         undoBtn["clickEvent"] = "StatusBar.Undo";
 
         json redoBtn = json::object();
@@ -1823,6 +1919,7 @@ void AssetManager::ensureEditorWidgetsCreated()
         redoBtn["shaderVertex"] = "button_vertex.glsl";
         redoBtn["shaderFragment"] = "button_fragment.glsl";
         redoBtn["isHitTestable"] = true;
+        redoBtn["tooltipText"] = "Redo last action (Ctrl+Y)";
         redoBtn["clickEvent"] = "StatusBar.Redo";
 
         json spacer = json::object();
@@ -1860,6 +1957,7 @@ void AssetManager::ensureEditorWidgetsCreated()
         saveBtn["shaderVertex"] = "button_vertex.glsl";
         saveBtn["shaderFragment"] = "button_fragment.glsl";
         saveBtn["isHitTestable"] = true;
+        saveBtn["tooltipText"] = "Save all unsaved assets (Ctrl+S)";
         saveBtn["clickEvent"] = "StatusBar.Save";
 
         row["children"] = json::array({ undoBtn, redoBtn, spacer, dirtyLabel, saveBtn });

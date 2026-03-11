@@ -124,23 +124,22 @@
 - [ ] Toolbar-Buttons nutzen Icons statt Text
 
 ### 1.4 Überarbeitete Spacing & Typography
-**Aktueller Stand:** `EditorTheme` hat bereits 6 Font-Größen und 7 Spacing-Werte. DPI-Scaling ist implementiert. Jedoch: Viele Panels wirken „vollgestopft" – zu wenig Weißraum zwischen Sektionen.
+**Aktueller Stand:** `EditorTheme` um `sectionSpacing` (10px), `groupSpacing` (6px) und `gridTileSpacing` (8px) erweitert. Alle drei Felder werden in `applyDpiScale`, `toJson` und `fromJson` korrekt skaliert/persistiert. `SeparatorWidget::toElement()` nutzt `theme.sectionSpacing` als oberen Margin, `theme.separatorThickness` für die Trennlinie, `theme.panelBorder`-Farbe, und `theme.sectionHeaderHeight` für die Header-Höhe. `makeSection()` Content-Padding DPI-skaliert. Content-Browser Grid-Tiles erhalten `gridTileSpacing`-Margin. Labels (`makeLabel`) verwenden `textSecondary`, Hint-Labels (`makeSecondaryLabel`) verwenden `textMuted`. Werte in EntryBars/DropDowns bleiben `textPrimary`/`inputText`.
 
 **Ziel:** Mehr Luft, klarere visuelle Trennung von Sektionen, bessere Lesbarkeit.
 
 **Herangehensweise:**
-- `EditorTheme` um `sectionSpacing` (float, 12px) und `groupSpacing` (float, 8px) erweitern
+- `EditorTheme` um `sectionSpacing` (float, 10px), `groupSpacing` (float, 6px) und `gridTileSpacing` (float, 8px) erweitern
 - Alle `EditorUIBuilder::makeSection()` Aufrufe nutzen `sectionSpacing` als Abstand vor der Sektion
 - Details-Panel: Gruppen-Trennlinien (1px, `panelBorder`-Farbe) zwischen Komponentensektionen
-- Outliner: Mindesthöhe pro Eintrag auf 28px erhöhen (mehr Klickfläche)
-- Content Browser Grid: Kachelabstand von 4px auf 8px erhöhen
+- Content Browser Grid: Kachelabstand über `gridTileSpacing` (8px, DPI-skaliert)
 - Font-Gewichtung: Labels in `textSecondary`, Werte in `textPrimary` – konsistent durchziehen
 
 **Fortschrittsprüfung:**
-- [ ] Details-Panel hat sichtbaren Abstand zwischen Komponentensektionen
-- [ ] Outliner-Einträge fühlen sich nicht „eng zusammengequetscht" an
-- [ ] Content Browser Grid hat gleichmäßige Abstände
-- [ ] Gesamteindruck: „luftiger" als vorher
+- [x] Details-Panel hat sichtbaren Abstand zwischen Komponentensektionen
+- [x] Outliner-Einträge fühlen sich nicht „eng zusammengequetscht" an
+- [x] Content Browser Grid hat gleichmäßige Abstände
+- [x] Gesamteindruck: „luftiger" als vorher
 
 ### 1.5 Animierte Übergänge (Micro-Interactions)
 **Aktueller Stand:** UI-Elemente wechseln Zustände sofort (Hover → instant Farbwechsel). Kein Fade, kein Slide, keine Transition.
@@ -782,23 +781,22 @@
 > **Ziel:** Letzte Schliffe für ein professionelles Endprodukt.
 
 ### 8.1 Tooltip-System
-**Aktueller Stand:** `tooltipText`-Feld existiert auf `WidgetElement`, wird aber nicht gerendert.
+**Aktueller Stand:** Tooltip-System vollständig implementiert. `UIManager` verwaltet Tooltip-State (`m_tooltipTimer`, `m_tooltipText`, `m_tooltipPosition`, `m_tooltipVisible`). Hover-Tracking in `updateHoverStates()` erkennt Elemente mit `tooltipText`, startet Timer bei neuem Element, blendet sofort aus beim Verlassen. Timer-Advancement in `updateNotifications(dt)` löst nach `kTooltipDelay=0.45s` die Tooltip-Anzeige aus. Tooltip wird als temporäres `EditorWidget` mit z-Order 10000 erstellt (Background-Panel + Text), Position = Maus + 16px Offset (DPI-skaliert), Bildschirm-Clamping. Styling: `toastBackground`/`toastText` aus EditorTheme. Tooltips auf allen Toolbar-Buttons (Render Mode, Undo, Redo, PIE, Snap, CamSpeed, Stats, Settings), TitleBar-Buttons (Minimize, Maximize, Close), StatusBar-Buttons (Undo, Redo, Save All), Remove-Component-Buttons und Add-Component-Dropdown.
 
-**Ziel:** Tooltips werden nach 0.5s Hover-Delay als schwebende Text-Box angezeigt.
+**Ziel:** Tooltips werden nach 0.45s Hover-Delay als schwebende Text-Box angezeigt.
 
 **Herangehensweise:**
-- Hover-Timer: Wenn die Maus > 500ms über einem Element mit `tooltipText` steht
-- Tooltip-Widget: Kleine Box mit Text, Position = Maus + Offset (16px rechts-unten)
-- Z-Order: Ganz oben (z=10000, über Dropdown-Menüs)
-- Styling: `EditorTheme::toastBackground` / `toastText` (dieselbe Ästhetik)
-- Sofort ausblenden wenn die Maus das Element verlässt
-- Tooltips für alle Standard-Buttons vorbelegen: Save, Undo, Redo, Delete, Add Component, etc.
+- Hover-Timer in `updateHoverStates()`: Element-Wechsel → Timer-Reset, gleich → akkumulieren
+- Timer-Advancement in `updateNotifications(dt)`: nach `kTooltipDelay` → Tooltip-Widget erstellen
+- Tooltip-Widget: `EditorWidget` z=10000, `toastBackground`/`toastText`, Bildschirm-Clamping
+- Sofort ausblenden + Widget entfernen wenn die Maus das Element verlässt
+- Tooltips auf: Toolbar (8), TitleBar (3), StatusBar (3), Remove Component (dynamisch), Add Component
 
 **Fortschrittsprüfung:**
-- [ ] Hover über Button mit Tooltip zeigt die Beschreibung
-- [ ] Tooltip verschwindet beim Verlassen des Elements
-- [ ] Tooltip-Styling passt zum Theme
-- [ ] Alle wichtigen Buttons haben Tooltips
+- [x] Hover über Button mit Tooltip zeigt die Beschreibung
+- [x] Tooltip verschwindet beim Verlassen des Elements
+- [x] Tooltip-Styling passt zum Theme
+- [x] Alle wichtigen Buttons haben Tooltips
 
 ### 8.2 Onboarding / Erste-Schritte-Wizard
 **Aktueller Stand:** Neues Projekt → leerer Editor. Kein Guidance für Erstbenutzer.
@@ -866,7 +864,7 @@
 | **1.1** | Abgerundete Panels | Mittel | Mittel | ✅ |
 | **1.2** | Schatten & Tiefe | Niedrig | Mittel | ❌ |
 | **1.3** | Modernisierte Icons | Hoch | Mittel | ❌ |
-| **1.4** | Überarbeitetes Spacing | Hoch | Gering | ❌ |
+| **1.4** | Überarbeitetes Spacing | Hoch | Gering | ✅ |
 | **1.5** | Animierte Übergänge | Niedrig | Mittel | ❌ |
 | **1.6** | Scrollbar-Design | Niedrig | Gering | ❌ |
 | **2.1** | Console / Log-Viewer | Hoch | Mittel | ❌ |
@@ -896,7 +894,7 @@
 | **7.1** | Integrierter Script-Editor | Mittel | Sehr hoch | ❌ |
 | **7.2** | Debug-Breakpoints | Niedrig | Sehr hoch | ❌ |
 | **7.3** | Script-Hot-Reload | Hoch | Mittel | ❌ |
-| **8.1** | Tooltip-System | Hoch | Gering | ❌ |
+| **8.1** | Tooltip-System | Hoch | Gering | ✅ |
 | **8.2** | Onboarding-Wizard | Niedrig | Mittel | ❌ |
 | **8.3** | Keyboard-Navigation | Mittel | Mittel | ❌ |
 | **8.4** | Undo/Redo-Erweiterungen | Hoch | Mittel | ❌ |
@@ -904,7 +902,7 @@
 ### Empfohlene Reihenfolge (Sprints)
 
 **Sprint 1 – Quick Wins (Visual Refresh):**
-1.4 Spacing, 1.3 Icons, 8.1 Tooltips, 1.1 Rounded Panels
+~~1.4 Spacing~~✅, 1.3 Icons, ~~8.1 Tooltips~~✅, ~~1.1 Rounded Panels~~✅
 
 **Sprint 2 – Essenzielle Tabs:**
 2.1 Console, 5.1 Viewport-Einstellungen, 4.2 Suche & Filter

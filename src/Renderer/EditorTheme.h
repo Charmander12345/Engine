@@ -157,6 +157,9 @@ struct EditorTheme
 
     float borderRadius        = 5.0f;
     float separatorThickness  = 1.0f;
+    float sectionSpacing      = 10.0f;  // vertical space before a collapsible section
+    float groupSpacing        = 6.0f;   // vertical space between component groups
+    float gridTileSpacing     = 8.0f;   // gap between Content Browser grid tiles
 
     // ── DPI scaling ──────────────────────────────────────────────────────
     /// Current DPI scale factor applied to all sizing values.
@@ -202,6 +205,9 @@ struct EditorTheme
         // Geometry
         borderRadius       *= ratio;
         separatorThickness *= ratio;
+        sectionSpacing     *= ratio;
+        groupSpacing       *= ratio;
+        gridTileSpacing    *= ratio;
     }
 
     /// Scale an arbitrary pixel value by the current DPI factor.
@@ -336,6 +342,9 @@ struct EditorTheme
         j["iconSizeLarge"]        = iconSizeLarge      * inv;
         j["borderRadius"]         = borderRadius       * inv;
         j["separatorThickness"]   = separatorThickness * inv;
+        j["sectionSpacing"]       = sectionSpacing     * inv;
+        j["groupSpacing"]         = groupSpacing       * inv;
+        j["gridTileSpacing"]      = gridTileSpacing    * inv;
 
         return j;
     }
@@ -466,6 +475,9 @@ struct EditorTheme
         rf("iconSizeLarge",         iconSizeLarge);
         rf("borderRadius",          borderRadius);
         rf("separatorThickness",    separatorThickness);
+        rf("sectionSpacing",        sectionSpacing);
+        rf("groupSpacing",          groupSpacing);
+        rf("gridTileSpacing",       gridTileSpacing);
 
         // JSON stores base (unscaled) values — re-apply current DPI scale
         if (dpiScale > 0.0f && std::abs(dpiScale - 1.0f) > 0.001f)
@@ -483,6 +495,7 @@ struct EditorTheme
             paddingSection = { paddingSection.x * s, paddingSection.y * s };
             indentSize     *= s;  iconSize       *= s;  iconSizeLarge  *= s;
             borderRadius   *= s;  separatorThickness *= s;
+            sectionSpacing *= s;  groupSpacing   *= s;  gridTileSpacing *= s;
         }
     }
 

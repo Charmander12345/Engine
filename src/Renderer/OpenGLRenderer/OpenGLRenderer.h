@@ -585,6 +585,11 @@ private:
     std::unordered_map<std::string, std::unique_ptr<PopupWindow>> m_popupWindows;
     GLuint m_popupUiVao{ 0 };
 
+    // Current rendering viewport size (set at the start of drawUIWidgetsToFramebuffer
+    // so that drawUIPanel/drawUIBrush pass the correct uViewportSize to shaders,
+    // even when rendering into popup windows).
+    Vec2 m_currentRenderViewportSize{};
+
     // Mesh viewer editor windows
     std::unordered_map<std::string, std::unique_ptr<MeshViewerWindow>> m_meshViewers;
 

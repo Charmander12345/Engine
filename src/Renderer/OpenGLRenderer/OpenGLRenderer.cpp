@@ -2316,6 +2316,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
 
     m_textRenderer->setScreenSize(width, height);
     mgr.setAvailableViewportSize(Vec2{ static_cast<float>(width), static_cast<float>(height) });
+    m_currentRenderViewportSize = Vec2{ static_cast<float>(width), static_cast<float>(height) };
 
     if (mgr.needsLayoutUpdate())
     {
@@ -4310,6 +4311,7 @@ void OpenGLRenderer::renderUI()
     }
     m_textRenderer->setScreenSize(width, height);
     m_uiManager.setAvailableViewportSize(Vec2{ static_cast<float>(width), static_cast<float>(height) });
+    m_currentRenderViewportSize = Vec2{ static_cast<float>(width), static_cast<float>(height) };
 
     const bool layoutDirty = m_uiManager.needsLayoutUpdate();
     if (layoutDirty)
@@ -5207,6 +5209,7 @@ void OpenGLRenderer::renderUI()
 
                     uiProjection = glm::ortho(0.0f, static_cast<float>(fboW), static_cast<float>(fboH), 0.0f);
                     m_textRenderer->setScreenSize(fboW, fboH);
+                    m_currentRenderViewportSize = Vec2{ static_cast<float>(fboW), static_cast<float>(fboH) };
 
                     for (const auto& element : widget->getElements())
                     {
@@ -5269,6 +5272,7 @@ void OpenGLRenderer::renderUI()
                     // Restore state — rebind main UI FBO
                     uiProjection = savedProjection;
                     m_textRenderer->setScreenSize(width, height);
+                    m_currentRenderViewportSize = Vec2{ static_cast<float>(width), static_cast<float>(height) };
                     glBindFramebuffer(GL_FRAMEBUFFER, m_uiFbo);
                     glViewport(0, 0, width, height);
                     glEnable(GL_BLEND);
@@ -7696,8 +7700,8 @@ void OpenGLRenderer::drawUIPanel(float x0, float y0, float x1, float y1, const V
         std::min(1.0f, baseColor.z + 0.1f),
         baseColor.w
     };
-    const Vec2 viewportSize = (m_uiManager.getAvailableViewportSize().x > 0.0f && m_uiManager.getAvailableViewportSize().y > 0.0f)
-        ? m_uiManager.getAvailableViewportSize()
+    const Vec2 viewportSize = (m_currentRenderViewportSize.x > 0.0f && m_currentRenderViewportSize.y > 0.0f)
+        ? m_currentRenderViewportSize
         : getViewportSize();
 
     float vertices[6][2] = {

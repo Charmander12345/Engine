@@ -1907,6 +1907,87 @@ void UIManager::updateNotifications(float deltaSeconds)
     {
         updateToastStackLayout();
     }
+
+    // ── Tooltip timer ────────────────────────────────────────────────────
+    if (!m_tooltipText.empty() && !m_tooltipVisible)
+    {
+        m_tooltipTimer += deltaSeconds;
+        if (m_tooltipTimer >= kTooltipDelay)
+        {
+            m_tooltipVisible = true;
+            m_renderDirty = true;
+
+            // Create the tooltip widget
+            const auto& theme = EditorTheme::Get();
+            auto widget = std::make_shared<EditorWidget>();
+            widget->setName("_Tooltip");
+            widget->setAnchor(WidgetAnchor::TopLeft);
+            widget->setAbsolutePosition(true);
+            widget->setZOrder(10000);
+
+            const float padX = EditorTheme::Scaled(8.0f);
+            const float padY = EditorTheme::Scaled(4.0f);
+            const float fontSize = theme.fontSizeSmall;
+
+            // Estimate width based on character count (rough heuristic)
+            const float charW = fontSize * 0.55f;
+            const float estW = padX * 2.0f + charW * static_cast<float>(m_tooltipText.size());
+            const float maxW = EditorTheme::Scaled(320.0f);
+            const float tipW = std::min(std::max(estW, EditorTheme::Scaled(40.0f)), maxW);
+            const float tipH = fontSize + padY * 2.0f + EditorTheme::Scaled(4.0f);
+
+            // Clamp position so the tooltip stays on screen
+            float posX = m_tooltipPosition.x;
+            float posY = m_tooltipPosition.y;
+            if (posX + tipW > m_availableViewportSize.x)
+                posX = m_availableViewportSize.x - tipW;
+            if (posY + tipH > m_availableViewportSize.y)
+                posY = m_tooltipPosition.y - tipH - EditorTheme::Scaled(4.0f);
+            if (posX < 0.0f) posX = 0.0f;
+            if (posY < 0.0f) posY = 0.0f;
+
+            widget->setPositionPixels(Vec2{ posX, posY });
+            widget->setSizePixels(Vec2{ tipW, tipH });
+
+            WidgetElement bg{};
+            bg.type = WidgetElementType::Panel;
+            bg.from = Vec2{ 0.0f, 0.0f };
+            bg.to = Vec2{ 1.0f, 1.0f };
+            bg.style.color = theme.toastBackground;
+            bg.style.borderRadius = theme.borderRadius * 0.6f;
+            bg.runtimeOnly = true;
+
+            WidgetElement text{};
+            text.type = WidgetElementType::Text;
+            text.id = "_Tooltip.Text";
+            text.text = m_tooltipText;
+            text.font = theme.fontDefault;
+            text.fontSize = fontSize;
+            text.style.textColor = theme.toastText;
+            text.textAlignH = TextAlignH::Left;
+            text.textAlignV = TextAlignV::Center;
+            text.from = Vec2{ 0.0f, 0.0f };
+            text.to = Vec2{ 1.0f, 1.0f };
+            text.padding = Vec2{ padX, padY };
+            text.runtimeOnly = true;
+
+            std::vector<WidgetElement> elements;
+            elements.push_back(std::move(bg));
+            elements.push_back(std::move(text));
+            widget->setElements(std::move(elements));
+            widget->markLayoutDirty();
+
+            // Remove previous tooltip widget if any
+            unregisterWidget("_Tooltip");
+            registerWidget("_Tooltip", widget);
+        }
+    }
+    else if (m_tooltipVisible && m_tooltipText.empty())
+    {
+        // Tooltip was hidden by updateHoverStates — remove the widget
+        m_tooltipVisible = false;
+        unregisterWidget("_Tooltip");
+    }
 }
 
 void UIManager::populateOutlinerWidget(const std::shared_ptr<EditorWidget>& widget)
@@ -2064,6 +2145,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
                         "Details.Remove." + sanitizeId(title), "X", {}, EditorTheme::Scaled(Vec2{ 22.0f, 22.0f }));
                     removeBtn.fillX = false;
                     removeBtn.fontSize = EditorTheme::Get().fontSizeSmall;
+                    removeBtn.tooltipText = "Remove " + title;
 
                     const std::string compTitle = title;
                     removeBtn.onClicked = [this, compTitle, onRemove]()
@@ -3138,6 +3220,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
 
         WidgetElement dropdownEl = dropdown.toElement();
         dropdownEl.id = "Details.AddComponent";
+        dropdownEl.tooltipText = "Add a new component to this entity";
         dropdownEl.fillX = true;
         dropdownEl.runtimeOnly = true;
         detailsPanel->children.push_back(std::move(dropdownEl));
@@ -3425,6 +3508,7 @@ static WidgetElement makeGridTile(const std::string& id,
     tile.hitTestMode = HitTestMode::Enabled;
     tile.runtimeOnly = true;
     tile.text = "";
+    tile.margin = Vec2{ theme.gridTileSpacing * 0.5f, theme.gridTileSpacing * 0.5f };
 
     // Icon (top portion)
     if (!iconPath.empty())
@@ -5643,6 +5727,37 @@ void UIManager::updateHoverStates()
     }
 
     m_lastHoveredElement = (newHovered && newHovered->hitTestMode == HitTestMode::Enabled) ? newHovered : nullptr;
+
+    // ── Tooltip tracking ─────────────────────────────────────────────────
+    if (m_lastHoveredElement && !m_lastHoveredElement->tooltipText.empty())
+    {
+        // Same element still hovered — accumulate time (caller must pass dt)
+        if (!m_tooltipVisible && m_tooltipText == m_lastHoveredElement->tooltipText)
+        {
+            // Timer is advanced externally in updateTooltip(dt)
+        }
+        else if (m_tooltipText != m_lastHoveredElement->tooltipText)
+        {
+            // Switched to a new tooltip element — reset timer
+            m_tooltipTimer = 0.0f;
+            m_tooltipVisible = false;
+            m_tooltipText = m_lastHoveredElement->tooltipText;
+        }
+        m_tooltipPosition = Vec2{ m_mousePosition.x + EditorTheme::Scaled(16.0f),
+                                   m_mousePosition.y + EditorTheme::Scaled(16.0f) };
+    }
+    else
+    {
+        // No tooltip element hovered — hide immediately
+        if (m_tooltipVisible || !m_tooltipText.empty())
+        {
+            m_tooltipVisible = false;
+            m_tooltipText.clear();
+            m_tooltipTimer = 0.0f;
+            unregisterWidget("_Tooltip");
+            m_renderDirty = true;
+        }
+    }
 }
 
 void UIManager::registerClickEvent(const std::string& eventId, std::function<void()> callback)

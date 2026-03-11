@@ -206,6 +206,13 @@ private:
 	// Hover tracking (avoids full tree walk per mouse move)
 	WidgetElement* m_lastHoveredElement{ nullptr };
 
+	// Tooltip state
+	float m_tooltipTimer{ 0.0f };         // seconds hovering on the same element
+	std::string m_tooltipText;            // text to show (empty = hidden)
+	Vec2 m_tooltipPosition{};             // screen-space anchor
+	bool m_tooltipVisible{ false };
+	static constexpr float kTooltipDelay = 0.45f; // seconds before showing
+
 	// Save progress modal state
 	std::shared_ptr<EditorWidget> m_saveProgressWidget;
 	bool m_saveProgressVisible{ false };

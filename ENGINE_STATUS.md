@@ -7,7 +7,13 @@
 
 ## Letzte Änderung (Viewport)
 
-- ✅ `DPI/Theme Startup Fix`: `rebuildAllEditorUI()` wird in `main.cpp` vor dem ersten Render aufgerufen, damit das gespeicherte Theme auf alle Widget-Elemente propagiert wird. Behebt: blauen Farbstich beim Start (Widget-JSON-Farben statt Theme-Farben). `rebuildEditorUIForDpi()` vollständig überarbeitet: lädt komplette Widget-Elementbäume aus regenerierten JSON-Dateien per `Widget::loadFromJson()` → `EditorWidget` Properties (nicht nur `m_sizePixels`), sodass `minSize`, `padding`, `fontSize` aller Elemente den neuen DPI-Wert erhalten. Zusätzlich werden alle dynamischen Widgets (Outliner, EntityDetails, ContentBrowser, StatusBar) nach DPI-Wechsel neu aufgebaut.
+- ✅ `Tooltip-System (Phase 8.1)`: Vollständiges Tooltip-System. UIManager: `m_tooltipTimer`/`m_tooltipText`/`m_tooltipVisible` + `kTooltipDelay=0.45s`. Hover-Tracking in `updateHoverStates()`, Timer in `updateNotifications(dt)`. Tooltip als EditorWidget z=10000, `toastBackground`/`toastText`, Bildschirm-Clamping. Tooltips auf 17+ Buttons (Toolbar, TitleBar, StatusBar, Remove Component, Add Component). `kEditorWidgetUIVersion=7`.
+
+- ✅ `Toolbar Redesign (ViewportOverlay)`: Komplette Neugestaltung als ein horizontaler StackPanel. Layout: RenderMode | Undo(↶) Redo(↷) | PIE(zentriert, volle Höhe) | Snap(#) CamSpeed(1.0x) Stats | Settings(Icon). Settings.png statt Text. RenderMode-Dropdown-Bug behoben (war von CenterStack überdeckt). Undo/Redo funktional, Snap/CamSpeed/Stats als Dummy mit Toast.
+
+- ✅ `Editor Spacing & Typography (Phase 1.4)`: `EditorTheme` um `sectionSpacing` (10px), `groupSpacing` (6px), `gridTileSpacing` (8px) erweitert. Alle in `applyDpiScale`/`toJson`/`fromJson` integriert. `SeparatorWidget::toElement()` nutzt `theme.sectionSpacing` als Margin, `theme.separatorThickness` + `theme.panelBorder` für Trennlinien, `theme.sectionHeaderHeight` für Header. Content-Browser Grid-Tiles mit `gridTileSpacing`-Margin. `makeLabel()` → `textSecondary`, `makeSecondaryLabel()` → `textMuted` für konsistente Font-Gewichtung.
+
+- ✅ `DPI/Theme Startup Fix (v2)`: `rebuildAllEditorUI()` durch `rebuildEditorUIForDpi(currentDpi)` in `main.cpp` ersetzt. Startup durchläuft jetzt exakt denselben vollständigen Pfad wie ein DPI-Wechsel zur Laufzeit: JSON-Assets regenerieren → Elementbäume nachladen → Theme anwenden → dynamische Widgets neu aufbauen. Behebt: Skalierung wurde beim Start nicht korrekt auf Buttons/Controls angewendet.
 
 - ✅ `DPI Scaling Phase 2 – Dynamic UI Elements`: Alle dynamisch erzeugten UI-Elemente verwenden `EditorTheme::Scaled()` für Pixelwerte. Betrifft: `makeTreeRow`, `makeGridTile`, `populateOutlinerWidget`, `populateOutlinerDetails`, `populateContentBrowserWidget`, `showDropdownMenu`, UIDesigner. `makeLabel()`/`makeSecondaryLabel()` skalieren `minWidth` intern. Deferred-Dropdown-Rendering: min ItemHeight skaliert + Background-Panel.
 

@@ -686,6 +686,40 @@ int main()
                 Logger::Instance().log(Logger::Category::Input, "Toolbar: Scale mode.", Logger::LogLevel::INFO);
             });
 
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.Undo", [&renderer]()
+            {
+                Logger::Instance().log(Logger::Category::Input, "Toolbar: Undo.", Logger::LogLevel::INFO);
+                UndoRedoManager::Instance().undo();
+                renderer->getUIManager().markAllWidgetsDirty();
+                renderer->getUIManager().refreshWorldOutliner();
+            });
+
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.Redo", [&renderer]()
+            {
+                Logger::Instance().log(Logger::Category::Input, "Toolbar: Redo.", Logger::LogLevel::INFO);
+                UndoRedoManager::Instance().redo();
+                renderer->getUIManager().markAllWidgetsDirty();
+                renderer->getUIManager().refreshWorldOutliner();
+            });
+
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.Snap", [&renderer]()
+            {
+                Logger::Instance().log(Logger::Category::Input, "Toolbar: Grid Snap toggled.", Logger::LogLevel::INFO);
+                renderer->getUIManager().showToastMessage("Grid Snap (coming soon)", 2.0f);
+            });
+
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.CamSpeed", [&renderer]()
+            {
+                Logger::Instance().log(Logger::Category::Input, "Toolbar: Camera Speed.", Logger::LogLevel::INFO);
+                renderer->getUIManager().showToastMessage("Camera Speed (coming soon)", 2.0f);
+            });
+
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.Stats", [&renderer]()
+            {
+                Logger::Instance().log(Logger::Category::Input, "Toolbar: Stats toggled.", Logger::LogLevel::INFO);
+                renderer->getUIManager().showToastMessage("Stats Overlay (coming soon)", 2.0f);
+            });
+
         renderer->getUIManager().registerClickEvent("ViewportOverlay.RenderMode", [&renderer]()
             {
                 auto& uiMgr = renderer->getUIManager();
@@ -1759,10 +1793,15 @@ int main()
     // still visible so the main window never appears white / empty.
     if (renderer)
     {
-        // Apply the loaded theme colours to all widget elements. Widget assets
-        // are created with hardcoded default colours; the saved theme was loaded
-        // earlier (Phase 2b) but never propagated to the registered widgets.
-        renderer->getUIManager().rebuildAllEditorUI();
+        // Run the full DPI rebuild at startup so that every widget element
+        // picks up the correct DPI-scaled sizes, theme colours, and dynamic
+        // content.  This is the same path that runs when the user changes
+        // the DPI slider at runtime, and it guarantees consistency:
+        //   1) regenerate widget JSON assets (ensures _dpiScale matches)
+        //   2) reload all element trees from JSON (sizes, padding, fontSize)
+        //   3) apply theme colours to all elements
+        //   4) re-populate dynamic widgets (Outliner, Details, ContentBrowser)
+        renderer->getUIManager().rebuildEditorUIForDpi(EditorTheme::Get().dpiScale);
 
         // Ensure all loaded widgets are marked dirty so the UI FBO is fully redrawn.
         renderer->getUIManager().markAllWidgetsDirty();

@@ -45,6 +45,8 @@ public:
 
     WidgetElement toElement() const
     {
+        const auto& theme = EditorTheme::Get();
+
         WidgetElement container{};
         container.type = WidgetElementType::StackPanel;
         container.id = m_id.empty() ? "Separator" : "Separator." + m_id;
@@ -52,14 +54,15 @@ public:
         container.fillX = true;
         container.sizeToContent = true;
         container.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        container.margin = Vec2{ 0.0f, theme.sectionSpacing };
         container.runtimeOnly = true;
 
         // Thin divider line above the section
         WidgetElement divider{};
         divider.type = WidgetElementType::Panel;
         divider.fillX = true;
-        divider.minSize = Vec2{ 0.0f, 1.0f };
-        divider.style.color = Vec4{ 0.25f, 0.26f, 0.3f, 0.6f };
+        divider.minSize = Vec2{ 0.0f, theme.separatorThickness };
+        divider.style.color = theme.panelBorder;
         divider.runtimeOnly = true;
 
         // Flat section header (styled as subtle bar, not a prominent button)
@@ -72,8 +75,8 @@ public:
         header.fontSize = m_fontSize;
         header.textAlignH = TextAlignH::Left;
         header.textAlignV = TextAlignV::Center;
-        header.padding = Vec2{ 8.0f, 3.0f };
-        header.minSize = Vec2{ 0.0f, EditorTheme::Scaled(22.0f) };
+        header.padding = EditorTheme::Scaled(Vec2{ 8.0f, 3.0f });
+        header.minSize = Vec2{ 0.0f, theme.sectionHeaderHeight };
         header.style.color = m_headerColor;
         header.style.hoverColor = m_headerHoverColor;
         header.style.textColor = m_titleColor;
