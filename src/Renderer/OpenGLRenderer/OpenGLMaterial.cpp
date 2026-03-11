@@ -355,6 +355,9 @@ void OpenGLMaterial::cacheUniformLocations()
     m_locSkinned = glGetUniformLocation(m_program, "uSkinned");
     m_locBoneMatrices = glGetUniformLocation(m_program, "uBoneMatrices[0]");
     m_locColorTint = glGetUniformLocation(m_program, "uColorTint");
+    m_locDisplacementMap   = glGetUniformLocation(m_program, "uDisplacementMap");
+    m_locDisplacementScale = glGetUniformLocation(m_program, "uDisplacementScale");
+    m_locTessLevel         = glGetUniformLocation(m_program, "uTessLevel");
 }
 
 void OpenGLMaterial::bindTextures()
@@ -604,6 +607,23 @@ void OpenGLMaterial::bind()
     if (m_locColorTint >= 0)
         glUniform3fv(m_locColorTint, 1, glm::value_ptr(m_colorTint));
 
+    // Displacement mapping (tessellation) uniforms
+    if (m_displacementEnabled)
+    {
+        if (m_locDisplacementScale >= 0)
+            glUniform1f(m_locDisplacementScale, m_displacementScale);
+        if (m_locTessLevel >= 0)
+            glUniform1f(m_locTessLevel, m_tessLevel);
+        // Displacement map bound on texture unit 8
+        if (m_locDisplacementMap >= 0 && m_displacementTexture != 0)
+        {
+            constexpr int kDisplacementTexUnit = 8;
+            glActiveTexture(GL_TEXTURE0 + kDisplacementTexUnit);
+            glBindTexture(GL_TEXTURE_2D, m_displacementTexture);
+            glUniform1i(m_locDisplacementMap, kDisplacementTexUnit);
+        }
+    }
+
     bindTextures();
 }
 
@@ -614,13 +634,16 @@ void OpenGLMaterial::unbind()
 void OpenGLMaterial::render()
 {
     bind();
+    const GLenum drawMode = m_displacementEnabled ? GL_PATCHES : GL_TRIANGLES;
+    if (m_displacementEnabled)
+        glPatchParameteri(GL_PATCH_VERTICES, 3);
     if (m_indexCount > 0)
     {
-        glDrawElements(GL_TRIANGLES, m_indexCount, GL_UNSIGNED_INT, nullptr);
+        glDrawElements(drawMode, m_indexCount, GL_UNSIGNED_INT, nullptr);
     }
     else
     {
-        glDrawArrays(GL_TRIANGLES, 0, m_vertexCount);
+        glDrawArrays(drawMode, 0, m_vertexCount);
     }
     unbind();
 }
@@ -664,13 +687,16 @@ void OpenGLMaterial::renderBatchContinuation()
 
     bindTextures();
 
+    const GLenum drawMode = m_displacementEnabled ? GL_PATCHES : GL_TRIANGLES;
+    if (m_displacementEnabled)
+        glPatchParameteri(GL_PATCH_VERTICES, 3);
     if (m_indexCount > 0)
     {
-        glDrawElements(GL_TRIANGLES, m_indexCount, GL_UNSIGNED_INT, nullptr);
+        glDrawElements(drawMode, m_indexCount, GL_UNSIGNED_INT, nullptr);
     }
     else
     {
-        glDrawArrays(GL_TRIANGLES, 0, m_vertexCount);
+        glDrawArrays(drawMode, 0, m_vertexCount);
     }
 }
 
@@ -681,13 +707,16 @@ void OpenGLMaterial::renderInstanced(int instanceCount)
     {
         glUniform1i(m_locInstanced, 1);
     }
+    const GLenum drawMode = m_displacementEnabled ? GL_PATCHES : GL_TRIANGLES;
+    if (m_displacementEnabled)
+        glPatchParameteri(GL_PATCH_VERTICES, 3);
     if (m_indexCount > 0)
     {
-        glDrawElementsInstanced(GL_TRIANGLES, m_indexCount, GL_UNSIGNED_INT, nullptr, instanceCount);
+        glDrawElementsInstanced(drawMode, m_indexCount, GL_UNSIGNED_INT, nullptr, instanceCount);
     }
     else
     {
-        glDrawArraysInstanced(GL_TRIANGLES, 0, m_vertexCount, instanceCount);
+        glDrawArraysInstanced(drawMode, 0, m_vertexCount, instanceCount);
     }
     // Reset instanced state so subsequent non-instanced draws cannot
     // accidentally read stale SSBO data through the same binding point.

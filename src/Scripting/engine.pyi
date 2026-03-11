@@ -900,6 +900,46 @@ class camera:
         """Cancel the active camera transition, keeping the current interpolated position."""
         ...
 
+    @staticmethod
+    def start_path(points: list[tuple[float, float, float, float, float]], duration: float, loop: bool = False) -> bool:
+        """Start a spline-based (Catmull-Rom) camera path through control points.
+
+        Each point is a tuple ``(x, y, z, yaw, pitch)``.  The camera
+        smoothly interpolates through all points over ``duration`` seconds.
+        At least 2 points are required.
+
+        Args:
+            points: List of ``(x, y, z, yaw, pitch)`` tuples.
+            duration: Total playback time in seconds.
+            loop: If True, the path loops seamlessly.
+        """
+        ...
+
+    @staticmethod
+    def is_path_playing() -> bool:
+        """Returns True while a camera path is actively playing (not paused)."""
+        ...
+
+    @staticmethod
+    def pause_path() -> bool:
+        """Pause the active camera path playback."""
+        ...
+
+    @staticmethod
+    def resume_path() -> bool:
+        """Resume a paused camera path."""
+        ...
+
+    @staticmethod
+    def stop_path() -> bool:
+        """Stop the camera path, keeping the current interpolated position."""
+        ...
+
+    @staticmethod
+    def get_path_progress() -> float:
+        """Get normalised progress [0.0 – 1.0] of the current camera path."""
+        ...
+
 # ---------------------------------------------------------------------------
 # engine.particle
 # ---------------------------------------------------------------------------

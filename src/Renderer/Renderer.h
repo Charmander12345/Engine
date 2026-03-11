@@ -6,6 +6,7 @@
 #include <SDL3/SDL.h>
 #include "../Core/MathTypes.h"
 #include "RendererCapabilities.h"
+#include "CameraPath.h"
 
 class UIManager;
 class ViewportUIManager;
@@ -116,6 +117,28 @@ public:
     /// Cancel an active camera transition, keeping the current interpolated position.
     virtual void cancelCameraTransition() {}
 
+    // --- Cinematic camera path (spline-based) ---
+
+    /// Start playback of a camera path (Catmull-Rom spline through control points).
+    /// Each point is {x, y, z, yaw, pitch}.  Duration is total playback time.
+    virtual void startCameraPath(const std::vector<CameraPathPoint>& points, float duration, bool loop = false)
+    {
+        (void)points; (void)duration; (void)loop;
+    }
+
+    /// Returns true while a camera path is playing.
+    virtual bool isCameraPathPlaying() const { return false; }
+
+    /// Pause / resume a playing camera path.
+    virtual void pauseCameraPath() {}
+    virtual void resumeCameraPath() {}
+
+    /// Stop the camera path, keeping the current interpolated position.
+    virtual void stopCameraPath() {}
+
+    /// Get normalised progress [0,1] of the current camera path.
+    virtual float getCameraPathProgress() const { return 0.0f; }
+
     // Active entity camera (used at runtime / PIE)
     virtual void setActiveCameraEntity(unsigned int entity) = 0;
     virtual unsigned int getActiveCameraEntity() const = 0;
@@ -174,6 +197,14 @@ public:
     virtual void setTextureCompressionEnabled(bool /*enabled*/) {}
     virtual bool isTextureStreamingEnabled() const { return false; }
     virtual void setTextureStreamingEnabled(bool /*enabled*/) {}
+
+    // --- Displacement Mapping (Tessellation) ---
+    virtual bool isDisplacementMappingEnabled() const { return false; }
+    virtual void setDisplacementMappingEnabled(bool /*enabled*/) {}
+    virtual float getDisplacementScale() const { return 0.5f; }
+    virtual void setDisplacementScale(float /*scale*/) {}
+    virtual float getTessellationLevel() const { return 16.0f; }
+    virtual void setTessellationLevel(float /*level*/) {}
 
     // --- Debug render mode ---
     virtual DebugRenderMode getDebugRenderMode() const { return DebugRenderMode::Lit; }

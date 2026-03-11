@@ -79,7 +79,10 @@ public:
 	void registerClickEvent(const std::string& eventId, std::function<void()> callback);
 	void markAllWidgetsDirty();
 	void rebuildAllEditorUI();
+	void rebuildEditorUIForDpi(float newDpi);
 	void applyThemeToAllEditorWidgets();
+
+	bool isUIRenderingPaused() const { return m_uiRenderingPaused; }
 
 	bool isRenderDirty() const;
     void clearRenderDirty();
@@ -152,6 +155,7 @@ private:
     WidgetElement* m_focusedEntry{ nullptr };
 	bool m_renderDirty{ true };
 	bool m_themeDirty{ false };
+	bool m_uiRenderingPaused{ false };
 	std::string m_activeTabId{ "Viewport" };
 
 	std::shared_ptr<EditorWidget> m_modalWidget;

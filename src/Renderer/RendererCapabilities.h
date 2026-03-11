@@ -12,4 +12,5 @@ struct RendererCapabilities
     bool supportsPopupWindows       = false;
     bool supportsPostProcessing     = false;
     bool supportsTextureCompression = false;
+    bool supportsTessellation       = false;
 };

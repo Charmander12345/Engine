@@ -64,8 +64,8 @@ struct EditorTheme
     Vec4 checkboxChecked      { 0.20f, 0.48f, 0.85f, 1.0f };   // accent blue
     Vec4 checkboxText         { 0.95f, 0.95f, 0.95f, 1.0f };
 
-    Vec4 dropdownBackground   { 0.07f, 0.07f, 0.07f, 0.98f };
-    Vec4 dropdownHover        { 0.14f, 0.14f, 0.16f, 1.0f };
+    Vec4 dropdownBackground   { 0.13f, 0.13f, 0.16f, 1.0f };
+    Vec4 dropdownHover        { 0.18f, 0.18f, 0.22f, 1.0f };
     Vec4 dropdownText         { 0.95f, 0.95f, 0.95f, 1.0f };
 
     Vec4 sliderTrack          { 0.10f, 0.10f, 0.10f, 1.0f };
@@ -132,30 +132,30 @@ struct EditorTheme
     // ── Fonts ────────────────────────────────────────────────────────────
     const char* fontDefault   = "default.ttf";
 
-    float fontSizeHeading     = 16.0f;
-    float fontSizeSubheading  = 14.0f;
-    float fontSizeBody        = 13.0f;
+    float fontSizeHeading     = 14.0f;
+    float fontSizeSubheading  = 13.0f;
+    float fontSizeBody        = 12.0f;
     float fontSizeSmall       = 11.0f;
     float fontSizeCaption     = 10.0f;
-    float fontSizeMonospace   = 12.0f;
+    float fontSizeMonospace   = 11.0f;
 
     // ── Spacing / sizing ─────────────────────────────────────────────────
-    float rowHeight           = 24.0f;
-    float rowHeightSmall      = 20.0f;
-    float rowHeightLarge      = 28.0f;
-    float sectionHeaderHeight = 26.0f;
-    float toolbarHeight       = 32.0f;
+    float rowHeight           = 20.0f;
+    float rowHeightSmall      = 18.0f;
+    float rowHeightLarge      = 24.0f;
+    float sectionHeaderHeight = 22.0f;
+    float toolbarHeight       = 28.0f;
 
     Vec2 paddingSmall         { 4.0f,  2.0f };
-    Vec2 paddingNormal        { 6.0f,  4.0f };
-    Vec2 paddingLarge         { 10.0f, 6.0f };
-    Vec2 paddingSection       { 8.0f,  4.0f };
+    Vec2 paddingNormal        { 6.0f,  3.0f };
+    Vec2 paddingLarge         { 8.0f,  4.0f };
+    Vec2 paddingSection       { 8.0f,  3.0f };
 
-    float indentSize          = 16.0f;   // tree-view indent per level
-    float iconSize            = 16.0f;   // small icon (tree, list)
-    float iconSizeLarge       = 24.0f;   // toolbar icon
+    float indentSize          = 14.0f;   // tree-view indent per level
+    float iconSize            = 14.0f;   // small icon (tree, list)
+    float iconSizeLarge       = 20.0f;   // toolbar icon
 
-    float borderRadius        = 3.0f;
+    float borderRadius        = 5.0f;
     float separatorThickness  = 1.0f;
 
     // ── DPI scaling ──────────────────────────────────────────────────────
@@ -725,6 +725,7 @@ struct EditorTheme
             el.style.hoverColor   = t.buttonDanger;
             el.style.pressedColor = t.buttonPressed;
             el.style.textColor    = t.buttonText;
+            el.style.borderRadius = 0.0f;  // title bar close stays rectangular
             el.font = t.fontDefault;
             el.fontSize = t.fontSizeBody;
             for (auto& child : el.children) ApplyThemeToElement(child, t);
@@ -738,6 +739,7 @@ struct EditorTheme
             el.style.hoverColor   = t.buttonPrimaryHover;
             el.style.pressedColor = t.buttonPressed;
             el.style.textColor    = t.buttonPrimaryText;
+            el.style.borderRadius = t.borderRadius;
             el.font = t.fontDefault;
             el.fontSize = t.fontSizeBody;
             for (auto& child : el.children) ApplyThemeToElement(child, t);
@@ -778,6 +780,7 @@ struct EditorTheme
             el.style.textColor    = t.buttonText;
             el.style.textHoverColor = t.buttonText;
             el.style.borderColor  = t.panelBorder;
+            el.style.borderRadius = t.borderRadius;
             el.font = t.fontDefault;
             if (el.fontSize <= 0.0f) el.fontSize = t.fontSizeBody;
             break;
@@ -788,6 +791,7 @@ struct EditorTheme
             el.style.pressedColor = t.accent;
             el.style.textColor    = t.buttonText;
             el.style.borderColor  = t.panelBorder;
+            el.style.borderRadius = t.borderRadius;
             el.font = t.fontDefault;
             if (el.fontSize <= 0.0f) el.fontSize = t.fontSizeBody;
             break;
@@ -798,6 +802,7 @@ struct EditorTheme
             el.style.pressedColor = t.buttonPressed;
             el.style.textColor    = t.buttonText;
             el.style.borderColor  = t.panelBorder;
+            el.style.borderRadius = t.borderRadius;
             el.font = t.fontDefault;
             if (el.fontSize <= 0.0f) el.fontSize = t.fontSizeBody;
             break;
@@ -900,6 +905,25 @@ struct EditorTheme
             // Container only, keep transparent
             break;
 
+        default:
+            break;
+        }
+
+        // Apply default border radius from theme for interactive/background elements
+        switch (el.type)
+        {
+        case WidgetElementType::Button:
+        case WidgetElementType::ToggleButton:
+        case WidgetElementType::DropdownButton:
+        case WidgetElementType::EntryBar:
+        case WidgetElementType::DropDown:
+        case WidgetElementType::CheckBox:
+        case WidgetElementType::RadioButton:
+        case WidgetElementType::ProgressBar:
+        case WidgetElementType::Slider:
+            if (el.style.borderRadius <= 0.0f)
+                el.style.borderRadius = t.borderRadius;
+            break;
         default:
             break;
         }

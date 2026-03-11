@@ -95,17 +95,17 @@ Präprozessor-basierte Shader-Varianten implementiert. `ShaderVariantKey` (Bitma
 
 ---
 
-## 14. Cinematic-Kamera / Pfad-Follow
+## ~~14. Cinematic-Kamera / Pfad-Follow~~ ✅
 **Aufwand:** Mittel · **Nutzen:** Gering
 
-Spline-basierte Kamera-Pfade (Catmull-Rom/Bézier) mit Editor-UI zum Platzieren von Kontrollpunkten. Rein Content-getrieben – nur nützlich wenn Cutscene-Workflow gebraucht wird.
+Catmull-Rom-Spline-basierte Kamera-Pfade implementiert. `CameraPath`-Struct (`CameraPath.h`) mit `CameraPathPoint` (Position + Yaw/Pitch) und `evaluate(t)`-Methode für stückweise kubische Catmull-Rom-Interpolation über beliebig viele Kontrollpunkte. Loop-Modus mit nahtlosem Wraparound. `Renderer`-Basisklasse um 6 virtuelle Methoden erweitert: `startCameraPath()`, `isCameraPathPlaying()`, `pauseCameraPath()`, `resumeCameraPath()`, `stopCameraPath()`, `getCameraPathProgress()`. `OpenGLRenderer` implementiert alle Methoden mit SDL-PerformanceCounter-basiertem Delta-Timing im Render-Loop (neben bestehendem `CameraTransition`-Tick). Während Pfad-Playback sind `moveCamera()` und `rotateCamera()` blockiert. Python-API: `engine.camera.start_path(points, duration, loop)`, `is_path_playing()`, `pause_path()`, `resume_path()`, `stop_path()`, `get_path_progress()`. `engine.pyi` aktualisiert.
 
 ---
 
-## 15. Displacement Mapping
+## ~~15. Displacement Mapping~~ ✅
 **Aufwand:** Mittel · **Nutzen:** Gering
 
-Tessellation-Shader (Hull/Domain) für echte Geometrie-Verformung basierend auf Heightmaps. Visuell beeindruckend bei Terrain-Nahansichten, aber hoher GPU-Aufwand und nur in speziellen Szenarien vorteilhaft. Landscape-System nutzt bereits HeightField-Geometrie.
+Tessellation-basiertes Displacement Mapping implementiert. `Shader::Type::Hull`/`Domain` → `GL_TESS_CONTROL_SHADER`/`GL_TESS_EVALUATION_SHADER` in `OpenGLShader.cpp` gemappt. Zwei neue GLSL-Shader: `displacement_tesc.glsl` (Tessellation Control, distanzadaptive Tessellationslevel, 3 Vertices/Patch) und `displacement_tese.glsl` (Tessellation Evaluation, baryzentrisches Catmull-Interpolation aller Attribute, Heightmap-Sampling → Normal-Displacement). `OpenGLMaterial` um Displacement-Uniforms (`uDisplacementMap`, `uDisplacementScale`, `uTessLevel`), `GL_PATCHES`-Draw-Mode in `render()`/`renderBatchContinuation()`/`renderInstanced()`, Displacement-Textur-Slot (Unit 8) erweitert. `Renderer.h` um 6 virtuelle Methoden: `isDisplacementMappingEnabled()`/`setDisplacementMappingEnabled()`, `getDisplacementScale()`/`setDisplacementScale()`, `getTessellationLevel()`/`setTessellationLevel()`. `OpenGLRenderer` implementiert lazy `ensureDisplacementResources()` (4-Stage-Programm: VS+TCS+TES+FS), aktiviert/deaktiviert Displacement pro Material im Draw-Loop, Cleanup in `shutdown()`. Engine Settings UI: Checkbox + zwei Float-Einträge (Scale 0–∞, Level 1–64). Config-Persistenz in `DiagnosticsManager`. `RendererCapabilities::supportsTessellation` hinzugefügt.
 
 ---
 

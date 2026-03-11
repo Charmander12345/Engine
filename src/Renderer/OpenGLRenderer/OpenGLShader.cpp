@@ -73,6 +73,8 @@ static GLenum ToGLType(Shader::Type type)
     case Shader::Type::Fragment: return GL_FRAGMENT_SHADER;
     case Shader::Type::Geometry: return GL_GEOMETRY_SHADER;
     case Shader::Type::Compute: return GL_COMPUTE_SHADER;
+    case Shader::Type::Hull: return GL_TESS_CONTROL_SHADER;
+    case Shader::Type::Domain: return GL_TESS_EVALUATION_SHADER;
     default: return 0;
     }
 }

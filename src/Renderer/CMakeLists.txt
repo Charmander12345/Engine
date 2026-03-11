@@ -3,6 +3,7 @@ add_library(RendererCore OBJECT
     Texture.h
     Material.h
     Camera.h
+    CameraPath.h
     DDSLoader.h
     DDSLoader.cpp
 

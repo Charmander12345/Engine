@@ -122,6 +122,13 @@ public:
     void setSkinned(bool skinned) { m_skinned = skinned; }
     void setBoneMatrices(const float* data, int count);
 
+    // Displacement Mapping (Tessellation)
+    void setDisplacementEnabled(bool enabled) { m_displacementEnabled = enabled; }
+    bool isDisplacementEnabled() const { return m_displacementEnabled; }
+    void setDisplacementScale(float scale) { m_displacementScale = scale; }
+    void setTessellationLevel(float level) { m_tessLevel = level; }
+    void setDisplacementTexture(GLuint tex) { m_displacementTexture = tex; }
+
     // Texture Streaming
     void setTextureStreamingManager(class TextureStreamingManager* mgr) { m_textureStreamingMgr = mgr; }
 
@@ -280,4 +287,13 @@ private:
     float m_boneMatrixData[kMaxBones * 16]{}; // row-major float[16] per bone
     GLint m_locSkinned{-1};
     GLint m_locBoneMatrices{-1};
+
+    // Displacement Mapping (Tessellation)
+    bool  m_displacementEnabled{false};
+    float m_displacementScale{0.5f};
+    float m_tessLevel{16.0f};
+    GLuint m_displacementTexture{0};
+    GLint m_locDisplacementMap{-1};
+    GLint m_locDisplacementScale{-1};
+    GLint m_locTessLevel{-1};
 };

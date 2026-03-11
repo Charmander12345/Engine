@@ -383,6 +383,16 @@ int main()
             renderer->setTextureCompressionEnabled(*v == "1");
         if (auto v = diag.getState("TextureStreamingEnabled"))
             renderer->setTextureStreamingEnabled(*v == "1");
+        if (auto v = diag.getState("DisplacementMappingEnabled"))
+            renderer->setDisplacementMappingEnabled(*v == "1");
+        if (auto v = diag.getState("DisplacementScale"))
+        {
+            try { renderer->setDisplacementScale(std::stof(*v)); } catch (...) {}
+        }
+        if (auto v = diag.getState("TessellationLevel"))
+        {
+            try { renderer->setTessellationLevel(std::stof(*v)); } catch (...) {}
+        }
     }
 
     // In fast mode, show the main window immediately (splash mode keeps it hidden until ready).
@@ -435,6 +445,33 @@ int main()
     if (!audioManager.initialize())
     {
         logTimed(Logger::Category::Engine, "AudioManager initialization failed.", Logger::LogLevel::ERROR);
+    }
+
+    // --- Detect DPI scale early so widget assets are created at correct size ---
+    {
+        float dpiScale = 1.0f;
+        if (auto savedScale = diagnostics.getState("UIScale"); savedScale && !savedScale->empty())
+        {
+            try { dpiScale = std::stof(*savedScale); }
+            catch (...) { dpiScale = 1.0f; }
+        }
+        else
+        {
+            const auto& hwInfo = diagnostics.getHardwareInfo();
+            for (const auto& mon : hwInfo.monitors)
+            {
+                if (mon.primary && mon.dpiScale > 0.0f)
+                {
+                    dpiScale = mon.dpiScale;
+                    break;
+                }
+            }
+        }
+        if (dpiScale < 0.5f)  dpiScale = 0.5f;
+        if (dpiScale > 4.0f)  dpiScale = 4.0f;
+
+        EditorTheme::Get().applyDpiScale(dpiScale);
+        logTimed(Logger::Category::Engine, "DPI scale set to " + std::to_string(dpiScale) + " before asset init.", Logger::LogLevel::INFO);
     }
 
     // Asset system
@@ -496,30 +533,6 @@ int main()
 
     // --- Phase 2b: Load saved editor theme ---
     {
-        // Detect DPI scale from primary monitor (or use saved override)
-        float dpiScale = 1.0f;
-        if (auto savedScale = diagnostics.getState("UIScale"); savedScale && !savedScale->empty())
-        {
-            try { dpiScale = std::stof(*savedScale); }
-            catch (...) { dpiScale = 1.0f; }
-        }
-        else
-        {
-            const auto& hwInfo = diagnostics.getHardwareInfo();
-            for (const auto& mon : hwInfo.monitors)
-            {
-                if (mon.primary && mon.dpiScale > 0.0f)
-                {
-                    dpiScale = mon.dpiScale;
-                    break;
-                }
-            }
-        }
-        if (dpiScale < 0.5f)  dpiScale = 0.5f;
-        if (dpiScale > 4.0f)  dpiScale = 4.0f;
-
-        EditorTheme::Get().applyDpiScale(dpiScale);
-
         if (auto savedTheme = diagnostics.getState("EditorTheme"); savedTheme && !savedTheme->empty())
             EditorTheme::Get().loadThemeByName(*savedTheme);
     }
@@ -1746,6 +1759,11 @@ int main()
     // still visible so the main window never appears white / empty.
     if (renderer)
     {
+        // Apply the loaded theme colours to all widget elements. Widget assets
+        // are created with hardcoded default colours; the saved theme was loaded
+        // earlier (Phase 2b) but never propagated to the registered widgets.
+        renderer->getUIManager().rebuildAllEditorUI();
+
         // Ensure all loaded widgets are marked dirty so the UI FBO is fully redrawn.
         renderer->getUIManager().markAllWidgetsDirty();
 

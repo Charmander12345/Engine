@@ -5,6 +5,7 @@
 #include <functional>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <cstdlib>
 #include <sstream>
 #include <iomanip>
@@ -1961,7 +1962,7 @@ void UIManager::populateOutlinerWidget(const std::shared_ptr<EditorWidget>& widg
     listPanel->fillX = true;
     listPanel->fillY = false;
     listPanel->sizeToContent = false;
-    listPanel->padding = Vec2{ 2.0f, 2.0f };
+    listPanel->padding = EditorTheme::Scaled(Vec2{ 2.0f, 2.0f });
 
     auto& ecs = ECS::ECSManager::Instance();
     ECS::Schema schema;
@@ -2060,7 +2061,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
                     originalHeader.fillX = true;
 
                     WidgetElement removeBtn = EditorUIBuilder::makeDangerButton(
-                        "Details.Remove." + sanitizeId(title), "X", {}, Vec2{ 22.0f, 22.0f });
+                        "Details.Remove." + sanitizeId(title), "X", {}, EditorTheme::Scaled(Vec2{ 22.0f, 22.0f }));
                     removeBtn.fillX = false;
                     removeBtn.fontSize = EditorTheme::Get().fontSizeSmall;
 
@@ -2355,11 +2356,11 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             row.fillX = true;
             row.sizeToContent = true;
             row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-            row.padding = Vec2{ 0.0f, 1.0f };
+            row.padding = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
             row.runtimeOnly = true;
 
             WidgetElement lbl = makeTextLine("Type");
-            lbl.minSize = Vec2{ 90.0f, 20.0f };
+            lbl.minSize = EditorTheme::Scaled(Vec2{ 90.0f, 20.0f });
             lbl.fillX = false;
             row.children.push_back(std::move(lbl));
 
@@ -2379,18 +2380,18 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             row.fillX = true;
             row.sizeToContent = true;
             row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-            row.padding = Vec2{ 0.0f, 1.0f };
+            row.padding = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
             row.runtimeOnly = true;
 
             WidgetElement lbl = makeTextLine("Color");
-            lbl.minSize = Vec2{ 90.0f, 20.0f };
+            lbl.minSize = EditorTheme::Scaled(Vec2{ 90.0f, 20.0f });
             lbl.fillX = false;
             row.children.push_back(std::move(lbl));
 
             ColorPickerWidget cp;
             cp.setColor(Vec4{ light->color[0], light->color[1], light->color[2], 1.0f });
             cp.setCompact(true);
-            cp.setMinSize(Vec2{ 0.0f, 20.0f });
+            cp.setMinSize(EditorTheme::Scaled(Vec2{ 0.0f, 20.0f }));
             cp.setOnColorChanged([entity](const Vec4& c) {
                 auto& ecs = ECS::ECSManager::Instance();
                 if (auto* comp = ecs.getComponent<ECS::LightComponent>(entity))
@@ -2539,11 +2540,11 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             row.fillX = true;
             row.sizeToContent = true;
             row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-            row.padding = Vec2{ 0.0f, 1.0f };
+            row.padding = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
             row.runtimeOnly = true;
 
             WidgetElement lbl = makeTextLine("Collider");
-            lbl.minSize = Vec2{ 90.0f, 20.0f };
+            lbl.minSize = EditorTheme::Scaled(Vec2{ 90.0f, 20.0f });
             lbl.fillX = false;
             row.children.push_back(std::move(lbl));
 
@@ -2649,11 +2650,11 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             row.fillX = true;
             row.sizeToContent = true;
             row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-            row.padding = Vec2{ 0.0f, 1.0f };
+            row.padding = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
             row.runtimeOnly = true;
 
             WidgetElement lbl = makeTextLine("Motion Type");
-            lbl.minSize = Vec2{ 90.0f, 20.0f };
+            lbl.minSize = EditorTheme::Scaled(Vec2{ 90.0f, 20.0f });
             lbl.fillX = false;
             row.children.push_back(std::move(lbl));
 
@@ -2758,11 +2759,11 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             row.fillX = true;
             row.sizeToContent = true;
             row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
-            row.padding = Vec2{ 0.0f, 1.0f };
+            row.padding = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
             row.runtimeOnly = true;
 
             WidgetElement lbl = makeTextLine("Motion Quality");
-            lbl.minSize = Vec2{ 90.0f, 20.0f };
+            lbl.minSize = EditorTheme::Scaled(Vec2{ 90.0f, 20.0f });
             lbl.fillX = false;
             row.children.push_back(std::move(lbl));
 
@@ -3395,7 +3396,7 @@ static WidgetElement makeTreeRow(const std::string& id,
         lbl.style.textColor = theme.textPrimary;
         lbl.from = Vec2{ textFrom, 0.0f };
         lbl.to   = Vec2{ 1.0f, 1.0f };
-        lbl.padding = Vec2{ 3.0f, 2.0f };
+        lbl.padding = EditorTheme::Scaled(Vec2{ 3.0f, 2.0f });
         lbl.runtimeOnly = true;
         btn.children.push_back(std::move(lbl));
     }
@@ -3416,7 +3417,7 @@ static WidgetElement makeGridTile(const std::string& id,
     WidgetElement tile{};
     tile.id = id;
     tile.type = WidgetElementType::Button;
-    tile.minSize = Vec2{ 80.0f, 80.0f };
+    tile.minSize = EditorTheme::Scaled(Vec2{ 80.0f, 80.0f });
     tile.style.color = theme.buttonSubtle;
     tile.style.hoverColor = theme.cbTileHover;
     tile.shaderVertex = "button_vertex.glsl";
@@ -3452,7 +3453,7 @@ static WidgetElement makeGridTile(const std::string& id,
         lbl.style.textColor = theme.textPrimary;
         lbl.from = Vec2{ 0.0f, 0.65f };
         lbl.to   = Vec2{ 1.0f, 1.0f };
-        lbl.padding = Vec2{ 2.0f, 1.0f };
+        lbl.padding = EditorTheme::Scaled(Vec2{ 2.0f, 1.0f });
         lbl.runtimeOnly = true;
         tile.children.push_back(std::move(lbl));
     }
@@ -3505,8 +3506,8 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
             loadingRow.textAlignH = TextAlignH::Left;
             loadingRow.textAlignV = TextAlignV::Center;
             loadingRow.fillX = true;
-            loadingRow.minSize = Vec2{ 0.0f, 24.0f };
-            loadingRow.padding = Vec2{ 8.0f, 4.0f };
+            loadingRow.minSize = EditorTheme::Scaled(Vec2{ 0.0f, 24.0f });
+            loadingRow.padding = EditorTheme::Scaled(Vec2{ 8.0f, 4.0f });
             loadingRow.runtimeOnly = true;
             treePanel->children.push_back(std::move(loadingRow));
         }
@@ -3746,7 +3747,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
         {
             const auto& theme = EditorTheme::Get();
             WidgetElement backBtn = EditorUIBuilder::makeSubtleButton(
-                "ContentBrowser.PathBar.Back", "<", {}, Vec2{ 24.0f, theme.rowHeightSmall });
+                "ContentBrowser.PathBar.Back", "<", {}, EditorTheme::Scaled(Vec2{ 24.0f, theme.rowHeightSmall }));
             backBtn.fillX = false;
             backBtn.sizeToContent = false;
             backBtn.onClicked = [this]()
@@ -3771,7 +3772,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
         // Import button
         {
             WidgetElement importBtn = EditorUIBuilder::makePrimaryButton(
-                "ContentBrowser.PathBar.Import", "+ Import", {}, Vec2{ 64.0f, EditorTheme::Get().rowHeightSmall });
+                "ContentBrowser.PathBar.Import", "+ Import", {}, EditorTheme::Scaled(Vec2{ 64.0f, EditorTheme::Get().rowHeightSmall }));
             importBtn.fillX = false;
             pathBar->children.push_back(std::move(importBtn));
         }
@@ -3780,7 +3781,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
         {
             const auto& theme = EditorTheme::Get();
             WidgetElement renameBtn = EditorUIBuilder::makeButton(
-                "ContentBrowser.PathBar.Rename", "Rename", {}, Vec2{ 60.0f, theme.rowHeightSmall });
+                "ContentBrowser.PathBar.Rename", "Rename", {}, EditorTheme::Scaled(Vec2{ 60.0f, theme.rowHeightSmall }));
             renameBtn.fillX = false;
             if (!m_selectedGridAsset.empty())
             {
@@ -3837,7 +3838,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
                 sep.style.textColor = EditorTheme::Get().textMuted;
                 sep.textAlignH = TextAlignH::Center;
                 sep.textAlignV = TextAlignV::Center;
-                sep.minSize = Vec2{ 14.0f, 20.0f };
+                sep.minSize = EditorTheme::Scaled(Vec2{ 14.0f, 20.0f });
                 sep.runtimeOnly = true;
                 pathBar->children.push_back(std::move(sep));
             }
@@ -5318,6 +5319,81 @@ void UIManager::rebuildAllEditorUI()
     markAllWidgetsDirty();
 }
 
+void UIManager::rebuildEditorUIForDpi(float newDpi)
+{
+    m_uiRenderingPaused = true;
+
+    // 1. Apply new DPI to theme (scales fonts, spacing, borderRadius, etc.)
+    EditorTheme::Get().applyDpiScale(newDpi);
+
+    // 2. Regenerate widget asset files with the new DPI baked into dimensions.
+    //    ensureEditorWidgetsCreated() checks _dpiScale in each file; since the
+    //    theme now carries the new scale the comparison will fail and every
+    //    editor widget asset is rewritten.
+    auto& am = AssetManager::Instance();
+    am.ensureEditorWidgetsCreated();
+
+    // 3. Fully reload each editor widget from the regenerated asset files.
+    //    This refreshes m_sizePixels AND all element minSize/padding/fontSize
+    //    values that were baked with the new DPI.
+    struct WidgetFileMapping { const char* widgetId; const char* assetFile; };
+    static constexpr WidgetFileMapping kMappings[] = {
+        { "TitleBar",        "TitleBar.asset" },
+        { "ViewportOverlay", "ViewportOverlay.asset" },
+        { "WorldSettings",   "WorldSettings.asset" },
+        { "WorldOutliner",   "WorldOutliner.asset" },
+        { "EntityDetails",   "EntityDetails.asset" },
+        { "StatusBar",       "StatusBar.asset" },
+        { "ContentBrowser",  "ContentBrowser.asset" },
+    };
+
+    for (const auto& mapping : kMappings)
+    {
+        auto* entry = findWidgetEntry(mapping.widgetId);
+        if (!entry || !entry->widget) continue;
+
+        const std::string path = am.getEditorWidgetPath(mapping.assetFile);
+        std::ifstream in(path);
+        if (!in.is_open()) continue;
+
+        auto fileJson = nlohmann::json::parse(in, nullptr, false);
+        in.close();
+        if (fileJson.is_discarded() || !fileJson.is_object() || !fileJson.contains("data"))
+            continue;
+
+        // Reload through a temporary Widget so all element pixel values
+        // (minSize, padding, fontSize) are refreshed from the new-DPI JSON.
+        auto tempWidget = std::make_shared<Widget>();
+        if (tempWidget->loadFromJson(fileJson.at("data")))
+        {
+            entry->widget->setSizePixels(tempWidget->getSizePixels());
+            entry->widget->setPositionPixels(tempWidget->getPositionPixels());
+            entry->widget->setAnchor(tempWidget->getAnchor());
+            entry->widget->setFillX(tempWidget->getFillX());
+            entry->widget->setFillY(tempWidget->getFillY());
+            entry->widget->setElements(tempWidget->getElements());
+        }
+    }
+
+    // 4. Apply theme colours & DPI-scaled fonts/spacing to all widget elements.
+    applyThemeToAllEditorWidgets();
+
+    // 5. Re-populate dynamic widgets with new DPI-scaled values.
+    //    Runtime elements (outliner rows, detail rows, content browser tiles)
+    //    cached their old DPI-scaled sizes; we need to rebuild them.
+    refreshWorldOutliner();
+    populateOutlinerDetails(m_outlinerSelectedEntity);
+    if (auto* cb = findWidgetEntry("ContentBrowser"))
+    {
+        if (cb->widget) populateContentBrowserWidget(cb->widget);
+    }
+    refreshStatusBar();
+
+    markAllWidgetsDirty();
+
+    m_uiRenderingPaused = false;
+}
+
 void UIManager::applyThemeToAllEditorWidgets()
 {
     // Close any open dropdown – its Panel/Button elements would receive
@@ -6371,9 +6447,9 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
     if (items.empty()) return;
 
     const auto& theme = EditorTheme::Get();
-    constexpr float kItemH = 28.0f;
-    constexpr float kPadY = 4.0f;
-    constexpr float kDefaultMenuW = 180.0f;
+    const float kItemH = EditorTheme::Scaled(28.0f);
+    const float kPadY = EditorTheme::Scaled(4.0f);
+    const float kDefaultMenuW = EditorTheme::Scaled(180.0f);
     const float menuW = std::max(kDefaultMenuW, minWidth);
     const float menuH = kPadY * 2.0f + static_cast<float>(items.size()) * kItemH;
 
@@ -6453,7 +6529,7 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
         item.style.textColor     = theme.textPrimary;
         item.textAlignH    = TextAlignH::Left;
         item.textAlignV    = TextAlignV::Center;
-        item.padding       = Vec2{ 12.0f, 4.0f };
+        item.padding       = EditorTheme::Scaled(Vec2{ 12.0f, 4.0f });
         item.hitTestMode = HitTestMode::Enabled;
 
         auto callback = items[i].onClick;
@@ -6795,7 +6871,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
             sep.id = "WidgetEditor.Left.Sep";
             sep.type = WidgetElementType::Panel;
             sep.fillX = true;
-            sep.minSize = Vec2{ 0.0f, 1.0f };
+            sep.minSize = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
             sep.style.color = EditorTheme::Get().panelBorder;
             sep.runtimeOnly = true;
             root.children.push_back(std::move(sep));
@@ -9469,6 +9545,33 @@ void UIManager::openEngineSettingsPopup()
                     DiagnosticsManager::Instance().setState("TextureStreamingEnabled", v ? "1" : "0");
                     DiagnosticsManager::Instance().saveConfig();
                 });
+            addCheckbox("ES.C.Displacement", "Displacement Mapping (Tessellation)",
+                renderer->isDisplacementMappingEnabled(),
+                [renderer](bool v) {
+                    renderer->setDisplacementMappingEnabled(v);
+                    DiagnosticsManager::Instance().setState("DisplacementMappingEnabled", v ? "1" : "0");
+                    DiagnosticsManager::Instance().saveConfig();
+                });
+            addFloatEntry("ES.C.DispScale", "Displacement Scale",
+                std::to_string(renderer->getDisplacementScale()),
+                [renderer](const std::string& v) {
+                    try {
+                        float fv = std::stof(v);
+                        renderer->setDisplacementScale(fv);
+                        DiagnosticsManager::Instance().setState("DisplacementScale", v);
+                        DiagnosticsManager::Instance().saveConfig();
+                    } catch (...) {}
+                });
+            addFloatEntry("ES.C.TessLevel", "Tessellation Level",
+                std::to_string(renderer->getTessellationLevel()),
+                [renderer](const std::string& v) {
+                    try {
+                        float fv = std::max(1.0f, std::min(std::stof(v), 64.0f));
+                        renderer->setTessellationLevel(fv);
+                        DiagnosticsManager::Instance().setState("TessellationLevel", std::to_string(fv));
+                        DiagnosticsManager::Instance().saveConfig();
+                    } catch (...) {}
+                });
         }
         else if (state->activeCategory == 2) // Debug
         {
@@ -9991,8 +10094,7 @@ void UIManager::openEditorSettingsPopup()
                 }
 
                 auto& t = EditorTheme::Get();
-                t.applyDpiScale(newScale);
-                selfScale->rebuildAllEditorUI();
+                selfScale->rebuildEditorUIForDpi(newScale);
                 DiagnosticsManager::Instance().saveConfig();
             };
             row.children.push_back(dd);
@@ -12235,7 +12337,7 @@ void UIManager::openUIDesignerTab()
             WidgetElement spacer{};
             spacer.type        = WidgetElementType::Panel;
             spacer.fillX       = true;
-            spacer.minSize     = Vec2{ 0.0f, 1.0f };
+            spacer.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
             spacer.style.color       = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             spacer.runtimeOnly = true;
             root.children.push_back(std::move(spacer));
@@ -12381,7 +12483,7 @@ void UIManager::openUIDesignerTab()
             sep.id         = "UIDesigner.Left.Sep";
             sep.type       = WidgetElementType::Panel;
             sep.fillX      = true;
-            sep.minSize    = Vec2{ 0.0f, 1.0f };
+            sep.minSize    = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
             sep.style.color      = EditorTheme::Get().panelBorder;
             sep.runtimeOnly = true;
             root.children.push_back(std::move(sep));
@@ -12396,7 +12498,7 @@ void UIManager::openUIDesignerTab()
             hierarchySection.fillY       = true;
             hierarchySection.scrollable  = true;
             hierarchySection.orientation = StackOrientation::Vertical;
-            hierarchySection.padding     = Vec2{ 10.0f, 8.0f };
+            hierarchySection.padding     = EditorTheme::Scaled(Vec2{ 10.0f, 8.0f });
             hierarchySection.style.color       = Vec4{ 0.08f, 0.09f, 0.12f, 0.75f };
             hierarchySection.runtimeOnly = true;
 

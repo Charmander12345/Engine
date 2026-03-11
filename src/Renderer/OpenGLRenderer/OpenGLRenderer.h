@@ -84,6 +84,13 @@ public:
     bool isCameraTransitioning() const override;
     void cancelCameraTransition() override;
 
+    void startCameraPath(const std::vector<CameraPathPoint>& points, float duration, bool loop) override;
+    bool isCameraPathPlaying() const override;
+    void pauseCameraPath() override;
+    void resumeCameraPath() override;
+    void stopCameraPath() override;
+    float getCameraPathProgress() const override;
+
     void setActiveCameraEntity(unsigned int entity) override;
     unsigned int getActiveCameraEntity() const override;
     void clearActiveCameraEntity() override;
@@ -144,6 +151,8 @@ private:
     void rebuildHeightFieldDebugMesh();
     void renderHeightFieldDebug(const glm::mat4& viewProj);
     void releaseHeightFieldDebugResources();
+    bool ensureDisplacementResources();
+    void releaseDisplacementResources();
     bool ensurePickFbo(int width, int height);
     void releasePickFbo();
     void renderPickBuffer(const glm::mat4& view, const glm::mat4& projection);
@@ -151,8 +160,8 @@ private:
     bool ensureOutlineResources();
     void releaseOutlineResources();
     void drawUIPanel(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program,
-        const Vec4& hoverColor = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f }, bool isHovered = false);
-    void drawUIBrush(float x0, float y0, float x1, float y1, const UIBrush& brush, const glm::mat4& projection, float opacity = 1.0f, bool isHovered = false, const UIBrush* hoverBrush = nullptr);
+        const Vec4& hoverColor = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f }, bool isHovered = false, float borderRadius = 0.0f);
+    void drawUIBrush(float x0, float y0, float x1, float y1, const UIBrush& brush, const glm::mat4& projection, float opacity = 1.0f, bool isHovered = false, const UIBrush* hoverBrush = nullptr, float borderRadius = 0.0f);
     void drawUIImage(float x0, float y0, float x1, float y1, GLuint textureId, const glm::mat4& projection, const Vec4& tintColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }, bool invertRGB = false, bool flipY = false);
     GLuint getOrLoadUITexture(const std::string& path);
     void drawUIOutline(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program);
@@ -193,6 +202,12 @@ private:
     unsigned int m_activeCameraEntity{ 0 };
     CameraTransition m_cameraTransition;
     uint64_t m_lastTransitionTick{0};
+
+    CameraPath m_cameraPath;
+    float m_cameraPathElapsed{0.0f};
+    bool m_cameraPathActive{false};
+    bool m_cameraPathPaused{false};
+    uint64_t m_lastPathTick{0};
 
     ParticleSystem m_particleSystem;
     uint64_t m_lastParticleTick{0};
@@ -238,6 +253,7 @@ private:
         GLint viewportSize{ -1 };
         GLint hoverColor{ -1 };
         GLint isHovered{ -1 };
+        GLint borderRadiusLoc{ -1 };
     };
     struct UIImageUniforms
     {
@@ -341,6 +357,12 @@ private:
 
     // Texture streaming
     TextureStreamingManager m_textureStreaming;
+
+    // Displacement Mapping (Tessellation)
+    bool  m_displacementEnabled{false};
+    float m_displacementScale{0.5f};
+    float m_tessLevel{16.0f};
+    GLuint m_displacementProgram{0};  // Shader program with tess stages
 
     float m_exposure{1.0f};
     AntiAliasingMode m_aaMode{AntiAliasingMode::None};
@@ -620,6 +642,12 @@ public:
     bool isTextureCompressionEnabled() const override { return m_textureCompressionEnabled; }
     void setTextureStreamingEnabled(bool enabled) override { m_textureStreamingEnabled = enabled; }
     bool isTextureStreamingEnabled() const override { return m_textureStreamingEnabled; }
+    void setDisplacementMappingEnabled(bool enabled) override { m_displacementEnabled = enabled; }
+    bool isDisplacementMappingEnabled() const override { return m_displacementEnabled; }
+    void setDisplacementScale(float scale) override { m_displacementScale = scale; }
+    float getDisplacementScale() const override { return m_displacementScale; }
+    void setTessellationLevel(float level) override { m_tessLevel = level; }
+    float getTessellationLevel() const override { return m_tessLevel; }
     void setRenderFrozen(bool frozen) override { m_renderFrozen = frozen; }
     bool isRenderFrozen() const override { return m_renderFrozen; }
     void setDebugRenderMode(DebugRenderMode mode) override { m_debugRenderMode = mode; }
