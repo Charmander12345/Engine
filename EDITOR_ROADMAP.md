@@ -55,7 +55,7 @@
 |---------|--------|
 | Material Editor Tab (voller Tab, nicht nur Popup) | ❌ |
 | Shader Editor / Viewer | ❌ |
-| Console / Log-Viewer | ❌ |
+| Console / Log-Viewer | ✅ |
 | Animation Editor (Skeletal) | ❌ |
 | Particle Editor | ❌ |
 | Texture Viewer | ❌ |
@@ -89,7 +89,7 @@
 - [x] Kein visueller Bruch zwischen Elementen mit und ohne Radius
 
 ### 1.2 Schatten & Tiefe (Elevation System)
-**Aktueller Stand:** Kein visuelles Tiefensystem. Alle Panels wirken „flach" auf einer Ebene.
+**Aktueller Stand:** Elevation-System vollständig implementiert. `elevation`-Feld (int, 0–5) in `WidgetElement`, `applyElevation()` Helper in `WidgetElementStyle`. `EditorTheme` mit `shadowColor`/`shadowOffset` (DPI-skaliert, JSON-serialisiert). `drawUIShadow()` mit variablem `blurRadius`. Modals/Toasts elevation=3, Dropdowns elevation=2, Deferred-Dropdowns mit Theme-Shadow. Widget-Editor: Shadow & Elevation-Sektion mit Elevation-Slider + Blur-Radius.
 
 **Ziel:** Leichter Drop-Shadow auf schwebenden Elementen (Dropdowns, Modals, Toasts, Kontextmenüs) für visuelle Hierarchie.
 
@@ -101,10 +101,10 @@
 - Modals, Toasts und Dropdown-Menüs bekommen automatisch `elevation = 3`
 
 **Fortschrittsprüfung:**
-- [ ] Dropdown-Menüs haben sichtbaren Schatten
-- [ ] Modal-Dialoge heben sich visuell vom Hintergrund ab
-- [ ] Toasts wirken wie schwebende Karten
-- [ ] Elevation 0 Panels haben keinen Schatten (kein Overhead)
+- [x] Dropdown-Menüs haben sichtbaren Schatten
+- [x] Modal-Dialoge heben sich visuell vom Hintergrund ab
+- [x] Toasts wirken wie schwebende Karten
+- [x] Elevation 0 Panels haben keinen Schatten (kein Overhead)
 
 ### 1.3 Modernisierte Icon-Sprache
 **Aktueller Stand:** Icons werden als PNG-Texturen geladen (`Editor/Textures/`) und per Tint-Color eingefärbt. Es gibt keine Icon-Font und keine SVG-Unterstützung.
@@ -184,7 +184,7 @@
 ### 2.1 Console / Log-Viewer Tab
 **Priorität:** Hoch (essentiell für Debugging und Scripting)
 
-**Beschreibung:** Ein dedizierter Tab (oder festes Bottom-Panel) für Live-Log-Output. Zeigt Nachrichten des Logger-Systems (INFO/WARNING/ERROR/FATAL), Python-Print-Output, und Engine-Diagnosen.
+**Aktueller Stand:** Vollständig implementiert. Schließbarer Tab mit Toolbar (Filter-Buttons, Suchfeld, Clear, Auto-Scroll), scrollbarer Log-Area, farbcodierte Einträge aus Logger-Ringbuffer (2000 max). 0.5s-Refresh-Timer. Zugang über Settings-Dropdown.
 
 **Herangehensweise:**
 - Neuer `ConsoleTab` der den bestehenden `Logger`-Singleton anzapft
@@ -209,8 +209,8 @@
 - [x] Tab zeigt Live-Log-Einträge in Echtzeit
 - [x] Filter reduzieren die sichtbaren Zeilen korrekt
 - [x] Suche findet Teilstrings in Nachrichten
-- [ ] Python `print()` erscheint im Console-Tab
-- [ ] Performance: 10.000+ Einträge ohne Stutter
+- [ ] Python `print()` erscheint im Console-Tab (sys.stdout Umleitung ausstehend)
+- [ ] Performance: 10.000+ Einträge ohne Stutter (virtualisierte Zeilen ausstehend)
 
 ### 2.2 Material Editor Tab (Vollwertiger Tab statt Popup)
 **Priorität:** Hoch (Material-Editing ist einer der häufigsten Workflows)
@@ -353,7 +353,7 @@
 > **Ziel:** Dem Entwickler möglichst viel Arbeit abnehmen. Intelligente Defaults, Auto-Konfiguration, One-Click-Workflows.
 
 ### 3.1 Auto-Material-Erstellung bei Model-Import
-**Aktueller Stand:** Assimp extrahiert bereits Materialien und Texturen beim Import. Allerdings muss der Entwickler die Material-Assets manuell zuweisen.
+**Aktueller Stand:** Vollständig implementiert. Assimp-Import erzeugt automatisch Material- und Textur-Assets. PBR-Daten (Metallic, Roughness) werden übernommen, Fallback-Defaults gesetzt. Textur-Slots (Diffuse, Specular, Normal, Emissive, MetallicRoughness) automatisch verknüpft. Detaillierte Toast-Benachrichtigung mit Material-/Textur-Zähler.
 
 **Ziel:** Beim Import eines 3D-Modells werden automatisch:
 1. Alle Texturen extrahiert und als Textur-Assets registriert
@@ -369,10 +369,10 @@
 - Toast-Benachrichtigung: „Imported {model} with {n} materials and {m} textures"
 
 **Fortschrittsprüfung:**
-- [ ] FBX-Import erzeugt automatisch Material-Assets
-- [ ] Texturen werden automatisch extrahiert und referenziert
-- [ ] Mesh im Viewport zeigt sofort die korrekten Texturen
-- [ ] Toast-Nachricht informiert über den Import-Umfang
+- [x] FBX-Import erzeugt automatisch Material-Assets
+- [x] Texturen werden automatisch extrahiert und referenziert
+- [x] Mesh im Viewport zeigt sofort die korrekten Texturen
+- [x] Toast-Nachricht informiert über den Import-Umfang
 
 ### 3.2 Smart Entity Templates / Prefabs
 **Aktueller Stand:** Keine Prefab- oder Template-Funktionalität. Jede Entity muss manuell konfiguriert werden.
@@ -505,7 +505,7 @@
 - [ ] Thumbnails werden gecacht und schnell geladen
 
 ### 4.2 Erweiterte Such- und Filterfunktion
-**Aktueller Stand:** Kein Suchfeld im Content Browser.
+**Aktueller Stand:** Vollständig implementiert. Echtzeit-Suchfeld + 7 Typ-Filter-Toggle-Buttons in der PathBar. Suchmodus durchsucht alle Ordner als flache Liste. Typ-Filter per Bitmask. Ctrl+F fokussiert Suchfeld. Doppelklick auf Suchergebnis navigiert zum Ordner + öffnet Asset-Editor.
 
 **Ziel:** Echtzeit-Suche über alle Assets, Filter nach Typ.
 
@@ -518,10 +518,10 @@
 - Keyboard-Shortcut: Ctrl+F fokussiert das Suchfeld
 
 **Fortschrittsprüfung:**
-- [ ] Suchfeld ist sichtbar im Content Browser
-- [ ] Echtzeit-Filtern funktioniert
-- [ ] Typ-Filter-Buttons reduzieren die Ergebnisse
-- [ ] Ctrl+F fokussiert das Suchfeld
+- [x] Suchfeld ist sichtbar im Content Browser
+- [x] Echtzeit-Filtern funktioniert
+- [x] Typ-Filter-Buttons reduzieren die Ergebnisse
+- [x] Ctrl+F fokussiert das Suchfeld
 
 ### 4.3 Drag & Drop Verbesserungen
 **Aktueller Stand:** Drag & Drop von Assets auf den Viewport zum Spawnen existiert. Textur-Drag auf Entity-Details existiert.
@@ -609,7 +609,7 @@
 - [ ] Löschen entfernt alle selektierten Entities (mit Undo)
 
 ### 5.3 Entity Copy/Paste & Duplicate
-**Aktueller Stand:** Kein Copy/Paste für Entities.
+**Aktueller Stand:** Vollständig implementiert. `EntityClipboard`-Struct mit 13 Komponenten-Snapshots. Ctrl+C kopiert, Ctrl+V pastet (+1x Offset, Name-Suffix „(Copy)"), Ctrl+D dupliziert ohne Clipboard zu überschreiben. Undo/Redo-Integration.
 
 **Ziel:** Ctrl+C / Ctrl+V / Ctrl+D für Entities.
 
@@ -621,10 +621,10 @@
 - Multi-Select: Copy/Paste von mehreren Entities gleichzeitig
 
 **Fortschrittsprüfung:**
-- [ ] Ctrl+C + Ctrl+V dupliziert eine Entity
-- [ ] Duplizierte Entity hat einen Positions-Offset
-- [ ] Ctrl+D funktioniert als Shortcut
-- [ ] Undo macht das Duplizieren rückgängig
+- [x] Ctrl+C + Ctrl+V dupliziert eine Entity
+- [x] Duplizierte Entity hat einen Positions-Offset
+- [x] Ctrl+D funktioniert als Shortcut
+- [x] Undo macht das Duplizieren rückgängig
 
 ### 5.4 Transform-Einrasten auf Oberflächen
 **Aktueller Stand:** Kein Surface-Snapping.
@@ -862,7 +862,7 @@
 | Phase | Beschreibung | Priorität | Aufwand | Status |
 |-------|-------------|-----------|---------|--------|
 | **1.1** | Abgerundete Panels | Mittel | Mittel | ✅ |
-| **1.2** | Schatten & Tiefe | Niedrig | Mittel | ❌ |
+| **1.2** | Schatten & Tiefe | Niedrig | Mittel | ✅ |
 | **1.3** | Modernisierte Icons | Hoch | Mittel | ❌ |
 | **1.4** | Überarbeitetes Spacing | Hoch | Gering | ✅ |
 | **1.5** | Animierte Übergänge | Niedrig | Mittel | ❌ |
@@ -874,19 +874,19 @@
 | **2.5** | Particle Editor | Mittel | Mittel | ❌ |
 | **2.6** | Audio Preview | Niedrig–Mittel | Gering | ❌ |
 | **2.7** | Profiler Tab | Mittel | Mittel | ❌ |
-| **3.1** | Auto-Material bei Import | Hoch | Gering | ❌ |
+| **3.1** | Auto-Material bei Import | Hoch | Gering | ✅ |
 | **3.2** | Entity Templates / Prefabs | Hoch | Mittel | ❌ |
 | **3.3** | One-Click Scene Setup | Mittel | Gering | ❌ |
 | **3.4** | Auto-LOD-Generierung | Mittel | Hoch | ❌ |
 | **3.5** | Auto-Collider-Generierung | Mittel | Gering | ❌ |
 | **3.6** | Intelligent Snap & Grid | Hoch | Mittel | ❌ |
 | **4.1** | Asset-Thumbnails | Hoch | Mittel | ❌ |
-| **4.2** | Erweiterte Suche & Filter | Hoch | Gering | ❌ |
+| **4.2** | Erweiterte Suche & Filter | Hoch | Gering | ✅ |
 | **4.3** | Drag & Drop Verbesserungen | Mittel | Mittel | ❌ |
 | **4.4** | Asset-Referenz-Tracking | Mittel | Mittel | ❌ |
 | **5.1** | Viewport-Einstellungen Panel | Hoch | Gering | ✅ |
 | **5.2** | Multi-Select & Group Ops | Hoch | Hoch | ❌ |
-| **5.3** | Entity Copy/Paste | Hoch | Gering | ❌ |
+| **5.3** | Entity Copy/Paste | Hoch | Gering | ✅ |
 | **5.4** | Transform-Einrasten | Mittel | Mittel | ❌ |
 | **6.1** | Docking-System | Niedrig | Sehr hoch | ❌ |
 | **6.2** | Keyboard-Shortcut-System | Mittel | Mittel | ❌ |

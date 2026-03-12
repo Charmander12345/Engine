@@ -93,6 +93,10 @@ struct EditorTheme
     Vec4 toastBackground      { 0.07f, 0.07f, 0.07f, 0.95f };
     Vec4 toastText            { 0.95f, 0.95f, 0.95f, 1.0f };
 
+    // ── Drop shadows / elevation ────────────────────────────────────────
+    Vec4 shadowColor          { 0.0f,  0.0f,  0.0f,  0.30f };  // global default shadow tint
+    Vec2 shadowOffset         { 2.0f,  3.0f };                  // global default shadow offset
+
     // ── Scrollbar ────────────────────────────────────────────────────────
     Vec4 scrollbarTrack       { 0.04f, 0.04f, 0.04f, 0.5f };
     Vec4 scrollbarThumb       { 0.20f, 0.20f, 0.20f, 0.7f };
@@ -208,6 +212,9 @@ struct EditorTheme
         sectionSpacing     *= ratio;
         groupSpacing       *= ratio;
         gridTileSpacing    *= ratio;
+
+        // Shadow
+        shadowOffset = { shadowOffset.x * ratio, shadowOffset.y * ratio };
     }
 
     /// Scale an arbitrary pixel value by the current DPI factor.
@@ -345,6 +352,9 @@ struct EditorTheme
         j["sectionSpacing"]       = sectionSpacing     * inv;
         j["groupSpacing"]         = groupSpacing       * inv;
         j["gridTileSpacing"]      = gridTileSpacing    * inv;
+        // Shadow
+        j["shadowColor"]          = v4(shadowColor);
+        j["shadowOffset"]         = v2({ shadowOffset.x * inv, shadowOffset.y * inv });
 
         return j;
     }
@@ -479,6 +489,10 @@ struct EditorTheme
         rf("groupSpacing",          groupSpacing);
         rf("gridTileSpacing",       gridTileSpacing);
 
+        // Shadow
+        rv4("shadowColor",          shadowColor);
+        rv2("shadowOffset",         shadowOffset);
+
         // JSON stores base (unscaled) values — re-apply current DPI scale
         if (dpiScale > 0.0f && std::abs(dpiScale - 1.0f) > 0.001f)
         {
@@ -496,6 +510,7 @@ struct EditorTheme
             indentSize     *= s;  iconSize       *= s;  iconSizeLarge  *= s;
             borderRadius   *= s;  separatorThickness *= s;
             sectionSpacing *= s;  groupSpacing   *= s;  gridTileSpacing *= s;
+            shadowOffset = { shadowOffset.x * s, shadowOffset.y * s };
         }
     }
 
@@ -644,6 +659,10 @@ struct EditorTheme
                 // Toast
                 light.toastBackground      = Vec4{ 0.96f, 0.96f, 0.96f, 0.95f };
                 light.toastText            = Vec4{ 0.10f, 0.10f, 0.10f, 1.0f };
+
+                // Drop shadows
+                light.shadowColor          = Vec4{ 0.0f,  0.0f,  0.0f,  0.18f };
+                light.shadowOffset         = Vec2{ 2.0f,  3.0f };
 
                 // Scrollbar
                 light.scrollbarTrack       = Vec4{ 0.88f, 0.88f, 0.88f, 0.5f };

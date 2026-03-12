@@ -337,11 +337,8 @@ int main()
             renderer->setShadowsEnabled(*v != "0");
         if (auto v = diag.getState("OcclusionCullingEnabled"))
             renderer->setOcclusionCullingEnabled(*v != "0");
-        if (auto v = diag.getState("UIDebugEnabled"))
-        {
-            if ((*v == "1") != renderer->isUIDebugEnabled())
-                renderer->toggleUIDebug();
-        }
+        // UIDebugEnabled is intentionally not restored from config;
+        // debug draw outlines should always start disabled.
         if (auto v = diag.getState("BoundsDebugEnabled"))
         {
             if ((*v == "1") != renderer->isBoundsDebugEnabled())
@@ -870,39 +867,9 @@ int main()
                     }
                 });
 
-                items.push_back({ "UI Designer", [&renderer]()
-                    {
-                        renderer->getUIManager().openUIDesignerTab();
-                    }
-                });
-
                 items.push_back({ "Console", [&renderer]()
                     {
                         renderer->getUIManager().openConsoleTab();
-                    }
-                });
-
-                // ── Quick viewport toggles ──
-                items.push_back({ "", nullptr, true }); // separator
-
-                items.push_back({ std::string(renderer->isShadowsEnabled() ? "[x] " : "[ ] ") + "Shadows", [&renderer]()
-                    {
-                        renderer->setShadowsEnabled(!renderer->isShadowsEnabled());
-                    }
-                });
-                items.push_back({ std::string(renderer->isBloomEnabled() ? "[x] " : "[ ] ") + "Bloom", [&renderer]()
-                    {
-                        renderer->setBloomEnabled(!renderer->isBloomEnabled());
-                    }
-                });
-                items.push_back({ std::string(renderer->isSsaoEnabled() ? "[x] " : "[ ] ") + "SSAO", [&renderer]()
-                    {
-                        renderer->setSsaoEnabled(!renderer->isSsaoEnabled());
-                    }
-                });
-                items.push_back({ std::string(renderer->isWireframeEnabled() ? "[x] " : "[ ] ") + "Wireframe", [&renderer]()
-                    {
-                        renderer->setWireframeEnabled(!renderer->isWireframeEnabled());
                     }
                 });
 
@@ -3125,6 +3092,26 @@ int main()
                         {
                             renderer->getUIManager().showToastMessage("Nothing to save.", 2.0f);
                         }
+                        continue;
+                    }
+                    if (event.key.key == SDLK_F)
+                    {
+                        renderer->getUIManager().focusContentBrowserSearch();
+                        continue;
+                    }
+                    if (event.key.key == SDLK_C)
+                    {
+                        renderer->getUIManager().copySelectedEntity();
+                        continue;
+                    }
+                    if (event.key.key == SDLK_V)
+                    {
+                        renderer->getUIManager().pasteEntity();
+                        continue;
+                    }
+                    if (event.key.key == SDLK_D)
+                    {
+                        renderer->getUIManager().duplicateSelectedEntity();
                         continue;
                     }
                 }

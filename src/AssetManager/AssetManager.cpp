@@ -4275,6 +4275,7 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 			fs::create_directories(materialsDir, dirEc);
 
 			json createdMaterials = json::array();
+			int createdTextureCount = 0;
 
 			for (unsigned int mi = 0; mi < scene->mNumMaterials; ++mi)
 			{
@@ -4418,9 +4419,10 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 								registerAssetInRegistry(texRegEntry);
 
 								logger.log(Logger::Category::AssetManagement,
-									"Import: created texture asset: " + texAssetName,
-									Logger::LogLevel::INFO);
-							}
+										"Import: created texture asset: " + texAssetName,
+										Logger::LogLevel::INFO);
+									createdTextureCount++;
+								}
 							stbi_image_free(imgData);
 						}
 					}
@@ -4558,6 +4560,22 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 					"Import: created " + std::to_string(createdMaterials.size()) + " material(s) for model " + assetName,
 					Logger::LogLevel::INFO);
 			}
+
+			// Enhanced toast for 3D models showing material/texture counts
+			{
+				std::string toastMsg = "Imported " + assetName;
+				if (!createdMaterials.empty() || createdTextureCount > 0)
+				{
+					toastMsg += " with";
+					if (!createdMaterials.empty())
+						toastMsg += " " + std::to_string(createdMaterials.size()) + " material(s)";
+					if (!createdMaterials.empty() && createdTextureCount > 0)
+						toastMsg += " and";
+					if (createdTextureCount > 0)
+						toastMsg += " " + std::to_string(createdTextureCount) + " texture(s)";
+				}
+				diagnostics.enqueueToastNotification(toastMsg, 4.0f);
+			}
 		}
 
 		success = true;
@@ -4639,7 +4657,9 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 	logger.log(Logger::Category::AssetManagement,
 		"Import successful: " + assetName + " (" + relPath + ")",
 		Logger::LogLevel::INFO);
-	diagnostics.enqueueToastNotification("Imported: " + assetName, 3.0f);
+	// Model3D sends its own detailed toast with material/texture counts
+	if (detectedType != AssetType::Model3D)
+		diagnostics.enqueueToastNotification("Imported: " + assetName, 3.0f);
 
 	if (m_onImportCompleted)
 	{

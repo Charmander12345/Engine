@@ -165,6 +165,7 @@ private:
     void drawUIImage(float x0, float y0, float x1, float y1, GLuint textureId, const glm::mat4& projection, const Vec4& tintColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }, bool invertRGB = false, bool flipY = false);
     GLuint getOrLoadUITexture(const std::string& path);
     void drawUIOutline(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program);
+    void drawUIShadow(float x0, float y0, float x1, float y1, const Vec4& shadowColor, const Vec2& shadowOffset, const glm::mat4& projection, GLuint program, float borderRadius = 0.0f, float blurRadius = 6.0f);
 
     struct RenderEntry
     {

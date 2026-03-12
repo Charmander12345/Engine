@@ -323,6 +323,20 @@ struct WidgetElementStyle
     // Shadow
     Vec4 shadowColor{ 0.0f, 0.0f, 0.0f, 0.0f };       // drop shadow color (alpha 0 = no shadow)
     Vec2 shadowOffset{ 0.0f, 2.0f };                   // drop shadow offset
+    float shadowBlurRadius{ 6.0f };                    // soft shadow blur spread (px)
+
+    /// Apply an elevation level (0–5) using the given base shadow color/offset.
+    /// 0 = no shadow, 1 = subtle, 2 = medium (dropdowns), 3 = strong (modals), 4–5 = extra.
+    void applyElevation(int level, const Vec4& baseShadowColor, const Vec2& baseShadowOffset)
+    {
+        if (level <= 0) { shadowColor = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f }; return; }
+        const float t = static_cast<float>(std::min(level, 5));
+        const float alphaScale = 0.4f + t * 0.2f;   // 0.6, 0.8, 1.0, 1.2, 1.4
+        const float offsetScale = 0.5f + t * 0.25f;  // 0.75, 1.0, 1.25, 1.5, 1.75
+        shadowColor  = Vec4{ baseShadowColor.x, baseShadowColor.y, baseShadowColor.z, baseShadowColor.w * alphaScale };
+        shadowOffset = Vec2{ baseShadowOffset.x * offsetScale, baseShadowOffset.y * offsetScale };
+        shadowBlurRadius = 2.0f + t * 2.0f;          // 4, 6, 8, 10, 12
+    }
 
     // Opacity / Visibility
     float opacity{ 1.0f };                              // 0=transparent, 1=fully opaque
@@ -342,6 +356,7 @@ struct WidgetElement
     Vec2 from{};
     Vec2 to{ 1.0f, 1.0f };
     WidgetElementStyle style;
+    int elevation{ 0 };              // 0–5: shadow depth level (0 = none)
     std::string text;
     std::string font;
     float fontSize{ 0.0f };

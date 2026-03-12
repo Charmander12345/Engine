@@ -1575,6 +1575,9 @@ void UIManager::showConfirmDialog(const std::string& message, std::function<void
     panel.padding = Vec2{ 20.0f, 16.0f };
     panel.orientation = StackOrientation::Vertical;
     panel.style.color = theme.modalBackground;
+    panel.elevation = 3;
+    panel.style.applyElevation(3, theme.shadowColor, theme.shadowOffset);
+    panel.style.borderRadius = theme.borderRadius;
     panel.hitTestMode = HitTestMode::DisabledSelf;
     panel.runtimeOnly = true;
 
@@ -1704,6 +1707,9 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
     panel.padding = Vec2{ 20.0f, 16.0f };
     panel.orientation = StackOrientation::Vertical;
     panel.style.color = theme.modalBackground;
+    panel.elevation = 3;
+    panel.style.applyElevation(3, theme.shadowColor, theme.shadowOffset);
+    panel.style.borderRadius = theme.borderRadius;
     panel.hitTestMode = HitTestMode::DisabledSelf;
     panel.runtimeOnly = true;
 
@@ -3395,6 +3401,194 @@ void UIManager::refreshContentBrowser(const std::string& subfolder)
     }
 }
 
+void UIManager::focusContentBrowserSearch()
+{
+    if (auto* searchBar = findElementById("ContentBrowser.Search"))
+    {
+        setFocusedEntry(searchBar);
+        markAllWidgetsDirty();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Entity clipboard: Copy / Paste / Duplicate
+// ---------------------------------------------------------------------------
+
+void UIManager::copySelectedEntity()
+{
+    const auto entity = static_cast<ECS::Entity>(m_outlinerSelectedEntity);
+    if (entity == 0) return;
+
+    auto& ecs = ECS::ECSManager::Instance();
+    m_entityClipboard = {};
+    m_entityClipboard.valid = true;
+
+    if (ecs.hasComponent<ECS::TransformComponent>(entity))
+        m_entityClipboard.transform = *ecs.getComponent<ECS::TransformComponent>(entity);
+    if (ecs.hasComponent<ECS::MeshComponent>(entity))
+        m_entityClipboard.mesh = *ecs.getComponent<ECS::MeshComponent>(entity);
+    if (ecs.hasComponent<ECS::MaterialComponent>(entity))
+        m_entityClipboard.material = *ecs.getComponent<ECS::MaterialComponent>(entity);
+    if (ecs.hasComponent<ECS::LightComponent>(entity))
+        m_entityClipboard.light = *ecs.getComponent<ECS::LightComponent>(entity);
+    if (ecs.hasComponent<ECS::CameraComponent>(entity))
+        m_entityClipboard.camera = *ecs.getComponent<ECS::CameraComponent>(entity);
+    if (ecs.hasComponent<ECS::PhysicsComponent>(entity))
+        m_entityClipboard.physics = *ecs.getComponent<ECS::PhysicsComponent>(entity);
+    if (ecs.hasComponent<ECS::ScriptComponent>(entity))
+        m_entityClipboard.script = *ecs.getComponent<ECS::ScriptComponent>(entity);
+    if (ecs.hasComponent<ECS::NameComponent>(entity))
+        m_entityClipboard.name = *ecs.getComponent<ECS::NameComponent>(entity);
+    if (ecs.hasComponent<ECS::CollisionComponent>(entity))
+        m_entityClipboard.collision = *ecs.getComponent<ECS::CollisionComponent>(entity);
+    if (ecs.hasComponent<ECS::HeightFieldComponent>(entity))
+        m_entityClipboard.heightField = *ecs.getComponent<ECS::HeightFieldComponent>(entity);
+    if (ecs.hasComponent<ECS::LodComponent>(entity))
+        m_entityClipboard.lod = *ecs.getComponent<ECS::LodComponent>(entity);
+    if (ecs.hasComponent<ECS::AnimationComponent>(entity))
+        m_entityClipboard.animation = *ecs.getComponent<ECS::AnimationComponent>(entity);
+    if (ecs.hasComponent<ECS::ParticleEmitterComponent>(entity))
+        m_entityClipboard.particleEmitter = *ecs.getComponent<ECS::ParticleEmitterComponent>(entity);
+
+    std::string entityName = "Entity " + std::to_string(entity);
+    if (m_entityClipboard.name)
+        entityName = m_entityClipboard.name->displayName;
+    showToastMessage("Copied: " + entityName, 2.0f);
+}
+
+bool UIManager::pasteEntity()
+{
+    if (!m_entityClipboard.valid) return false;
+
+    auto& ecs = ECS::ECSManager::Instance();
+    const ECS::Entity newEntity = ecs.createEntity();
+
+    // Add all snapshotted components
+    if (m_entityClipboard.transform)
+    {
+        auto t = *m_entityClipboard.transform;
+        t.position[0] += 1.0f; // offset so it doesn't overlap
+        ecs.addComponent<ECS::TransformComponent>(newEntity, t);
+    }
+    if (m_entityClipboard.name)
+    {
+        auto n = *m_entityClipboard.name;
+        n.displayName += " (Copy)";
+        ecs.addComponent<ECS::NameComponent>(newEntity, n);
+    }
+    if (m_entityClipboard.mesh)
+        ecs.addComponent<ECS::MeshComponent>(newEntity, *m_entityClipboard.mesh);
+    if (m_entityClipboard.material)
+        ecs.addComponent<ECS::MaterialComponent>(newEntity, *m_entityClipboard.material);
+    if (m_entityClipboard.light)
+        ecs.addComponent<ECS::LightComponent>(newEntity, *m_entityClipboard.light);
+    if (m_entityClipboard.camera)
+        ecs.addComponent<ECS::CameraComponent>(newEntity, *m_entityClipboard.camera);
+    if (m_entityClipboard.physics)
+        ecs.addComponent<ECS::PhysicsComponent>(newEntity, *m_entityClipboard.physics);
+    if (m_entityClipboard.script)
+        ecs.addComponent<ECS::ScriptComponent>(newEntity, *m_entityClipboard.script);
+    if (m_entityClipboard.collision)
+        ecs.addComponent<ECS::CollisionComponent>(newEntity, *m_entityClipboard.collision);
+    if (m_entityClipboard.heightField)
+        ecs.addComponent<ECS::HeightFieldComponent>(newEntity, *m_entityClipboard.heightField);
+    if (m_entityClipboard.lod)
+        ecs.addComponent<ECS::LodComponent>(newEntity, *m_entityClipboard.lod);
+    if (m_entityClipboard.animation)
+        ecs.addComponent<ECS::AnimationComponent>(newEntity, *m_entityClipboard.animation);
+    if (m_entityClipboard.particleEmitter)
+        ecs.addComponent<ECS::ParticleEmitterComponent>(newEntity, *m_entityClipboard.particleEmitter);
+
+    // Register with the level
+    auto* level = DiagnosticsManager::Instance().getActiveLevelSoft();
+    if (level) level->onEntityAdded(newEntity);
+
+    // Select the new entity
+    selectEntity(newEntity);
+    if (m_renderer) m_renderer->setSelectedEntity(newEntity);
+    refreshWorldOutliner();
+
+    std::string entityName = "Entity " + std::to_string(newEntity);
+    if (m_entityClipboard.name)
+        entityName = m_entityClipboard.name->displayName + " (Copy)";
+    showToastMessage("Pasted: " + entityName, 2.0f);
+
+    Logger::Instance().log(Logger::Category::Engine,
+        "Pasted entity " + std::to_string(newEntity) + " (" + entityName + ")",
+        Logger::LogLevel::INFO);
+
+    // Undo/Redo
+    UndoRedoManager::Command cmd;
+    cmd.description = "Paste " + entityName;
+    cmd.execute = [newEntity, cb = m_entityClipboard]()
+    {
+        auto& e = ECS::ECSManager::Instance();
+        e.createEntity(newEntity);
+        if (cb.transform)        { auto t = *cb.transform; t.position[0] += 1.0f; e.addComponent<ECS::TransformComponent>(newEntity, t); }
+        if (cb.name)             { auto n = *cb.name; n.displayName += " (Copy)"; e.addComponent<ECS::NameComponent>(newEntity, n); }
+        if (cb.mesh)             e.addComponent<ECS::MeshComponent>(newEntity, *cb.mesh);
+        if (cb.material)         e.addComponent<ECS::MaterialComponent>(newEntity, *cb.material);
+        if (cb.light)            e.addComponent<ECS::LightComponent>(newEntity, *cb.light);
+        if (cb.camera)           e.addComponent<ECS::CameraComponent>(newEntity, *cb.camera);
+        if (cb.physics)          e.addComponent<ECS::PhysicsComponent>(newEntity, *cb.physics);
+        if (cb.script)           e.addComponent<ECS::ScriptComponent>(newEntity, *cb.script);
+        if (cb.collision)        e.addComponent<ECS::CollisionComponent>(newEntity, *cb.collision);
+        if (cb.heightField)      e.addComponent<ECS::HeightFieldComponent>(newEntity, *cb.heightField);
+        if (cb.lod)              e.addComponent<ECS::LodComponent>(newEntity, *cb.lod);
+        if (cb.animation)        e.addComponent<ECS::AnimationComponent>(newEntity, *cb.animation);
+        if (cb.particleEmitter)  e.addComponent<ECS::ParticleEmitterComponent>(newEntity, *cb.particleEmitter);
+        auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
+        if (lvl) lvl->onEntityAdded(newEntity);
+    };
+    cmd.undo = [newEntity]()
+    {
+        auto& e = ECS::ECSManager::Instance();
+        auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
+        if (lvl) lvl->onEntityRemoved(newEntity);
+        e.removeEntity(newEntity);
+    };
+    UndoRedoManager::Instance().pushCommand(std::move(cmd));
+
+    return true;
+}
+
+bool UIManager::duplicateSelectedEntity()
+{
+    const auto entity = static_cast<ECS::Entity>(m_outlinerSelectedEntity);
+    if (entity == 0) return false;
+
+    // Snapshot directly from the source entity (bypass clipboard so Ctrl+D doesn't overwrite it)
+    EntityClipboard snapshot;
+    snapshot.valid = true;
+    auto& ecs = ECS::ECSManager::Instance();
+
+    if (ecs.hasComponent<ECS::TransformComponent>(entity))   snapshot.transform       = *ecs.getComponent<ECS::TransformComponent>(entity);
+    if (ecs.hasComponent<ECS::MeshComponent>(entity))        snapshot.mesh            = *ecs.getComponent<ECS::MeshComponent>(entity);
+    if (ecs.hasComponent<ECS::MaterialComponent>(entity))    snapshot.material        = *ecs.getComponent<ECS::MaterialComponent>(entity);
+    if (ecs.hasComponent<ECS::LightComponent>(entity))       snapshot.light           = *ecs.getComponent<ECS::LightComponent>(entity);
+    if (ecs.hasComponent<ECS::CameraComponent>(entity))      snapshot.camera          = *ecs.getComponent<ECS::CameraComponent>(entity);
+    if (ecs.hasComponent<ECS::PhysicsComponent>(entity))     snapshot.physics         = *ecs.getComponent<ECS::PhysicsComponent>(entity);
+    if (ecs.hasComponent<ECS::ScriptComponent>(entity))      snapshot.script          = *ecs.getComponent<ECS::ScriptComponent>(entity);
+    if (ecs.hasComponent<ECS::NameComponent>(entity))        snapshot.name            = *ecs.getComponent<ECS::NameComponent>(entity);
+    if (ecs.hasComponent<ECS::CollisionComponent>(entity))   snapshot.collision       = *ecs.getComponent<ECS::CollisionComponent>(entity);
+    if (ecs.hasComponent<ECS::HeightFieldComponent>(entity)) snapshot.heightField     = *ecs.getComponent<ECS::HeightFieldComponent>(entity);
+    if (ecs.hasComponent<ECS::LodComponent>(entity))         snapshot.lod             = *ecs.getComponent<ECS::LodComponent>(entity);
+    if (ecs.hasComponent<ECS::AnimationComponent>(entity))   snapshot.animation       = *ecs.getComponent<ECS::AnimationComponent>(entity);
+    if (ecs.hasComponent<ECS::ParticleEmitterComponent>(entity)) snapshot.particleEmitter = *ecs.getComponent<ECS::ParticleEmitterComponent>(entity);
+
+    // Temporarily put snapshot into clipboard, paste, then restore
+    EntityClipboard savedClipboard = m_entityClipboard;
+    m_entityClipboard = snapshot;
+    const bool ok = pasteEntity();
+    m_entityClipboard = savedClipboard;
+    return ok;
+}
+
+bool UIManager::hasEntityClipboard() const
+{
+    return m_entityClipboard.valid;
+}
+
 // Returns the icon filename (inside Editor/Textures/) for a given AssetType.
 static const char* iconForAssetType(AssetType type)
 {
@@ -3979,6 +4173,75 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
             };
             pathBar->children.push_back(std::move(crumbBtn));
         }
+
+        // ── Spacer to push search to the right ──────────────────────
+        {
+            WidgetElement spacer{};
+            spacer.type        = WidgetElementType::Panel;
+            spacer.fillX       = true;
+            spacer.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+            spacer.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            spacer.runtimeOnly = true;
+            pathBar->children.push_back(std::move(spacer));
+        }
+
+        // ── Type filter buttons ──────────────────────────────────────
+        {
+            const auto& theme = EditorTheme::Get();
+            struct FilterDef { const char* label; AssetType type; };
+            const FilterDef filters[] = {
+                { "Mesh",     AssetType::Model3D  },
+                { "Mat",      AssetType::Material },
+                { "Tex",      AssetType::Texture  },
+                { "Script",   AssetType::Script   },
+                { "Audio",    AssetType::Audio    },
+                { "Level",    AssetType::Level    },
+                { "Widget",   AssetType::Widget   },
+            };
+            for (const auto& f : filters)
+            {
+                const uint16_t bit = static_cast<uint16_t>(1 << static_cast<int>(f.type));
+                const bool active = (m_browserTypeFilter & bit) != 0;
+                WidgetElement btn{};
+                btn.id            = std::string("ContentBrowser.Filter.") + f.label;
+                btn.type          = WidgetElementType::Button;
+                btn.text          = f.label;
+                btn.font          = theme.fontDefault;
+                btn.fontSize      = theme.fontSizeCaption;
+                btn.style.textColor = active ? theme.textPrimary : theme.textMuted;
+                btn.style.color     = active ? Vec4{ theme.accent.x, theme.accent.y, theme.accent.z, 0.35f } : theme.transparent;
+                btn.style.hoverColor = theme.buttonSubtleHover;
+                btn.style.borderRadius = theme.borderRadius;
+                btn.textAlignH    = TextAlignH::Center;
+                btn.textAlignV    = TextAlignV::Center;
+                btn.minSize       = EditorTheme::Scaled(Vec2{ 38.0f, 18.0f });
+                btn.padding       = EditorTheme::Scaled(Vec2{ 4.0f, 1.0f });
+                btn.sizeToContent = true;
+                btn.hitTestMode   = HitTestMode::Enabled;
+                btn.runtimeOnly   = true;
+                const uint16_t filterBit = bit;
+                btn.onClicked = [this, filterBit]()
+                {
+                    m_browserTypeFilter ^= filterBit;
+                    refreshContentBrowser();
+                };
+                pathBar->children.push_back(std::move(btn));
+            }
+        }
+
+        // ── Search entry bar ─────────────────────────────────────────
+        {
+            WidgetElement search = EditorUIBuilder::makeEntryBar(
+                "ContentBrowser.Search", m_browserSearchText,
+                [this](const std::string& text)
+                {
+                    m_browserSearchText = text;
+                    refreshContentBrowser();
+                },
+                EditorTheme::Scaled(140.0f));
+            search.minSize = EditorTheme::Scaled(Vec2{ 140.0f, 20.0f });
+            pathBar->children.push_back(std::move(search));
+        }
     }
 
     // ---- Populate Grid panel with contents of selected folder ----
@@ -3990,8 +4253,28 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
 
         const std::string& gridFolder = m_selectedBrowserFolder;
 
+        // Helper: case-insensitive substring match
+        auto matchesSearch = [this](const std::string& name) -> bool
+        {
+            if (m_browserSearchText.empty()) return true;
+            std::string nameLower = name;
+            std::string queryLower = m_browserSearchText;
+            for (auto& c : nameLower)  c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            for (auto& c : queryLower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return nameLower.find(queryLower) != std::string::npos;
+        };
+
+        // Helper: check if an asset type passes the type filter
+        auto matchesTypeFilter = [this](AssetType type) -> bool
+        {
+            const uint16_t bit = static_cast<uint16_t>(1 << static_cast<int>(type));
+            return (m_browserTypeFilter & bit) != 0;
+        };
+
+        const bool isSearchMode = !m_browserSearchText.empty();
+
         // Handle Shaders virtual folder
-        const bool isShadersView = (gridFolder == "__Shaders__");
+        const bool isShadersView = (gridFolder == "__Shaders__") && !isSearchMode;
         if (isShadersView)
         {
             const std::filesystem::path shadersDir =
@@ -4016,6 +4299,79 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
                         Vec4{ 0.75f, 0.50f, 1.00f, 1.0f }, false);
                     gridPanel->children.push_back(std::move(tile));
                 }
+            }
+        }
+        else if (isSearchMode)
+        {
+            // ── Search mode: flat list of ALL matching assets across all folders ──
+            struct GridAssetItem { std::string name; std::string relPath; AssetType type; };
+            std::vector<GridAssetItem> gridAssets;
+            for (const auto& e : registry)
+            {
+                if (!matchesSearch(e.name)) continue;
+                if (!matchesTypeFilter(e.type)) continue;
+                gridAssets.push_back({ e.name, e.path, e.type });
+            }
+            std::sort(gridAssets.begin(), gridAssets.end(),
+                [](const GridAssetItem& a, const GridAssetItem& b) { return a.name < b.name; });
+
+            for (const auto& item : gridAssets)
+            {
+                const std::string iconFile = iconForAssetType(item.type);
+                const std::string relPath = item.relPath;
+
+                // Show path as label in search mode for disambiguation
+                const std::string displayName = item.name + "  (" +
+                    std::filesystem::path(item.relPath).parent_path().generic_string() + ")";
+
+                WidgetElement tile = makeGridTile(
+                    "ContentBrowser.GridAsset." + relPath,
+                    displayName, iconFile,
+                    iconTintForAssetType(item.type), false);
+
+                if (relPath == m_selectedGridAsset)
+                    tile.style.color = EditorTheme::Get().cbTileSelected;
+
+                tile.isDraggable = true;
+                tile.dragPayload = std::to_string(static_cast<int>(item.type)) + "|" + relPath;
+
+                tile.onClicked = [uiMgr = this, relPath]()
+                {
+                    uiMgr->m_selectedGridAsset = relPath;
+                    uiMgr->refreshContentBrowser();
+                };
+
+                tile.onDoubleClicked = [uiMgr = this, relPath, assetType = item.type]()
+                {
+                    // Navigate to the asset's folder and clear search
+                    const std::string folder = std::filesystem::path(relPath).parent_path().generic_string();
+                    uiMgr->m_browserSearchText.clear();
+                    uiMgr->m_selectedBrowserFolder = folder;
+                    uiMgr->m_selectedGridAsset = relPath;
+                    if (!folder.empty() && !uiMgr->m_expandedFolders.count(folder))
+                        uiMgr->m_expandedFolders.insert(folder);
+
+                    // Also open the asset if it has a dedicated editor
+                    if (assetType == AssetType::Model3D && uiMgr->getRenderer())
+                    {
+                        uiMgr->getRenderer()->openMeshViewer(relPath);
+                    }
+                    else if (assetType == AssetType::Widget)
+                    {
+                        uiMgr->openWidgetEditorPopup(relPath);
+                    }
+                    else if (assetType == AssetType::Material)
+                    {
+                        uiMgr->openMaterialEditorPopup(relPath);
+                    }
+                    else if (assetType == AssetType::Level && uiMgr->m_onLevelLoadRequested)
+                    {
+                        uiMgr->m_onLevelLoadRequested(relPath);
+                    }
+                    uiMgr->refreshContentBrowser();
+                };
+
+                gridPanel->children.push_back(std::move(tile));
             }
         }
         else
@@ -4074,6 +4430,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
             const std::string parentStr = regPath.parent_path().generic_string();
             if (parentStr == gridFolder)
             {
+                if (!matchesTypeFilter(e.type)) continue;
                 gridAssets.push_back({ e.name, e.path, e.type });
             }
         }
@@ -5576,6 +5933,9 @@ void UIManager::ensureModalWidget()
     panel.padding = Vec2{ 20.0f, 16.0f };
     panel.orientation = StackOrientation::Vertical;
     panel.style.color = theme.modalBackground;
+    panel.elevation = 3;
+    panel.style.applyElevation(3, theme.shadowColor, theme.shadowOffset);
+    panel.style.borderRadius = theme.borderRadius;
     panel.hitTestMode = HitTestMode::DisabledSelf;
     panel.runtimeOnly = true;
 
@@ -5661,6 +6021,9 @@ std::shared_ptr<EditorWidget> UIManager::createToastWidget(const std::string& me
     panel.padding = Vec2{ 12.0f, 10.0f };
     panel.orientation = StackOrientation::Vertical;
     panel.style.color = theme.toastBackground;
+    panel.elevation = 3;
+    panel.style.applyElevation(3, theme.shadowColor, theme.shadowOffset);
+    panel.style.borderRadius = theme.borderRadius;
     panel.hitTestMode = HitTestMode::DisabledSelf;
     panel.runtimeOnly = true;
 
@@ -6627,6 +6990,9 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
     bg.from  = Vec2{ 0.0f, 0.0f };
     bg.to    = Vec2{ 1.0f, 1.0f };
     bg.style.color = theme.dropdownBackground;
+    bg.elevation = 2;
+    bg.style.applyElevation(2, theme.shadowColor, theme.shadowOffset);
+    bg.style.borderRadius = theme.borderRadius;
     elements.push_back(bg);
 
     for (size_t i = 0; i < items.size(); ++i)

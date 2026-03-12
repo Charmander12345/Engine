@@ -740,6 +740,14 @@ class ui:
     #   isVisible       — bool  (whether the element is rendered/interactive)
     #   isBold          — bool  (bold text style)
     #   isItalic        — bool  (italic text style)
+    #   shadowColor     — Vec4 RGBA (drop shadow color; alpha 0 = no shadow)
+    #   shadowOffset    — Vec2 (shadow offset in pixels, default (0, 2))
+    #   shadowBlurRadius — float (soft blur spread in pixels, default 6.0)
+    #   applyElevation(level, baseShadowColor, baseShadowOffset) — sets shadow
+    #       from elevation level (0=none, 1=subtle, 2=medium, 3=strong, 4-5=extra)
+    #
+    # WidgetElement also has:
+    #   elevation — int (0–5, shadow depth level; 0 = none)
     #
     # Access pattern: element.style.color, element.style.opacity, etc.
 

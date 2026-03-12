@@ -406,6 +406,22 @@ void WidgetDetailSchema::addShadowSection(const std::string& prefix,
 {
     std::vector<WidgetElement> children;
 
+    children.push_back(EditorUIBuilder::makeIntRow(prefix + ".Elev", "Elevation (0-5)",
+        sel->elevation,
+        [sel, applyChange](int v) {
+            sel->elevation = std::max(0, std::min(5, v));
+            if (sel->elevation > 0)
+            {
+                const auto& theme = EditorTheme::Get();
+                sel->style.applyElevation(sel->elevation, theme.shadowColor, theme.shadowOffset);
+            }
+            else
+            {
+                sel->style.shadowColor = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            }
+            applyChange();
+        }));
+
     children.push_back(EditorUIBuilder::makeColorPickerRow(prefix + ".ShadCol", "Shadow Color",
         sel->style.shadowColor,
         [sel, applyChange](const Vec4& c) { sel->style.shadowColor = c; applyChange(); }));
@@ -418,7 +434,11 @@ void WidgetDetailSchema::addShadowSection(const std::string& prefix,
             applyChange();
         }));
 
-    root->children.push_back(EditorUIBuilder::makeSection(prefix + ".Shadow", "Shadow", children));
+    children.push_back(EditorUIBuilder::makeFloatRow(prefix + ".ShadBlur", "Blur Radius",
+        sel->style.shadowBlurRadius,
+        [sel, applyChange](float v) { sel->style.shadowBlurRadius = std::max(0.0f, v); applyChange(); }));
+
+    root->children.push_back(EditorUIBuilder::makeSection(prefix + ".Shadow", "Shadow & Elevation", children));
 }
 
 // ── Per-type sections ───────────────────────────────────────────────────

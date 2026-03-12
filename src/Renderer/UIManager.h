@@ -7,10 +7,12 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <set>
+#include <optional>
 
 #include "../Core/MathTypes.h"
 #include "../AssetManager/AssetTypes.h"
 #include "../Diagnostics/DiagnosticsManager.h"
+#include "../Core/ECS/ECS.h"
 #include "UIWidget.h"
 #include "EditorUI/EditorWidget.h"
 
@@ -118,6 +120,12 @@ public:
 	void openConsoleTab();
 	void closeConsoleTab();
 	bool isConsoleOpen() const;
+
+	// Entity clipboard (Copy/Paste/Duplicate)
+	void copySelectedEntity();
+	bool pasteEntity();
+	bool duplicateSelectedEntity();
+	bool hasEntityClipboard() const;
     void openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)> onProjectChosen);
 
     // Returns true if the active tab is a widget editor and had a selected element to delete
@@ -194,10 +202,33 @@ private:
 	EngineLevel* m_outlinerLevel{ nullptr };
 	size_t m_levelChangedCallbackToken{ 0 };
 	unsigned int m_outlinerSelectedEntity{ 0 };
+
+	// Entity clipboard for Copy/Paste
+	struct EntityClipboard
+	{
+		bool valid{ false };
+		std::optional<ECS::TransformComponent>       transform;
+		std::optional<ECS::MeshComponent>            mesh;
+		std::optional<ECS::MaterialComponent>        material;
+		std::optional<ECS::LightComponent>           light;
+		std::optional<ECS::CameraComponent>          camera;
+		std::optional<ECS::PhysicsComponent>         physics;
+		std::optional<ECS::ScriptComponent>          script;
+		std::optional<ECS::NameComponent>            name;
+		std::optional<ECS::CollisionComponent>       collision;
+		std::optional<ECS::HeightFieldComponent>     heightField;
+		std::optional<ECS::LodComponent>             lod;
+		std::optional<ECS::AnimationComponent>       animation;
+		std::optional<ECS::ParticleEmitterComponent> particleEmitter;
+	};
+	EntityClipboard m_entityClipboard;
+
 	std::string m_contentBrowserPath;  // current subfolder relative to Content (empty = root)
 	std::string m_selectedBrowserFolder; // folder highlighted in tree (shown in grid)
 	std::string m_selectedGridAsset;     // relative asset path selected in grid (empty = none)
 	std::unordered_set<std::string> m_expandedFolders; // set of expanded folder paths
+	std::string m_browserSearchText;     // real-time search filter text
+	uint16_t m_browserTypeFilter{ 0xFFFF }; // bitmask: 1 bit per AssetType (0xFFFF = all)
 	bool m_registryWasReady{ false }; // tracks previous registry state for change detection
 	bool m_renamingGridAsset{ false };  // true while inline rename entry bar is shown
 	std::string m_renameOriginalPath;   // relPath of the asset being renamed
@@ -356,6 +387,7 @@ public:
 public:
 	void refreshWorldOutliner();
 	void refreshContentBrowser(const std::string& subfolder = "");
+	void focusContentBrowserSearch();
 	void selectEntity(unsigned int entity);
 	unsigned int getSelectedEntity() const { return m_outlinerSelectedEntity; }
 	const std::string& getSelectedBrowserFolder() const { return m_selectedBrowserFolder; }

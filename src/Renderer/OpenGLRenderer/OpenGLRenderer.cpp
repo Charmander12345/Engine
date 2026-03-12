@@ -2394,6 +2394,14 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
             ~ScissorRestore2() { if (active) { glScissor(box[0], box[1], box[2], box[3]); if (!wasEnabled) glDisable(GL_SCISSOR_TEST); } } };
         ScissorRestore2 scissorRestore{ {prevScissorBoxFB[0], prevScissorBoxFB[1], prevScissorBoxFB[2], prevScissorBoxFB[3]}, prevScissorEnabledFB, clipToBoundsFB };
 
+        // ── Drop shadow (Phase 1.2) ──────────────────────────────────────
+        if (element.style.shadowColor.w > 0.001f)
+        {
+            const std::string& sv = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+            const std::string& sf = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+            drawUIShadow(x0, y0, x1, y1, element.style.shadowColor, element.style.shadowOffset, uiProjection, getUIQuadProgram(sv, sf), element.style.borderRadius, element.style.shadowBlurRadius);
+        }
+
         // ── Brush-based background (Phase 2) ─────────────────────────────
         if (element.background.isVisible())
         {
@@ -2988,6 +2996,8 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
         if (!dd.items.empty())
         {
             const float totalH = static_cast<float>(dd.items.size()) * ih;
+            const auto& theme = EditorTheme::Get();
+            drawUIShadow(dd.x0, dd.y1, dd.x1, dd.y1 + totalH, theme.shadowColor, theme.shadowOffset, uiProjection, prog, theme.borderRadius);
             drawUIPanel(dd.x0, dd.y1, dd.x1, dd.y1 + totalH, Vec4{0.12f,0.12f,0.15f,0.98f}, uiProjection, prog, Vec4{0,0,0,0}, false);
         }
         for (size_t i = 0; i < dd.items.size(); ++i)
@@ -3821,6 +3831,14 @@ void OpenGLRenderer::renderViewportUI()
             ~ScissorRestore() { if (active) { glScissor(box[0], box[1], box[2], box[3]); if (!wasEnabled) glDisable(GL_SCISSOR_TEST); } } };
         ScissorRestore scissorRestore{ {prevScissorBoxVP[0], prevScissorBoxVP[1], prevScissorBoxVP[2], prevScissorBoxVP[3]}, prevScissorEnabledVP, clipToBoundsVP };
 
+        // ── Drop shadow (Phase 1.2) ──────────────────────────────────────
+        if (element.style.shadowColor.w > 0.001f)
+        {
+            const std::string& sv = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+            const std::string& sf = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+            drawUIShadow(x0, y0, x1, y1, element.style.shadowColor, element.style.shadowOffset, uiProjection, getUIQuadProgram(sv, sf), element.style.borderRadius, element.style.shadowBlurRadius);
+        }
+
         // ── Brush-based background (Phase 2) ─────────────────────────────
         if (element.background.isVisible())
         {
@@ -4409,6 +4427,14 @@ void OpenGLRenderer::renderUI()
             struct ScissorRestore3 { GLint box[4]; GLboolean wasEnabled; bool active;
                 ~ScissorRestore3() { if (active) { glScissor(box[0], box[1], box[2], box[3]); if (!wasEnabled) glDisable(GL_SCISSOR_TEST); } } };
             ScissorRestore3 scissorRestore{ {prevScissorBoxUI[0], prevScissorBoxUI[1], prevScissorBoxUI[2], prevScissorBoxUI[3]}, prevScissorEnabledUI, clipToBoundsUI };
+
+            // ── Drop shadow (Phase 1.2) ──────────────────────────────────
+            if (element.style.shadowColor.w > 0.001f)
+            {
+                const std::string& sv = resolveUIShaderPath(element.shaderVertex, m_defaultPanelVertex);
+                const std::string& sf = resolveUIShaderPath(element.shaderFragment, m_defaultPanelFragment);
+                drawUIShadow(x0, y0, x1, y1, element.style.shadowColor, element.style.shadowOffset, uiProjection, getUIQuadProgram(sv, sf), element.style.borderRadius, element.style.shadowBlurRadius);
+            }
 
             if (element.type == WidgetElementType::Panel)
             {
@@ -5160,6 +5186,8 @@ void OpenGLRenderer::renderUI()
             if (!dd.items.empty())
             {
                 const float totalH = static_cast<float>(dd.items.size()) * itemHeight;
+                const auto& theme = EditorTheme::Get();
+                drawUIShadow(dd.x0, dd.y1, dd.x1, dd.y1 + totalH, theme.shadowColor, theme.shadowOffset, uiProjection, prog, theme.borderRadius);
                 drawUIPanel(dd.x0, dd.y1, dd.x1, dd.y1 + totalH, Vec4{0.12f,0.12f,0.15f,0.98f}, uiProjection, prog, Vec4{0,0,0,0}, false);
             }
             for (size_t i = 0; i < dd.items.size(); ++i)
@@ -7748,6 +7776,31 @@ void OpenGLRenderer::drawUIOutline(float x0, float y0, float x1, float y1, const
     drawUIPanel(x0, y0 + t, x0 + t, y1 - t, color, projection, program, color, false);
     // Right edge
     drawUIPanel(x1 - t, y0 + t, x1, y1 - t, color, projection, program, color, false);
+}
+
+void OpenGLRenderer::drawUIShadow(float x0, float y0, float x1, float y1,
+    const Vec4& shadowColor, const Vec2& shadowOffset,
+    const glm::mat4& projection, GLuint program, float borderRadius, float blurRadius)
+{
+    if (shadowColor.w < 0.001f || program == 0)
+        return;
+
+    // Draw 3 expanding layers with decreasing alpha for a soft-shadow effect
+    // Scale expansion by blurRadius (default 6.0 gives the original 1/3/6 spread)
+    constexpr int kLayers = 3;
+    const float kExpand[] = { blurRadius * 0.167f, blurRadius * 0.5f, blurRadius };
+    constexpr float kAlpha[]  = { 0.55f, 0.30f, 0.12f };
+
+    for (int i = 0; i < kLayers; ++i)
+    {
+        const float e = kExpand[i];
+        const float sx0 = x0 + shadowOffset.x - e;
+        const float sy0 = y0 + shadowOffset.y - e;
+        const float sx1 = x1 + shadowOffset.x + e;
+        const float sy1 = y1 + shadowOffset.y + e;
+        const Vec4 layerColor{ shadowColor.x, shadowColor.y, shadowColor.z, shadowColor.w * kAlpha[i] };
+        drawUIPanel(sx0, sy0, sx1, sy1, layerColor, projection, program, layerColor, false, borderRadius + e);
+    }
 }
 
 void OpenGLRenderer::setVSyncEnabled(bool enabled)

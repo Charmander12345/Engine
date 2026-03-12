@@ -860,6 +860,22 @@ namespace
         {
             element.style.gradientColor = readVec4(entry.at("gradientColor"));
         }
+        if (entry.contains("shadowColor"))
+        {
+            element.style.shadowColor = readVec4(entry.at("shadowColor"));
+        }
+        if (entry.contains("shadowOffset"))
+        {
+            element.style.shadowOffset = readVec2(entry.at("shadowOffset"));
+        }
+        if (entry.contains("shadowBlurRadius"))
+        {
+            element.style.shadowBlurRadius = entry.at("shadowBlurRadius").get<float>();
+        }
+        if (entry.contains("elevation"))
+        {
+            element.elevation = entry.at("elevation").get<int>();
+        }
         if (entry.contains("maxSize"))
         {
             element.maxSize = readVec2(entry.at("maxSize"));
@@ -1299,6 +1315,19 @@ namespace
             element.style.gradientColor.w != 0.0f)
         {
             entry["gradientColor"] = writeVec4(element.style.gradientColor);
+        }
+        if (element.style.shadowColor.w > 0.001f)
+        {
+            entry["shadowColor"] = writeVec4(element.style.shadowColor);
+            entry["shadowOffset"] = writeVec2(element.style.shadowOffset);
+            if (element.style.shadowBlurRadius != 6.0f)
+            {
+                entry["shadowBlurRadius"] = element.style.shadowBlurRadius;
+            }
+        }
+        if (element.elevation > 0)
+        {
+            entry["elevation"] = element.elevation;
         }
         if (element.maxSize.x > 0.0f || element.maxSize.y > 0.0f)
         {
