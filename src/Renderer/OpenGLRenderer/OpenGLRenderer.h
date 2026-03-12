@@ -662,6 +662,7 @@ public:
     void requestPick(int screenX, int screenY) override { m_pickRequested = true; m_pickX = screenX; m_pickY = screenY; }
     unsigned int getSelectedEntity() const override { return m_selectedEntity; }
     void setSelectedEntity(unsigned int entity) override { m_selectedEntity = entity; }
+    void focusOnSelectedEntity() override;
 
     // Gizmo public API
     void setGizmoMode(GizmoMode mode) override { m_gizmoMode = mode; }

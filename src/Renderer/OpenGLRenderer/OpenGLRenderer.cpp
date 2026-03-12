@@ -8220,6 +8220,76 @@ void OpenGLRenderer::cancelCameraTransition()
     m_cameraTransition.active = false;
 }
 
+void OpenGLRenderer::focusOnSelectedEntity()
+{
+    if (!m_camera || m_selectedEntity == 0)
+        return;
+
+    // Find the render entry for the selected entity to get its AABB
+    auto findEntry = [&](const std::vector<RenderEntry>& entries) -> const RenderEntry*
+    {
+        for (auto& e : entries)
+            if (e.entity == m_selectedEntity)
+                return &e;
+        return nullptr;
+    };
+
+    const RenderEntry* entry = findEntry(m_renderEntries);
+    if (!entry)
+        entry = findEntry(m_meshEntries);
+
+    // Compute world-space AABB center and size
+    Vec3 center{};
+    float radius = 2.0f;
+
+    auto& ecs = ECS::ECSManager::Instance();
+    auto* tc = ecs.getComponent<ECS::TransformComponent>(m_selectedEntity);
+    if (!tc)
+        return;
+
+    center = { tc->position[0], tc->position[1], tc->position[2] };
+
+    if (entry && entry->object3D && entry->object3D->hasLocalBounds())
+    {
+        Vec3 lo = entry->object3D->getLocalBoundsMin();
+        Vec3 hi = entry->object3D->getLocalBoundsMax();
+        float sx = tc->scale[0], sy = tc->scale[1], sz = tc->scale[2];
+        Vec3 scaledHalf{
+            (hi.x - lo.x) * 0.5f * std::abs(sx),
+            (hi.y - lo.y) * 0.5f * std::abs(sy),
+            (hi.z - lo.z) * 0.5f * std::abs(sz)
+        };
+        Vec3 localCenter{
+            (lo.x + hi.x) * 0.5f * sx,
+            (lo.y + hi.y) * 0.5f * sy,
+            (lo.z + hi.z) * 0.5f * sz
+        };
+        center.x += localCenter.x;
+        center.y += localCenter.y;
+        center.z += localCenter.z;
+        radius = std::sqrt(scaledHalf.x * scaledHalf.x + scaledHalf.y * scaledHalf.y + scaledHalf.z * scaledHalf.z);
+        if (radius < 0.1f) radius = 0.1f;
+    }
+
+    // Camera offset: approach from current direction
+    const float distance = radius * 2.5f;
+    Vec2 rot = m_camera->getRotationDegrees();
+    float yaw = rot.x;
+    float pitch = rot.y;
+
+    constexpr float kDegToRad = 3.14159265f / 180.0f;
+    float yawRad = yaw * kDegToRad;
+    float pitchRad = pitch * kDegToRad;
+
+    Vec3 targetPos{
+        center.x - std::cos(pitchRad) * std::sin(yawRad) * distance,
+        center.y - std::sin(pitchRad) * distance,
+        center.z + std::cos(pitchRad) * std::cos(yawRad) * distance
+    };
+
+    startCameraTransition(targetPos, yaw, pitch, 0.3f);
+}
+
 // ─── Cinematic camera path (Catmull-Rom spline) ─────────────────────────────
 
 void OpenGLRenderer::startCameraPath(const std::vector<CameraPathPoint>& points, float duration, bool loop)

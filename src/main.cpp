@@ -553,6 +553,12 @@ int main()
     // Gamepad state â€“ we keep the first connected gamepad open for UI navigation
     SDL_Gamepad* activeGamepad = nullptr;
 
+    // ── Viewport state variables (captured by click-event lambdas + used in game loop) ──
+    float cameraSpeedMultiplier = 1.0f;
+    bool showMetrics = true;
+    bool showOcclusionStats = false;
+    bool gridSnapEnabled = false;
+
     if (renderer)
     {
         const unsigned int playTexId = renderer->preloadUITexture("Play.tga");
@@ -702,22 +708,83 @@ int main()
                 renderer->getUIManager().refreshWorldOutliner();
             });
 
-        renderer->getUIManager().registerClickEvent("ViewportOverlay.Snap", [&renderer]()
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.Snap", [&renderer, &gridSnapEnabled]()
             {
-                Logger::Instance().log(Logger::Category::Input, "Toolbar: Grid Snap toggled.", Logger::LogLevel::INFO);
-                renderer->getUIManager().showToastMessage("Grid Snap (coming soon)", 2.0f);
+                gridSnapEnabled = !gridSnapEnabled;
+                Logger::Instance().log(Logger::Category::Input,
+                    std::string("Toolbar: Grid Snap ") + (gridSnapEnabled ? "ON" : "OFF"),
+                    Logger::LogLevel::INFO);
+                if (auto* el = renderer->getUIManager().findElementById("ViewportOverlay.Snap"))
+                {
+                    el->style.textColor = gridSnapEnabled
+                        ? Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }
+                        : Vec4{ 0.45f, 0.45f, 0.45f, 1.0f };
+                    renderer->getUIManager().markAllWidgetsDirty();
+                }
+                renderer->getUIManager().showToastMessage(
+                    gridSnapEnabled ? "Grid Snap: ON" : "Grid Snap: OFF", 1.5f);
             });
 
-        renderer->getUIManager().registerClickEvent("ViewportOverlay.CamSpeed", [&renderer]()
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.CamSpeed", [&renderer, &cameraSpeedMultiplier]()
             {
-                Logger::Instance().log(Logger::Category::Input, "Toolbar: Camera Speed.", Logger::LogLevel::INFO);
-                renderer->getUIManager().showToastMessage("Camera Speed (coming soon)", 2.0f);
+                auto& uiMgr = renderer->getUIManager();
+                if (uiMgr.isDropdownMenuOpen())
+                {
+                    uiMgr.closeDropdownMenu();
+                    return;
+                }
+
+                auto* btn = uiMgr.findElementById("ViewportOverlay.CamSpeed");
+                Vec2 anchor{ 0.0f, 0.0f };
+                if (btn && btn->hasBounds)
+                {
+                    constexpr float kDropdownW = 80.0f;
+                    anchor = Vec2{ btn->boundsMinPixels.x, btn->boundsMaxPixels.y + 2.0f };
+                }
+
+                struct SpeedEntry { const char* label; float value; };
+                static const SpeedEntry speeds[] = {
+                    { "0.25x", 0.25f }, { "0.5x", 0.5f }, { "1.0x", 1.0f },
+                    { "1.5x", 1.5f },   { "2.0x", 2.0f }, { "3.0x", 3.0f },
+                    { "5.0x", 5.0f }
+                };
+
+                std::vector<UIManager::DropdownMenuItem> items;
+                for (auto& s : speeds)
+                {
+                    float val = s.value;
+                    std::string lbl = s.label;
+                    if (std::abs(cameraSpeedMultiplier - val) < 0.01f)
+                        lbl = "> " + lbl;
+                    items.push_back({ lbl, [&renderer, &cameraSpeedMultiplier, val]()
+                        {
+                            cameraSpeedMultiplier = val;
+                            if (auto* el = renderer->getUIManager().findElementById("ViewportOverlay.CamSpeed"))
+                            {
+                                char buf[16];
+                                std::snprintf(buf, sizeof(buf), "%.1fx", val);
+                                el->text = buf;
+                                renderer->getUIManager().markAllWidgetsDirty();
+                            }
+                        }
+                    });
+                }
+                uiMgr.showDropdownMenu(anchor, items);
             });
 
-        renderer->getUIManager().registerClickEvent("ViewportOverlay.Stats", [&renderer]()
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.Stats", [&renderer, &showMetrics]()
             {
-                Logger::Instance().log(Logger::Category::Input, "Toolbar: Stats toggled.", Logger::LogLevel::INFO);
-                renderer->getUIManager().showToastMessage("Stats Overlay (coming soon)", 2.0f);
+                showMetrics = !showMetrics;
+                Logger::Instance().log(Logger::Category::Input,
+                    std::string("Toolbar: Stats ") + (showMetrics ? "ON" : "OFF"),
+                    Logger::LogLevel::INFO);
+                if (auto* el = renderer->getUIManager().findElementById("ViewportOverlay.Stats"))
+                {
+                    el->style.textColor = showMetrics
+                        ? Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }
+                        : Vec4{ 0.45f, 0.45f, 0.45f, 1.0f };
+                    renderer->getUIManager().markAllWidgetsDirty();
+                }
             });
 
         renderer->getUIManager().registerClickEvent("ViewportOverlay.RenderMode", [&renderer]()
@@ -806,6 +873,36 @@ int main()
                 items.push_back({ "UI Designer", [&renderer]()
                     {
                         renderer->getUIManager().openUIDesignerTab();
+                    }
+                });
+
+                items.push_back({ "Console", [&renderer]()
+                    {
+                        renderer->getUIManager().openConsoleTab();
+                    }
+                });
+
+                // ── Quick viewport toggles ──
+                items.push_back({ "", nullptr, true }); // separator
+
+                items.push_back({ std::string(renderer->isShadowsEnabled() ? "[x] " : "[ ] ") + "Shadows", [&renderer]()
+                    {
+                        renderer->setShadowsEnabled(!renderer->isShadowsEnabled());
+                    }
+                });
+                items.push_back({ std::string(renderer->isBloomEnabled() ? "[x] " : "[ ] ") + "Bloom", [&renderer]()
+                    {
+                        renderer->setBloomEnabled(!renderer->isBloomEnabled());
+                    }
+                });
+                items.push_back({ std::string(renderer->isSsaoEnabled() ? "[x] " : "[ ] ") + "SSAO", [&renderer]()
+                    {
+                        renderer->setSsaoEnabled(!renderer->isSsaoEnabled());
+                    }
+                });
+                items.push_back({ std::string(renderer->isWireframeEnabled() ? "[x] " : "[ ] ") + "Wireframe", [&renderer]()
+                    {
+                        renderer->setWireframeEnabled(!renderer->isWireframeEnabled());
                     }
                 });
 
@@ -1978,9 +2075,6 @@ int main()
         });
 
     bool rightMouseDown = false;
-    float cameraSpeedMultiplier = 1.0f;
-    bool showMetrics = true;
-    bool showOcclusionStats = false;
     Vec2 mousePosPixels{};
     bool hasMousePos = false;
     bool isOverUI = false;
@@ -2843,6 +2937,14 @@ int main()
                     {
                         cameraSpeedMultiplier = std::max(0.5f, cameraSpeedMultiplier - step);
                     }
+                    // Update CamSpeed button label
+                    if (auto* el = renderer->getUIManager().findElementById("ViewportOverlay.CamSpeed"))
+                    {
+                        char buf[16];
+                        std::snprintf(buf, sizeof(buf), "%.1fx", cameraSpeedMultiplier);
+                        el->text = buf;
+                        renderer->getUIManager().markAllWidgetsDirty();
+                    }
                 }
             }
 
@@ -2956,6 +3058,11 @@ int main()
                     if (event.key.key == SDLK_R)
                     {
                         renderer->setGizmoMode(Renderer::GizmoMode::Scale);
+                        continue;
+                    }
+                    if (event.key.key == SDLK_F)
+                    {
+                        renderer->focusOnSelectedEntity();
                         continue;
                     }
                 }

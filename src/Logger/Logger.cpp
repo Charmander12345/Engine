@@ -6,6 +6,7 @@
 #include <sstream>
 #include <algorithm>
 #include <vector>
+#include <deque>
 
 namespace
 {
@@ -181,6 +182,35 @@ void Logger::log(Category category, const std::string& message, LogLevel level)
     {
         std::cout << "[" << ts << "][" << catStr << "][" << levelStr << "] " << message << '\n';
     }
+
+    // Append to console ring-buffer
+    ConsoleEntry entry;
+    entry.timestamp = ts;
+    entry.level = level;
+    entry.category = category;
+    entry.message = message;
+    entry.sequenceId = m_nextSequenceId++;
+    m_consoleEntries.push_back(std::move(entry));
+    while (m_consoleEntries.size() > kMaxConsoleEntries)
+    {
+        m_consoleEntries.pop_front();
+    }
+}
+
+void Logger::clearConsoleBuffer()
+{
+    std::lock_guard<std::mutex> lock(logMutex);
+    m_consoleEntries.clear();
+}
+
+const char* Logger::levelToString(LogLevel level)
+{
+    return toString(level);
+}
+
+const char* Logger::categoryToString(Category category)
+{
+    return toString(category);
 }
 
 bool Logger::hasErrors() const

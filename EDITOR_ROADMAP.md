@@ -62,7 +62,7 @@
 | Audio Preview | ❌ |
 | Blueprint / Visual Scripting | ❌ |
 | Profiler / Performance-Monitor | ❌ |
-| Viewport-Einstellungen Panel | ❌ |
+| Viewport-Einstellungen Panel | ✅ |
 
 ---
 
@@ -206,9 +206,9 @@
 5. Filter-State als Bitmaske (wie `ShaderVariantKey`)
 
 **Fortschrittsprüfung:**
-- [ ] Tab zeigt Live-Log-Einträge in Echtzeit
-- [ ] Filter reduzieren die sichtbaren Zeilen korrekt
-- [ ] Suche findet Teilstrings in Nachrichten
+- [x] Tab zeigt Live-Log-Einträge in Echtzeit
+- [x] Filter reduzieren die sichtbaren Zeilen korrekt
+- [x] Suche findet Teilstrings in Nachrichten
 - [ ] Python `print()` erscheint im Console-Tab
 - [ ] Performance: 10.000+ Einträge ohne Stutter
 
@@ -569,7 +569,7 @@
 > **Ziel:** Der Viewport als zentrales Arbeitswerkzeug optimieren.
 
 ### 5.1 Viewport-Einstellungen Panel
-**Aktueller Stand:** Debug-Render-Modi existieren (F-Tasten), aber es gibt kein UI-Panel dafür.
+**Aktueller Stand:** ✅ Toolbar-Buttons (CamSpeed, Stats, Snap) funktional. Settings-Dropdown mit Quick-Toggles. Focus on Selection (F-Taste) implementiert.
 
 **Ziel:** Viewport-Toolbar mit Visualisierungs-Optionen.
 
@@ -584,10 +584,10 @@
 - „Fokus auf Selektion"-Button (Kamera zentriert auf die ausgewählte Entity)
 
 **Fortschrittsprüfung:**
-- [ ] Render-Mode-Dropdown wechselt die Darstellung
-- [ ] Grid-Toggle funktioniert
-- [ ] Kamera-Speed ist einstellbar
-- [ ] Fokus-Button zentriert die Kamera
+- [x] Render-Mode-Dropdown wechselt die Darstellung
+- [x] Grid-Toggle funktioniert
+- [x] Kamera-Speed ist einstellbar
+- [x] Fokus-Button zentriert die Kamera
 
 ### 5.2 Multi-Select & Group Operations
 **Aktueller Stand:** Nur eine Entity gleichzeitig selektierbar.
@@ -867,7 +867,7 @@
 | **1.4** | Überarbeitetes Spacing | Hoch | Gering | ✅ |
 | **1.5** | Animierte Übergänge | Niedrig | Mittel | ❌ |
 | **1.6** | Scrollbar-Design | Niedrig | Gering | ❌ |
-| **2.1** | Console / Log-Viewer | Hoch | Mittel | ❌ |
+| **2.1** | Console / Log-Viewer | Hoch | Mittel | ✅ |
 | **2.2** | Material Editor Tab | Hoch | Hoch | ❌ |
 | **2.3** | Texture Viewer | Mittel | Gering | ❌ |
 | **2.4** | Animation Editor | Mittel–Hoch | Hoch | ❌ |
@@ -884,7 +884,7 @@
 | **4.2** | Erweiterte Suche & Filter | Hoch | Gering | ❌ |
 | **4.3** | Drag & Drop Verbesserungen | Mittel | Mittel | ❌ |
 | **4.4** | Asset-Referenz-Tracking | Mittel | Mittel | ❌ |
-| **5.1** | Viewport-Einstellungen Panel | Hoch | Gering | ❌ |
+| **5.1** | Viewport-Einstellungen Panel | Hoch | Gering | ✅ |
 | **5.2** | Multi-Select & Group Ops | Hoch | Hoch | ❌ |
 | **5.3** | Entity Copy/Paste | Hoch | Gering | ❌ |
 | **5.4** | Transform-Einrasten | Mittel | Mittel | ❌ |

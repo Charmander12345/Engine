@@ -111,8 +111,13 @@ public:
 	void openWidgetEditorPopup(const std::string& relativeAssetPath);
 	void openMaterialEditorPopup(const std::string& materialAssetPath = {});
 	void openUIDesignerTab();
-    void closeUIDesignerTab();
-    bool isUIDesignerOpen() const;
+	void closeUIDesignerTab();
+	bool isUIDesignerOpen() const;
+
+	// Console / Log-Viewer tab
+	void openConsoleTab();
+	void closeConsoleTab();
+	bool isConsoleOpen() const;
     void openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)> onProjectChosen);
 
     // Returns true if the active tab is a widget editor and had a selected element to delete
@@ -311,6 +316,22 @@ private:
 	void addElementToViewportWidget(const std::string& elementType);
 	void deleteSelectedUIDesignerElement();
 	ViewportUIManager* getViewportUIManager() const;
+
+	// Console / Log-Viewer tab state
+	struct ConsoleState
+	{
+		std::string tabId;
+		std::string widgetId;
+		uint64_t lastSeenSequenceId{ 0 };
+		uint8_t levelFilter{ 0xFF }; // bitmask: bit0=INFO, bit1=WARNING, bit2=ERROR, bit3=FATAL
+		std::string searchText;
+		bool autoScroll{ true };
+		bool isOpen{ false };
+		float refreshTimer{ 0.0f };
+	};
+	ConsoleState m_consoleState;
+	void refreshConsoleLog();
+	void buildConsoleToolbar(WidgetElement& root);
 
 public:
 	bool getWidgetEditorCanvasRect(Vec4& outRect) const;

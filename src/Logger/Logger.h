@@ -4,6 +4,10 @@
 #include <iostream>
 #include <fstream>
 #include <mutex>
+#include <deque>
+#include <functional>
+#include <vector>
+#include <cstdint>
 
 #ifdef ERROR
 #undef ERROR
@@ -15,28 +19,37 @@
 class Logger
 {
 public:
-    enum class LogLevel {
-        INFO,
-        WARNING,
-        ERROR,
-        FATAL
-    };
+	enum class LogLevel {
+		INFO,
+		WARNING,
+		ERROR,
+		FATAL
+	};
 
-    enum class Category {
-        General,
-        Engine,
-        Scripting,
-        AssetManagement,
-        Diagnostics,
-        Rendering,
-        Input,
-        Project,
-        IO,
-        UI
-    };
+	enum class Category {
+		General,
+		Engine,
+		Scripting,
+		AssetManagement,
+		Diagnostics,
+		Rendering,
+		Input,
+		Project,
+		IO,
+		UI
+	};
 
-    static Logger& Instance();
-    void initialize();
+	struct ConsoleEntry
+	{
+		std::string timestamp;
+		LogLevel level{ LogLevel::INFO };
+		Category category{ Category::General };
+		std::string message;
+		uint64_t sequenceId{ 0 };
+	};
+
+	static Logger& Instance();
+	void initialize();
 
 	void setMinimumLogLevel(LogLevel level);
 	void setSuppressStdout(bool suppress);
@@ -46,19 +59,28 @@ public:
 	// Log with specified category
 	void log(Category category, const std::string& message, LogLevel level = LogLevel::INFO);
 
-    bool hasErrors() const;
-    bool hasFatal() const;
-    bool hasErrorsOrFatal() const;
-    const std::string& getLogFilename() const;
+	bool hasErrors() const;
+	bool hasFatal() const;
+	bool hasErrorsOrFatal() const;
+	const std::string& getLogFilename() const;
+
+	// Console ring-buffer access (thread-safe)
+	static constexpr size_t kMaxConsoleEntries = 2000;
+	const std::deque<ConsoleEntry>& getConsoleEntries() const { return m_consoleEntries; }
+	uint64_t getLatestSequenceId() const { return m_nextSequenceId - 1; }
+	void clearConsoleBuffer();
+
+	static const char* levelToString(LogLevel level);
+	static const char* categoryToString(Category category);
 
 private:
-    Logger() = default;
-    ~Logger();
-    Logger(const Logger&) = delete;
-    Logger& operator=(const Logger&) = delete;
+	Logger() = default;
+	~Logger();
+	Logger(const Logger&) = delete;
+	Logger& operator=(const Logger&) = delete;
 
-    static const char* toString(LogLevel level);
-    static const char* toString(Category category);
+	static const char* toString(LogLevel level);
+	static const char* toString(Category category);
 
 	std::ofstream logFile;
 	bool initialized{false};
@@ -69,4 +91,8 @@ private:
 	std::mutex logMutex;
 
 	LogLevel minimumLevel{ LogLevel::INFO };
+
+	// Console ring-buffer
+	std::deque<ConsoleEntry> m_consoleEntries;
+	uint64_t m_nextSequenceId{ 1 };
 };

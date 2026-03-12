@@ -225,6 +225,9 @@ public:
     virtual unsigned int getSelectedEntity() const { return 0; }
     virtual void setSelectedEntity(unsigned int /*entity*/) {}
 
+    /// Focus camera on the currently selected entity (smooth transition to AABB center).
+    virtual void focusOnSelectedEntity() {}
+
     // --- Gizmo ---
     virtual void setGizmoMode(GizmoMode /*mode*/) {}
     virtual GizmoMode getGizmoMode() const { return GizmoMode::None; }
