@@ -251,11 +251,11 @@
 - Mipmap-Level-Slider (wenn Texture Mipmaps hat)
 
 **Fortschrittsprüfung:**
-- [ ] Textur wird korrekt dargestellt
-- [ ] Zoom/Pan funktioniert
-- [ ] Einzelne RGBA-Kanäle können isoliert werden
-- [ ] Metadaten werden angezeigt
-- [ ] DDS-komprimierte Texturen werden korrekt dargestellt
+- [x] Textur wird korrekt dargestellt
+- [x] Zoom/Pan funktioniert
+- [x] Einzelne RGBA-Kanäle können isoliert werden
+- [x] Metadaten werden angezeigt
+- [x] DDS-komprimierte Texturen werden korrekt dargestellt
 
 ### 2.4 Animation Editor Tab
 **Priorität:** Mittel–Hoch (Skeletal Animation ist bereits implementiert, aber es gibt keine Editing-UI)
@@ -329,7 +329,7 @@
 ### 2.7 Profiler / Performance-Monitor Tab
 **Priorität:** Mittel (F10 Overlay existiert, aber kein dedizierter Tab mit Verlaufshistorie)
 
-**Beschreibung:** Dedizierter Tab für Performance-Analyse mit Echtzeit-Graphen und Frame-Analyse.
+**Aktueller Stand:** Implementiert. Schließbarer Tab mit Toolbar (Freeze/Resume-Button), scrollbarer Metrik-Bereich. `FrameMetrics`-Struct in `DiagnosticsManager` mit Ring-Buffer (300 Frames). Anzeige: Frame-History-Balkengrafik (letzte 150 Frames, farbcodiert grün/gelb/rot nach Warnschwellen), Current-Frame-Übersicht (FPS, CPU/GPU Frame-Time), CPU-Breakdown (World/UI/Layout/Draw/ECS/Input/Events/Render/GC/Other mit Proportions-Balken), Occlusion-Culling-Statistik (Visible/Hidden/Total/Cull-Rate). 0.25s-Auto-Refresh-Timer. Freeze-Modus hält die aktuelle Anzeige an. Warnschwellen: grün < 8.3ms, gelb < 16.6ms, rot ≥ 16.6ms. Zugang über Settings-Dropdown → „Profiler".
 
 **Herangehensweise:**
 - Die existierenden GPU Timer Queries und CPU-Metriken nutzen
@@ -341,9 +341,9 @@
 - Warnschwellen: Zeilen werden rot wenn > 16.6ms (60fps), gelb wenn > 8.3ms (120fps)
 
 **Fortschrittsprüfung:**
-- [ ] FPS-Graph zeigt Live-Daten
-- [ ] Aufschlüsselung nach Rendering-Phase sichtbar
-- [ ] Frame-Einfrieren funktioniert
+- [x] FPS-Graph zeigt Live-Daten
+- [x] Aufschlüsselung nach Rendering-Phase sichtbar
+- [x] Frame-Einfrieren funktioniert
 - [ ] Draw-Call-Count wird korrekt angezeigt
 
 ---
@@ -459,7 +459,7 @@
 - [ ] Collider-Wireframe ist im Viewport sichtbar
 
 ### 3.6 Intelligent Snap & Grid
-**Aktueller Stand:** Kein Snapping, kein Grid-System im Viewport.
+**Aktueller Stand:** Implementiert. Grid-Overlay auf der XZ-Ebene (SDF-basierter Infinite-Grid-Shader mit fwidth()-Antialiasing, Achsen-Highlighting rot/blau, 10er-Verstärkungslinien, Distance-Fade). Grid-Sichtbarkeit wird zusammen mit Snap aktiviert. Snap-to-Grid für Translate (rundet alle Positionskomponenten auf `gridSize`-Vielfache), Rotate (rundet Euler-Winkel auf 15°-Schritte) und Scale (rundet auf 0.1-Schritte). `ViewportOverlay.Snap`-Toggle-Button schaltet Snap + Grid gemeinsam ein/aus. `ViewportOverlay.GridSize`-Dropdown (0.25/0.5/1/2/5/10 Einheiten). Snap- und Grid-Einstellungen über `DiagnosticsManager::setState/getState` in config.ini persistiert. Snap-State liegt als `m_snapEnabled`/`m_gridVisible`/`m_gridSize`/`m_rotationSnapDeg`/`m_scaleSnapStep` in der `Renderer`-Basisklasse. Surface-Snap (Raycast) steht noch aus.
 
 **Ziel:** Konfigurierbares Snap-to-Grid und Surface-Snapping für präzise Platzierung.
 
@@ -473,10 +473,10 @@
 - Snap-Settings in Engine Settings persistiert
 
 **Fortschrittsprüfung:**
-- [ ] Grid-Overlay im Viewport sichtbar (toggelbar)
-- [ ] Ctrl+Move rastet auf Grid
+- [x] Grid-Overlay im Viewport sichtbar (toggelbar)
+- [x] Snap aktiviert rastet Translate auf Grid
 - [ ] Surface-Snap platziert Entity auf Oberfläche
-- [ ] Rotation-Snap funktioniert in 15°-Schritten
+- [x] Rotation-Snap funktioniert in 15°-Schritten
 
 ---
 
@@ -485,7 +485,7 @@
 > **Ziel:** Content Browser zu einem vollwertigen Asset-Management-Tool ausbauen.
 
 ### 4.1 Asset-Thumbnails
-**Aktueller Stand:** Assets werden als farbige Quadrate mit Typ-Icon dargestellt. Keine Vorschaubilder.
+**Aktueller Stand:** Textur-Thumbnails implementiert. `resolveTextureSourcePath()` löst den absoluten Quell-Bildpfad aus dem Textur-Asset-JSON (`m_sourcePath`) auf. `makeGridTile()` akzeptiert optionalen `thumbnailTextureId`-Parameter. Für Textur-Assets im Grid (Normal- und Suchmodus) wird per `preloadUITexture()` das Quellbild als GL-Textur geladen und direkt als Tile-Icon angezeigt (größerer Anzeigebereich: 5%–95% statt 15%–85%, weiße Tint statt Typ-Farbe). Caching über den bestehenden `m_uiTextureCache` des Renderers. Mesh- und Material-Thumbnails (FBO-Render) stehen noch aus.
 
 **Ziel:** Echte Thumbnails für Texturen, Meshes und Materialien.
 
@@ -499,10 +499,10 @@
 - Cache-Invalidierung: Wenn sich das Asset ändert (isSaved=false), Thumbnail neu generieren
 
 **Fortschrittsprüfung:**
-- [ ] Texturen zeigen ihr Bild als Thumbnail
+- [x] Texturen zeigen ihr Bild als Thumbnail
 - [ ] 3D-Modelle zeigen einen kleinen Render
 - [ ] Materialien zeigen eine Kugel mit dem Material
-- [ ] Thumbnails werden gecacht und schnell geladen
+- [x] Thumbnails werden gecacht und schnell geladen
 
 ### 4.2 Erweiterte Such- und Filterfunktion
 **Aktueller Stand:** Vollständig implementiert. Echtzeit-Suchfeld + 7 Typ-Filter-Toggle-Buttons in der PathBar. Suchmodus durchsucht alle Ordner als flache Liste. Typ-Filter per Bitmask. Ctrl+F fokussiert Suchfeld. Doppelklick auf Suchergebnis navigiert zum Ordner + öffnet Asset-Editor.
@@ -590,7 +590,7 @@
 - [x] Fokus-Button zentriert die Kamera
 
 ### 5.2 Multi-Select & Group Operations
-**Aktueller Stand:** Nur eine Entity gleichzeitig selektierbar.
+**Aktueller Stand:** ✅ Grundlegende Multi-Select implementiert. `std::unordered_set<unsigned int>` Selektionsmodell. Ctrl+Click im Viewport fügt/entfernt Entities. Gizmo (Translate/Rotate/Scale) bewegt alle selektierten Entities gleichzeitig mit Group-Undo/Redo. Delete entfernt alle selektierten Entities mit Group-Undo. Selection-Outline für alle selektierten Entities. Tab-Wechsel speichert/stellt Selektion pro Tab wieder her.
 
 **Ziel:** Mehrfachauswahl und Gruppenoperationen.
 
@@ -603,10 +603,10 @@
 - Selektion in `std::unordered_set<uint32_t>` statt `uint32_t`
 
 **Fortschrittsprüfung:**
-- [ ] Ctrl+Klick fügt Entities zur Selektion hinzu
-- [ ] Gizmo bewegt alle selektierten Entities gleichzeitig
+- [x] Ctrl+Klick fügt Entities zur Selektion hinzu
+- [x] Gizmo bewegt alle selektierten Entities gleichzeitig
 - [ ] Rubber-Band-Selection funktioniert im Viewport
-- [ ] Löschen entfernt alle selektierten Entities (mit Undo)
+- [x] Löschen entfernt alle selektierten Entities (mit Undo)
 
 ### 5.3 Entity Copy/Paste & Duplicate
 **Aktueller Stand:** Vollständig implementiert. `EntityClipboard`-Struct mit 13 Komponenten-Snapshots. Ctrl+C kopiert, Ctrl+V pastet (+1x Offset, Name-Suffix „(Copy)"), Ctrl+D dupliziert ohne Clipboard zu überschreiben. Undo/Redo-Integration.
@@ -757,7 +757,7 @@
 - [ ] Continue-Button setzt die Ausführung fort
 
 ### 7.3 Script-Hot-Reload
-**Aktueller Stand:** Shader Hot-Reload existiert, aber kein Script Hot-Reload.
+**Aktueller Stand:** Vollständig implementiert. `ScriptHotReload`-Klasse überwacht rekursiv das `Content/`-Verzeichnis auf `.py`-Dateiänderungen (analog zu `ShaderHotReload`, aber mit `recursive_directory_iterator`). Poll-Intervall 500ms. Bei Änderung wird das Script-Modul im Python-Interpreter neu geladen (alte ScriptState freigegeben, neue Modul-Funktionen extrahiert), wobei `startedEntities` erhalten bleibt (kein erneutes `onloaded`). Level-Skript wird ebenfalls erkannt und neu geladen. Toast-Benachrichtigung zeigt Erfolg/Fehler an. Toggle in Engine Settings → General → Scripting mit config.ini-Persistenz via `DiagnosticsManager::setState("ScriptHotReloadEnabled", ...)`.
 
 **Ziel:** Wenn eine .py-Datei extern geändert wird, wird sie automatisch neu geladen.
 
@@ -769,10 +769,10 @@
 - Falls Syntax-Error: Error-Toast statt Reload
 
 **Fortschrittsprüfung:**
-- [ ] Externe Script-Änderung wird erkannt
-- [ ] Script wird im laufenden PIE neu geladen
-- [ ] Syntax-Fehler werden als Toast angezeigt
-- [ ] Alter Script-Zustand bleibt erhalten (soweit möglich)
+- [x] Externe Script-Änderung wird erkannt
+- [x] Script wird im laufenden PIE neu geladen
+- [x] Syntax-Fehler werden als Toast angezeigt
+- [x] Alter Script-Zustand bleibt erhalten (soweit möglich)
 
 ---
 
@@ -869,18 +869,18 @@
 | **1.6** | Scrollbar-Design | Niedrig | Gering | ❌ |
 | **2.1** | Console / Log-Viewer | Hoch | Mittel | ✅ |
 | **2.2** | Material Editor Tab | Hoch | Hoch | ❌ |
-| **2.3** | Texture Viewer | Mittel | Gering | ❌ |
+| **2.3** | Texture Viewer | Mittel | Gering | ✅ |
 | **2.4** | Animation Editor | Mittel–Hoch | Hoch | ❌ |
 | **2.5** | Particle Editor | Mittel | Mittel | ❌ |
 | **2.6** | Audio Preview | Niedrig–Mittel | Gering | ❌ |
-| **2.7** | Profiler Tab | Mittel | Mittel | ❌ |
+| **2.7** | Profiler Tab | Mittel | Mittel | ✅ |
 | **3.1** | Auto-Material bei Import | Hoch | Gering | ✅ |
 | **3.2** | Entity Templates / Prefabs | Hoch | Mittel | ❌ |
 | **3.3** | One-Click Scene Setup | Mittel | Gering | ✅ |
 | **3.4** | Auto-LOD-Generierung | Mittel | Hoch | ❌ |
 | **3.5** | Auto-Collider-Generierung | Mittel | Gering | ✅ |
-| **3.6** | Intelligent Snap & Grid | Hoch | Mittel | ❌ |
-| **4.1** | Asset-Thumbnails | Hoch | Mittel | ❌ |
+| **3.6** | Intelligent Snap & Grid | Hoch | Mittel | ✅ |
+| **4.1** | Asset-Thumbnails | Hoch | Mittel | 🔄 |
 | **4.2** | Erweiterte Suche & Filter | Hoch | Gering | ✅ |
 | **4.3** | Drag & Drop Verbesserungen | Mittel | Mittel | ❌ |
 | **4.4** | Asset-Referenz-Tracking | Mittel | Mittel | ❌ |
@@ -893,7 +893,7 @@
 | **6.3** | Benachrichtigungs-System | Niedrig | Gering | ❌ |
 | **7.1** | Integrierter Script-Editor | Mittel | Sehr hoch | ❌ |
 | **7.2** | Debug-Breakpoints | Niedrig | Sehr hoch | ❌ |
-| **7.3** | Script-Hot-Reload | Hoch | Mittel | ❌ |
+| **7.3** | Script-Hot-Reload | Hoch | Mittel | ✅ |
 | **8.1** | Tooltip-System | Hoch | Gering | ✅ |
 | **8.2** | Onboarding-Wizard | Niedrig | Mittel | ❌ |
 | **8.3** | Keyboard-Navigation | Mittel | Mittel | ❌ |
@@ -911,10 +911,10 @@
 3.1 Auto-Material, 3.5 Auto-Collider, 3.3 Scene Setup, 5.3 Copy/Paste
 
 **Sprint 4 – Asset-Management:**
-4.1 Thumbnails, 2.2 Material Editor Tab, 2.3 Texture Viewer
+~~4.1 Thumbnails~~🔄 (Textur-Thumbnails ✅, Mesh/Material ausstehend), 2.2 Material Editor Tab, ~~2.3 Texture Viewer~~✅
 
 **Sprint 5 – Viewport-Workflow:**
-3.6 Snap & Grid, 5.2 Multi-Select, 5.4 Surface-Snap
+~~3.6 Snap & Grid~~✅, 5.2 Multi-Select, 5.4 Surface-Snap
 
 **Sprint 6 – Erweiterte Tabs:**
 2.5 Particle Editor, 2.4 Animation Editor, 2.7 Profiler

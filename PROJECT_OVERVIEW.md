@@ -120,11 +120,13 @@
 - `Level Loading via Content Browser`: Doppelklick auf ein Level-Asset im Content Browser löst Level-Wechsel aus. Unsaved-Changes-Dialog zeigt Checkbox-Liste ungespeicherter Assets (alle standardmäßig ausgewählt). Rendering friert ein (`Renderer::setRenderFrozen`), modaler Progress wird angezeigt. `AssetManager::loadLevelAsset()` (public) lädt neues Level, `setScenePrepared(false)` erzwingt Neuaufbau. Editor-Kamera/Skybox werden aus dem neuen Level wiederhergestellt. Der Unsaved-Changes-Dialog ersetzt auch den bisherigen Speicher-Flow (Ctrl+S, StatusBar.Save). Neue APIs: `getUnsavedAssetList()`, `saveSelectedAssetsAsync()`, `showUnsavedChangesDialog()`, `showLevelLoadProgress()`.
 - `Texture Streaming`: Asynchrones Texture-Streaming via `TextureStreamingManager` (Background-Thread + GPU-Upload-Queue). Texturen werden als 1×1 Placeholder zurückgegeben, pro Frame werden bis zu 4 Texturen hochgeladen. `OpenGLMaterial::bindTextures()` nutzt den Streaming-Manager wenn aktiv. Toggle über `Renderer::isTextureStreamingEnabled()`/`setTextureStreamingEnabled()`. Engine Settings → Rendering → Performance: Checkbox „Texture Streaming". Persistiert in `config.ini` (`TextureStreamingEnabled`).
 - `Console / Log-Viewer Tab` (Editor Roadmap 2.1): Dedizierter Editor-Tab für Live-Log-Output. `openConsoleTab()`/`closeConsoleTab()`/`isConsoleOpen()` in `UIManager`. `ConsoleState`-Struct (tabId, widgetId, levelFilter-Bitmask, searchText, autoScroll, refreshTimer). Toolbar mit Filter-Buttons (All/Info/Warning/Error als Toggle-Bitmask), Suchfeld (Echtzeit-Textfilter, case-insensitive), Clear-Button, Auto-Scroll-Toggle. Scrollbare Log-Area zeigt farbcodierte Einträge aus dem Logger-Ringbuffer (2000 Einträge max): INFO=textSecondary, WARNING=warningColor, ERROR=errorColor, FATAL=rot. `refreshConsoleLog()` baut Log-Zeilen mit Timestamp, Level-Tag, Category und Message. Periodischer Refresh alle 0.5s in `updateNotifications()` (nur bei neuen Einträgen via sequenceId-Vergleich). Erreichbar über Settings-Dropdown → „Console".
+- `Profiler / Performance-Monitor Tab` (Editor Roadmap 2.7): Dedizierter Editor-Tab für Echtzeit-Performance-Analyse. `FrameMetrics`-Struct in `DiagnosticsManager` mit Ring-Buffer (300 Frames, `pushFrameMetrics()`/`getLatestMetrics()`/`getFrameHistory()`). `openProfilerTab()`/`closeProfilerTab()`/`isProfilerOpen()` in `UIManager`. `ProfilerState`-Struct (tabId, widgetId, frozen, refreshTimer). Toolbar mit Freeze/Resume-Button. Scrollbare Metriken-Area: Frame-History-Balkengrafik (letzte 150 Frames, farbcodiert grün<8.3ms/gelb<16.6ms/rot≥16.6ms), Current-Frame-Übersicht (FPS, CPU/GPU Frame-Time), CPU-Breakdown (10 Kategorien: World/UI/Layout/Draw/ECS/Input/Events/Render/GC/Other mit Proportions-Balken), Occlusion-Culling-Statistik (Visible/Hidden/Total/Cull-Rate%). 0.25s-Auto-Refresh-Timer in `updateNotifications()`. Freeze-Modus pausiert Datenanzeige. Erreichbar über Settings-Dropdown → „Profiler".
 - `Content Browser Suche & Filter` (Editor Roadmap 4.2): Echtzeit-Suchfeld + 7 Typ-Filter-Buttons in der Content-Browser-PathBar. `m_browserSearchText` (Textfilter) + `m_browserTypeFilter` (uint16_t Bitmask, 1 Bit pro AssetType). Filter-Buttons: Mesh, Mat, Tex, Script, Audio, Level, Widget — Accent-Toggle (aktiv=halbtransparent blau, inaktiv=transparent). Suchmodus: alle Assets über alle Ordner als flache Liste, case-insensitive Substring + Typ-Filter. Doppelklick navigiert zum Asset-Ordner, öffnet Asset-Editor, leert Suchtext. Normalmodus: nur Typ-Filter auf aktuellen Ordner. `focusContentBrowserSearch()` + Ctrl+F Shortcut.
 - `Entity Copy/Paste & Duplicate` (Editor Roadmap 5.3): Ctrl+C/Ctrl+V/Ctrl+D für Entities. `EntityClipboard`-Struct in `UIManager` mit Snapshots aller 13 ECS-Komponententypen. `copySelectedEntity()` speichert vollständigen Entity-Snapshot. `pasteEntity()` erzeugt neue Entity mit +1x Offset und „(Copy)"-Namenssuffix, Undo/Redo-Integration. `duplicateSelectedEntity()` (Ctrl+D) erstellt frischen Snapshot ohne den Clipboard zu überschreiben.
 - `Auto-Collider-Generierung` (Editor Roadmap 3.5): `autoFitColliderForEntity()` berechnet Mesh-AABB, skaliert mit Entity-Transform, wählt ColliderType per Heuristik (Sphere/Capsule/Box). „Add Component → Physics" fügt automatisch CollisionComponent mit gefitteten Dimensionen hinzu. „Auto-Fit Collider"-Button in Collision-Details.
 - `One-Click Scene Setup` (Editor Roadmap 3.3): `createNewLevelWithTemplate()` mit SceneTemplate-Enum (Empty/BasicOutdoor/Prototype) und optionalem `relFolder`-Parameter. „+ Level"-Dropdown in Content-Browser-PathBar. Rechtsklick-Kontextmenü „New Level" öffnet Popup mit Namenseingabe, erstellt Level als ungespeicherte Änderung (dirty), registriert im Asset-Registry. Entities direkt per ECS aufgebaut, Editor-Kamera template-spezifisch positioniert.
 - `Viewport-Einstellungen Panel (Editor Roadmap 5.1)`: Toolbar-Buttons funktional gemacht. **CamSpeed-Dropdown**: Klick öffnet Dropdown mit 7 Geschwindigkeitsvoreinstellungen (0.25x–5.0x), aktuelle Geschwindigkeit markiert, Button-Label aktualisiert bei Auswahl und Mausrad-Scroll. **Stats-Toggle**: Schaltet Performance-Metriken-Overlay ein/aus, visueller Zustand (weiß=aktiv, grau=inaktiv). **Grid-Snap-Toggle**: Schaltet Grid-Snap ein/aus mit visueller Rückmeldung und Toast. **Settings-Dropdown**: Einträge Engine Settings, Editor Settings, Console. **Focus on Selection (F-Taste)**: Neue `Renderer::focusOnSelectedEntity()` – berechnet AABB-Center, Smooth-Transition (0.3s) in 2.5× Radius-Entfernung. F-Taste im Gizmo-Shortcut-Block (W/E/R/F).
+- `Intelligent Snap & Grid (Editor Roadmap 3.6)`: Vollständiges Snap-to-Grid-System. **Grid-Overlay**: Infinite-Grid-Shader (XZ-Ebene, SDF-basiert, fwidth-AA, Achsen-Highlighting rot/blau, 10er-Verstärkungslinien, Distance-Fade). **Gizmo-Snap**: Translate rastet auf gridSize-Vielfache, Rotate auf 15°-Schritte, Scale auf 0.1-Schritte. **Toolbar**: Snap-Toggle + GridSize-Dropdown (0.25/0.5/1/2/5/10). **Persistenz**: config.ini via DiagnosticsManager. Snap-State in Renderer-Basisklasse (m_snapEnabled, m_gridVisible, m_gridSize, m_rotationSnapDeg, m_scaleSnapStep).
 
 ## Inhaltsverzeichnis
 
@@ -306,11 +308,13 @@ Engine/
 │   │   │   └── TileViewWidget.h        # NEU – Grid-Tile-Ansicht (Phase 4)
 │   │   ├── EditorWindows/           # Editor-Fenster (FBO-Override, 3D-Vorschau)
 │   │   │   ├── MeshViewerWindow.h/.cpp  # Mesh-Viewer: Orbit-Kamera, dedizierter FBO
+│   │   │   ├── TextureViewerWindow.h/.cpp # Texture-Viewer: Channel-Isolation, Checkerboard, Metadaten
 │   │   │   └── PopupWindow.h/.cpp       # Multi-Window Popup-System (backend-agnostisch, nutzt IRenderContext)
 │   │   └── CMakeLists.txt          # RendererCore OBJECT-Lib (abstrakte Schicht, eingebettet in Renderer.dll)
 ├── RENDERER_ABSTRACTION_PLAN.md     # Detaillierter Plan zur Backend-Abstrahierung des Renderers
 │   └── Scripting/                  # Eingebettetes Python-Scripting
 │       ├── PythonScripting.h/.cpp
+│       ├── ScriptHotReload.h/.cpp  # Script-Hot-Reload: Überwacht Content/ rekursiv per last_write_time (500ms Poll) auf .py-Änderungen, löst Modul-Neuladen im Python-Interpreter aus
 │       └── engine.pyi              # Python-Stubs für IntelliSense
 └── PROJECT_OVERVIEW.md             # Diese Datei
 ```
@@ -411,7 +415,7 @@ Beim Start werden sechs Editor-Widgets geladen:
 | WorldSettings     | `WorldSettings.asset`    | Viewport   | Clear-Color-Picker (RGB-Einträge)           |
 | WorldOutliner     | `WorldOutliner.asset`    | Viewport   | Entitäten-Liste des aktiven Levels          |
 | EntityDetails     | `EntityDetails.asset`    | Viewport   | Komponenten-Details der ausgewählten Entität mit editierbaren Steuerelementen: Vec3-Eingabefelder (X/Y/Z farbcodiert) für Transform, EntryBars für Floats, CheckBoxen für Booleans, DropDowns für Enums, ColorPicker für Farben, Drag-and-Drop + Dropdown-Auswahl für Mesh/Material/Script-Assets, "+ Add Component"-Dropdown, Remove-Button (X) pro Komponente mit Bestätigungsdialog |
-| ContentBrowser    | `ContentBrowser.asset`   | Viewport   | TreeView (Ordner-Hierarchie + Shaders-Root, Highlight) + Grid (Kacheln mit Icons, Selektion + Delete + Rename + F2-Shortcut), Doppelklick-Navigation (Ordner öffnen, Model3D → Mesh-Viewer-Tab), farbcodierte PNGs, Rechtsklick-Kontextmenü (New Script/Level/Material) |
+| ContentBrowser    | `ContentBrowser.asset`   | Viewport   | TreeView (Ordner-Hierarchie + Shaders-Root, Highlight) + Grid (Kacheln mit Icons, Selektion + Delete + Rename + F2-Shortcut), Doppelklick-Navigation (Ordner öffnen, Model3D → Mesh-Viewer-Tab), farbcodierte PNGs, Rechtsklick-Kontextmenü (New Script/Level/Material), Textur-Asset-Thumbnails (Quellbild als Grid-Icon via `preloadUITexture`, gecacht im Renderer) |
 | StatusBar         | `StatusBar.asset`        | Global     | Undo/Redo + Dirty-Zähler + Save All        |
 
 ### 4.3 Editor-Tab-System
@@ -1216,6 +1220,21 @@ registerClickEvent("TitleBar.Close", []() { ... });
 - **Schließen**: `closeMeshViewer(assetPath)` — wechselt auf Viewport-Tab, stellt Editor-Level/Kamera wieder her, entfernt Tab und Widgets.
 - **Input-Routing in `main.cpp`**: `getMeshViewer(getActiveTabId())` steuert Orbit-Kamera-Input (Scroll → Zoom, Rechtsklick-Drag → Orbit).
 
+#### Texture Viewer (Editor-Fenster):
+- **Klasse**: `TextureViewerWindow` (`src/Renderer/EditorWindows/TextureViewerWindow.h/.cpp`)
+- **Zweck**: 2D-Vorschau von Textur-Assets mit Channel-Isolation (R/G/B/A), Checkerboard-Hintergrund und Metadaten-Anzeige.
+- **Architektur**: Kein Runtime-EngineLevel nötig — die Textur wird direkt per GLSL-Shader in den Tab-FBO gerendert. Kein Level-Swap beim Tab-Wechsel.
+- **Channel-Isolation**: Ein eigener GLSL-Shader (`m_texViewerChannelProgram`) mit `uniform ivec4 uChannelMask` und `uniform int uCheckerboard`. Bei Einzel-Kanal-Isolation wird der Wert als Grayscale dargestellt.
+- **Checkerboard-Hintergrund**: Prozedural im Fragment-Shader generiert (32×32 Kacheln). Zeigt Transparenz-Bereiche deutlich an.
+- **Metadaten-Panel** (rechts, 320px): Auflösung, Kanäle, Format (PNG/JPEG/TGA/BMP/HDR/DDS), Dateigröße, Kompressionsformat. Tab-scoped Widget (`TextureViewerDetails.{path}`).
+- **Channel-Toggle-Buttons**: R/G/B/A-Buttons in der Sidebar mit farblicher Kodierung (Rot/Grün/Blau/Grau). Klick togglet den jeweiligen Kanal. Deaktivierte Kanäle werden visuell ausgegraut (gedämpfte Hintergrund- und Textfarbe), aktive Kanäle zeigen ihre lebendige Originalfarbe.
+- **Zoom/Pan**: Zoom 1.0 = Fit-to-Window (ohne Upscaling). Scroll-Rad zoomt stufenlos (Faktor 1.15x pro Tick, Bereich 0.05–50.0, relativ zu Fit-Scale). Rechtsklick-Drag verschiebt die Ansicht (Pan). Im Laptop-Modus kann alternativ Linksklick-Drag zum Pan verwendet werden. Zoom- und Pan-State im `TextureViewerWindow`-Objekt gespeichert.
+- **Öffnung**: Doppelklick auf Texture-Asset im Content Browser → `OpenGLRenderer::openTextureViewer(assetPath)`.
+  - Pfad-Auflösung via `resolveContentPath()`, automatisches Laden via `AssetManager::loadAsset(Sync)`.
+  - Textur-Upload per `getOrLoadUITexture()` mit Fallback auf `m_sourcePath`.
+- **Schließen**: `closeTextureViewer(assetPath)` — wechselt auf Viewport-Tab, entfernt Tab und Widgets.
+- **Rendering**: Im `render()`-Loop wird für Texture-Viewer-Tabs `renderWorld()` übersprungen und stattdessen die Textur direkt in den Tab-FBO gerendert.
+
 #### World-Outliner-Integration:
 ```cpp
 refreshWorldOutliner()          → Aktualisiert Entitäten-Liste
@@ -1653,6 +1672,23 @@ Scripting::Shutdown()       // Python-Interpreter herunterfahren
 - `_DEBUG` wird vor `Python.h`-Include deaktiviert (vermeidet Debug-Python-Lib)
 - Engine-Modul (`engine`) wird als eingebettetes C-Modul registriert
 
+### 11.1b Script Hot-Reload
+**Dateien:** `src/Scripting/ScriptHotReload.h/.cpp`, `src/Scripting/PythonScripting.cpp`
+
+```cpp
+Scripting::InitScriptHotReload(contentDir)  // File-Watcher auf Content/ initialisieren
+Scripting::PollScriptHotReload()            // Prüft auf .py-Änderungen, lädt Module neu
+Scripting::IsScriptHotReloadEnabled()       // Abfrage ob Hot-Reload aktiv
+Scripting::SetScriptHotReloadEnabled(b)     // Toggle (wird auch aus config.ini gelesen)
+```
+
+- `ScriptHotReload`-Klasse: Überwacht Content/-Verzeichnis rekursiv (`recursive_directory_iterator`) auf `.py`-Dateiänderungen via `std::filesystem::last_write_time`
+- Poll-Intervall: 500ms (selbstthrottled)
+- Bei Änderung: Alte `ScriptState` freigeben, Modul neu laden, `startedEntities` beibehalten (kein erneutes `onloaded`)
+- Level-Skript wird ebenfalls erkannt und neu geladen (mit `on_level_loaded` Re-Aufruf)
+- Toast-Benachrichtigung bei Erfolg/Fehler via `DiagnosticsManager::enqueueToastNotification()`
+- Toggle in Engine Settings → General → Scripting mit config.ini-Persistenz (`ScriptHotReloadEnabled`)
+
 ### 11.2 Script-API (engine-Modul)
 
 Das `engine`-Modul wird Python-Skripten automatisch zur Verfügung gestellt und bietet:
@@ -2035,7 +2071,7 @@ while (running) {
     SDL_PollEvent:
     - QUIT → running = false
     - MOUSE_MOTION → UI-Hover + Kamera-Rotation (bei Rechtsklick oder PIE-Maus-Capture; UI-Updates deaktiviert während aktivem PIE-Capture)
-    - MOUSE_BUTTON_DOWN (Links) → während PIE-Capture ignoriert; sonst PIE-Recapture (Position speichern + Grab) oder UI-Hit-Test oder Entity-Picking
+    - MOUSE_BUTTON_DOWN (Links) → während PIE-Capture ignoriert; sonst PIE-Recapture (Position speichern + Grab) oder UI-Hit-Test oder Entity-Picking (Ctrl+Klick für Multi-Select Toggle)
     - MOUSE_BUTTON_DOWN (Rechts) → während PIE-Capture ignoriert; sonst Kamera-Steuerung aktivieren (nur außerhalb PIE), Mausposition speichern + Window-Grab
     - MOUSE_BUTTON_UP (Rechts) → Kamera-Steuerung deaktivieren, Maus zurück an gespeicherte Position warpen
     - MOUSE_WHEEL → während PIE-Capture ignoriert; sonst UI-Scroll oder Kamera-Geschwindigkeit ändern
@@ -2050,7 +2086,7 @@ while (running) {
         ESC → PIE stoppen
         W/E/R → Gizmo-Modus (nur ohne Rechtsklick, außerhalb PIE)
         F → Fokus auf selektierte Entity (Kamera-Transition zum AABB-Center)
-        DELETE → Selektierte Entity löschen (Snapshot aller Komponenten → Undo/Redo-Action)
+        DELETE → Selektierte Entity(s) löschen (Gruppen-Delete aller selektierten Entities, EntitySnapshot pro Entity → Gruppen-Undo/Redo-Action)
         Sonst → DiagnosticsManager + Scripting
     - KEY_DOWN → UI-Keyboard + DiagnosticsManager + Scripting
 
@@ -2091,7 +2127,8 @@ while (running) {
 | F12        | FPS-Cap (60 FPS) toggle               |
 | ESC        | PIE stoppen (wenn aktiv)              |
 | Shift+F1   | PIE-Maus freigeben / Input pausieren  |
-| DELETE     | Selektierte Entity löschen (mit Undo/Redo) |
+| DELETE     | Selektierte Entity(s) löschen (Gruppen-Delete mit Undo/Redo) |
+| Ctrl+Klick | Multi-Select Toggle (Entity zur Selektion hinzufügen/entfernen) |
 
 ### Kamera-Steuerung
 
@@ -2103,7 +2140,7 @@ while (running) {
 | RMB + Q/E         | Kamera runter/hoch                    |
 | Rechte Maustaste  | Kamera-Rotation aktivieren            |
 | Mausrad (+ RMB)   | Kamera-Geschwindigkeit ändern (0.5x–5.0x) |
-| W/E/R (ohne RMB)  | Gizmo-Modus: Translate/Rotate/Scale   |
+| W/E/R (ohne RMB)  | Gizmo-Modus: Translate/Rotate/Scale (Multi-Entity-Gruppen-Gizmo) |
 
 **Editor-Modus (Laptop-Modus):**
 

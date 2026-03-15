@@ -795,10 +795,159 @@ void OpenGLRenderer::render()
 
         if (activeTab)
         {
-            renderWorld();
-            if (activeTab->id == "Viewport")
+            // Texture viewer tabs: render texture preview into the tab FBO
+            auto texViewerIt = m_textureViewers.find(activeTab->id);
+            if (texViewerIt != m_textureViewers.end() && texViewerIt->second)
             {
-                renderViewportUI();
+                auto* viewer = texViewerIt->second.get();
+                GLuint texId = viewer->getGLTextureId();
+                if (texId != 0 && activeTab->renderTarget && activeTab->renderTarget->isValid())
+                {
+                    auto* glRT = static_cast<OpenGLRenderTarget*>(activeTab->renderTarget.get());
+                    glBindFramebuffer(GL_FRAMEBUFFER, glRT->getGLFramebuffer());
+                    glViewport(0, 0, width, height);
+
+                    // Clear with dark background
+                    glClearColor(0.12f, 0.12f, 0.15f, 1.0f);
+                    glClear(GL_COLOR_BUFFER_BIT);
+
+                    // Ensure channel-isolation shader
+                    if (m_texViewerChannelProgram == 0)
+                    {
+                        const char* vsSource = R"(
+#version 330 core
+layout(location = 0) in vec2 aPos;
+out vec2 vTexCoord;
+uniform mat4 uProjection;
+uniform vec4 uRect;
+void main() {
+    gl_Position = uProjection * vec4(aPos, 0.0, 1.0);
+    vec2 normalised = (aPos - uRect.xy) / max(uRect.zw - uRect.xy, vec2(1.0));
+    vTexCoord = vec2(normalised.x, 1.0 - normalised.y);
+}
+)";
+                        const char* fsSource = R"(
+#version 330 core
+in vec2 vTexCoord;
+out vec4 FragColor;
+uniform sampler2D uTexture;
+uniform ivec4 uChannelMask;
+uniform int uCheckerboard;
+void main() {
+    // Checkerboard background
+    vec3 bg = vec3(0.12, 0.12, 0.15);
+    if (uCheckerboard != 0) {
+        float checker = mod(floor(vTexCoord.x * 32.0) + floor(vTexCoord.y * 32.0), 2.0);
+        bg = mix(vec3(0.3), vec3(0.5), checker);
+    }
+
+    vec4 texel = texture(uTexture, vTexCoord);
+
+    // Apply channel mask
+    float r = (uChannelMask.x != 0) ? texel.r : 0.0;
+    float g = (uChannelMask.y != 0) ? texel.g : 0.0;
+    float b = (uChannelMask.z != 0) ? texel.b : 0.0;
+    float a = (uChannelMask.w != 0) ? texel.a : 1.0;
+
+    // If only one channel is on, show it as grayscale
+    int count = uChannelMask.x + uChannelMask.y + uChannelMask.z;
+    if (count == 1) {
+        float v = r + g + b;
+        FragColor = vec4(mix(bg, vec3(v), a), 1.0);
+    } else {
+        FragColor = vec4(mix(bg, vec3(r, g, b), a), 1.0);
+    }
+}
+)";
+                        GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+                        glShaderSource(vs, 1, &vsSource, nullptr);
+                        glCompileShader(vs);
+                        GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+                        glShaderSource(fs, 1, &fsSource, nullptr);
+                        glCompileShader(fs);
+                        m_texViewerChannelProgram = glCreateProgram();
+                        glAttachShader(m_texViewerChannelProgram, vs);
+                        glAttachShader(m_texViewerChannelProgram, fs);
+                        glLinkProgram(m_texViewerChannelProgram);
+                        glDeleteShader(vs);
+                        glDeleteShader(fs);
+
+                        m_texViewerChannelUniforms.projection = glGetUniformLocation(m_texViewerChannelProgram, "uProjection");
+                        m_texViewerChannelUniforms.rect = glGetUniformLocation(m_texViewerChannelProgram, "uRect");
+                        m_texViewerChannelUniforms.texture = glGetUniformLocation(m_texViewerChannelProgram, "uTexture");
+                        m_texViewerChannelUniforms.channelMask = glGetUniformLocation(m_texViewerChannelProgram, "uChannelMask");
+                        m_texViewerChannelUniforms.checkerboard = glGetUniformLocation(m_texViewerChannelProgram, "uCheckerboard");
+                    }
+
+                    ensureUIQuadRenderer();
+
+                    // Compute image rect with zoom and pan, centered in the viewport content area
+                    const Vec4 vpRect = m_cachedViewportContentRect;
+                    float vpX = vpRect.x;
+                    float vpY = vpRect.y;
+                    float vpW = vpRect.z > 0.0f ? vpRect.z : static_cast<float>(width);
+                    float vpH = vpRect.w > 0.0f ? vpRect.w : static_cast<float>(height);
+
+                    // Always compute fit-to-window scale as the base (no upscale beyond 1:1)
+                    float fitScale = std::min(vpW / std::max(1.0f, static_cast<float>(viewer->getWidth())),
+                                              vpH / std::max(1.0f, static_cast<float>(viewer->getHeight())));
+                    fitScale = std::min(fitScale, 1.0f);
+
+                    // Zoom is relative to fitScale: zoom 1.0 = fit-to-window
+                    float imgW = static_cast<float>(viewer->getWidth()) * fitScale * viewer->getZoom();
+                    float imgH = static_cast<float>(viewer->getHeight()) * fitScale * viewer->getZoom();
+
+                    float cx = vpX + vpW * 0.5f + viewer->getPanX();
+                    float cy = vpY + vpH * 0.5f + viewer->getPanY();
+
+                    float x0 = cx - imgW * 0.5f;
+                    float y0 = cy - imgH * 0.5f;
+                    float x1 = cx + imgW * 0.5f;
+                    float y1 = cy + imgH * 0.5f;
+
+                    glm::mat4 ortho = glm::ortho(0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f);
+
+                    glEnable(GL_BLEND);
+                    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                    glDisable(GL_DEPTH_TEST);
+
+                    glUseProgram(m_texViewerChannelProgram);
+                    glUniformMatrix4fv(m_texViewerChannelUniforms.projection, 1, GL_FALSE, &ortho[0][0]);
+                    glUniform4f(m_texViewerChannelUniforms.rect, x0, y0, x1, y1);
+                    glUniform4i(m_texViewerChannelUniforms.channelMask,
+                        viewer->isChannelR() ? 1 : 0,
+                        viewer->isChannelG() ? 1 : 0,
+                        viewer->isChannelB() ? 1 : 0,
+                        viewer->isChannelA() ? 1 : 0);
+                    glUniform1i(m_texViewerChannelUniforms.checkerboard, viewer->isCheckerboard() ? 1 : 0);
+
+                    glActiveTexture(GL_TEXTURE0);
+                    glBindTexture(GL_TEXTURE_2D, texId);
+                    glUniform1i(m_texViewerChannelUniforms.texture, 0);
+
+                    float vertices[6][2] = {
+                        { x0, y1 }, { x0, y0 }, { x1, y0 },
+                        { x0, y1 }, { x1, y0 }, { x1, y1 }
+                    };
+
+                    glBindVertexArray(m_uiQuadVao);
+                    glBindBuffer(GL_ARRAY_BUFFER, m_uiQuadVbo);
+                    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+                    glBindBuffer(GL_ARRAY_BUFFER, 0);
+                    glDrawArrays(GL_TRIANGLES, 0, 6);
+                    glBindVertexArray(0);
+                    glBindTexture(GL_TEXTURE_2D, 0);
+
+                    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                }
+            }
+            else
+            {
+                renderWorld();
+                if (activeTab->id == "Viewport")
+                {
+                    renderViewportUI();
+                }
             }
         }
     }
@@ -1278,9 +1427,14 @@ void OpenGLRenderer::renderWorld()
 	const auto& groups = level->getGroups();
 
 	// Sync selection state with UIManager (outliner may have changed it)
-	if (m_uiManager.getSelectedEntity() != m_selectedEntity && !m_pickRequested)
+	const unsigned int uiSelected = m_uiManager.getSelectedEntity();
+	if (uiSelected != 0 && !m_pickRequested)
 	{
-		m_selectedEntity = m_uiManager.getSelectedEntity();
+		if (m_selectedEntities.empty() || *m_selectedEntities.begin() != uiSelected)
+		{
+			m_selectedEntities.clear();
+			m_selectedEntities.insert(uiSelected);
+		}
 	}
 
 	// Collect all visible 3D objects into a unified draw list for batching
@@ -2004,17 +2158,35 @@ void OpenGLRenderer::renderWorld()
 		if (!diagnostics.isPIEActive())
 		{
 			const unsigned int picked = pickEntityAt(m_pickX, m_pickY);
-			m_selectedEntity = picked;
-			m_uiManager.selectEntity(picked);
+			if (m_pickCtrlHeld)
+			{
+				// Ctrl+click: toggle entity in selection set
+				if (picked != 0)
+				{
+					if (m_selectedEntities.count(picked))
+						m_selectedEntities.erase(picked);
+					else
+						m_selectedEntities.insert(picked);
+				}
+			}
+			else
+			{
+				// Normal click: replace selection
+				m_selectedEntities.clear();
+				if (picked != 0)
+					m_selectedEntities.insert(picked);
+			}
+			m_uiManager.selectEntity(m_selectedEntities.empty() ? 0u : *m_selectedEntities.begin());
+			m_pickCtrlHeld = false;
 		}
 	}
 
 	// Render selected entity into pick buffer (needed for outline + picking before resolve)
-	if (m_selectedEntity != 0 && !diagnostics.isPIEActive())
+	if (!m_selectedEntities.empty() && !diagnostics.isPIEActive())
 	{
 		if (ensurePickFbo(fullWidth, fullHeight))
 		{
-			renderPickBufferSingleEntity(view, m_projectionMatrix, m_selectedEntity);
+			renderPickBufferSelectedEntities(view, m_projectionMatrix, m_selectedEntities);
 		}
 
 		// Update gizmo hover highlight
@@ -2056,8 +2228,14 @@ void OpenGLRenderer::renderWorld()
 		}
 	}
 
+	// Draw viewport grid overlay (XZ plane) when not in PIE
+	if (!diagnostics.isPIEActive())
+	{
+		drawViewportGrid(view, m_projectionMatrix);
+	}
+
 	// Draw selection outline + gizmo AFTER post-process resolve so they are not overwritten
-	if (m_selectedEntity != 0 && !diagnostics.isPIEActive())
+	if (!m_selectedEntities.empty() && !diagnostics.isPIEActive())
 	{
 		if (m_pickColorTex != 0)
 		{
@@ -3660,7 +3838,7 @@ void OpenGLRenderer::closeMeshViewer(const std::string& assetPath)
     m_meshViewers.erase(assetPath);
 
     // Clean up per-tab selection state
-    m_tabSelectedEntity.erase(assetPath);
+    m_tabSelectedEntities.erase(assetPath);
 
     // Unregister the details panel widget
     m_uiManager.unregisterWidget("MeshViewerDetails." + assetPath);
@@ -3689,6 +3867,419 @@ MeshViewerWindow* OpenGLRenderer::getMeshViewer(const std::string& assetPath)
 {
     auto it = m_meshViewers.find(assetPath);
     return (it != m_meshViewers.end()) ? it->second.get() : nullptr;
+}
+
+// ============================================================================
+// Texture Viewer
+// ============================================================================
+
+TextureViewerWindow* OpenGLRenderer::openTextureViewer(const std::string& assetPath)
+{
+    // Return existing viewer if already open – just switch to its tab.
+    {
+        auto it = m_textureViewers.find(assetPath);
+        if (it != m_textureViewers.end() && it->second)
+        {
+            setActiveTab(assetPath);
+            return it->second.get();
+        }
+    }
+
+    const std::string displayName = std::filesystem::path(assetPath).stem().string();
+    m_uiManager.showToastMessage("Loading " + displayName + "...", 4.0f);
+
+    const std::string resolvedPath = m_resourceManager.resolveContentPath(assetPath);
+    if (resolvedPath.empty())
+    {
+        Logger::Instance().log(Logger::Category::Rendering,
+            "openTextureViewer: could not resolve content path for '" + assetPath + "'",
+            Logger::LogLevel::WARNING);
+        m_uiManager.showToastMessage("Failed to resolve " + displayName, 3.0f);
+        return nullptr;
+    }
+
+    // Ensure the texture asset is loaded into the AssetManager
+    auto& assetMgr = AssetManager::Instance();
+    auto existingAsset = assetMgr.getLoadedAssetByPath(resolvedPath);
+    if (!existingAsset)
+    {
+        const int loadId = assetMgr.loadAsset(resolvedPath, AssetType::Texture, AssetManager::Sync);
+        if (loadId == 0)
+        {
+            Logger::Instance().log(Logger::Category::Rendering,
+                "openTextureViewer: loadAsset returned 0 for '" + resolvedPath + "'",
+                Logger::LogLevel::WARNING);
+            m_uiManager.showToastMessage("Failed to load " + displayName, 3.0f);
+            return nullptr;
+        }
+    }
+
+    auto viewer = std::make_unique<TextureViewerWindow>();
+    if (!viewer->initialize(resolvedPath))
+    {
+        m_uiManager.showToastMessage("Failed to open " + displayName, 3.0f);
+        Logger::Instance().log(Logger::Category::Rendering,
+            "Texture viewer init failed: " + resolvedPath, Logger::LogLevel::WARNING);
+        return nullptr;
+    }
+
+    // Upload the texture to GPU for display via getOrLoadUITexture.
+    // Prefer the source image path (actual image file that stbi can decode)
+    // over the .asset path to avoid a spurious "Failed to load raw image" log.
+    GLuint glTex = 0;
+    {
+        auto asset = assetMgr.getLoadedAssetByPath(resolvedPath);
+        if (asset && asset->getData().contains("m_sourcePath"))
+        {
+            std::string sourcePath = asset->getData()["m_sourcePath"].get<std::string>();
+            if (!sourcePath.empty())
+                glTex = getOrLoadUITexture(sourcePath);
+        }
+    }
+    if (glTex == 0)
+        glTex = getOrLoadUITexture(resolvedPath);
+    viewer->setGLTextureId(glTex);
+
+    TextureViewerWindow* ptr = viewer.get();
+    m_textureViewers[assetPath] = std::move(viewer);
+
+    // Create a new editor tab
+    addTab(assetPath, displayName, true);
+
+    // Register click events for tab button and close button
+    m_uiManager.registerClickEvent("TitleBar.Tab." + assetPath, [this, assetPath]()
+    {
+        setActiveTab(assetPath);
+        m_uiManager.markAllWidgetsDirty();
+    });
+    m_uiManager.registerClickEvent("TitleBar.TabClose." + assetPath, [this, assetPath]()
+    {
+        closeTextureViewer(assetPath);
+    });
+
+    // Build the details panel widget (tab-scoped)
+    {
+        auto propsWidget = std::make_shared<Widget>();
+        propsWidget->setName("TextureViewerDetails." + assetPath);
+        propsWidget->setAnchor(WidgetAnchor::TopRight);
+        propsWidget->setSizePixels(Vec2{ 320.0f, 0.0f });
+        propsWidget->setFillY(true);
+        propsWidget->setZOrder(1);
+
+        std::vector<WidgetElement> elements;
+
+        WidgetElement root{};
+        root.type = WidgetElementType::StackPanel;
+        root.id = "TexViewer.Details.Root";
+        root.from = Vec2{ 0.0f, 0.0f };
+        root.to = Vec2{ 1.0f, 1.0f };
+        root.fillX = true;
+        root.fillY = true;
+        root.style.color = Vec4{ 0.14f, 0.14f, 0.18f, 0.95f };
+        root.padding = Vec2{ 10.0f, 10.0f };
+        root.scrollable = true;
+
+        // Title
+        {
+            WidgetElement title{};
+            title.type = WidgetElementType::Text;
+            title.text = displayName;
+            title.font = EditorTheme::Get().fontDefault;
+            title.fontSize = EditorTheme::Get().fontSizeHeading;
+            title.style.textColor = EditorTheme::Get().textPrimary;
+            title.fillX = true;
+            title.minSize = Vec2{ 0.0f, EditorTheme::Scaled(28.0f) };
+            title.runtimeOnly = true;
+            root.children.push_back(std::move(title));
+        }
+
+        // Path
+        {
+            WidgetElement pathLine{};
+            pathLine.type = WidgetElementType::Text;
+            pathLine.text = "Path: " + assetPath;
+            pathLine.font = EditorTheme::Get().fontDefault;
+            pathLine.fontSize = EditorTheme::Get().fontSizeSmall;
+            pathLine.style.textColor = EditorTheme::Get().textMuted;
+            pathLine.fillX = true;
+            pathLine.minSize = Vec2{ 0.0f, EditorTheme::Scaled(20.0f) };
+            pathLine.runtimeOnly = true;
+            root.children.push_back(std::move(pathLine));
+        }
+
+        // Dimensions
+        {
+            WidgetElement dims{};
+            dims.type = WidgetElementType::Text;
+            dims.text = "Size: " + std::to_string(ptr->getWidth()) + " x " + std::to_string(ptr->getHeight())
+                + "  Channels: " + std::to_string(ptr->getChannels());
+            dims.font = EditorTheme::Get().fontDefault;
+            dims.fontSize = EditorTheme::Get().fontSizeSmall;
+            dims.style.textColor = EditorTheme::Get().textMuted;
+            dims.fillX = true;
+            dims.minSize = Vec2{ 0.0f, EditorTheme::Scaled(20.0f) };
+            dims.runtimeOnly = true;
+            root.children.push_back(std::move(dims));
+        }
+
+        // Format
+        {
+            WidgetElement fmt{};
+            fmt.type = WidgetElementType::Text;
+            fmt.text = "Format: " + ptr->getFormatString();
+            fmt.font = EditorTheme::Get().fontDefault;
+            fmt.fontSize = EditorTheme::Get().fontSizeSmall;
+            fmt.style.textColor = EditorTheme::Get().textMuted;
+            fmt.fillX = true;
+            fmt.minSize = Vec2{ 0.0f, EditorTheme::Scaled(20.0f) };
+            fmt.runtimeOnly = true;
+            root.children.push_back(std::move(fmt));
+        }
+
+        // File size
+        if (ptr->getFileSizeBytes() > 0)
+        {
+            std::string sizeStr;
+            const size_t bytes = ptr->getFileSizeBytes();
+            if (bytes >= 1024 * 1024)
+                sizeStr = std::to_string(bytes / (1024 * 1024)) + " MB";
+            else if (bytes >= 1024)
+                sizeStr = std::to_string(bytes / 1024) + " KB";
+            else
+                sizeStr = std::to_string(bytes) + " B";
+
+            WidgetElement fs{};
+            fs.type = WidgetElementType::Text;
+            fs.text = "File Size: " + sizeStr;
+            fs.font = EditorTheme::Get().fontDefault;
+            fs.fontSize = EditorTheme::Get().fontSizeSmall;
+            fs.style.textColor = EditorTheme::Get().textMuted;
+            fs.fillX = true;
+            fs.minSize = Vec2{ 0.0f, EditorTheme::Scaled(20.0f) };
+            fs.runtimeOnly = true;
+            root.children.push_back(std::move(fs));
+        }
+
+        // --- Separator ---
+        {
+            WidgetElement sep{};
+            sep.type = WidgetElementType::Panel;
+            sep.fillX = true;
+            sep.minSize = Vec2{ 0.0f, 1.0f };
+            sep.style.color = Vec4{ 0.3f, 0.3f, 0.35f, 0.6f };
+            sep.runtimeOnly = true;
+            root.children.push_back(std::move(sep));
+        }
+
+        // --- Section header: Channels ---
+        {
+            WidgetElement header{};
+            header.type = WidgetElementType::Text;
+            header.text = "Channels";
+            header.font = EditorTheme::Get().fontDefault;
+            header.fontSize = EditorTheme::Get().fontSizeBody;
+            header.style.textColor = EditorTheme::Get().textSecondary;
+            header.fillX = true;
+            header.minSize = Vec2{ 0.0f, EditorTheme::Scaled(24.0f) };
+            header.runtimeOnly = true;
+            root.children.push_back(std::move(header));
+        }
+
+        // Channel toggle buttons (R, G, B, A) in a horizontal row
+        {
+            WidgetElement row{};
+            row.type = WidgetElementType::StackPanel;
+            row.orientation = StackOrientation::Horizontal;
+            row.fillX = true;
+            row.minSize = Vec2{ 0.0f, EditorTheme::Scaled(30.0f) };
+            row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.spacing = 4.0f;
+            row.runtimeOnly = true;
+
+            auto makeChannelBtn = [&](const std::string& label, const std::string& btnId, const Vec4& color)
+            {
+                WidgetElement btn{};
+                btn.type = WidgetElementType::Button;
+                btn.id = btnId;
+                btn.text = label;
+                btn.font = EditorTheme::Get().fontDefault;
+                btn.fontSize = EditorTheme::Get().fontSizeSmall;
+                btn.minSize = Vec2{ EditorTheme::Scaled(40.0f), EditorTheme::Get().rowHeight };
+                btn.style.color = color;
+                btn.style.textColor = EditorTheme::Get().textPrimary;
+                btn.style.hoverColor = Vec4{ color.x + 0.1f, color.y + 0.1f, color.z + 0.1f, color.w };
+                btn.hitTestMode = HitTestMode::Enabled;
+                btn.runtimeOnly = true;
+                btn.style.borderRadius = 4.0f;
+                return btn;
+            };
+
+            row.children.push_back(makeChannelBtn("R", "TexViewer.Ch.R", Vec4{ 0.6f, 0.15f, 0.15f, 1.0f }));
+            row.children.push_back(makeChannelBtn("G", "TexViewer.Ch.G", Vec4{ 0.15f, 0.5f, 0.15f, 1.0f }));
+            row.children.push_back(makeChannelBtn("B", "TexViewer.Ch.B", Vec4{ 0.15f, 0.15f, 0.6f, 1.0f }));
+            row.children.push_back(makeChannelBtn("A", "TexViewer.Ch.A", Vec4{ 0.4f, 0.4f, 0.4f, 1.0f }));
+
+            root.children.push_back(std::move(row));
+        }
+
+        // Checkerboard toggle
+        {
+            WidgetElement chkRow{};
+            chkRow.type = WidgetElementType::StackPanel;
+            chkRow.orientation = StackOrientation::Horizontal;
+            chkRow.fillX = true;
+            chkRow.minSize = Vec2{ 0.0f, EditorTheme::Scaled(26.0f) };
+            chkRow.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            chkRow.runtimeOnly = true;
+
+            WidgetElement chkBtn{};
+            chkBtn.type = WidgetElementType::Button;
+            chkBtn.id = "TexViewer.Checkerboard";
+            chkBtn.text = "Checkerboard";
+            chkBtn.font = EditorTheme::Get().fontDefault;
+            chkBtn.fontSize = EditorTheme::Get().fontSizeSmall;
+            chkBtn.fillX = true;
+            chkBtn.minSize = Vec2{ 0.0f, EditorTheme::Get().rowHeight };
+            chkBtn.style.color = EditorTheme::Get().inputBackground;
+            chkBtn.style.textColor = EditorTheme::Get().textPrimary;
+            chkBtn.style.hoverColor = EditorTheme::Get().inputBackgroundHover;
+            chkBtn.hitTestMode = HitTestMode::Enabled;
+            chkBtn.runtimeOnly = true;
+            chkBtn.style.borderRadius = 4.0f;
+            chkRow.children.push_back(std::move(chkBtn));
+
+            root.children.push_back(std::move(chkRow));
+        }
+
+        elements.push_back(std::move(root));
+        propsWidget->setElements(std::move(elements));
+
+        m_uiManager.registerWidget("TextureViewerDetails." + assetPath, propsWidget, assetPath);
+    }
+
+    // Register channel toggle click events
+    {
+        const std::string ap = assetPath;
+        const Vec4 colorR{ 0.6f, 0.15f, 0.15f, 1.0f };
+        const Vec4 colorG{ 0.15f, 0.5f, 0.15f, 1.0f };
+        const Vec4 colorB{ 0.15f, 0.15f, 0.6f, 1.0f };
+        const Vec4 colorA{ 0.4f, 0.4f, 0.4f, 1.0f };
+        const Vec4 grayedOut{ 0.2f, 0.2f, 0.2f, 0.5f };
+        const Vec4 grayedHover{ 0.25f, 0.25f, 0.25f, 0.6f };
+        const Vec4 grayedText{ 0.5f, 0.5f, 0.5f, 1.0f };
+        const Vec4 activeText = EditorTheme::Get().textPrimary;
+
+        auto updateChannelBtn = [this](const std::string& btnId, bool enabled, const Vec4& activeColor, const Vec4& gray, const Vec4& grayHov, const Vec4& grayTxt, const Vec4& activeTxt)
+        {
+            if (auto* el = m_uiManager.findElementById(btnId))
+            {
+                if (enabled)
+                {
+                    el->style.color = activeColor;
+                    el->style.hoverColor = Vec4{ activeColor.x + 0.1f, activeColor.y + 0.1f, activeColor.z + 0.1f, activeColor.w };
+                    el->style.textColor = activeTxt;
+                }
+                else
+                {
+                    el->style.color = gray;
+                    el->style.hoverColor = grayHov;
+                    el->style.textColor = grayTxt;
+                }
+            }
+        };
+
+        m_uiManager.registerClickEvent("TexViewer.Ch.R", [this, ap, colorR, grayedOut, grayedHover, grayedText, activeText, updateChannelBtn]()
+        {
+            auto* v = getTextureViewer(ap);
+            if (v) { v->setChannelR(!v->isChannelR()); updateChannelBtn("TexViewer.Ch.R", v->isChannelR(), colorR, grayedOut, grayedHover, grayedText, activeText); m_uiManager.markAllWidgetsDirty(); }
+        });
+        m_uiManager.registerClickEvent("TexViewer.Ch.G", [this, ap, colorG, grayedOut, grayedHover, grayedText, activeText, updateChannelBtn]()
+        {
+            auto* v = getTextureViewer(ap);
+            if (v) { v->setChannelG(!v->isChannelG()); updateChannelBtn("TexViewer.Ch.G", v->isChannelG(), colorG, grayedOut, grayedHover, grayedText, activeText); m_uiManager.markAllWidgetsDirty(); }
+        });
+        m_uiManager.registerClickEvent("TexViewer.Ch.B", [this, ap, colorB, grayedOut, grayedHover, grayedText, activeText, updateChannelBtn]()
+        {
+            auto* v = getTextureViewer(ap);
+            if (v) { v->setChannelB(!v->isChannelB()); updateChannelBtn("TexViewer.Ch.B", v->isChannelB(), colorB, grayedOut, grayedHover, grayedText, activeText); m_uiManager.markAllWidgetsDirty(); }
+        });
+        m_uiManager.registerClickEvent("TexViewer.Ch.A", [this, ap, colorA, grayedOut, grayedHover, grayedText, activeText, updateChannelBtn]()
+        {
+            auto* v = getTextureViewer(ap);
+            if (v) { v->setChannelA(!v->isChannelA()); updateChannelBtn("TexViewer.Ch.A", v->isChannelA(), colorA, grayedOut, grayedHover, grayedText, activeText); m_uiManager.markAllWidgetsDirty(); }
+        });
+        m_uiManager.registerClickEvent("TexViewer.Checkerboard", [this, ap]()
+        {
+            auto* v = getTextureViewer(ap);
+            if (v)
+            {
+                v->setCheckerboard(!v->isCheckerboard());
+                if (auto* el = m_uiManager.findElementById("TexViewer.Checkerboard"))
+                {
+                    if (v->isCheckerboard())
+                    {
+                        el->style.color = EditorTheme::Get().inputBackground;
+                        el->style.textColor = EditorTheme::Get().textPrimary;
+                    }
+                    else
+                    {
+                        el->style.color = Vec4{ 0.2f, 0.2f, 0.2f, 0.5f };
+                        el->style.textColor = Vec4{ 0.5f, 0.5f, 0.5f, 1.0f };
+                    }
+                }
+                m_uiManager.markAllWidgetsDirty();
+            }
+        });
+    }
+
+    // Switch to the new tab
+    setActiveTab(assetPath);
+
+    m_uiManager.markAllWidgetsDirty();
+    m_uiManager.showToastMessage(displayName + " ready", 2.5f);
+    Logger::Instance().log(Logger::Category::Rendering,
+        "Texture viewer opened: " + assetPath, Logger::LogLevel::INFO);
+    return ptr;
+}
+
+void OpenGLRenderer::closeTextureViewer(const std::string& assetPath)
+{
+    // If this viewer's tab is active, switch back to Viewport first
+    if (m_activeTabId == assetPath)
+    {
+        setActiveTab("Viewport");
+    }
+
+    // Destroy the viewer
+    m_textureViewers.erase(assetPath);
+
+    // Unregister the details panel widget
+    m_uiManager.unregisterWidget("TextureViewerDetails." + assetPath);
+
+    // Remove the tab button and close button from TitleBar
+    {
+        auto* tabsStack = m_uiManager.findElementById("TitleBar.Tabs");
+        if (tabsStack)
+        {
+            const std::string tabBtnId = "TitleBar.Tab." + assetPath;
+            const std::string closeBtnId = "TitleBar.TabClose." + assetPath;
+            tabsStack->children.erase(
+                std::remove_if(tabsStack->children.begin(), tabsStack->children.end(),
+                    [&](const WidgetElement& el) { return el.id == tabBtnId || el.id == closeBtnId; }),
+                tabsStack->children.end());
+        }
+    }
+
+    // Remove the editor tab and its FBO
+    removeTab(assetPath);
+
+    m_uiManager.markAllWidgetsDirty();
+}
+
+TextureViewerWindow* OpenGLRenderer::getTextureViewer(const std::string& assetPath)
+{
+    auto it = m_textureViewers.find(assetPath);
+    return (it != m_textureViewers.end()) ? it->second.get() : nullptr;
 }
 
 void OpenGLRenderer::renderViewportUI()
@@ -8275,14 +8866,15 @@ void OpenGLRenderer::cancelCameraTransition()
 
 void OpenGLRenderer::focusOnSelectedEntity()
 {
-    if (!m_camera || m_selectedEntity == 0)
+    const unsigned int primaryEntity = m_selectedEntities.empty() ? 0u : *m_selectedEntities.begin();
+    if (!m_camera || primaryEntity == 0)
         return;
 
-    // Find the render entry for the selected entity to get its AABB
+    // Find the render entry for the primary selected entity to get its AABB
     auto findEntry = [&](const std::vector<RenderEntry>& entries) -> const RenderEntry*
     {
         for (auto& e : entries)
-            if (e.entity == m_selectedEntity)
+            if (e.entity == primaryEntity)
                 return &e;
         return nullptr;
     };
@@ -8296,7 +8888,7 @@ void OpenGLRenderer::focusOnSelectedEntity()
     float radius = 2.0f;
 
     auto& ecs = ECS::ECSManager::Instance();
-    auto* tc = ecs.getComponent<ECS::TransformComponent>(m_selectedEntity);
+    auto* tc = ecs.getComponent<ECS::TransformComponent>(primaryEntity);
     if (!tc)
         return;
 
@@ -8587,9 +9179,9 @@ void OpenGLRenderer::renderPickBuffer(const glm::mat4& view, const glm::mat4& pr
     }
 }
 
-void OpenGLRenderer::renderPickBufferSingleEntity(const glm::mat4& view, const glm::mat4& projection, unsigned int entityId)
+void OpenGLRenderer::renderPickBufferSelectedEntities(const glm::mat4& view, const glm::mat4& projection, const std::unordered_set<unsigned int>& entityIds)
 {
-    if (m_pickFbo == 0 || m_pickProgram == 0 || entityId == 0)
+    if (m_pickFbo == 0 || m_pickProgram == 0 || entityIds.empty())
         return;
 
     glBindFramebuffer(GL_FRAMEBUFFER, m_pickFbo);
@@ -8615,7 +9207,7 @@ void OpenGLRenderer::renderPickBufferSingleEntity(const glm::mat4& view, const g
 
     for (const auto& cmd : m_drawList)
     {
-        if (cmd.entityId != entityId || !cmd.obj)
+        if (!cmd.obj || entityIds.count(cmd.entityId) == 0)
             continue;
 
         if (m_pickLocModel >= 0)
@@ -8631,7 +9223,6 @@ void OpenGLRenderer::renderPickBufferSingleEntity(const glm::mat4& view, const g
             glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, nullptr);
         else
             glDrawArrays(GL_TRIANGLES, 0, vertexCount);
-        break;
     }
 
     glBindVertexArray(0);
@@ -8780,20 +9371,19 @@ bool OpenGLRenderer::ensureOutlineResources()
         "out vec4 FragColor;\n"
         "in vec2 vTexCoord;\n"
         "uniform usampler2D uPickTex;\n"
-        "uniform uint uSelectedId;\n"
         "uniform vec4 uOutlineColor;\n"
         "uniform float uThickness;\n"
         "void main() {\n"
         "    ivec2 coord = ivec2(gl_FragCoord.xy);\n"
         "    uint center = texelFetch(uPickTex, coord, 0).r;\n"
-        "    bool centerIsSelected = (center == uSelectedId);\n"
+        "    bool centerIsSelected = (center != 0u);\n"
         "    int r = int(uThickness);\n"
         "    bool foundEdge = false;\n"
         "    for (int dy = -r; dy <= r && !foundEdge; ++dy) {\n"
         "        for (int dx = -r; dx <= r && !foundEdge; ++dx) {\n"
         "            if (dx == 0 && dy == 0) continue;\n"
         "            uint neighbor = texelFetch(uPickTex, coord + ivec2(dx, dy), 0).r;\n"
-        "            bool neighborIsSelected = (neighbor == uSelectedId);\n"
+        "            bool neighborIsSelected = (neighbor != 0u);\n"
         "            if (centerIsSelected != neighborIsSelected) {\n"
         "                foundEdge = true;\n"
         "            }\n"
@@ -8822,7 +9412,6 @@ bool OpenGLRenderer::ensureOutlineResources()
 
     m_outlineProgram = prog;
     m_outlineLocPickTex = glGetUniformLocation(prog, "uPickTex");
-    m_outlineLocSelectedId = glGetUniformLocation(prog, "uSelectedId");
     m_outlineLocOutlineColor = glGetUniformLocation(prog, "uOutlineColor");
     m_outlineLocThickness = glGetUniformLocation(prog, "uThickness");
 
@@ -8839,7 +9428,7 @@ void OpenGLRenderer::releaseOutlineResources()
 
 void OpenGLRenderer::drawSelectionOutline()
 {
-    if (!ensureOutlineResources() || m_pickColorTex == 0 || m_selectedEntity == 0)
+    if (!ensureOutlineResources() || m_pickColorTex == 0 || m_selectedEntities.empty())
         return;
 
     glDisable(GL_DEPTH_TEST);
@@ -8851,8 +9440,6 @@ void OpenGLRenderer::drawSelectionOutline()
     glBindTexture(GL_TEXTURE_2D, m_pickColorTex);
     if (m_outlineLocPickTex >= 0)
         glUniform1i(m_outlineLocPickTex, 0);
-    if (m_outlineLocSelectedId >= 0)
-        glUniform1ui(m_outlineLocSelectedId, m_selectedEntity);
     if (m_outlineLocOutlineColor >= 0)
         glUniform4f(m_outlineLocOutlineColor, 1.0f, 0.6f, 0.0f, 1.0f);
     if (m_outlineLocThickness >= 0)
@@ -9014,7 +9601,7 @@ void OpenGLRenderer::setActiveTab(const std::string& id)
         if (viewerIt != m_meshViewers.end() && viewerIt->second)
         {
             // Save per-tab entity selection
-            m_tabSelectedEntity[oldTabId] = m_selectedEntity;
+            m_tabSelectedEntities[oldTabId] = m_selectedEntities;
 
             // Save camera state into the viewer's runtime level before swapping out
             auto returnedLevel = diag.swapActiveLevel(std::move(m_savedViewportLevel));
@@ -9034,7 +9621,7 @@ void OpenGLRenderer::setActiveTab(const std::string& id)
     else
     {
         // Leaving Viewport: save the editor camera state and selection
-        m_savedViewportSelectedEntity = m_selectedEntity;
+        m_savedViewportSelectedEntities = m_selectedEntities;
         if (m_camera)
         {
             m_savedCameraPos = m_camera->getPosition();
@@ -9043,7 +9630,7 @@ void OpenGLRenderer::setActiveTab(const std::string& id)
     }
 
     // Clear selection before switching tabs
-    m_selectedEntity = 0;
+    m_selectedEntities.clear();
     m_uiManager.selectEntity(0);
 
     // --- Level swap: entering a mesh viewer tab → swap in viewer's level ---
@@ -9065,11 +9652,11 @@ void OpenGLRenderer::setActiveTab(const std::string& id)
             diag.setScenePrepared(false);
 
             // Restore per-tab entity selection
-            auto selIt = m_tabSelectedEntity.find(id);
-            if (selIt != m_tabSelectedEntity.end())
+            auto selIt = m_tabSelectedEntities.find(id);
+            if (selIt != m_tabSelectedEntities.end())
             {
-                m_selectedEntity = selIt->second;
-                m_uiManager.selectEntity(m_selectedEntity);
+                m_selectedEntities = selIt->second;
+                m_uiManager.selectEntity(m_selectedEntities.empty() ? 0u : *m_selectedEntities.begin());
             }
         }
     }
@@ -9097,8 +9684,8 @@ void OpenGLRenderer::setActiveTab(const std::string& id)
             m_camera->setPosition(m_savedCameraPos);
             m_camera->setRotationDegrees(m_savedCameraRot.x, m_savedCameraRot.y);
         }
-        m_selectedEntity = m_savedViewportSelectedEntity;
-        m_uiManager.selectEntity(m_selectedEntity);
+        m_selectedEntities = m_savedViewportSelectedEntities;
+        m_uiManager.selectEntity(m_selectedEntities.empty() ? 0u : *m_selectedEntities.begin());
     }
 
     // Snapshot the current active tab so it can be displayed as a cached image later
@@ -9198,6 +9785,150 @@ void OpenGLRenderer::releaseGizmoResources()
     if (m_gizmoVao) { glDeleteVertexArrays(1, &m_gizmoVao); m_gizmoVao = 0; }
 }
 
+// ============================================================================
+// Viewport Grid (infinite XZ plane)
+// ============================================================================
+
+bool OpenGLRenderer::ensureGridResources()
+{
+    if (m_gridProgram != 0)
+        return true;
+
+    const char* vs = R"(
+#version 330 core
+layout(location = 0) in vec3 aPos;
+uniform mat4 uViewProj;
+out vec3 vWorldPos;
+void main() {
+    vWorldPos = aPos;
+    gl_Position = uViewProj * vec4(aPos, 1.0);
+}
+)";
+
+    const char* fs = R"(
+#version 330 core
+in vec3 vWorldPos;
+uniform vec3  uCameraPos;
+uniform float uGridSize;
+uniform vec4  uColor;
+uniform float uFadeRadius;
+out vec4 FragColor;
+void main() {
+    // Grid lines via screen-space derivatives
+    vec2 coord = vWorldPos.xz / uGridSize;
+    vec2 grid  = abs(fract(coord - 0.5) - 0.5) / fwidth(coord);
+    float line = min(grid.x, grid.y);
+    float alpha = 1.0 - min(line, 1.0);
+
+    // Thicker lines every 10 grid units
+    vec2 coord10 = vWorldPos.xz / (uGridSize * 10.0);
+    vec2 grid10  = abs(fract(coord10 - 0.5) - 0.5) / fwidth(coord10);
+    float line10 = min(grid10.x, grid10.y);
+    float alpha10 = 1.0 - min(line10, 1.0);
+    alpha = max(alpha * 0.35, alpha10 * 0.7);
+
+    // Axis highlight: red for X (Z~=0), blue for Z (X~=0)
+    float axisWidth = uGridSize * 0.05;
+    vec3 lineColor = uColor.rgb;
+    if (abs(vWorldPos.z) < axisWidth) {
+        lineColor = vec3(0.8, 0.2, 0.2);
+        alpha = max(alpha, 0.8);
+    }
+    if (abs(vWorldPos.x) < axisWidth) {
+        lineColor = vec3(0.2, 0.2, 0.8);
+        alpha = max(alpha, 0.8);
+    }
+
+    // Distance fade
+    float dist = length(vWorldPos.xz - uCameraPos.xz);
+    float fade = 1.0 - smoothstep(uFadeRadius * 0.6, uFadeRadius, dist);
+    alpha *= fade * uColor.a;
+
+    if (alpha < 0.005) discard;
+    FragColor = vec4(lineColor, alpha);
+}
+)";
+
+    GLuint vsh = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vsh, 1, &vs, nullptr);
+    glCompileShader(vsh);
+    GLuint fsh = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fsh, 1, &fs, nullptr);
+    glCompileShader(fsh);
+    m_gridProgram = glCreateProgram();
+    glAttachShader(m_gridProgram, vsh);
+    glAttachShader(m_gridProgram, fsh);
+    glLinkProgram(m_gridProgram);
+    glDeleteShader(vsh);
+    glDeleteShader(fsh);
+
+    m_gridLocViewProj  = glGetUniformLocation(m_gridProgram, "uViewProj");
+    m_gridLocCameraPos = glGetUniformLocation(m_gridProgram, "uCameraPos");
+    m_gridLocGridSize  = glGetUniformLocation(m_gridProgram, "uGridSize");
+    m_gridLocColor     = glGetUniformLocation(m_gridProgram, "uColor");
+    m_gridLocFadeRadius = glGetUniformLocation(m_gridProgram, "uFadeRadius");
+
+    // Large quad on XZ plane (Y=0)
+    const float S = 500.0f;
+    float verts[] = {
+        -S, 0.0f, -S,
+         S, 0.0f, -S,
+         S, 0.0f,  S,
+        -S, 0.0f, -S,
+         S, 0.0f,  S,
+        -S, 0.0f,  S,
+    };
+
+    glGenVertexArrays(1, &m_gridVao);
+    glGenBuffers(1, &m_gridVbo);
+    glBindVertexArray(m_gridVao);
+    glBindBuffer(GL_ARRAY_BUFFER, m_gridVbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
+    glBindVertexArray(0);
+
+    return true;
+}
+
+void OpenGLRenderer::releaseGridResources()
+{
+    if (m_gridProgram) { glDeleteProgram(m_gridProgram); m_gridProgram = 0; }
+    if (m_gridVbo) { glDeleteBuffers(1, &m_gridVbo); m_gridVbo = 0; }
+    if (m_gridVao) { glDeleteVertexArrays(1, &m_gridVao); m_gridVao = 0; }
+}
+
+void OpenGLRenderer::drawViewportGrid(const glm::mat4& view, const glm::mat4& projection)
+{
+    if (!m_gridVisible || !ensureGridResources())
+        return;
+
+    const glm::mat4 vp = projection * view;
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+    glEnable(GL_DEPTH_TEST);
+
+    glUseProgram(m_gridProgram);
+    glUniformMatrix4fv(m_gridLocViewProj, 1, GL_FALSE, glm::value_ptr(vp));
+
+    const glm::vec3 camPos = m_camera ? glm::vec3{
+        m_camera->getPosition().x, m_camera->getPosition().y, m_camera->getPosition().z
+    } : glm::vec3(0.0f);
+    glUniform3fv(m_gridLocCameraPos, 1, glm::value_ptr(camPos));
+    glUniform1f(m_gridLocGridSize, m_gridSize);
+    glUniform4f(m_gridLocColor, 0.5f, 0.5f, 0.5f, 0.6f);
+    glUniform1f(m_gridLocFadeRadius, 200.0f);
+
+    glBindVertexArray(m_gridVao);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glBindVertexArray(0);
+
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+}
+
 static void buildCircleVerts(std::vector<float>& verts, int segments, float radius, int axis)
 {
     for (int i = 0; i <= segments; ++i)
@@ -9235,11 +9966,12 @@ glm::vec3 OpenGLRenderer::getGizmoWorldAxis(const ECS::TransformComponent& tc, i
 
 void OpenGLRenderer::renderGizmo(const glm::mat4& view, const glm::mat4& projection)
 {
-    if (m_selectedEntity == 0 || m_gizmoMode == GizmoMode::None)
+    if (m_selectedEntities.empty() || m_gizmoMode == GizmoMode::None)
         return;
 
+    const unsigned int primaryEntity = *m_selectedEntities.begin();
     auto& ecs = ECS::ECSManager::Instance();
-    const auto* tc = ecs.getComponent<ECS::TransformComponent>(m_selectedEntity);
+    const auto* tc = ecs.getComponent<ECS::TransformComponent>(primaryEntity);
     if (!tc)
         return;
 
@@ -9356,11 +10088,12 @@ void OpenGLRenderer::renderGizmo(const glm::mat4& view, const glm::mat4& project
 // Pick gizmo axis using rotated (local-space) axes projected to screen
 OpenGLRenderer::GizmoAxis OpenGLRenderer::pickGizmoAxis(const glm::mat4& view, const glm::mat4& projection, int screenX, int screenY) const
 {
-    if (m_selectedEntity == 0 || m_gizmoMode == GizmoMode::None)
+    if (m_selectedEntities.empty() || m_gizmoMode == GizmoMode::None)
         return GizmoAxis::None;
 
+    const unsigned int primaryEntity = *m_selectedEntities.begin();
     auto& ecs = ECS::ECSManager::Instance();
-    const auto* tc = ecs.getComponent<ECS::TransformComponent>(m_selectedEntity);
+    const auto* tc = ecs.getComponent<ECS::TransformComponent>(primaryEntity);
     if (!tc)
         return GizmoAxis::None;
 
@@ -9511,9 +10244,10 @@ static float closestTOnAxis(const glm::vec3& rayOrigin, const glm::vec3& rayDir,
 
 bool OpenGLRenderer::beginGizmoDrag(int screenX, int screenY)
 {
-    if (m_selectedEntity == 0 || m_gizmoMode == GizmoMode::None || !m_camera)
+    if (m_selectedEntities.empty() || m_gizmoMode == GizmoMode::None || !m_camera)
         return false;
 
+    const unsigned int primaryEntity = *m_selectedEntities.begin();
     const Mat4 engineView = m_camera->getViewMatrixColumnMajor();
     const glm::mat4 view = glm::make_mat4(engineView.m);
 
@@ -9522,7 +10256,7 @@ bool OpenGLRenderer::beginGizmoDrag(int screenX, int screenY)
         return false;
 
     auto& ecs = ECS::ECSManager::Instance();
-    const auto* tc = ecs.getComponent<ECS::TransformComponent>(m_selectedEntity);
+    const auto* tc = ecs.getComponent<ECS::TransformComponent>(primaryEntity);
     if (!tc)
         return false;
 
@@ -9538,6 +10272,15 @@ bool OpenGLRenderer::beginGizmoDrag(int screenX, int screenY)
     m_gizmoDragScaleStart = tc->scale[axisIdx];
     m_gizmoDragStartScreen = glm::vec2{ static_cast<float>(screenX), static_cast<float>(screenY) };
     m_gizmoDragOldTransform = *tc;
+
+    // Store old transforms for ALL selected entities (group undo)
+    m_gizmoDragOldTransforms.clear();
+    for (unsigned int eid : m_selectedEntities)
+    {
+        const auto* etc = ecs.getComponent<ECS::TransformComponent>(eid);
+        if (etc)
+            m_gizmoDragOldTransforms[eid] = *etc;
+    }
 
     // Compute the initial parameter along the axis ray
     const Vec4 bgvp = m_cachedViewportContentRect;
@@ -9555,11 +10298,12 @@ bool OpenGLRenderer::beginGizmoDrag(int screenX, int screenY)
 
 void OpenGLRenderer::updateGizmoDrag(int screenX, int screenY)
 {
-    if (!m_gizmoDragging || m_gizmoActiveAxis == GizmoAxis::None || m_selectedEntity == 0 || !m_camera)
+    if (!m_gizmoDragging || m_gizmoActiveAxis == GizmoAxis::None || m_selectedEntities.empty() || !m_camera)
         return;
 
+    const unsigned int primaryEntity = *m_selectedEntities.begin();
     auto& ecs = ECS::ECSManager::Instance();
-    auto* tc = ecs.getComponent<ECS::TransformComponent>(m_selectedEntity);
+    auto* tc = ecs.getComponent<ECS::TransformComponent>(primaryEntity);
     if (!tc)
         return;
 
@@ -9584,7 +10328,16 @@ void OpenGLRenderer::updateGizmoDrag(int screenX, int screenY)
         const float deltaT = currentT - m_gizmoDragStartT;
 
         // Move entity along the world-space axis
-        const glm::vec3 newPos = m_gizmoDragEntityStart + m_gizmoDragWorldAxis * deltaT;
+        glm::vec3 newPos = m_gizmoDragEntityStart + m_gizmoDragWorldAxis * deltaT;
+
+        // Snap to grid when enabled
+        if (m_snapEnabled && m_gridSize > 0.0f)
+        {
+            newPos.x = std::round(newPos.x / m_gridSize) * m_gridSize;
+            newPos.y = std::round(newPos.y / m_gridSize) * m_gridSize;
+            newPos.z = std::round(newPos.z / m_gridSize) * m_gridSize;
+        }
+
         tc->position[0] = newPos.x;
         tc->position[1] = newPos.y;
         tc->position[2] = newPos.z;
@@ -9646,9 +10399,21 @@ void OpenGLRenderer::updateGizmoDrag(int screenX, int screenY)
             rz = 0.0f;
         }
 
-        tc->rotation[0] = glm::degrees(rx);
-        tc->rotation[1] = glm::degrees(ry);
-        tc->rotation[2] = glm::degrees(rz);
+        float degX = glm::degrees(rx);
+        float degY = glm::degrees(ry);
+        float degZ = glm::degrees(rz);
+
+        // Snap rotation to fixed degree increments when enabled
+        if (m_snapEnabled && m_rotationSnapDeg > 0.0f)
+        {
+            degX = std::round(degX / m_rotationSnapDeg) * m_rotationSnapDeg;
+            degY = std::round(degY / m_rotationSnapDeg) * m_rotationSnapDeg;
+            degZ = std::round(degZ / m_rotationSnapDeg) * m_rotationSnapDeg;
+        }
+
+        tc->rotation[0] = degX;
+        tc->rotation[1] = degY;
+        tc->rotation[2] = degZ;
     }
     else if (m_gizmoMode == GizmoMode::Scale)
     {
@@ -9678,24 +10443,98 @@ void OpenGLRenderer::updateGizmoDrag(int screenX, int screenY)
             static_cast<float>(screenY) - m_gizmoDragStartScreen.y
         };
         const float projectedPixels = glm::dot(mouseDelta, axisNorm);
-        tc->scale[axisIdx] = std::max(0.01f, m_gizmoDragScaleStart + projectedPixels * 0.01f);
+        float newScale = std::max(0.01f, m_gizmoDragScaleStart + projectedPixels * 0.01f);
+
+        // Snap scale to fixed step increments when enabled
+        if (m_snapEnabled && m_scaleSnapStep > 0.0f)
+        {
+            newScale = std::max(m_scaleSnapStep, std::round(newScale / m_scaleSnapStep) * m_scaleSnapStep);
+        }
+
+        tc->scale[axisIdx] = newScale;
     }
 
-    ecs.setComponent<ECS::TransformComponent>(m_selectedEntity, *tc);
+    // Apply primary entity's transform, then compute delta and apply to all other selected entities
+    ecs.setComponent<ECS::TransformComponent>(primaryEntity, *tc);
+
+    // For translate: apply position delta to all other selected entities
+    if (m_gizmoMode == GizmoMode::Translate && m_selectedEntities.size() > 1)
+    {
+        const auto& oldPrimary = m_gizmoDragOldTransforms[primaryEntity];
+        const float dx = tc->position[0] - oldPrimary.position[0];
+        const float dy = tc->position[1] - oldPrimary.position[1];
+        const float dz = tc->position[2] - oldPrimary.position[2];
+        for (unsigned int eid : m_selectedEntities)
+        {
+            if (eid == primaryEntity) continue;
+            auto itOld = m_gizmoDragOldTransforms.find(eid);
+            if (itOld == m_gizmoDragOldTransforms.end()) continue;
+            auto* otc = ecs.getComponent<ECS::TransformComponent>(eid);
+            if (!otc) continue;
+            otc->position[0] = itOld->second.position[0] + dx;
+            otc->position[1] = itOld->second.position[1] + dy;
+            otc->position[2] = itOld->second.position[2] + dz;
+            ecs.setComponent<ECS::TransformComponent>(eid, *otc);
+        }
+    }
+    // For rotate: apply rotation delta to all other selected entities
+    else if (m_gizmoMode == GizmoMode::Rotate && m_selectedEntities.size() > 1)
+    {
+        const auto& oldPrimary = m_gizmoDragOldTransforms[primaryEntity];
+        const float drx = tc->rotation[0] - oldPrimary.rotation[0];
+        const float dry = tc->rotation[1] - oldPrimary.rotation[1];
+        const float drz = tc->rotation[2] - oldPrimary.rotation[2];
+        for (unsigned int eid : m_selectedEntities)
+        {
+            if (eid == primaryEntity) continue;
+            auto itOld = m_gizmoDragOldTransforms.find(eid);
+            if (itOld == m_gizmoDragOldTransforms.end()) continue;
+            auto* otc = ecs.getComponent<ECS::TransformComponent>(eid);
+            if (!otc) continue;
+            otc->rotation[0] = itOld->second.rotation[0] + drx;
+            otc->rotation[1] = itOld->second.rotation[1] + dry;
+            otc->rotation[2] = itOld->second.rotation[2] + drz;
+            ecs.setComponent<ECS::TransformComponent>(eid, *otc);
+        }
+    }
+    // For scale: apply scale delta to all other selected entities
+    else if (m_gizmoMode == GizmoMode::Scale && m_selectedEntities.size() > 1)
+    {
+        const auto& oldPrimary = m_gizmoDragOldTransforms[primaryEntity];
+        const float ds = tc->scale[axisIdx] - oldPrimary.scale[axisIdx];
+        for (unsigned int eid : m_selectedEntities)
+        {
+            if (eid == primaryEntity) continue;
+            auto itOld = m_gizmoDragOldTransforms.find(eid);
+            if (itOld == m_gizmoDragOldTransforms.end()) continue;
+            auto* otc = ecs.getComponent<ECS::TransformComponent>(eid);
+            if (!otc) continue;
+            otc->scale[axisIdx] = std::max(0.01f, itOld->second.scale[axisIdx] + ds);
+            ecs.setComponent<ECS::TransformComponent>(eid, *otc);
+        }
+    }
 }
 
 void OpenGLRenderer::endGizmoDrag()
 {
-    if (m_selectedEntity != 0)
+    if (!m_selectedEntities.empty())
     {
         auto& ecs = ECS::ECSManager::Instance();
-        const auto* tc = ecs.getComponent<ECS::TransformComponent>(m_selectedEntity);
-        if (tc)
-        {
-            const ECS::TransformComponent newTransform = *tc;
-            const ECS::TransformComponent oldTransform = m_gizmoDragOldTransform;
-            const unsigned int entity = m_selectedEntity;
 
+        // Capture new transforms for all selected entities
+        std::unordered_map<unsigned int, ECS::TransformComponent> newTransforms;
+        for (unsigned int eid : m_selectedEntities)
+        {
+            const auto* tc = ecs.getComponent<ECS::TransformComponent>(eid);
+            if (tc)
+                newTransforms[eid] = *tc;
+        }
+
+        // Capture old transforms from the drag-start snapshot
+        auto oldTransforms = m_gizmoDragOldTransforms;
+
+        if (!newTransforms.empty())
+        {
             std::string modeLabel = "Transform";
             switch (m_gizmoMode)
             {
@@ -9707,13 +10546,15 @@ void OpenGLRenderer::endGizmoDrag()
 
             UndoRedoManager::Command cmd;
             cmd.description = modeLabel;
-            cmd.execute = [entity, newTransform]() {
+            cmd.execute = [newTransforms]() {
                 auto& e = ECS::ECSManager::Instance();
-                e.setComponent<ECS::TransformComponent>(entity, newTransform);
+                for (const auto& [eid, tc] : newTransforms)
+                    e.setComponent<ECS::TransformComponent>(eid, tc);
             };
-            cmd.undo = [entity, oldTransform]() {
+            cmd.undo = [oldTransforms]() {
                 auto& e = ECS::ECSManager::Instance();
-                e.setComponent<ECS::TransformComponent>(entity, oldTransform);
+                for (const auto& [eid, tc] : oldTransforms)
+                    e.setComponent<ECS::TransformComponent>(eid, tc);
             };
             UndoRedoManager::Instance().pushCommand(std::move(cmd));
         }

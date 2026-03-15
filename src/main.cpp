@@ -19,6 +19,7 @@
 #include "Renderer/SplashWindow.h"
 #include "Renderer/UIWidget.h"
 #include "Renderer/EditorWindows/PopupWindow.h"
+#include "Renderer/EditorWindows/TextureViewerWindow.h"
 #include "Logger/Logger.h"
 #include "Diagnostics/DiagnosticsManager.h"
 #include "AssetManager/AssetManager.h"
@@ -534,6 +535,18 @@ int main()
             EditorTheme::Get().loadThemeByName(*savedTheme);
     }
 
+    // --- Phase 2c: Initialise Script Hot-Reload ---
+    {
+        const auto& projectPath = diagnostics.getProjectInfo().projectPath;
+        if (!projectPath.empty())
+        {
+            const std::string contentDir = (std::filesystem::path(projectPath) / "Content").string();
+            Scripting::InitScriptHotReload(contentDir);
+        }
+        if (auto saved = diagnostics.getState("ScriptHotReloadEnabled"); saved && *saved == "false")
+            Scripting::SetScriptHotReloadEnabled(false);
+    }
+
     // --- Phase 3: Load editor UI widgets ---
     showProgress("Loading editor UI...");
 
@@ -708,6 +721,8 @@ int main()
         renderer->getUIManager().registerClickEvent("ViewportOverlay.Snap", [&renderer, &gridSnapEnabled]()
             {
                 gridSnapEnabled = !gridSnapEnabled;
+                renderer->setSnapEnabled(gridSnapEnabled);
+                renderer->setGridVisible(gridSnapEnabled);
                 Logger::Instance().log(Logger::Category::Input,
                     std::string("Toolbar: Grid Snap ") + (gridSnapEnabled ? "ON" : "OFF"),
                     Logger::LogLevel::INFO);
@@ -720,6 +735,55 @@ int main()
                 }
                 renderer->getUIManager().showToastMessage(
                     gridSnapEnabled ? "Grid Snap: ON" : "Grid Snap: OFF", 1.5f);
+
+                DiagnosticsManager::Instance().setState("GridSnapEnabled", gridSnapEnabled ? "1" : "0");
+            });
+
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.GridSize", [&renderer]()
+            {
+                auto& uiMgr = renderer->getUIManager();
+                if (uiMgr.isDropdownMenuOpen())
+                {
+                    uiMgr.closeDropdownMenu();
+                    return;
+                }
+
+                auto* btn = uiMgr.findElementById("ViewportOverlay.GridSize");
+                Vec2 anchor{ 0.0f, 0.0f };
+                if (btn && btn->hasBounds)
+                {
+                    anchor = Vec2{ btn->boundsMinPixels.x, btn->boundsMaxPixels.y + 2.0f };
+                }
+
+                struct GridEntry { const char* label; float value; };
+                static const GridEntry sizes[] = {
+                    { "0.25", 0.25f }, { "0.5",  0.5f  }, { "1.0",  1.0f },
+                    { "2.0",  2.0f  }, { "5.0",  5.0f  }, { "10.0", 10.0f }
+                };
+
+                const float currentSize = renderer->getGridSize();
+                std::vector<UIManager::DropdownMenuItem> items;
+                for (auto& s : sizes)
+                {
+                    float val = s.value;
+                    std::string lbl = s.label;
+                    if (std::abs(currentSize - val) < 0.01f)
+                        lbl = "> " + lbl;
+                    items.push_back({ lbl, [&renderer, val]()
+                        {
+                            renderer->setGridSize(val);
+                            if (auto* el = renderer->getUIManager().findElementById("ViewportOverlay.GridSize"))
+                            {
+                                char buf[16];
+                                std::snprintf(buf, sizeof(buf), "%.2g", static_cast<double>(val));
+                                el->text = buf;
+                                renderer->getUIManager().markAllWidgetsDirty();
+                            }
+                            DiagnosticsManager::Instance().setState("GridSize", std::to_string(val));
+                        }
+                    });
+                }
+                uiMgr.showDropdownMenu(anchor, items);
             });
 
         renderer->getUIManager().registerClickEvent("ViewportOverlay.CamSpeed", [&renderer, &cameraSpeedMultiplier]()
@@ -873,6 +937,12 @@ int main()
                     }
                 });
 
+                items.push_back({ "Profiler", [&renderer]()
+                    {
+                        renderer->getUIManager().openProfilerTab();
+                    }
+                });
+
                 uiMgr.showDropdownMenu(anchor, items);
             });
 
@@ -998,20 +1068,54 @@ int main()
                             });
 
                         const std::string toolbarPath = assetManager.getEditorWidgetPath("ViewportOverlay.asset");
-        if (!toolbarPath.empty())
-        {
-            const int widgetId = assetManager.loadAsset(toolbarPath, AssetType::Widget, AssetManager::Sync);
-            if (widgetId != 0)
-            {
-                if (auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(widgetId)))
-                {
-                    if (auto widget = renderer->createWidgetFromAsset(asset))
-                    {
-                        renderer->getUIManager().registerWidget("ViewportOverlay", widget, "Viewport");
-                    }
-                }
-            }
-        }
+                        if (!toolbarPath.empty())
+                        {
+                            const int widgetId = assetManager.loadAsset(toolbarPath, AssetType::Widget, AssetManager::Sync);
+                            if (widgetId != 0)
+                            {
+                                if (auto asset = assetManager.getLoadedAssetByID(static_cast<unsigned int>(widgetId)))
+                                {
+                                    if (auto widget = renderer->createWidgetFromAsset(asset))
+                                    {
+                                        renderer->getUIManager().registerWidget("ViewportOverlay", widget, "Viewport");
+                                    }
+                                }
+                            }
+                        }
+
+                        // Restore snap & grid settings from config
+                        {
+                            auto& diag = DiagnosticsManager::Instance();
+                            if (auto v = diag.getState("GridSnapEnabled"))
+                            {
+                                gridSnapEnabled = (*v == "1");
+                                renderer->setSnapEnabled(gridSnapEnabled);
+                                renderer->setGridVisible(gridSnapEnabled);
+                                if (auto* el = renderer->getUIManager().findElementById("ViewportOverlay.Snap"))
+                                {
+                                    el->style.textColor = gridSnapEnabled
+                                        ? Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }
+                                        : Vec4{ 0.45f, 0.45f, 0.45f, 1.0f };
+                                }
+                            }
+                            if (auto v = diag.getState("GridSize"))
+                            {
+                                try {
+                                    const float gs = std::stof(*v);
+                                    if (gs > 0.0f)
+                                    {
+                                        renderer->setGridSize(gs);
+                                        if (auto* el = renderer->getUIManager().findElementById("ViewportOverlay.GridSize"))
+                                        {
+                                            char buf[16];
+                                            std::snprintf(buf, sizeof(buf), "%.2g", static_cast<double>(gs));
+                                            el->text = buf;
+                                        }
+                                    }
+                                } catch (...) {}
+                            }
+                            renderer->getUIManager().markAllWidgetsDirty();
+                        }
 
         const std::string worldSettingsPath = assetManager.getEditorWidgetPath("WorldSettings.asset");
         if (!worldSettingsPath.empty())
@@ -1957,84 +2061,114 @@ int main()
             return true;
         }
 
-        // Otherwise try entity deletion
-        const unsigned int selected = uiManager.getSelectedEntity();
-        if (selected == 0) return false;
+        // Otherwise try entity deletion (supports multi-select)
+        const auto& selectedEntities = renderer->getSelectedEntities();
+        if (selectedEntities.empty()) return false;
 
         auto& ecs = ECS::ECSManager::Instance();
         auto* level = diagnostics.getActiveLevelSoft();
-        const auto entity = static_cast<ECS::Entity>(selected);
 
-        // Get entity name for feedback
-        std::string entityName = "Entity " + std::to_string(selected);
-        if (const auto* nameComp = ecs.getComponent<ECS::NameComponent>(entity))
+        struct EntitySnapshot
         {
-            if (!nameComp->displayName.empty())
-                entityName = nameComp->displayName;
+            ECS::Entity entity;
+            std::string name;
+            std::optional<ECS::TransformComponent>       transform;
+            std::optional<ECS::NameComponent>            nameComp;
+            std::optional<ECS::MeshComponent>            mesh;
+            std::optional<ECS::MaterialComponent>        material;
+            std::optional<ECS::LightComponent>           light;
+            std::optional<ECS::CameraComponent>          camera;
+            std::optional<ECS::PhysicsComponent>         physics;
+            std::optional<ECS::ScriptComponent>          script;
+            std::optional<ECS::CollisionComponent>       collision;
+            std::optional<ECS::HeightFieldComponent>     heightField;
+        };
+
+        std::vector<EntitySnapshot> snapshots;
+        snapshots.reserve(selectedEntities.size());
+
+        for (unsigned int sel : selectedEntities)
+        {
+            const auto entity = static_cast<ECS::Entity>(sel);
+            EntitySnapshot snap;
+            snap.entity = entity;
+            snap.name = "Entity " + std::to_string(sel);
+            if (const auto* nc = ecs.getComponent<ECS::NameComponent>(entity))
+            {
+                if (!nc->displayName.empty())
+                    snap.name = nc->displayName;
+            }
+            snap.transform   = ecs.hasComponent<ECS::TransformComponent>(entity)   ? std::make_optional(*ecs.getComponent<ECS::TransformComponent>(entity))   : std::nullopt;
+            snap.nameComp    = ecs.hasComponent<ECS::NameComponent>(entity)        ? std::make_optional(*ecs.getComponent<ECS::NameComponent>(entity))        : std::nullopt;
+            snap.mesh        = ecs.hasComponent<ECS::MeshComponent>(entity)        ? std::make_optional(*ecs.getComponent<ECS::MeshComponent>(entity))        : std::nullopt;
+            snap.material    = ecs.hasComponent<ECS::MaterialComponent>(entity)    ? std::make_optional(*ecs.getComponent<ECS::MaterialComponent>(entity))    : std::nullopt;
+            snap.light       = ecs.hasComponent<ECS::LightComponent>(entity)       ? std::make_optional(*ecs.getComponent<ECS::LightComponent>(entity))       : std::nullopt;
+            snap.camera      = ecs.hasComponent<ECS::CameraComponent>(entity)      ? std::make_optional(*ecs.getComponent<ECS::CameraComponent>(entity))      : std::nullopt;
+            snap.physics     = ecs.hasComponent<ECS::PhysicsComponent>(entity)     ? std::make_optional(*ecs.getComponent<ECS::PhysicsComponent>(entity))     : std::nullopt;
+            snap.script      = ecs.hasComponent<ECS::ScriptComponent>(entity)      ? std::make_optional(*ecs.getComponent<ECS::ScriptComponent>(entity))      : std::nullopt;
+            snap.collision   = ecs.hasComponent<ECS::CollisionComponent>(entity)   ? std::make_optional(*ecs.getComponent<ECS::CollisionComponent>(entity))   : std::nullopt;
+            snap.heightField = ecs.hasComponent<ECS::HeightFieldComponent>(entity) ? std::make_optional(*ecs.getComponent<ECS::HeightFieldComponent>(entity)) : std::nullopt;
+            snapshots.push_back(std::move(snap));
         }
 
-        // Snapshot components for undo
-        auto savedTransform   = ecs.hasComponent<ECS::TransformComponent>(entity)   ? std::make_optional(*ecs.getComponent<ECS::TransformComponent>(entity))   : std::nullopt;
-        auto savedName        = ecs.hasComponent<ECS::NameComponent>(entity)        ? std::make_optional(*ecs.getComponent<ECS::NameComponent>(entity))        : std::nullopt;
-        auto savedMesh        = ecs.hasComponent<ECS::MeshComponent>(entity)        ? std::make_optional(*ecs.getComponent<ECS::MeshComponent>(entity))        : std::nullopt;
-        auto savedMaterial    = ecs.hasComponent<ECS::MaterialComponent>(entity)    ? std::make_optional(*ecs.getComponent<ECS::MaterialComponent>(entity))    : std::nullopt;
-        auto savedLight       = ecs.hasComponent<ECS::LightComponent>(entity)       ? std::make_optional(*ecs.getComponent<ECS::LightComponent>(entity))       : std::nullopt;
-        auto savedCamera      = ecs.hasComponent<ECS::CameraComponent>(entity)      ? std::make_optional(*ecs.getComponent<ECS::CameraComponent>(entity))      : std::nullopt;
-        auto savedPhysics     = ecs.hasComponent<ECS::PhysicsComponent>(entity)     ? std::make_optional(*ecs.getComponent<ECS::PhysicsComponent>(entity))     : std::nullopt;
-        auto savedScript      = ecs.hasComponent<ECS::ScriptComponent>(entity)      ? std::make_optional(*ecs.getComponent<ECS::ScriptComponent>(entity))      : std::nullopt;
-        auto savedCollision   = ecs.hasComponent<ECS::CollisionComponent>(entity)   ? std::make_optional(*ecs.getComponent<ECS::CollisionComponent>(entity))   : std::nullopt;
-        auto savedHeightField = ecs.hasComponent<ECS::HeightFieldComponent>(entity) ? std::make_optional(*ecs.getComponent<ECS::HeightFieldComponent>(entity)) : std::nullopt;
-
-        // Remove from level tracking first
-        if (level)
+        // Remove all selected entities
+        for (const auto& snap : snapshots)
         {
-            level->onEntityRemoved(entity);
+            if (level) level->onEntityRemoved(snap.entity);
+            ecs.removeEntity(snap.entity);
         }
-
-        // Remove from ECS
-        ecs.removeEntity(entity);
 
         // Clear selection and deselect in renderer
         uiManager.selectEntity(0);
-        renderer->setSelectedEntity(0);
+        renderer->clearSelection();
 
         uiManager.refreshWorldOutliner();
-        uiManager.showToastMessage("Deleted: " + entityName, 2.5f);
+
+        std::string toastMsg = (snapshots.size() == 1)
+            ? ("Deleted: " + snapshots[0].name)
+            : ("Deleted " + std::to_string(snapshots.size()) + " entities");
+        uiManager.showToastMessage(toastMsg, 2.5f);
 
         Logger::Instance().log(Logger::Category::Engine,
-            "Deleted entity " + std::to_string(selected) + " (" + entityName + ")",
+            "Deleted " + std::to_string(snapshots.size()) + " entity(ies)",
             Logger::LogLevel::INFO);
 
-        // Push undo/redo command
+        // Push undo/redo command for group delete
         UndoRedoManager::Command cmd;
-        cmd.description = "Delete " + entityName;
-        cmd.execute = [entity]()
+        cmd.description = (snapshots.size() == 1) ? ("Delete " + snapshots[0].name) : ("Delete " + std::to_string(snapshots.size()) + " entities");
+        cmd.execute = [snapshots]()
             {
                 auto& e = ECS::ECSManager::Instance();
-                if (std::find(e.getEntitiesMatchingSchema(ECS::Schema()).begin(),
-                              e.getEntitiesMatchingSchema(ECS::Schema()).end(), entity) != e.getEntitiesMatchingSchema(ECS::Schema()).end())
+                auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
+                for (const auto& snap : snapshots)
                 {
-                    auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
-                    if (lvl) lvl->onEntityRemoved(entity);
-                    e.removeEntity(entity);
+                    if (std::find(e.getEntitiesMatchingSchema(ECS::Schema()).begin(),
+                                  e.getEntitiesMatchingSchema(ECS::Schema()).end(), snap.entity) != e.getEntitiesMatchingSchema(ECS::Schema()).end())
+                    {
+                        if (lvl) lvl->onEntityRemoved(snap.entity);
+                        e.removeEntity(snap.entity);
+                    }
                 }
             };
-        cmd.undo = [entity, savedTransform, savedName, savedMesh, savedMaterial, savedLight, savedCamera, savedPhysics, savedScript, savedCollision, savedHeightField]()
+        cmd.undo = [snapshots]()
             {
                 auto& e = ECS::ECSManager::Instance();
-                e.createEntity(entity);
-                if (savedTransform)   e.addComponent<ECS::TransformComponent>(entity, *savedTransform);
-                if (savedName)        e.addComponent<ECS::NameComponent>(entity, *savedName);
-                if (savedMesh)        e.addComponent<ECS::MeshComponent>(entity, *savedMesh);
-                if (savedMaterial)    e.addComponent<ECS::MaterialComponent>(entity, *savedMaterial);
-                if (savedLight)       e.addComponent<ECS::LightComponent>(entity, *savedLight);
-                if (savedCamera)      e.addComponent<ECS::CameraComponent>(entity, *savedCamera);
-                if (savedPhysics)     e.addComponent<ECS::PhysicsComponent>(entity, *savedPhysics);
-                if (savedScript)      e.addComponent<ECS::ScriptComponent>(entity, *savedScript);
-                if (savedCollision)   e.addComponent<ECS::CollisionComponent>(entity, *savedCollision);
-                if (savedHeightField) e.addComponent<ECS::HeightFieldComponent>(entity, *savedHeightField);
                 auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
-                if (lvl) lvl->onEntityAdded(entity);
+                for (const auto& snap : snapshots)
+                {
+                    e.createEntity(snap.entity);
+                    if (snap.transform)   e.addComponent<ECS::TransformComponent>(snap.entity, *snap.transform);
+                    if (snap.nameComp)    e.addComponent<ECS::NameComponent>(snap.entity, *snap.nameComp);
+                    if (snap.mesh)        e.addComponent<ECS::MeshComponent>(snap.entity, *snap.mesh);
+                    if (snap.material)    e.addComponent<ECS::MaterialComponent>(snap.entity, *snap.material);
+                    if (snap.light)       e.addComponent<ECS::LightComponent>(snap.entity, *snap.light);
+                    if (snap.camera)      e.addComponent<ECS::CameraComponent>(snap.entity, *snap.camera);
+                    if (snap.physics)     e.addComponent<ECS::PhysicsComponent>(snap.entity, *snap.physics);
+                    if (snap.script)      e.addComponent<ECS::ScriptComponent>(snap.entity, *snap.script);
+                    if (snap.collision)   e.addComponent<ECS::CollisionComponent>(snap.entity, *snap.collision);
+                    if (snap.heightField) e.addComponent<ECS::HeightFieldComponent>(snap.entity, *snap.heightField);
+                    if (lvl) lvl->onEntityAdded(snap.entity);
+                }
             };
         UndoRedoManager::Instance().pushCommand(std::move(cmd));
 
@@ -2042,6 +2176,7 @@ int main()
         });
 
     bool rightMouseDown = false;
+    bool texViewerPanning = false;
     Vec2 mousePosPixels{};
     bool hasMousePos = false;
     bool isOverUI = false;
@@ -2254,6 +2389,21 @@ int main()
                     }
                     if (!isOverUI)
                     {
+                        // Texture viewer: left-click starts panning in laptop mode
+                        const bool laptopModeLocal = [&]() {
+                            if (auto v = diagnostics.getState("LaptopMode")) return *v == "1";
+                            return false;
+                        }();
+                        if (laptopModeLocal)
+                        {
+                            auto* texViewer = renderer->getTextureViewer(renderer->getActiveTabId());
+                            if (texViewer)
+                            {
+                                texViewerPanning = true;
+                                continue;
+                            }
+                        }
+
                         // PIE: recapture mouse when clicking on viewport while input is paused
                         if (diagnostics.isPIEActive() && pieInputPaused)
                         {
@@ -2271,7 +2421,8 @@ int main()
                         // Try gizmo interaction first; only pick entity if gizmo not hit
                         if (!renderer->beginGizmoDrag(static_cast<int>(event.button.x), static_cast<int>(event.button.y)))
                         {
-                            renderer->requestPick(static_cast<int>(event.button.x), static_cast<int>(event.button.y));
+                            const bool ctrlHeld = (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
+                            renderer->requestPick(static_cast<int>(event.button.x), static_cast<int>(event.button.y), ctrlHeld);
                         }
                     }
                 }
@@ -2279,6 +2430,13 @@ int main()
 
             if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT)
             {
+                // End texture viewer panning (laptop mode left-click)
+                if (texViewerPanning)
+                {
+                    texViewerPanning = false;
+                    continue;
+                }
+
                 if (diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused)
                     continue;
 
@@ -2948,6 +3106,14 @@ int main()
                 }
                 if (!isOverUI && !diagnostics.isPIEActive())
                 {
+                    // Texture viewer: right-click starts panning instead of camera rotation
+                    auto* texViewer = renderer->getTextureViewer(renderer->getActiveTabId());
+                    if (texViewer)
+                    {
+                        texViewerPanning = true;
+                        continue;
+                    }
+
                     rightMouseDown = true;
                     SDL_GetMouseState(&preCaptureMouseX, &preCaptureMouseY);
                     if (auto* w = renderer->window())
@@ -2960,6 +3126,13 @@ int main()
             }
             else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_RIGHT)
             {
+                // Texture viewer: end panning
+                if (texViewerPanning)
+                {
+                    texViewerPanning = false;
+                    continue;
+                }
+
                 // Widget editor: end panning
                 if (renderer)
                 {
@@ -3005,6 +3178,21 @@ int main()
                     }
                 }
 
+                // Texture viewer zoom
+                if (renderer)
+                {
+                    auto* texViewer = renderer->getTextureViewer(renderer->getActiveTabId());
+                    if (texViewer)
+                    {
+                        const float zoomFactor = (event.wheel.y > 0.0f) ? 1.15f : (1.0f / 1.15f);
+                        float newZoom = texViewer->getZoom() * zoomFactor;
+                        newZoom = std::max(0.05f, std::min(newZoom, 50.0f));
+                        texViewer->setZoom(newZoom);
+                        renderer->getUIManager().markAllWidgetsDirty();
+                        continue;
+                    }
+                }
+
                 if (rightMouseDown)
                 {
                     const float step = 0.1f;
@@ -3025,6 +3213,22 @@ int main()
                         renderer->getUIManager().markAllWidgetsDirty();
                     }
                 }
+            }
+
+            // Texture viewer pan via right-click drag (or left-click in laptop mode)
+            if (event.type == SDL_EVENT_MOUSE_MOTION && texViewerPanning)
+            {
+                if (renderer)
+                {
+                    auto* texViewer = renderer->getTextureViewer(renderer->getActiveTabId());
+                    if (texViewer)
+                    {
+                        texViewer->setPanX(texViewer->getPanX() + event.motion.xrel);
+                        texViewer->setPanY(texViewer->getPanY() + event.motion.yrel);
+                        renderer->getUIManager().markAllWidgetsDirty();
+                    }
+                }
+                continue;
             }
 
             if (event.type == SDL_EVENT_MOUSE_MOTION && (rightMouseDown || (diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused)))
@@ -3306,6 +3510,9 @@ int main()
             Scripting::UpdateScripts(static_cast<float>(dt));
         }
 
+        // Poll for .py file changes and hot-reload if needed (self-throttled to 500ms)
+        Scripting::PollScriptHotReload();
+
         if (renderer)
         {
             renderer->getUIManager().updateNotifications(static_cast<float>(dt));
@@ -3348,6 +3555,29 @@ int main()
         const uint64_t frameEndCounter = SDL_GetPerformanceCounter();
         const double cpuFrameMs = (freq > 0.0) ? (static_cast<double>(frameEndCounter - frameStartCounter) / freq * 1000.0) : 0.0;
         cpuOtherMs = std::max(0.0, cpuFrameMs - cpuInputMs - cpuRenderMs);
+
+        // Push frame metrics to DiagnosticsManager for the Profiler tab
+        {
+            DiagnosticsManager::FrameMetrics fm{};
+            fm.fps           = fpsValue;
+            fm.cpuFrameMs    = cpuFrameMs;
+            fm.gpuFrameMs    = renderer->getLastGpuFrameMs();
+            fm.cpuWorldMs    = renderer->getLastCpuRenderWorldMs();
+            fm.cpuUiMs       = renderer->getLastCpuRenderUiMs();
+            fm.cpuUiLayoutMs = renderer->getLastCpuUiLayoutMs();
+            fm.cpuUiDrawMs   = renderer->getLastCpuUiDrawMs();
+            fm.cpuEcsMs      = renderer->getLastCpuEcsMs();
+            fm.cpuInputMs    = cpuInputMs;
+            fm.cpuEventMs    = cpuEventMs;
+            fm.cpuGcMs       = cpuGcMs;
+            fm.cpuRenderMs   = cpuRenderMs;
+            fm.cpuOtherMs    = cpuOtherMs;
+            fm.visibleCount  = renderer->getLastVisibleCount();
+            fm.hiddenCount   = renderer->getLastHiddenCount();
+            fm.totalCount    = renderer->getLastTotalCount();
+            diagnostics.pushFrameMetrics(fm);
+        }
+
         if (renderer)
         {
             const bool isViewportTab = (renderer->getActiveTabId() == "Viewport");

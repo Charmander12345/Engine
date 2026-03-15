@@ -121,6 +121,11 @@ public:
 	void closeConsoleTab();
 	bool isConsoleOpen() const;
 
+	// Profiler / Performance-Monitor tab
+	void openProfilerTab();
+	void closeProfilerTab();
+	bool isProfilerOpen() const;
+
 	// Entity clipboard (Copy/Paste/Duplicate)
 	void copySelectedEntity();
 	bool pasteEntity();
@@ -370,6 +375,19 @@ private:
 	ConsoleState m_consoleState;
 	void refreshConsoleLog();
 	void buildConsoleToolbar(WidgetElement& root);
+
+	// Profiler / Performance-Monitor tab state
+	struct ProfilerState
+	{
+		std::string tabId;
+		std::string widgetId;
+		bool isOpen{ false };
+		bool frozen{ false };
+		float refreshTimer{ 0.0f };
+	};
+	ProfilerState m_profilerState;
+	void refreshProfilerMetrics();
+	void buildProfilerToolbar(WidgetElement& root);
 
 public:
 	bool getWidgetEditorCanvasRect(Vec4& outRect) const;

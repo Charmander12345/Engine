@@ -63,6 +63,8 @@ add_library(RendererCore OBJECT
     UIWidgets/TabViewWidget.h
     EditorWindows/MeshViewerWindow.cpp
     EditorWindows/MeshViewerWindow.h
+    EditorWindows/TextureViewerWindow.cpp
+    EditorWindows/TextureViewerWindow.h
     EditorWindows/PopupWindow.cpp
     EditorWindows/PopupWindow.h
 )

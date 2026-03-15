@@ -7,6 +7,8 @@
 
 ## Letzte Änderung (Viewport)
 
+- ✅ `Profiler / Performance-Monitor Tab (Phase 2.7)`: Dedizierter Editor-Tab für Echtzeit-Performance-Analyse. `FrameMetrics`-Struct in `DiagnosticsManager` mit Ring-Buffer (300 Frames) – sammelt pro Frame: FPS, CPU/GPU Frame-Time, World/UI/Layout/Draw/ECS/Input/Events/Render/GC/Other ms, Occlusion Visible/Hidden/Total. `pushFrameMetrics()` wird jeden Frame aus `main.cpp` aufgerufen. `openProfilerTab()` in `UIManager` (folgt ConsoleTab-Pattern): Toolbar mit Freeze/Resume-Button, scrollbarer Metrik-Bereich. Anzeige: Frame-History-Balkengrafik (letzte 150 Frames, farbcodiert grün<8.3ms/gelb<16.6ms/rot≥16.6ms), Current-Frame-Übersicht (FPS + CPU/GPU Frame-Time mit Proportions-Balken), CPU-Breakdown (10 Kategorien mit individuellen Proportions-Balken relativ zur Frame-Time), Occlusion-Culling-Statistik (Visible/Hidden/Total/Cull-Rate%). 0.25s-Auto-Refresh-Timer in `updateNotifications()`. Freeze-Modus pausiert die Anzeige für Detail-Analyse. Zugang über Settings-Dropdown → „Profiler" in `main.cpp`.
+
 - ✅ `One-Click Scene Setup (Phase 3.3)`: `createNewLevelWithTemplate()` in `UIManager` mit `SceneTemplate`-Enum (Empty/BasicOutdoor/Prototype). „+ Level"-`DropdownButtonWidget` in Content-Browser-PathBar neben Import. ECS via `initialize({})` zurückgesetzt, Entities per Lambda (Name, Transform, Mesh, Material, Light) aufgebaut, `level->onEntityAdded()` registriert. BasicOutdoor sucht ersten Skybox-Asset in Registry. Level sofort gespeichert, Outliner/ContentBrowser refresht. Eindeutige Level-Namen (NewLevel, NewLevel1, ...).
 
 - ✅ `Auto-Collider-Generierung (Phase 3.5)`: `autoFitColliderForEntity()` in `UIManager` berechnet Mesh-AABB aus Vertex-Daten (stride 5), skaliert mit Entity-Scale, wählt ColliderType per Heuristik (Sphere bei Aspekt <1.4, Capsule bei vertikal >2.5, sonst Box) mit Center-Offset. „Add Component → Physics" fügt automatisch `CollisionComponent` mit gefitteten Dimensionen hinzu. „Auto-Fit Collider"-Button in der Collision-Sektion des Details-Panels über `EditorUIBuilder::makeButton`. `<limits>` Include in UIManager.cpp.
@@ -208,6 +210,7 @@
 - ✅ `Texture Streaming`: Asynchrones Texture-Streaming implementiert. `TextureStreamingManager` (`TextureStreamingManager.h/.cpp`) im `OpenGLRenderer`-Verzeichnis: Background-Loader-Thread + GPU-Upload-Queue. Texturen werden sofort als 1×1 Magenta-Placeholder zurückgegeben; `processUploads()` lädt pro Frame bis zu 4 Texturen auf die GPU hoch. De-Duplikation über `m_streamCache`. `OpenGLMaterial::bindTextures()` nutzt den Streaming-Manager wenn verfügbar. Toggle: `Renderer::isTextureStreamingEnabled()`/`setTextureStreamingEnabled()`. Engine Settings → Rendering → Performance: Checkbox „Texture Streaming". Config-Persistenz über `config.ini` (`TextureStreamingEnabled`).
 - ✅ `Console / Log-Viewer Tab`: Dedizierter Editor-Tab für Live-Log-Output (Editor Roadmap 2.1). `openConsoleTab()`/`closeConsoleTab()`/`isConsoleOpen()` in `UIManager`. `ConsoleState`-Struct (tabId, widgetId, levelFilter-Bitmask, searchText, autoScroll, refreshTimer). Toolbar mit Filter-Buttons (All/Info/Warning/Error als Toggle-Bitmask), Suchfeld (Echtzeit-Textfilter, case-insensitive), Clear-Button, Auto-Scroll-Toggle. Scrollbare Log-Area zeigt farbcodierte Einträge aus dem Logger-Ringbuffer (INFO=textSecondary, WARNING=warningColor, ERROR=errorColor, FATAL=rot). `refreshConsoleLog()` baut Log-Zeilen mit Timestamp, Level-Tag, Category und Message. Periodischer Refresh alle 0.5s in `updateNotifications()` (nur bei neuen Einträgen via sequenceId-Vergleich). Erreichbar über Settings-Dropdown → „Console".
 - ✅ `Viewport-Einstellungen Panel (Editor Roadmap 5.1)`: Toolbar-Buttons funktional gemacht. **CamSpeed-Dropdown**: Klick auf CamSpeed-Button öffnet Dropdown mit 7 Geschwindigkeitsvoreinstellungen (0.25x–5.0x), aktuelle Geschwindigkeit mit „>" markiert, Button-Label wird bei Auswahl und Mausrad-Scroll aktualisiert. **Stats-Toggle**: Klick schaltet Performance-Metriken-Overlay ein/aus, aktiver Zustand mit weißem Text, inaktiv mit gedimmtem Grau (0.45). **Grid-Snap-Toggle**: Klick schaltet Grid-Snap ein/aus mit visueller Rückmeldung (weiß/gedimmt) und Toast-Bestätigung. **Settings-Dropdown**: Einträge Engine Settings, Editor Settings, Console. **Focus on Selection (F-Taste)**: Neue `Renderer::focusOnSelectedEntity()` Methode (virtual mit Impl in OpenGLRenderer) – berechnet AABB-Center der selektierten Entity, positioniert Kamera per Smooth-Transition (0.3s) in 2.5× Radius-Entfernung aus aktueller Blickrichtung. F-Taste im Gizmo-Shortcut-Block (W/E/R/F, nur Editor-Modus, nicht bei RMB/PIE/Texteingabe).
+- ✅ `Intelligent Snap & Grid (Editor Roadmap 3.6)`: Vollständiges Snap-to-Grid-System für Gizmo-Operationen. **Grid-Overlay**: SDF-basierter Infinite-Grid-Shader auf der XZ-Ebene mit `fwidth()`-Antialiasing, Achsen-Highlighting (rot=X, blau=Z), 10er-Verstärkungslinien, Distance-Fade (200 Einheiten). Grid-Quad 500×500, gerendert nach Post-Processing, vor Gizmo/Outline. **Snap-to-Grid**: Translate rastet alle Positionskomponenten auf `gridSize`-Vielfache, Rotate rastet Euler-Winkel auf 15°-Schritte, Scale rastet auf 0.1-Schritte. **Toolbar-Integration**: `ViewportOverlay.Snap`-Toggle schaltet Snap + Grid gemeinsam ein/aus. Neuer `ViewportOverlay.GridSize`-Dropdown mit 6 Presets (0.25/0.5/1/2/5/10 Einheiten). **Persistenz**: Snap-Zustand und Grid-Größe über `DiagnosticsManager::setState/getState` in config.ini gespeichert, beim Start wiederhergestellt. Snap-State-Felder (`m_snapEnabled`, `m_gridVisible`, `m_gridSize`, `m_rotationSnapDeg`, `m_scaleSnapStep`) in `Renderer`-Basisklasse mit virtuellen Gettern/Settern. Grid-Rendering-Ressourcen (`ensureGridResources`/`releaseGridResources`/`drawViewportGrid`) in OpenGLRenderer.
 
 ## Legende
 
@@ -501,8 +504,12 @@
 | PBO-basierter Async-Readback              | ✅     |
 | Entity-Picking (Pick-FBO + Farbcodierung) | ✅     |
 | Entity-Löschen (Entf-Taste + Undo/Redo)          | ✅     |
+| **Multi-Select** (Ctrl+Klick Toggle, `m_selectedEntities` unordered_set) | ✅ |
+| **Gruppen-Gizmo** (Translate/Rotate/Scale aller selektierten Entities gleichzeitig) | ✅ |
+| **Gruppen-Löschen** (DELETE löscht alle selektierten Entities, Gruppen-Undo/Redo) | ✅ |
+| **Gruppen-Undo/Redo** (Einzelner Undo-Command für Multi-Entity-Transform/Delete) | ✅ |
 | Screen-to-World (Depth-Buffer Unproject)  | ✅     |
-| Selection-Outline (Edge-Detection)        | ✅     |
+| Selection-Outline (Edge-Detection, Multi-Entity) | ✅     |
 | GPU Timer Queries (Triple-Buffered)       | ✅     |
 | CPU-Metriken (Welt/UI/Layout/Draw/ECS)   | ✅     |
 | Metriken-Overlay (F10)                    | ✅     |
@@ -844,6 +851,7 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 - Content Browser: Icons werden per Tint-Color eingefärbt (Ordner gelb, Scripte grün, Texturen blau, Materials orange, Audio rot, Shader lila, etc.)
 - Content Browser: TreeView-Inhalte per `glScissor` auf den Zeichenbereich begrenzt (kein Überlauf beim Scrollen)
 - Content Browser: Grid-View zeigt Ordner + Assets des ausgewählten Ordners als quadratische Kacheln (80×80px, Icon + Name)
+- Content Browser: Textur-Asset-Thumbnails: `resolveTextureSourcePath()` löst Quellbild aus Asset-JSON auf, `makeGridTile()` mit `thumbnailTextureId`-Parameter zeigt das Bild direkt als Tile-Icon (größerer Bereich, weiße Tint). Funktioniert in Normal- und Suchmodus. Caching via Renderer `m_uiTextureCache`.
 - Content Browser: Doppelklick auf Grid-Ordner navigiert hinein, Doppelklick auf Model3D-Asset öffnet Mesh-Viewer-Tab, Doppelklick auf andere Assets zeigt Toast
 - Content Browser: Ausgewählter Ordner im TreeView visuell hervorgehoben
 - Content Browser: Einfachklick auf TreeView-Ordner wählt ihn aus und aktualisiert Grid
@@ -1037,6 +1045,7 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | Bloom Toggle (Engine Settings → Rendering → Post-Processing) | ✅ |
 | SSAO Toggle (Engine Settings → Rendering → Post-Processing) | ✅ |
 | CSM Toggle (Engine Settings → Rendering → Lighting) | ✅ |
+| Script Hot-Reload Toggle (Engine Settings → General → Scripting, config.ini-Persistenz) | ✅ |
 | Absolute Widget-Positionierung (`setAbsolutePosition`) | ✅ |
 
 **Offene Punkte:**
@@ -1069,7 +1078,7 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 | Automatische Ausrichtung der Kamera auf Mesh-Zentrum | ✅ |
 | Standard-Beleuchtung (Directional Light, Rotation 50°/30°, natürliches Warmweiß, Intensität 0.8) | ✅ |
 | Kamera-State Save/Restore pro Tab (EditorCamera in Level) | ✅ |
-| **Per-Tab Entity-Selektion** (Selection-State wird beim Tab-Wechsel gespeichert/wiederhergestellt) | ✅ |
+| **Per-Tab Entity-Selektion** (Multi-Selection-State wird beim Tab-Wechsel gespeichert/wiederhergestellt via `m_tabSelectedEntities`) | ✅ |
 | **Editierbare Asset-Properties** im Sidepanel (Scale X/Y/Z, Material-Pfad, markiert Asset als unsaved) | ✅ |
 | Doppelklick auf Model3D im Content Browser öffnet Viewer | ✅ |
 | Automatisches Laden von noch nicht geladenen Assets | ✅ |
@@ -1087,6 +1096,31 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 - Kein Mesh-Editing (nur Betrachtung)
 - Keine Animations-Unterstützung
 - Kein Info-Overlay (Vertex/Triangle-Count)
+
+---
+
+## 25b. Editor-Fenster / Texture Viewer
+
+| Feature                                          | Status |
+|--------------------------------------------------|--------|
+| `TextureViewerWindow`-Klasse (`src/Renderer/EditorWindows/TextureViewerWindow.h/.cpp`) | ✅ |
+| **Tab-basiertes System** (eigener EditorTab pro Texture Viewer mit eigenem FBO) | ✅ |
+| Doppelklick auf Texture-Asset im Content Browser öffnet Viewer | ✅ |
+| **Texture-Anzeige** mit Zoom/Pan und Fit-to-Window (Zoom 1.0 = Fit, Scroll-Zoom stufenlos) | ✅ |
+| **Channel-Isolation** (R/G/B/A einzeln togglebar, Grayscale bei Single-Channel, ausgegraut wenn deaktiviert) | ✅ |
+| **Checkerboard-Hintergrund** für Alpha-Transparenz-Visualisierung (Toggle mit Graying) | ✅ |
+| **GLSL Channel-Isolation Shader** (`uChannelMask`, `uCheckerboard`) | ✅ |
+| **Metadaten-Anzeige** im Sidepanel (Auflösung, Kanäle, Format, Dateigröße) | ✅ |
+| **Format-Erkennung** (PNG/JPEG/TGA/BMP/HDR/DDS, komprimiert/unkomprimiert) | ✅ |
+| **Tab-scoped Properties-Widget** (`TextureViewerDetails.{path}`, tabId = assetPath) | ✅ |
+| Kein Level-Swap nötig (reine 2D-Vorschau, kein 3D-Szenen-Rendering) | ✅ |
+| Automatisches Laden von noch nicht geladenen Texture-Assets | ✅ |
+| Toast-Benachrichtigung beim Laden | ✅ |
+| **Scroll-Zoom** (1.15x Faktor, Bereich 0.05–50.0, relativ zu Fit-Scale) | ✅ |
+| **Rechtsklick-Pan** (Drag zum Verschieben der Textur-Ansicht) | ✅ |
+| **Laptop-Modus-Pan** (Linksklick-Drag bei aktivem Laptop-Modus) | ✅ |
+| **Channel-Button-Graying** (deaktivierte Kanäle visuell ausgegraut) | ✅ |
+| Mipmap-Level-Slider                             | ❌ |
 
 ---
 
@@ -1255,7 +1289,7 @@ Gameplay-UI wird ausschließlich über Widget-Assets gesteuert. Widgets werden i
 | Mehrere Scripts pro Level           | ✅     |
 | Script-Fehlerbehandlung             | 🟡     |
 | Script-Debugger                     | ❌     |
-| Script Hot-Reload                   | ❌     |
+| Script Hot-Reload                   | ✅     |
 
 ### 18.2 Script-API Module
 
@@ -1276,7 +1310,6 @@ Gameplay-UI wird ausschließlich über Widget-Assets gesteuert. Widgets werden i
 **Offene Punkte:**
 - Script-Fehler werden geloggt, aber kein detailliertes Error-Recovery (Script crasht → Fehlermeldung, aber kein Retry)
 - Kein Script-Debugger (Breakpoints etc.)
-- Kein Hot-Reload bei Script-Änderung (nur bei PIE-Neustart)
 - Kein Zugriff auf Renderer-Parameter (z.B. Material-Uniforms) aus Python
 - `engine.math` bietet 54 Funktionen: Vec3 (17), Vec2 (9), Quaternion (7), Scalar (4), Trigonometrie (7: sin, cos, tan, asin, acos, atan, atan2), Common Math (10: sqrt, abs, pow, floor, ceil, round, sign, min, max, pi) — alle Berechnungen laufen in C++
 
@@ -1344,8 +1377,8 @@ Große Feature-Blöcke, die noch nicht existieren:
 
 | System                            | Status | Beschreibung                                                                   |
 |-----------------------------------|--------|--------------------------------------------------------------------------------|
-| **Undo/Redo**                    | ✅     | Command-Pattern für Editor-Aktionen (UndoRedoManager-Singleton, Ctrl+Z/Y, StatusBar-Buttons). Entity-Löschen (DELETE) mit vollständigem Komponenten-Snapshot, Entity-Spawn (Drag-and-Drop) und Landscape-Erstellung erzeugen Undo/Redo-Actions |
-| **Editor-Gizmos**               | ✅     | Translate/Rotate/Scale-Gizmos für Entity-Manipulation (W/E/R Shortcuts)      |
+| **Undo/Redo**                    | ✅     | Command-Pattern für Editor-Aktionen (UndoRedoManager-Singleton, Ctrl+Z/Y, StatusBar-Buttons). Entity-Löschen (DELETE) mit vollständigem Komponenten-Snapshot (Einzel- und Gruppen-Delete), Entity-Spawn (Drag-and-Drop) und Landscape-Erstellung erzeugen Undo/Redo-Actions. Multi-Entity-Transform-Undo via `m_gizmoDragOldTransforms`-Map. |
+| **Editor-Gizmos**               | ✅     | Translate/Rotate/Scale-Gizmos für Entity-Manipulation (W/E/R Shortcuts). Multi-Entity-Gruppen-Gizmo: Transformiert alle selektierten Entities gleichzeitig mit einem einzigen Undo-Command. |
 | **Shadow Mapping (Dir/Spot)**    | ✅     | Multi-Light Shadow Maps für bis zu 4 Directional/Spot Lights, 5×5 PCF       |
 | **Shadow Mapping (Point Lights)**| ✅     | Omnidirektionale Cube-Map Shadows für bis zu 4 Point Lights via Geometry-Shader |
 | **Popup-UI Refactoring**         | ✅     | Landscape-Manager- und Engine-Settings-Popup-Erstellung aus `main.cpp` in `UIManager` verschoben (`openLandscapeManagerPopup`, `openEngineSettingsPopup`). UIManager hält jetzt einen Back-Pointer auf `OpenGLRenderer`. |

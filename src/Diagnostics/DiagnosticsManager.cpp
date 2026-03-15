@@ -778,3 +778,38 @@ void DiagnosticsManager::refreshHardwareInfo()
     m_hardwareInfo.monitors = queryMonitorInfo();
     m_hardwareInfoQueried   = true;
 }
+
+// ?? Frame metrics ring buffer ????????????????????????????????????????????????
+
+void DiagnosticsManager::pushFrameMetrics(const FrameMetrics& metrics)
+{
+    if (m_frameHistory.size() < kMaxFrameHistory)
+    {
+        m_frameHistory.push_back(metrics);
+        m_frameHistoryIndex = m_frameHistory.size() - 1;
+        m_frameHistoryCount = m_frameHistory.size();
+    }
+    else
+    {
+        m_frameHistoryIndex = (m_frameHistoryIndex + 1) % kMaxFrameHistory;
+        m_frameHistory[m_frameHistoryIndex] = metrics;
+        m_frameHistoryCount = kMaxFrameHistory;
+    }
+}
+
+const std::vector<DiagnosticsManager::FrameMetrics>& DiagnosticsManager::getFrameHistory() const
+{
+    return m_frameHistory;
+}
+
+const DiagnosticsManager::FrameMetrics& DiagnosticsManager::getLatestMetrics() const
+{
+    if (m_frameHistory.empty())
+        return m_emptyMetrics;
+    return m_frameHistory[m_frameHistoryIndex];
+}
+
+size_t DiagnosticsManager::getFrameHistorySize() const
+{
+    return m_frameHistoryCount;
+}

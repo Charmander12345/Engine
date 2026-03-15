@@ -1,6 +1,8 @@
 add_library(Scripting SHARED
     PythonScripting.cpp
     PythonScripting.h
+    ScriptHotReload.cpp
+    ScriptHotReload.h
 )
 
 set_target_properties(Scripting PROPERTIES

@@ -1,4 +1,5 @@
 #include "PythonScripting.h"
+#include "ScriptHotReload.h"
 
 #ifdef _DEBUG
 #define PYTHONSCRIPTING_DEBUG_RESTORE
@@ -165,6 +166,10 @@ namespace
     Renderer* s_renderer{ nullptr };
     std::unordered_map<int, std::shared_ptr<PyObject>> s_assetLoadCallbacks;
     std::mutex s_assetLoadCallbacksMutex;
+
+    // Script Hot-Reload state
+    ScriptHotReload s_scriptHotReload;
+    bool s_scriptHotReloadEnabled{ true };
 
     void ReleaseScriptState(ScriptState& state)
     {
@@ -3681,5 +3686,165 @@ namespace Scripting
     void SetRenderer(Renderer* renderer)
     {
         s_renderer = renderer;
+    }
+
+    // ── Script Hot-Reload ─────────────────────────────────────────────
+
+    void InitScriptHotReload(const std::string& contentDirectory)
+    {
+        if (contentDirectory.empty())
+            return;
+        s_scriptHotReload.init(contentDirectory, 0.5);
+    }
+
+    void PollScriptHotReload()
+    {
+        // Sync enabled flag from persisted config (UI toggle writes to DiagnosticsManager)
+        if (auto v = DiagnosticsManager::Instance().getState("ScriptHotReloadEnabled"))
+            s_scriptHotReloadEnabled = (*v != "false");
+
+        if (!s_scriptHotReloadEnabled || !s_scriptHotReload.isInitialized())
+            return;
+
+        auto changed = s_scriptHotReload.poll();
+        if (changed.empty())
+            return;
+
+        if (!Py_IsInitialized())
+            return;
+
+        auto& diagnostics = DiagnosticsManager::Instance();
+        const std::string contentDir = s_scriptHotReload.directory();
+
+        PyGILState_STATE gilState = PyGILState_Ensure();
+
+        int reloadedCount = 0;
+
+        for (const auto& absPath : changed)
+        {
+            // Convert absolute path to a relative content path for matching
+            std::filesystem::path absFile(absPath);
+            std::filesystem::path contentRoot(contentDir);
+            std::string relPath;
+
+            // Try to get a Content-relative path (e.g. "Scripts/MyScript.py")
+            auto rel = absFile.lexically_relative(contentRoot);
+            if (!rel.empty() && rel.native()[0] != '.')
+            {
+                relPath = rel.generic_string();
+            }
+            else
+            {
+                relPath = absFile.filename().generic_string();
+            }
+
+            // Also build the "Content/..." prefixed variant
+            std::string contentPrefixed = "Content/" + relPath;
+
+            // Check if this script is currently loaded (try both path forms)
+            ScriptState* matchedState = nullptr;
+            std::string matchedKey;
+
+            for (auto& [key, state] : s_scripts)
+            {
+                if (key == relPath || key == contentPrefixed || key == absPath)
+                {
+                    matchedState = &state;
+                    matchedKey = key;
+                    break;
+                }
+                // Also try comparing resolved absolute paths
+                std::filesystem::path resolved = ResolveScriptPath(key);
+                std::error_code ec;
+                if (std::filesystem::equivalent(resolved, absFile, ec) && !ec)
+                {
+                    matchedState = &state;
+                    matchedKey = key;
+                    break;
+                }
+            }
+
+            if (matchedState)
+            {
+                // Release old module and re-load
+                std::unordered_set<unsigned long> savedEntities = std::move(matchedState->startedEntities);
+                ReleaseScriptState(*matchedState);
+
+                if (LoadScriptModule(matchedKey, *matchedState))
+                {
+                    // Preserve started-entities set so onloaded is NOT re-called for
+                    // entities that already received it (prevents duplicate init).
+                    // Scripts that want fresh init on reload can implement an on_reload() hook.
+                    matchedState->startedEntities = std::move(savedEntities);
+                    ++reloadedCount;
+
+                    Logger::Instance().log(Logger::Category::Engine,
+                        "ScriptHotReload: reloaded " + matchedKey,
+                        Logger::LogLevel::INFO);
+                }
+                else
+                {
+                    Logger::Instance().log(Logger::Category::Engine,
+                        "ScriptHotReload: failed to reload " + matchedKey,
+                        Logger::LogLevel::ERROR);
+
+                    diagnostics.enqueueToastNotification("Script reload failed: " + matchedKey, 4.0f);
+                }
+            }
+
+            // Check level script
+            if (!s_lastLevelScriptPath.empty() && s_levelScript.module)
+            {
+                std::filesystem::path resolvedLevel = ResolveScriptPath(s_lastLevelScriptPath);
+                std::error_code ec;
+                if (std::filesystem::equivalent(resolvedLevel, absFile, ec) && !ec)
+                {
+                    bool wasLoaded = s_levelScript.loadedCalled;
+                    ReleaseLevelScriptState();
+                    if (LoadLevelScriptModule(s_lastLevelScriptPath))
+                    {
+                        if (wasLoaded && s_levelScript.onLoadedFunc)
+                        {
+                            PyObject* result = PyObject_CallFunction(s_levelScript.onLoadedFunc, nullptr);
+                            if (!result)
+                                LogPythonError("Python: on_level_loaded failed after hot-reload");
+                            else
+                                Py_DECREF(result);
+                        }
+                        s_levelScript.loadedCalled = wasLoaded;
+                        ++reloadedCount;
+                        Logger::Instance().log(Logger::Category::Engine,
+                            "ScriptHotReload: reloaded level script " + s_lastLevelScriptPath,
+                            Logger::LogLevel::INFO);
+                    }
+                    else
+                    {
+                        Logger::Instance().log(Logger::Category::Engine,
+                            "ScriptHotReload: failed to reload level script",
+                            Logger::LogLevel::ERROR);
+                        diagnostics.enqueueToastNotification("Level script reload failed", 4.0f);
+                    }
+                }
+            }
+        }
+
+        PyGILState_Release(gilState);
+
+        if (reloadedCount > 0)
+        {
+            std::string msg = "Script reloaded (" + std::to_string(reloadedCount) + " file" +
+                (reloadedCount > 1 ? "s" : "") + ")";
+            diagnostics.enqueueToastNotification(msg, 3.0f);
+        }
+    }
+
+    bool IsScriptHotReloadEnabled()
+    {
+        return s_scriptHotReloadEnabled;
+    }
+
+    void SetScriptHotReloadEnabled(bool enabled)
+    {
+        s_scriptHotReloadEnabled = enabled;
     }
 }

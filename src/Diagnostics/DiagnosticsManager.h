@@ -167,6 +167,33 @@ public:
 	void setGpuInfo(const GpuInfo& gpu);
 	void refreshHardwareInfo();
 
+	// Frame-level performance metrics (ring buffer for profiler tab)
+	struct FrameMetrics
+	{
+		double fps{ 0.0 };
+		double cpuFrameMs{ 0.0 };
+		double gpuFrameMs{ 0.0 };
+		double cpuWorldMs{ 0.0 };
+		double cpuUiMs{ 0.0 };
+		double cpuUiLayoutMs{ 0.0 };
+		double cpuUiDrawMs{ 0.0 };
+		double cpuEcsMs{ 0.0 };
+		double cpuInputMs{ 0.0 };
+		double cpuEventMs{ 0.0 };
+		double cpuGcMs{ 0.0 };
+		double cpuRenderMs{ 0.0 };
+		double cpuOtherMs{ 0.0 };
+		uint32_t visibleCount{ 0 };
+		uint32_t hiddenCount{ 0 };
+		uint32_t totalCount{ 0 };
+	};
+
+	static constexpr size_t kMaxFrameHistory = 300;
+	void pushFrameMetrics(const FrameMetrics& metrics);
+	const std::vector<FrameMetrics>& getFrameHistory() const;
+	const FrameMetrics& getLatestMetrics() const;
+	size_t getFrameHistorySize() const;
+
 private:
     DiagnosticsManager();
     ~DiagnosticsManager() = default;
@@ -216,4 +243,10 @@ private:
 
     HardwareInfo m_hardwareInfo;
     bool m_hardwareInfoQueried{ false };
+
+    // Profiler ring buffer
+    std::vector<FrameMetrics> m_frameHistory;
+    size_t m_frameHistoryIndex{ 0 };
+    size_t m_frameHistoryCount{ 0 };
+    FrameMetrics m_emptyMetrics{};
 };

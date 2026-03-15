@@ -7,6 +7,7 @@
 #include "../ViewportUIManager.h"
 #include "../EditorWindows/PopupWindow.h"
 #include "../EditorWindows/MeshViewerWindow.h"
+#include "../EditorWindows/TextureViewerWindow.h"
 #include "../IRenderTarget.h"
 #include "OpenGLRenderTarget.h"
 #include "PostProcessStack.h"
@@ -20,6 +21,7 @@
 #include "glad/include/gl.h"
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <array>
 #include <glm/glm.hpp>
@@ -156,7 +158,7 @@ private:
     bool ensurePickFbo(int width, int height);
     void releasePickFbo();
     void renderPickBuffer(const glm::mat4& view, const glm::mat4& projection);
-    void renderPickBufferSingleEntity(const glm::mat4& view, const glm::mat4& projection, unsigned int entityId);
+    void renderPickBufferSelectedEntities(const glm::mat4& view, const glm::mat4& projection, const std::unordered_set<unsigned int>& entityIds);
     bool ensureOutlineResources();
     void releaseOutlineResources();
     void drawUIPanel(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program,
@@ -530,11 +532,11 @@ private:
     GLuint m_outlineProgram{0};
     GLuint m_outlineVao{0};
     GLint m_outlineLocPickTex{-1};
-    GLint m_outlineLocSelectedId{-1};
     GLint m_outlineLocOutlineColor{-1};
     GLint m_outlineLocThickness{-1};
-    unsigned int m_selectedEntity{0};
+    std::unordered_set<unsigned int> m_selectedEntities;
     bool m_pickRequested{false};
+    bool m_pickCtrlHeld{false};
     int m_pickX{0};
     int m_pickY{0};
 
@@ -564,7 +566,22 @@ private:
     float m_gizmoDragRotStart{ 0.0f };
     float m_gizmoDragScaleStart{ 1.0f };
     glm::vec2 m_gizmoDragStartScreen{ 0.0f };   // screen position at drag start
-    ECS::TransformComponent m_gizmoDragOldTransform{};  // full transform snapshot for undo
+    ECS::TransformComponent m_gizmoDragOldTransform{};  // primary entity transform snapshot for undo
+    std::unordered_map<unsigned int, ECS::TransformComponent> m_gizmoDragOldTransforms;  // all selected entities for group undo
+
+    // ---- Viewport Grid ----
+    bool ensureGridResources();
+    void releaseGridResources();
+    void drawViewportGrid(const glm::mat4& view, const glm::mat4& projection);
+
+    GLuint m_gridProgram{ 0 };
+    GLuint m_gridVao{ 0 };
+    GLuint m_gridVbo{ 0 };
+    GLint m_gridLocViewProj{ -1 };
+    GLint m_gridLocCameraPos{ -1 };
+    GLint m_gridLocGridSize{ -1 };
+    GLint m_gridLocColor{ -1 };
+    GLint m_gridLocFadeRadius{ -1 };
 
     // Editor tab system
     void releaseAllTabFbos();
@@ -576,8 +593,8 @@ private:
     std::unique_ptr<EngineLevel> m_savedViewportLevel;
     Vec3 m_savedCameraPos{};
     Vec2 m_savedCameraRot{};
-    unsigned int m_savedViewportSelectedEntity{ 0 };
-    std::unordered_map<std::string, unsigned int> m_tabSelectedEntity;
+    std::unordered_set<unsigned int> m_savedViewportSelectedEntities;
+    std::unordered_map<std::string, std::unordered_set<unsigned int>> m_tabSelectedEntities;
 
     // Popup window management (multi-window)
     void drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int height);
@@ -593,6 +610,20 @@ private:
 
     // Mesh viewer editor windows
     std::unordered_map<std::string, std::unique_ptr<MeshViewerWindow>> m_meshViewers;
+
+    // Texture viewer editor windows
+    std::unordered_map<std::string, std::unique_ptr<TextureViewerWindow>> m_textureViewers;
+    GLuint m_texViewerChannelProgram{ 0 };
+    struct TexViewerChannelUniforms
+    {
+        GLint projection{ -1 };
+        GLint rect{ -1 };
+        GLint texture{ -1 };
+        GLint channelMask{ -1 };
+        GLint checkerboard{ -1 };
+        GLint flipY{ -1 };
+    };
+    TexViewerChannelUniforms m_texViewerChannelUniforms{};
 
     // Widget editor preview FBOs (one per open editor tab)
     std::unordered_map<std::string, std::unique_ptr<OpenGLRenderTarget>> m_widgetEditorPreviews;
@@ -660,9 +691,14 @@ public:
     DebugRenderMode getDebugRenderMode() const override { return m_debugRenderMode; }
     void setSkyboxPath(const std::string& pathOrFolder) override;
     std::string getSkyboxPath() const override { return m_skyboxLoadedPath; }
-    void requestPick(int screenX, int screenY) override { m_pickRequested = true; m_pickX = screenX; m_pickY = screenY; }
-    unsigned int getSelectedEntity() const override { return m_selectedEntity; }
-    void setSelectedEntity(unsigned int entity) override { m_selectedEntity = entity; }
+    void requestPick(int screenX, int screenY, bool ctrlHeld = false) override { m_pickRequested = true; m_pickX = screenX; m_pickY = screenY; m_pickCtrlHeld = ctrlHeld; }
+    unsigned int getSelectedEntity() const override { return m_selectedEntities.empty() ? 0u : *m_selectedEntities.begin(); }
+    void setSelectedEntity(unsigned int entity) override { m_selectedEntities.clear(); if (entity != 0) m_selectedEntities.insert(entity); }
+    const std::unordered_set<unsigned int>& getSelectedEntities() const override { return m_selectedEntities; }
+    void addSelectedEntity(unsigned int entity) override { if (entity != 0) m_selectedEntities.insert(entity); }
+    void removeSelectedEntity(unsigned int entity) override { m_selectedEntities.erase(entity); }
+    void clearSelection() override { m_selectedEntities.clear(); }
+    bool isEntitySelected(unsigned int entity) const override { return m_selectedEntities.count(entity) > 0; }
     void focusOnSelectedEntity() override;
 
     // Gizmo public API
@@ -685,5 +721,10 @@ public:
     MeshViewerWindow* openMeshViewer(const std::string& assetPath) override;
     void              closeMeshViewer(const std::string& assetPath) override;
     MeshViewerWindow* getMeshViewer(const std::string& assetPath) override;
+
+    // Texture viewer editor window
+    TextureViewerWindow* openTextureViewer(const std::string& assetPath) override;
+    void                 closeTextureViewer(const std::string& assetPath) override;
+    TextureViewerWindow* getTextureViewer(const std::string& assetPath) override;
 
 };

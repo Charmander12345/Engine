@@ -3,6 +3,7 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <unordered_set>
 #include <SDL3/SDL.h>
 #include "../Core/MathTypes.h"
 #include "RendererCapabilities.h"
@@ -12,6 +13,7 @@ class UIManager;
 class ViewportUIManager;
 class PopupWindow;
 class MeshViewerWindow;
+class TextureViewerWindow;
 class Widget;
 class AssetData;
 
@@ -221,9 +223,16 @@ public:
     // --- Entity picking ---
     virtual unsigned int pickEntityAt(int /*x*/, int /*y*/) { return 0; }
     virtual unsigned int pickEntityAtImmediate(int /*x*/, int /*y*/) { return 0; }
-    virtual void requestPick(int /*screenX*/, int /*screenY*/) {}
+    virtual void requestPick(int /*screenX*/, int /*screenY*/, bool /*ctrlHeld*/ = false) {}
     virtual unsigned int getSelectedEntity() const { return 0; }
     virtual void setSelectedEntity(unsigned int /*entity*/) {}
+
+    // --- Multi-select ---
+    virtual const std::unordered_set<unsigned int>& getSelectedEntities() const { static const std::unordered_set<unsigned int> empty; return empty; }
+    virtual void addSelectedEntity(unsigned int /*entity*/) {}
+    virtual void removeSelectedEntity(unsigned int /*entity*/) {}
+    virtual void clearSelection() {}
+    virtual bool isEntitySelected(unsigned int /*entity*/) const { return false; }
 
     /// Focus camera on the currently selected entity (smooth transition to AABB center).
     virtual void focusOnSelectedEntity() {}
@@ -235,6 +244,18 @@ public:
     virtual void updateGizmoDrag(int /*screenX*/, int /*screenY*/) {}
     virtual void endGizmoDrag() {}
     virtual bool isGizmoDragging() const { return false; }
+
+    // --- Snap & Grid ---
+    virtual void setSnapEnabled(bool enabled) { m_snapEnabled = enabled; }
+    virtual bool isSnapEnabled() const { return m_snapEnabled; }
+    virtual void setGridVisible(bool visible) { m_gridVisible = visible; }
+    virtual bool isGridVisible() const { return m_gridVisible; }
+    virtual void setGridSize(float size) { m_gridSize = size; }
+    virtual float getGridSize() const { return m_gridSize; }
+    virtual void setRotationSnapDeg(float deg) { m_rotationSnapDeg = deg; }
+    virtual float getRotationSnapDeg() const { return m_rotationSnapDeg; }
+    virtual void setScaleSnapStep(float step) { m_scaleSnapStep = step; }
+    virtual float getScaleSnapStep() const { return m_scaleSnapStep; }
 
     // --- Editor tabs ---
     virtual void addTab(const std::string& /*id*/, const std::string& /*name*/, bool /*closable*/) {}
@@ -253,6 +274,11 @@ public:
     virtual MeshViewerWindow* openMeshViewer(const std::string& /*assetPath*/) { return nullptr; }
     virtual void closeMeshViewer(const std::string& /*assetPath*/) {}
     virtual MeshViewerWindow* getMeshViewer(const std::string& /*assetPath*/) { return nullptr; }
+
+    // --- Texture viewer ---
+    virtual TextureViewerWindow* openTextureViewer(const std::string& /*assetPath*/) { return nullptr; }
+    virtual void closeTextureViewer(const std::string& /*assetPath*/) {}
+    virtual TextureViewerWindow* getTextureViewer(const std::string& /*assetPath*/) { return nullptr; }
 
     // --- Viewport & visuals ---
     virtual Vec2 getViewportSize() const { return {}; }
@@ -281,4 +307,12 @@ public:
     virtual uint32_t getLastVisibleCount() const { return 0; }
     virtual uint32_t getLastHiddenCount() const { return 0; }
     virtual uint32_t getLastTotalCount() const { return 0; }
+
+protected:
+    // Snap & Grid state
+    bool  m_snapEnabled{ false };
+    bool  m_gridVisible{ true };
+    float m_gridSize{ 1.0f };
+    float m_rotationSnapDeg{ 15.0f };
+    float m_scaleSnapStep{ 0.1f };
 };

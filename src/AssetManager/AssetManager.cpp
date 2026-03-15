@@ -1080,7 +1080,7 @@ void AssetManager::ensureEditorWidgetsCreated()
     auto& logger = Logger::Instance();
 
     // Current UI layout version. Bump this to force all editor widget assets to regenerate.
-    static constexpr int kEditorWidgetUIVersion = 8;
+    static constexpr int kEditorWidgetUIVersion = 9;
 
     // Returns true only when the file on disk contains a matching _uiVersion AND _dpiScale field.
     auto checkUIVersion = [&](const fs::path& abs) -> bool {
@@ -1534,7 +1534,7 @@ void AssetManager::ensureEditorWidgetsCreated()
         btnSnap["clickEvent"] = "ViewportOverlay.Snap";
         btnSnap["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
         btnSnap["hoverColor"] = json{ {"x", 0.22f}, {"y", 0.22f}, {"z", 0.22f}, {"w", 1.0f} };
-        btnSnap["textColor"] = json{ {"x", 0.70f}, {"y", 0.70f}, {"z", 0.70f}, {"w", 1.0f} };
+        btnSnap["textColor"] = json{ {"x", 0.45f}, {"y", 0.45f}, {"z", 0.45f}, {"w", 1.0f} };
         btnSnap["text"] = "#";
         btnSnap["font"] = "default.ttf";
         btnSnap["fontSize"] = t.fontSizeBody;
@@ -1546,6 +1546,26 @@ void AssetManager::ensureEditorWidgetsCreated()
         btnSnap["tooltipText"] = "Grid Snap";
         btnSnap["shaderVertex"] = "button_vertex.glsl";
         btnSnap["shaderFragment"] = "button_fragment.glsl";
+
+        // Grid size dropdown
+        json btnGridSize = json::object();
+        btnGridSize["id"] = "ViewportOverlay.GridSize";
+        btnGridSize["type"] = "Button";
+        btnGridSize["clickEvent"] = "ViewportOverlay.GridSize";
+        btnGridSize["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+        btnGridSize["hoverColor"] = json{ {"x", 0.22f}, {"y", 0.22f}, {"z", 0.22f}, {"w", 1.0f} };
+        btnGridSize["textColor"] = json{ {"x", 0.70f}, {"y", 0.70f}, {"z", 0.70f}, {"w", 1.0f} };
+        btnGridSize["text"] = "1.0";
+        btnGridSize["font"] = "default.ttf";
+        btnGridSize["fontSize"] = t.fontSizeSmall;
+        btnGridSize["textAlignH"] = "Center";
+        btnGridSize["textAlignV"] = "Center";
+        btnGridSize["minSize"] = json{ {"x", S(32.0f)}, {"y", 0.0f} };
+        btnGridSize["fillY"] = true;
+        btnGridSize["padding"] = json{ {"x", S(4.0f)}, {"y", S(2.0f)} };
+        btnGridSize["tooltipText"] = "Grid Size";
+        btnGridSize["shaderVertex"] = "button_vertex.glsl";
+        btnGridSize["shaderFragment"] = "button_fragment.glsl";
 
         // Camera speed button
         json btnCamSpeed = json::object();
@@ -1608,7 +1628,7 @@ void AssetManager::ensureEditorWidgetsCreated()
             btnUndo, btnRedo, makeSep("ViewportOverlay.Sep2"),
             spacerLeft, btnPIE, spacerRight,
             makeSep("ViewportOverlay.Sep3"),
-            btnSnap, btnCamSpeed, btnStats,
+            btnSnap, btnGridSize, btnCamSpeed, btnStats,
             makeSep("ViewportOverlay.Sep4"), btnSettings
         });
         elements.push_back(toolbar);
