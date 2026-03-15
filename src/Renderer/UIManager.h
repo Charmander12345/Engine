@@ -126,6 +126,13 @@ public:
 	bool pasteEntity();
 	bool duplicateSelectedEntity();
 	bool hasEntityClipboard() const;
+
+	// Auto-Collider: compute and apply a fitted CollisionComponent from mesh AABB
+	bool autoFitColliderForEntity(ECS::Entity entity);
+
+	// Scene templates for new levels
+	enum class SceneTemplate { Empty, BasicOutdoor, Prototype };
+	void createNewLevelWithTemplate(SceneTemplate tmpl, const std::string& levelName = "NewLevel", const std::string& relFolder = "Levels");
     void openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)> onProjectChosen);
 
     // Returns true if the active tab is a widget editor and had a selected element to delete

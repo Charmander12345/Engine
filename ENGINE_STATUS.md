@@ -7,6 +7,10 @@
 
 ## Letzte Änderung (Viewport)
 
+- ✅ `One-Click Scene Setup (Phase 3.3)`: `createNewLevelWithTemplate()` in `UIManager` mit `SceneTemplate`-Enum (Empty/BasicOutdoor/Prototype). „+ Level"-`DropdownButtonWidget` in Content-Browser-PathBar neben Import. ECS via `initialize({})` zurückgesetzt, Entities per Lambda (Name, Transform, Mesh, Material, Light) aufgebaut, `level->onEntityAdded()` registriert. BasicOutdoor sucht ersten Skybox-Asset in Registry. Level sofort gespeichert, Outliner/ContentBrowser refresht. Eindeutige Level-Namen (NewLevel, NewLevel1, ...).
+
+- ✅ `Auto-Collider-Generierung (Phase 3.5)`: `autoFitColliderForEntity()` in `UIManager` berechnet Mesh-AABB aus Vertex-Daten (stride 5), skaliert mit Entity-Scale, wählt ColliderType per Heuristik (Sphere bei Aspekt <1.4, Capsule bei vertikal >2.5, sonst Box) mit Center-Offset. „Add Component → Physics" fügt automatisch `CollisionComponent` mit gefitteten Dimensionen hinzu. „Auto-Fit Collider"-Button in der Collision-Sektion des Details-Panels über `EditorUIBuilder::makeButton`. `<limits>` Include in UIManager.cpp.
+
 - ✅ `Auto-Material bei Model-Import (Phase 3.1)`: Erweiterte Toast-Benachrichtigung für 3D-Model-Import. `createdTextureCount`-Zähler in der Import-Pipeline. Model3D-Importe zeigen jetzt „Imported {name} with {n} material(s) and {m} texture(s)" statt generischem „Imported: {name}". Generischer Toast wird für Model3D übersprungen.
 
 - ✅ `Entity Copy/Paste & Duplicate (Phase 5.3)`: Ctrl+C/Ctrl+V/Ctrl+D für Entities. `EntityClipboard`-Struct in `UIManager` speichert Snapshots aller 13 Komponententypen (Transform, Mesh, Material, Light, Camera, Physics, Script, Name, Collision, HeightField, Lod, Animation, ParticleEmitter). `copySelectedEntity()` erstellt Snapshot der selektierten Entity. `pasteEntity()` erzeugt neue Entity mit Positions-Offset (+1,0,0), Name-Suffix „(Copy)", registriert bei Level, selektiert neue Entity, UndoRedo-Command. `duplicateSelectedEntity()` (Ctrl+D) erstellt frischen Snapshot und pastet, ohne den Clipboard zu überschreiben. Shortcuts in main.cpp im Ctrl-Block (neben Ctrl+Z/Y/S/F).
@@ -850,7 +854,7 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
 - Content Browser: Rechtsklick-Kontextmenü auf Grid zum Erstellen neuer Assets (Script, Level, Material)
 - Content Browser: Shaders-Ordner des Projekts wird als eigener Root-Knoten im TreeView angezeigt (lila Icon, separate Ansicht)
 - Content Browser: "New Script" erstellt `.py`-Datei mit `import engine` und `onloaded`/`tick`-Boilerplate
-- Content Browser: "New Level" erstellt leeres Level-Asset (`.map`)
+- Content Browser: "New Level" öffnet Popup mit Namenseingabe, erstellt Level via `createNewLevelWithTemplate` als ungespeicherte Änderung (kein sofortiges Speichern)
 - Content Browser: "New Material" öffnet Popup mit Eingabefeldern für Name, Vertex/Fragment-Shader, Texturen, Shininess
 - Content Browser: Einfachklick auf Grid-Asset selektiert es (blaue Hervorhebung), Doppelklick öffnet wie zuvor
 - Content Browser: Entf-Taste auf selektiertem Grid-Asset zeigt Bestätigungsdialog ("Delete" / "Cancel")

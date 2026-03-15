@@ -2440,41 +2440,153 @@ int main()
                                 const auto& folder = uiMgr.getSelectedBrowserFolder();
                                 if (folder == "__Shaders__") return;
 
-                                auto& diagnostics = DiagnosticsManager::Instance();
-                                auto& assetMgr = AssetManager::Instance();
-                                const std::filesystem::path contentDir =
-                                    std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content";
-                                const std::filesystem::path targetDir = folder.empty() ? contentDir : contentDir / folder;
-                                std::error_code ec;
-                                std::filesystem::create_directories(targetDir, ec);
+                                constexpr float kBaseW = 360.0f;
+                                constexpr float kBaseH = 180.0f;
+                                const int kPopupW = static_cast<int>(EditorTheme::Scaled(kBaseW));
+                                const int kPopupH = static_cast<int>(EditorTheme::Scaled(kBaseH));
+                                PopupWindow* popup = renderer->openPopupWindow(
+                                    "NewLevel", "New Level", kPopupW, kPopupH);
+                                if (!popup) return;
+                                if (!popup->uiManager().getRegisteredWidgets().empty()) return;
 
-                                std::string baseName = "NewLevel";
-                                std::string fileName = baseName + ".map";
-                                int counter = 1;
-                                while (std::filesystem::exists(targetDir / fileName))
+                                constexpr float W = kBaseW;
+                                constexpr float H = kBaseH;
+                                auto nx = [&](float px) { return px / W; };
+                                auto ny = [&](float py) { return py / H; };
+
+                                struct LevelState
                                 {
-                                    fileName = baseName + std::to_string(counter++) + ".map";
+                                    std::string name = "NewLevel";
+                                    std::string folder;
+                                };
+                                auto state = std::make_shared<LevelState>();
+                                state->folder = folder;
+
+                                std::vector<WidgetElement> elements;
+
+                                // Background
+                                {
+                                    WidgetElement bg;
+                                    bg.type = WidgetElementType::Panel;
+                                    bg.id = "NL.Bg";
+                                    bg.from = Vec2{ 0.0f, 0.0f };
+                                    bg.to = Vec2{ 1.0f, 1.0f };
+                                    bg.style.color = EditorTheme::Get().panelBackground;
+                                    elements.push_back(bg);
                                 }
 
-                                auto level = std::make_unique<EngineLevel>();
-                                const std::string displayName = std::filesystem::path(fileName).stem().string();
-                                level->setName(displayName);
-                                const std::string relPath = std::filesystem::relative(targetDir / fileName, contentDir).generic_string();
-                                level->setPath(relPath);
-                                level->setAssetType(AssetType::Level);
-                                level->setLevelData(json::object());
-
-                                auto saveResult = assetMgr.saveNewLevelAsset(level.get());
-                                if (saveResult)
+                                // Title
                                 {
-                                    AssetRegistryEntry entry;
-                                    entry.name = displayName;
-                                    entry.path = relPath;
-                                    entry.type = AssetType::Level;
-                                    assetMgr.registerAssetInRegistry(entry);
-                                    uiMgr.refreshContentBrowser();
-                                    uiMgr.showToastMessage("Created: " + fileName, 3.0f);
+                                    WidgetElement title;
+                                    title.type = WidgetElementType::Text;
+                                    title.id = "NL.Title";
+                                    title.from = Vec2{ nx(8.0f), 0.0f };
+                                    title.to = Vec2{ 1.0f, ny(36.0f) };
+                                    title.text = "New Level";
+                                    title.fontSize = EditorTheme::Get().fontSizeHeading;
+                                    title.style.textColor = EditorTheme::Get().titleBarText;
+                                    title.textAlignV = TextAlignV::Center;
+                                    title.padding = EditorTheme::Scaled(Vec2{ 6.0f, 0.0f });
+                                    elements.push_back(title);
                                 }
+
+                                // Form layout
+                                WidgetElement formStack;
+                                formStack.type = WidgetElementType::StackPanel;
+                                formStack.id = "NL.Form";
+                                formStack.from = Vec2{ nx(16.0f), ny(44.0f) };
+                                formStack.to = Vec2{ nx(W - 16.0f), ny(H - 50.0f) };
+                                formStack.padding = EditorTheme::Scaled(Vec2{ 4.0f, 4.0f });
+
+                                // Name label
+                                {
+                                    WidgetElement lbl;
+                                    lbl.type = WidgetElementType::Text;
+                                    lbl.id = "NL.NameLbl";
+                                    lbl.text = "Name";
+                                    lbl.fontSize = EditorTheme::Get().fontSizeBody;
+                                    lbl.style.textColor = Vec4{ 0.7f, 0.75f, 0.85f, 1.0f };
+                                    lbl.fillX = true;
+                                    lbl.minSize = Vec2{ 0.0f, EditorTheme::Scaled(20.0f) };
+                                    lbl.runtimeOnly = true;
+                                    formStack.children.push_back(std::move(lbl));
+                                }
+
+                                // Name entry
+                                {
+                                    WidgetElement entry;
+                                    entry.type = WidgetElementType::EntryBar;
+                                    entry.id = "NL.Name";
+                                    entry.value = state->name;
+                                    entry.fontSize = EditorTheme::Get().fontSizeBody;
+                                    entry.style.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
+                                    entry.style.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.9f };
+                                    entry.fillX = true;
+                                    entry.minSize = Vec2{ 0.0f, EditorTheme::Scaled(24.0f) };
+                                    entry.padding = EditorTheme::Scaled(Vec2{ 6.0f, 4.0f });
+                                    entry.hitTestMode = HitTestMode::Enabled;
+                                    entry.runtimeOnly = true;
+                                    entry.onValueChanged = [state](const std::string& v) { state->name = v; };
+                                    formStack.children.push_back(std::move(entry));
+                                }
+
+                                elements.push_back(std::move(formStack));
+
+                                // Create button
+                                {
+                                    WidgetElement createBtn;
+                                    createBtn.type = WidgetElementType::Button;
+                                    createBtn.id = "NL.Create";
+                                    createBtn.from = Vec2{ nx(W - 180.0f), ny(H - 44.0f) };
+                                    createBtn.to = Vec2{ nx(W - 100.0f), ny(H - 12.0f) };
+                                    createBtn.text = "Create";
+                                    createBtn.fontSize = EditorTheme::Get().fontSizeSubheading;
+                                    createBtn.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+                                    createBtn.textAlignH = TextAlignH::Center;
+                                    createBtn.textAlignV = TextAlignV::Center;
+                                    createBtn.style.color = Vec4{ 0.15f, 0.45f, 0.25f, 0.95f };
+                                    createBtn.style.hoverColor = Vec4{ 0.2f, 0.6f, 0.35f, 1.0f };
+                                    createBtn.shaderVertex = "button_vertex.glsl";
+                                    createBtn.shaderFragment = "button_fragment.glsl";
+                                    createBtn.hitTestMode = HitTestMode::Enabled;
+                                    createBtn.onClicked = [state, &renderer, popup]()
+                                    {
+                                        auto& uiMgr = renderer->getUIManager();
+                                        const std::string levelName = state->name.empty() ? "NewLevel" : state->name;
+                                        const std::string relFolder = state->folder.empty() ? "Levels" : state->folder;
+                                        uiMgr.createNewLevelWithTemplate(UIManager::SceneTemplate::Empty, levelName, relFolder);
+                                        popup->close();
+                                    };
+                                    elements.push_back(std::move(createBtn));
+                                }
+
+                                // Cancel button
+                                {
+                                    WidgetElement cancelBtn;
+                                    cancelBtn.type = WidgetElementType::Button;
+                                    cancelBtn.id = "NL.Cancel";
+                                    cancelBtn.from = Vec2{ nx(W - 90.0f), ny(H - 44.0f) };
+                                    cancelBtn.to = Vec2{ nx(W - 16.0f), ny(H - 12.0f) };
+                                    cancelBtn.text = "Cancel";
+                                    cancelBtn.fontSize = EditorTheme::Get().fontSizeSubheading;
+                                    cancelBtn.style.textColor = Vec4{ 0.9f, 0.9f, 0.9f, 1.0f };
+                                    cancelBtn.textAlignH = TextAlignH::Center;
+                                    cancelBtn.textAlignV = TextAlignV::Center;
+                                    cancelBtn.style.color = Vec4{ 0.25f, 0.25f, 0.3f, 0.95f };
+                                    cancelBtn.style.hoverColor = Vec4{ 0.35f, 0.35f, 0.42f, 1.0f };
+                                    cancelBtn.shaderVertex = "button_vertex.glsl";
+                                    cancelBtn.shaderFragment = "button_fragment.glsl";
+                                    cancelBtn.hitTestMode = HitTestMode::Enabled;
+                                    cancelBtn.onClicked = [popup]() { popup->close(); };
+                                    elements.push_back(std::move(cancelBtn));
+                                }
+
+                                auto widget = std::make_shared<EditorWidget>();
+                                widget->setName("NewLevel");
+                                widget->setFillX(true);
+                                widget->setFillY(true);
+                                widget->setElements(std::move(elements));
+                                popup->uiManager().registerWidget("NewLevel", widget);
                             }});
 
                         items.push_back({ "New Widget", [&renderer]()

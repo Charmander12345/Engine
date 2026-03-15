@@ -400,7 +400,7 @@
 - [ ] Mindestens 5 Built-in-Templates verfügbar
 
 ### 3.3 One-Click Scene Setup
-**Aktueller Stand:** Neue Levels sind leer. Der Entwickler muss manuell Lichter, Kamera und Skybox hinzufügen.
+**Aktueller Stand:** Implementiert. `createNewLevelWithTemplate()` in `UIManager` mit 3 Templates. „+ Level"-Dropdown-Button in der Content-Browser-PathBar (neben Import). ECS wird mit `initialize({})` zurückgesetzt, Entities per `onEntityAdded` registriert, Level sofort gespeichert. Editor-Kamera wird template-spezifisch positioniert.
 
 **Ziel:** Beim Erstellen eines neuen Levels automatisch eine sinnvolle Basisszene aufbauen.
 
@@ -416,10 +416,10 @@
 - Editor-Kamera wird auf eine sinnvolle Position gesetzt
 
 **Fortschrittsprüfung:**
-- [ ] „New Level"-Dialog zeigt Template-Auswahl
-- [ ] „Basic Outdoor" erzeugt Level mit Licht, Skybox und Boden
-- [ ] „Prototype" erzeugt Level mit Grid und Basis-Geometrie
-- [ ] Editor-Kamera blickt auf die generierte Szene
+- [x] „New Level"-Dropdown zeigt Template-Auswahl (Empty / Basic Outdoor / Prototype)
+- [x] „Basic Outdoor" erzeugt Level mit Licht, Skybox-Lookup und Boden
+- [x] „Prototype" erzeugt Level mit Grid und Basis-Geometrie
+- [x] Editor-Kamera blickt auf die generierte Szene
 
 ### 3.4 Auto-LOD-Generierung
 **Aktueller Stand:** LOD-System existiert, aber LOD-Meshes müssen manuell erstellt und zugewiesen werden.
@@ -442,7 +442,7 @@
 - [ ] LOD-Wechsel im Viewport sichtbar (per Debug-Modus)
 
 ### 3.5 Auto-Collider-Generierung
-**Aktueller Stand:** Collision-Collider (Box/Sphere/Capsule/Cylinder/HeightField) müssen manuell konfiguriert werden.
+**Aktueller Stand:** Implementiert. `autoFitColliderForEntity()` in `UIManager` berechnet AABB aus Mesh-Vertices (stride 5), skaliert mit Entity-Transform, wählt Collider-Typ per Heuristik (Sphere bei Aspekt <1.4, Capsule bei vertikal >2.5, sonst Box). „Add Component → Physics" fügt automatisch `CollisionComponent` mit gefitteten Dimensionen hinzu. „Auto-Fit Collider"-Button in der Collision-Sektion des Details-Panels.
 
 **Ziel:** Bei Hinzufügen einer `PhysicsComponent` automatisch einen passenden Collider vorschlagen.
 
@@ -454,8 +454,8 @@
 - Collider-Visualisierung als transparente Wireframe-Overlay im Viewport
 
 **Fortschrittsprüfung:**
-- [ ] „Add Component → Physics" erzeugt automatisch passenden Collider
-- [ ] „Auto-Fit"-Button berechnet Collider-Dimensionen aus dem Mesh
+- [x] „Add Component → Physics" erzeugt automatisch passenden Collider
+- [x] „Auto-Fit"-Button berechnet Collider-Dimensionen aus dem Mesh
 - [ ] Collider-Wireframe ist im Viewport sichtbar
 
 ### 3.6 Intelligent Snap & Grid
@@ -876,9 +876,9 @@
 | **2.7** | Profiler Tab | Mittel | Mittel | ❌ |
 | **3.1** | Auto-Material bei Import | Hoch | Gering | ✅ |
 | **3.2** | Entity Templates / Prefabs | Hoch | Mittel | ❌ |
-| **3.3** | One-Click Scene Setup | Mittel | Gering | ❌ |
+| **3.3** | One-Click Scene Setup | Mittel | Gering | ✅ |
 | **3.4** | Auto-LOD-Generierung | Mittel | Hoch | ❌ |
-| **3.5** | Auto-Collider-Generierung | Mittel | Gering | ❌ |
+| **3.5** | Auto-Collider-Generierung | Mittel | Gering | ✅ |
 | **3.6** | Intelligent Snap & Grid | Hoch | Mittel | ❌ |
 | **4.1** | Asset-Thumbnails | Hoch | Mittel | ❌ |
 | **4.2** | Erweiterte Suche & Filter | Hoch | Gering | ✅ |

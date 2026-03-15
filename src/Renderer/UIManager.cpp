@@ -4,6 +4,7 @@
 #include <numeric>
 #include <functional>
 #include <cmath>
+#include <limits>
 #include <filesystem>
 #include <fstream>
 #include <cstdlib>
@@ -2714,6 +2715,30 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
                 }
             }));
 
+        // Auto-Fit Collider button
+        if (ecs.hasComponent<ECS::MeshComponent>(entity))
+        {
+            WidgetElement autoFitEl = EditorUIBuilder::makeButton(
+                "Details.Collision.AutoFit", "Auto-Fit Collider",
+                [this, entity]() {
+                    if (autoFitColliderForEntity(entity))
+                    {
+                        DiagnosticsManager::Instance().invalidateEntity(entity);
+                        if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+                        populateOutlinerDetails(entity);
+                        showToastMessage("Auto-fitted collider from mesh AABB.", 2.0f);
+                    }
+                    else
+                    {
+                        showToastMessage("No mesh data available for auto-fit.", 2.5f);
+                    }
+                },
+                Vec2{ 0.0f, 22.0f * EditorTheme::Get().dpiScale });
+            autoFitEl.fillX = true;
+            autoFitEl.runtimeOnly = true;
+            lines.push_back(std::move(autoFitEl));
+        }
+
         addSeparator("Collision", lines, [this, entity]() {
             ECS::ECSManager::Instance().removeComponent<ECS::CollisionComponent>(entity);
             if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
@@ -3211,7 +3236,15 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             { "Collision", ecs.hasComponent<ECS::CollisionComponent>(entity),
               [entity]() { ECS::ECSManager::Instance().addComponent<ECS::CollisionComponent>(entity); } },
             { "Physics", ecs.hasComponent<ECS::PhysicsComponent>(entity),
-              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::PhysicsComponent>(entity); } },
+              [this, entity]() {
+                  auto& e = ECS::ECSManager::Instance();
+                  e.addComponent<ECS::PhysicsComponent>(entity);
+                  // Auto-add CollisionComponent with fitted size from mesh AABB
+                  if (!e.hasComponent<ECS::CollisionComponent>(entity))
+                  {
+                      autoFitColliderForEntity(entity);
+                  }
+              } },
             { "Script", ecs.hasComponent<ECS::ScriptComponent>(entity),
               [entity]() { ECS::ECSManager::Instance().addComponent<ECS::ScriptComponent>(entity); } },
             { "Name", ecs.hasComponent<ECS::NameComponent>(entity),
@@ -3587,6 +3620,291 @@ bool UIManager::duplicateSelectedEntity()
 bool UIManager::hasEntityClipboard() const
 {
     return m_entityClipboard.valid;
+}
+
+bool UIManager::autoFitColliderForEntity(ECS::Entity entity)
+{
+    auto& ecs = ECS::ECSManager::Instance();
+
+    // Need a mesh to compute AABB
+    if (!ecs.hasComponent<ECS::MeshComponent>(entity))
+        return false;
+
+    const auto* meshComp = ecs.getComponent<ECS::MeshComponent>(entity);
+    if (!meshComp || meshComp->meshAssetPath.empty())
+        return false;
+
+    // Load or get the mesh asset to read vertex data
+    auto& assetMgr = AssetManager::Instance();
+    auto meshAsset = assetMgr.getLoadedAssetByPath(meshComp->meshAssetPath);
+    if (!meshAsset)
+    {
+        int id = assetMgr.loadAsset(meshComp->meshAssetPath, AssetType::Model3D);
+        if (id > 0)
+            meshAsset = assetMgr.getLoadedAssetByID(static_cast<unsigned int>(id));
+    }
+    if (!meshAsset)
+        return false;
+
+    const auto& data = meshAsset->getData();
+    if (!data.contains("m_vertices") || !data["m_vertices"].is_array())
+        return false;
+
+    const auto& verts = data["m_vertices"];
+    if (verts.size() < 5)
+        return false;
+
+    // Compute AABB from vertices (layout: pos3 + uv2 = stride 5)
+    float minX = std::numeric_limits<float>::max(), maxX = std::numeric_limits<float>::lowest();
+    float minY = std::numeric_limits<float>::max(), maxY = std::numeric_limits<float>::lowest();
+    float minZ = std::numeric_limits<float>::max(), maxZ = std::numeric_limits<float>::lowest();
+
+    const size_t stride = 5;
+    const size_t vertCount = verts.size() / stride;
+    for (size_t i = 0; i < vertCount; ++i)
+    {
+        const float x = verts[i * stride + 0].get<float>();
+        const float y = verts[i * stride + 1].get<float>();
+        const float z = verts[i * stride + 2].get<float>();
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+
+    // Apply entity scale to AABB
+    float scaleX = 1.0f, scaleY = 1.0f, scaleZ = 1.0f;
+    if (ecs.hasComponent<ECS::TransformComponent>(entity))
+    {
+        const auto* t = ecs.getComponent<ECS::TransformComponent>(entity);
+        scaleX = t->scale[0]; scaleY = t->scale[1]; scaleZ = t->scale[2];
+    }
+
+    const float halfX = (maxX - minX) * 0.5f * std::abs(scaleX);
+    const float halfY = (maxY - minY) * 0.5f * std::abs(scaleY);
+    const float halfZ = (maxZ - minZ) * 0.5f * std::abs(scaleZ);
+
+    // Compute center offset (in local space)
+    const float centerX = (minX + maxX) * 0.5f;
+    const float centerY = (minY + maxY) * 0.5f;
+    const float centerZ = (minZ + maxZ) * 0.5f;
+
+    // Heuristic: determine best collider type
+    // Aspect ratio checks
+    const float maxHalf = std::max({ halfX, halfY, halfZ });
+    const float minHalf = std::min({ halfX, halfY, halfZ });
+    const float aspectRatio = (minHalf > 0.001f) ? (maxHalf / minHalf) : 10.0f;
+
+    ECS::CollisionComponent collision{};
+    collision.colliderOffset[0] = centerX;
+    collision.colliderOffset[1] = centerY;
+    collision.colliderOffset[2] = centerZ;
+
+    // Nearly cubic → Sphere if all dimensions similar, else Box
+    const float midHalf = halfX + halfY + halfZ - maxHalf - minHalf;
+    const float sphereRatio = (minHalf > 0.001f) ? (maxHalf / minHalf) : 10.0f;
+
+    if (sphereRatio < 1.4f)
+    {
+        // Approximately cube-like → Sphere
+        collision.colliderType = ECS::CollisionComponent::ColliderType::Sphere;
+        collision.colliderSize[0] = maxHalf; // radius
+        collision.colliderSize[1] = 0.0f;
+        collision.colliderSize[2] = 0.0f;
+    }
+    else if (aspectRatio > 2.5f && halfY > halfX && halfY > halfZ)
+    {
+        // Tall and thin → Capsule (vertical)
+        collision.colliderType = ECS::CollisionComponent::ColliderType::Capsule;
+        collision.colliderSize[0] = std::max(halfX, halfZ); // radius
+        collision.colliderSize[1] = halfY;                   // half-height
+        collision.colliderSize[2] = 0.0f;
+    }
+    else
+    {
+        // Default → Box
+        collision.colliderType = ECS::CollisionComponent::ColliderType::Box;
+        collision.colliderSize[0] = halfX;
+        collision.colliderSize[1] = halfY;
+        collision.colliderSize[2] = halfZ;
+    }
+
+    // Add or update the CollisionComponent
+    if (!ecs.hasComponent<ECS::CollisionComponent>(entity))
+        ecs.addComponent<ECS::CollisionComponent>(entity, collision);
+    else
+        ecs.setComponent<ECS::CollisionComponent>(entity, collision);
+
+    return true;
+}
+
+void UIManager::createNewLevelWithTemplate(SceneTemplate tmpl, const std::string& levelName, const std::string& relFolder)
+{
+    auto& diagnostics = DiagnosticsManager::Instance();
+    auto& ecs = ECS::ECSManager::Instance();
+    auto& logger = Logger::Instance();
+
+    if (!diagnostics.isProjectLoaded())
+    {
+        showToastMessage("No project loaded.", 2.5f);
+        return;
+    }
+
+    // Prepare a fresh level
+    const std::string levelRelPath = relFolder + "/" + levelName + ".map";
+    auto level = std::make_unique<EngineLevel>();
+    level->setName(levelName);
+    level->setPath(levelRelPath);
+    level->setAssetType(AssetType::Level);
+    level->setIsSaved(false);
+
+    // Reset ECS for fresh level
+    ecs.initialize({});
+
+    // Common asset paths used by templates
+    const std::string cubeMesh = "default_quad3d.asset";
+    const std::string lightMesh = "Lights/PointLight.asset";
+    const std::string wallMat = "Materials/wall.asset";
+
+    auto addEntity = [&](const std::string& name, float px, float py, float pz,
+        float rx, float ry, float rz, float sx, float sy, float sz) -> ECS::Entity
+    {
+        ECS::Entity e = ecs.createEntity();
+        ECS::TransformComponent t{};
+        t.position[0] = px; t.position[1] = py; t.position[2] = pz;
+        t.rotation[0] = rx; t.rotation[1] = ry; t.rotation[2] = rz;
+        t.scale[0] = sx; t.scale[1] = sy; t.scale[2] = sz;
+        ecs.addComponent<ECS::TransformComponent>(e, t);
+        ECS::NameComponent n; n.displayName = name;
+        ecs.addComponent<ECS::NameComponent>(e, n);
+        level->onEntityAdded(e);
+        return e;
+    };
+
+    auto addMesh = [&](ECS::Entity e, const std::string& meshPath, const std::string& matPath)
+    {
+        ECS::MeshComponent m; m.meshAssetPath = meshPath;
+        ecs.addComponent<ECS::MeshComponent>(e, m);
+        ECS::MaterialComponent mat; mat.materialAssetPath = matPath;
+        ecs.addComponent<ECS::MaterialComponent>(e, mat);
+    };
+
+    auto addLight = [&](ECS::Entity e, ECS::LightComponent::LightType type,
+        float r, float g, float b, float intensity, float range, float spotAngle)
+    {
+        ECS::LightComponent l{};
+        l.type = type;
+        l.color[0] = r; l.color[1] = g; l.color[2] = b;
+        l.intensity = intensity;
+        l.range = range;
+        l.spotAngle = spotAngle;
+        ecs.addComponent<ECS::LightComponent>(e, l);
+    };
+
+    switch (tmpl)
+    {
+    case SceneTemplate::Empty:
+    {
+        // Just a directional light so the scene isn't pitch black
+        auto dirLight = addEntity("Directional Light", 0.0f, 5.0f, 0.0f, 50.0f, -30.0f, 0.0f, 0.15f, 0.15f, 0.15f);
+        addMesh(dirLight, lightMesh, wallMat);
+        addLight(dirLight, ECS::LightComponent::LightType::Directional, 0.9f, 0.85f, 0.7f, 0.6f, 0.0f, 0.0f);
+
+        level->setEditorCameraPosition(Vec3{ 0.0f, 3.0f, 8.0f });
+        level->setEditorCameraRotation(Vec2{ -15.0f, 0.0f });
+        level->setHasEditorCamera(true);
+        break;
+    }
+
+    case SceneTemplate::BasicOutdoor:
+    {
+        // Directional light (sun)
+        auto sun = addEntity("Sun", 0.0f, 10.0f, 0.0f, 50.0f, -30.0f, 0.0f, 0.15f, 0.15f, 0.15f);
+        addMesh(sun, lightMesh, wallMat);
+        addLight(sun, ECS::LightComponent::LightType::Directional, 1.0f, 0.95f, 0.8f, 0.7f, 0.0f, 0.0f);
+
+        // Ground plane (flat scaled cube)
+        auto ground = addEntity("Ground", 0.0f, -0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 50.0f, 0.1f, 50.0f);
+        addMesh(ground, cubeMesh, wallMat);
+
+        // Point light for fill
+        auto fill = addEntity("Fill Light", 5.0f, 3.0f, 5.0f, 0.0f, 0.0f, 0.0f, 0.15f, 0.15f, 0.15f);
+        addMesh(fill, lightMesh, wallMat);
+        addLight(fill, ECS::LightComponent::LightType::Point, 0.6f, 0.7f, 1.0f, 0.5f, 15.0f, 0.0f);
+
+        // Skybox — try the first available skybox asset
+        {
+            const auto& registry = AssetManager::Instance().getAssetRegistry();
+            for (const auto& entry : registry)
+            {
+                if (entry.type == AssetType::Skybox)
+                {
+                    level->setSkyboxPath(entry.path);
+                    break;
+                }
+            }
+        }
+
+        level->setEditorCameraPosition(Vec3{ 0.0f, 5.0f, 15.0f });
+        level->setEditorCameraRotation(Vec2{ -20.0f, 0.0f });
+        level->setHasEditorCamera(true);
+        break;
+    }
+
+    case SceneTemplate::Prototype:
+    {
+        // Directional light
+        auto sun = addEntity("Sun", 0.0f, 8.0f, 0.0f, 50.0f, -30.0f, 0.0f, 0.15f, 0.15f, 0.15f);
+        addMesh(sun, lightMesh, wallMat);
+        addLight(sun, ECS::LightComponent::LightType::Directional, 0.9f, 0.9f, 0.85f, 0.6f, 0.0f, 0.0f);
+
+        // Grid-like floor (large flat box)
+        auto floor = addEntity("Floor", 0.0f, -0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 30.0f, 0.1f, 30.0f);
+        addMesh(floor, cubeMesh, wallMat);
+
+        // Scatter some reference cubes
+        auto cubeA = addEntity("Cube A", 0.0f, 0.5f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f);
+        addMesh(cubeA, cubeMesh, wallMat);
+        auto cubeB = addEntity("Cube B", 3.0f, 0.5f, 0.0f, 0.0f, 45.0f, 0.0f, 1.0f, 1.0f, 1.0f);
+        addMesh(cubeB, cubeMesh, wallMat);
+        auto cubeC = addEntity("Cube C", -3.0f, 0.5f, 2.0f, 0.0f, -30.0f, 0.0f, 1.0f, 1.0f, 1.0f);
+        addMesh(cubeC, cubeMesh, wallMat);
+
+        // A tall column as height reference
+        auto column = addEntity("Column", 0.0f, 2.5f, -5.0f, 0.0f, 0.0f, 0.0f, 0.5f, 5.0f, 0.5f);
+        addMesh(column, cubeMesh, wallMat);
+
+        // Point light
+        auto ptLight = addEntity("Point Light", 2.0f, 3.0f, 3.0f, 0.0f, 0.0f, 0.0f, 0.15f, 0.15f, 0.15f);
+        addMesh(ptLight, lightMesh, wallMat);
+        addLight(ptLight, ECS::LightComponent::LightType::Point, 1.0f, 0.9f, 0.8f, 1.5f, 15.0f, 0.0f);
+
+        level->setEditorCameraPosition(Vec3{ 5.0f, 5.0f, 12.0f });
+        level->setEditorCameraRotation(Vec2{ -20.0f, -15.0f });
+        level->setHasEditorCamera(true);
+        break;
+    }
+    }
+
+    diagnostics.setActiveLevel(std::move(level));
+    diagnostics.setScenePrepared(false);
+
+    // Register in asset registry so the content browser shows the new level
+    {
+        AssetRegistryEntry entry;
+        entry.name = levelName;
+        entry.path = levelRelPath;
+        entry.type = AssetType::Level;
+        AssetManager::Instance().registerAssetInRegistry(entry);
+    }
+
+    // Refresh UI
+    m_outlinerSelectedEntity = 0;
+    refreshWorldOutliner();
+    refreshContentBrowser();
+
+    const char* templateNames[] = { "Empty", "Basic Outdoor", "Prototype" };
+    showToastMessage("Created level '" + levelName + "' (" + templateNames[static_cast<int>(tmpl)] + ") – unsaved", 3.0f);
+    logger.log(Logger::Category::UI, "Created new level: " + levelName + " with template " + templateNames[static_cast<int>(tmpl)], Logger::LogLevel::INFO);
 }
 
 // Returns the icon filename (inside Editor/Textures/) for a given AssetType.
@@ -4068,6 +4386,54 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
                 "ContentBrowser.PathBar.Import", "+ Import", {}, EditorTheme::Scaled(Vec2{ 64.0f, EditorTheme::Get().rowHeightSmall }));
             importBtn.fillX = false;
             pathBar->children.push_back(std::move(importBtn));
+        }
+
+        // New Level dropdown button
+        {
+            const auto& theme = EditorTheme::Get();
+            DropdownButtonWidget newLevelDropdown;
+            newLevelDropdown.setText("+ Level");
+            newLevelDropdown.setFont(theme.fontDefault);
+            newLevelDropdown.setFontSize(theme.fontSizeSmall);
+            newLevelDropdown.setMinSize(EditorTheme::Scaled(Vec2{ 58.0f, theme.rowHeightSmall }));
+            newLevelDropdown.setPadding(theme.paddingSmall);
+            newLevelDropdown.setBackgroundColor(Vec4{ theme.successColor.x * 0.55f, theme.successColor.y * 0.55f, theme.successColor.z * 0.55f, 0.85f });
+            newLevelDropdown.setHoverColor(Vec4{ theme.successColor.x * 0.75f, theme.successColor.y * 0.75f, theme.successColor.z * 0.75f, 0.95f });
+            newLevelDropdown.setTextColor(theme.textPrimary);
+
+            struct LevelTemplate { std::string label; SceneTemplate tmpl; };
+            const LevelTemplate templates[] = {
+                { "Empty",         SceneTemplate::Empty },
+                { "Basic Outdoor", SceneTemplate::BasicOutdoor },
+                { "Prototype",     SceneTemplate::Prototype },
+            };
+            for (const auto& t : templates)
+            {
+                newLevelDropdown.addItem(t.label, [this, tmpl = t.tmpl, label = t.label]() {
+                    // Build unique level name
+                    std::string baseName = "NewLevel";
+                    int suffix = 1;
+                    std::string levelName = baseName;
+                    const auto& reg = AssetManager::Instance().getAssetRegistry();
+                    while (true)
+                    {
+                        bool found = false;
+                        for (const auto& e : reg)
+                        {
+                            if (e.type == AssetType::Level && e.name == levelName) { found = true; break; }
+                        }
+                        if (!found) break;
+                        levelName = baseName + std::to_string(suffix++);
+                    }
+                    createNewLevelWithTemplate(tmpl, levelName);
+                });
+            }
+
+            WidgetElement newLevelEl = newLevelDropdown.toElement();
+            newLevelEl.id = "ContentBrowser.PathBar.NewLevel";
+            newLevelEl.fillX = false;
+            newLevelEl.runtimeOnly = false;
+            pathBar->children.push_back(std::move(newLevelEl));
         }
 
         // Rename button (enabled only when a grid asset is selected)
