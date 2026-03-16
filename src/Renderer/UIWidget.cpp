@@ -836,6 +836,10 @@ namespace
         {
             element.style.borderRadius = entry.at("borderRadius").get<float>();
         }
+        if (entry.contains("transitionDuration"))
+        {
+            element.style.transitionDuration = entry.at("transitionDuration").get<float>();
+        }
         if (entry.contains("opacity"))
         {
             element.style.opacity = entry.at("opacity").get<float>();
@@ -1288,6 +1292,10 @@ namespace
         if (element.style.borderRadius > 0.0f)
         {
             entry["borderRadius"] = element.style.borderRadius;
+        }
+        if (element.style.transitionDuration > 0.0f)
+        {
+            entry["transitionDuration"] = element.style.transitionDuration;
         }
         if (element.style.opacity < 1.0f)
         {

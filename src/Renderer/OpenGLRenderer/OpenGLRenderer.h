@@ -7,6 +7,7 @@
 #include "../ViewportUIManager.h"
 #include "../EditorWindows/PopupWindow.h"
 #include "../EditorWindows/MeshViewerWindow.h"
+#include "../EditorWindows/MaterialEditorWindow.h"
 #include "../EditorWindows/TextureViewerWindow.h"
 #include "../IRenderTarget.h"
 #include "OpenGLRenderTarget.h"
@@ -111,6 +112,7 @@ public:
     const ViewportUIManager& getViewportUIManager() const { return m_viewportUIManager; }
     std::shared_ptr<Widget> createWidgetFromAsset(const std::shared_ptr<AssetData>& asset) override;
     unsigned int preloadUITexture(const std::string& path) override;
+    unsigned int generateAssetThumbnail(const std::string& assetPath, int assetType) override;
 
     void addTab(const std::string& id, const std::string& name, bool closable) override;
     void removeTab(const std::string& id) override;
@@ -162,10 +164,12 @@ private:
     bool ensureOutlineResources();
     void releaseOutlineResources();
     void drawUIPanel(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program,
-        const Vec4& hoverColor = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f }, bool isHovered = false, float borderRadius = 0.0f);
-    void drawUIBrush(float x0, float y0, float x1, float y1, const UIBrush& brush, const glm::mat4& projection, float opacity = 1.0f, bool isHovered = false, const UIBrush* hoverBrush = nullptr, float borderRadius = 0.0f);
+        const Vec4& hoverColor = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f }, float hoverT = 0.0f, float borderRadius = 0.0f);
+    void drawUIBrush(float x0, float y0, float x1, float y1, const UIBrush& brush, const glm::mat4& projection, float opacity = 1.0f, float hoverT = 0.0f, const UIBrush* hoverBrush = nullptr, float borderRadius = 0.0f);
     void drawUIImage(float x0, float y0, float x1, float y1, GLuint textureId, const glm::mat4& projection, const Vec4& tintColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }, bool invertRGB = false, bool flipY = false);
     GLuint getOrLoadUITexture(const std::string& path);
+    bool ensureThumbnailFbo(int size);
+    void releaseThumbnailFbo();
     void drawUIOutline(float x0, float y0, float x1, float y1, const Vec4& color, const glm::mat4& projection, GLuint program);
     void drawUIShadow(float x0, float y0, float x1, float y1, const Vec4& shadowColor, const Vec2& shadowOffset, const glm::mat4& projection, GLuint program, float borderRadius = 0.0f, float blurRadius = 6.0f);
 
@@ -279,6 +283,11 @@ private:
     };
     UIGradientUniforms m_uiGradientUniforms{};
     std::unordered_map<std::string, GLuint> m_uiTextureCache;
+    std::unordered_map<std::string, GLuint> m_thumbnailCache;
+    GLuint m_thumbFbo{0};
+    GLuint m_thumbColorTex{0};
+    GLuint m_thumbDepthRbo{0};
+    int m_thumbSize{0};
     ECS::Schema m_lightSchema{};
     bool m_lightSchemaInitialized{false};
     std::vector<OpenGLMaterial::LightData> m_sceneLights;
@@ -542,6 +551,13 @@ private:
 
     void drawSelectionOutline();
 
+    // ---- Rubber-Band (Marquee) Selection ----
+    bool m_rubberBandActive{false};
+    Vec2 m_rubberBandStart{};
+    Vec2 m_rubberBandEnd{};
+    void drawRubberBand(const glm::mat4& ortho);
+    void resolveRubberBandSelection();
+
     // ---- Editor Gizmos ----
 
     bool ensureGizmoResources();
@@ -610,6 +626,9 @@ private:
 
     // Mesh viewer editor windows
     std::unordered_map<std::string, std::unique_ptr<MeshViewerWindow>> m_meshViewers;
+
+    // Material editor windows
+    std::unordered_map<std::string, std::unique_ptr<MaterialEditorWindow>> m_materialEditors;
 
     // Texture viewer editor windows
     std::unordered_map<std::string, std::unique_ptr<TextureViewerWindow>> m_textureViewers;
@@ -701,6 +720,13 @@ public:
     bool isEntitySelected(unsigned int entity) const override { return m_selectedEntities.count(entity) > 0; }
     void focusOnSelectedEntity() override;
 
+    // Rubber-band selection public API
+    void beginRubberBand(int screenX, int screenY) override;
+    void updateRubberBand(int screenX, int screenY) override;
+    void endRubberBand(bool ctrlHeld) override;
+    void cancelRubberBand() override;
+    bool isRubberBandActive() const override { return m_rubberBandActive; }
+
     // Gizmo public API
     void setGizmoMode(GizmoMode mode) override { m_gizmoMode = mode; }
     GizmoMode getGizmoMode() const override { return m_gizmoMode; }
@@ -721,6 +747,11 @@ public:
     MeshViewerWindow* openMeshViewer(const std::string& assetPath) override;
     void              closeMeshViewer(const std::string& assetPath) override;
     MeshViewerWindow* getMeshViewer(const std::string& assetPath) override;
+
+    // Material editor tab
+    MaterialEditorWindow* openMaterialEditorTab(const std::string& assetPath) override;
+    void                  closeMaterialEditorTab(const std::string& assetPath) override;
+    MaterialEditorWindow* getMaterialEditor(const std::string& assetPath) override;
 
     // Texture viewer editor window
     TextureViewerWindow* openTextureViewer(const std::string& assetPath) override;

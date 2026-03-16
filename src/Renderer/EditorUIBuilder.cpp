@@ -92,6 +92,7 @@ static WidgetElement makeButtonBase(const std::string& id,
     el.style.hoverColor = hover;
     el.style.textColor  = textColor;
     el.style.borderRadius = t.borderRadius;
+    el.style.transitionDuration = t.hoverTransitionSpeed;
     el.shaderVertex   = "button_vertex.glsl";
     el.shaderFragment = "button_fragment.glsl";
     el.hitTestMode    = HitTestMode::Enabled;
@@ -165,6 +166,7 @@ WidgetElement EditorUIBuilder::makeEntryBar(const std::string& id,
     el.fillX       = true;
     el.runtimeOnly = true;
     el.style.borderRadius = t.borderRadius;
+    el.style.transitionDuration = t.hoverTransitionSpeed;
     return el;
 }
 
@@ -209,6 +211,7 @@ WidgetElement EditorUIBuilder::makeDropDown(const std::string& id,
     el.style.hoverColor = t.dropdownHover;
     el.style.textColor  = t.dropdownText;
     el.style.borderRadius = t.borderRadius;
+    el.style.transitionDuration = t.hoverTransitionSpeed;
     el.items         = items;
     el.selectedIndex = selectedIndex;
     el.hitTestMode   = HitTestMode::Enabled;

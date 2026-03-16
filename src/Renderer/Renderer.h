@@ -13,6 +13,7 @@ class UIManager;
 class ViewportUIManager;
 class PopupWindow;
 class MeshViewerWindow;
+class MaterialEditorWindow;
 class TextureViewerWindow;
 class Widget;
 class AssetData;
@@ -237,6 +238,13 @@ public:
     /// Focus camera on the currently selected entity (smooth transition to AABB center).
     virtual void focusOnSelectedEntity() {}
 
+    // --- Rubber-band (marquee) selection ---
+    virtual void beginRubberBand(int /*screenX*/, int /*screenY*/) {}
+    virtual void updateRubberBand(int /*screenX*/, int /*screenY*/) {}
+    virtual void endRubberBand(bool /*ctrlHeld*/ = false) {}
+    virtual void cancelRubberBand() {}
+    virtual bool isRubberBandActive() const { return false; }
+
     // --- Gizmo ---
     virtual void setGizmoMode(GizmoMode /*mode*/) {}
     virtual GizmoMode getGizmoMode() const { return GizmoMode::None; }
@@ -280,6 +288,11 @@ public:
     virtual void closeTextureViewer(const std::string& /*assetPath*/) {}
     virtual TextureViewerWindow* getTextureViewer(const std::string& /*assetPath*/) { return nullptr; }
 
+    // --- Material editor tab ---
+    virtual MaterialEditorWindow* openMaterialEditorTab(const std::string& /*assetPath*/) { return nullptr; }
+    virtual void closeMaterialEditorTab(const std::string& /*assetPath*/) {}
+    virtual MaterialEditorWindow* getMaterialEditor(const std::string& /*assetPath*/) { return nullptr; }
+
     // --- Viewport & visuals ---
     virtual Vec2 getViewportSize() const { return {}; }
     virtual void setClearColor(const Vec4& /*color*/) {}
@@ -289,6 +302,11 @@ public:
     virtual void queueText(const std::string& /*text*/, const Vec2& /*screenPos*/, float /*scale*/, const Vec4& /*color*/) {}
     virtual std::shared_ptr<Widget> createWidgetFromAsset(const std::shared_ptr<AssetData>& /*asset*/) { return nullptr; }
     virtual unsigned int preloadUITexture(const std::string& /*path*/) { return 0; }
+    /// Generate an FBO-rendered thumbnail for a 3D model or material asset.
+    /// @param assetPath  Content-relative asset path
+    /// @param assetType  int-cast of AssetType (Model3D=3, Material=1)
+    /// @return OpenGL texture ID (cached), or 0 on failure
+    virtual unsigned int generateAssetThumbnail(const std::string& /*assetPath*/, int /*assetType*/) { return 0; }
 
     // --- Scene management ---
     virtual void refreshEntity(unsigned int /*entity*/) {}

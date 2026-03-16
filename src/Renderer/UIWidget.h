@@ -338,6 +338,9 @@ struct WidgetElementStyle
         shadowBlurRadius = 2.0f + t * 2.0f;          // 4, 6, 8, 10, 12
     }
 
+    // Hover transition (Phase 1.5)
+    float transitionDuration{ 0.0f };                   // seconds for hover color blend (0 = instant)
+
     // Opacity / Visibility
     float opacity{ 1.0f };                              // 0=transparent, 1=fully opaque
     bool isVisible{ true };                             // hide without collapsing layout
@@ -397,11 +400,15 @@ struct WidgetElement
     Vec2 boundsMaxPixels{};
     bool hasBounds{ false };
     bool isHovered{ false };
+    float hoverTransitionT{ 0.0f };     // runtime: interpolated hover blend (0=normal, 1=fully hovered)
     bool isPressed{ false };
     bool isFocused{ false };
     bool runtimeOnly{ false };
     bool scrollable{ false };
     float scrollOffset{ 0.0f };
+    float scrollbarOpacity{ 0.0f };          // runtime: current scrollbar visibility (0=hidden, 1=visible)
+    float scrollbarActivityTimer{ 0.0f };    // runtime: seconds since last scroll activity
+    bool  scrollbarHovered{ false };         // runtime: mouse is over the scrollbar track area
     std::function<void()> onClicked;
     std::function<void()> onDoubleClicked;
     std::function<void(const Vec4&)> onColorChanged;

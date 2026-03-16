@@ -101,6 +101,11 @@ struct EditorTheme
     Vec4 scrollbarTrack       { 0.04f, 0.04f, 0.04f, 0.5f };
     Vec4 scrollbarThumb       { 0.20f, 0.20f, 0.20f, 0.7f };
     Vec4 scrollbarThumbHover  { 0.28f, 0.28f, 0.28f, 0.9f };
+    bool scrollbarAutoHide       = true;   // auto-hide scrollbars after inactivity
+    float scrollbarWidth         = 6.0f;   // default scrollbar width in pixels
+    float scrollbarWidthHover    = 10.0f;  // scrollbar width when hovered
+    float scrollbarAutoHideDelay = 1.5f;   // seconds before auto-hide fade starts
+    float scrollbarBorderRadius  = 3.0f;   // rounded thumb ends
 
     // ── Tree view ────────────────────────────────────────────────────────
     Vec4 treeRowEven          { 0.07f, 0.07f, 0.07f, 1.0f };
@@ -165,6 +170,9 @@ struct EditorTheme
     float groupSpacing        = 6.0f;   // vertical space between component groups
     float gridTileSpacing     = 8.0f;   // gap between Content Browser grid tiles
 
+    // ── Hover transition (Phase 1.5) ─────────────────────────────────────
+    float hoverTransitionSpeed = 0.12f;  // seconds for hover color transition (0 = instant)
+
     // ── DPI scaling ──────────────────────────────────────────────────────
     /// Current DPI scale factor applied to all sizing values.
     /// 1.0 = 96 DPI (100%), 1.25 = 120 DPI (125%), 1.5 = 144 DPI (150%) etc.
@@ -215,6 +223,11 @@ struct EditorTheme
 
         // Shadow
         shadowOffset = { shadowOffset.x * ratio, shadowOffset.y * ratio };
+
+        // Scrollbar
+        scrollbarWidth      *= ratio;
+        scrollbarWidthHover *= ratio;
+        scrollbarBorderRadius *= ratio;
     }
 
     /// Scale an arbitrary pixel value by the current DPI factor.
@@ -299,6 +312,8 @@ struct EditorTheme
         j["scrollbarTrack"]       = v4(scrollbarTrack);
         j["scrollbarThumb"]       = v4(scrollbarThumb);
         j["scrollbarThumbHover"]  = v4(scrollbarThumbHover);
+        j["scrollbarAutoHide"]    = scrollbarAutoHide;
+        j["scrollbarAutoHideDelay"] = scrollbarAutoHideDelay;
         // Tree view
         j["treeRowEven"]          = v4(treeRowEven);
         j["treeRowOdd"]           = v4(treeRowOdd);
@@ -352,6 +367,10 @@ struct EditorTheme
         j["sectionSpacing"]       = sectionSpacing     * inv;
         j["groupSpacing"]         = groupSpacing       * inv;
         j["gridTileSpacing"]      = gridTileSpacing    * inv;
+        // Scrollbar sizing (DPI-scaled)
+        j["scrollbarWidth"]       = scrollbarWidth       * inv;
+        j["scrollbarWidthHover"]  = scrollbarWidthHover  * inv;
+        j["scrollbarBorderRadius"]= scrollbarBorderRadius * inv;
         // Shadow
         j["shadowColor"]          = v4(shadowColor);
         j["shadowOffset"]         = v2({ shadowOffset.x * inv, shadowOffset.y * inv });
@@ -442,6 +461,12 @@ struct EditorTheme
         rv4("scrollbarTrack",       scrollbarTrack);
         rv4("scrollbarThumb",       scrollbarThumb);
         rv4("scrollbarThumbHover",  scrollbarThumbHover);
+        if (j.contains("scrollbarAutoHide") && j["scrollbarAutoHide"].is_boolean())
+            scrollbarAutoHide = j["scrollbarAutoHide"].get<bool>();
+        rf("scrollbarWidth",        scrollbarWidth);
+        rf("scrollbarWidthHover",   scrollbarWidthHover);
+        rf("scrollbarAutoHideDelay",scrollbarAutoHideDelay);
+        rf("scrollbarBorderRadius", scrollbarBorderRadius);
         rv4("treeRowEven",          treeRowEven);
         rv4("treeRowOdd",           treeRowOdd);
         rv4("treeRowHover",         treeRowHover);
@@ -511,6 +536,7 @@ struct EditorTheme
             borderRadius   *= s;  separatorThickness *= s;
             sectionSpacing *= s;  groupSpacing   *= s;  gridTileSpacing *= s;
             shadowOffset = { shadowOffset.x * s, shadowOffset.y * s };
+            scrollbarWidth *= s;  scrollbarWidthHover *= s;  scrollbarBorderRadius *= s;
         }
     }
 

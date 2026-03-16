@@ -53,7 +53,7 @@
 ### Fehlende Editor-Tabs / Panels
 | Feature | Status |
 |---------|--------|
-| Material Editor Tab (voller Tab, nicht nur Popup) | ❌ |
+| Material Editor Tab (voller Tab, nicht nur Popup) | ✅ |
 | Shader Editor / Viewer | ❌ |
 | Console / Log-Viewer | ✅ |
 | Animation Editor (Skeletal) | ❌ |
@@ -107,7 +107,7 @@
 - [x] Elevation 0 Panels haben keinen Schatten (kein Overhead)
 
 ### 1.3 Modernisierte Icon-Sprache
-**Aktueller Stand:** Icons werden als PNG-Texturen geladen (`Editor/Textures/`) und per Tint-Color eingefärbt. Es gibt keine Icon-Font und keine SVG-Unterstützung.
+**Aktueller Stand:** 24 Editor-Icons (22 PNG + 2 TGA) in `Editor/Textures/`. Neue Icons: `light.png`, `camera.png`, `entity.png`, `level.png`, `widget.png`, `skybox.png`, `save.png`, `add.png`, `search.png`, `eye.png` (24×24, weiße Silhouette auf transparent). `iconForAssetType()` gibt für jeden Asset-Typ ein passendes Icon zurück (Widget→widget.png, Skybox→skybox.png, Level→level.png). `iconForEntity()` / `iconTintForEntity()` bestimmen Icon+Farbe nach prominentester ECS-Komponente (Light→gelb, Camera→grün, Mesh→cyan, Script→grün, HeightField→lime, Physics→lila, default→grau). Outliner-Einträge nutzen `makeTreeRow()` mit Typ-Icons. Content Browser nutzt verbesserte Icons. Toolbar-Buttons verwenden Icons (PIE→Play.tga/Stop.tga, Settings→Settings.png, Undo→undo.png, Redo→redo.png).
 
 **Ziel:** Konsistente, skalierbare Icon-Sprache für den gesamten Editor.
 
@@ -118,10 +118,10 @@
 - Alle hardcoded Text-Symbole (▾, ▸, ◆, ×, +, ■, ▶) durch Icon-Referenzen ersetzen
 
 **Fortschrittsprüfung:**
-- [ ] Mindestens 20 Editor-Icons als Atlas oder Icon-Font verfügbar
-- [ ] Content Browser nutzt neue Icons statt farbiger Quadrate
-- [ ] Outliner Entity-Einträge haben Typ-Icons (Mesh, Light, Camera, etc.)
-- [ ] Toolbar-Buttons nutzen Icons statt Text
+- [x] Mindestens 20 Editor-Icons als Atlas oder Icon-Font verfügbar
+- [x] Content Browser nutzt neue Icons statt farbiger Quadrate
+- [x] Outliner Entity-Einträge haben Typ-Icons (Mesh, Light, Camera, etc.)
+- [x] Toolbar-Buttons nutzen Icons statt Text
 
 ### 1.4 Überarbeitete Spacing & Typography
 **Aktueller Stand:** `EditorTheme` um `sectionSpacing` (10px), `groupSpacing` (6px) und `gridTileSpacing` (8px) erweitert. Alle drei Felder werden in `applyDpiScale`, `toJson` und `fromJson` korrekt skaliert/persistiert. `SeparatorWidget::toElement()` nutzt `theme.sectionSpacing` als oberen Margin, `theme.separatorThickness` für die Trennlinie, `theme.panelBorder`-Farbe, und `theme.sectionHeaderHeight` für die Header-Höhe. `makeSection()` Content-Padding DPI-skaliert. Content-Browser Grid-Tiles erhalten `gridTileSpacing`-Margin. Labels (`makeLabel`) verwenden `textSecondary`, Hint-Labels (`makeSecondaryLabel`) verwenden `textMuted`. Werte in EntryBars/DropDowns bleiben `textPrimary`/`inputText`.
@@ -155,9 +155,9 @@
 - **NICHT** für: Layout-Änderungen, Panel-Größen, Scrolling (zu komplex, zu wenig Nutzen)
 
 **Fortschrittsprüfung:**
-- [ ] Button-Hover hat sichtbaren Farbübergang (~120ms)
-- [ ] Toast-Notifications faden ein/aus statt zu poppen
-- [ ] Performance-Impact: < 0.1ms pro Frame Overhead
+- [x] Button-Hover hat sichtbaren Farbübergang (~120ms)
+- [x] Toast-Notifications faden ein/aus statt zu poppen
+- [x] Performance-Impact: < 0.1ms pro Frame Overhead
 
 ### 1.6 Verbessertes Scrollbar-Design
 **Aktueller Stand:** Scrollbalken existieren als dünne Overlay-Tracks (`scrollbarTrack`/`scrollbarThumb` im Theme). Design ist funktional, aber nicht besonders modern.
@@ -171,9 +171,9 @@
 - `EditorTheme` um `scrollbarAutoHide` (bool, default true) und `scrollbarWidth` (float, 6.0) erweitern
 
 **Fortschrittsprüfung:**
-- [ ] Scrollbars verschwinden wenn nicht gescrollt wird
-- [ ] Scrollbars verbreitern sich beim Hover
-- [ ] Scrollbar-Design ist konsistent in allen scrollbaren Panels
+- [x] Scrollbars verschwinden wenn nicht gescrollt wird
+- [x] Scrollbars verbreitern sich beim Hover
+- [x] Scrollbar-Design ist konsistent in allen scrollbaren Panels
 
 ---
 
@@ -184,7 +184,7 @@
 ### 2.1 Console / Log-Viewer Tab
 **Priorität:** Hoch (essentiell für Debugging und Scripting)
 
-**Aktueller Stand:** Vollständig implementiert. Schließbarer Tab mit Toolbar (Filter-Buttons, Suchfeld, Clear, Auto-Scroll), scrollbarer Log-Area, farbcodierte Einträge aus Logger-Ringbuffer (2000 max). 0.5s-Refresh-Timer. Zugang über Settings-Dropdown.
+**Aktueller Stand:** Vollständig implementiert. Schließbarer Tab mit Toolbar (Filter-Buttons, Suchfeld, Clear, Auto-Scroll), scrollbarer Log-Area, farbcodierte Einträge aus Logger-Ringbuffer (2000 max). 0.5s-Refresh-Timer. Zugang über Settings-Dropdown. Python `sys.stdout`/`sys.stderr` werden über einen C++-basierten `PyLogWriter`-Typ auf den Logger umgeleitet – `print()` erscheint als INFO/Scripting, Fehlerausgaben als ERROR/Scripting im Console-Tab.
 
 **Herangehensweise:**
 - Neuer `ConsoleTab` der den bestehenden `Logger`-Singleton anzapft
@@ -209,7 +209,7 @@
 - [x] Tab zeigt Live-Log-Einträge in Echtzeit
 - [x] Filter reduzieren die sichtbaren Zeilen korrekt
 - [x] Suche findet Teilstrings in Nachrichten
-- [ ] Python `print()` erscheint im Console-Tab (sys.stdout Umleitung ausstehend)
+- [x] Python `print()` erscheint im Console-Tab (sys.stdout Umleitung ausstehend)
 - [ ] Performance: 10.000+ Einträge ohne Stutter (virtualisierte Zeilen ausstehend)
 
 ### 2.2 Material Editor Tab (Vollwertiger Tab statt Popup)
@@ -230,11 +230,11 @@
 - PBR-Werte: Slider mit sofortigem Live-Update
 
 **Fortschrittsprüfung:**
-- [ ] Doppelklick auf Material im Content Browser öffnet Material-Tab
-- [ ] Preview-Sphäre zeigt das Material korrekt an
-- [ ] PBR-Slider-Änderungen sind sofort in der Preview sichtbar
+- [x] Doppelklick auf Material im Content Browser öffnet Material-Tab
+- [x] Preview-Sphäre zeigt das Material korrekt an
+- [x] PBR-Slider-Änderungen sind sofort in der Preview sichtbar
 - [ ] Textur-Drag & Drop funktioniert
-- [ ] Material-Änderungen werden korrekt gespeichert
+- [x] Material-Änderungen werden korrekt gespeichert
 
 ### 2.3 Texture Viewer Tab
 **Priorität:** Mittel
@@ -459,7 +459,7 @@
 - [ ] Collider-Wireframe ist im Viewport sichtbar
 
 ### 3.6 Intelligent Snap & Grid
-**Aktueller Stand:** Implementiert. Grid-Overlay auf der XZ-Ebene (SDF-basierter Infinite-Grid-Shader mit fwidth()-Antialiasing, Achsen-Highlighting rot/blau, 10er-Verstärkungslinien, Distance-Fade). Grid-Sichtbarkeit wird zusammen mit Snap aktiviert. Snap-to-Grid für Translate (rundet alle Positionskomponenten auf `gridSize`-Vielfache), Rotate (rundet Euler-Winkel auf 15°-Schritte) und Scale (rundet auf 0.1-Schritte). `ViewportOverlay.Snap`-Toggle-Button schaltet Snap + Grid gemeinsam ein/aus. `ViewportOverlay.GridSize`-Dropdown (0.25/0.5/1/2/5/10 Einheiten). Snap- und Grid-Einstellungen über `DiagnosticsManager::setState/getState` in config.ini persistiert. Snap-State liegt als `m_snapEnabled`/`m_gridVisible`/`m_gridSize`/`m_rotationSnapDeg`/`m_scaleSnapStep` in der `Renderer`-Basisklasse. Surface-Snap (Raycast) steht noch aus.
+Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit Callback-Pattern (`RaycastDownFn`) für DLL-Grenzüberschreitung. `computeEntityBottomOffset()` berechnet den Abstand vom Entity-Pivot zur Unterseite der Mesh-AABB. End-Taste als Shortcut + Settings-Dropdown-Eintrag „Drop to Surface (End)". Undo/Redo-Integration über `UndoRedoManager::pushCommand()`.
 
 **Ziel:** Konfigurierbares Snap-to-Grid und Surface-Snapping für präzise Platzierung.
 
@@ -475,7 +475,7 @@
 **Fortschrittsprüfung:**
 - [x] Grid-Overlay im Viewport sichtbar (toggelbar)
 - [x] Snap aktiviert rastet Translate auf Grid
-- [ ] Surface-Snap platziert Entity auf Oberfläche
+- [x] Surface-Snap platziert Entity auf Oberfläche
 - [x] Rotation-Snap funktioniert in 15°-Schritten
 
 ---
@@ -627,7 +627,7 @@
 - [x] Undo macht das Duplizieren rückgängig
 
 ### 5.4 Transform-Einrasten auf Oberflächen
-**Aktueller Stand:** Kein Surface-Snapping.
+**Aktueller Stand:** Implementiert. `dropSelectedEntitiesToSurface()` in `UIManager` setzt selektierte Entities per Raycast nach unten (-Y) auf die nächste Oberfläche. `computeEntityBottomOffset()` berechnet den Abstand vom Entity-Pivot zur Mesh-AABB-Unterseite (Stride-5-Vertex-Daten, skaliert mit Entity-Scale). Callback-Pattern (`RaycastDownFn = std::function<pair<bool,float>(float,float,float)>`) überbrückt die DLL-Grenze zwischen Renderer und Physics. End-Taste als Shortcut, Settings-Dropdown-Eintrag „Drop to Surface (End)". Undo/Redo-Unterstützung mit alter Y-Position. Multi-Select-fähig.
 
 **Ziel:** Entity auf die nächste Oberfläche „fallen lassen" per Button oder Shortcut.
 
@@ -639,9 +639,9 @@
 - Optional: Ausrichtung der Entity-Rotation an der Oberflächen-Normale
 
 **Fortschrittsprüfung:**
-- [ ] Entity wird korrekt auf der Oberfläche platziert
-- [ ] Funktioniert auf flachen und schrägen Oberflächen
-- [ ] Funktioniert auf Landscape-Terrain
+- [x] Entity wird korrekt auf der Oberfläche platziert
+- [x] Funktioniert auf flachen und schrägen Oberflächen
+- [x] Funktioniert auf Landscape-Terrain
 
 ---
 
@@ -863,12 +863,12 @@
 |-------|-------------|-----------|---------|--------|
 | **1.1** | Abgerundete Panels | Mittel | Mittel | ✅ |
 | **1.2** | Schatten & Tiefe | Niedrig | Mittel | ✅ |
-| **1.3** | Modernisierte Icons | Hoch | Mittel | ❌ |
+| **1.3** | Modernisierte Icons | Hoch | Mittel | ✅ |
 | **1.4** | Überarbeitetes Spacing | Hoch | Gering | ✅ |
-| **1.5** | Animierte Übergänge | Niedrig | Mittel | ❌ |
-| **1.6** | Scrollbar-Design | Niedrig | Gering | ❌ |
+| **1.5** | Animierte Übergänge | Niedrig | Mittel | ✅ |
+| **1.6** | Scrollbar-Design | Niedrig | Gering | ✅ |
 | **2.1** | Console / Log-Viewer | Hoch | Mittel | ✅ |
-| **2.2** | Material Editor Tab | Hoch | Hoch | ❌ |
+| **2.2** | Material Editor Tab | Hoch | Hoch | ✅ |
 | **2.3** | Texture Viewer | Mittel | Gering | ✅ |
 | **2.4** | Animation Editor | Mittel–Hoch | Hoch | ❌ |
 | **2.5** | Particle Editor | Mittel | Mittel | ❌ |
@@ -887,7 +887,7 @@
 | **5.1** | Viewport-Einstellungen Panel | Hoch | Gering | ✅ |
 | **5.2** | Multi-Select & Group Ops | Hoch | Hoch | ❌ |
 | **5.3** | Entity Copy/Paste | Hoch | Gering | ✅ |
-| **5.4** | Transform-Einrasten | Mittel | Mittel | ❌ |
+| **5.4** | Transform-Einrasten | Mittel | Mittel | ✅ |
 | **6.1** | Docking-System | Niedrig | Sehr hoch | ❌ |
 | **6.2** | Keyboard-Shortcut-System | Mittel | Mittel | ❌ |
 | **6.3** | Benachrichtigungs-System | Niedrig | Gering | ❌ |
@@ -911,7 +911,7 @@
 3.1 Auto-Material, 3.5 Auto-Collider, 3.3 Scene Setup, 5.3 Copy/Paste
 
 **Sprint 4 – Asset-Management:**
-~~4.1 Thumbnails~~🔄 (Textur-Thumbnails ✅, Mesh/Material ausstehend), 2.2 Material Editor Tab, ~~2.3 Texture Viewer~~✅
+~~4.1 Thumbnails~~🔄 (Textur-Thumbnails ✅, Mesh/Material ausstehend), ~~2.2 Material Editor Tab~~✅, ~~2.3 Texture Viewer~~✅
 
 **Sprint 5 – Viewport-Workflow:**
 ~~3.6 Snap & Grid~~✅, 5.2 Multi-Select, 5.4 Surface-Snap

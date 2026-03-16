@@ -943,6 +943,16 @@ int main()
                     }
                 });
 
+                items.push_back({ "Drop to Surface (End)", [&renderer]()
+                    {
+                        renderer->getUIManager().dropSelectedEntitiesToSurface([](float ox, float oy, float oz) -> std::pair<bool, float>
+                        {
+                            auto hit = PhysicsWorld::Instance().raycast(ox, oy, oz, 0.0f, -1.0f, 0.0f, 10000.0f);
+                            return { hit.hit, hit.point[1] };
+                        });
+                    }
+                });
+
                 uiMgr.showDropdownMenu(anchor, items);
             });
 
@@ -3346,6 +3356,15 @@ int main()
                     if (event.key.key == SDLK_F)
                     {
                         renderer->focusOnSelectedEntity();
+                        continue;
+                    }
+                    if (event.key.key == SDLK_END)
+                    {
+                        renderer->getUIManager().dropSelectedEntitiesToSurface([](float ox, float oy, float oz) -> std::pair<bool, float>
+                        {
+                            auto hit = PhysicsWorld::Instance().raycast(ox, oy, oz, 0.0f, -1.0f, 0.0f, 10000.0f);
+                            return { hit.hit, hit.point[1] };
+                        });
                         continue;
                     }
                 }

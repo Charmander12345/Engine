@@ -3392,6 +3392,108 @@ namespace
     {
         return CreateEngineModule();
     }
+
+    // ── PyLogWriter – redirects sys.stdout / sys.stderr to Logger ────────
+    struct PyLogWriter
+    {
+        PyObject_HEAD
+        Logger::LogLevel level;
+        std::string      buffer;
+    };
+
+    static void PyLogWriter_dealloc(PyLogWriter* self)
+    {
+        self->buffer.~basic_string();
+        Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
+    }
+
+    static PyObject* PyLogWriter_write(PyLogWriter* self, PyObject* args)
+    {
+        const char* text = nullptr;
+        if (!PyArg_ParseTuple(args, "s", &text))
+            return nullptr;
+
+        if (text)
+        {
+            self->buffer += text;
+            // Flush complete lines to the Logger
+            std::string::size_type pos;
+            while ((pos = self->buffer.find('\n')) != std::string::npos)
+            {
+                std::string line = self->buffer.substr(0, pos);
+                self->buffer.erase(0, pos + 1);
+                if (!line.empty())
+                {
+                    Logger::Instance().log(Logger::Category::Scripting, line, self->level);
+                }
+            }
+        }
+        Py_RETURN_NONE;
+    }
+
+    static PyObject* PyLogWriter_flush(PyLogWriter* self, PyObject*)
+    {
+        // Flush any remaining partial line
+        if (!self->buffer.empty())
+        {
+            Logger::Instance().log(Logger::Category::Scripting, self->buffer, self->level);
+            self->buffer.clear();
+        }
+        Py_RETURN_NONE;
+    }
+
+    static PyMethodDef PyLogWriter_methods[] = {
+        { "write", reinterpret_cast<PyCFunction>(PyLogWriter_write), METH_VARARGS, "Write text to the engine logger." },
+        { "flush", reinterpret_cast<PyCFunction>(PyLogWriter_flush), METH_NOARGS,  "Flush buffered text to the engine logger." },
+        { nullptr, nullptr, 0, nullptr }
+    };
+
+    static PyTypeObject PyLogWriterType = {
+        PyVarObject_HEAD_INIT(nullptr, 0)
+        "engine.LogWriter",                     // tp_name
+        sizeof(PyLogWriter),                    // tp_basicsize
+        0,                                      // tp_itemsize
+        reinterpret_cast<destructor>(PyLogWriter_dealloc), // tp_dealloc
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        Py_TPFLAGS_DEFAULT,                     // tp_flags
+        "Redirects output to the engine Logger",// tp_doc
+        0, 0, 0, 0, 0, 0,
+        PyLogWriter_methods,                    // tp_methods
+        0, 0, 0, 0, 0, 0, 0, 0, 0,
+        PyType_GenericNew,                      // tp_new
+    };
+
+    // Creates and installs LogWriter instances on sys.stdout / sys.stderr
+    void InstallPythonLogRedirect()
+    {
+        if (PyType_Ready(&PyLogWriterType) < 0)
+        {
+            Logger::Instance().log(Logger::Category::Engine, "Python: failed to ready LogWriter type", Logger::LogLevel::WARNING);
+            return;
+        }
+
+        auto makeWriter = [](Logger::LogLevel level) -> PyObject*
+        {
+            PyLogWriter* w = PyObject_New(PyLogWriter, &PyLogWriterType);
+            if (!w) return nullptr;
+            new (&w->buffer) std::string();
+            w->level = level;
+            return reinterpret_cast<PyObject*>(w);
+        };
+
+        PyObject* stdoutWriter = makeWriter(Logger::LogLevel::INFO);
+        PyObject* stderrWriter = makeWriter(Logger::LogLevel::ERROR);
+
+        if (stdoutWriter)
+            PySys_SetObject("stdout", stdoutWriter);
+        if (stderrWriter)
+            PySys_SetObject("stderr", stderrWriter);
+
+        Py_XDECREF(stdoutWriter);
+        Py_XDECREF(stderrWriter);
+
+        Logger::Instance().log(Logger::Category::Engine, "Python: sys.stdout/stderr redirected to Logger", Logger::LogLevel::INFO);
+    }
 }
 
 namespace Scripting
@@ -3414,6 +3516,7 @@ namespace Scripting
             Logger::Instance().log(Logger::Category::Engine, "Python: initialization failed", Logger::LogLevel::ERROR);
             return false;
         }
+        InstallPythonLogRedirect();
         Logger::Instance().log(Logger::Category::Engine, "Python: initialized", Logger::LogLevel::INFO);
         return Py_IsInitialized();
     }

@@ -135,6 +135,15 @@ public:
 	// Auto-Collider: compute and apply a fitted CollisionComponent from mesh AABB
 	bool autoFitColliderForEntity(ECS::Entity entity);
 
+	// Surface-Snap: raycast selected entities downward and place them on the hit surface.
+	// The caller provides a raycast function (origin xyz, direction xyz, maxDist) → (hit, hitY).
+	using RaycastDownFn = std::function<std::pair<bool, float>(float ox, float oy, float oz)>;
+	void dropSelectedEntitiesToSurface(const RaycastDownFn& raycastDown);
+
+	// Compute mesh AABB min-Y offset (distance from pivot to bottom) for an entity.
+	// Returns 0 if no mesh data is available.
+	float computeEntityBottomOffset(ECS::Entity entity) const;
+
 	// Scene templates for new levels
 	enum class SceneTemplate { Empty, BasicOutdoor, Prototype };
 	void createNewLevelWithTemplate(SceneTemplate tmpl, const std::string& levelName = "NewLevel", const std::string& relFolder = "Levels");
@@ -156,11 +165,15 @@ private:
 	void populateOutlinerDetails(unsigned int entity);
 	void populateContentBrowserWidget(const std::shared_ptr<EditorWidget>& widget);
     void applyAssetToEntity(AssetType type, const std::string& assetPath, unsigned int entity);
-    void updateHoverStates();
-    void setFocusedEntry(WidgetElement* element);
-    void ensureModalWidget();
+	void updateHoverStates();
+	void updateHoverTransitions(float deltaSeconds);
+	void updateHoverTransitionsRecursive(WidgetElement& element, float deltaSeconds);
+	void updateScrollbarVisibility(float deltaSeconds);
+	void updateScrollbarVisibilityRecursive(WidgetElement& element, float deltaSeconds);
+	void setFocusedEntry(WidgetElement* element);
+	void ensureModalWidget();
 	std::shared_ptr<EditorWidget> createToastWidget(const std::string& message, const std::string& name) const;
-    void updateToastStackLayout();
+	void updateToastStackLayout();
 
     Renderer* m_renderer{ nullptr };
     Vec2 m_availableViewportSize{};

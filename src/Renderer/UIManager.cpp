@@ -1898,6 +1898,7 @@ void UIManager::updateNotifications(float deltaSeconds)
     }
 
     bool removed = false;
+    constexpr float toastFadeDuration = 0.3f;
     for (auto it = m_toasts.begin(); it != m_toasts.end();)
     {
         it->timer = std::max(0.0f, it->timer - deltaSeconds);
@@ -1908,12 +1909,31 @@ void UIManager::updateNotifications(float deltaSeconds)
             removed = true;
             continue;
         }
+        // Fade in/out: first 0.3s fade in, last 0.3s fade out
+        float fadeAlpha = 1.0f;
+        const float age = it->duration - it->timer;
+        if (age < toastFadeDuration)
+            fadeAlpha = age / toastFadeDuration;
+        if (it->timer < toastFadeDuration)
+            fadeAlpha = std::min(fadeAlpha, it->timer / toastFadeDuration);
+        if (it->widget)
+        {
+            for (auto& el : it->widget->getElementsMutable())
+                el.style.opacity = fadeAlpha;
+            m_renderDirty = true;
+        }
         ++it;
     }
     if (removed)
     {
         updateToastStackLayout();
     }
+
+    // ── Hover transition interpolation (Phase 1.5) ──────────────────────
+    updateHoverTransitions(deltaSeconds);
+
+    // ── Scrollbar auto-hide (Phase 1.6) ─────────────────────────────────
+    updateScrollbarVisibility(deltaSeconds);
 
     // ── Console log refresh ──────────────────────────────────────────────
     if (m_consoleState.isOpen)
@@ -2020,19 +2040,29 @@ void UIManager::updateNotifications(float deltaSeconds)
         // Tooltip was hidden by updateHoverStates — remove the widget
         m_tooltipVisible = false;
         unregisterWidget("_Tooltip");
-    }
+	}
 }
+
+// Forward declarations for static helpers defined later in this file
+static const char* iconForEntity(ECS::Entity entity);
+static Vec4 iconTintForEntity(ECS::Entity entity);
+static WidgetElement makeTreeRow(const std::string& id,
+								 const std::string& label,
+								 const std::string& iconPath,
+								 bool isFolder,
+								 int indentLevel,
+								 const Vec4& iconTint);
 
 void UIManager::populateOutlinerWidget(const std::shared_ptr<EditorWidget>& widget)
 {
 	if (!widget)
 	{
 		Logger::Instance().log(Logger::Category::UI, "WorldOutliner widget is null.", Logger::LogLevel::WARNING);
-        return;
-    }
+		return;
+	}
 
-    auto& diagnostics = DiagnosticsManager::Instance();
-    auto* level = m_outlinerLevel ? m_outlinerLevel : diagnostics.getActiveLevelSoft();
+	auto& diagnostics = DiagnosticsManager::Instance();
+	auto* level = m_outlinerLevel ? m_outlinerLevel : diagnostics.getActiveLevelSoft();
     if (!level)
     {
 		Logger::Instance().log(Logger::Category::UI, "No active level for WorldOutliner.", Logger::LogLevel::WARNING);
@@ -2093,11 +2123,11 @@ void UIManager::populateOutlinerWidget(const std::shared_ptr<EditorWidget>& widg
             }
         }
 
-        WidgetElement button = EditorUIBuilder::makeButton(
-            "Outliner.Entity." + std::to_string(entity), label);
+        WidgetElement button = makeTreeRow(
+            "Outliner.Entity." + std::to_string(entity), label,
+            iconForEntity(entity), false, 0, iconTintForEntity(entity));
         button.from = Vec2{ 0.0f, 0.0f };
         button.to = Vec2{ 1.0f, 1.0f };
-        button.textAlignH = TextAlignH::Center;
         button.onClicked = [this, entity]()
             {
                 m_outlinerSelectedEntity = entity;
@@ -3748,6 +3778,166 @@ bool UIManager::autoFitColliderForEntity(ECS::Entity entity)
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// computeEntityBottomOffset – distance from entity pivot to bottom of mesh
+// ---------------------------------------------------------------------------
+float UIManager::computeEntityBottomOffset(ECS::Entity entity) const
+{
+    auto& ecs = ECS::ECSManager::Instance();
+
+    if (!ecs.hasComponent<ECS::MeshComponent>(entity))
+        return 0.0f;
+
+    const auto* meshComp = ecs.getComponent<ECS::MeshComponent>(entity);
+    if (!meshComp || meshComp->meshAssetPath.empty())
+        return 0.0f;
+
+    auto& assetMgr = AssetManager::Instance();
+    auto meshAsset = assetMgr.getLoadedAssetByPath(meshComp->meshAssetPath);
+    if (!meshAsset)
+    {
+        int id = assetMgr.loadAsset(meshComp->meshAssetPath, AssetType::Model3D);
+        if (id > 0)
+            meshAsset = assetMgr.getLoadedAssetByID(static_cast<unsigned int>(id));
+    }
+    if (!meshAsset)
+        return 0.0f;
+
+    const auto& data = meshAsset->getData();
+    if (!data.contains("m_vertices") || !data["m_vertices"].is_array())
+        return 0.0f;
+
+    const auto& verts = data["m_vertices"];
+    const size_t stride = 5;
+    const size_t vertCount = verts.size() / stride;
+    if (vertCount == 0)
+        return 0.0f;
+
+    float minY = std::numeric_limits<float>::max();
+    for (size_t i = 0; i < vertCount; ++i)
+    {
+        const float vy = verts[i * stride + 1].get<float>();
+        if (vy < minY) minY = vy;
+    }
+
+    float scaleY = 1.0f;
+    if (ecs.hasComponent<ECS::TransformComponent>(entity))
+    {
+        const auto* t = ecs.getComponent<ECS::TransformComponent>(entity);
+        if (t) scaleY = std::abs(t->scale[1]);
+    }
+
+    return -minY * scaleY;
+}
+
+// ---------------------------------------------------------------------------
+// dropSelectedEntitiesToSurface – raycast each selected entity downward and
+// place it on the first hit surface.
+// ---------------------------------------------------------------------------
+void UIManager::dropSelectedEntitiesToSurface(const RaycastDownFn& raycastDown)
+{
+    if (!m_renderer || !raycastDown)
+        return;
+
+    auto& ecs = ECS::ECSManager::Instance();
+
+    // Gather entities to process (multi-select or single)
+    std::vector<ECS::Entity> entities;
+    const auto& sel = m_renderer->getSelectedEntities();
+    if (!sel.empty())
+    {
+        for (auto e : sel)
+            entities.push_back(static_cast<ECS::Entity>(e));
+    }
+    else if (m_outlinerSelectedEntity != 0)
+    {
+        entities.push_back(static_cast<ECS::Entity>(m_outlinerSelectedEntity));
+    }
+
+    if (entities.empty())
+    {
+        showToastMessage("No entity selected.", 2.0f);
+        return;
+    }
+
+    // Store old transforms for undo
+    struct DropRecord
+    {
+        ECS::Entity entity;
+        float oldY;
+        float newY;
+    };
+    std::vector<DropRecord> records;
+
+    for (auto entity : entities)
+    {
+        if (!ecs.hasComponent<ECS::TransformComponent>(entity))
+            continue;
+
+        auto* tc = ecs.getComponent<ECS::TransformComponent>(entity);
+        if (!tc)
+            continue;
+
+        const float posX = tc->position[0];
+        const float posY = tc->position[1];
+        const float posZ = tc->position[2];
+
+        // Compute distance from pivot to bottom of mesh
+        const float bottomOffset = computeEntityBottomOffset(entity);
+
+        // Raycast straight down from a bit above the entity
+        auto [hit, hitY] = raycastDown(posX, posY + 0.1f, posZ);
+        if (!hit)
+            continue;
+
+        const float newY = hitY + bottomOffset;
+
+        records.push_back({ entity, posY, newY });
+
+        // Apply immediately
+        tc->position[1] = newY;
+    }
+
+    if (records.empty())
+    {
+        showToastMessage("No surface found below selection.", 2.5f);
+        return;
+    }
+
+    // Undo/Redo
+    UndoRedoManager::Command cmd;
+    cmd.description = (records.size() == 1) ? "Drop to Surface" : ("Drop " + std::to_string(records.size()) + " entities to Surface");
+    cmd.execute = [records]()
+    {
+        auto& e = ECS::ECSManager::Instance();
+        for (const auto& r : records)
+        {
+            if (auto* t = e.getComponent<ECS::TransformComponent>(r.entity))
+                t->position[1] = r.newY;
+        }
+    };
+    cmd.undo = [records]()
+    {
+        auto& e = ECS::ECSManager::Instance();
+        for (const auto& r : records)
+        {
+            if (auto* t = e.getComponent<ECS::TransformComponent>(r.entity))
+                t->position[1] = r.oldY;
+        }
+    };
+    UndoRedoManager::Instance().pushCommand(std::move(cmd));
+
+    const std::string msg = (records.size() == 1)
+        ? "Dropped entity to surface"
+        : ("Dropped " + std::to_string(records.size()) + " entities to surface");
+    showToastMessage(msg, 2.0f);
+    Logger::Instance().log(Logger::Category::Engine, msg, Logger::LogLevel::INFO);
+
+    markAllWidgetsDirty();
+    if (m_outlinerSelectedEntity != 0)
+        populateOutlinerDetails(m_outlinerSelectedEntity);
+}
+
 void UIManager::createNewLevelWithTemplate(SceneTemplate tmpl, const std::string& levelName, const std::string& relFolder)
 {
     auto& diagnostics = DiagnosticsManager::Instance();
@@ -3930,9 +4120,10 @@ static const char* iconForAssetType(AssetType type)
     case AssetType::Audio:    return "sound.png";
     case AssetType::Script:   return "script.png";
     case AssetType::Shader:   return "shader.png";
-    case AssetType::Widget:   return "texture.png";
-    case AssetType::Skybox:   return "texture.png";
-    default:                  return "texture.png";
+    case AssetType::Widget:   return "widget.png";
+    case AssetType::Skybox:   return "skybox.png";
+    case AssetType::Level:    return "level.png";
+    default:                  return "entity.png";
     }
 }
 
@@ -3953,6 +4144,32 @@ static Vec4 iconTintForAssetType(AssetType type)
     case AssetType::Skybox:   return Vec4{ 0.40f, 0.75f, 0.95f, 1.0f }; // sky blue
     default:                  return Vec4{ 0.85f, 0.85f, 0.85f, 1.0f }; // light grey
     }
+}
+
+// Returns the icon filename for an entity based on its most prominent component.
+static const char* iconForEntity(ECS::Entity entity)
+{
+    auto& ecs = ECS::ECSManager::Instance();
+    if (ecs.hasComponent<ECS::LightComponent>(entity))       return "light.png";
+    if (ecs.hasComponent<ECS::CameraComponent>(entity))      return "camera.png";
+    if (ecs.hasComponent<ECS::MeshComponent>(entity))        return "model3d.png";
+    if (ecs.hasComponent<ECS::ScriptComponent>(entity))      return "script.png";
+    if (ecs.hasComponent<ECS::HeightFieldComponent>(entity)) return "level.png";
+    if (ecs.hasComponent<ECS::PhysicsComponent>(entity))     return "entity.png";
+    return "entity.png";
+}
+
+// Returns a tint color for an entity based on its most prominent component.
+static Vec4 iconTintForEntity(ECS::Entity entity)
+{
+    auto& ecs = ECS::ECSManager::Instance();
+    if (ecs.hasComponent<ECS::LightComponent>(entity))       return Vec4{ 1.00f, 0.90f, 0.30f, 1.0f }; // yellow
+    if (ecs.hasComponent<ECS::CameraComponent>(entity))      return Vec4{ 0.40f, 0.85f, 0.40f, 1.0f }; // green
+    if (ecs.hasComponent<ECS::MeshComponent>(entity))        return Vec4{ 0.50f, 0.80f, 0.90f, 1.0f }; // cyan
+    if (ecs.hasComponent<ECS::ScriptComponent>(entity))      return Vec4{ 0.40f, 0.90f, 0.40f, 1.0f }; // green
+    if (ecs.hasComponent<ECS::HeightFieldComponent>(entity)) return Vec4{ 0.65f, 0.85f, 0.45f, 1.0f }; // lime
+    if (ecs.hasComponent<ECS::PhysicsComponent>(entity))     return Vec4{ 0.75f, 0.50f, 1.00f, 1.0f }; // purple
+    return Vec4{ 0.85f, 0.85f, 0.85f, 1.0f }; // light grey
 }
 
 // Build a Button row for the tree panel.
@@ -3978,7 +4195,8 @@ static WidgetElement makeTreeRow(const std::string& id,
     btn.shaderFragment = "button_fragment.glsl";
     btn.hitTestMode = HitTestMode::Enabled;
     btn.runtimeOnly = true;
-    // No own text/image â€” children handle rendering
+    btn.style.transitionDuration = theme.hoverTransitionSpeed;
+    // No own text/image
     btn.text = "";
 
     const float indentFrac = static_cast<float>(indentLevel) * 0.04f; // 4% per level
@@ -4737,6 +4955,10 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
                     if (!srcPath.empty())
                         thumbTex = m_renderer->preloadUITexture(srcPath);
                 }
+                else if ((item.type == AssetType::Model3D || item.type == AssetType::Material) && m_renderer)
+                {
+                    thumbTex = m_renderer->generateAssetThumbnail(relPath, static_cast<int>(item.type));
+                }
 
                 // Show path as label in search mode for disambiguation
                 const std::string displayName = item.name + "  (" +
@@ -4784,7 +5006,8 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
                     }
                     else if (assetType == AssetType::Material)
                     {
-                        uiMgr->openMaterialEditorPopup(relPath);
+                        if (uiMgr->getRenderer())
+                            uiMgr->getRenderer()->openMaterialEditorTab(relPath);
                     }
                     else if (assetType == AssetType::Level && uiMgr->m_onLevelLoadRequested)
                     {
@@ -4871,6 +5094,10 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
                 const std::string srcPath = resolveTextureSourcePath(relPath);
                 if (!srcPath.empty())
                     thumbTex = m_renderer->preloadUITexture(srcPath);
+            }
+            else if ((item.type == AssetType::Model3D || item.type == AssetType::Material) && m_renderer)
+            {
+                thumbTex = m_renderer->generateAssetThumbnail(relPath, static_cast<int>(item.type));
             }
 
             WidgetElement tile = makeGridTile(
@@ -4959,7 +5186,8 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
                 }
                 if (assetType == AssetType::Material)
                 {
-                    uiMgr->openMaterialEditorPopup(relPath);
+                    if (uiMgr->getRenderer())
+                        uiMgr->getRenderer()->openMaterialEditorTab(relPath);
                     return;
                 }
                 if (assetType == AssetType::Level)
@@ -5888,6 +6116,8 @@ bool UIManager::handleScroll(const Vec2& screenPos, float delta)
                         : std::max(0.0f, target->contentSizePixels.y - target->computedSizePixels.y);
                 }
                 target->scrollOffset = std::clamp(target->scrollOffset - delta * scrollStep, 0.0f, maxScroll);
+                target->scrollbarActivityTimer = 0.0f;
+                target->scrollbarOpacity = 1.0f;
                 entryPtr->widget->markLayoutDirty();
                 m_renderDirty = true;
                 return true;
@@ -6571,6 +6801,117 @@ void UIManager::updateHoverStates()
             unregisterWidget("_Tooltip");
             m_renderDirty = true;
         }
+    }
+}
+
+void UIManager::updateHoverTransitionsRecursive(WidgetElement& element, float deltaSeconds)
+{
+    // Use explicit transitionDuration if set; otherwise fall back to the
+    // theme's hoverTransitionSpeed for any hittable (interactive) element.
+    const float duration = element.style.transitionDuration > 0.0f
+        ? element.style.transitionDuration
+        : (element.hitTestMode == HitTestMode::Enabled
+            ? EditorTheme::Get().hoverTransitionSpeed
+            : 0.0f);
+    if (duration > 0.0f)
+    {
+        const float target = element.isHovered ? 1.0f : 0.0f;
+        if (element.hoverTransitionT != target)
+        {
+            const float speed = deltaSeconds / duration;
+            if (element.hoverTransitionT < target)
+                element.hoverTransitionT = std::min(target, element.hoverTransitionT + speed);
+            else
+                element.hoverTransitionT = std::max(target, element.hoverTransitionT - speed);
+            m_renderDirty = true;
+        }
+    }
+    else
+    {
+        element.hoverTransitionT = element.isHovered ? 1.0f : 0.0f;
+    }
+    for (auto& child : element.children)
+        updateHoverTransitionsRecursive(child, deltaSeconds);
+}
+
+void UIManager::updateHoverTransitions(float deltaSeconds)
+{
+    for (auto& entry : m_widgets)
+    {
+        if (!entry.widget) continue;
+        for (auto& el : entry.widget->getElementsMutable())
+            updateHoverTransitionsRecursive(el, deltaSeconds);
+    }
+}
+
+// ── Scrollbar auto-hide (Phase 1.6) ─────────────────────────────────────
+
+void UIManager::updateScrollbarVisibilityRecursive(WidgetElement& element, float deltaSeconds)
+{
+    if (element.scrollable || element.type == WidgetElementType::ScrollView)
+    {
+        const auto& theme = EditorTheme::Get();
+        const float delay = theme.scrollbarAutoHideDelay;
+        const float fadeDuration = 0.3f;
+
+        element.scrollbarActivityTimer += deltaSeconds;
+
+        // Scrollbar hover detection
+        bool sbHovered = false;
+        if (m_hasMousePosition && element.hasComputedPosition && element.hasComputedSize)
+        {
+            const float sbWidth = theme.scrollbarWidthHover;  // use hover width for hit area
+            const float ex = element.computedPositionPixels.x;
+            const float ey = element.computedPositionPixels.y;
+            const float ew = element.computedSizePixels.x;
+            const float eh = element.computedSizePixels.y;
+            const float sbX0 = ex + ew - sbWidth;
+            const float sbX1 = ex + ew;
+            const float sbY0 = ey;
+            const float sbY1 = ey + eh;
+            sbHovered = m_mousePosition.x >= sbX0 && m_mousePosition.x <= sbX1 &&
+                        m_mousePosition.y >= sbY0 && m_mousePosition.y <= sbY1;
+        }
+        if (sbHovered != element.scrollbarHovered)
+        {
+            element.scrollbarHovered = sbHovered;
+            m_renderDirty = true;
+        }
+
+        if (!theme.scrollbarAutoHide)
+        {
+            element.scrollbarOpacity = 1.0f;
+        }
+        else if (element.scrollbarHovered)
+        {
+            element.scrollbarOpacity = 1.0f;
+            element.scrollbarActivityTimer = 0.0f;
+        }
+        else if (element.scrollbarActivityTimer <= delay)
+        {
+            element.scrollbarOpacity = 1.0f;
+        }
+        else
+        {
+            const float fadeElapsed = element.scrollbarActivityTimer - delay;
+            element.scrollbarOpacity = std::max(0.0f, 1.0f - fadeElapsed / fadeDuration);
+        }
+
+        if (element.scrollbarOpacity > 0.0f)
+            m_renderDirty = true;
+    }
+
+    for (auto& child : element.children)
+        updateScrollbarVisibilityRecursive(child, deltaSeconds);
+}
+
+void UIManager::updateScrollbarVisibility(float deltaSeconds)
+{
+    for (auto& entry : m_widgets)
+    {
+        if (!entry.widget) continue;
+        for (auto& el : entry.widget->getElementsMutable())
+            updateScrollbarVisibilityRecursive(el, deltaSeconds);
     }
 }
 
