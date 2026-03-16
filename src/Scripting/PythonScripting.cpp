@@ -3891,7 +3891,7 @@ namespace Scripting
                         "ScriptHotReload: failed to reload " + matchedKey,
                         Logger::LogLevel::ERROR);
 
-                    diagnostics.enqueueToastNotification("Script reload failed: " + matchedKey, 4.0f);
+                    diagnostics.enqueueToastNotification("Script reload failed: " + matchedKey, 4.0f, DiagnosticsManager::NotificationLevel::Error);
                 }
             }
 
@@ -3925,7 +3925,7 @@ namespace Scripting
                         Logger::Instance().log(Logger::Category::Engine,
                             "ScriptHotReload: failed to reload level script",
                             Logger::LogLevel::ERROR);
-                        diagnostics.enqueueToastNotification("Level script reload failed", 4.0f);
+                        diagnostics.enqueueToastNotification("Level script reload failed", 4.0f, DiagnosticsManager::NotificationLevel::Error);
                     }
                 }
             }
@@ -3937,7 +3937,7 @@ namespace Scripting
         {
             std::string msg = "Script reloaded (" + std::to_string(reloadedCount) + " file" +
                 (reloadedCount > 1 ? "s" : "") + ")";
-            diagnostics.enqueueToastNotification(msg, 3.0f);
+            diagnostics.enqueueToastNotification(msg, 3.0f, DiagnosticsManager::NotificationLevel::Success);
         }
     }
 

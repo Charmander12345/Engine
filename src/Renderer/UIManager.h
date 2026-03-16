@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <deque>
 #include <memory>
 #include <functional>
 #include <unordered_map>
@@ -73,7 +74,13 @@ public:
 	void handleMouseMotionForPan(const Vec2& screenPos);
 	void handleMouseMotion(const Vec2& screenPos);
     bool handleTextInput(const std::string& text);
-    bool handleKeyDown(int key);
+	bool handleKeyDown(int key);
+
+	// Key capture: when set, handleKeyDown forwards key+mods to this callback first.
+	// If callback returns true, the event is consumed. Used for shortcut rebinding.
+	using KeyCaptureCallback = std::function<bool(uint32_t sdlKey, uint16_t sdlMod)>;
+	void setKeyCaptureCallback(KeyCaptureCallback cb) { m_keyCaptureCallback = std::move(cb); }
+	void clearKeyCaptureCallback() { m_keyCaptureCallback = nullptr; }
     void setMousePosition(const Vec2& screenPos);
     const Vec2& getMousePosition() const { return m_mousePosition; }
     bool isPointerOverUI(const Vec2& screenPos) const;
@@ -94,8 +101,25 @@ public:
     void showConfirmDialog(const std::string& message, std::function<void()> onConfirm, std::function<void()> onCancel = {});
     void showConfirmDialogWithCheckbox(const std::string& message, const std::string& checkboxLabel, bool checkedByDefault,
         std::function<void(bool checked)> onConfirm, std::function<void()> onCancel = {});
-    void showToastMessage(const std::string& message, float durationSeconds);
-    void updateNotifications(float deltaSeconds);
+	// Notification levels for priority-based styling (alias from DiagnosticsManager)
+	using NotificationLevel = DiagnosticsManager::NotificationLevel;
+
+	void showToastMessage(const std::string& message, float durationSeconds);
+	void showToastMessage(const std::string& message, float durationSeconds, NotificationLevel level);
+	void updateNotifications(float deltaSeconds);
+
+	// Notification history
+	struct NotificationHistoryEntry
+	{
+		std::string message;
+		NotificationLevel level{ NotificationLevel::Info };
+		uint64_t timestampMs{ 0 };  // SDL_GetTicks() at time of notification
+	};
+	const std::deque<NotificationHistoryEntry>& getNotificationHistory() const { return m_notificationHistory; }
+	size_t getUnreadNotificationCount() const { return m_unreadNotificationCount; }
+	void clearUnreadNotifications() { m_unreadNotificationCount = 0; }
+	void openNotificationHistoryPopup();
+	void refreshNotificationBadge();
 
     struct DropdownMenuItem
     {
@@ -110,6 +134,13 @@ public:
 	void openLandscapeManagerPopup();
 	void openEngineSettingsPopup();
 	void openEditorSettingsPopup();
+	void openShortcutHelpPopup();
+
+	// Non-blocking progress bars in StatusBar
+	struct ProgressBarHandle { uint64_t id{ 0 }; };
+	ProgressBarHandle beginProgress(const std::string& label, float total = 1.0f);
+	void updateProgress(ProgressBarHandle handle, float current, const std::string& label = {});
+	void endProgress(ProgressBarHandle handle);
 	void openWidgetEditorPopup(const std::string& relativeAssetPath);
 	void openMaterialEditorPopup(const std::string& materialAssetPath = {});
 	void openUIDesignerTab();
@@ -125,6 +156,11 @@ public:
 	void openProfilerTab();
 	void closeProfilerTab();
 	bool isProfilerOpen() const;
+
+	// Audio Preview tab
+	void openAudioPreviewTab(const std::string& assetPath);
+	void closeAudioPreviewTab();
+	bool isAudioPreviewOpen() const;
 
 	// Entity clipboard (Copy/Paste/Duplicate)
 	void copySelectedEntity();
@@ -147,6 +183,11 @@ public:
 	// Scene templates for new levels
 	enum class SceneTemplate { Empty, BasicOutdoor, Prototype };
 	void createNewLevelWithTemplate(SceneTemplate tmpl, const std::string& levelName = "NewLevel", const std::string& relFolder = "Levels");
+
+	// Prefab / Entity Templates
+	bool savePrefabFromEntity(ECS::Entity entity, const std::string& name, const std::string& folder);
+	bool spawnPrefabAtPosition(const std::string& prefabRelPath, const Vec3& pos);
+	bool spawnBuiltinTemplate(const std::string& templateName, const Vec3& pos);
     void openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)> onProjectChosen);
 
     // Returns true if the active tab is a widget editor and had a selected element to delete
@@ -160,7 +201,9 @@ public:
 private:
 	WidgetEntry* findWidgetEntry(const std::string& id);
 	const WidgetEntry* findWidgetEntry(const std::string& id) const;
-    WidgetElement* hitTest(const Vec2& screenPos, bool logDetails = false) const;
+	WidgetElement* hitTest(const Vec2& screenPos, bool logDetails = false) const;
+
+	KeyCaptureCallback m_keyCaptureCallback;
 	void populateOutlinerWidget(const std::shared_ptr<EditorWidget>& widget);
 	void populateOutlinerDetails(unsigned int entity);
 	void populateContentBrowserWidget(const std::shared_ptr<EditorWidget>& widget);
@@ -172,7 +215,7 @@ private:
 	void updateScrollbarVisibilityRecursive(WidgetElement& element, float deltaSeconds);
 	void setFocusedEntry(WidgetElement* element);
 	void ensureModalWidget();
-	std::shared_ptr<EditorWidget> createToastWidget(const std::string& message, const std::string& name) const;
+	std::shared_ptr<EditorWidget> createToastWidget(const std::string& message, const std::string& name, NotificationLevel level = NotificationLevel::Info) const;
 	void updateToastStackLayout();
 
     Renderer* m_renderer{ nullptr };
@@ -212,10 +255,27 @@ private:
 		std::shared_ptr<EditorWidget> widget;
 		float timer{ 0.0f };
 		float duration{ 0.0f };
+		NotificationLevel level{ NotificationLevel::Info };
 	};
-    std::vector<ModalRequest> m_modalQueue;
-    std::vector<ToastNotification> m_toasts;
-    uint64_t m_nextToastId{ 1 };
+	std::vector<ModalRequest> m_modalQueue;
+	std::vector<ToastNotification> m_toasts;
+	uint64_t m_nextToastId{ 1 };
+
+	// Notification history (circular buffer of last 50)
+	static constexpr size_t kMaxNotificationHistory = 50;
+	std::deque<NotificationHistoryEntry> m_notificationHistory;
+	size_t m_unreadNotificationCount{ 0 };
+
+	// Non-blocking progress bars
+	struct ProgressEntry
+	{
+		uint64_t id{ 0 };
+		std::string label;
+		float current{ 0.0f };
+		float total{ 1.0f };
+	};
+	std::vector<ProgressEntry> m_progressBars;
+	uint64_t m_nextProgressId{ 1 };
 
     // Dropdown menu state
 	std::shared_ptr<EditorWidget> m_dropdownWidget;
@@ -401,6 +461,30 @@ private:
 	ProfilerState m_profilerState;
 	void refreshProfilerMetrics();
 	void buildProfilerToolbar(WidgetElement& root);
+
+	// Audio Preview tab state
+	struct AudioPreviewState
+	{
+		std::string tabId;
+		std::string widgetId;
+		std::string assetPath;       // Content-relative path of the open audio asset
+		bool isOpen{ false };
+		bool isPlaying{ false };
+		unsigned int playHandle{ 0 }; // AudioManager source handle
+		float volume{ 1.0f };
+		// Metadata extracted from asset JSON
+		int channels{ 0 };
+		int sampleRate{ 0 };
+		int format{ 0 };
+		size_t dataBytes{ 0 };
+		float durationSeconds{ 0.0f };
+		std::string displayName;
+	};
+	AudioPreviewState m_audioPreviewState;
+	void refreshAudioPreview();
+	void buildAudioPreviewToolbar(WidgetElement& root);
+	void buildAudioPreviewWaveform(WidgetElement& root);
+	void buildAudioPreviewMetadata(WidgetElement& root);
 
 public:
 	bool getWidgetEditorCanvasRect(Vec4& outRect) const;

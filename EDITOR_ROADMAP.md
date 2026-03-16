@@ -59,7 +59,7 @@
 | Animation Editor (Skeletal) | ❌ |
 | Particle Editor | ❌ |
 | Texture Viewer | ❌ |
-| Audio Preview | ❌ |
+| Audio Preview | ✅ |
 | Blueprint / Visual Scripting | ❌ |
 | Profiler / Performance-Monitor | ❌ |
 | Viewport-Einstellungen Panel | ✅ |
@@ -309,6 +309,8 @@
 ### 2.6 Audio Preview Panel
 **Priorität:** Niedrig–Mittel
 
+**Aktueller Stand:** Implementiert. Doppelklick auf Audio-Asset im Content Browser öffnet einen eigenen Tab. Play/Stop-Buttons, Lautstärke-Slider, Waveform-Balkengrafik (80 Balken aus Sample-Daten), Metadaten-Anzeige (Pfad, Channels, Sample Rate, Format, Duration, Dateigröße). Folgt dem Console/Profiler-Tab-Muster (rein UIManager-basiert, kein FBO). AudioPreviewState-Struct in UIManager verwaltet Tab-Lifecycle.
+
 **Beschreibung:** Einfaches Panel/Tab für Audio-Asset-Vorschau mit Waveform-Anzeige und Play/Stop.
 
 **Herangehensweise:**
@@ -321,10 +323,10 @@
 - Metadaten: Format, Sample Rate, Channels, Duration, Dateigröße
 
 **Fortschrittsprüfung:**
-- [ ] Audio kann abgespielt werden
+- [x] Audio kann abgespielt werden
 - [ ] Scrubber zeigt die aktuelle Position
-- [ ] Metadaten werden angezeigt
-- [ ] Waveform wird visuell dargestellt
+- [x] Metadaten werden angezeigt
+- [x] Waveform wird visuell dargestellt
 
 ### 2.7 Profiler / Performance-Monitor Tab
 **Priorität:** Mittel (F10 Overlay existiert, aber kein dedizierter Tab mit Verlaufshistorie)
@@ -375,13 +377,13 @@
 - [x] Toast-Nachricht informiert über den Import-Umfang
 
 ### 3.2 Smart Entity Templates / Prefabs
-**Aktueller Stand:** Keine Prefab- oder Template-Funktionalität. Jede Entity muss manuell konfiguriert werden.
+**Aktueller Stand:** Implementiert. `AssetType::Prefab` hinzugefügt. Content Browser → Rechtsklick → „Save as Prefab" speichert die selektierte Entity als Prefab-Asset (JSON mit allen Komponenten). Prefab-Assets im Content Browser mit eigenem Icon (entity.png, Teal-Tint) und Typ-Filter sichtbar. Drag & Drop eines Prefab-Assets auf den Viewport spawnt die Entity an der Cursor-Position. Doppelklick spawnt am Ursprung. „+ Entity"-Dropdown-Button in der Content-Browser-PathBar mit 7 Built-in-Templates (Empty Entity, Point Light, Directional Light, Camera, Static Mesh, Physics Object, Particle Emitter). Alle Operationen mit Undo/Redo.
 
 **Ziel:** Vorgefertigte Entity-Templates für häufige Anwendungsfälle, die per Drag & Drop instanziiert werden können.
 
 **Herangehensweise:**
 - Neuer Asset-Typ `AssetType::Prefab` (JSON: Liste von Entities mit Komponenten)
-- Content Browser → Rechtsklick → „New Prefab" erstellt ein Prefab aus der aktuell selektierten Entity (mit allen Komponenten)
+- Content Browser → Rechtsklick → „Save as Prefab" erstellt ein Prefab aus der aktuell selektierten Entity (mit allen Komponenten)
 - Drag & Drop eines Prefab-Assets auf den Viewport erzeugt alle Entities mit ihren Komponenten
 - Eingebaute Templates:
   - **Empty Entity** (nur Transform)
@@ -391,13 +393,13 @@
   - **Static Mesh** (Transform + Mesh + Material)
   - **Physics Object** (Transform + Mesh + Material + Physics)
   - **Particle Emitter** (Transform + ParticleEmitter)
-- „Templates"-Sektion im Content Browser oder als klappbare Palette im Outliner
+- „+ Entity"-Button in der Content-Browser-PathBar als Dropdown mit allen Built-in-Templates
 
 **Fortschrittsprüfung:**
-- [ ] „Create Prefab" aus selektierter Entity funktioniert
-- [ ] Prefab-Asset im Content Browser sichtbar
-- [ ] Drag & Drop erzeugt korrekte Entity mit allen Komponenten
-- [ ] Mindestens 5 Built-in-Templates verfügbar
+- [x] „Create Prefab" aus selektierter Entity funktioniert
+- [x] Prefab-Asset im Content Browser sichtbar
+- [x] Drag & Drop erzeugt korrekte Entity mit allen Komponenten
+- [x] Mindestens 5 Built-in-Templates verfügbar
 
 ### 3.3 One-Click Scene Setup
 **Aktueller Stand:** Implementiert. `createNewLevelWithTemplate()` in `UIManager` mit 3 Templates. „+ Level"-Dropdown-Button in der Content-Browser-PathBar (neben Import). ECS wird mit `initialize({})` zurückgesetzt, Entities per `onEntityAdded` registriert, Level sofort gespeichert. Editor-Kamera wird template-spezifisch positioniert.
@@ -605,7 +607,7 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 **Fortschrittsprüfung:**
 - [x] Ctrl+Klick fügt Entities zur Selektion hinzu
 - [x] Gizmo bewegt alle selektierten Entities gleichzeitig
-- [ ] Rubber-Band-Selection funktioniert im Viewport
+- [x] Rubber-Band-Selection funktioniert im Viewport
 - [x] Löschen entfernt alle selektierten Entities (mit Undo)
 
 ### 5.3 Entity Copy/Paste & Duplicate
@@ -683,10 +685,10 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 - In-App Shortcut-Hilfe (Ctrl+? oder F1 → Liste aller Shortcuts)
 
 **Fortschrittsprüfung:**
-- [ ] Alle bestehenden Shortcuts sind im ShortcutManager registriert
-- [ ] Editor Settings zeigen die Shortcut-Liste
-- [ ] Shortcuts können umbelegt werden
-- [ ] F1 zeigt die Shortcut-Hilfe
+- [x] Alle bestehenden Shortcuts sind im ShortcutManager registriert
+- [x] Editor Settings zeigen die Shortcut-Liste
+- [x] Shortcuts können umbelegt werden
+- [x] F1 zeigt die Shortcut-Hilfe
 
 ### 6.3 Benachrichtigungs- und Fortschritts-System
 **Aktueller Stand:** Toast-Benachrichtigungen und modale Progress-Dialoge existieren.
@@ -850,10 +852,10 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 - Gruppierte Undo-Commands (z.B. Multi-Entity-Delete als ein Undo-Schritt)
 
 **Fortschrittsprüfung:**
-- [ ] Wertänderung im Details-Panel ist undoable
-- [ ] Komponenten-Hinzufügen ist undoable
-- [ ] Material-Zuweisung per Drag & Drop ist undoable
-- [ ] Kein Undo-Fall wurde vergessen
+- [x] Wertänderung im Details-Panel ist undoable
+- [x] Komponenten-Hinzufügen ist undoable
+- [x] Material-Zuweisung per Drag & Drop ist undoable
+- [x] Kein Undo-Fall wurde vergessen
 
 ---
 
@@ -872,10 +874,10 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 | **2.3** | Texture Viewer | Mittel | Gering | ✅ |
 | **2.4** | Animation Editor | Mittel–Hoch | Hoch | ❌ |
 | **2.5** | Particle Editor | Mittel | Mittel | ❌ |
-| **2.6** | Audio Preview | Niedrig–Mittel | Gering | ❌ |
+| **2.6** | Audio Preview | Niedrig–Mittel | Gering | ✅ |
 | **2.7** | Profiler Tab | Mittel | Mittel | ✅ |
 | **3.1** | Auto-Material bei Import | Hoch | Gering | ✅ |
-| **3.2** | Entity Templates / Prefabs | Hoch | Mittel | ❌ |
+| **3.2** | Entity Templates / Prefabs | Hoch | Mittel | ✅ |
 | **3.3** | One-Click Scene Setup | Mittel | Gering | ✅ |
 | **3.4** | Auto-LOD-Generierung | Mittel | Hoch | ❌ |
 | **3.5** | Auto-Collider-Generierung | Mittel | Gering | ✅ |
@@ -885,7 +887,7 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 | **4.3** | Drag & Drop Verbesserungen | Mittel | Mittel | ❌ |
 | **4.4** | Asset-Referenz-Tracking | Mittel | Mittel | ❌ |
 | **5.1** | Viewport-Einstellungen Panel | Hoch | Gering | ✅ |
-| **5.2** | Multi-Select & Group Ops | Hoch | Hoch | ❌ |
+| **5.2** | Multi-Select & Group Ops | Hoch | Hoch | ✅ |
 | **5.3** | Entity Copy/Paste | Hoch | Gering | ✅ |
 | **5.4** | Transform-Einrasten | Mittel | Mittel | ✅ |
 | **6.1** | Docking-System | Niedrig | Sehr hoch | ❌ |
@@ -897,7 +899,7 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 | **8.1** | Tooltip-System | Hoch | Gering | ✅ |
 | **8.2** | Onboarding-Wizard | Niedrig | Mittel | ❌ |
 | **8.3** | Keyboard-Navigation | Mittel | Mittel | ❌ |
-| **8.4** | Undo/Redo-Erweiterungen | Hoch | Mittel | ❌ |
+| **8.4** | Undo/Redo-Erweiterungen | Hoch | Mittel | ✅ |
 
 ### Empfohlene Reihenfolge (Sprints)
 
@@ -914,7 +916,7 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 ~~4.1 Thumbnails~~🔄 (Textur-Thumbnails ✅, Mesh/Material ausstehend), ~~2.2 Material Editor Tab~~✅, ~~2.3 Texture Viewer~~✅
 
 **Sprint 5 – Viewport-Workflow:**
-~~3.6 Snap & Grid~~✅, 5.2 Multi-Select, 5.4 Surface-Snap
+~~3.6 Snap & Grid~~✅, ~~5.2 Multi-Select~~✅, 5.4 Surface-Snap
 
 **Sprint 6 – Erweiterte Tabs:**
 2.5 Particle Editor, 2.4 Animation Editor, 2.7 Profiler
@@ -923,7 +925,7 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 7.3 Script Hot-Reload, 7.1 Script Editor, 2.6 Audio Preview
 
 **Sprint 8 – Framework & Polish:**
-6.2 Shortcut-System, 8.3 Keyboard-Navigation, 8.4 Undo/Redo, 3.2 Prefabs
+6.2 Shortcut-System, 8.3 Keyboard-Navigation, ~~8.4 Undo/Redo~~✅, ~~3.2 Prefabs~~✅
 
 **Sprint 9 – Advanced:**
 3.4 Auto-LOD, 1.2 Elevation/Shadows, 1.5 Animations, 6.1 Docking

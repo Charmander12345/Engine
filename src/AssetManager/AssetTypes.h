@@ -16,5 +16,6 @@ enum class AssetType
     Shader,
     Level,
     Widget,
-    Skybox
+    Skybox,
+    Prefab
 };

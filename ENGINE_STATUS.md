@@ -5,7 +5,17 @@
 
 ---
 
+## Letzte Änderung (Content Browser / ECS)
+
+- ✅ `Entity Templates / Prefabs (Phase 3.2)`: Neuer Asset-Typ `AssetType::Prefab` für serialisierbare Entity-Vorlagen. Content Browser → Rechtsklick → „Save as Prefab" speichert die selektierte Entity mit allen 13 Komponententypen als JSON-Asset (Magic 0x41535453, Version 2, Type 12). Prefab-Assets im Content Browser mit eigenem Icon (`entity.png`, Teal-Tint) und Typ-Filter-Button. Drag & Drop auf den Viewport spawnt Entity an der Cursor-Position (`screenToWorldPos`-Fallback auf Kamera-Richtung). Doppelklick spawnt am Ursprung. „+ Entity"-Dropdown-Button in der Content-Browser-PathBar mit 7 Built-in-Templates: Empty Entity, Point Light, Directional Light, Camera, Static Mesh, Physics Object, Particle Emitter. Alle Spawn-Operationen mit Undo/Redo-Integration. Neue Methoden in `UIManager`: `savePrefabFromEntity()`, `spawnPrefabAtPosition()`, `spawnBuiltinTemplate()`. Interne Helfer: `prefabSerializeEntity()`/`prefabDeserializeEntity()` serialisieren/deserialisieren alle ECS-Komponenten.
+
+## Letzte Änderung (Toast Notification Levels – Phase 6.3)
+
+- ✅ `Toast NotificationLevel (Phase 6.3)`: Einheitliches `NotificationLevel`-Enum (`Info`, `Success`, `Warning`, `Error`) in `DiagnosticsManager.h`, per `using`-Alias in `UIManager` übernommen. `ToastNotification`-Struct um `level`-Feld erweitert. `enqueueToastNotification()` akzeptiert optionalen Level-Parameter (default `Info`). `showToastMessage()` erhöht Mindestdauer für Warning (≥4s) und Error (≥5s). `createToastWidget()` rendert farbigen 4px-Akzentbalken links am Toast (Theme-Farben: `accentColor`/`successColor`/`warningColor`/`errorColor`). Notification History speichert Level pro Eintrag. Alle Aufrufer aktualisiert: `AssetManager.cpp` (7 Stellen), `PythonScripting.cpp` (3 Stellen) mit passenden Error/Success-Levels.
+
 ## Letzte Änderung (Viewport)
+
+- ✅ `Rubber-Band-Selection (Phase 5.2)`: Marquee-Selektion im Viewport implementiert. Linksklick+Drag im Viewport zieht ein halbtransparentes blaues Auswahlrechteck auf. Bei Mouse-Up werden alle Entities im Rechteck über den Pick-Buffer (glReadPixels-Block) selektiert. Ctrl+Drag für additive Selektion. Bei kleinem Rechteck (<4px) Fallback auf Einzel-Pick. `Renderer.h`: 6 virtuelle Methoden (`beginRubberBand`, `updateRubberBand`, `endRubberBand`, `cancelRubberBand`, `isRubberBandActive`, `getRubberBandStart`). `OpenGLRenderer`: State-Members (`m_rubberBandActive`, `m_rubberBandStart`, `m_rubberBandEnd`), `resolveRubberBandSelection()` liest Pick-FBO blockweise, `drawRubberBand()` rendert Overlay mit Gizmo-Shader (Fill + Border). `main.cpp`: Mouse-Down startet Rubber-Band (statt sofortigem Pick), Motion aktualisiert, Mouse-Up resolved oder fällt auf Pick zurück.
 
 - ✅ `Material Editor Tab (Phase 2.2)`: Vollwertiger Editor-Tab für Material-Assets statt Popup. Doppelklick auf Material im Content Browser öffnet dedizierten Tab mit 3D-Preview (Cube + Directional Light + Ground Plane via eigenem Runtime-Level) und rechtem Properties-Panel. Properties-Panel enthält: PBR-Section (PBR-Checkbox, Metallic/Roughness/Shininess-Slider), Textures-Section (5 Textur-Slot-Einträge: Diffuse, Specular, Normal, Emissive, MetallicRoughness), Save-Button. Neue `MaterialEditorWindow`-Klasse (`src/Renderer/EditorWindows/`) folgt MeshViewerWindow-Architektur: `initialize()`, `createRuntimeLevel()` (JSON-Entities), `take/giveRuntimeLevel()`. `OpenGLRenderer`: `m_materialEditors`-Map, `openMaterialEditorTab()`/`closeMaterialEditorTab()`/`getMaterialEditor()`. `setActiveTab()` erweitert für Material-Editor-Level-Swap (leaving/entering/returning in allen 3 Branches). `Renderer.h` um 3 neue virtuelle Methoden erweitert. Properties-Panel nutzt `EditorUIBuilder`-Factories (makeSliderRow, makeCheckBox, makeStringRow, makeSection, makePrimaryButton).
 
@@ -522,6 +532,8 @@
 | **Gruppen-Gizmo** (Translate/Rotate/Scale aller selektierten Entities gleichzeitig) | ✅ |
 | **Gruppen-Löschen** (DELETE löscht alle selektierten Entities, Gruppen-Undo/Redo) | ✅ |
 | **Gruppen-Undo/Redo** (Einzelner Undo-Command für Multi-Entity-Transform/Delete) | ✅ |
+| **Rubber-Band-Selection** (Marquee-Rechteck im Viewport aufziehen → alle Entities im Bereich selektieren, Ctrl+Drag für additive Selektion, Fallback auf Einzel-Pick bei kleinem Rect) | ✅ |
+| **Prefab / Entity Templates** (AssetType::Prefab, Save as Prefab, Drag & Drop Spawn, Doppelklick Spawn, „+ Entity"-Dropdown mit 7 Built-in-Templates, Undo/Redo) | ✅ |
 | Screen-to-World (Depth-Buffer Unproject)  | ✅     |
 | Selection-Outline (Edge-Detection, Multi-Entity) | ✅     |
 | GPU Timer Queries (Triple-Buffered)       | ✅     |
@@ -931,6 +943,7 @@ CMake-Targets konsolidiert: `RendererCore` (OBJECT-Lib, abstrakte Schicht) einge
   - Gizmo-Drag hat Vorrang vor Entity-Picking (Klick auf Achse startet Drag, nicht neuen Pick)
   - Eigener GLSL-Shader (Vertex + Fragment) mit dynamischem VBO für Linien-Geometrie
 - Mesh-Viewer-Tabs für 3D-Modell-Vorschau implementiert (Doppelklick auf Model3D im Content Browser)
+- **Audio Preview Tab (Phase 2.6):** Doppelklick auf Audio-Asset im Content Browser öffnet einen eigenen Tab mit Play/Stop-Buttons, Lautstärke-Slider, Waveform-Balkengrafik (80 Balken aus Sample-Daten) und Metadaten-Anzeige (Pfad, Channels, Sample Rate, Format, Duration, Dateigröße). Folgt dem Console/Profiler-Tab-Muster (rein UIManager-basiert, kein FBO). `AudioPreviewState`-Struct in `UIManager` verwaltet Tab-Lifecycle.
 - **StatusBar (Fußleiste):**
   - Horizontales Widget am unteren Fensterrand (32px, z-order=3, BottomLeft, fillX)
   - Undo-Button + Redo-Button links, Dirty-Asset-Zähler Mitte, Save-All-Button rechts
@@ -1391,7 +1404,7 @@ Große Feature-Blöcke, die noch nicht existieren:
 
 | System                            | Status | Beschreibung                                                                   |
 |-----------------------------------|--------|--------------------------------------------------------------------------------|
-| **Undo/Redo**                    | ✅     | Command-Pattern für Editor-Aktionen (UndoRedoManager-Singleton, Ctrl+Z/Y, StatusBar-Buttons). Entity-Löschen (DELETE) mit vollständigem Komponenten-Snapshot (Einzel- und Gruppen-Delete), Entity-Spawn (Drag-and-Drop) und Landscape-Erstellung erzeugen Undo/Redo-Actions. Multi-Entity-Transform-Undo via `m_gizmoDragOldTransforms`-Map. |
+| **Undo/Redo**                    | ✅     | Command-Pattern für Editor-Aktionen (UndoRedoManager-Singleton, Ctrl+Z/Y, StatusBar-Buttons). Entity-Löschen (DELETE) mit vollständigem Komponenten-Snapshot (Einzel- und Gruppen-Delete), Entity-Spawn (Drag-and-Drop) und Landscape-Erstellung erzeugen Undo/Redo-Actions. Multi-Entity-Transform-Undo via `m_gizmoDragOldTransforms`-Map. **Erweitert (Phase 8.4):** Alle Details-Panel-Wertänderungen (Transform, Light, Camera, Collision, Physics, ParticleEmitter, Name), Komponenten-Hinzufügen/Entfernen und Asset-Zuweisungen (Mesh/Material/Script) sind jetzt vollständig undoable via `setCompFieldWithUndo<>`-Template-Helper. |
 | **Editor-Gizmos**               | ✅     | Translate/Rotate/Scale-Gizmos für Entity-Manipulation (W/E/R Shortcuts). Multi-Entity-Gruppen-Gizmo: Transformiert alle selektierten Entities gleichzeitig mit einem einzigen Undo-Command. |
 | **Shadow Mapping (Dir/Spot)**    | ✅     | Multi-Light Shadow Maps für bis zu 4 Directional/Spot Lights, 5×5 PCF       |
 | **Shadow Mapping (Point Lights)**| ✅     | Omnidirektionale Cube-Map Shadows für bis zu 4 Point Lights via Geometry-Shader |
@@ -1400,6 +1413,7 @@ Große Feature-Blöcke, die noch nicht existieren:
 | **Paralleles Asset-Laden**       | ✅     | Dreiphasen-Architektur: `readAssetFromDisk()` (thread-safe Disk-I/O + CPU), `finalizeAssetLoad()` (Registration), GPU-Upload. Thread-Pool mit `hardware_concurrency()` Threads + globaler Job-Queue. `loadBatchParallel()` dispatched in den Pool mit Batch-Wait (atomic counter + CV). `preloadLevelAssets()` warmed den Cache beim Scene-Prepare mit allen Mesh-, Material- und Textur-Assets. |
 | **Physik-System (Jolt)**         | ✅     | `PhysicsWorld`-Singleton mit Backend-Abstraktion (`IPhysicsBackend`). `JoltBackend` (Jolt Physics v5.5.1). Zwei ECS-Komponenten: `CollisionComponent` + `PhysicsComponent`. BodyDesc/BodyState für backend-agnostische Body-Verwaltung. ECS↔Backend-Sync in PhysicsWorld, alle Jolt-spezifischen Typen in JoltBackend isoliert. |
 | **Physik-System (PhysX)**        | ✅     | `PhysXBackend` (NVIDIA PhysX 5.6.1, `external/PhysX/`). Optional via `ENGINE_PHYSX_BACKEND` CMake-Option. Kontakt-Callbacks (`SimCallbackImpl`), Euler↔Quat-Konvertierung, PVD-Support. `PhysicsWorld::Backend`-Enum (Jolt/PhysX) für Backend-Auswahl bei `initialize()`. |
+| **Keyboard-Shortcut-System**    | ✅     | `ShortcutManager` Singleton (`src/Core/ShortcutManager.h/.cpp`). 20 Shortcuts registriert (Editor/Gizmo/Debug/PIE). Konfigurations-UI in Editor Settings (Rebind-Buttons, KeyCapture, Konflikt-Erkennung, Reset All). F1 Shortcut-Hilfe Popup. Persistenz via `shortcuts.cfg` im Projektverzeichnis. |
 
 ---
 
@@ -1470,6 +1484,7 @@ Große Feature-Blöcke, die noch nicht existieren:
 - **Bugfix: PhysX HeightField Fall-Through** – `PhysXBackend::createBody()` behandelte `heightSampleCount` fälschlich als Gesamtzahl (√N), obwohl es die Per-Side-Anzahl ist. Zusätzlich fehlte die Anwendung des HeightField-Offsets als Shape-Local-Pose und Row/Column-Scales waren vertauscht. Behoben: Direktverwendung von `heightSampleCount`, Offset als `setLocalPose`, korrektes Scale-Mapping (Row=Z, Column=X).
 - **Bugfix: Jolt HeightField Stuck** – Jolt erfordert `sampleCount = 2^n + 1` (z.B. 3, 5, 9, 17). Der LandscapeManager erzeugte `sampleCount = gridSize + 1 = 4`, was Jolts `HeightFieldShapeSettings::Create()` zum Fehler veranlasste und ein winziges BoxShape-Fallback einsetzte. Behoben: (1) `JoltBackend` resampled per bilinearer Interpolation auf den nächsten gültigen Count, (2) `LandscapeManager` rundet gridSize auf die nächste Zweierpotenz auf.
 - **Bugfix: Crash bei Projekterstellung (Use-After-Free)** – Der temporäre `UIManager` (Projekt-Auswahl-Screen) registrierte einen `ActiveLevelChangedCallback` beim `DiagnosticsManager` mit `this`-Capture, wurde aber zerstört ohne den Callback abzumelden. Beim anschließenden `createProject()` → `setActiveLevel()` wurde der dangling Callback aufgerufen → Crash. Behoben: Callback-System auf Token-basierte `unordered_map` umgestellt (`registerActiveLevelChangedCallback` gibt `size_t`-Token zurück, `unregisterActiveLevelChangedCallback(token)` entfernt ihn). `UIManager::~UIManager()` meldet den Callback sauber ab.
+- ✅ `Keyboard-Shortcut-System (Phase 6.2)`: Zentrales, konfigurierbares Shortcut-System implementiert. **ShortcutManager** Singleton (`src/Core/ShortcutManager.h/.cpp`) mit Registry aller Aktionen (id, displayName, category, defaultCombo, currentCombo, phase, callback). 20 Shortcuts registriert in `main.cpp` (Editor: Undo/Redo/Save/Copy/Paste/Duplicate/Delete/SearchCB/FocusSelected/DropToSurface/ImportDialog/ToggleFPSCap, Gizmo: W/E/R, Debug: F8/F9/F10/F11, PIE: Escape/Shift+F1). **Konfigurations-UI** in Editor Settings Popup: Shortcut-Liste nach Kategorien gruppiert, klickbare Keybind-Buttons zum Umbelegen (KeyCaptureCallback-Mechanismus in UIManager), Konflikt-Erkennung mit Logger-Warnung, „Reset All to Defaults" Button. **F1 Shortcut-Hilfe Popup**: `openShortcutHelpPopup()` zeigt alle registrierten Shortcuts als scrollbare Liste nach Kategorien sortiert. **Persistenz**: `shortcuts.cfg` im Projektverzeichnis (Text-Format: id key mods), geladen nach Shortcut-Registrierung, gespeichert beim Shutdown.
 
 ---
 

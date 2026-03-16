@@ -138,14 +138,23 @@ public:
     bool isShutdownRequested() const;
     void resetShutdownRequest();
 
+    enum class NotificationLevel
+    {
+        Info,
+        Success,
+        Warning,
+        Error
+    };
+
     struct ToastNotification
     {
         std::string message;
         float durationSeconds{ 0.0f };
+        NotificationLevel level{ NotificationLevel::Info };
     };
 
     void enqueueModalNotification(const std::string& message, bool dedupe = true);
-    void enqueueToastNotification(const std::string& message, float durationSeconds);
+    void enqueueToastNotification(const std::string& message, float durationSeconds, NotificationLevel level = NotificationLevel::Info);
     std::vector<std::string> consumeModalNotifications();
     std::vector<ToastNotification> consumeToastNotifications();
 

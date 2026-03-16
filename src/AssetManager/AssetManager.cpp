@@ -1980,7 +1980,33 @@ void AssetManager::ensureEditorWidgetsCreated()
         saveBtn["tooltipText"] = "Save all unsaved assets (Ctrl+S)";
         saveBtn["clickEvent"] = "StatusBar.Save";
 
-        row["children"] = json::array({ undoBtn, redoBtn, spacer, dirtyLabel, saveBtn });
+        json notifSpacer = json::object();
+        notifSpacer["id"] = "StatusBar.NotifSpacer";
+        notifSpacer["type"] = "Panel";
+        notifSpacer["minSize"] = json{ {"x", S(6.0f)}, {"y", 0.0f} };
+        notifSpacer["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+
+        json notifBtn = json::object();
+        notifBtn["id"] = "StatusBar.Notifications";
+        notifBtn["type"] = "Button";
+        notifBtn["text"] = "\xF0\x9F\x94\x94";  // 🔔 bell emoji
+        notifBtn["font"] = "default.ttf";
+        notifBtn["fontSize"] = t.fontSizeBody;
+        notifBtn["textAlignH"] = "Center";
+        notifBtn["textAlignV"] = "Center";
+        notifBtn["padding"] = json{ {"x", S(6.0f)}, {"y", S(4.0f)} };
+        notifBtn["minSize"] = json{ {"x", S(32.0f)}, {"y", S(22.0f)} };
+        notifBtn["color"] = json{ {"x", 0.16f}, {"y", 0.16f}, {"z", 0.2f}, {"w", 0.95f} };
+        notifBtn["hoverColor"] = json{ {"x", 0.24f}, {"y", 0.24f}, {"z", 0.3f}, {"w", 0.98f} };
+        notifBtn["textColor"] = json{ {"x", 0.7f}, {"y", 0.7f}, {"z", 0.75f}, {"w", 1.0f} };
+        notifBtn["borderRadius"] = S(4.0f);
+        notifBtn["shaderVertex"] = "button_vertex.glsl";
+        notifBtn["shaderFragment"] = "button_fragment.glsl";
+        notifBtn["isHitTestable"] = true;
+        notifBtn["tooltipText"] = "Notification History";
+        notifBtn["clickEvent"] = "StatusBar.Notifications";
+
+        row["children"] = json::array({ undoBtn, redoBtn, spacer, dirtyLabel, saveBtn, notifSpacer, notifBtn });
         elements.push_back(row);
         widgetJson["m_elements"] = elements;
 
@@ -3892,7 +3918,7 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 	if (!diagnostics.isProjectLoaded())
 	{
 		logger.log(Logger::Category::AssetManagement, "Import failed: no project loaded.", Logger::LogLevel::ERROR);
-		diagnostics.enqueueToastNotification("Import failed: no project loaded.", 4.0f);
+		diagnostics.enqueueToastNotification("Import failed: no project loaded.", 4.0f, DiagnosticsManager::NotificationLevel::Error);
 		diagnostics.updateActionProgress(ActionID, false);
 		return;
 	}
@@ -3900,7 +3926,7 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 	if (!fs::exists(path))
 	{
 		logger.log(Logger::Category::AssetManagement, "Import asset failed: file does not exist: " + path, Logger::LogLevel::ERROR);
-		diagnostics.enqueueToastNotification("Import failed: file not found.", 4.0f);
+		diagnostics.enqueueToastNotification("Import failed: file not found.", 4.0f, DiagnosticsManager::NotificationLevel::Error);
 		diagnostics.updateActionProgress(ActionID, false);
 		return;
 	}
@@ -3913,7 +3939,7 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 	if (detectedType == AssetType::Unknown)
 	{
 		logger.log(Logger::Category::AssetManagement, "Import failed: unsupported file format: " + sourcePath.extension().string(), Logger::LogLevel::ERROR);
-		diagnostics.enqueueToastNotification("Import failed: unsupported format " + sourcePath.extension().string(), 4.0f);
+		diagnostics.enqueueToastNotification("Import failed: unsupported format " + sourcePath.extension().string(), 4.0f, DiagnosticsManager::NotificationLevel::Error);
 		diagnostics.updateActionProgress(ActionID, false);
 		return;
 	}
@@ -4594,7 +4620,7 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 					if (createdTextureCount > 0)
 						toastMsg += " " + std::to_string(createdTextureCount) + " texture(s)";
 				}
-				diagnostics.enqueueToastNotification(toastMsg, 4.0f);
+				diagnostics.enqueueToastNotification(toastMsg, 4.0f, DiagnosticsManager::NotificationLevel::Success);
 			}
 		}
 
@@ -4638,7 +4664,7 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 	if (!success)
 	{
 		const std::string failName = sourcePath.filename().string();
-		diagnostics.enqueueToastNotification("Import failed: " + failName, 4.0f);
+		diagnostics.enqueueToastNotification("Import failed: " + failName, 4.0f, DiagnosticsManager::NotificationLevel::Error);
 		diagnostics.updateActionProgress(ActionID, false);
 		return;
 	}
@@ -4651,7 +4677,7 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 	if (!out.is_open())
 	{
 		logger.log(Logger::Category::AssetManagement, "Import failed: could not create .asset file: " + destAssetPath.string(), Logger::LogLevel::ERROR);
-		diagnostics.enqueueToastNotification("Import failed: could not write asset file.", 4.0f);
+		diagnostics.enqueueToastNotification("Import failed: could not write asset file.", 4.0f, DiagnosticsManager::NotificationLevel::Error);
 		diagnostics.updateActionProgress(ActionID, false);
 		return;
 	}
@@ -4679,7 +4705,7 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 		Logger::LogLevel::INFO);
 	// Model3D sends its own detailed toast with material/texture counts
 	if (detectedType != AssetType::Model3D)
-		diagnostics.enqueueToastNotification("Imported: " + assetName, 3.0f);
+		diagnostics.enqueueToastNotification("Imported: " + assetName, 3.0f, DiagnosticsManager::NotificationLevel::Success);
 
 	if (m_onImportCompleted)
 	{

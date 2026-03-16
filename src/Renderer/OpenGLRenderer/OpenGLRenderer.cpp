@@ -2247,6 +2247,16 @@ void OpenGLRenderer::renderWorld()
 		renderGizmo(view, m_projectionMatrix);
 	}
 
+	// Draw rubber-band rectangle overlay (screen-space)
+	if (m_rubberBandActive && !diagnostics.isPIEActive())
+	{
+		// Rubber-band coords are in full-window SDL space, so use full FBO viewport
+		glViewport(0, 0, fullWidth, fullHeight);
+		const glm::mat4 rbOrtho = glm::ortho(0.0f, static_cast<float>(fullWidth), static_cast<float>(fullHeight), 0.0f);
+		drawRubberBand(rbOrtho);
+		glViewport(vpX, viewportY, width, height);
+	}
+
 	// Deferred FXAA pass: apply after overlays (gizmos, outlines) so they also get AA.
 	// Use content-rect viewport so FXAA does not process the clear-colour border.
 	if (usePostProcess && m_aaMode == AntiAliasingMode::FXAA)
@@ -11275,4 +11285,159 @@ void OpenGLRenderer::endGizmoDrag()
 
 	m_gizmoDragging = false;
 	m_gizmoActiveAxis = GizmoAxis::None;
+}
+
+// ── Rubber-Band (Marquee) Selection ─────────────────────────────────────────
+
+void OpenGLRenderer::beginRubberBand(int screenX, int screenY)
+{
+	m_rubberBandActive = true;
+	m_rubberBandStart = Vec2{ static_cast<float>(screenX), static_cast<float>(screenY) };
+	m_rubberBandEnd = m_rubberBandStart;
+}
+
+void OpenGLRenderer::updateRubberBand(int screenX, int screenY)
+{
+	if (!m_rubberBandActive)
+		return;
+	m_rubberBandEnd = Vec2{ static_cast<float>(screenX), static_cast<float>(screenY) };
+}
+
+void OpenGLRenderer::endRubberBand(bool ctrlHeld)
+{
+	if (!m_rubberBandActive)
+		return;
+	m_rubberBandActive = false;
+
+	// Only resolve if the rectangle has a meaningful size (> 4 px in both axes)
+	const float dx = std::abs(m_rubberBandEnd.x - m_rubberBandStart.x);
+	const float dy = std::abs(m_rubberBandEnd.y - m_rubberBandStart.y);
+	if (dx > 4.0f && dy > 4.0f)
+	{
+		if (!ctrlHeld)
+			m_selectedEntities.clear();
+		resolveRubberBandSelection();
+	}
+}
+
+void OpenGLRenderer::cancelRubberBand()
+{
+	m_rubberBandActive = false;
+}
+
+void OpenGLRenderer::resolveRubberBandSelection()
+{
+	// Ensure pick buffer is freshly rendered before reading
+	const Vec2 vs = getViewportSize();
+	const int vpW = static_cast<int>(vs.x);
+	const int vpH = static_cast<int>(vs.y);
+	if (vpW <= 0 || vpH <= 0)
+		return;
+	if (!ensurePickFbo(vpW, vpH))
+		return;
+	renderPickBuffer(m_lastViewMatrix, m_projectionMatrix);
+
+	// Compute pixel rect in screen-space
+	const int x0 = static_cast<int>(std::min(m_rubberBandStart.x, m_rubberBandEnd.x));
+	const int y0 = static_cast<int>(std::min(m_rubberBandStart.y, m_rubberBandEnd.y));
+	const int x1 = static_cast<int>(std::max(m_rubberBandStart.x, m_rubberBandEnd.x));
+	const int y1 = static_cast<int>(std::max(m_rubberBandStart.y, m_rubberBandEnd.y));
+
+	const int rectW = x1 - x0;
+	const int rectH = y1 - y0;
+	if (rectW <= 0 || rectH <= 0)
+		return;
+
+	// Clamp to pick-buffer dimensions
+	const int rx0 = std::max(0, std::min(x0, m_pickWidth - 1));
+	const int ry0 = std::max(0, std::min(y0, m_pickHeight - 1));
+	const int rx1 = std::max(0, std::min(x1, m_pickWidth));
+	const int ry1 = std::max(0, std::min(y1, m_pickHeight));
+
+	const int clampedW = rx1 - rx0;
+	const int clampedH = ry1 - ry0;
+	if (clampedW <= 0 || clampedH <= 0)
+		return;
+
+	// Read a block of entity IDs from the pick buffer (GL Y is flipped)
+	const int glY = m_pickHeight - ry1; // bottom-left in GL coords
+	std::vector<unsigned int> pixels(static_cast<size_t>(clampedW) * clampedH, 0u);
+
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, m_pickFbo);
+	glReadPixels(rx0, glY, clampedW, clampedH, GL_RED_INTEGER, GL_UNSIGNED_INT, pixels.data());
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+
+	// Collect unique non-zero entity IDs
+	for (unsigned int eid : pixels)
+	{
+		if (eid != 0)
+			m_selectedEntities.insert(eid);
+	}
+}
+
+void OpenGLRenderer::drawRubberBand(const glm::mat4& ortho)
+{
+	if (!m_rubberBandActive)
+		return;
+
+	const float x0 = std::min(m_rubberBandStart.x, m_rubberBandEnd.x);
+	const float y0 = std::min(m_rubberBandStart.y, m_rubberBandEnd.y);
+	const float x1 = std::max(m_rubberBandStart.x, m_rubberBandEnd.x);
+	const float y1 = std::max(m_rubberBandStart.y, m_rubberBandEnd.y);
+
+	// Build a simple quad (two triangles) for the filled rectangle
+	const float verts[] = {
+		x0, y0,  x1, y0,  x1, y1,
+		x0, y0,  x1, y1,  x0, y1
+	};
+
+	// Use a tiny immediate-mode VAO/VBO for the overlay
+	GLuint vao = 0, vbo = 0;
+	glGenVertexArrays(1, &vao);
+	glGenBuffers(1, &vbo);
+	glBindVertexArray(vao);
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STREAM_DRAW);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
+
+	// Use the gizmo shader (simple MVP + uniform colour) if available
+	if (m_gizmoProgram != 0)
+	{
+		glUseProgram(m_gizmoProgram);
+		if (m_gizmoLocMVP >= 0)
+			glUniformMatrix4fv(m_gizmoLocMVP, 1, GL_FALSE, glm::value_ptr(ortho));
+
+		glDisable(GL_DEPTH_TEST);
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+		// Filled rectangle (semi-transparent blue)
+		if (m_gizmoLocColor >= 0)
+			glUniform4f(m_gizmoLocColor, 0.25f, 0.56f, 1.0f, 0.18f);
+		glDrawArrays(GL_TRIANGLES, 0, 6);
+
+		// Border (opaque blue, 1.5 px)
+		if (m_gizmoLocColor >= 0)
+			glUniform4f(m_gizmoLocColor, 0.25f, 0.56f, 1.0f, 0.85f);
+		glLineWidth(1.5f);
+
+		// Build a line-loop for the border
+		const float borderVerts[] = {
+			x0, y0,  x1, y0,
+			x1, y0,  x1, y1,
+			x1, y1,  x0, y1,
+			x0, y1,  x0, y0
+		};
+		glBufferData(GL_ARRAY_BUFFER, sizeof(borderVerts), borderVerts, GL_STREAM_DRAW);
+		glDrawArrays(GL_LINES, 0, 8);
+
+		glDisable(GL_BLEND);
+		glEnable(GL_DEPTH_TEST);
+		glUseProgram(0);
+	}
+
+	glBindVertexArray(0);
+	glDeleteBuffers(1, &vbo);
+	glDeleteVertexArrays(1, &vao);
 }

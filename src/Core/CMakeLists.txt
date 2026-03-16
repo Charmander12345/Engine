@@ -7,6 +7,8 @@ add_library(Core SHARED
     "AudioManager.h"
     "UndoRedoManager.cpp"
     "UndoRedoManager.h"
+    "ShortcutManager.cpp"
+    "ShortcutManager.h"
     "../Renderer/Texture.cpp"
     "../Renderer/Texture.h"
     "../Renderer/Material.h"

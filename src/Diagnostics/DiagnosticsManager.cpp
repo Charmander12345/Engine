@@ -152,7 +152,7 @@ void DiagnosticsManager::enqueueModalNotification(const std::string& message, bo
     m_modalNotifications.push_back(message);
 }
 
-void DiagnosticsManager::enqueueToastNotification(const std::string& message, float durationSeconds)
+void DiagnosticsManager::enqueueToastNotification(const std::string& message, float durationSeconds, NotificationLevel level)
 {
     if (message.empty())
     {
@@ -162,6 +162,7 @@ void DiagnosticsManager::enqueueToastNotification(const std::string& message, fl
     ToastNotification toast{};
     toast.message = message;
     toast.durationSeconds = durationSeconds;
+    toast.level = level;
     m_toastNotifications.push_back(std::move(toast));
 }
 

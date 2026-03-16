@@ -27,6 +27,8 @@
 #include "EditorTheme.h"
 #include "EditorUIBuilder.h"
 #include "WidgetDetailSchema.h"
+#include "../Core/ShortcutManager.h"
+#include "../Core/AudioManager.h"
 #include "../AssetManager/AssetManager.h"
 #include "../AssetManager/AssetTypes.h"
 #include "Renderer.h"
@@ -1823,22 +1825,48 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
 
 void UIManager::showToastMessage(const std::string& message, float durationSeconds)
 {
+    showToastMessage(message, durationSeconds, NotificationLevel::Info);
+}
+
+void UIManager::showToastMessage(const std::string& message, float durationSeconds, NotificationLevel level)
+{
     if (message.empty())
     {
         return;
     }
 
+    // Error notifications stay visible longer
+    float effectiveDuration = durationSeconds;
+    if (level == NotificationLevel::Error)
+        effectiveDuration = std::max(effectiveDuration, 5.0f);
+    else if (level == NotificationLevel::Warning)
+        effectiveDuration = std::max(effectiveDuration, 4.0f);
+
     ToastNotification toast{};
-    toast.duration = std::max(0.1f, durationSeconds);
+    toast.duration = std::max(0.1f, effectiveDuration);
     toast.timer = toast.duration;
     toast.id = "ToastMessage." + std::to_string(m_nextToastId++);
-    toast.widget = createToastWidget(message, toast.id);
+    toast.level = level;
+    toast.widget = createToastWidget(message, toast.id, level);
     if (toast.widget)
     {
         registerWidget(toast.id, toast.widget);
         m_toasts.push_back(std::move(toast));
         updateToastStackLayout();
     }
+
+    // Record in notification history
+    NotificationHistoryEntry entry{};
+    entry.message = message;
+    entry.level = level;
+    entry.timestampMs = SDL_GetTicks();
+    m_notificationHistory.push_front(std::move(entry));
+    while (m_notificationHistory.size() > kMaxNotificationHistory)
+        m_notificationHistory.pop_back();
+    ++m_unreadNotificationCount;
+
+    // Update badge in StatusBar
+    refreshNotificationBadge();
 }
 
 void UIManager::updateNotifications(float deltaSeconds)
@@ -1893,7 +1921,7 @@ void UIManager::updateNotifications(float deltaSeconds)
         const auto toastNotifications = diagnostics.consumeToastNotifications();
         for (const auto& toast : toastNotifications)
         {
-            showToastMessage(toast.message, toast.durationSeconds);
+            showToastMessage(toast.message, toast.durationSeconds, toast.level);
         }
     }
 
@@ -2160,6 +2188,41 @@ void UIManager::selectEntity(unsigned int entity)
     populateOutlinerDetails(entity);
 }
 
+// ── Undo/Redo helper: capture old component state, apply mutation, push command ──
+namespace {
+    template<typename CompT>
+    void setCompFieldWithUndo(unsigned int entity, const std::string& desc,
+        std::function<void(CompT&)> applyChange)
+    {
+        auto e = static_cast<ECS::Entity>(entity);
+        auto& ecs = ECS::ECSManager::Instance();
+        auto* comp = ecs.getComponent<CompT>(e);
+        if (!comp) return;
+        CompT oldComp = *comp;
+        CompT newComp = *comp;
+        applyChange(newComp);
+        ecs.setComponent<CompT>(e, newComp);
+        DiagnosticsManager::Instance().invalidateEntity(entity);
+        UndoRedoManager::Instance().pushCommand({
+            desc,
+            [entity, newComp]() {
+                auto e2 = static_cast<ECS::Entity>(entity);
+                auto& ecs2 = ECS::ECSManager::Instance();
+                if (ecs2.hasComponent<CompT>(e2))
+                    ecs2.setComponent<CompT>(e2, newComp);
+                DiagnosticsManager::Instance().invalidateEntity(entity);
+            },
+            [entity, oldComp]() {
+                auto e2 = static_cast<ECS::Entity>(entity);
+                auto& ecs2 = ECS::ECSManager::Instance();
+                if (ecs2.hasComponent<CompT>(e2))
+                    ecs2.setComponent<CompT>(e2, oldComp);
+                DiagnosticsManager::Instance().invalidateEntity(entity);
+            }
+        });
+    }
+} // anonymous namespace
+
 void UIManager::populateOutlinerDetails(unsigned int entity)
 {
     auto* detailsEntry = findWidgetEntry("EntityDetails");
@@ -2303,23 +2366,33 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
         nameEntry.setPadding(theme.paddingNormal);
         nameEntry.setOnValueChanged([this, entity](const std::string& val) {
             auto& ecs = ECS::ECSManager::Instance();
-            if (auto* comp = ecs.getComponent<ECS::NameComponent>(entity))
-            {
-                ECS::NameComponent updated = *comp;
-                updated.displayName = val;
-                ecs.setComponent<ECS::NameComponent>(entity, updated);
-            }
+            auto* comp = ecs.getComponent<ECS::NameComponent>(entity);
+            if (!comp) return;
+            ECS::NameComponent oldComp = *comp;
+            ECS::NameComponent newComp = *comp;
+            newComp.displayName = val;
+            ecs.setComponent<ECS::NameComponent>(entity, newComp);
             // Update the entity header label in the details panel
             if (auto* lbl = findElementById("Details.Entity.NameLabel"))
             {
                 lbl->text = "Name: " + (val.empty() ? std::string("<unnamed>") : val);
             }
             refreshWorldOutliner();
-            auto& diag = DiagnosticsManager::Instance();
-            if (auto* level = diag.getActiveLevelSoft())
-            {
-                level->setIsSaved(false);
-            }
+            UndoRedoManager::Instance().pushCommand({
+                "Rename Entity",
+                [this, entity, newComp]() {
+                    auto& ecs2 = ECS::ECSManager::Instance();
+                    if (ecs2.hasComponent<ECS::NameComponent>(entity))
+                        ecs2.setComponent<ECS::NameComponent>(entity, newComp);
+                    refreshWorldOutliner();
+                },
+                [this, entity, oldComp]() {
+                    auto& ecs2 = ECS::ECSManager::Instance();
+                    if (ecs2.hasComponent<ECS::NameComponent>(entity))
+                        ecs2.setComponent<ECS::NameComponent>(entity, oldComp);
+                    refreshWorldOutliner();
+                }
+            });
         });
         WidgetElement nameEl = nameEntry.toElement();
         nameEl.id = "Details.Name.Entry";
@@ -2327,11 +2400,16 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
         nameEl.runtimeOnly = true;
         lines.push_back(std::move(nameEl));
 
-        addSeparator("Name", lines, [this, entity]() {
+        addSeparator("Name", lines, [this, entity, saved = *nameComponent]() {
             ECS::ECSManager::Instance().removeComponent<ECS::NameComponent>(entity);
             if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
             populateOutlinerDetails(entity);
             refreshWorldOutliner();
+            UndoRedoManager::Instance().pushCommand({
+                "Remove Name",
+                [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::NameComponent>(entity); },
+                [entity, saved]() { ECS::ECSManager::Instance().setComponent<ECS::NameComponent>(entity, saved); }
+            });
         });
     }
 
@@ -2341,42 +2419,32 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
 
         lines.push_back(makeVec3Row("Details.Transform.Pos", "Position", transform->position,
             [entity](int axis, float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::TransformComponent>(entity))
-                {
-                    ECS::TransformComponent updated = *comp;
-                    updated.position[axis] = val;
-                    ecs.setComponent<ECS::TransformComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::TransformComponent>(entity, "Change Position",
+                    [axis, val](ECS::TransformComponent& c) { c.position[axis] = val; });
             }));
 
         lines.push_back(makeVec3Row("Details.Transform.Rot", "Rotation", transform->rotation,
             [entity](int axis, float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::TransformComponent>(entity))
-                {
-                    ECS::TransformComponent updated = *comp;
-                    updated.rotation[axis] = val;
-                    ecs.setComponent<ECS::TransformComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::TransformComponent>(entity, "Change Rotation",
+                    [axis, val](ECS::TransformComponent& c) { c.rotation[axis] = val; });
             }));
 
         lines.push_back(makeVec3Row("Details.Transform.Scale", "Scale", transform->scale,
             [entity](int axis, float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::TransformComponent>(entity))
-                {
-                    ECS::TransformComponent updated = *comp;
-                    updated.scale[axis] = val;
-                    ecs.setComponent<ECS::TransformComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::TransformComponent>(entity, "Change Scale",
+                    [axis, val](ECS::TransformComponent& c) { c.scale[axis] = val; });
             }));
 
-        addSeparator("Transform", lines, [this, entity]() {
+        addSeparator("Transform", lines, [this, entity, saved = *transform]() {
             ECS::ECSManager::Instance().removeComponent<ECS::TransformComponent>(entity);
             DiagnosticsManager::Instance().invalidateEntity(entity);
             if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
             populateOutlinerDetails(entity);
+            UndoRedoManager::Instance().pushCommand({
+                "Remove Transform",
+                [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::TransformComponent>(entity); DiagnosticsManager::Instance().invalidateEntity(entity); },
+                [entity, saved]() { ECS::ECSManager::Instance().setComponent<ECS::TransformComponent>(entity, saved); DiagnosticsManager::Instance().invalidateEntity(entity); }
+            });
         });
     }
 
@@ -2417,11 +2485,16 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             lines.push_back(std::move(dropdownEl));
         }
 
-        addSeparator("Mesh", lines, [this, entity]() {
+        addSeparator("Mesh", lines, [this, entity, saved = *mesh]() {
             ECS::ECSManager::Instance().removeComponent<ECS::MeshComponent>(entity);
             DiagnosticsManager::Instance().invalidateEntity(entity);
             if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
             populateOutlinerDetails(entity);
+            UndoRedoManager::Instance().pushCommand({
+                "Remove Mesh",
+                [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::MeshComponent>(entity); DiagnosticsManager::Instance().invalidateEntity(entity); },
+                [entity, saved]() { ECS::ECSManager::Instance().setComponent<ECS::MeshComponent>(entity, saved); DiagnosticsManager::Instance().invalidateEntity(entity); }
+            });
         });
     }
 
@@ -2462,11 +2535,16 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             lines.push_back(std::move(dropdownEl));
         }
 
-        addSeparator("Material", lines, [this, entity]() {
+        addSeparator("Material", lines, [this, entity, saved = *material]() {
             ECS::ECSManager::Instance().removeComponent<ECS::MaterialComponent>(entity);
             DiagnosticsManager::Instance().invalidateEntity(entity);
             if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
             populateOutlinerDetails(entity);
+            UndoRedoManager::Instance().pushCommand({
+                "Remove Material",
+                [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::MaterialComponent>(entity); DiagnosticsManager::Instance().invalidateEntity(entity); },
+                [entity, saved]() { ECS::ECSManager::Instance().setComponent<ECS::MaterialComponent>(entity, saved); DiagnosticsManager::Instance().invalidateEntity(entity); }
+            });
         });
     }
 
@@ -2485,14 +2563,8 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             typeDropdown.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
             typeDropdown.setPadding(EditorTheme::Get().paddingNormal);
             typeDropdown.setOnSelectionChanged([entity](int idx) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::LightComponent>(entity))
-                {
-                    ECS::LightComponent updated = *comp;
-                    updated.type = static_cast<ECS::LightComponent::LightType>(idx);
-                    ecs.setComponent<ECS::LightComponent>(entity, updated);
-                }
-                if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+                setCompFieldWithUndo<ECS::LightComponent>(entity, "Change Light Type",
+                    [idx](ECS::LightComponent& c) { c.type = static_cast<ECS::LightComponent::LightType>(idx); });
             });
 
             WidgetElement row{};
@@ -2538,16 +2610,8 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             cp.setCompact(true);
             cp.setMinSize(EditorTheme::Scaled(Vec2{ 0.0f, 20.0f }));
             cp.setOnColorChanged([entity](const Vec4& c) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::LightComponent>(entity))
-                {
-                    ECS::LightComponent updated = *comp;
-                    updated.color[0] = c.x;
-                    updated.color[1] = c.y;
-                    updated.color[2] = c.z;
-                    ecs.setComponent<ECS::LightComponent>(entity, updated);
-                }
-                if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+                setCompFieldWithUndo<ECS::LightComponent>(entity, "Change Light Color",
+                    [c](ECS::LightComponent& comp) { comp.color[0] = c.x; comp.color[1] = c.y; comp.color[2] = c.z; });
             });
 
             WidgetElement cpEl = cp.toElement();
@@ -2560,41 +2624,31 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
 
         lines.push_back(makeFloatEntry("Details.Light.Intensity", "Intensity", light->intensity,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::LightComponent>(entity))
-                {
-                    ECS::LightComponent updated = *comp;
-                    updated.intensity = val;
-                    ecs.setComponent<ECS::LightComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::LightComponent>(entity, "Change Intensity",
+                    [val](ECS::LightComponent& c) { c.intensity = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Light.Range", "Range", light->range,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::LightComponent>(entity))
-                {
-                    ECS::LightComponent updated = *comp;
-                    updated.range = val;
-                    ecs.setComponent<ECS::LightComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::LightComponent>(entity, "Change Range",
+                    [val](ECS::LightComponent& c) { c.range = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Light.SpotAngle", "Spot Angle", light->spotAngle,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::LightComponent>(entity))
-                {
-                    ECS::LightComponent updated = *comp;
-                    updated.spotAngle = val;
-                    ecs.setComponent<ECS::LightComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::LightComponent>(entity, "Change Spot Angle",
+                    [val](ECS::LightComponent& c) { c.spotAngle = val; });
             }));
 
-        addSeparator("Light", lines, [this, entity]() {
+        addSeparator("Light", lines, [this, entity, saved = *light]() {
             ECS::ECSManager::Instance().removeComponent<ECS::LightComponent>(entity);
             if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
             populateOutlinerDetails(entity);
+            UndoRedoManager::Instance().pushCommand({
+                "Remove Light",
+                [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::LightComponent>(entity); },
+                [entity, saved]() { ECS::ECSManager::Instance().setComponent<ECS::LightComponent>(entity, saved); }
+            });
         });
     }
 
@@ -2604,52 +2658,37 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
 
         lines.push_back(makeFloatEntry("Details.Camera.FOV", "FOV", camera->fov,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::CameraComponent>(entity))
-                {
-                    ECS::CameraComponent updated = *comp;
-                    updated.fov = val;
-                    ecs.setComponent<ECS::CameraComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::CameraComponent>(entity, "Change FOV",
+                    [val](ECS::CameraComponent& c) { c.fov = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Camera.NearClip", "Near Clip", camera->nearClip,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::CameraComponent>(entity))
-                {
-                    ECS::CameraComponent updated = *comp;
-                    updated.nearClip = val;
-                    ecs.setComponent<ECS::CameraComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::CameraComponent>(entity, "Change Near Clip",
+                    [val](ECS::CameraComponent& c) { c.nearClip = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Camera.FarClip", "Far Clip", camera->farClip,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::CameraComponent>(entity))
-                {
-                    ECS::CameraComponent updated = *comp;
-                    updated.farClip = val;
-                    ecs.setComponent<ECS::CameraComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::CameraComponent>(entity, "Change Far Clip",
+                    [val](ECS::CameraComponent& c) { c.farClip = val; });
             }));
 
         lines.push_back(makeCheckBoxRow("Details.Camera.IsActive", "Active", camera->isActive,
             [entity](bool val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::CameraComponent>(entity))
-                {
-                    ECS::CameraComponent updated = *comp;
-                    updated.isActive = val;
-                    ecs.setComponent<ECS::CameraComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::CameraComponent>(entity, "Change Camera Active",
+                    [val](ECS::CameraComponent& c) { c.isActive = val; });
             }));
 
-        addSeparator("Camera", lines, [this, entity]() {
+        addSeparator("Camera", lines, [this, entity, saved = *camera]() {
             ECS::ECSManager::Instance().removeComponent<ECS::CameraComponent>(entity);
             if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
             populateOutlinerDetails(entity);
+            UndoRedoManager::Instance().pushCommand({
+                "Remove Camera",
+                [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::CameraComponent>(entity); },
+                [entity, saved]() { ECS::ECSManager::Instance().setComponent<ECS::CameraComponent>(entity, saved); }
+            });
         });
     }
 
@@ -2669,14 +2708,8 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             colliderDropdown.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
             colliderDropdown.setPadding(EditorTheme::Get().paddingNormal);
             colliderDropdown.setOnSelectionChanged([entity](int idx) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::CollisionComponent>(entity))
-                {
-                    ECS::CollisionComponent updated = *comp;
-                    updated.colliderType = static_cast<ECS::CollisionComponent::ColliderType>(idx);
-                    ecs.setComponent<ECS::CollisionComponent>(entity, updated);
-                }
-                if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+                setCompFieldWithUndo<ECS::CollisionComponent>(entity, "Change Collider Type",
+                    [idx](ECS::CollisionComponent& c) { c.colliderType = static_cast<ECS::CollisionComponent::ColliderType>(idx); });
             });
 
             WidgetElement row{};
@@ -2703,57 +2736,32 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
 
         lines.push_back(makeVec3Row("Details.Collision.Size", "Size", collision->colliderSize,
             [entity](int axis, float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::CollisionComponent>(entity))
-                {
-                    ECS::CollisionComponent updated = *comp;
-                    updated.colliderSize[axis] = val;
-                    ecs.setComponent<ECS::CollisionComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::CollisionComponent>(entity, "Change Collider Size",
+                    [axis, val](ECS::CollisionComponent& c) { c.colliderSize[axis] = val; });
             }));
 
         lines.push_back(makeVec3Row("Details.Collision.Offset", "Offset", collision->colliderOffset,
             [entity](int axis, float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::CollisionComponent>(entity))
-                {
-                    ECS::CollisionComponent updated = *comp;
-                    updated.colliderOffset[axis] = val;
-                    ecs.setComponent<ECS::CollisionComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::CollisionComponent>(entity, "Change Collider Offset",
+                    [axis, val](ECS::CollisionComponent& c) { c.colliderOffset[axis] = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Collision.Restitution", "Restitution", collision->restitution,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::CollisionComponent>(entity))
-                {
-                    ECS::CollisionComponent updated = *comp;
-                    updated.restitution = val;
-                    ecs.setComponent<ECS::CollisionComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::CollisionComponent>(entity, "Change Restitution",
+                    [val](ECS::CollisionComponent& c) { c.restitution = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Collision.Friction", "Friction", collision->friction,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::CollisionComponent>(entity))
-                {
-                    ECS::CollisionComponent updated = *comp;
-                    updated.friction = val;
-                    ecs.setComponent<ECS::CollisionComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::CollisionComponent>(entity, "Change Friction",
+                    [val](ECS::CollisionComponent& c) { c.friction = val; });
             }));
 
         lines.push_back(makeCheckBoxRow("Details.Collision.Sensor", "Is Sensor", collision->isSensor,
             [entity](bool val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::CollisionComponent>(entity))
-                {
-                    ECS::CollisionComponent updated = *comp;
-                    updated.isSensor = val;
-                    ecs.setComponent<ECS::CollisionComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::CollisionComponent>(entity, "Change Is Sensor",
+                    [val](ECS::CollisionComponent& c) { c.isSensor = val; });
             }));
 
         // Auto-Fit Collider button
@@ -2780,10 +2788,15 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             lines.push_back(std::move(autoFitEl));
         }
 
-        addSeparator("Collision", lines, [this, entity]() {
+        addSeparator("Collision", lines, [this, entity, saved = *collision]() {
             ECS::ECSManager::Instance().removeComponent<ECS::CollisionComponent>(entity);
             if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
             populateOutlinerDetails(entity);
+            UndoRedoManager::Instance().pushCommand({
+                "Remove Collision",
+                [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::CollisionComponent>(entity); },
+                [entity, saved]() { ECS::ECSManager::Instance().setComponent<ECS::CollisionComponent>(entity, saved); }
+            });
         });
     }
 
@@ -2803,14 +2816,8 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             motionDropdown.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
             motionDropdown.setPadding(EditorTheme::Get().paddingNormal);
             motionDropdown.setOnSelectionChanged([entity](int idx) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
-                {
-                    ECS::PhysicsComponent updated = *comp;
-                    updated.motionType = static_cast<ECS::PhysicsComponent::MotionType>(idx);
-                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
-                }
-                if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+                setCompFieldWithUndo<ECS::PhysicsComponent>(entity, "Change Motion Type",
+                    [idx](ECS::PhysicsComponent& c) { c.motionType = static_cast<ECS::PhysicsComponent::MotionType>(idx); });
             });
 
             WidgetElement row{};
@@ -2837,68 +2844,38 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
 
         lines.push_back(makeFloatEntry("Details.Physics.Mass", "Mass", physics->mass,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
-                {
-                    ECS::PhysicsComponent updated = *comp;
-                    updated.mass = val;
-                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::PhysicsComponent>(entity, "Change Mass",
+                    [val](ECS::PhysicsComponent& c) { c.mass = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Physics.GravityFactor", "Gravity Factor", physics->gravityFactor,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
-                {
-                    ECS::PhysicsComponent updated = *comp;
-                    updated.gravityFactor = val;
-                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::PhysicsComponent>(entity, "Change Gravity Factor",
+                    [val](ECS::PhysicsComponent& c) { c.gravityFactor = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Physics.LinearDamping", "Linear Damping", physics->linearDamping,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
-                {
-                    ECS::PhysicsComponent updated = *comp;
-                    updated.linearDamping = val;
-                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::PhysicsComponent>(entity, "Change Linear Damping",
+                    [val](ECS::PhysicsComponent& c) { c.linearDamping = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Physics.AngularDamping", "Angular Damping", physics->angularDamping,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
-                {
-                    ECS::PhysicsComponent updated = *comp;
-                    updated.angularDamping = val;
-                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::PhysicsComponent>(entity, "Change Angular Damping",
+                    [val](ECS::PhysicsComponent& c) { c.angularDamping = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Physics.MaxLinVel", "Max Linear Vel", physics->maxLinearVelocity,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
-                {
-                    ECS::PhysicsComponent updated = *comp;
-                    updated.maxLinearVelocity = val;
-                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::PhysicsComponent>(entity, "Change Max Linear Vel",
+                    [val](ECS::PhysicsComponent& c) { c.maxLinearVelocity = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Physics.MaxAngVel", "Max Angular Vel", physics->maxAngularVelocity,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
-                {
-                    ECS::PhysicsComponent updated = *comp;
-                    updated.maxAngularVelocity = val;
-                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::PhysicsComponent>(entity, "Change Max Angular Vel",
+                    [val](ECS::PhysicsComponent& c) { c.maxAngularVelocity = val; });
             }));
 
         // Motion Quality dropdown
@@ -2912,14 +2889,8 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             mqDropdown.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
             mqDropdown.setPadding(EditorTheme::Get().paddingNormal);
             mqDropdown.setOnSelectionChanged([entity](int idx) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
-                {
-                    ECS::PhysicsComponent updated = *comp;
-                    updated.motionQuality = static_cast<ECS::PhysicsComponent::MotionQuality>(idx);
-                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
-                }
-                if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+                setCompFieldWithUndo<ECS::PhysicsComponent>(entity, "Change Motion Quality",
+                    [idx](ECS::PhysicsComponent& c) { c.motionQuality = static_cast<ECS::PhysicsComponent::MotionQuality>(idx); });
             });
 
             WidgetElement row{};
@@ -2946,41 +2917,31 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
 
         lines.push_back(makeCheckBoxRow("Details.Physics.AllowSleep", "Allow Sleeping", physics->allowSleeping,
             [entity](bool val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
-                {
-                    ECS::PhysicsComponent updated = *comp;
-                    updated.allowSleeping = val;
-                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::PhysicsComponent>(entity, "Change Allow Sleeping",
+                    [val](ECS::PhysicsComponent& c) { c.allowSleeping = val; });
             }));
 
         lines.push_back(makeVec3Row("Details.Physics.Velocity", "Velocity", physics->velocity,
             [entity](int axis, float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
-                {
-                    ECS::PhysicsComponent updated = *comp;
-                    updated.velocity[axis] = val;
-                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::PhysicsComponent>(entity, "Change Velocity",
+                    [axis, val](ECS::PhysicsComponent& c) { c.velocity[axis] = val; });
             }));
 
         lines.push_back(makeVec3Row("Details.Physics.AngularVel", "Angular Vel", physics->angularVelocity,
             [entity](int axis, float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::PhysicsComponent>(entity))
-                {
-                    ECS::PhysicsComponent updated = *comp;
-                    updated.angularVelocity[axis] = val;
-                    ecs.setComponent<ECS::PhysicsComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::PhysicsComponent>(entity, "Change Angular Velocity",
+                    [axis, val](ECS::PhysicsComponent& c) { c.angularVelocity[axis] = val; });
             }));
 
-        addSeparator("Physics", lines, [this, entity]() {
+        addSeparator("Physics", lines, [this, entity, saved = *physics]() {
             ECS::ECSManager::Instance().removeComponent<ECS::PhysicsComponent>(entity);
             if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
             populateOutlinerDetails(entity);
+            UndoRedoManager::Instance().pushCommand({
+                "Remove Physics",
+                [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::PhysicsComponent>(entity); },
+                [entity, saved]() { ECS::ECSManager::Instance().setComponent<ECS::PhysicsComponent>(entity, saved); }
+            });
         });
     }
 
@@ -3021,10 +2982,15 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             lines.push_back(std::move(dropdownEl));
         }
 
-        addSeparator("Script", lines, [this, entity]() {
+        addSeparator("Script", lines, [this, entity, saved = *script]() {
             ECS::ECSManager::Instance().removeComponent<ECS::ScriptComponent>(entity);
             if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
             populateOutlinerDetails(entity);
+            UndoRedoManager::Instance().pushCommand({
+                "Remove Script",
+                [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::ScriptComponent>(entity); },
+                [entity, saved]() { ECS::ECSManager::Instance().setComponent<ECS::ScriptComponent>(entity, saved); }
+            });
         });
     }
 
@@ -3035,217 +3001,127 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
 
         lines.push_back(makeCheckBoxRow("Details.Particle.Enabled", "Enabled", emitter->enabled,
             [entity](bool val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.enabled = val;
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Particle Enabled",
+                    [val](ECS::ParticleEmitterComponent& c) { c.enabled = val; });
             }));
 
         lines.push_back(makeCheckBoxRow("Details.Particle.Loop", "Loop", emitter->loop,
             [entity](bool val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.loop = val;
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Particle Loop",
+                    [val](ECS::ParticleEmitterComponent& c) { c.loop = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Particle.MaxParticles", "Max Particles", static_cast<float>(emitter->maxParticles),
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.maxParticles = static_cast<int>(val);
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Max Particles",
+                    [val](ECS::ParticleEmitterComponent& c) { c.maxParticles = static_cast<int>(val); });
             }));
 
         lines.push_back(makeFloatEntry("Details.Particle.EmissionRate", "Emission Rate", emitter->emissionRate,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.emissionRate = val;
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Emission Rate",
+                    [val](ECS::ParticleEmitterComponent& c) { c.emissionRate = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Particle.Lifetime", "Lifetime", emitter->lifetime,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.lifetime = val;
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Lifetime",
+                    [val](ECS::ParticleEmitterComponent& c) { c.lifetime = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Particle.Speed", "Speed", emitter->speed,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.speed = val;
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Speed",
+                    [val](ECS::ParticleEmitterComponent& c) { c.speed = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Particle.SpeedVariance", "Speed Variance", emitter->speedVariance,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.speedVariance = val;
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Speed Variance",
+                    [val](ECS::ParticleEmitterComponent& c) { c.speedVariance = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Particle.Size", "Size", emitter->size,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.size = val;
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Particle Size",
+                    [val](ECS::ParticleEmitterComponent& c) { c.size = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Particle.SizeEnd", "Size End", emitter->sizeEnd,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.sizeEnd = val;
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Particle Size End",
+                    [val](ECS::ParticleEmitterComponent& c) { c.sizeEnd = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Particle.Gravity", "Gravity", emitter->gravity,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.gravity = val;
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Particle Gravity",
+                    [val](ECS::ParticleEmitterComponent& c) { c.gravity = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Particle.ConeAngle", "Cone Angle", emitter->coneAngle,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.coneAngle = val;
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Cone Angle",
+                    [val](ECS::ParticleEmitterComponent& c) { c.coneAngle = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Particle.ColorR", "Color R", emitter->colorR,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.colorR = val;
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Particle Color R",
+                    [val](ECS::ParticleEmitterComponent& c) { c.colorR = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Particle.ColorG", "Color G", emitter->colorG,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.colorG = val;
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Particle Color G",
+                    [val](ECS::ParticleEmitterComponent& c) { c.colorG = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Particle.ColorB", "Color B", emitter->colorB,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.colorB = val;
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Particle Color B",
+                    [val](ECS::ParticleEmitterComponent& c) { c.colorB = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Particle.ColorA", "Color A", emitter->colorA,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.colorA = val;
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Particle Color A",
+                    [val](ECS::ParticleEmitterComponent& c) { c.colorA = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Particle.ColorEndR", "End Color R", emitter->colorEndR,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.colorEndR = val;
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Particle End Color R",
+                    [val](ECS::ParticleEmitterComponent& c) { c.colorEndR = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Particle.ColorEndG", "End Color G", emitter->colorEndG,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.colorEndG = val;
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Particle End Color G",
+                    [val](ECS::ParticleEmitterComponent& c) { c.colorEndG = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Particle.ColorEndB", "End Color B", emitter->colorEndB,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.colorEndB = val;
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Particle End Color B",
+                    [val](ECS::ParticleEmitterComponent& c) { c.colorEndB = val; });
             }));
 
         lines.push_back(makeFloatEntry("Details.Particle.ColorEndA", "End Color A", emitter->colorEndA,
             [entity](float val) {
-                auto& ecs = ECS::ECSManager::Instance();
-                if (auto* comp = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
-                {
-                    ECS::ParticleEmitterComponent updated = *comp;
-                    updated.colorEndA = val;
-                    ecs.setComponent<ECS::ParticleEmitterComponent>(entity, updated);
-                }
+                setCompFieldWithUndo<ECS::ParticleEmitterComponent>(entity, "Change Particle End Color A",
+                    [val](ECS::ParticleEmitterComponent& c) { c.colorEndA = val; });
             }));
 
-        addSeparator("Particle Emitter", lines, [this, entity]() {
+        addSeparator("Particle Emitter", lines, [this, entity, saved = *emitter]() {
             ECS::ECSManager::Instance().removeComponent<ECS::ParticleEmitterComponent>(entity);
             if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
             populateOutlinerDetails(entity);
+            UndoRedoManager::Instance().pushCommand({
+                "Remove Particle Emitter",
+                [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::ParticleEmitterComponent>(entity); },
+                [entity, saved]() { ECS::ECSManager::Instance().setComponent<ECS::ParticleEmitterComponent>(entity, saved); }
+            });
         });
     }
 
@@ -3262,20 +3138,26 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
         dropdown.setHoverColor(EditorTheme::Get().successColor);
         dropdown.setTextColor(EditorTheme::Get().textPrimary);
 
-        struct CompOption { std::string label; bool present; std::function<void()> addFn; };
+        struct CompOption { std::string label; bool present; std::function<void()> addFn; std::function<void()> removeFn; };
         std::vector<CompOption> options = {
             { "Transform", ecs.hasComponent<ECS::TransformComponent>(entity),
-              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::TransformComponent>(entity); } },
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::TransformComponent>(entity); },
+              [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::TransformComponent>(entity); } },
             { "Mesh", ecs.hasComponent<ECS::MeshComponent>(entity),
-              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::MeshComponent>(entity); } },
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::MeshComponent>(entity); },
+              [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::MeshComponent>(entity); } },
             { "Material", ecs.hasComponent<ECS::MaterialComponent>(entity),
-              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::MaterialComponent>(entity); } },
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::MaterialComponent>(entity); },
+              [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::MaterialComponent>(entity); } },
             { "Light", ecs.hasComponent<ECS::LightComponent>(entity),
-              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::LightComponent>(entity); } },
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::LightComponent>(entity); },
+              [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::LightComponent>(entity); } },
             { "Camera", ecs.hasComponent<ECS::CameraComponent>(entity),
-              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::CameraComponent>(entity); } },
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::CameraComponent>(entity); },
+              [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::CameraComponent>(entity); } },
             { "Collision", ecs.hasComponent<ECS::CollisionComponent>(entity),
-              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::CollisionComponent>(entity); } },
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::CollisionComponent>(entity); },
+              [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::CollisionComponent>(entity); } },
             { "Physics", ecs.hasComponent<ECS::PhysicsComponent>(entity),
               [this, entity]() {
                   auto& e = ECS::ECSManager::Instance();
@@ -3285,13 +3167,19 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
                   {
                       autoFitColliderForEntity(entity);
                   }
+              },
+              [entity]() {
+                  ECS::ECSManager::Instance().removeComponent<ECS::PhysicsComponent>(entity);
               } },
             { "Script", ecs.hasComponent<ECS::ScriptComponent>(entity),
-              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::ScriptComponent>(entity); } },
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::ScriptComponent>(entity); },
+              [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::ScriptComponent>(entity); } },
             { "Name", ecs.hasComponent<ECS::NameComponent>(entity),
-              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::NameComponent>(entity); } },
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::NameComponent>(entity); },
+              [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::NameComponent>(entity); } },
             { "Particle Emitter", ecs.hasComponent<ECS::ParticleEmitterComponent>(entity),
-              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::ParticleEmitterComponent>(entity); } },
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::ParticleEmitterComponent>(entity); },
+              [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::ParticleEmitterComponent>(entity); } },
         };
 
         for (const auto& opt : options)
@@ -3299,7 +3187,8 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             if (!opt.present)
             {
                 auto addFn = opt.addFn;
-                dropdown.addItem(opt.label, [this, addFn, label = opt.label, entity]() {
+                auto removeFn = opt.removeFn;
+                dropdown.addItem(opt.label, [this, addFn, removeFn, label = opt.label, entity]() {
                     addFn();
                     DiagnosticsManager::Instance().invalidateEntity(entity);
                     if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
@@ -3309,6 +3198,17 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
                         refreshWorldOutliner();
                     }
                     showToastMessage("Added " + label + " component.", 2.0f);
+                    UndoRedoManager::Instance().pushCommand({
+                        "Add " + label,
+                        [addFn, entity]() {
+                            addFn();
+                            DiagnosticsManager::Instance().invalidateEntity(entity);
+                        },
+                        [removeFn, entity]() {
+                            removeFn();
+                            DiagnosticsManager::Instance().invalidateEntity(entity);
+                        }
+                    });
                 });
             }
         }
@@ -3337,6 +3237,12 @@ void UIManager::applyAssetToEntity(AssetType type, const std::string& assetPath,
     {
     case AssetType::Model3D:
     {
+        // Capture old state for undo
+        std::optional<ECS::MeshComponent> oldMesh;
+        std::optional<ECS::MaterialComponent> oldMat;
+        if (auto* m = ecs.getComponent<ECS::MeshComponent>(entity)) oldMesh = *m;
+        if (auto* m = ecs.getComponent<ECS::MaterialComponent>(entity)) oldMat = *m;
+
         ECS::MeshComponent comp{};
         comp.meshAssetPath = assetPath;
         if (!ecs.hasComponent<ECS::MeshComponent>(entity))
@@ -3384,6 +3290,29 @@ void UIManager::applyAssetToEntity(AssetType type, const std::string& assetPath,
             }
         }
 
+        // Capture new state for redo
+        std::optional<ECS::MeshComponent> newMesh;
+        std::optional<ECS::MaterialComponent> newMat;
+        if (auto* m = ecs.getComponent<ECS::MeshComponent>(entity)) newMesh = *m;
+        if (auto* m = ecs.getComponent<ECS::MaterialComponent>(entity)) newMat = *m;
+
+        UndoRedoManager::Instance().pushCommand({
+            "Assign Mesh",
+            [entity, newMesh, newMat]() {
+                auto& e = ECS::ECSManager::Instance();
+                if (newMesh) { if (e.hasComponent<ECS::MeshComponent>(entity)) e.setComponent(entity, *newMesh); else e.addComponent(entity, *newMesh); }
+                if (newMat)  { if (e.hasComponent<ECS::MaterialComponent>(entity)) e.setComponent(entity, *newMat); else e.addComponent(entity, *newMat); }
+                DiagnosticsManager::Instance().invalidateEntity(entity);
+            },
+            [entity, oldMesh, oldMat]() {
+                auto& e = ECS::ECSManager::Instance();
+                if (oldMesh) { if (e.hasComponent<ECS::MeshComponent>(entity)) e.setComponent(entity, *oldMesh); else e.addComponent(entity, *oldMesh); }
+                else { e.removeComponent<ECS::MeshComponent>(entity); }
+                if (oldMat) { if (e.hasComponent<ECS::MaterialComponent>(entity)) e.setComponent(entity, *oldMat); else e.addComponent(entity, *oldMat); }
+                DiagnosticsManager::Instance().invalidateEntity(entity);
+            }
+        });
+
         Logger::Instance().log(Logger::Category::UI,
             "Applied mesh '" + assetPath + "' to entity " + std::to_string(entity),
             Logger::LogLevel::INFO);
@@ -3392,6 +3321,9 @@ void UIManager::applyAssetToEntity(AssetType type, const std::string& assetPath,
     }
     case AssetType::Material:
     {
+        std::optional<ECS::MaterialComponent> oldMat;
+        if (auto* m = ecs.getComponent<ECS::MaterialComponent>(entity)) oldMat = *m;
+
         ECS::MaterialComponent comp{};
         comp.materialAssetPath = assetPath;
         if (!ecs.hasComponent<ECS::MaterialComponent>(entity))
@@ -3402,6 +3334,22 @@ void UIManager::applyAssetToEntity(AssetType type, const std::string& assetPath,
         {
             ecs.setComponent<ECS::MaterialComponent>(entity, comp);
         }
+
+        UndoRedoManager::Instance().pushCommand({
+            "Assign Material",
+            [entity, comp]() {
+                auto& e = ECS::ECSManager::Instance();
+                if (e.hasComponent<ECS::MaterialComponent>(entity)) e.setComponent(entity, comp); else e.addComponent(entity, comp);
+                DiagnosticsManager::Instance().invalidateEntity(entity);
+            },
+            [entity, oldMat]() {
+                auto& e = ECS::ECSManager::Instance();
+                if (oldMat) { if (e.hasComponent<ECS::MaterialComponent>(entity)) e.setComponent(entity, *oldMat); else e.addComponent(entity, *oldMat); }
+                else { e.removeComponent<ECS::MaterialComponent>(entity); }
+                DiagnosticsManager::Instance().invalidateEntity(entity);
+            }
+        });
+
         Logger::Instance().log(Logger::Category::UI,
             "Applied material '" + assetPath + "' to entity " + std::to_string(entity),
             Logger::LogLevel::INFO);
@@ -3410,6 +3358,9 @@ void UIManager::applyAssetToEntity(AssetType type, const std::string& assetPath,
     }
     case AssetType::Script:
     {
+        std::optional<ECS::ScriptComponent> oldScript;
+        if (auto* s = ecs.getComponent<ECS::ScriptComponent>(entity)) oldScript = *s;
+
         ECS::ScriptComponent comp{};
         comp.scriptPath = assetPath;
         if (!ecs.hasComponent<ECS::ScriptComponent>(entity))
@@ -3420,6 +3371,22 @@ void UIManager::applyAssetToEntity(AssetType type, const std::string& assetPath,
         {
             ecs.setComponent<ECS::ScriptComponent>(entity, comp);
         }
+
+        UndoRedoManager::Instance().pushCommand({
+            "Assign Script",
+            [entity, comp]() {
+                auto& e = ECS::ECSManager::Instance();
+                if (e.hasComponent<ECS::ScriptComponent>(entity)) e.setComponent(entity, comp); else e.addComponent(entity, comp);
+                DiagnosticsManager::Instance().invalidateEntity(entity);
+            },
+            [entity, oldScript]() {
+                auto& e = ECS::ECSManager::Instance();
+                if (oldScript) { if (e.hasComponent<ECS::ScriptComponent>(entity)) e.setComponent(entity, *oldScript); else e.addComponent(entity, *oldScript); }
+                else { e.removeComponent<ECS::ScriptComponent>(entity); }
+                DiagnosticsManager::Instance().invalidateEntity(entity);
+            }
+        });
+
         Logger::Instance().log(Logger::Category::UI,
             "Applied script '" + assetPath + "' to entity " + std::to_string(entity),
             Logger::LogLevel::INFO);
@@ -3661,6 +3628,596 @@ bool UIManager::duplicateSelectedEntity()
 bool UIManager::hasEntityClipboard() const
 {
     return m_entityClipboard.valid;
+}
+
+// ── Prefab / Entity Templates ──────────────────────────────────────────────
+
+static json prefabSerializeFloat3(const float v[3])
+{
+    return nlohmann::json::array({ v[0], v[1], v[2] });
+}
+
+static void prefabDeserializeFloat3(const nlohmann::json& j, float out[3])
+{
+    if (!j.is_array() || j.size() < 3) return;
+    for (size_t i = 0; i < 3; ++i) out[i] = j.at(i).get<float>();
+}
+
+static nlohmann::json prefabSerializeEntity(ECS::Entity entity, ECS::ECSManager& ecs)
+{
+    using json = nlohmann::json;
+    json comps = json::object();
+
+    if (const auto* c = ecs.getComponent<ECS::NameComponent>(entity))
+        comps["Name"] = json{ {"displayName", c->displayName} };
+
+    if (const auto* c = ecs.getComponent<ECS::TransformComponent>(entity))
+        comps["Transform"] = json{
+            {"position", prefabSerializeFloat3(c->position)},
+            {"rotation", prefabSerializeFloat3(c->rotation)},
+            {"scale",    prefabSerializeFloat3(c->scale)}
+        };
+
+    if (const auto* c = ecs.getComponent<ECS::MeshComponent>(entity))
+        comps["Mesh"] = json{ {"meshAssetPath", c->meshAssetPath} };
+
+    if (const auto* c = ecs.getComponent<ECS::MaterialComponent>(entity))
+    {
+        json j = json{ {"materialAssetPath", c->materialAssetPath} };
+        const auto& ov = c->overrides;
+        if (ov.hasAnyOverride())
+        {
+            json ovJson;
+            if (ov.hasColorTint)  ovJson["colorTint"]  = prefabSerializeFloat3(ov.colorTint);
+            if (ov.hasMetallic)   ovJson["metallic"]    = ov.metallic;
+            if (ov.hasRoughness)  ovJson["roughness"]   = ov.roughness;
+            if (ov.hasShininess)  ovJson["shininess"]   = ov.shininess;
+            if (ov.hasEmissive)   ovJson["emissive"]    = prefabSerializeFloat3(ov.emissiveColor);
+            j["overrides"] = ovJson;
+        }
+        comps["Material"] = j;
+    }
+
+    if (const auto* c = ecs.getComponent<ECS::LightComponent>(entity))
+        comps["Light"] = json{
+            {"type",      static_cast<int>(c->type)},
+            {"color",     prefabSerializeFloat3(c->color)},
+            {"intensity", c->intensity},
+            {"range",     c->range},
+            {"spotAngle", c->spotAngle}
+        };
+
+    if (const auto* c = ecs.getComponent<ECS::CameraComponent>(entity))
+        comps["Camera"] = json{ {"fov", c->fov}, {"nearClip", c->nearClip}, {"farClip", c->farClip} };
+
+    if (const auto* c = ecs.getComponent<ECS::PhysicsComponent>(entity))
+        comps["Physics"] = json{
+            {"motionType",          static_cast<int>(c->motionType)},
+            {"mass",                c->mass},
+            {"gravityFactor",       c->gravityFactor},
+            {"linearDamping",       c->linearDamping},
+            {"angularDamping",      c->angularDamping},
+            {"maxLinearVelocity",   c->maxLinearVelocity},
+            {"maxAngularVelocity",  c->maxAngularVelocity},
+            {"motionQuality",       static_cast<int>(c->motionQuality)},
+            {"allowSleeping",       c->allowSleeping},
+            {"velocity",            prefabSerializeFloat3(c->velocity)},
+            {"angularVelocity",     prefabSerializeFloat3(c->angularVelocity)}
+        };
+
+    if (const auto* c = ecs.getComponent<ECS::CollisionComponent>(entity))
+        comps["Collision"] = json{
+            {"colliderType",   static_cast<int>(c->colliderType)},
+            {"colliderSize",   prefabSerializeFloat3(c->colliderSize)},
+            {"colliderOffset", prefabSerializeFloat3(c->colliderOffset)},
+            {"restitution",    c->restitution},
+            {"friction",       c->friction},
+            {"isSensor",       c->isSensor}
+        };
+
+    if (const auto* c = ecs.getComponent<ECS::ScriptComponent>(entity))
+        comps["Script"] = json{ {"scriptPath", c->scriptPath} };
+
+    if (const auto* c = ecs.getComponent<ECS::LodComponent>(entity))
+    {
+        json levels = json::array();
+        for (const auto& lv : c->levels)
+            levels.push_back(json{ {"meshAssetPath", lv.meshAssetPath}, {"maxDistance", lv.maxDistance} });
+        comps["Lod"] = json{ {"levels", levels} };
+    }
+
+    if (const auto* c = ecs.getComponent<ECS::AnimationComponent>(entity))
+        comps["Animation"] = json{
+            {"currentClipIndex", c->currentClipIndex},
+            {"speed",            c->speed},
+            {"playing",          c->playing},
+            {"loop",             c->loop}
+        };
+
+    if (const auto* c = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
+        comps["ParticleEmitter"] = json{
+            {"maxParticles",  c->maxParticles},  {"emissionRate",  c->emissionRate},
+            {"lifetime",      c->lifetime},      {"speed",         c->speed},
+            {"speedVariance", c->speedVariance}, {"size",          c->size},
+            {"sizeEnd",       c->sizeEnd},       {"gravity",       c->gravity},
+            {"colorR", c->colorR}, {"colorG", c->colorG}, {"colorB", c->colorB}, {"colorA", c->colorA},
+            {"colorEndR", c->colorEndR}, {"colorEndG", c->colorEndG}, {"colorEndB", c->colorEndB}, {"colorEndA", c->colorEndA},
+            {"coneAngle", c->coneAngle}, {"enabled", c->enabled}, {"loop", c->loop}
+        };
+
+    return json{ {"components", comps} };
+}
+
+static void prefabDeserializeEntity(const nlohmann::json& entityJson, ECS::Entity entity, ECS::ECSManager& ecs, const Vec3& posOverride, bool overridePos)
+{
+    using json = nlohmann::json;
+    if (!entityJson.contains("components")) return;
+    const auto& c = entityJson.at("components");
+    if (!c.is_object()) return;
+
+    if (c.contains("Name"))
+    {
+        ECS::NameComponent comp;
+        if (c.at("Name").contains("displayName")) comp.displayName = c.at("Name").at("displayName").get<std::string>();
+        ecs.addComponent<ECS::NameComponent>(entity, comp);
+    }
+
+    if (c.contains("Transform"))
+    {
+        ECS::TransformComponent comp;
+        const auto& t = c.at("Transform");
+        if (t.contains("position")) prefabDeserializeFloat3(t.at("position"), comp.position);
+        if (t.contains("rotation")) prefabDeserializeFloat3(t.at("rotation"), comp.rotation);
+        if (t.contains("scale"))    prefabDeserializeFloat3(t.at("scale"),    comp.scale);
+        if (overridePos) { comp.position[0] = posOverride.x; comp.position[1] = posOverride.y; comp.position[2] = posOverride.z; }
+        ecs.addComponent<ECS::TransformComponent>(entity, comp);
+    }
+    else if (overridePos)
+    {
+        ECS::TransformComponent comp;
+        comp.position[0] = posOverride.x; comp.position[1] = posOverride.y; comp.position[2] = posOverride.z;
+        ecs.addComponent<ECS::TransformComponent>(entity, comp);
+    }
+
+    if (c.contains("Mesh"))
+    {
+        ECS::MeshComponent comp;
+        if (c.at("Mesh").contains("meshAssetPath")) comp.meshAssetPath = c.at("Mesh").at("meshAssetPath").get<std::string>();
+        ecs.addComponent<ECS::MeshComponent>(entity, comp);
+    }
+
+    if (c.contains("Material"))
+    {
+        ECS::MaterialComponent comp;
+        const auto& m = c.at("Material");
+        if (m.contains("materialAssetPath")) comp.materialAssetPath = m.at("materialAssetPath").get<std::string>();
+        if (m.contains("overrides"))
+        {
+            const auto& ov = m.at("overrides");
+            if (ov.contains("colorTint"))  { prefabDeserializeFloat3(ov.at("colorTint"), comp.overrides.colorTint); comp.overrides.hasColorTint = true; }
+            if (ov.contains("metallic"))   { comp.overrides.metallic  = ov.at("metallic").get<float>();  comp.overrides.hasMetallic = true; }
+            if (ov.contains("roughness"))  { comp.overrides.roughness = ov.at("roughness").get<float>(); comp.overrides.hasRoughness = true; }
+            if (ov.contains("shininess"))  { comp.overrides.shininess = ov.at("shininess").get<float>(); comp.overrides.hasShininess = true; }
+            if (ov.contains("emissive"))   { prefabDeserializeFloat3(ov.at("emissive"), comp.overrides.emissiveColor); comp.overrides.hasEmissive = true; }
+        }
+        ecs.addComponent<ECS::MaterialComponent>(entity, comp);
+    }
+
+    if (c.contains("Light"))
+    {
+        ECS::LightComponent comp;
+        const auto& l = c.at("Light");
+        if (l.contains("type"))      comp.type      = static_cast<ECS::LightComponent::LightType>(l.at("type").get<int>());
+        if (l.contains("color"))     prefabDeserializeFloat3(l.at("color"), comp.color);
+        if (l.contains("intensity")) comp.intensity  = l.at("intensity").get<float>();
+        if (l.contains("range"))     comp.range      = l.at("range").get<float>();
+        if (l.contains("spotAngle")) comp.spotAngle  = l.at("spotAngle").get<float>();
+        ecs.addComponent<ECS::LightComponent>(entity, comp);
+    }
+
+    if (c.contains("Camera"))
+    {
+        ECS::CameraComponent comp;
+        const auto& cm = c.at("Camera");
+        if (cm.contains("fov"))      comp.fov      = cm.at("fov").get<float>();
+        if (cm.contains("nearClip")) comp.nearClip  = cm.at("nearClip").get<float>();
+        if (cm.contains("farClip"))  comp.farClip   = cm.at("farClip").get<float>();
+        ecs.addComponent<ECS::CameraComponent>(entity, comp);
+    }
+
+    if (c.contains("Physics"))
+    {
+        ECS::PhysicsComponent comp;
+        const auto& p = c.at("Physics");
+        if (p.contains("motionType"))         comp.motionType         = static_cast<ECS::PhysicsComponent::MotionType>(p.at("motionType").get<int>());
+        if (p.contains("mass"))               comp.mass               = p.at("mass").get<float>();
+        if (p.contains("gravityFactor"))      comp.gravityFactor      = p.at("gravityFactor").get<float>();
+        if (p.contains("linearDamping"))      comp.linearDamping      = p.at("linearDamping").get<float>();
+        if (p.contains("angularDamping"))     comp.angularDamping     = p.at("angularDamping").get<float>();
+        if (p.contains("maxLinearVelocity"))  comp.maxLinearVelocity  = p.at("maxLinearVelocity").get<float>();
+        if (p.contains("maxAngularVelocity")) comp.maxAngularVelocity = p.at("maxAngularVelocity").get<float>();
+        if (p.contains("motionQuality"))      comp.motionQuality      = static_cast<ECS::PhysicsComponent::MotionQuality>(p.at("motionQuality").get<int>());
+        if (p.contains("allowSleeping"))      comp.allowSleeping      = p.at("allowSleeping").get<bool>();
+        if (p.contains("velocity"))           prefabDeserializeFloat3(p.at("velocity"), comp.velocity);
+        if (p.contains("angularVelocity"))    prefabDeserializeFloat3(p.at("angularVelocity"), comp.angularVelocity);
+        ecs.addComponent<ECS::PhysicsComponent>(entity, comp);
+    }
+
+    if (c.contains("Collision"))
+    {
+        ECS::CollisionComponent comp;
+        const auto& cl = c.at("Collision");
+        if (cl.contains("colliderType"))   comp.colliderType = static_cast<ECS::CollisionComponent::ColliderType>(cl.at("colliderType").get<int>());
+        if (cl.contains("colliderSize"))   prefabDeserializeFloat3(cl.at("colliderSize"), comp.colliderSize);
+        if (cl.contains("colliderOffset")) prefabDeserializeFloat3(cl.at("colliderOffset"), comp.colliderOffset);
+        if (cl.contains("restitution"))    comp.restitution  = cl.at("restitution").get<float>();
+        if (cl.contains("friction"))       comp.friction     = cl.at("friction").get<float>();
+        if (cl.contains("isSensor"))       comp.isSensor     = cl.at("isSensor").get<bool>();
+        ecs.addComponent<ECS::CollisionComponent>(entity, comp);
+    }
+
+    if (c.contains("Script"))
+    {
+        ECS::ScriptComponent comp;
+        if (c.at("Script").contains("scriptPath")) comp.scriptPath = c.at("Script").at("scriptPath").get<std::string>();
+        ecs.addComponent<ECS::ScriptComponent>(entity, comp);
+    }
+
+    if (c.contains("Lod"))
+    {
+        ECS::LodComponent comp;
+        if (c.at("Lod").contains("levels") && c.at("Lod").at("levels").is_array())
+        {
+            for (const auto& lv : c.at("Lod").at("levels"))
+            {
+                ECS::LodComponent::LodLevel level;
+                if (lv.contains("meshAssetPath")) level.meshAssetPath = lv.at("meshAssetPath").get<std::string>();
+                if (lv.contains("maxDistance"))    level.maxDistance    = lv.at("maxDistance").get<float>();
+                comp.levels.push_back(std::move(level));
+            }
+        }
+        ecs.addComponent<ECS::LodComponent>(entity, comp);
+    }
+
+    if (c.contains("Animation"))
+    {
+        ECS::AnimationComponent comp;
+        const auto& a = c.at("Animation");
+        if (a.contains("currentClipIndex")) comp.currentClipIndex = a.at("currentClipIndex").get<int>();
+        if (a.contains("speed"))            comp.speed            = a.at("speed").get<float>();
+        if (a.contains("playing"))          comp.playing          = a.at("playing").get<bool>();
+        if (a.contains("loop"))             comp.loop             = a.at("loop").get<bool>();
+        ecs.addComponent<ECS::AnimationComponent>(entity, comp);
+    }
+
+    if (c.contains("ParticleEmitter"))
+    {
+        ECS::ParticleEmitterComponent comp;
+        const auto& pe = c.at("ParticleEmitter");
+        if (pe.contains("maxParticles"))  comp.maxParticles  = pe.at("maxParticles").get<int>();
+        if (pe.contains("emissionRate"))  comp.emissionRate  = pe.at("emissionRate").get<float>();
+        if (pe.contains("lifetime"))      comp.lifetime      = pe.at("lifetime").get<float>();
+        if (pe.contains("speed"))         comp.speed         = pe.at("speed").get<float>();
+        if (pe.contains("speedVariance")) comp.speedVariance = pe.at("speedVariance").get<float>();
+        if (pe.contains("size"))          comp.size          = pe.at("size").get<float>();
+        if (pe.contains("sizeEnd"))       comp.sizeEnd       = pe.at("sizeEnd").get<float>();
+        if (pe.contains("gravity"))       comp.gravity       = pe.at("gravity").get<float>();
+        if (pe.contains("colorR"))        comp.colorR        = pe.at("colorR").get<float>();
+        if (pe.contains("colorG"))        comp.colorG        = pe.at("colorG").get<float>();
+        if (pe.contains("colorB"))        comp.colorB        = pe.at("colorB").get<float>();
+        if (pe.contains("colorA"))        comp.colorA        = pe.at("colorA").get<float>();
+        if (pe.contains("colorEndR"))     comp.colorEndR     = pe.at("colorEndR").get<float>();
+        if (pe.contains("colorEndG"))     comp.colorEndG     = pe.at("colorEndG").get<float>();
+        if (pe.contains("colorEndB"))     comp.colorEndB     = pe.at("colorEndB").get<float>();
+        if (pe.contains("colorEndA"))     comp.colorEndA     = pe.at("colorEndA").get<float>();
+        if (pe.contains("coneAngle"))     comp.coneAngle     = pe.at("coneAngle").get<float>();
+        if (pe.contains("enabled"))       comp.enabled       = pe.at("enabled").get<bool>();
+        if (pe.contains("loop"))          comp.loop          = pe.at("loop").get<bool>();
+        ecs.addComponent<ECS::ParticleEmitterComponent>(entity, comp);
+    }
+}
+
+bool UIManager::savePrefabFromEntity(ECS::Entity entity, const std::string& name, const std::string& folder)
+{
+    using json = nlohmann::json;
+    auto& ecs = ECS::ECSManager::Instance();
+    auto& diagnostics = DiagnosticsManager::Instance();
+
+    if (!diagnostics.isProjectLoaded())
+    {
+        showToastMessage("No project loaded.", 3.0f);
+        return false;
+    }
+
+    // Serialize the entity
+    json entityData = prefabSerializeEntity(entity, ecs);
+
+    // Build the prefab asset file
+    json fileJson;
+    fileJson["magic"]   = 0x41535453;
+    fileJson["version"] = 2;
+    fileJson["type"]    = static_cast<int>(AssetType::Prefab);
+    fileJson["name"]    = name;
+    fileJson["data"]    = json{ {"entities", json::array({ entityData })} };
+
+    // Write to disk
+    const std::filesystem::path contentDir =
+        std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content";
+    const std::filesystem::path targetDir = folder.empty() ? contentDir : contentDir / folder;
+    std::error_code ec;
+    std::filesystem::create_directories(targetDir, ec);
+
+    // Find unique filename
+    std::string fileName = name + ".asset";
+    int counter = 1;
+    while (std::filesystem::exists(targetDir / fileName))
+    {
+        fileName = name + std::to_string(counter++) + ".asset";
+    }
+
+    const std::filesystem::path absPath = targetDir / fileName;
+    std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+    if (!out.is_open())
+    {
+        showToastMessage("Failed to create prefab file.", 3.0f);
+        return false;
+    }
+
+    out << fileJson.dump(4);
+    out.close();
+
+    // Register in asset registry
+    const std::string relPath = std::filesystem::relative(absPath, contentDir).generic_string();
+    AssetRegistryEntry entry;
+    entry.name = std::filesystem::path(fileName).stem().string();
+    entry.path = relPath;
+    entry.type = AssetType::Prefab;
+    AssetManager::Instance().registerAssetInRegistry(entry);
+
+    refreshContentBrowser();
+    showToastMessage("Prefab saved: " + entry.name, 3.0f);
+
+    Logger::Instance().log(Logger::Category::AssetManagement,
+        "Saved prefab '" + name + "' to " + relPath, Logger::LogLevel::INFO);
+    return true;
+}
+
+bool UIManager::spawnPrefabAtPosition(const std::string& prefabRelPath, const Vec3& pos)
+{
+    using json = nlohmann::json;
+    auto& ecs = ECS::ECSManager::Instance();
+    auto& diagnostics = DiagnosticsManager::Instance();
+
+    if (!diagnostics.isProjectLoaded())
+    {
+        showToastMessage("No project loaded.", 3.0f);
+        return false;
+    }
+
+    // Load prefab JSON from disk
+    const std::filesystem::path absPath =
+        std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content" / prefabRelPath;
+
+    if (!std::filesystem::exists(absPath))
+    {
+        showToastMessage("Prefab file not found.", 3.0f);
+        return false;
+    }
+
+    std::ifstream in(absPath);
+    if (!in.is_open())
+    {
+        showToastMessage("Failed to open prefab file.", 3.0f);
+        return false;
+    }
+
+    json fileJson;
+    try { in >> fileJson; } catch (...) { showToastMessage("Invalid prefab file.", 3.0f); return false; }
+
+    if (!fileJson.is_object() || !fileJson.contains("data"))
+    {
+        showToastMessage("Invalid prefab format.", 3.0f);
+        return false;
+    }
+
+    const auto& data = fileJson.at("data");
+    if (!data.contains("entities") || !data.at("entities").is_array())
+    {
+        showToastMessage("Prefab has no entities.", 3.0f);
+        return false;
+    }
+
+    const std::string prefabName = fileJson.value("name", std::filesystem::path(prefabRelPath).stem().string());
+    auto* level = diagnostics.getActiveLevelSoft();
+
+    for (const auto& entJson : data.at("entities"))
+    {
+        const ECS::Entity newEntity = ecs.createEntity();
+        prefabDeserializeEntity(entJson, newEntity, ecs, pos, true);
+
+        // Ensure the entity has a name
+        if (!ecs.hasComponent<ECS::NameComponent>(newEntity))
+        {
+            ECS::NameComponent nc;
+            nc.displayName = prefabName;
+            ecs.addComponent<ECS::NameComponent>(newEntity, nc);
+        }
+
+        if (level) level->onEntityAdded(newEntity);
+
+        // Select the last spawned entity
+        selectEntity(static_cast<unsigned int>(newEntity));
+        if (m_renderer) m_renderer->setSelectedEntity(newEntity);
+
+        // Undo/Redo: snapshot the JSON for redo so we can recreate identically
+        const json snapshot = entJson;
+        const Vec3 spawnPos = pos;
+        const std::string entityName = ecs.hasComponent<ECS::NameComponent>(newEntity)
+            ? ecs.getComponent<ECS::NameComponent>(newEntity)->displayName
+            : ("Entity " + std::to_string(newEntity));
+
+        UndoRedoManager::Command cmd;
+        cmd.description = "Spawn Prefab: " + entityName;
+        cmd.execute = [newEntity, snapshot, spawnPos]()
+        {
+            auto& e = ECS::ECSManager::Instance();
+            e.createEntity(newEntity);
+            prefabDeserializeEntity(snapshot, newEntity, e, spawnPos, true);
+            if (!e.hasComponent<ECS::NameComponent>(newEntity))
+            {
+                ECS::NameComponent nc;
+                nc.displayName = "Entity " + std::to_string(newEntity);
+                e.addComponent<ECS::NameComponent>(newEntity, nc);
+            }
+            auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
+            if (lvl) lvl->onEntityAdded(newEntity);
+        };
+        cmd.undo = [newEntity]()
+        {
+            auto& e = ECS::ECSManager::Instance();
+            auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
+            if (lvl) lvl->onEntityRemoved(newEntity);
+            e.removeEntity(newEntity);
+        };
+        UndoRedoManager::Instance().pushCommand(std::move(cmd));
+    }
+
+    refreshWorldOutliner();
+    showToastMessage("Spawned: " + prefabName, 2.0f);
+    Logger::Instance().log(Logger::Category::Engine,
+        "Spawned prefab '" + prefabName + "' at (" +
+        std::to_string(pos.x) + ", " + std::to_string(pos.y) + ", " + std::to_string(pos.z) + ")",
+        Logger::LogLevel::INFO);
+    return true;
+}
+
+bool UIManager::spawnBuiltinTemplate(const std::string& templateName, const Vec3& pos)
+{
+    using json = nlohmann::json;
+    auto& ecs = ECS::ECSManager::Instance();
+    auto& diagnostics = DiagnosticsManager::Instance();
+    auto* level = diagnostics.getActiveLevelSoft();
+
+    const ECS::Entity newEntity = ecs.createEntity();
+
+    // Transform at spawn position
+    ECS::TransformComponent transform{};
+    transform.position[0] = pos.x;
+    transform.position[1] = pos.y;
+    transform.position[2] = pos.z;
+    ecs.addComponent<ECS::TransformComponent>(newEntity, transform);
+
+    // Name
+    ECS::NameComponent nameComp;
+    nameComp.displayName = templateName;
+    ecs.addComponent<ECS::NameComponent>(newEntity, nameComp);
+
+    if (templateName == "Point Light")
+    {
+        ECS::LightComponent light;
+        light.type = ECS::LightComponent::LightType::Point;
+        light.color[0] = 1.0f; light.color[1] = 1.0f; light.color[2] = 1.0f;
+        light.intensity = 1.0f;
+        light.range = 10.0f;
+        ecs.addComponent<ECS::LightComponent>(newEntity, light);
+    }
+    else if (templateName == "Directional Light")
+    {
+        ECS::LightComponent light;
+        light.type = ECS::LightComponent::LightType::Directional;
+        light.color[0] = 1.0f; light.color[1] = 0.95f; light.color[2] = 0.85f;
+        light.intensity = 1.0f;
+        ecs.addComponent<ECS::LightComponent>(newEntity, light);
+        // Point downward
+        auto* tc = ecs.getComponent<ECS::TransformComponent>(newEntity);
+        if (tc) { tc->rotation[0] = -45.0f; tc->rotation[1] = 30.0f; }
+    }
+    else if (templateName == "Camera")
+    {
+        ECS::CameraComponent cam;
+        cam.fov = 60.0f;
+        cam.nearClip = 0.1f;
+        cam.farClip = 1000.0f;
+        ecs.addComponent<ECS::CameraComponent>(newEntity, cam);
+    }
+    else if (templateName == "Static Mesh")
+    {
+        ECS::MeshComponent mesh;
+        mesh.meshAssetPath = "";
+        ecs.addComponent<ECS::MeshComponent>(newEntity, mesh);
+        ECS::MaterialComponent mat;
+        mat.materialAssetPath = "";
+        ecs.addComponent<ECS::MaterialComponent>(newEntity, mat);
+    }
+    else if (templateName == "Physics Object")
+    {
+        ECS::MeshComponent mesh;
+        mesh.meshAssetPath = "";
+        ecs.addComponent<ECS::MeshComponent>(newEntity, mesh);
+        ECS::MaterialComponent mat;
+        mat.materialAssetPath = "";
+        ecs.addComponent<ECS::MaterialComponent>(newEntity, mat);
+        ECS::PhysicsComponent phys;
+        phys.motionType = ECS::PhysicsComponent::MotionType::Dynamic;
+        phys.mass = 1.0f;
+        phys.gravityFactor = 1.0f;
+        ecs.addComponent<ECS::PhysicsComponent>(newEntity, phys);
+        ECS::CollisionComponent coll;
+        coll.colliderType = ECS::CollisionComponent::ColliderType::Box;
+        coll.colliderSize[0] = 1.0f; coll.colliderSize[1] = 1.0f; coll.colliderSize[2] = 1.0f;
+        ecs.addComponent<ECS::CollisionComponent>(newEntity, coll);
+    }
+    else if (templateName == "Particle Emitter")
+    {
+        ECS::ParticleEmitterComponent pe;
+        pe.enabled = true;
+        pe.loop = true;
+        pe.maxParticles = 500;
+        pe.emissionRate = 50.0f;
+        pe.lifetime = 2.0f;
+        pe.speed = 2.0f;
+        pe.size = 0.1f;
+        pe.sizeEnd = 0.0f;
+        pe.gravity = -1.0f;
+        pe.colorR = 1.0f; pe.colorG = 0.8f; pe.colorB = 0.3f; pe.colorA = 1.0f;
+        pe.colorEndR = 1.0f; pe.colorEndG = 0.2f; pe.colorEndB = 0.0f; pe.colorEndA = 0.0f;
+        ecs.addComponent<ECS::ParticleEmitterComponent>(newEntity, pe);
+    }
+    // else: "Empty Entity" – just Transform + Name, already added above
+
+    if (level) level->onEntityAdded(newEntity);
+
+    selectEntity(static_cast<unsigned int>(newEntity));
+    if (m_renderer) m_renderer->setSelectedEntity(newEntity);
+    refreshWorldOutliner();
+    showToastMessage("Created: " + templateName, 2.0f);
+
+    // Undo/Redo
+    const json snapshot = prefabSerializeEntity(newEntity, ecs);
+    const Vec3 spawnPos = pos;
+    UndoRedoManager::Command cmd;
+    cmd.description = "Create " + templateName;
+    cmd.execute = [newEntity, snapshot, spawnPos]()
+    {
+        auto& e = ECS::ECSManager::Instance();
+        e.createEntity(newEntity);
+        prefabDeserializeEntity(snapshot, newEntity, e, spawnPos, false);
+        auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
+        if (lvl) lvl->onEntityAdded(newEntity);
+    };
+    cmd.undo = [newEntity]()
+    {
+        auto& e = ECS::ECSManager::Instance();
+        auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
+        if (lvl) lvl->onEntityRemoved(newEntity);
+        e.removeEntity(newEntity);
+    };
+    UndoRedoManager::Instance().pushCommand(std::move(cmd));
+
+    Logger::Instance().log(Logger::Category::Engine,
+        "Spawned built-in template '" + templateName + "' entity=" + std::to_string(newEntity),
+        Logger::LogLevel::INFO);
+    return true;
 }
 
 bool UIManager::autoFitColliderForEntity(ECS::Entity entity)
@@ -4123,6 +4680,7 @@ static const char* iconForAssetType(AssetType type)
     case AssetType::Widget:   return "widget.png";
     case AssetType::Skybox:   return "skybox.png";
     case AssetType::Level:    return "level.png";
+    case AssetType::Prefab:   return "entity.png";
     default:                  return "entity.png";
     }
 }
@@ -4142,6 +4700,7 @@ static Vec4 iconTintForAssetType(AssetType type)
     case AssetType::Level:    return Vec4{ 0.95f, 0.85f, 0.40f, 1.0f }; // gold
     case AssetType::Widget:   return Vec4{ 0.70f, 0.70f, 0.90f, 1.0f }; // lavender
     case AssetType::Skybox:   return Vec4{ 0.40f, 0.75f, 0.95f, 1.0f }; // sky blue
+    case AssetType::Prefab:   return Vec4{ 0.30f, 0.90f, 0.70f, 1.0f }; // teal
     default:                  return Vec4{ 0.85f, 0.85f, 0.85f, 1.0f }; // light grey
     }
 }
@@ -4801,6 +5360,66 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
             pathBar->children.push_back(std::move(crumbBtn));
         }
 
+        // ── "+ Entity" template dropdown ────────────────────────────
+        {
+            const auto& theme = EditorTheme::Get();
+            WidgetElement addBtn{};
+            addBtn.id            = "ContentBrowser.AddEntity";
+            addBtn.type          = WidgetElementType::Button;
+            addBtn.text          = "+ Entity";
+            addBtn.font          = theme.fontDefault;
+            addBtn.fontSize      = theme.fontSizeSmall;
+            addBtn.style.textColor = theme.textPrimary;
+            addBtn.style.color     = Vec4{ theme.accent.x, theme.accent.y, theme.accent.z, 0.25f };
+            addBtn.style.hoverColor = Vec4{ theme.accent.x, theme.accent.y, theme.accent.z, 0.45f };
+            addBtn.style.borderRadius = theme.borderRadius;
+            addBtn.textAlignH    = TextAlignH::Center;
+            addBtn.textAlignV    = TextAlignV::Center;
+            addBtn.minSize       = EditorTheme::Scaled(Vec2{ 58.0f, 20.0f });
+            addBtn.padding       = EditorTheme::Scaled(Vec2{ 6.0f, 2.0f });
+            addBtn.sizeToContent = true;
+            addBtn.hitTestMode   = HitTestMode::Enabled;
+            addBtn.runtimeOnly   = true;
+            addBtn.onClicked = [this]()
+            {
+                auto* renderer = getRenderer();
+                if (!renderer) return;
+                Vec3 spawnPos{ 0.0f, 0.0f, 0.0f };
+                const Vec3 camPos = renderer->getCameraPosition();
+                const Vec2 camRot = renderer->getCameraRotationDegrees();
+                const float yaw = camRot.x * 3.14159265f / 180.0f;
+                const float pitch = camRot.y * 3.14159265f / 180.0f;
+                spawnPos.x = camPos.x + cosf(yaw) * cosf(pitch) * 5.0f;
+                spawnPos.y = camPos.y + sinf(pitch) * 5.0f;
+                spawnPos.z = camPos.z + sinf(yaw) * cosf(pitch) * 5.0f;
+
+                std::vector<DropdownMenuItem> items;
+                const char* templates[] = {
+                    "Empty Entity", "Point Light", "Directional Light",
+                    "Camera", "Static Mesh", "Physics Object", "Particle Emitter"
+                };
+                for (const char* t : templates)
+                {
+                    const std::string tmplName = t;
+                    const Vec3 pos = spawnPos;
+                    items.push_back({ tmplName, [this, tmplName, pos]()
+                    {
+                        spawnBuiltinTemplate(tmplName, pos);
+                    }});
+                }
+                // Compute dropdown anchor from the button's layout
+                const auto* elem = findElementById("ContentBrowser.AddEntity");
+                Vec2 anchor = m_mousePosition;
+                if (elem)
+                {
+                    anchor.x = elem->computedPositionPixels.x;
+                    anchor.y = elem->computedPositionPixels.y + elem->computedSizePixels.y;
+                }
+                showDropdownMenu(anchor, items, EditorTheme::Scaled(130.0f));
+            };
+            pathBar->children.push_back(std::move(addBtn));
+        }
+
         // ── Spacer to push search to the right ──────────────────────
         {
             WidgetElement spacer{};
@@ -4824,6 +5443,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
                 { "Audio",    AssetType::Audio    },
                 { "Level",    AssetType::Level    },
                 { "Widget",   AssetType::Widget   },
+                { "Prefab",   AssetType::Prefab   },
             };
             for (const auto& f : filters)
             {
@@ -5009,6 +5629,14 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
                         if (uiMgr->getRenderer())
                             uiMgr->getRenderer()->openMaterialEditorTab(relPath);
                     }
+                    else if (assetType == AssetType::Prefab)
+                    {
+                        uiMgr->spawnPrefabAtPosition(relPath, Vec3{ 0.0f, 0.0f, 0.0f });
+                    }
+                    else if (assetType == AssetType::Audio)
+                    {
+                        uiMgr->openAudioPreviewTab(relPath);
+                    }
                     else if (assetType == AssetType::Level && uiMgr->m_onLevelLoadRequested)
                     {
                         uiMgr->m_onLevelLoadRequested(relPath);
@@ -5188,6 +5816,16 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
                 {
                     if (uiMgr->getRenderer())
                         uiMgr->getRenderer()->openMaterialEditorTab(relPath);
+                    return;
+                }
+                if (assetType == AssetType::Prefab)
+                {
+                    uiMgr->spawnPrefabAtPosition(relPath, Vec3{ 0.0f, 0.0f, 0.0f });
+                    return;
+                }
+                if (assetType == AssetType::Audio)
+                {
+                    uiMgr->openAudioPreviewTab(relPath);
                     return;
                 }
                 if (assetType == AssetType::Level)
@@ -5980,6 +6618,14 @@ bool UIManager::handleTextInput(const std::string& text)
 
 bool UIManager::handleKeyDown(int key)
 {
+    // Key capture callback (e.g. shortcut rebinding)
+    if (m_keyCaptureCallback)
+    {
+        const uint16_t mods = static_cast<uint16_t>(SDL_GetModState());
+        if (m_keyCaptureCallback(static_cast<uint32_t>(key), mods))
+            return true;
+    }
+
     // F2: trigger inline rename on selected Content Browser asset
     if (key == SDLK_F2)
     {
@@ -6668,7 +7314,7 @@ void UIManager::ensureModalWidget()
     m_modalWidget->markLayoutDirty();
 }
 
-std::shared_ptr<EditorWidget> UIManager::createToastWidget(const std::string& message, const std::string& name) const
+std::shared_ptr<EditorWidget> UIManager::createToastWidget(const std::string& message, const std::string& name, NotificationLevel level) const
 {
     auto widget = std::make_shared<EditorWidget>();
     widget->setName(name);
@@ -6679,19 +7325,39 @@ std::shared_ptr<EditorWidget> UIManager::createToastWidget(const std::string& me
 
     const auto& theme = EditorTheme::Get();
 
+    // Priority-based left accent color
+    Vec4 accentColor = theme.toastText;
+    switch (level)
+    {
+    case NotificationLevel::Error:   accentColor = theme.errorColor;   break;
+    case NotificationLevel::Warning: accentColor = theme.warningColor; break;
+    case NotificationLevel::Success: accentColor = theme.successColor; break;
+    case NotificationLevel::Info:    accentColor = Vec4{ 0.4f, 0.6f, 0.9f, 1.0f }; break;
+    }
+
     WidgetElement panel{};
     panel.id = name + ".Panel";
     panel.type = WidgetElementType::StackPanel;
     panel.from = Vec2{ 0.0f, 0.0f };
     panel.to = Vec2{ 1.0f, 1.0f };
     panel.padding = Vec2{ 12.0f, 10.0f };
-    panel.orientation = StackOrientation::Vertical;
+    panel.orientation = StackOrientation::Horizontal;
     panel.style.color = theme.toastBackground;
     panel.elevation = 3;
     panel.style.applyElevation(3, theme.shadowColor, theme.shadowOffset);
     panel.style.borderRadius = theme.borderRadius;
     panel.hitTestMode = HitTestMode::DisabledSelf;
     panel.runtimeOnly = true;
+
+    // Accent bar on the left side
+    WidgetElement accent{};
+    accent.id = name + ".Accent";
+    accent.type = WidgetElementType::Panel;
+    accent.minSize = Vec2{ 4.0f, 0.0f };
+    accent.fillY = true;
+    accent.style.color = accentColor;
+    accent.style.borderRadius = 2.0f;
+    accent.runtimeOnly = true;
 
     WidgetElement messageElement{};
     messageElement.id = name + ".Text";
@@ -6702,9 +7368,11 @@ std::shared_ptr<EditorWidget> UIManager::createToastWidget(const std::string& me
     messageElement.style.textColor = theme.toastText;
     messageElement.fillX = true;
     messageElement.minSize = Vec2{ 0.0f, 22.0f };
+    messageElement.padding = Vec2{ 8.0f, 0.0f };
     messageElement.runtimeOnly = true;
 
     panel.children.clear();
+    panel.children.push_back(std::move(accent));
     panel.children.push_back(std::move(messageElement));
 
     std::vector<WidgetElement> elements;
@@ -7367,11 +8035,11 @@ void UIManager::closeSaveProgressModal(bool success)
 
     if (success)
     {
-        showToastMessage("All assets saved successfully.", 3.0f);
+        showToastMessage("All assets saved successfully.", 3.0f, NotificationLevel::Success);
     }
     else
     {
-        showToastMessage("Some assets failed to save.", 4.0f);
+        showToastMessage("Some assets failed to save.", 4.0f, NotificationLevel::Error);
     }
 
     refreshStatusBar();
@@ -7906,7 +8574,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
     const int assetId = assetManager.loadAsset(relativeAssetPath, AssetType::Widget, AssetManager::Sync);
     if (assetId == 0)
     {
-        showToastMessage("Failed to load widget: " + relativeAssetPath, 3.0f);
+        showToastMessage("Failed to load widget: " + relativeAssetPath, 3.0f, NotificationLevel::Error);
         m_renderer->removeTab(tabId);
         return;
     }
@@ -7922,7 +8590,7 @@ void UIManager::openWidgetEditorPopup(const std::string& relativeAssetPath)
     auto widget = m_renderer->createWidgetFromAsset(asset);
     if (!widget)
     {
-        showToastMessage("Failed to create widget from asset: " + relativeAssetPath, 3.0f);
+        showToastMessage("Failed to create widget from asset: " + relativeAssetPath, 3.0f, NotificationLevel::Error);
         m_renderer->removeTab(tabId);
         return;
     }
@@ -8496,11 +9164,11 @@ void UIManager::saveWidgetEditorAsset(const std::string& tabId)
     {
         state.isDirty = false;
         refreshWidgetEditorToolbar(tabId);
-        showToastMessage("Widget saved.", 2.0f);
+        showToastMessage("Widget saved.", 2.0f, NotificationLevel::Success);
     }
     else
     {
-        showToastMessage("Failed to save widget.", 3.0f);
+        showToastMessage("Failed to save widget.", 3.0f, NotificationLevel::Error);
     }
 }
 
@@ -9990,7 +10658,7 @@ void UIManager::openLandscapeManagerPopup()
             {
                 refreshWorldOutliner();
                 selectEntity(entity);
-                showToastMessage("Landscape created: " + p.name, 3.0f);
+                showToastMessage("Landscape created: " + p.name, 3.0f, NotificationLevel::Success);
 
                 // Push undo/redo for landscape creation
                 UndoRedoManager::Command cmd;
@@ -10007,7 +10675,7 @@ void UIManager::openLandscapeManagerPopup()
             }
             else
             {
-                showToastMessage("Failed to create landscape.", 3.0f);
+                showToastMessage("Failed to create landscape.", 3.0f, NotificationLevel::Error);
             }
             m_renderer->closePopupWindow("LandscapeManager");
         };
@@ -11133,7 +11801,7 @@ void UIManager::openEditorSettingsPopup()
         return;
 
     const int kPopupW = static_cast<int>(EditorTheme::Scaled(480.0f));
-    const int kPopupH = static_cast<int>(EditorTheme::Scaled(380.0f));
+    const int kPopupH = static_cast<int>(EditorTheme::Scaled(600.0f));
     PopupWindow* popup = m_renderer->openPopupWindow(
         "EditorSettings", "Editor Settings", kPopupW, kPopupH);
     if (!popup) return;
@@ -11573,6 +12241,254 @@ void UIManager::openEditorSettingsPopup()
             content.children.push_back(row);
         }
 
+        // ── Section: Keyboard Shortcuts ──
+        {
+            WidgetElement spacer;
+            spacer.type    = WidgetElementType::Panel;
+            spacer.id      = "EdS.Spacer.Keys";
+            spacer.style.color   = theme.transparent;
+            spacer.minSize = Vec2{ contentW - 8.0f, 8.0f };
+            content.children.push_back(spacer);
+        }
+        {
+            WidgetElement secLabel;
+            secLabel.type      = WidgetElementType::Text;
+            secLabel.id        = "EdS.Sec.Shortcuts";
+            secLabel.text      = "Keyboard Shortcuts";
+            secLabel.fontSize  = theme.fontSizeSubheading;
+            secLabel.style.textColor = theme.textSecondary;
+            secLabel.textAlignV = TextAlignV::Center;
+            secLabel.minSize   = Vec2{ contentW - 8.0f, kRowH };
+            secLabel.padding   = Vec2{ 2.0f, 0.0f };
+            content.children.push_back(secLabel);
+        }
+        {
+            WidgetElement sep;
+            sep.type    = WidgetElementType::Panel;
+            sep.id      = "EdS.Sep.Shortcuts";
+            sep.style.color   = theme.panelBorder;
+            sep.minSize = Vec2{ contentW - 8.0f, 1.0f };
+            content.children.push_back(sep);
+        }
+
+        // Build a row per registered shortcut showing [Category] Name : [Keybind Button]
+        {
+            auto& sm = ShortcutManager::Instance();
+            const auto& actions = sm.getActions();
+
+            // State shared by all capture buttons
+            struct CaptureState
+            {
+                std::string capturingId;  // id of the action being rebound (empty = not capturing)
+            };
+            auto captureState = std::make_shared<CaptureState>();
+
+            std::string lastCategory;
+            int shortcutIdx = 0;
+            for (const auto& action : actions)
+            {
+                // Category sub-header when category changes
+                if (action.category != lastCategory)
+                {
+                    lastCategory = action.category;
+                    WidgetElement catLabel;
+                    catLabel.type      = WidgetElementType::Text;
+                    catLabel.id        = "EdS.SC.Cat." + action.category;
+                    catLabel.text      = action.category;
+                    catLabel.fontSize  = theme.fontSizeSmall;
+                    catLabel.style.textColor = Vec4{ 0.55f, 0.65f, 0.85f, 1.0f };
+                    catLabel.textAlignV = TextAlignV::Center;
+                    catLabel.minSize   = Vec2{ contentW - 8.0f, kRowH * 0.85f };
+                    catLabel.padding   = Vec2{ 2.0f, 4.0f };
+                    content.children.push_back(catLabel);
+                }
+
+                const std::string rowId = "EdS.SC." + std::to_string(shortcutIdx);
+                const std::string actionId = action.id;
+
+                WidgetElement row;
+                row.type        = WidgetElementType::StackPanel;
+                row.id          = rowId + ".Row";
+                row.orientation = StackOrientation::Horizontal;
+                row.minSize     = Vec2{ contentW - 8.0f, kRowH };
+                row.style.color = theme.transparent;
+                row.padding     = Vec2{ 4.0f, 2.0f };
+
+                // Action display name
+                WidgetElement lbl;
+                lbl.type      = WidgetElementType::Text;
+                lbl.id        = rowId + ".Lbl";
+                lbl.text      = action.displayName;
+                lbl.fontSize  = theme.fontSizeBody;
+                lbl.style.textColor = theme.textPrimary;
+                lbl.textAlignV = TextAlignV::Center;
+                lbl.minSize   = Vec2{ kLabelW, kRowH };
+                row.children.push_back(lbl);
+
+                // Keybind button – click to start capture, next key press rebinds
+                WidgetElement btn;
+                btn.type          = WidgetElementType::Button;
+                btn.id            = rowId + ".Btn";
+                btn.text          = action.currentCombo.toString();
+                btn.fontSize      = theme.fontSizeSmall;
+                btn.style.textColor     = theme.inputText;
+                btn.textAlignH    = TextAlignH::Center;
+                btn.textAlignV    = TextAlignV::Center;
+                btn.style.color         = theme.inputBackground;
+                btn.style.hoverColor    = theme.inputBackgroundHover;
+                btn.shaderVertex  = "button_vertex.glsl";
+                btn.shaderFragment = "button_fragment.glsl";
+                btn.hitTestMode   = HitTestMode::Enabled;
+                btn.minSize       = Vec2{ contentW - 8.0f - kLabelW - 12.0f, kRowH };
+                btn.padding       = Vec2{ 6.0f, 4.0f };
+
+                UIManager* popupUi = &popup->uiManager();
+                btn.onClicked = [captureState, actionId, rowId, popupUi]() {
+                    // Toggle capture mode
+                    if (captureState->capturingId == actionId)
+                    {
+                        captureState->capturingId.clear();
+                        ShortcutManager::Instance().setEnabled(true);
+                        popupUi->clearKeyCaptureCallback();
+                        // Restore button text
+                        if (auto* b = popupUi->findElementById(rowId + ".Btn"))
+                        {
+                            const auto& acts = ShortcutManager::Instance().getActions();
+                            for (const auto& a : acts)
+                            {
+                                if (a.id == actionId) { b->text = a.currentCombo.toString(); break; }
+                            }
+                            b->style.textColor = EditorTheme::Get().inputText;
+                            popupUi->markAllWidgetsDirty();
+                        }
+                        return;
+                    }
+                    captureState->capturingId = actionId;
+                    ShortcutManager::Instance().setEnabled(false);
+                    if (auto* b = popupUi->findElementById(rowId + ".Btn"))
+                    {
+                        b->text = "Press key...";
+                        b->style.textColor = Vec4{ 1.0f, 0.85f, 0.3f, 1.0f };
+                        popupUi->markAllWidgetsDirty();
+                    }
+
+                    // Install key capture callback on the popup's UIManager
+                    popupUi->setKeyCaptureCallback([captureState, actionId, rowId, popupUi](uint32_t sdlKey, uint16_t sdlMod) -> bool {
+                        if (captureState->capturingId != actionId)
+                            return false;
+
+                        // Ignore bare modifier keys
+                        if (sdlKey == SDLK_LCTRL || sdlKey == SDLK_RCTRL ||
+                            sdlKey == SDLK_LSHIFT || sdlKey == SDLK_RSHIFT ||
+                            sdlKey == SDLK_LALT || sdlKey == SDLK_RALT)
+                            return true; // consume but don't finish
+
+                        uint8_t mods = ShortcutManager::Mod::None;
+                        if (sdlMod & (SDL_KMOD_LCTRL | SDL_KMOD_RCTRL))  mods |= ShortcutManager::Mod::Ctrl;
+                        if (sdlMod & (SDL_KMOD_LSHIFT | SDL_KMOD_RSHIFT)) mods |= ShortcutManager::Mod::Shift;
+                        if (sdlMod & (SDL_KMOD_LALT | SDL_KMOD_RALT))    mods |= ShortcutManager::Mod::Alt;
+
+                        ShortcutManager::KeyCombo newCombo{ sdlKey, mods };
+                        auto& sm = ShortcutManager::Instance();
+
+                        // Check for Escape — cancel capture
+                        if (sdlKey == SDLK_ESCAPE && mods == 0)
+                        {
+                            captureState->capturingId.clear();
+                            sm.setEnabled(true);
+                            popupUi->clearKeyCaptureCallback();
+                            if (auto* b = popupUi->findElementById(rowId + ".Btn"))
+                            {
+                                for (const auto& a : sm.getActions())
+                                {
+                                    if (a.id == actionId) { b->text = a.currentCombo.toString(); break; }
+                                }
+                                b->style.textColor = EditorTheme::Get().inputText;
+                                popupUi->markAllWidgetsDirty();
+                            }
+                            return true;
+                        }
+
+                        // Check for conflicts
+                        const auto& acts = sm.getActions();
+                        ShortcutManager::Phase actionPhase = ShortcutManager::Phase::KeyDown;
+                        for (const auto& a : acts) { if (a.id == actionId) { actionPhase = a.phase; break; } }
+                        std::string conflict = sm.findConflict(newCombo, actionPhase, actionId);
+
+                        sm.rebind(actionId, newCombo);
+                        captureState->capturingId.clear();
+                        sm.setEnabled(true);
+                        popupUi->clearKeyCaptureCallback();
+
+                        if (auto* b = popupUi->findElementById(rowId + ".Btn"))
+                        {
+                            b->text = newCombo.toString();
+                            b->style.textColor = EditorTheme::Get().inputText;
+                            popupUi->markAllWidgetsDirty();
+                        }
+
+                        if (!conflict.empty())
+                        {
+                            Logger::Instance().log(Logger::Category::Input,
+                                "Shortcut conflict: " + newCombo.toString() + " was also bound to " + conflict,
+                                Logger::LogLevel::WARNING);
+                        }
+                        return true;
+                    });
+                };
+
+                row.children.push_back(btn);
+                content.children.push_back(row);
+                ++shortcutIdx;
+            }
+
+            // Reset All button
+            {
+                WidgetElement spacer;
+                spacer.type    = WidgetElementType::Panel;
+                spacer.id      = "EdS.SC.SpacerReset";
+                spacer.style.color   = theme.transparent;
+                spacer.minSize = Vec2{ contentW - 8.0f, 6.0f };
+                content.children.push_back(spacer);
+
+                WidgetElement resetBtn;
+                resetBtn.type          = WidgetElementType::Button;
+                resetBtn.id            = "EdS.SC.ResetAll";
+                resetBtn.text          = "Reset All to Defaults";
+                resetBtn.fontSize      = theme.fontSizeSmall;
+                resetBtn.style.textColor     = Vec4{ 0.9f, 0.7f, 0.7f, 1.0f };
+                resetBtn.textAlignH    = TextAlignH::Center;
+                resetBtn.textAlignV    = TextAlignV::Center;
+                resetBtn.style.color         = Vec4{ 0.3f, 0.15f, 0.15f, 0.8f };
+                resetBtn.style.hoverColor    = Vec4{ 0.45f, 0.2f, 0.2f, 0.95f };
+                resetBtn.shaderVertex  = "button_vertex.glsl";
+                resetBtn.shaderFragment = "button_fragment.glsl";
+                resetBtn.hitTestMode   = HitTestMode::Enabled;
+                resetBtn.minSize       = Vec2{ EditorTheme::Scaled(180.0f), kRowH };
+                resetBtn.padding       = Vec2{ 6.0f, 4.0f };
+
+                UIManager* popupUi = &popup->uiManager();
+                resetBtn.onClicked = [popupUi]() {
+                    auto& sm = ShortcutManager::Instance();
+                    sm.resetAllToDefaults();
+                    // Update all keybind buttons
+                    const auto& acts = sm.getActions();
+                    int idx = 0;
+                    for (const auto& a : acts)
+                    {
+                        std::string bid = "EdS.SC." + std::to_string(idx) + ".Btn";
+                        if (auto* b = popupUi->findElementById(bid))
+                        {
+                            b->text = a.currentCombo.toString();
+                        }
+                        ++idx;
+                    }
+                    popupUi->markAllWidgetsDirty();
+                };
+                content.children.push_back(resetBtn);
+            }
+        }
+
         elements.push_back(content);
     }
 
@@ -11582,6 +12498,414 @@ void UIManager::openEditorSettingsPopup()
     widget->setFillY(true);
     widget->setElements(std::move(elements));
     popup->uiManager().registerWidget("EditorSettings.Main", widget);
+}
+
+// ---------------------------------------------------------------------------------
+// Shortcut Help Popup (F1 - lists all registered shortcuts)
+// ---------------------------------------------------------------------------------
+void UIManager::openShortcutHelpPopup()
+{
+    if (!m_renderer)
+        return;
+
+    const int kPopupW = static_cast<int>(EditorTheme::Scaled(420.0f));
+    const int kPopupH = static_cast<int>(EditorTheme::Scaled(500.0f));
+    PopupWindow* popup = m_renderer->openPopupWindow(
+        "ShortcutHelp", "Keyboard Shortcuts", kPopupW, kPopupH);
+    if (!popup) return;
+    if (!popup->uiManager().getRegisteredWidgets().empty()) return;
+
+    const float W = static_cast<float>(kPopupW);
+    const float H = static_cast<float>(kPopupH);
+    auto nx = [&](float px) { return px / W; };
+    auto ny = [&](float py) { return py / H; };
+
+    auto& theme = EditorTheme::Get();
+    std::vector<WidgetElement> elements;
+
+    // Background
+    {
+        WidgetElement bg;
+        bg.type  = WidgetElementType::Panel;
+        bg.id    = "SKH.Bg";
+        bg.from  = Vec2{ 0.0f, 0.0f };
+        bg.to    = Vec2{ 1.0f, 1.0f };
+        bg.style.color = theme.panelBackground;
+        elements.push_back(bg);
+    }
+
+    const float kTitleH = EditorTheme::Scaled(40.0f);
+
+    // Title bar
+    {
+        WidgetElement titleBg;
+        titleBg.type  = WidgetElementType::Panel;
+        titleBg.id    = "SKH.TitleBg";
+        titleBg.from  = Vec2{ 0.0f, 0.0f };
+        titleBg.to    = Vec2{ 1.0f, ny(kTitleH) };
+        titleBg.style.color = theme.titleBarBackground;
+        elements.push_back(titleBg);
+
+        WidgetElement titleText;
+        titleText.type      = WidgetElementType::Text;
+        titleText.id        = "SKH.TitleText";
+        titleText.from      = Vec2{ nx(8.0f), 0.0f };
+        titleText.to        = Vec2{ nx(W - 8.0f), ny(kTitleH) };
+        titleText.text      = "Keyboard Shortcuts";
+        titleText.fontSize  = theme.fontSizeHeading;
+        titleText.style.textColor = theme.titleBarText;
+        titleText.textAlignV = TextAlignV::Center;
+        titleText.padding   = Vec2{ 8.0f, 0.0f };
+        elements.push_back(titleText);
+    }
+
+    // Content area (scrollable stack)
+    {
+        WidgetElement content;
+        content.type        = WidgetElementType::StackPanel;
+        content.id          = "SKH.Content";
+        content.from        = Vec2{ nx(16.0f), ny(kTitleH + 12.0f) };
+        content.to          = Vec2{ nx(W - 16.0f), ny(H - 16.0f) };
+        content.style.color = theme.transparent;
+        content.orientation = StackOrientation::Vertical;
+        content.padding     = Vec2{ 4.0f, 4.0f };
+        content.scrollable  = true;
+
+        const float contentW = W - 32.0f;
+        const float kRowH = EditorTheme::Scaled(24.0f);
+        const float kLabelW = EditorTheme::Scaled(180.0f);
+
+        auto& sm = ShortcutManager::Instance();
+        const auto& actions = sm.getActions();
+        std::string lastCategory;
+
+        for (size_t i = 0; i < actions.size(); ++i)
+        {
+            const auto& action = actions[i];
+
+            if (action.category != lastCategory)
+            {
+                lastCategory = action.category;
+
+                if (!content.children.empty())
+                {
+                    WidgetElement spacer;
+                    spacer.type    = WidgetElementType::Panel;
+                    spacer.id      = "SKH.Sp." + std::to_string(i);
+                    spacer.style.color   = theme.transparent;
+                    spacer.minSize = Vec2{ contentW - 8.0f, 4.0f };
+                    content.children.push_back(spacer);
+                }
+
+                WidgetElement catLabel;
+                catLabel.type      = WidgetElementType::Text;
+                catLabel.id        = "SKH.Cat." + std::to_string(i);
+                catLabel.text      = action.category;
+                catLabel.fontSize  = theme.fontSizeSubheading;
+                catLabel.style.textColor = Vec4{ 0.55f, 0.65f, 0.85f, 1.0f };
+                catLabel.textAlignV = TextAlignV::Center;
+                catLabel.minSize   = Vec2{ contentW - 8.0f, kRowH };
+                catLabel.padding   = Vec2{ 2.0f, 2.0f };
+                content.children.push_back(catLabel);
+
+                WidgetElement sep;
+                sep.type    = WidgetElementType::Panel;
+                sep.id      = "SKH.Sep." + std::to_string(i);
+                sep.style.color   = theme.panelBorder;
+                sep.minSize = Vec2{ contentW - 8.0f, 1.0f };
+                content.children.push_back(sep);
+            }
+
+            WidgetElement row;
+            row.type        = WidgetElementType::StackPanel;
+            row.id          = "SKH.R." + std::to_string(i);
+            row.orientation = StackOrientation::Horizontal;
+            row.minSize     = Vec2{ contentW - 8.0f, kRowH };
+            row.style.color = theme.transparent;
+            row.padding     = Vec2{ 4.0f, 1.0f };
+
+            WidgetElement lbl;
+            lbl.type      = WidgetElementType::Text;
+            lbl.id        = "SKH.L." + std::to_string(i);
+            lbl.text      = action.displayName;
+            lbl.fontSize  = theme.fontSizeBody;
+            lbl.style.textColor = theme.textPrimary;
+            lbl.textAlignV = TextAlignV::Center;
+            lbl.minSize   = Vec2{ kLabelW, kRowH };
+            row.children.push_back(lbl);
+
+            WidgetElement key;
+            key.type      = WidgetElementType::Text;
+            key.id        = "SKH.K." + std::to_string(i);
+            key.text      = action.currentCombo.toString();
+            key.fontSize  = theme.fontSizeSmall;
+            key.style.textColor = Vec4{ 0.7f, 0.85f, 1.0f, 1.0f };
+            key.textAlignV = TextAlignV::Center;
+            key.textAlignH = TextAlignH::Right;
+            key.minSize   = Vec2{ contentW - 8.0f - kLabelW - 12.0f, kRowH };
+            row.children.push_back(key);
+
+            content.children.push_back(row);
+        }
+
+        elements.push_back(content);
+    }
+
+    auto widget = std::make_shared<EditorWidget>();
+    widget->setName("ShortcutHelpWidget");
+    widget->setFillX(true);
+    widget->setFillY(true);
+    widget->setElements(std::move(elements));
+    popup->uiManager().registerWidget("ShortcutHelp.Main", widget);
+}
+
+// ---------------------------------------------------------------------------------
+// Notification History Popup
+// ---------------------------------------------------------------------------------
+void UIManager::openNotificationHistoryPopup()
+{
+    if (!m_renderer)
+        return;
+
+    // Clear unread count on open
+    m_unreadNotificationCount = 0;
+    refreshNotificationBadge();
+
+    const int kPopupW = static_cast<int>(EditorTheme::Scaled(440.0f));
+    const int kPopupH = static_cast<int>(EditorTheme::Scaled(480.0f));
+    PopupWindow* popup = m_renderer->openPopupWindow(
+        "NotificationHistory", "Notification History", kPopupW, kPopupH);
+    if (!popup) return;
+    if (!popup->uiManager().getRegisteredWidgets().empty()) return;
+
+    const float W = static_cast<float>(kPopupW);
+    const float H = static_cast<float>(kPopupH);
+    auto nx = [&](float px) { return px / W; };
+    auto ny = [&](float py) { return py / H; };
+
+    auto& theme = EditorTheme::Get();
+    std::vector<WidgetElement> elements;
+
+    // Background
+    {
+        WidgetElement bg;
+        bg.type  = WidgetElementType::Panel;
+        bg.id    = "NH.Bg";
+        bg.from  = Vec2{ 0.0f, 0.0f };
+        bg.to    = Vec2{ 1.0f, 1.0f };
+        bg.style.color = theme.panelBackground;
+        elements.push_back(bg);
+    }
+
+    const float kTitleH = EditorTheme::Scaled(40.0f);
+
+    // Title bar
+    {
+        WidgetElement titleBg;
+        titleBg.type  = WidgetElementType::Panel;
+        titleBg.id    = "NH.TitleBg";
+        titleBg.from  = Vec2{ 0.0f, 0.0f };
+        titleBg.to    = Vec2{ 1.0f, ny(kTitleH) };
+        titleBg.style.color = theme.titleBarBackground;
+        elements.push_back(titleBg);
+
+        WidgetElement titleText;
+        titleText.type      = WidgetElementType::Text;
+        titleText.id        = "NH.TitleText";
+        titleText.from      = Vec2{ nx(8.0f), 0.0f };
+        titleText.to        = Vec2{ nx(W - 8.0f), ny(kTitleH) };
+        titleText.text      = "Notification History";
+        titleText.fontSize  = theme.fontSizeHeading;
+        titleText.style.textColor = theme.titleBarText;
+        titleText.textAlignV = TextAlignV::Center;
+        titleText.padding   = Vec2{ 8.0f, 0.0f };
+        elements.push_back(titleText);
+    }
+
+    // Content area (scrollable)
+    {
+        WidgetElement content;
+        content.type        = WidgetElementType::StackPanel;
+        content.id          = "NH.Content";
+        content.from        = Vec2{ nx(12.0f), ny(kTitleH + 8.0f) };
+        content.to          = Vec2{ nx(W - 12.0f), ny(H - 12.0f) };
+        content.style.color = theme.transparent;
+        content.orientation = StackOrientation::Vertical;
+        content.padding     = Vec2{ 4.0f, 4.0f };
+        content.scrollable  = true;
+
+        const float contentW = W - 24.0f;
+        const float kRowH = EditorTheme::Scaled(28.0f);
+
+        if (m_notificationHistory.empty())
+        {
+            WidgetElement emptyLabel;
+            emptyLabel.type      = WidgetElementType::Text;
+            emptyLabel.id        = "NH.Empty";
+            emptyLabel.text      = "No notifications yet.";
+            emptyLabel.fontSize  = theme.fontSizeBody;
+            emptyLabel.style.textColor = theme.textMuted;
+            emptyLabel.textAlignV = TextAlignV::Center;
+            emptyLabel.textAlignH = TextAlignH::Center;
+            emptyLabel.minSize   = Vec2{ contentW - 8.0f, EditorTheme::Scaled(40.0f) };
+            content.children.push_back(emptyLabel);
+        }
+        else
+        {
+            for (size_t i = 0; i < m_notificationHistory.size(); ++i)
+            {
+                const auto& entry = m_notificationHistory[i];
+
+                // Level accent color
+                Vec4 levelColor = Vec4{ 0.4f, 0.6f, 0.9f, 1.0f }; // info
+                switch (entry.level)
+                {
+                case NotificationLevel::Error:   levelColor = theme.errorColor;   break;
+                case NotificationLevel::Warning: levelColor = theme.warningColor; break;
+                case NotificationLevel::Success: levelColor = theme.successColor; break;
+                default: break;
+                }
+
+                WidgetElement row;
+                row.type        = WidgetElementType::StackPanel;
+                row.id          = "NH.R." + std::to_string(i);
+                row.orientation = StackOrientation::Horizontal;
+                row.minSize     = Vec2{ contentW - 8.0f, kRowH };
+                row.style.color = (i % 2 == 0)
+                    ? Vec4{ 0.0f, 0.0f, 0.0f, 0.0f }
+                    : Vec4{ 1.0f, 1.0f, 1.0f, 0.03f };
+                row.padding     = Vec2{ 4.0f, 2.0f };
+
+                // Level indicator dot
+                WidgetElement dot;
+                dot.type    = WidgetElementType::Panel;
+                dot.id      = "NH.D." + std::to_string(i);
+                dot.minSize = Vec2{ 6.0f, 6.0f };
+                dot.style.color   = levelColor;
+                dot.style.borderRadius = 3.0f;
+                dot.padding = Vec2{ 2.0f, static_cast<float>((kRowH - 6.0f) * 0.5f) };
+                row.children.push_back(dot);
+
+                // Timestamp
+                const uint64_t elapsed = SDL_GetTicks() - entry.timestampMs;
+                std::string timeStr;
+                if (elapsed < 60000)
+                    timeStr = std::to_string(elapsed / 1000) + "s ago";
+                else if (elapsed < 3600000)
+                    timeStr = std::to_string(elapsed / 60000) + "m ago";
+                else
+                    timeStr = std::to_string(elapsed / 3600000) + "h ago";
+
+                WidgetElement timeLabel;
+                timeLabel.type      = WidgetElementType::Text;
+                timeLabel.id        = "NH.T." + std::to_string(i);
+                timeLabel.text      = timeStr;
+                timeLabel.fontSize  = theme.fontSizeSmall;
+                timeLabel.style.textColor = theme.textMuted;
+                timeLabel.textAlignV = TextAlignV::Center;
+                timeLabel.minSize   = Vec2{ EditorTheme::Scaled(56.0f), kRowH };
+                timeLabel.padding   = Vec2{ 4.0f, 0.0f };
+                row.children.push_back(timeLabel);
+
+                // Message
+                WidgetElement msg;
+                msg.type      = WidgetElementType::Text;
+                msg.id        = "NH.M." + std::to_string(i);
+                msg.text      = entry.message;
+                msg.fontSize  = theme.fontSizeBody;
+                msg.style.textColor = theme.textPrimary;
+                msg.textAlignV = TextAlignV::Center;
+                msg.fillX     = true;
+                msg.minSize   = Vec2{ 0.0f, kRowH };
+                msg.padding   = Vec2{ 4.0f, 0.0f };
+                row.children.push_back(msg);
+
+                content.children.push_back(row);
+            }
+        }
+
+        elements.push_back(content);
+    }
+
+    auto widget = std::make_shared<EditorWidget>();
+    widget->setName("NotificationHistoryWidget");
+    widget->setFillX(true);
+    widget->setFillY(true);
+    widget->setElements(std::move(elements));
+    popup->uiManager().registerWidget("NotificationHistory.Main", widget);
+}
+
+void UIManager::refreshNotificationBadge()
+{
+    auto* entry = findWidgetEntry("StatusBar");
+    if (!entry || !entry->widget)
+        return;
+
+    auto& elements = entry->widget->getElementsMutable();
+    WidgetElement* notifBtn = FindElementById(elements, "StatusBar.Notifications");
+    if (!notifBtn)
+        return;
+
+    if (m_unreadNotificationCount > 0)
+    {
+        std::string badge = "\xF0\x9F\x94\x94 " + std::to_string(m_unreadNotificationCount);
+        notifBtn->text = badge;
+        notifBtn->style.textColor = EditorTheme::Get().warningColor;
+    }
+    else
+    {
+        notifBtn->text = "\xF0\x9F\x94\x94";
+        notifBtn->style.textColor = Vec4{ 0.7f, 0.7f, 0.75f, 1.0f };
+    }
+
+    entry->widget->markLayoutDirty();
+    m_renderDirty = true;
+}
+
+// ---------------------------------------------------------------------------------
+// Non-blocking Progress Bars
+// ---------------------------------------------------------------------------------
+UIManager::ProgressBarHandle UIManager::beginProgress(const std::string& label, float total)
+{
+    ProgressEntry pe;
+    pe.id = m_nextProgressId++;
+    pe.label = label;
+    pe.current = 0.0f;
+    pe.total = std::max(0.01f, total);
+    m_progressBars.push_back(std::move(pe));
+
+    showToastMessage(label + "...", 1.5f, NotificationLevel::Info);
+
+    ProgressBarHandle handle;
+    handle.id = m_progressBars.back().id;
+    return handle;
+}
+
+void UIManager::updateProgress(ProgressBarHandle handle, float current, const std::string& label)
+{
+    for (auto& pb : m_progressBars)
+    {
+        if (pb.id == handle.id)
+        {
+            pb.current = current;
+            if (!label.empty())
+                pb.label = label;
+            break;
+        }
+    }
+}
+
+void UIManager::endProgress(ProgressBarHandle handle)
+{
+    for (auto it = m_progressBars.begin(); it != m_progressBars.end(); ++it)
+    {
+        if (it->id == handle.id)
+        {
+            showToastMessage(it->label + " complete", 2.0f, NotificationLevel::Success);
+            m_progressBars.erase(it);
+            break;
+        }
+    }
 }
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -15599,4 +16923,656 @@ void UIManager::closeProfilerTab()
 bool UIManager::isProfilerOpen() const
 {
     return m_profilerState.isOpen;
+}
+
+// ===========================================================================
+// Audio Preview Tab
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// isAudioPreviewOpen
+// ---------------------------------------------------------------------------
+bool UIManager::isAudioPreviewOpen() const
+{
+    return m_audioPreviewState.isOpen;
+}
+
+// ---------------------------------------------------------------------------
+// openAudioPreviewTab
+// ---------------------------------------------------------------------------
+void UIManager::openAudioPreviewTab(const std::string& assetPath)
+{
+    if (!m_renderer)
+        return;
+
+    const std::string tabId = "AudioPreview";
+
+    // If already open with the same asset, just switch to it
+    if (m_audioPreviewState.isOpen && m_audioPreviewState.assetPath == assetPath)
+    {
+        m_renderer->setActiveTab(tabId);
+        markAllWidgetsDirty();
+        return;
+    }
+
+    // If open with a different asset, close first
+    if (m_audioPreviewState.isOpen)
+        closeAudioPreviewTab();
+
+    // --- Resolve and load the asset ---
+    auto& assetMgr = AssetManager::Instance();
+    const std::string absPath = assetMgr.getAbsoluteContentPath(assetPath);
+    if (absPath.empty())
+    {
+        showToastMessage("Failed to resolve audio asset.", 3.0f, NotificationLevel::Error);
+        return;
+    }
+
+    auto existingAsset = assetMgr.getLoadedAssetByPath(assetPath);
+    if (!existingAsset)
+    {
+        const int loadId = assetMgr.loadAsset(absPath, AssetType::Audio, AssetManager::Sync);
+        if (loadId == 0)
+        {
+            showToastMessage("Failed to load audio asset.", 3.0f, NotificationLevel::Error);
+            return;
+        }
+        existingAsset = assetMgr.getLoadedAssetByPath(assetPath);
+    }
+
+    if (!existingAsset)
+    {
+        showToastMessage("Audio asset not found in memory.", 3.0f, NotificationLevel::Error);
+        return;
+    }
+
+    const auto& data = existingAsset->getData();
+
+    // --- Create tab ---
+    m_renderer->addTab(tabId, std::filesystem::path(assetPath).stem().string(), true);
+    m_renderer->setActiveTab(tabId);
+
+    const std::string widgetId = "AudioPreview.Main";
+    unregisterWidget(widgetId);
+
+    // --- Initialise state ---
+    m_audioPreviewState = {};
+    m_audioPreviewState.tabId       = tabId;
+    m_audioPreviewState.widgetId    = widgetId;
+    m_audioPreviewState.assetPath   = assetPath;
+    m_audioPreviewState.isOpen      = true;
+    m_audioPreviewState.volume      = 1.0f;
+    m_audioPreviewState.displayName = std::filesystem::path(assetPath).stem().string();
+
+    // Extract metadata
+    if (data.contains("m_channels") && data["m_channels"].is_number())
+        m_audioPreviewState.channels = data["m_channels"].get<int>();
+    if (data.contains("m_sampleRate") && data["m_sampleRate"].is_number())
+        m_audioPreviewState.sampleRate = data["m_sampleRate"].get<int>();
+    if (data.contains("m_format") && data["m_format"].is_number())
+        m_audioPreviewState.format = data["m_format"].get<int>();
+    if (data.contains("m_data") && data["m_data"].is_array())
+        m_audioPreviewState.dataBytes = data["m_data"].size();
+
+    // Compute duration
+    if (m_audioPreviewState.sampleRate > 0 && m_audioPreviewState.channels > 0)
+    {
+        int bytesPerSample = 2; // default: 16-bit
+        // SDL_AUDIO_U8 = 0x0008
+        if (m_audioPreviewState.format == 0x0008)
+            bytesPerSample = 1;
+        const size_t frameSize = static_cast<size_t>(m_audioPreviewState.channels) * bytesPerSample;
+        if (frameSize > 0)
+            m_audioPreviewState.durationSeconds = static_cast<float>(m_audioPreviewState.dataBytes) / static_cast<float>(frameSize * m_audioPreviewState.sampleRate);
+    }
+
+    // --- Build the widget ---
+    {
+        auto widget = std::make_shared<EditorWidget>();
+        widget->setName(widgetId);
+        widget->setAnchor(WidgetAnchor::TopLeft);
+        widget->setFillX(true);
+        widget->setFillY(true);
+        widget->setSizePixels(Vec2{ 0.0f, 0.0f });
+        widget->setZOrder(2);
+
+        const auto& theme = EditorTheme::Get();
+
+        WidgetElement root{};
+        root.id          = "AudioPreview.Root";
+        root.type        = WidgetElementType::StackPanel;
+        root.from        = Vec2{ 0.0f, 0.0f };
+        root.to          = Vec2{ 1.0f, 1.0f };
+        root.fillX       = true;
+        root.fillY       = true;
+        root.orientation = StackOrientation::Vertical;
+        root.style.color = theme.panelBackground;
+        root.runtimeOnly = true;
+
+        // Toolbar
+        buildAudioPreviewToolbar(root);
+
+        // Separator
+        {
+            WidgetElement sep{};
+            sep.type        = WidgetElementType::Panel;
+            sep.fillX       = true;
+            sep.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+            sep.style.color = theme.panelBorder;
+            sep.runtimeOnly = true;
+            root.children.push_back(std::move(sep));
+        }
+
+        // Scrollable content area
+        {
+            WidgetElement content{};
+            content.id          = "AudioPreview.Content";
+            content.type        = WidgetElementType::StackPanel;
+            content.fillX       = true;
+            content.fillY       = true;
+            content.scrollable  = true;
+            content.orientation = StackOrientation::Vertical;
+            content.padding     = EditorTheme::Scaled(Vec2{ 16.0f, 12.0f });
+            content.style.color = Vec4{ 0.10f, 0.10f, 0.13f, 1.0f };
+            content.runtimeOnly = true;
+
+            // Waveform
+            buildAudioPreviewWaveform(content);
+
+            // Metadata
+            buildAudioPreviewMetadata(content);
+
+            root.children.push_back(std::move(content));
+        }
+
+        widget->setElements({ std::move(root) });
+        registerWidget(widgetId, widget, tabId);
+    }
+
+    // --- Tab / close click events ---
+    registerClickEvent("TitleBar.Tab." + tabId, [this, tabId]()
+    {
+        if (m_renderer)
+            m_renderer->setActiveTab(tabId);
+        markAllWidgetsDirty();
+    });
+
+    registerClickEvent("TitleBar.TabClose." + tabId, [this]()
+    {
+        closeAudioPreviewTab();
+    });
+
+    // --- Playback button events ---
+    registerClickEvent("AudioPreview.Play", [this]()
+    {
+        if (m_audioPreviewState.isPlaying)
+            return;
+        auto& audioMgr = AudioManager::Instance();
+        auto& assetMgr = AssetManager::Instance();
+        auto asset = assetMgr.getLoadedAssetByPath(m_audioPreviewState.assetPath);
+        if (asset)
+        {
+            unsigned int handle = audioMgr.playAudioAsset(asset->getId(), false, m_audioPreviewState.volume);
+            if (handle != 0)
+            {
+                m_audioPreviewState.playHandle = handle;
+                m_audioPreviewState.isPlaying = true;
+                refreshAudioPreview();
+            }
+        }
+    });
+
+    registerClickEvent("AudioPreview.Stop", [this]()
+    {
+        if (m_audioPreviewState.playHandle != 0)
+        {
+            AudioManager::Instance().stopSource(m_audioPreviewState.playHandle);
+            m_audioPreviewState.playHandle = 0;
+        }
+        m_audioPreviewState.isPlaying = false;
+        refreshAudioPreview();
+    });
+
+    refreshAudioPreview();
+    markAllWidgetsDirty();
+
+    Logger::Instance().log(Logger::Category::UI,
+        "Audio Preview opened: " + assetPath, Logger::LogLevel::INFO);
+}
+
+// ---------------------------------------------------------------------------
+// closeAudioPreviewTab
+// ---------------------------------------------------------------------------
+void UIManager::closeAudioPreviewTab()
+{
+    if (!m_audioPreviewState.isOpen || !m_renderer)
+        return;
+
+    // Stop any playing audio
+    if (m_audioPreviewState.playHandle != 0)
+    {
+        AudioManager::Instance().stopSource(m_audioPreviewState.playHandle);
+    }
+
+    const std::string tabId = m_audioPreviewState.tabId;
+
+    if (m_renderer->getActiveTabId() == tabId)
+        m_renderer->setActiveTab("Viewport");
+
+    unregisterWidget(m_audioPreviewState.widgetId);
+
+    m_renderer->removeTab(tabId);
+    m_audioPreviewState = {};
+    markAllWidgetsDirty();
+}
+
+// ---------------------------------------------------------------------------
+// refreshAudioPreview  – rebuilds content of the widget
+// ---------------------------------------------------------------------------
+void UIManager::refreshAudioPreview()
+{
+    if (!m_audioPreviewState.isOpen)
+        return;
+
+    auto* entry = findWidgetEntry(m_audioPreviewState.widgetId);
+    if (!entry || !entry->widget)
+        return;
+
+    auto& elements = entry->widget->getElementsMutable();
+    if (elements.empty())
+        return;
+
+    auto& root = elements[0];
+    root.children.clear();
+
+    const auto& theme = EditorTheme::Get();
+    root.style.color = theme.panelBackground;
+
+    // Toolbar
+    buildAudioPreviewToolbar(root);
+
+    // Separator
+    {
+        WidgetElement sep{};
+        sep.type        = WidgetElementType::Panel;
+        sep.fillX       = true;
+        sep.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+        sep.style.color = theme.panelBorder;
+        sep.runtimeOnly = true;
+        root.children.push_back(std::move(sep));
+    }
+
+    // Content area
+    {
+        WidgetElement content{};
+        content.id          = "AudioPreview.Content";
+        content.type        = WidgetElementType::StackPanel;
+        content.fillX       = true;
+        content.fillY       = true;
+        content.scrollable  = true;
+        content.orientation = StackOrientation::Vertical;
+        content.padding     = EditorTheme::Scaled(Vec2{ 16.0f, 12.0f });
+        content.style.color = Vec4{ 0.10f, 0.10f, 0.13f, 1.0f };
+        content.runtimeOnly = true;
+
+        buildAudioPreviewWaveform(content);
+        buildAudioPreviewMetadata(content);
+
+        root.children.push_back(std::move(content));
+    }
+
+    entry->widget->markLayoutDirty();
+    markAllWidgetsDirty();
+}
+
+// ---------------------------------------------------------------------------
+// buildAudioPreviewToolbar
+// ---------------------------------------------------------------------------
+void UIManager::buildAudioPreviewToolbar(WidgetElement& root)
+{
+    const auto& theme = EditorTheme::Get();
+
+    WidgetElement toolbar{};
+    toolbar.id          = "AudioPreview.Toolbar";
+    toolbar.type        = WidgetElementType::StackPanel;
+    toolbar.fillX       = true;
+    toolbar.orientation = StackOrientation::Horizontal;
+    toolbar.padding     = EditorTheme::Scaled(Vec2{ 8.0f, 4.0f });
+    toolbar.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 36.0f });
+    toolbar.style.color = Vec4{ 0.14f, 0.15f, 0.19f, 1.0f };
+    toolbar.runtimeOnly = true;
+
+    auto makeToolBtn = [&](const std::string& id, const std::string& label, bool active) -> WidgetElement
+    {
+        WidgetElement btn{};
+        btn.id              = id;
+        btn.type            = WidgetElementType::Button;
+        btn.text            = label;
+        btn.font            = theme.fontDefault;
+        btn.fontSize        = theme.fontSizeSmall;
+        btn.style.textColor = active ? theme.textPrimary : theme.textMuted;
+        btn.style.color     = active ? theme.accent : theme.buttonDefault;
+        btn.style.hoverColor = theme.buttonHover;
+        btn.textAlignH      = TextAlignH::Center;
+        btn.textAlignV      = TextAlignV::Center;
+        btn.minSize         = EditorTheme::Scaled(Vec2{ 60.0f, 26.0f });
+        btn.padding         = EditorTheme::Scaled(Vec2{ 10.0f, 2.0f });
+        btn.hitTestMode     = HitTestMode::Enabled;
+        btn.runtimeOnly     = true;
+        btn.clickEvent      = id;
+        return btn;
+    };
+
+    // Play / Stop buttons
+    toolbar.children.push_back(makeToolBtn("AudioPreview.Play", m_audioPreviewState.isPlaying ? "Playing..." : "Play", !m_audioPreviewState.isPlaying));
+    toolbar.children.push_back(makeToolBtn("AudioPreview.Stop", "Stop", m_audioPreviewState.isPlaying));
+
+    // Spacer
+    {
+        WidgetElement spacer{};
+        spacer.type        = WidgetElementType::Panel;
+        spacer.fillX       = true;
+        spacer.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+        spacer.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        spacer.runtimeOnly = true;
+        toolbar.children.push_back(std::move(spacer));
+    }
+
+    // Volume label
+    {
+        WidgetElement volLabel{};
+        volLabel.type          = WidgetElementType::Text;
+        volLabel.text          = "Volume";
+        volLabel.font          = theme.fontDefault;
+        volLabel.fontSize      = theme.fontSizeSmall;
+        volLabel.style.textColor = theme.textSecondary;
+        volLabel.minSize       = EditorTheme::Scaled(Vec2{ 50.0f, 26.0f });
+        volLabel.textAlignV    = TextAlignV::Center;
+        volLabel.runtimeOnly   = true;
+        toolbar.children.push_back(std::move(volLabel));
+    }
+
+    // Volume slider
+    {
+        WidgetElement slider = EditorUIBuilder::makeSliderRow(
+            "AudioPreview.Volume", "",
+            m_audioPreviewState.volume, 0.0f, 1.0f,
+            [this](float v)
+            {
+                m_audioPreviewState.volume = v;
+                if (m_audioPreviewState.playHandle != 0)
+                    AudioManager::Instance().setHandleGain(m_audioPreviewState.playHandle, v);
+            });
+        slider.minSize = EditorTheme::Scaled(Vec2{ 140.0f, 26.0f });
+        toolbar.children.push_back(std::move(slider));
+    }
+
+    // Asset name label (right side)
+    {
+        WidgetElement nameLabel{};
+        nameLabel.type          = WidgetElementType::Text;
+        nameLabel.text          = m_audioPreviewState.displayName;
+        nameLabel.font          = theme.fontDefault;
+        nameLabel.fontSize      = theme.fontSizeSmall;
+        nameLabel.style.textColor = theme.textMuted;
+        nameLabel.minSize       = EditorTheme::Scaled(Vec2{ 80.0f, 26.0f });
+        nameLabel.textAlignV    = TextAlignV::Center;
+        nameLabel.textAlignH    = TextAlignH::Right;
+        nameLabel.runtimeOnly   = true;
+        nameLabel.padding       = EditorTheme::Scaled(Vec2{ 8.0f, 0.0f });
+        toolbar.children.push_back(std::move(nameLabel));
+    }
+
+    root.children.push_back(std::move(toolbar));
+}
+
+// ---------------------------------------------------------------------------
+// buildAudioPreviewWaveform  – simple bar-chart visualisation of audio samples
+// ---------------------------------------------------------------------------
+void UIManager::buildAudioPreviewWaveform(WidgetElement& root)
+{
+    const auto& theme = EditorTheme::Get();
+
+    // Section heading
+    {
+        WidgetElement heading = EditorUIBuilder::makeHeading("Waveform");
+        heading.padding = EditorTheme::Scaled(Vec2{ 0.0f, 4.0f });
+        root.children.push_back(std::move(heading));
+    }
+
+    // Waveform container
+    WidgetElement waveContainer{};
+    waveContainer.id          = "AudioPreview.Waveform";
+    waveContainer.type        = WidgetElementType::StackPanel;
+    waveContainer.fillX       = true;
+    waveContainer.orientation = StackOrientation::Horizontal;
+    waveContainer.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 100.0f });
+    waveContainer.style.color = Vec4{ 0.06f, 0.07f, 0.09f, 1.0f };
+    waveContainer.padding     = EditorTheme::Scaled(Vec2{ 4.0f, 4.0f });
+    waveContainer.runtimeOnly = true;
+
+    // Try to read raw sample data for waveform visualisation
+    auto& assetMgr = AssetManager::Instance();
+    auto asset = assetMgr.getLoadedAssetByPath(m_audioPreviewState.assetPath);
+
+    const int numBars = 80;
+    std::vector<float> barHeights(numBars, 0.0f);
+
+    if (asset)
+    {
+        const auto& data = asset->getData();
+        if (data.contains("m_data") && data["m_data"].is_array())
+        {
+            const auto& rawArr = data["m_data"];
+            const size_t totalBytes = rawArr.size();
+
+            const bool is8bit = (m_audioPreviewState.format == 0x0008);
+            const int bytesPerSample = is8bit ? 1 : 2;
+            const int frameSize = m_audioPreviewState.channels * bytesPerSample;
+            if (frameSize > 0 && totalBytes > 0)
+            {
+                const size_t totalFrames = totalBytes / frameSize;
+                const size_t framesPerBar = (totalFrames > 0) ? std::max<size_t>(1, totalFrames / numBars) : 1;
+
+                for (int bar = 0; bar < numBars; ++bar)
+                {
+                    const size_t startFrame = bar * framesPerBar;
+                    const size_t endFrame = std::min<size_t>(startFrame + framesPerBar, totalFrames);
+                    float maxAmp = 0.0f;
+
+                    // Sample a subset of frames to avoid reading millions of JSON elements
+                    const size_t step = std::max<size_t>(1, (endFrame - startFrame) / 32);
+                    for (size_t f = startFrame; f < endFrame; f += step)
+                    {
+                        const size_t byteOffset = f * frameSize;
+                        if (is8bit)
+                        {
+                            if (byteOffset < totalBytes)
+                            {
+                                float sample = static_cast<float>(rawArr[byteOffset].get<int>()) / 255.0f;
+                                sample = std::abs(sample - 0.5f) * 2.0f;
+                                maxAmp = std::max(maxAmp, sample);
+                            }
+                        }
+                        else
+                        {
+                            if (byteOffset + 1 < totalBytes)
+                            {
+                                int lo = rawArr[byteOffset].get<int>() & 0xFF;
+                                int hi = rawArr[byteOffset + 1].get<int>() & 0xFF;
+                                int16_t s16 = static_cast<int16_t>(lo | (hi << 8));
+                                float sample = std::abs(static_cast<float>(s16)) / 32768.0f;
+                                maxAmp = std::max(maxAmp, sample);
+                            }
+                        }
+                    }
+                    barHeights[bar] = maxAmp;
+                }
+            }
+        }
+    }
+
+    // Build bars
+    const float maxBarH = EditorTheme::Scaled(90.0f);
+    const Vec4 barColor = Vec4{ 0.30f, 0.60f, 1.00f, 0.85f };
+    const Vec4 barBg    = Vec4{ 0.12f, 0.13f, 0.16f, 1.0f };
+
+    for (int i = 0; i < numBars; ++i)
+    {
+        WidgetElement barCol{};
+        barCol.type        = WidgetElementType::StackPanel;
+        barCol.orientation = StackOrientation::Vertical;
+        barCol.fillX       = true;
+        barCol.fillY       = true;
+        barCol.runtimeOnly = true;
+
+        float h = barHeights[i] * maxBarH;
+        float emptyH = maxBarH - h;
+
+        // Top empty space
+        {
+            WidgetElement empty{};
+            empty.type        = WidgetElementType::Panel;
+            empty.fillX       = true;
+            empty.minSize     = Vec2{ 0.0f, std::max(emptyH, 1.0f) };
+            empty.style.color = Vec4{ 0, 0, 0, 0 };
+            empty.runtimeOnly = true;
+            barCol.children.push_back(std::move(empty));
+        }
+
+        // Bar
+        {
+            WidgetElement bar{};
+            bar.type        = WidgetElementType::Panel;
+            bar.fillX       = true;
+            bar.minSize     = Vec2{ 0.0f, std::max(h, 1.0f) };
+            bar.style.color = barColor;
+            bar.runtimeOnly = true;
+            barCol.children.push_back(std::move(bar));
+        }
+
+        waveContainer.children.push_back(std::move(barCol));
+    }
+
+    root.children.push_back(std::move(waveContainer));
+}
+
+// ---------------------------------------------------------------------------
+// buildAudioPreviewMetadata
+// ---------------------------------------------------------------------------
+void UIManager::buildAudioPreviewMetadata(WidgetElement& root)
+{
+    const auto& theme = EditorTheme::Get();
+    const auto& st = m_audioPreviewState;
+
+    // Spacer
+    {
+        WidgetElement sp{};
+        sp.type        = WidgetElementType::Panel;
+        sp.fillX       = true;
+        sp.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 10.0f });
+        sp.style.color = Vec4{ 0, 0, 0, 0 };
+        sp.runtimeOnly = true;
+        root.children.push_back(std::move(sp));
+    }
+
+    // Section heading
+    {
+        WidgetElement heading = EditorUIBuilder::makeHeading("Metadata");
+        heading.padding = EditorTheme::Scaled(Vec2{ 0.0f, 4.0f });
+        root.children.push_back(std::move(heading));
+    }
+
+    auto addInfoRow = [&](const std::string& label, const std::string& value)
+    {
+        WidgetElement row{};
+        row.type        = WidgetElementType::StackPanel;
+        row.orientation = StackOrientation::Horizontal;
+        row.fillX       = true;
+        row.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 22.0f });
+        row.runtimeOnly = true;
+
+        WidgetElement lbl{};
+        lbl.type          = WidgetElementType::Text;
+        lbl.text          = label;
+        lbl.font          = theme.fontDefault;
+        lbl.fontSize      = theme.fontSizeBody;
+        lbl.style.textColor = theme.textSecondary;
+        lbl.minSize       = EditorTheme::Scaled(Vec2{ 120.0f, 20.0f });
+        lbl.textAlignV    = TextAlignV::Center;
+        lbl.runtimeOnly   = true;
+        row.children.push_back(std::move(lbl));
+
+        WidgetElement val{};
+        val.type          = WidgetElementType::Text;
+        val.text          = value;
+        val.font          = theme.fontDefault;
+        val.fontSize      = theme.fontSizeBody;
+        val.style.textColor = theme.textPrimary;
+        val.fillX         = true;
+        val.minSize       = EditorTheme::Scaled(Vec2{ 0.0f, 20.0f });
+        val.textAlignV    = TextAlignV::Center;
+        val.runtimeOnly   = true;
+        row.children.push_back(std::move(val));
+
+        root.children.push_back(std::move(row));
+    };
+
+    addInfoRow("Path", st.assetPath);
+    addInfoRow("Channels", std::to_string(st.channels) + (st.channels == 1 ? " (Mono)" : st.channels == 2 ? " (Stereo)" : ""));
+    addInfoRow("Sample Rate", std::to_string(st.sampleRate) + " Hz");
+
+    // Format string
+    {
+        std::string fmtStr = "Unknown";
+        if (st.format == 0x0008) fmtStr = "8-bit Unsigned";
+        else if (st.format != 0) fmtStr = "16-bit Signed";
+        addInfoRow("Format", fmtStr);
+    }
+
+    // Duration
+    {
+        int totalSec = static_cast<int>(st.durationSeconds);
+        int minutes = totalSec / 60;
+        int seconds = totalSec % 60;
+        int millis = static_cast<int>((st.durationSeconds - totalSec) * 1000);
+        std::ostringstream oss;
+        oss << minutes << ":" << std::setfill('0') << std::setw(2) << seconds
+            << "." << std::setfill('0') << std::setw(3) << millis;
+        addInfoRow("Duration", oss.str());
+    }
+
+    // Data size
+    {
+        std::string sizeStr;
+        if (st.dataBytes >= 1024 * 1024)
+            sizeStr = std::to_string(st.dataBytes / (1024 * 1024)) + " MB";
+        else if (st.dataBytes >= 1024)
+            sizeStr = std::to_string(st.dataBytes / 1024) + " KB";
+        else
+            sizeStr = std::to_string(st.dataBytes) + " B";
+        addInfoRow("Data Size", sizeStr);
+    }
+
+    // File size on disk
+    {
+        const auto& projPath = DiagnosticsManager::Instance().getProjectInfo().projectPath;
+        if (!projPath.empty())
+        {
+            std::filesystem::path diskPath = std::filesystem::path(projPath) / "Content" / st.assetPath;
+            if (std::filesystem::exists(diskPath))
+            {
+                std::error_code ec;
+                size_t bytes = static_cast<size_t>(std::filesystem::file_size(diskPath, ec));
+                std::string sizeStr;
+                if (bytes >= 1024 * 1024)
+                    sizeStr = std::to_string(bytes / (1024 * 1024)) + " MB";
+                else if (bytes >= 1024)
+                    sizeStr = std::to_string(bytes / 1024) + " KB";
+                else
+                    sizeStr = std::to_string(bytes) + " B";
+                addInfoRow("File Size", sizeStr);
+            }
+        }
+    }
 }

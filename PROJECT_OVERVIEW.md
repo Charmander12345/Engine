@@ -5,8 +5,17 @@
 
 ---
 
+## Aktuelle Änderung (Content Browser / ECS)
+
+- `Entity Templates / Prefabs (Phase 3.2)`: Neuer Asset-Typ `AssetType::Prefab` (Enum-Wert 12) für serialisierbare Entity-Vorlagen. Rechtsklick → „Save as Prefab" im Content Browser speichert die selektierte Entity mit allen 13 Komponententypen als JSON-Asset. Content Browser: eigenes Icon (`entity.png`, Teal-Tint `{0.30, 0.90, 0.70}`), Typ-Filter-Button „Prefab". Drag & Drop auf Viewport spawnt Entity an Cursor-Position. Doppelklick spawnt am Ursprung. „+ Entity"-Dropdown-Button in PathBar mit 7 Built-in-Templates (Empty Entity, Point Light, Directional Light, Camera, Static Mesh, Physics Object, Particle Emitter). Alle Operationen Undo/Redo-fähig. `UIManager`: `savePrefabFromEntity()`, `spawnPrefabAtPosition()`, `spawnBuiltinTemplate()`. Interne Helfer: `prefabSerializeEntity()`/`prefabDeserializeEntity()` für vollständige Komponenten-Serialisierung.
+
+## Aktuelle Änderung (Toast Notification Levels – Phase 6.3)
+
+- `Toast NotificationLevel (Phase 6.3)`: Einheitliches `NotificationLevel`-Enum (`Info`, `Success`, `Warning`, `Error`) in `DiagnosticsManager.h` definiert, von `UIManager` per `using`-Alias übernommen. `ToastNotification`-Struct um `level`-Feld erweitert. `enqueueToastNotification()` akzeptiert optionalen Level-Parameter (default `Info`). `showToastMessage()` passt Mindestdauer an (Warning ≥ 4s, Error ≥ 5s). `createToastWidget()` rendert farbigen 4px-Akzentbalken links (Theme-basiert: `accentColor`/`successColor`/`warningColor`/`errorColor`). Notification History speichert Level. Alle Aufrufer aktualisiert: `AssetManager.cpp` (7 Stellen: Import-Fehler → Error, Import-Erfolg → Success), `PythonScripting.cpp` (3 Stellen: Hot-Reload-Fehler → Error, Erfolg → Success).
+
 ## Aktuelle Änderung (Viewport)
 
+- `Rubber-Band-Selection (Phase 5.2)`: Marquee-Selektion im Viewport. Linksklick+Drag zieht halbtransparentes blaues Auswahlrechteck auf; Mouse-Up selektiert alle Entities im Bereich über Pick-FBO-Block-Read. Ctrl+Drag für additive Selektion, Fallback auf Einzel-Pick bei kleinem Rect (<4px). `Renderer.h`: 6 virtuelle Methoden (begin/update/end/cancel/isActive/getStart). `OpenGLRenderer`: State-Members, `resolveRubberBandSelection()` (glReadPixels-Block), `drawRubberBand()` (Gizmo-Shader, Fill+Border). `main.cpp`: Mouse-Down startet Rubber-Band statt sofortigem Pick.
 - `Verbessertes Scrollbar-Design (Phase 1.6)`: macOS-inspirierte Overlay-Scrollbars für alle scrollbaren Panels. Auto-Hide nach 1.5s Inaktivität mit 0.3s Fade-Out. Scrollbar-Breite: 6px default, 10px bei Hover. Abgerundete Thumb-Enden via `scrollbarBorderRadius` (3.0px). `EditorTheme` um 5 neue Felder erweitert: `scrollbarAutoHide` (bool), `scrollbarWidth` (6.0f), `scrollbarWidthHover` (10.0f), `scrollbarAutoHideDelay` (1.5s), `scrollbarBorderRadius` (3.0f) – alle DPI-skaliert, JSON-serialisiert. `WidgetElement` um Runtime-State: `scrollbarOpacity`, `scrollbarActivityTimer`, `scrollbarHovered`. `UIManager::updateScrollbarVisibilityRecursive()` steuert Fade-Logik und Hover-Erkennung (Mausposition gegen rechten Rand). Scrollbar-Rendering in allen drei Render-Pfaden (Editor UI, Viewport UI, Widget Editor FBO) über `drawUIPanel` mit Theme-Farben (`scrollbarTrack`, `scrollbarThumb`, `scrollbarThumbHover`) × `scrollbarOpacity`.
 - `Animierte Übergänge / Micro-Interactions (Phase 1.5)`:
 - `Modernisierte Icon-Sprache (Phase 1.3)`:
@@ -210,6 +219,7 @@ Engine/
 │   │   ├── Asset.h/.cpp            # AssetData (Laufzeit-Repräsentation)
 │   │   ├── EngineLevel.h/.cpp      # Level-Verwaltung + ECS-Snapshot
 │   │   ├── AudioManager.h/.cpp     # OpenAL-basierter Audio-Manager
+│   │   ├── ShortcutManager.h/.cpp  # Zentrales Keyboard-Shortcut-System
 │   │   ├── ECS/
 │   │   │   ├── ECS.h/.cpp          # ECSManager, Schema, Entity-Verwaltung
 │   │   │   ├── Components.h        # Transform-, Mesh-, Material-, Light- etc.
@@ -835,6 +845,31 @@ uint64_t getComponentVersion(); // Globaler Zähler, inkrementiert bei jeder Kom
 - Source-ID ↔ Asset-ID Mapping in `m_sourceAssetIds`
 - Buffer-Caching: Ein Buffer pro Asset-ID
 
+### 8.7 ShortcutManager
+**Datei:** `src/Core/ShortcutManager.h/.cpp`
+
+Zentrales, konfigurierbares Keyboard-Shortcut-System (Singleton).
+
+**Architektur:**
+- **Action-Registry:** Jede Aktion hat id, displayName, category, defaultCombo, currentCombo, phase (KeyDown/KeyUp) und callback
+- **KeyCombo:** SDL_Keycode + Modifier-Bitmask (Ctrl/Shift/Alt), `toString()` für lesbare Labels (z.B. "Ctrl+Z")
+- **handleKey():** Dispatcht SDL-Key-Events an registrierte Aktionen (O(n) Scan, ~20 Einträge)
+- **Rebinding:** `rebind(id, newCombo)`, `resetToDefault(id)`, `resetAllToDefaults()`
+- **Konflikt-Erkennung:** `findConflict(combo, phase, excludeId)` → id des kollidierenden Shortcuts
+- **Persistenz:** `saveToFile()`/`loadFromFile()` → Text-Format (`shortcuts.cfg` im Projektverzeichnis)
+
+**Registrierte Shortcuts (20):**
+| Kategorie | Shortcuts |
+|-----------|-----------|
+| Editor    | Ctrl+Z Undo, Ctrl+Y Redo, Ctrl+S Save, Ctrl+F Search, Ctrl+C/V/D Copy/Paste/Duplicate, F1 Help, F2 Import, DELETE Delete, END Drop-to-Surface, F12 FPS Cap |
+| Gizmo     | W Translate, E Rotate, R Scale, F Focus |
+| Debug     | F8 Bounds, F9 Occlusion Stats, F10 Metrics, F11 UI Debug |
+| PIE       | Escape Stop, Shift+F1 Toggle Input |
+
+**Editor-Integration:**
+- Konfigurations-UI in Editor Settings Popup (Rebind-Buttons mit KeyCaptureCallback, Konflikt-Warnung, Reset All)
+- F1 Shortcut-Hilfe Popup (`UIManager::openShortcutHelpPopup()`) – scrollbare Liste aller Shortcuts nach Kategorien
+
 ---
 
 ## 9. Renderer
@@ -922,6 +957,7 @@ present()
 - **Pick-Buffer wird nur bei Bedarf gerendert** (wenn Pick angefragt oder Entity selektiert)
 - **Entity-Löschen (DELETE-Taste)**: Erstellt einen vollständigen Snapshot aller 10 Komponentenarten (`std::make_optional`) vor der Löschung. Eine Undo/Redo-Action wird gepusht: Undo erstellt die Entity mit derselben ID (`ecs.createEntity(entity)`) und stellt alle gesicherten Komponenten wieder her.
 - **Entity-Spawn Undo/Redo**: Beim Drag-and-Drop-Spawn eines Model3D-Assets auf den Viewport wird eine Undo/Redo-Action erzeugt. Undo entfernt die Entity via `level->onEntityRemoved()` + `ecs.removeEntity()`.
+- **Details-Panel Undo/Redo (Phase 8.4)**: Alle Wertänderungen im Details-Panel (Transform, Light, Camera, Collision, Physics, ParticleEmitter, Name) sind undoable via `setCompFieldWithUndo<>`-Template-Helper. Komponenten-Hinzufügen/Entfernen und Asset-Zuweisungen (Mesh/Material/Script über Dropdown oder Drag & Drop) erzeugen ebenfalls Undo/Redo-Commands mit vollständigem Komponenten-Snapshot.
 
 #### 9.2.6 Per-Entity Render Refresh
 - `refreshEntity(entity)` → Sucht die Entität in `m_renderEntries` / `m_meshEntries`, baut GPU-Daten per `refreshEntityRenderable()` neu auf und tauscht In-Place aus
@@ -1193,8 +1229,11 @@ registerClickEvent("TitleBar.Close", []() { ... });
 
 #### Notifications:
 - **Modal**: `showModalMessage(message, onClosed)` – blockierendes Popup
-- **Toast**: `showToastMessage(message, duration)` – temporäre Meldung
+- **Toast**: `showToastMessage(message, duration[, level])` – temporäre Meldung mit optionalem Priority-Level
+- **NotificationLevel**: `DiagnosticsManager::NotificationLevel` Enum (`Info`, `Success`, `Warning`, `Error`) – gemeinsam genutzt von `DiagnosticsManager` und `UIManager` (via `using`-Alias). Steuert farbigen Akzentbalken (links, 4px) am Toast-Widget: Info = `accentColor`, Success = `successColor`, Warning = `warningColor`, Error = `errorColor` (aus `EditorTheme`). Warning/Error-Toasts erhalten verlängerte Anzeigedauer (min 4s bzw. 5s).
+- **Notification History**: `NotificationHistoryEntry` mit Level + Zeitstempel. `getNotificationHistory()`, `getUnreadNotificationCount()`, `clearUnreadNotifications()`, `openNotificationHistoryPopup()`, `refreshNotificationBadge()`.
 - Toast-Stack-Layout: Automatisches Stapeln bei mehreren Toasts
+- **enqueueToastNotification**: Akzeptiert `NotificationLevel` (default `Info`). Aufrufer: `AssetManager` (Import-Erfolg/Fehler), `PythonScripting` (Hot-Reload-Erfolg/Fehler), `UIManager` (Level-Load, Validierung).
 
 #### Popup-Fenster:
 - `openLandscapeManagerPopup()` — öffnet das Landscape-Manager-Popup mit Formular-UI (vormals in `main.cpp`).
@@ -1242,6 +1281,18 @@ registerClickEvent("TitleBar.Close", []() { ... });
   - Textur-Upload per `getOrLoadUITexture()` mit Fallback auf `m_sourcePath`.
 - **Schließen**: `closeTextureViewer(assetPath)` — wechselt auf Viewport-Tab, entfernt Tab und Widgets.
 - **Rendering**: Im `render()`-Loop wird für Texture-Viewer-Tabs `renderWorld()` übersprungen und stattdessen die Textur direkt in den Tab-FBO gerendert.
+
+#### Audio Preview Tab (Editor-Tab):
+- **Architektur**: Folgt dem Console/Profiler-Tab-Muster (rein UIManager-basiert, kein FBO/Renderer-Level nötig).
+- **`AudioPreviewState`** in `UIManager.h`: tabId, widgetId, assetPath, isPlaying, playHandle, volume, channels, sampleRate, format, dataBytes, durationSeconds, displayName.
+- **Öffnung**: Doppelklick auf Audio-Asset im Content Browser → `UIManager::openAudioPreviewTab(assetPath)`.
+  - Lädt Audio-Asset via `AssetManager::loadAsset(Sync)`, extrahiert Metadaten (Channels, Sample Rate, Format, Duration, Dateigröße) aus dem Asset-JSON.
+  - Erstellt Tab via `Renderer::addTab()` und registriert ein Widget mit Toolbar, Waveform und Metadaten.
+- **Toolbar**: Play/Stop-Buttons (über `AudioManager::playAudioAsset()`/`stopSource()`), Lautstärke-Slider (`setHandleGain()`), Asset-Name-Anzeige.
+- **Waveform**: 80-Balken-Diagramm aus den rohen Sample-Daten (liest JSON-Byte-Array, berechnet Amplituden pro Balken). Farbcodiert nach EditorTheme.
+- **Metadaten-Panel**: Pfad, Channels, Sample Rate, Format (8-bit/16-bit), Duration, Datengröße, Dateigröße.
+- **Schließen**: `closeAudioPreviewTab()` — stoppt Wiedergabe, deregistriert Widget, entfernt Tab.
+- **Refresh**: `refreshAudioPreview()` baut Widget-Inhalt komplett neu auf (Toolbar + Waveform + Metadaten).
 
 #### World-Outliner-Integration:
 ```cpp

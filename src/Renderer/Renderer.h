@@ -244,6 +244,7 @@ public:
     virtual void endRubberBand(bool /*ctrlHeld*/ = false) {}
     virtual void cancelRubberBand() {}
     virtual bool isRubberBandActive() const { return false; }
+    virtual Vec2 getRubberBandStart() const { return Vec2{}; }
 
     // --- Gizmo ---
     virtual void setGizmoMode(GizmoMode /*mode*/) {}

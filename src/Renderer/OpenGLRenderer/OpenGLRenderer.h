@@ -726,6 +726,7 @@ public:
     void endRubberBand(bool ctrlHeld) override;
     void cancelRubberBand() override;
     bool isRubberBandActive() const override { return m_rubberBandActive; }
+    Vec2 getRubberBandStart() const override { return m_rubberBandStart; }
 
     // Gizmo public API
     void setGizmoMode(GizmoMode mode) override { m_gizmoMode = mode; }

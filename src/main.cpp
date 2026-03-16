@@ -28,6 +28,7 @@
 #include "Core/MathTypes.h"
 #include "Core/AudioManager.h"
 #include "Core/UndoRedoManager.h"
+#include "Core/ShortcutManager.h"
 #include "Core/EngineLevel.h"
 #include "Scripting/PythonScripting.h"
 #include "Physics/PhysicsWorld.h"
@@ -1485,6 +1486,24 @@ int main()
                                     return;
                                 }
 
+                                // --- Prefab: spawn prefab entities at drop position ---
+                                if (assetType == AssetType::Prefab)
+                                {
+                                    Vec3 spawnPos{ 0.0f, 0.0f, 0.0f };
+                                    if (!renderer->screenToWorldPos(static_cast<int>(screenPos.x), static_cast<int>(screenPos.y), spawnPos))
+                                    {
+                                        const Vec3 camPos = renderer->getCameraPosition();
+                                        const Vec2 camRot = renderer->getCameraRotationDegrees();
+                                        const float yaw = camRot.x * 3.14159265f / 180.0f;
+                                        const float pitch = camRot.y * 3.14159265f / 180.0f;
+                                        spawnPos.x = camPos.x + cosf(yaw) * cosf(pitch) * 5.0f;
+                                        spawnPos.y = camPos.y + sinf(pitch) * 5.0f;
+                                        spawnPos.z = camPos.z + sinf(yaw) * cosf(pitch) * 5.0f;
+                                    }
+                                    renderer->getUIManager().spawnPrefabAtPosition(relPath, spawnPos);
+                                    return;
+                                }
+
                                 // --- Non-Model3D types: apply to existing entity, or abort if none ---
                                 // Materials/Textures can only be applied to existing entities, never spawned alone.
                                 // Scripts likewise attach to existing entities.
@@ -1858,6 +1877,11 @@ int main()
                 renderer->getUIManager().showUnsavedChangesDialog(nullptr);
             });
 
+        renderer->getUIManager().registerClickEvent("StatusBar.Notifications", [&renderer]()
+            {
+                renderer->getUIManager().openNotificationHistoryPopup();
+            });
+
         // --- Level loading: double-click a .map in Content Browser ---
         renderer->getUIManager().setOnLevelLoadRequested([&renderer](const std::string& levelRelPath)
             {
@@ -2024,167 +2048,6 @@ int main()
     uint64_t frame = 0;
     logTimed(Logger::Category::Engine, "Entering main loop.", Logger::LogLevel::INFO);
 
-    diagnostics.registerKeyUpHandler(SDLK_F1, [&]() {
-        logTimed(Logger::Category::Input, "F1 pressed - saving all assets (async).", Logger::LogLevel::INFO);
-        //assetManager.saveAllAssetsAsync();
-        return true;
-        });
-
-    diagnostics.registerKeyUpHandler(SDLK_F2, [&]() {
-        logTimed(Logger::Category::Input, "F2 pressed - opening import dialog.", Logger::LogLevel::INFO);
-        assetManager.OpenImportDialog(renderer ? renderer->window() : nullptr, AssetType::Unknown, AssetManager::Async);
-        return true;
-        });
-
-    diagnostics.registerKeyUpHandler(SDLK_DELETE, [&]() {
-        if (!renderer) return false;
-        auto& uiManager = renderer->getUIManager();
-
-        // Check for widget editor element selection first (tab-level selection)
-        if (uiManager.tryDeleteWidgetEditorElement())
-        {
-            return true;
-        }
-
-        // Check for selected asset in Content Browser grid
-        const std::string selectedAsset = uiManager.getSelectedGridAsset();
-        if (!selectedAsset.empty())
-        {
-            uiManager.showConfirmDialog(
-                "Are you sure you want to delete this asset?\nThis cannot be undone.",
-                [&renderer, selectedAsset]()
-                {
-                    auto& assetMgr = AssetManager::Instance();
-                    auto& uiMgr = renderer->getUIManager();
-                    if (assetMgr.deleteAsset(selectedAsset, true))
-                    {
-                        const std::string name = std::filesystem::path(selectedAsset).stem().string();
-                        uiMgr.clearSelectedGridAsset();
-                        uiMgr.refreshContentBrowser();
-                        uiMgr.showToastMessage("Deleted: " + name, 3.0f);
-                    }
-                    else
-                    {
-                        uiMgr.showToastMessage("Failed to delete asset.", 3.0f);
-                    }
-                });
-            return true;
-        }
-
-        // Otherwise try entity deletion (supports multi-select)
-        const auto& selectedEntities = renderer->getSelectedEntities();
-        if (selectedEntities.empty()) return false;
-
-        auto& ecs = ECS::ECSManager::Instance();
-        auto* level = diagnostics.getActiveLevelSoft();
-
-        struct EntitySnapshot
-        {
-            ECS::Entity entity;
-            std::string name;
-            std::optional<ECS::TransformComponent>       transform;
-            std::optional<ECS::NameComponent>            nameComp;
-            std::optional<ECS::MeshComponent>            mesh;
-            std::optional<ECS::MaterialComponent>        material;
-            std::optional<ECS::LightComponent>           light;
-            std::optional<ECS::CameraComponent>          camera;
-            std::optional<ECS::PhysicsComponent>         physics;
-            std::optional<ECS::ScriptComponent>          script;
-            std::optional<ECS::CollisionComponent>       collision;
-            std::optional<ECS::HeightFieldComponent>     heightField;
-        };
-
-        std::vector<EntitySnapshot> snapshots;
-        snapshots.reserve(selectedEntities.size());
-
-        for (unsigned int sel : selectedEntities)
-        {
-            const auto entity = static_cast<ECS::Entity>(sel);
-            EntitySnapshot snap;
-            snap.entity = entity;
-            snap.name = "Entity " + std::to_string(sel);
-            if (const auto* nc = ecs.getComponent<ECS::NameComponent>(entity))
-            {
-                if (!nc->displayName.empty())
-                    snap.name = nc->displayName;
-            }
-            snap.transform   = ecs.hasComponent<ECS::TransformComponent>(entity)   ? std::make_optional(*ecs.getComponent<ECS::TransformComponent>(entity))   : std::nullopt;
-            snap.nameComp    = ecs.hasComponent<ECS::NameComponent>(entity)        ? std::make_optional(*ecs.getComponent<ECS::NameComponent>(entity))        : std::nullopt;
-            snap.mesh        = ecs.hasComponent<ECS::MeshComponent>(entity)        ? std::make_optional(*ecs.getComponent<ECS::MeshComponent>(entity))        : std::nullopt;
-            snap.material    = ecs.hasComponent<ECS::MaterialComponent>(entity)    ? std::make_optional(*ecs.getComponent<ECS::MaterialComponent>(entity))    : std::nullopt;
-            snap.light       = ecs.hasComponent<ECS::LightComponent>(entity)       ? std::make_optional(*ecs.getComponent<ECS::LightComponent>(entity))       : std::nullopt;
-            snap.camera      = ecs.hasComponent<ECS::CameraComponent>(entity)      ? std::make_optional(*ecs.getComponent<ECS::CameraComponent>(entity))      : std::nullopt;
-            snap.physics     = ecs.hasComponent<ECS::PhysicsComponent>(entity)     ? std::make_optional(*ecs.getComponent<ECS::PhysicsComponent>(entity))     : std::nullopt;
-            snap.script      = ecs.hasComponent<ECS::ScriptComponent>(entity)      ? std::make_optional(*ecs.getComponent<ECS::ScriptComponent>(entity))      : std::nullopt;
-            snap.collision   = ecs.hasComponent<ECS::CollisionComponent>(entity)   ? std::make_optional(*ecs.getComponent<ECS::CollisionComponent>(entity))   : std::nullopt;
-            snap.heightField = ecs.hasComponent<ECS::HeightFieldComponent>(entity) ? std::make_optional(*ecs.getComponent<ECS::HeightFieldComponent>(entity)) : std::nullopt;
-            snapshots.push_back(std::move(snap));
-        }
-
-        // Remove all selected entities
-        for (const auto& snap : snapshots)
-        {
-            if (level) level->onEntityRemoved(snap.entity);
-            ecs.removeEntity(snap.entity);
-        }
-
-        // Clear selection and deselect in renderer
-        uiManager.selectEntity(0);
-        renderer->clearSelection();
-
-        uiManager.refreshWorldOutliner();
-
-        std::string toastMsg = (snapshots.size() == 1)
-            ? ("Deleted: " + snapshots[0].name)
-            : ("Deleted " + std::to_string(snapshots.size()) + " entities");
-        uiManager.showToastMessage(toastMsg, 2.5f);
-
-        Logger::Instance().log(Logger::Category::Engine,
-            "Deleted " + std::to_string(snapshots.size()) + " entity(ies)",
-            Logger::LogLevel::INFO);
-
-        // Push undo/redo command for group delete
-        UndoRedoManager::Command cmd;
-        cmd.description = (snapshots.size() == 1) ? ("Delete " + snapshots[0].name) : ("Delete " + std::to_string(snapshots.size()) + " entities");
-        cmd.execute = [snapshots]()
-            {
-                auto& e = ECS::ECSManager::Instance();
-                auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
-                for (const auto& snap : snapshots)
-                {
-                    if (std::find(e.getEntitiesMatchingSchema(ECS::Schema()).begin(),
-                                  e.getEntitiesMatchingSchema(ECS::Schema()).end(), snap.entity) != e.getEntitiesMatchingSchema(ECS::Schema()).end())
-                    {
-                        if (lvl) lvl->onEntityRemoved(snap.entity);
-                        e.removeEntity(snap.entity);
-                    }
-                }
-            };
-        cmd.undo = [snapshots]()
-            {
-                auto& e = ECS::ECSManager::Instance();
-                auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
-                for (const auto& snap : snapshots)
-                {
-                    e.createEntity(snap.entity);
-                    if (snap.transform)   e.addComponent<ECS::TransformComponent>(snap.entity, *snap.transform);
-                    if (snap.nameComp)    e.addComponent<ECS::NameComponent>(snap.entity, *snap.nameComp);
-                    if (snap.mesh)        e.addComponent<ECS::MeshComponent>(snap.entity, *snap.mesh);
-                    if (snap.material)    e.addComponent<ECS::MaterialComponent>(snap.entity, *snap.material);
-                    if (snap.light)       e.addComponent<ECS::LightComponent>(snap.entity, *snap.light);
-                    if (snap.camera)      e.addComponent<ECS::CameraComponent>(snap.entity, *snap.camera);
-                    if (snap.physics)     e.addComponent<ECS::PhysicsComponent>(snap.entity, *snap.physics);
-                    if (snap.script)      e.addComponent<ECS::ScriptComponent>(snap.entity, *snap.script);
-                    if (snap.collision)   e.addComponent<ECS::CollisionComponent>(snap.entity, *snap.collision);
-                    if (snap.heightField) e.addComponent<ECS::HeightFieldComponent>(snap.entity, *snap.heightField);
-                    if (lvl) lvl->onEntityAdded(snap.entity);
-                }
-            };
-        UndoRedoManager::Instance().pushCommand(std::move(cmd));
-
-        return true;
-        });
-
     bool rightMouseDown = false;
     bool texViewerPanning = false;
     Vec2 mousePosPixels{};
@@ -2224,6 +2087,380 @@ int main()
     double cpuOtherMs = 0.0;
     double cpuLoggerMs = 0.0;
     double cpuGcMs = 0.0;
+
+    // ─── Register all keyboard shortcuts with ShortcutManager ───
+    {
+        auto& sm = ShortcutManager::Instance();
+        using Phase = ShortcutManager::Phase;
+        using Mod = ShortcutManager::Mod;
+
+        // --- KeyDown shortcuts (Ctrl+combos) ---
+
+        sm.registerAction("Editor.Undo", "Undo", "Editor",
+            { SDLK_Z, Mod::Ctrl }, Phase::KeyDown,
+            [&]() -> bool {
+                if (!renderer || diagnostics.isPIEActive() || renderer->getUIManager().hasEntryFocused()) return false;
+                auto& undo = UndoRedoManager::Instance();
+                if (!undo.canUndo()) return false;
+                undo.undo();
+                renderer->getUIManager().markAllWidgetsDirty();
+                return true;
+            });
+
+        sm.registerAction("Editor.Redo", "Redo", "Editor",
+            { SDLK_Y, Mod::Ctrl }, Phase::KeyDown,
+            [&]() -> bool {
+                if (!renderer || diagnostics.isPIEActive() || renderer->getUIManager().hasEntryFocused()) return false;
+                auto& undo = UndoRedoManager::Instance();
+                if (!undo.canRedo()) return false;
+                undo.redo();
+                renderer->getUIManager().markAllWidgetsDirty();
+                return true;
+            });
+
+        sm.registerAction("Editor.Save", "Save", "Editor",
+            { SDLK_S, Mod::Ctrl }, Phase::KeyDown,
+            [&]() -> bool {
+                if (!renderer || diagnostics.isPIEActive() || renderer->getUIManager().hasEntryFocused()) return false;
+                auto* lvl = diagnostics.getActiveLevelSoft();
+                if (lvl)
+                {
+                    lvl->setEditorCameraPosition(renderer->getCameraPosition());
+                    lvl->setEditorCameraRotation(renderer->getCameraRotationDegrees());
+                    lvl->setHasEditorCamera(true);
+                }
+                auto& am = AssetManager::Instance();
+                if (am.getUnsavedAssetCount() > 0)
+                    renderer->getUIManager().showUnsavedChangesDialog(nullptr);
+                else
+                    renderer->getUIManager().showToastMessage("Nothing to save.", 2.0f);
+                return true;
+            });
+
+        sm.registerAction("Editor.SearchContentBrowser", "Search Content Browser", "Editor",
+            { SDLK_F, Mod::Ctrl }, Phase::KeyDown,
+            [&]() -> bool {
+                if (!renderer || diagnostics.isPIEActive() || renderer->getUIManager().hasEntryFocused()) return false;
+                renderer->getUIManager().focusContentBrowserSearch();
+                return true;
+            });
+
+        sm.registerAction("Editor.CopyEntity", "Copy Entity", "Editor",
+            { SDLK_C, Mod::Ctrl }, Phase::KeyDown,
+            [&]() -> bool {
+                if (!renderer || diagnostics.isPIEActive() || renderer->getUIManager().hasEntryFocused()) return false;
+                renderer->getUIManager().copySelectedEntity();
+                return true;
+            });
+
+        sm.registerAction("Editor.PasteEntity", "Paste Entity", "Editor",
+            { SDLK_V, Mod::Ctrl }, Phase::KeyDown,
+            [&]() -> bool {
+                if (!renderer || diagnostics.isPIEActive() || renderer->getUIManager().hasEntryFocused()) return false;
+                renderer->getUIManager().pasteEntity();
+                return true;
+            });
+
+        sm.registerAction("Editor.DuplicateEntity", "Duplicate Entity", "Editor",
+            { SDLK_D, Mod::Ctrl }, Phase::KeyDown,
+            [&]() -> bool {
+                if (!renderer || diagnostics.isPIEActive() || renderer->getUIManager().hasEntryFocused()) return false;
+                renderer->getUIManager().duplicateSelectedEntity();
+                return true;
+            });
+
+        // --- KeyUp shortcuts ---
+
+        sm.registerAction("Editor.ToggleUIDebug", "Toggle UI Debug", "Debug",
+            { SDLK_F11, Mod::None }, Phase::KeyUp,
+            [&]() -> bool {
+                if (!renderer) return false;
+                renderer->toggleUIDebug();
+                logTimed(Logger::Category::Input,
+                    std::string("UI debug bounds: ") + (renderer->isUIDebugEnabled() ? "ON" : "OFF"),
+                    Logger::LogLevel::INFO);
+                return true;
+            });
+
+        sm.registerAction("Editor.ToggleBoundsDebug", "Toggle Bounds Debug", "Debug",
+            { SDLK_F8, Mod::None }, Phase::KeyUp,
+            [&]() -> bool {
+                if (!renderer) return false;
+                renderer->toggleBoundsDebug();
+                logTimed(Logger::Category::Input,
+                    std::string("Bounds debug boxes: ") + (renderer->isBoundsDebugEnabled() ? "ON" : "OFF"),
+                    Logger::LogLevel::INFO);
+                return true;
+            });
+
+        sm.registerAction("Editor.ToggleMetrics", "Toggle Metrics", "Debug",
+            { SDLK_F10, Mod::None }, Phase::KeyUp,
+            [&]() -> bool {
+                showMetrics = !showMetrics;
+                return true;
+            });
+
+        sm.registerAction("Editor.ToggleOcclusionStats", "Toggle Occlusion Stats", "Debug",
+            { SDLK_F9, Mod::None }, Phase::KeyUp,
+            [&]() -> bool {
+                showOcclusionStats = !showOcclusionStats;
+                return true;
+            });
+
+        sm.registerAction("PIE.Stop", "Stop PIE", "PIE",
+            { SDLK_ESCAPE, Mod::None }, Phase::KeyUp,
+            [&]() -> bool {
+                if (!diagnostics.isPIEActive() || !stopPIE) return false;
+                stopPIE();
+                return true;
+            });
+
+        sm.registerAction("PIE.ToggleInput", "Toggle PIE Input", "PIE",
+            { SDLK_F1, Mod::Shift }, Phase::KeyUp,
+            [&]() -> bool {
+                if (!diagnostics.isPIEActive()) return false;
+                if (pieMouseCaptured && !pieInputPaused)
+                {
+                    pieInputPaused = true;
+                    if (auto* w = renderer->window())
+                    {
+                        SDL_SetWindowRelativeMouseMode(w, false);
+                        SDL_SetWindowMouseGrab(w, false);
+                        SDL_WarpMouseInWindow(w, preCaptureMouseX, preCaptureMouseY);
+                    }
+                    SDL_ShowCursor();
+                    logTimed(Logger::Category::Input, "PIE: input paused (Shift+F1), mouse released.", Logger::LogLevel::INFO);
+                }
+                return true;
+            });
+
+        sm.registerAction("Gizmo.Translate", "Translate Mode", "Gizmo",
+            { SDLK_W, Mod::None }, Phase::KeyUp,
+            [&]() -> bool {
+                if (!renderer || diagnostics.isPIEActive() || rightMouseDown || renderer->getUIManager().hasEntryFocused()) return false;
+                renderer->setGizmoMode(Renderer::GizmoMode::Translate);
+                return true;
+            });
+
+        sm.registerAction("Gizmo.Rotate", "Rotate Mode", "Gizmo",
+            { SDLK_E, Mod::None }, Phase::KeyUp,
+            [&]() -> bool {
+                if (!renderer || diagnostics.isPIEActive() || rightMouseDown || renderer->getUIManager().hasEntryFocused()) return false;
+                renderer->setGizmoMode(Renderer::GizmoMode::Rotate);
+                return true;
+            });
+
+        sm.registerAction("Gizmo.Scale", "Scale Mode", "Gizmo",
+            { SDLK_R, Mod::None }, Phase::KeyUp,
+            [&]() -> bool {
+                if (!renderer || diagnostics.isPIEActive() || rightMouseDown || renderer->getUIManager().hasEntryFocused()) return false;
+                renderer->setGizmoMode(Renderer::GizmoMode::Scale);
+                return true;
+            });
+
+        sm.registerAction("Editor.FocusSelected", "Focus Selected", "Editor",
+            { SDLK_F, Mod::None }, Phase::KeyUp,
+            [&]() -> bool {
+                if (!renderer || diagnostics.isPIEActive() || rightMouseDown || renderer->getUIManager().hasEntryFocused()) return false;
+                renderer->focusOnSelectedEntity();
+                return true;
+            });
+
+        sm.registerAction("Editor.DropToSurface", "Drop to Surface", "Editor",
+            { SDLK_END, Mod::None }, Phase::KeyUp,
+            [&]() -> bool {
+                if (!renderer || diagnostics.isPIEActive() || rightMouseDown || renderer->getUIManager().hasEntryFocused()) return false;
+                renderer->getUIManager().dropSelectedEntitiesToSurface([](float ox, float oy, float oz) -> std::pair<bool, float>
+                {
+                    auto hit = PhysicsWorld::Instance().raycast(ox, oy, oz, 0.0f, -1.0f, 0.0f, 10000.0f);
+                    return { hit.hit, hit.point[1] };
+                });
+                return true;
+            });
+
+        sm.registerAction("Editor.ToggleFPSCap", "Toggle FPS Cap", "Debug",
+            { SDLK_F12, Mod::None }, Phase::KeyUp,
+            [&]() -> bool {
+                fpscap = !fpscap;
+                return true;
+            });
+
+        sm.registerAction("Editor.ShortcutHelp", "Shortcut Help", "Editor",
+            { SDLK_F1, Mod::None }, Phase::KeyUp,
+            [&]() -> bool {
+                if (!renderer) return false;
+                if (renderer->getUIManager().hasEntryFocused()) return false;
+                renderer->getUIManager().openShortcutHelpPopup();
+                return true;
+            });
+
+        sm.registerAction("Editor.ImportDialog", "Open Import Dialog", "Editor",
+            { SDLK_F2, Mod::None }, Phase::KeyUp,
+            [&]() -> bool {
+                if (renderer && renderer->getUIManager().hasEntryFocused()) return false;
+                logTimed(Logger::Category::Input, "F2 pressed - opening import dialog.", Logger::LogLevel::INFO);
+                assetManager.OpenImportDialog(renderer ? renderer->window() : nullptr, AssetType::Unknown, AssetManager::Async);
+                return true;
+            });
+
+        sm.registerAction("Editor.Delete", "Delete", "Editor",
+            { SDLK_DELETE, Mod::None }, Phase::KeyUp,
+            [&]() -> bool {
+                if (!renderer) return false;
+                if (renderer->getUIManager().hasEntryFocused()) return false;
+                auto& uiManager = renderer->getUIManager();
+
+                if (uiManager.tryDeleteWidgetEditorElement())
+                    return true;
+
+                const std::string selectedAsset = uiManager.getSelectedGridAsset();
+                if (!selectedAsset.empty())
+                {
+                    uiManager.showConfirmDialog(
+                        "Are you sure you want to delete this asset?\nThis cannot be undone.",
+                        [&renderer, selectedAsset]()
+                        {
+                            auto& assetMgr = AssetManager::Instance();
+                            auto& uiMgr = renderer->getUIManager();
+                            if (assetMgr.deleteAsset(selectedAsset, true))
+                            {
+                                const std::string name = std::filesystem::path(selectedAsset).stem().string();
+                                uiMgr.clearSelectedGridAsset();
+                                uiMgr.refreshContentBrowser();
+                                uiMgr.showToastMessage("Deleted: " + name, 3.0f);
+                            }
+                            else
+                            {
+                                uiMgr.showToastMessage("Failed to delete asset.", 3.0f);
+                            }
+                        });
+                    return true;
+                }
+
+                const auto& selectedEntities = renderer->getSelectedEntities();
+                if (selectedEntities.empty()) return false;
+
+                auto& ecs = ECS::ECSManager::Instance();
+                auto* level = diagnostics.getActiveLevelSoft();
+
+                struct EntitySnapshot
+                {
+                    ECS::Entity entity;
+                    std::string name;
+                    std::optional<ECS::TransformComponent>       transform;
+                    std::optional<ECS::NameComponent>            nameComp;
+                    std::optional<ECS::MeshComponent>            mesh;
+                    std::optional<ECS::MaterialComponent>        material;
+                    std::optional<ECS::LightComponent>           light;
+                    std::optional<ECS::CameraComponent>          camera;
+                    std::optional<ECS::PhysicsComponent>         physics;
+                    std::optional<ECS::ScriptComponent>          script;
+                    std::optional<ECS::CollisionComponent>       collision;
+                    std::optional<ECS::HeightFieldComponent>     heightField;
+                };
+
+                std::vector<EntitySnapshot> snapshots;
+                snapshots.reserve(selectedEntities.size());
+
+                for (unsigned int sel : selectedEntities)
+                {
+                    const auto entity = static_cast<ECS::Entity>(sel);
+                    EntitySnapshot snap;
+                    snap.entity = entity;
+                    snap.name = "Entity " + std::to_string(sel);
+                    if (const auto* nc = ecs.getComponent<ECS::NameComponent>(entity))
+                    {
+                        if (!nc->displayName.empty())
+                            snap.name = nc->displayName;
+                    }
+                    snap.transform   = ecs.hasComponent<ECS::TransformComponent>(entity)   ? std::make_optional(*ecs.getComponent<ECS::TransformComponent>(entity))   : std::nullopt;
+                    snap.nameComp    = ecs.hasComponent<ECS::NameComponent>(entity)        ? std::make_optional(*ecs.getComponent<ECS::NameComponent>(entity))        : std::nullopt;
+                    snap.mesh        = ecs.hasComponent<ECS::MeshComponent>(entity)        ? std::make_optional(*ecs.getComponent<ECS::MeshComponent>(entity))        : std::nullopt;
+                    snap.material    = ecs.hasComponent<ECS::MaterialComponent>(entity)    ? std::make_optional(*ecs.getComponent<ECS::MaterialComponent>(entity))    : std::nullopt;
+                    snap.light       = ecs.hasComponent<ECS::LightComponent>(entity)       ? std::make_optional(*ecs.getComponent<ECS::LightComponent>(entity))       : std::nullopt;
+                    snap.camera      = ecs.hasComponent<ECS::CameraComponent>(entity)      ? std::make_optional(*ecs.getComponent<ECS::CameraComponent>(entity))      : std::nullopt;
+                    snap.physics     = ecs.hasComponent<ECS::PhysicsComponent>(entity)     ? std::make_optional(*ecs.getComponent<ECS::PhysicsComponent>(entity))     : std::nullopt;
+                    snap.script      = ecs.hasComponent<ECS::ScriptComponent>(entity)      ? std::make_optional(*ecs.getComponent<ECS::ScriptComponent>(entity))      : std::nullopt;
+                    snap.collision   = ecs.hasComponent<ECS::CollisionComponent>(entity)   ? std::make_optional(*ecs.getComponent<ECS::CollisionComponent>(entity))   : std::nullopt;
+                    snap.heightField = ecs.hasComponent<ECS::HeightFieldComponent>(entity) ? std::make_optional(*ecs.getComponent<ECS::HeightFieldComponent>(entity)) : std::nullopt;
+                    snapshots.push_back(std::move(snap));
+                }
+
+                for (const auto& snap : snapshots)
+                {
+                    if (level) level->onEntityRemoved(snap.entity);
+                    ecs.removeEntity(snap.entity);
+                }
+
+                uiManager.selectEntity(0);
+                renderer->clearSelection();
+                uiManager.refreshWorldOutliner();
+
+                std::string toastMsg = (snapshots.size() == 1)
+                    ? ("Deleted: " + snapshots[0].name)
+                    : ("Deleted " + std::to_string(snapshots.size()) + " entities");
+                uiManager.showToastMessage(toastMsg, 2.5f);
+
+                Logger::Instance().log(Logger::Category::Engine,
+                    "Deleted " + std::to_string(snapshots.size()) + " entity(ies)",
+                    Logger::LogLevel::INFO);
+
+                UndoRedoManager::Command cmd;
+                cmd.description = (snapshots.size() == 1) ? ("Delete " + snapshots[0].name) : ("Delete " + std::to_string(snapshots.size()) + " entities");
+                cmd.execute = [snapshots]()
+                    {
+                        auto& e = ECS::ECSManager::Instance();
+                        auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
+                        for (const auto& snap : snapshots)
+                        {
+                            if (std::find(e.getEntitiesMatchingSchema(ECS::Schema()).begin(),
+                                          e.getEntitiesMatchingSchema(ECS::Schema()).end(), snap.entity) != e.getEntitiesMatchingSchema(ECS::Schema()).end())
+                            {
+                                if (lvl) lvl->onEntityRemoved(snap.entity);
+                                e.removeEntity(snap.entity);
+                            }
+                        }
+                    };
+                cmd.undo = [snapshots]()
+                    {
+                        auto& e = ECS::ECSManager::Instance();
+                        auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
+                        for (const auto& snap : snapshots)
+                        {
+                            e.createEntity(snap.entity);
+                            if (snap.transform)   e.addComponent<ECS::TransformComponent>(snap.entity, *snap.transform);
+                            if (snap.nameComp)    e.addComponent<ECS::NameComponent>(snap.entity, *snap.nameComp);
+                            if (snap.mesh)        e.addComponent<ECS::MeshComponent>(snap.entity, *snap.mesh);
+                            if (snap.material)    e.addComponent<ECS::MaterialComponent>(snap.entity, *snap.material);
+                            if (snap.light)       e.addComponent<ECS::LightComponent>(snap.entity, *snap.light);
+                            if (snap.camera)      e.addComponent<ECS::CameraComponent>(snap.entity, *snap.camera);
+                            if (snap.physics)     e.addComponent<ECS::PhysicsComponent>(snap.entity, *snap.physics);
+                            if (snap.script)      e.addComponent<ECS::ScriptComponent>(snap.entity, *snap.script);
+                            if (snap.collision)   e.addComponent<ECS::CollisionComponent>(snap.entity, *snap.collision);
+                            if (snap.heightField) e.addComponent<ECS::HeightFieldComponent>(snap.entity, *snap.heightField);
+                            if (lvl) lvl->onEntityAdded(snap.entity);
+                        }
+                    };
+                UndoRedoManager::Instance().pushCommand(std::move(cmd));
+                return true;
+            });
+
+        logTimed(Logger::Category::Engine, "Registered " + std::to_string(sm.getActions().size()) + " keyboard shortcuts.", Logger::LogLevel::INFO);
+
+        // Load user shortcut overrides from project config
+        {
+            const auto& projPath = diagnostics.getProjectInfo().projectPath;
+            if (!projPath.empty())
+            {
+                const std::string shortcutFile = (std::filesystem::path(projPath) / "shortcuts.cfg").string();
+                if (std::filesystem::exists(shortcutFile))
+                {
+                    sm.loadFromFile(shortcutFile);
+                    logTimed(Logger::Category::Engine, "Loaded shortcut overrides from " + shortcutFile, Logger::LogLevel::INFO);
+                }
+            }
+        }
+    }
 
     while (running)
     {
@@ -2363,6 +2600,12 @@ int main()
                         {
                             renderer->updateGizmoDrag(static_cast<int>(event.motion.x), static_cast<int>(event.motion.y));
                         }
+
+                        // Update rubber-band rectangle if active
+                        if (renderer->isRubberBandActive())
+                        {
+                            renderer->updateRubberBand(static_cast<int>(event.motion.x), static_cast<int>(event.motion.y));
+                        }
                     }
                 }
             }
@@ -2428,11 +2671,11 @@ int main()
                             logTimed(Logger::Category::Input, "PIE: input resumed (viewport click), mouse captured.", Logger::LogLevel::INFO);
                             continue;
                         }
-                        // Try gizmo interaction first; only pick entity if gizmo not hit
+                        // Try gizmo interaction first; only pick/rubber-band if gizmo not hit
                         if (!renderer->beginGizmoDrag(static_cast<int>(event.button.x), static_cast<int>(event.button.y)))
                         {
-                            const bool ctrlHeld = (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
-                            renderer->requestPick(static_cast<int>(event.button.x), static_cast<int>(event.button.y), ctrlHeld);
+                            // Start rubber-band selection; resolved on mouse-up
+                            renderer->beginRubberBand(static_cast<int>(event.button.x), static_cast<int>(event.button.y));
                         }
                     }
                 }
@@ -2469,9 +2712,24 @@ int main()
                         uiManager.handleMouseUp(mousePos, event.button.button);
                         if (viewportUI && viewportUI->handleMouseUp(mousePos, event.button.button))
                         {
+                            if (renderer->isRubberBandActive())
+                                renderer->cancelRubberBand();
                             continue;
                         }
-                        if (renderer->isGizmoDragging())
+                        if (renderer->isRubberBandActive())
+                        {
+                            const bool ctrlHeld = (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
+                            // endRubberBand resolves the marquee selection when the rect is large enough;
+                            // otherwise we fall back to a single-pixel pick.
+                            const float dx = std::abs(event.button.x - renderer->getRubberBandStart().x);
+                            const float dy = std::abs(event.button.y - renderer->getRubberBandStart().y);
+                            renderer->endRubberBand(ctrlHeld);
+                            if (dx <= 4.0f || dy <= 4.0f)
+                            {
+                                renderer->requestPick(static_cast<int>(event.button.x), static_cast<int>(event.button.y), ctrlHeld);
+                            }
+                        }
+                        else if (renderer->isGizmoDragging())
                         {
                             renderer->endGizmoDrag();
                         }
@@ -3110,6 +3368,30 @@ int main()
                                 popup->uiManager().registerWidget("NewMaterial", widget);
                             }});
 
+                        // ── Save selected entity as Prefab ──
+                        {
+                            const auto& selectedEntities = renderer->getSelectedEntities();
+                            if (!selectedEntities.empty())
+                            {
+                                items.push_back({ "", {}, true }); // separator
+                                items.push_back({ "Save as Prefab", [&renderer]()
+                                    {
+                                        auto& uiMgr = renderer->getUIManager();
+                                        const auto& selEnts = renderer->getSelectedEntities();
+                                        if (selEnts.empty()) { uiMgr.showToastMessage("No entity selected.", 2.5f); return; }
+                                        const auto entity = static_cast<ECS::Entity>(*selEnts.begin());
+                                        auto& ecs = ECS::ECSManager::Instance();
+                                        std::string prefabName = "Entity " + std::to_string(entity);
+                                        if (const auto* nc = ecs.getComponent<ECS::NameComponent>(entity))
+                                        {
+                                            if (!nc->displayName.empty()) prefabName = nc->displayName;
+                                        }
+                                        const std::string folder = uiMgr.getSelectedBrowserFolder();
+                                        uiMgr.savePrefabFromEntity(entity, prefabName, folder);
+                                    }});
+                            }
+                        }
+
                         uiManager.showDropdownMenu(mousePos, items);
                         continue;
                     }
@@ -3279,176 +3561,23 @@ int main()
                 }
             }
 
+
             if (event.type == SDL_EVENT_KEY_UP)
             {
-                if (event.key.key == SDLK_F11)
+                if (ShortcutManager::Instance().handleKey(event.key.key, event.key.mod, ShortcutManager::Phase::KeyUp))
                 {
-                    if (renderer)
-                    {
-                        renderer->toggleUIDebug();
-						logTimed(Logger::Category::Input,
-                            std::string("UI debug bounds: ") + (renderer->isUIDebugEnabled() ? "ON" : "OFF"),
-                            Logger::LogLevel::INFO);
-                    }
                     continue;
-                }
-                if (event.key.key == SDLK_F8)
-                {
-                    if (renderer)
-                    {
-                        renderer->toggleBoundsDebug();
-                        logTimed(Logger::Category::Input,
-                            std::string("Bounds debug boxes: ") + (renderer->isBoundsDebugEnabled() ? "ON" : "OFF"),
-                            Logger::LogLevel::INFO);
-                    }
-                    continue;
-                }
-                if (event.key.key == SDLK_F10)
-                {
-                    showMetrics = !showMetrics;
-                    continue;
-                }
-                if (event.key.key == SDLK_F9)
-                {
-                    showOcclusionStats = !showOcclusionStats;
-                    continue;
-                }
-                if (event.key.key == SDLK_ESCAPE && diagnostics.isPIEActive() && stopPIE)
-                {
-                    stopPIE();
-                    continue;
-                }
-                // Shift+F1: toggle PIE mouse capture (show cursor, pause PIE input)
-                if (event.key.key == SDLK_F1 && (event.key.mod & SDL_KMOD_SHIFT) && diagnostics.isPIEActive())
-                {
-                    if (pieMouseCaptured && !pieInputPaused)
-                    {
-                        pieInputPaused = true;
-                        if (auto* w = renderer->window())
-                        {
-                            SDL_SetWindowRelativeMouseMode(w, false);
-                            SDL_SetWindowMouseGrab(w, false);
-                            SDL_WarpMouseInWindow(w, preCaptureMouseX, preCaptureMouseY);
-                        }
-                        SDL_ShowCursor();
-                        logTimed(Logger::Category::Input, "PIE: input paused (Shift+F1), mouse released.", Logger::LogLevel::INFO);
-                    }
-                    continue;
-                }
-                // Gizmo mode shortcuts (W/E/R) â€“ only in editor mode, not when holding right-click, and not when a text entry is focused
-                if (!diagnostics.isPIEActive() && !rightMouseDown && renderer && !renderer->getUIManager().hasEntryFocused())
-                {
-                    if (event.key.key == SDLK_W)
-                    {
-                        renderer->setGizmoMode(Renderer::GizmoMode::Translate);
-                        continue;
-                    }
-                    if (event.key.key == SDLK_E)
-                    {
-                        renderer->setGizmoMode(Renderer::GizmoMode::Rotate);
-                        continue;
-                    }
-                    if (event.key.key == SDLK_R)
-                    {
-                        renderer->setGizmoMode(Renderer::GizmoMode::Scale);
-                        continue;
-                    }
-                    if (event.key.key == SDLK_F)
-                    {
-                        renderer->focusOnSelectedEntity();
-                        continue;
-                    }
-                    if (event.key.key == SDLK_END)
-                    {
-                        renderer->getUIManager().dropSelectedEntitiesToSurface([](float ox, float oy, float oz) -> std::pair<bool, float>
-                        {
-                            auto hit = PhysicsWorld::Instance().raycast(ox, oy, oz, 0.0f, -1.0f, 0.0f, 10000.0f);
-                            return { hit.hit, hit.point[1] };
-                        });
-                        continue;
-                    }
-                }
-                // Skip registered key handlers (F2/DELETE) when a text entry is focused
-                if (!renderer || !renderer->getUIManager().hasEntryFocused())
-                {
-                    diagnostics.dispatchKeyUp(event.key.key);
                 }
                 if (diagnostics.isPIEActive())
                 {
                     Scripting::HandleKeyUp(event.key.key);
                 }
-                if (event.key.key == SDLK_F12)
-                {
-					fpscap = !fpscap;
-                }
             }
             else if (event.type == SDL_EVENT_KEY_DOWN)
             {
-                // Ctrl+Z = Undo, Ctrl+Y = Redo (skip when a text entry is focused)
-                if (renderer && !diagnostics.isPIEActive() && (event.key.mod & SDL_KMOD_CTRL) && !renderer->getUIManager().hasEntryFocused())
+                if (ShortcutManager::Instance().handleKey(event.key.key, event.key.mod, ShortcutManager::Phase::KeyDown))
                 {
-                    if (event.key.key == SDLK_Z)
-                    {
-                        auto& undo = UndoRedoManager::Instance();
-                        if (undo.canUndo())
-                        {
-                            undo.undo();
-                            renderer->getUIManager().markAllWidgetsDirty();
-                        }
-                        continue;
-                    }
-                    if (event.key.key == SDLK_Y)
-                    {
-                        auto& undo = UndoRedoManager::Instance();
-                        if (undo.canRedo())
-                        {
-                            undo.redo();
-                            renderer->getUIManager().markAllWidgetsDirty();
-                        }
-                        continue;
-                    }
-                    if (event.key.key == SDLK_S)
-                    {
-                        // Capture editor camera into the active level before saving
-                        auto* lvl = diagnostics.getActiveLevelSoft();
-                        if (lvl)
-                        {
-                            lvl->setEditorCameraPosition(renderer->getCameraPosition());
-                            lvl->setEditorCameraRotation(renderer->getCameraRotationDegrees());
-                            lvl->setHasEditorCamera(true);
-                        }
-
-                        auto& am = AssetManager::Instance();
-                        if (am.getUnsavedAssetCount() > 0)
-                        {
-                            renderer->getUIManager().showUnsavedChangesDialog(nullptr);
-                        }
-                        else
-                        {
-                            renderer->getUIManager().showToastMessage("Nothing to save.", 2.0f);
-                        }
-                        continue;
-                    }
-                    if (event.key.key == SDLK_F)
-                    {
-                        renderer->getUIManager().focusContentBrowserSearch();
-                        continue;
-                    }
-                    if (event.key.key == SDLK_C)
-                    {
-                        renderer->getUIManager().copySelectedEntity();
-                        continue;
-                    }
-                    if (event.key.key == SDLK_V)
-                    {
-                        renderer->getUIManager().pasteEntity();
-                        continue;
-                    }
-                    if (event.key.key == SDLK_D)
-                    {
-                        renderer->getUIManager().duplicateSelectedEntity();
-                        continue;
-                    }
+                    continue;
                 }
                 if (renderer)
                 {
@@ -3471,6 +3600,7 @@ int main()
                     Scripting::HandleKeyDown(event.key.key);
                 }
             }
+
 
             // --- Gamepad events ---
             if (event.type == SDL_EVENT_GAMEPAD_ADDED)
@@ -3738,6 +3868,16 @@ int main()
             lvl->setEditorCameraRotation(renderer->getCameraRotationDegrees());
             lvl->setHasEditorCamera(true);
             assetManager.saveActiveLevel();
+        }
+    }
+
+    // Save shortcut overrides
+    {
+        const auto& projPath = diagnostics.getProjectInfo().projectPath;
+        if (!projPath.empty())
+        {
+            const std::string shortcutFile = (std::filesystem::path(projPath) / "shortcuts.cfg").string();
+            ShortcutManager::Instance().saveToFile(shortcutFile);
         }
     }
 
