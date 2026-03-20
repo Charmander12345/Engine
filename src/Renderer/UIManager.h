@@ -162,6 +162,11 @@ public:
 	void closeAudioPreviewTab();
 	bool isAudioPreviewOpen() const;
 
+	// Particle Editor tab
+	void openParticleEditorTab(ECS::Entity entity);
+	void closeParticleEditorTab();
+	bool isParticleEditorOpen() const;
+
 	// Entity clipboard (Copy/Paste/Duplicate)
 	void copySelectedEntity();
 	bool pasteEntity();
@@ -485,6 +490,22 @@ private:
 	void buildAudioPreviewToolbar(WidgetElement& root);
 	void buildAudioPreviewWaveform(WidgetElement& root);
 	void buildAudioPreviewMetadata(WidgetElement& root);
+
+	// Particle Editor tab state
+	struct ParticleEditorState
+	{
+		std::string tabId;
+		std::string widgetId;
+		ECS::Entity linkedEntity{ 0 };
+		bool isOpen{ false };
+		float refreshTimer{ 0.0f };
+		int presetIndex{ -1 };    // currently selected preset (-1 = custom)
+	};
+	ParticleEditorState m_particleEditorState;
+	void refreshParticleEditor();
+	void buildParticleEditorToolbar(WidgetElement& root);
+	void buildParticleEditorParams(WidgetElement& root);
+	void applyParticlePreset(int presetIndex);
 
 public:
 	bool getWidgetEditorCanvasRect(Vec4& outRect) const;

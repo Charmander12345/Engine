@@ -3640,6 +3640,37 @@ int main()
                     }
                 }
             }
+
+            // --- OS file drop: import files dragged from the OS file explorer ---
+            if (event.type == SDL_EVENT_DROP_FILE)
+            {
+                const char* droppedFile = event.drop.data;
+                if (droppedFile && droppedFile[0] != '\0')
+                {
+                    const std::string filePath(droppedFile);
+                    Logger::Instance().log(Logger::Category::AssetManagement,
+                        "OS file drop received: " + filePath, Logger::LogLevel::INFO);
+
+                    auto& am = AssetManager::Instance();
+                    auto& diag = DiagnosticsManager::Instance();
+
+                    if (!diag.isProjectLoaded())
+                    {
+                        if (renderer)
+                            renderer->getUIManager().showToastMessage("Cannot import: no project loaded.", 3.0f);
+                    }
+                    else
+                    {
+                        auto action = diag.registerAction(DiagnosticsManager::ActionType::ImportingAsset);
+                        am.importAssetFromPath(filePath, AssetType::Unknown, action.ID);
+                        if (renderer)
+                        {
+                            const std::string fileName = std::filesystem::path(filePath).filename().string();
+                            renderer->getUIManager().showToastMessage("Importing: " + fileName, 2.5f);
+                        }
+                    }
+                }
+            }
         }
         const uint64_t eventEndCounter = SDL_GetPerformanceCounter();
         cpuEventMs = (freq > 0.0) ? (static_cast<double>(eventEndCounter - eventStartCounter) / freq * 1000.0) : 0.0;

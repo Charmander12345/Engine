@@ -660,6 +660,7 @@ createProject(parentDir, name, info, syncState, includeDefaultContent=true)  // 
   - **Entity-Spawn Undo/Redo**: Beim Drag-and-Drop eines Model3D-Assets auf den Viewport wird nach dem Spawn eine Undo/Redo-Action erstellt. Undo entfernt die gespawnte Entity aus Level und ECS.
 - **Shader-Import**: Kopiert `.glsl`-Datei nach `Content/`.
 - **Script-Import**: Kopiert `.py`-Datei nach `Content/`.
+- **OS-Datei-Drop**: Dateien können direkt aus dem OS-Dateiexplorer in das Engine-Fenster gezogen werden. `SDL_EVENT_DROP_FILE` wird im Event-Loop verarbeitet und ruft `AssetManager::importAssetFromPath()` mit `AssetType::Unknown` auf — der Dateityp wird automatisch anhand der Endung erkannt (Textur/Model3D/Audio/Shader/Script). Toast-Benachrichtigung zeigt den Import-Fortschritt an.
 
 ---
 
@@ -1293,6 +1294,19 @@ registerClickEvent("TitleBar.Close", []() { ... });
 - **Metadaten-Panel**: Pfad, Channels, Sample Rate, Format (8-bit/16-bit), Duration, Datengröße, Dateigröße.
 - **Schließen**: `closeAudioPreviewTab()` — stoppt Wiedergabe, deregistriert Widget, entfernt Tab.
 - **Refresh**: `refreshAudioPreview()` baut Widget-Inhalt komplett neu auf (Toolbar + Waveform + Metadaten).
+
+#### Particle Editor Tab (Editor-Tab):
+- **Architektur**: Folgt dem Console/Profiler/Audio-Tab-Muster (rein UIManager-basiert, kein FBO). Verlinkt eine ECS-Entity und editiert deren `ParticleEmitterComponent` live.
+- **`ParticleEditorState`** in `UIManager.h`: tabId, widgetId, linkedEntity, isOpen, refreshTimer, presetIndex.
+- **Öffnung**: „Edit Particles"-Button in den Entity-Details bei Entities mit `ParticleEmitterComponent` → `UIManager::openParticleEditorTab(entity)`.
+  - Erstellt Tab via `Renderer::addTab()` und registriert ein Widget mit Toolbar und scrollbarem Parameterbereich.
+- **Toolbar**: Titel mit Entity-Name, Preset-Dropdown (Custom/Fire/Smoke/Sparks/Rain/Snow/Magic), Reset-Button.
+- **Parameter-Area**: Alle 20 `ParticleEmitterComponent`-Parameter als Slider-Controls, gruppiert in Sektionen (General: Enabled/Loop/MaxParticles, Emission: Rate/Lifetime/ConeAngle, Motion: Speed/SpeedVariance/Gravity, Size: Start/End, Start Color: RGBA, End Color: RGBA).
+- **Presets**: 6 eingebaute Presets (Fire, Smoke, Sparks, Rain, Snow, Magic) mit vollständiger Parameterbelegung. Undo/Redo-Integration über `UndoRedoManager::pushCommand()`.
+- **Reset**: Stellt alle Parameter auf `ParticleEmitterComponent{}`-Defaults zurück, mit Undo-Unterstützung.
+- **Validierung**: 0.3s-Timer prüft ob die verlinkte Entity noch eine `ParticleEmitterComponent` hat; schließt den Tab automatisch falls nicht.
+- **Schließen**: `closeParticleEditorTab()` — deregistriert Widget, entfernt Tab.
+- **Refresh**: `refreshParticleEditor()` baut den Parameterbereich komplett neu auf.
 
 #### World-Outliner-Integration:
 ```cpp

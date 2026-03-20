@@ -283,6 +283,8 @@
 ### 2.5 Particle Editor Tab
 **Priorität:** Mittel (Particle-System existiert, aber Parameter nur über Python API oder ECS editierbar)
 
+**Aktueller Stand:** Implementiert. Schließbarer Tab mit Toolbar (Titel mit Entity-Name, Preset-Dropdown, Reset-Button), scrollbarem Parameterbereich mit Slider-Controls für alle 20 Parameter, gruppiert in Sektionen (General, Emission, Motion, Size, Start Color, End Color). Öffnung über "Edit Particles"-Button in den Entity-Details bei Entities mit `ParticleEmitterComponent`. 6 eingebaute Presets (Fire, Smoke, Sparks, Rain, Snow, Magic) als Dropdown. Alle Änderungen werden live auf die verlinkte Entity im Viewport angewendet. Reset-Button stellt Standardwerte wieder her. Undo/Redo-Integration für Preset-Anwendung und Reset. 0.3s-Validierungs-Timer prüft ob die verlinkte Entity noch existiert.
+
 **Beschreibung:** Visueller Editor für Particle-Emitter-Konfigurationen mit Live-Preview.
 
 **Herangehensweise:**
@@ -301,10 +303,10 @@
 
 **Fortschrittsprüfung:**
 - [ ] Preview zeigt Partikel in Echtzeit
-- [ ] Alle 20 Parameter sind editierbar
-- [ ] Änderungen sind sofort sichtbar
-- [ ] Mindestens 3 Presets verfügbar
-- [ ] Parameter werden korrekt in ECS zurückgeschrieben
+- [x] Alle 20 Parameter sind editierbar
+- [x] Änderungen sind sofort sichtbar
+- [x] Mindestens 3 Presets verfügbar
+- [x] Parameter werden korrekt in ECS zurückgeschrieben
 
 ### 2.6 Audio Preview Panel
 **Priorität:** Niedrig–Mittel
@@ -526,7 +528,7 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 - [x] Ctrl+F fokussiert das Suchfeld
 
 ### 4.3 Drag & Drop Verbesserungen
-**Aktueller Stand:** Drag & Drop von Assets auf den Viewport zum Spawnen existiert. Textur-Drag auf Entity-Details existiert.
+**Aktueller Stand:** Drag & Drop von Assets auf den Viewport zum Spawnen existiert. Textur-Drag auf Entity-Details existiert. Material-Drop und Script-Drop auf Viewport-Entities zuweisen funktioniert. OS-Datei-Drop (`SDL_EVENT_DROP_FILE`) importiert Dateien automatisch basierend auf Dateiendung via `AssetManager::importAssetFromPath()`.
 
 **Ziel:** Umfassenderes Drag & Drop:
 - Material auf eine Entity im Viewport droppen → Material zuweisen
@@ -542,9 +544,9 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 - OS-Drag: `SDL_EVENT_DROP_FILE` verarbeiten → Auto-Import basierend auf Dateiendung
 
 **Fortschrittsprüfung:**
-- [ ] Material-Drop auf Entity im Viewport weist das Material zu
-- [ ] Script-Drop auf Entity fügt ScriptComponent hinzu
-- [ ] Dateien aus dem OS-Explorer können in den Content Browser gedroppt werden
+- [x] Material-Drop auf Entity im Viewport weist das Material zu
+- [x] Script-Drop auf Entity fügt ScriptComponent hinzu
+- [x] Dateien aus dem OS-Explorer können in den Content Browser gedroppt werden
 - [ ] Visueller Ghost-Preview bei Drag
 
 ### 4.4 Asset-Referenz-Tracking
@@ -672,7 +674,7 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 - [ ] Layout wird bei Neustart wiederhergestellt
 
 ### 6.2 Keyboard-Shortcut-System
-**Aktueller Stand:** Einige Shortcuts sind hardcoded (W/E/R, Ctrl+Z/Y/S, F2, Delete, F8–F12).
+**Aktueller Stand:** Implementiert. `ShortcutManager`-Singleton (`src/Core/ShortcutManager.h/.cpp`) mit Registry aller Aktionen (id, displayName, category, defaultCombo, currentCombo, callback). 20+ Shortcuts registriert in `main.cpp`. Konfigurations-UI in Editor Settings mit klickbaren Keybind-Buttons, Konflikt-Erkennung und „Reset All to Defaults“. F1 Shortcut-Hilfe Popup. Persistenz via `shortcuts.cfg`.
 
 **Ziel:** Zentrales, konfigurierbares Shortcut-System.
 
@@ -691,7 +693,7 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 - [x] F1 zeigt die Shortcut-Hilfe
 
 ### 6.3 Benachrichtigungs- und Fortschritts-System
-**Aktueller Stand:** Toast-Benachrichtigungen und modale Progress-Dialoge existieren.
+**Aktueller Stand:** Implementiert. `NotificationHistoryEntry`-Struct + `m_notificationHistory`-Deque (max 50 Einträge) + `openNotificationHistoryPopup()` für Verlauf. `ProgressBarHandle` mit `beginProgress()`/`updateProgress()`/`endProgress()` für nicht-blockierende Mehrfach-Progress-Bars. `NotificationLevel`-Enum (Info/Warning/Error) mit visueller Differenzierung. `refreshNotificationBadge()` zeigt Badge-Zähler in der StatusBar.
 
 **Ziel:** Erweitertes Benachrichtigungssystem mit Verlauf und nicht-blockierendem Fortschritt.
 
@@ -703,9 +705,9 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 - Sound-Feedback: Optionaler Ton bei Error-Benachrichtigungen
 
 **Fortschrittsprüfung:**
-- [ ] Benachrichtigungs-Verlauf ist abrufbar
-- [ ] Mehrere Progress-Bars gleichzeitig möglich
-- [ ] Error-Benachrichtigungen heben sich visuell ab
+- [x] Benachrichtigungs-Verlauf ist abrufbar
+- [x] Mehrere Progress-Bars gleichzeitig möglich
+- [x] Error-Benachrichtigungen heben sich visuell ab
 
 ---
 
@@ -873,7 +875,7 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 | **2.2** | Material Editor Tab | Hoch | Hoch | ✅ |
 | **2.3** | Texture Viewer | Mittel | Gering | ✅ |
 | **2.4** | Animation Editor | Mittel–Hoch | Hoch | ❌ |
-| **2.5** | Particle Editor | Mittel | Mittel | ❌ |
+| **2.5** | Particle Editor | Mittel | Mittel | 🔄 |
 | **2.6** | Audio Preview | Niedrig–Mittel | Gering | ✅ |
 | **2.7** | Profiler Tab | Mittel | Mittel | ✅ |
 | **3.1** | Auto-Material bei Import | Hoch | Gering | ✅ |
@@ -884,15 +886,15 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 | **3.6** | Intelligent Snap & Grid | Hoch | Mittel | ✅ |
 | **4.1** | Asset-Thumbnails | Hoch | Mittel | 🔄 |
 | **4.2** | Erweiterte Suche & Filter | Hoch | Gering | ✅ |
-| **4.3** | Drag & Drop Verbesserungen | Mittel | Mittel | ❌ |
+| **4.3** | Drag & Drop Verbesserungen | Mittel | Mittel | 🔄 |
 | **4.4** | Asset-Referenz-Tracking | Mittel | Mittel | ❌ |
 | **5.1** | Viewport-Einstellungen Panel | Hoch | Gering | ✅ |
 | **5.2** | Multi-Select & Group Ops | Hoch | Hoch | ✅ |
 | **5.3** | Entity Copy/Paste | Hoch | Gering | ✅ |
 | **5.4** | Transform-Einrasten | Mittel | Mittel | ✅ |
 | **6.1** | Docking-System | Niedrig | Sehr hoch | ❌ |
-| **6.2** | Keyboard-Shortcut-System | Mittel | Mittel | ❌ |
-| **6.3** | Benachrichtigungs-System | Niedrig | Gering | ❌ |
+| **6.2** | Keyboard-Shortcut-System | Mittel | Mittel | ✅ |
+| **6.3** | Benachrichtigungs-System | Niedrig | Gering | ✅ |
 | **7.1** | Integrierter Script-Editor | Mittel | Sehr hoch | ❌ |
 | **7.2** | Debug-Breakpoints | Niedrig | Sehr hoch | ❌ |
 | **7.3** | Script-Hot-Reload | Hoch | Mittel | ✅ |
@@ -925,10 +927,10 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 7.3 Script Hot-Reload, 7.1 Script Editor, 2.6 Audio Preview
 
 **Sprint 8 – Framework & Polish:**
-6.2 Shortcut-System, 8.3 Keyboard-Navigation, ~~8.4 Undo/Redo~~✅, ~~3.2 Prefabs~~✅
+~~6.2 Shortcut-System~~✅, 8.3 Keyboard-Navigation, ~~8.4 Undo/Redo~~✅, ~~3.2 Prefabs~~✅
 
 **Sprint 9 – Advanced:**
 3.4 Auto-LOD, 1.2 Elevation/Shadows, 1.5 Animations, 6.1 Docking
 
 **Sprint 10 – Final Polish:**
-6.3 Benachrichtigungs-System, 8.2 Onboarding, 1.6 Scrollbar, 4.3 Drag & Drop, 4.4 Referenz-Tracking, 7.2 Debug-Breakpoints
+~~6.3 Benachrichtigungs-System~~✅, 8.2 Onboarding, 1.6 Scrollbar, ~~4.3 Drag & Drop~~🔄, 4.4 Referenz-Tracking, 7.2 Debug-Breakpoints
