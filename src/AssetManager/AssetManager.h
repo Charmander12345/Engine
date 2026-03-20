@@ -174,6 +174,19 @@ public:
 	// Called after a successful asset import
 	void setOnImportCompleted(std::function<void()> callback) { m_onImportCompleted = std::move(callback); }
 
+	// --- Asset Reference Tracking ---
+	struct AssetReference
+	{
+		std::string sourcePath;   // Content-relative path of the referencing asset / entity description
+		std::string sourceType;   // "Level", "Material", "Entity", etc.
+	};
+
+	// Find all assets and ECS entities that reference the given content-relative path.
+	std::vector<AssetReference> findReferencesTo(const std::string& relPath) const;
+
+	// Return all content-relative asset paths that the given asset depends on (e.g. textures in a material).
+	std::vector<std::string> getAssetDependencies(const std::string& relPath) const;
+
 	// Register an asset entry in the registry (public for external create flows)
 	void registerAssetInRegistry(const AssetRegistryEntry& entry);
 	// Remove an asset from the registry and optionally delete from disk. Returns true on success.

@@ -135,6 +135,8 @@ public:
 	void openEngineSettingsPopup();
 	void openEditorSettingsPopup();
 	void openShortcutHelpPopup();
+	void openAssetReferencesPopup(const std::string& title, const std::string& assetPath,
+		const std::vector<std::pair<std::string, std::string>>& items);
 
 	// Non-blocking progress bars in StatusBar
 	struct ProgressBarHandle { uint64_t id{ 0 }; };

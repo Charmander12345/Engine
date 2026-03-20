@@ -2894,6 +2894,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
 			}
 			return;
 		}
+		if (element.type == WidgetElementType::Image)
 		{
 			if (element.textureId!=0 || !element.imagePath.empty())
 			{

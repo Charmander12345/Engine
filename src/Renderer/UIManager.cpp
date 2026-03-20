@@ -12862,6 +12862,162 @@ void UIManager::openNotificationHistoryPopup()
     popup->uiManager().registerWidget("NotificationHistory.Main", widget);
 }
 
+void UIManager::openAssetReferencesPopup(const std::string& title, const std::string& assetPath,
+    const std::vector<std::pair<std::string, std::string>>& items)
+{
+    if (!m_renderer) return;
+
+    const int kPopupW = static_cast<int>(EditorTheme::Scaled(500.0f));
+    const int kPopupH = static_cast<int>(EditorTheme::Scaled(420.0f));
+    PopupWindow* popup = m_renderer->openPopupWindow(
+        "AssetReferences", title, kPopupW, kPopupH);
+    if (!popup) return;
+    if (!popup->uiManager().getRegisteredWidgets().empty()) return;
+
+    const float W = static_cast<float>(kPopupW);
+    const float H = static_cast<float>(kPopupH);
+    auto nx = [&](float px) { return px / W; };
+    auto ny = [&](float py) { return py / H; };
+
+    auto& theme = EditorTheme::Get();
+    std::vector<WidgetElement> elements;
+
+    // Background
+    {
+        WidgetElement bg;
+        bg.type  = WidgetElementType::Panel;
+        bg.id    = "AR.Bg";
+        bg.from  = Vec2{ 0.0f, 0.0f };
+        bg.to    = Vec2{ 1.0f, 1.0f };
+        bg.style.color = theme.panelBackground;
+        elements.push_back(bg);
+    }
+
+    const float kTitleH = EditorTheme::Scaled(40.0f);
+
+    // Title bar
+    {
+        WidgetElement titleBg;
+        titleBg.type  = WidgetElementType::Panel;
+        titleBg.id    = "AR.TitleBg";
+        titleBg.from  = Vec2{ 0.0f, 0.0f };
+        titleBg.to    = Vec2{ 1.0f, ny(kTitleH) };
+        titleBg.style.color = theme.titleBarBackground;
+        elements.push_back(titleBg);
+
+        WidgetElement titleText;
+        titleText.type      = WidgetElementType::Text;
+        titleText.id        = "AR.TitleText";
+        titleText.from      = Vec2{ nx(8.0f), 0.0f };
+        titleText.to        = Vec2{ nx(W - 8.0f), ny(kTitleH) };
+        titleText.text      = title;
+        titleText.fontSize  = theme.fontSizeHeading;
+        titleText.style.textColor = theme.titleBarText;
+        titleText.textAlignV = TextAlignV::Center;
+        titleText.padding   = Vec2{ 8.0f, 0.0f };
+        elements.push_back(titleText);
+    }
+
+    // Subtitle: asset name
+    const float kSubH = EditorTheme::Scaled(24.0f);
+    {
+        WidgetElement sub;
+        sub.type      = WidgetElementType::Text;
+        sub.id        = "AR.Sub";
+        sub.from      = Vec2{ nx(12.0f), ny(kTitleH + 4.0f) };
+        sub.to        = Vec2{ nx(W - 12.0f), ny(kTitleH + 4.0f + kSubH) };
+        sub.text      = assetPath;
+        sub.fontSize  = theme.fontSizeSmall;
+        sub.style.textColor = theme.textMuted;
+        sub.textAlignV = TextAlignV::Center;
+        sub.padding   = Vec2{ 4.0f, 0.0f };
+        elements.push_back(sub);
+    }
+
+    // Content area (scrollable)
+    {
+        WidgetElement content;
+        content.type        = WidgetElementType::StackPanel;
+        content.id          = "AR.Content";
+        content.from        = Vec2{ nx(12.0f), ny(kTitleH + kSubH + 12.0f) };
+        content.to          = Vec2{ nx(W - 12.0f), ny(H - 12.0f) };
+        content.style.color = theme.transparent;
+        content.orientation = StackOrientation::Vertical;
+        content.padding     = Vec2{ 4.0f, 4.0f };
+        content.scrollable  = true;
+
+        const float contentW = W - 24.0f;
+        const float kRowH = EditorTheme::Scaled(26.0f);
+
+        if (items.empty())
+        {
+            WidgetElement emptyLabel;
+            emptyLabel.type      = WidgetElementType::Text;
+            emptyLabel.id        = "AR.Empty";
+            emptyLabel.text      = "No references found.";
+            emptyLabel.fontSize  = theme.fontSizeBody;
+            emptyLabel.style.textColor = theme.textMuted;
+            emptyLabel.textAlignV = TextAlignV::Center;
+            emptyLabel.textAlignH = TextAlignH::Center;
+            emptyLabel.minSize   = Vec2{ contentW - 8.0f, EditorTheme::Scaled(40.0f) };
+            content.children.push_back(emptyLabel);
+        }
+        else
+        {
+            for (size_t i = 0; i < items.size(); ++i)
+            {
+                const auto& [path, type] = items[i];
+
+                WidgetElement row;
+                row.type        = WidgetElementType::StackPanel;
+                row.id          = "AR.R." + std::to_string(i);
+                row.orientation = StackOrientation::Horizontal;
+                row.minSize     = Vec2{ contentW - 8.0f, kRowH };
+                row.style.color = (i % 2 == 0)
+                    ? Vec4{ 0.0f, 0.0f, 0.0f, 0.0f }
+                    : Vec4{ 1.0f, 1.0f, 1.0f, 0.03f };
+                row.padding     = Vec2{ 4.0f, 2.0f };
+
+                // Type badge
+                WidgetElement badge;
+                badge.type      = WidgetElementType::Text;
+                badge.id        = "AR.B." + std::to_string(i);
+                badge.text      = "[" + type + "]";
+                badge.fontSize  = theme.fontSizeSmall;
+                badge.style.textColor = theme.accent;
+                badge.textAlignV = TextAlignV::Center;
+                badge.minSize   = Vec2{ EditorTheme::Scaled(100.0f), kRowH };
+                badge.padding   = Vec2{ 2.0f, 0.0f };
+                row.children.push_back(badge);
+
+                // Path / name
+                WidgetElement pathLabel;
+                pathLabel.type      = WidgetElementType::Text;
+                pathLabel.id        = "AR.P." + std::to_string(i);
+                pathLabel.text      = path;
+                pathLabel.fontSize  = theme.fontSizeBody;
+                pathLabel.style.textColor = theme.textPrimary;
+                pathLabel.textAlignV = TextAlignV::Center;
+                pathLabel.fillX     = true;
+                pathLabel.minSize   = Vec2{ 0.0f, kRowH };
+                pathLabel.padding   = Vec2{ 4.0f, 0.0f };
+                row.children.push_back(pathLabel);
+
+                content.children.push_back(row);
+            }
+        }
+
+        elements.push_back(content);
+    }
+
+    auto arWidget = std::make_shared<EditorWidget>();
+    arWidget->setName("AssetReferencesWidget");
+    arWidget->setFillX(true);
+    arWidget->setFillY(true);
+    arWidget->setElements(std::move(elements));
+    popup->uiManager().registerWidget("AssetReferences.Main", arWidget);
+}
+
 void UIManager::refreshNotificationBadge()
 {
     auto* entry = findWidgetEntry("StatusBar");

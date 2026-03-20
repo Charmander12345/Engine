@@ -2316,8 +2316,15 @@ int main()
                 const std::string selectedAsset = uiManager.getSelectedGridAsset();
                 if (!selectedAsset.empty())
                 {
+                    const auto refs = AssetManager::Instance().findReferencesTo(selectedAsset);
+                    std::string msg = "Are you sure you want to delete this asset?\nThis cannot be undone.";
+                    if (!refs.empty())
+                    {
+                        msg = "This asset is referenced by " + std::to_string(refs.size())
+                            + " other asset(s)/entity(ies).\nDeleting it may break those references.\n\nDelete anyway?";
+                    }
                     uiManager.showConfirmDialog(
-                        "Are you sure you want to delete this asset?\nThis cannot be undone.",
+                        msg,
                         [&renderer, selectedAsset]()
                         {
                             auto& assetMgr = AssetManager::Instance();
@@ -3388,6 +3395,55 @@ int main()
                                         }
                                         const std::string folder = uiMgr.getSelectedBrowserFolder();
                                         uiMgr.savePrefabFromEntity(entity, prefabName, folder);
+                                    }});
+                            }
+                        }
+
+                        // ── Asset Reference Tracking ──
+                        {
+                            const std::string selectedAsset = uiManager.getSelectedGridAsset();
+                            if (!selectedAsset.empty())
+                            {
+                                items.push_back({ "", {}, true }); // separator
+                                items.push_back({ "Find References", [&renderer, selectedAsset]()
+                                    {
+                                        auto& uiMgr = renderer->getUIManager();
+                                        auto& assetMgr = AssetManager::Instance();
+                                        const auto refs = assetMgr.findReferencesTo(selectedAsset);
+                                        std::vector<std::pair<std::string, std::string>> items;
+                                        items.reserve(refs.size());
+                                        for (const auto& r : refs)
+                                            items.push_back({ r.sourcePath, r.sourceType });
+                                        const std::string title = "References to " + std::filesystem::path(selectedAsset).stem().string();
+                                        uiMgr.openAssetReferencesPopup(title, selectedAsset, items);
+                                    }});
+                                items.push_back({ "Show Dependencies", [&renderer, selectedAsset]()
+                                    {
+                                        auto& uiMgr = renderer->getUIManager();
+                                        auto& assetMgr = AssetManager::Instance();
+                                        const auto deps = assetMgr.getAssetDependencies(selectedAsset);
+                                        std::vector<std::pair<std::string, std::string>> items;
+                                        items.reserve(deps.size());
+                                        for (const auto& d : deps)
+                                        {
+                                            std::string depType = "Asset";
+                                            for (const auto& reg : assetMgr.getAssetRegistry())
+                                            {
+                                                if (reg.path == d)
+                                                {
+                                                    if (reg.type == AssetType::Texture) depType = "Texture";
+                                                    else if (reg.type == AssetType::Material) depType = "Material";
+                                                    else if (reg.type == AssetType::Model3D) depType = "3D Object";
+                                                    else if (reg.type == AssetType::Audio) depType = "Audio";
+                                                    else if (reg.type == AssetType::Level) depType = "Level";
+                                                    else if (reg.type == AssetType::Script) depType = "Script";
+                                                    break;
+                                                }
+                                            }
+                                            items.push_back({ d, depType });
+                                        }
+                                        const std::string title = "Dependencies of " + std::filesystem::path(selectedAsset).stem().string();
+                                        uiMgr.openAssetReferencesPopup(title, selectedAsset, items);
                                     }});
                             }
                         }

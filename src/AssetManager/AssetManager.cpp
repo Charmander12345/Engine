@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cctype>
 #include <exception>
+#include <algorithm>
 #include "AssetTypes.h"
 
 #include <SDL3/SDL.h>
@@ -5056,6 +5057,207 @@ bool AssetManager::renameAsset(const std::string& relPath, const std::string& ne
 	updateAssetFileReferences(contentDir, relPath, newRelPath);
 
 	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Recursively walk a JSON value and check if any string equals searchVal.
+// Returns true if at least one match is found.
+// ---------------------------------------------------------------------------
+static bool jsonContainsStringValue(const json& node, const std::string& searchVal)
+{
+	if (node.is_string())
+	{
+		return node.get<std::string>() == searchVal;
+	}
+	else if (node.is_array())
+	{
+		for (const auto& element : node)
+		{
+			if (jsonContainsStringValue(element, searchVal))
+				return true;
+		}
+	}
+	else if (node.is_object())
+	{
+		for (const auto& [key, value] : node.items())
+		{
+			if (jsonContainsStringValue(value, searchVal))
+				return true;
+		}
+	}
+	return false;
+}
+
+// ---------------------------------------------------------------------------
+// Recursively collect all string values from a JSON node that look like
+// content-relative asset paths (contain ".asset" or ".py").
+// ---------------------------------------------------------------------------
+static void collectAssetPathStrings(const json& node, std::vector<std::string>& out)
+{
+	if (node.is_string())
+	{
+		const std::string& val = node.get_ref<const std::string&>();
+		if (val.find(".asset") != std::string::npos || val.find(".py") != std::string::npos)
+		{
+			out.push_back(val);
+		}
+	}
+	else if (node.is_array())
+	{
+		for (const auto& element : node)
+			collectAssetPathStrings(element, out);
+	}
+	else if (node.is_object())
+	{
+		for (const auto& [key, value] : node.items())
+			collectAssetPathStrings(value, out);
+	}
+}
+
+std::vector<AssetManager::AssetReference> AssetManager::findReferencesTo(const std::string& relPath) const
+{
+	std::vector<AssetReference> results;
+	if (relPath.empty()) return results;
+
+	auto& diagnostics = DiagnosticsManager::Instance();
+	if (!diagnostics.isProjectLoaded()) return results;
+
+	const fs::path contentDir = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+
+	// 1) Scan all .asset files on disk
+	std::error_code ec;
+	for (auto it = fs::recursive_directory_iterator(contentDir, fs::directory_options::skip_permission_denied, ec);
+		it != fs::recursive_directory_iterator(); ++it)
+	{
+		if (it->is_directory()) continue;
+		if (it->path().extension() != ".asset") continue;
+
+		const std::string fileRelPath = fs::relative(it->path(), contentDir).generic_string();
+		if (fileRelPath == relPath) continue; // skip self
+
+		std::ifstream in(it->path(), std::ios::in | std::ios::binary);
+		if (!in.is_open()) continue;
+
+		json fileJson;
+		try { fileJson = json::parse(in); }
+		catch (...) { continue; }
+		in.close();
+
+		if (!fileJson.is_object()) continue;
+
+		bool found = false;
+		if (fileJson.contains("data"))
+			found |= jsonContainsStringValue(fileJson["data"], relPath);
+		if (fileJson.contains("Entities"))
+			found |= jsonContainsStringValue(fileJson["Entities"], relPath);
+
+		if (found)
+		{
+			std::string sourceType = "Asset";
+			if (fileJson.contains("type"))
+			{
+				const std::string t = fileJson["type"].get<std::string>();
+				if (t == "Level" || t == "Map") sourceType = "Level";
+				else if (t == "Material") sourceType = "Material";
+				else if (t == "Widget") sourceType = "Widget";
+				else sourceType = t;
+			}
+			results.push_back({ fileRelPath, sourceType });
+		}
+	}
+
+	// 2) Scan ECS entities in the active level
+	auto& ecs = ECS::ECSManager::Instance();
+	{
+		ECS::Schema schema;
+		schema.require<ECS::MeshComponent>();
+		for (const auto e : ecs.getEntitiesMatchingSchema(schema))
+		{
+			const auto* mesh = ecs.getComponent<ECS::MeshComponent>(e);
+			if (mesh && mesh->meshAssetPath == relPath)
+			{
+				std::string label = "Entity " + std::to_string(e);
+				if (const auto* nc = ecs.getComponent<ECS::NameComponent>(e))
+				{
+					if (!nc->displayName.empty()) label = nc->displayName + " (Entity " + std::to_string(e) + ")";
+				}
+				results.push_back({ label, "Entity (Mesh)" });
+			}
+		}
+	}
+	{
+		ECS::Schema schema;
+		schema.require<ECS::MaterialComponent>();
+		for (const auto e : ecs.getEntitiesMatchingSchema(schema))
+		{
+			const auto* mat = ecs.getComponent<ECS::MaterialComponent>(e);
+			if (mat && mat->materialAssetPath == relPath)
+			{
+				std::string label = "Entity " + std::to_string(e);
+				if (const auto* nc = ecs.getComponent<ECS::NameComponent>(e))
+				{
+					if (!nc->displayName.empty()) label = nc->displayName + " (Entity " + std::to_string(e) + ")";
+				}
+				results.push_back({ label, "Entity (Material)" });
+			}
+		}
+	}
+	{
+		ECS::Schema schema;
+		schema.require<ECS::ScriptComponent>();
+		for (const auto e : ecs.getEntitiesMatchingSchema(schema))
+		{
+			const auto* sc = ecs.getComponent<ECS::ScriptComponent>(e);
+			if (sc && sc->scriptPath == relPath)
+			{
+				std::string label = "Entity " + std::to_string(e);
+				if (const auto* nc = ecs.getComponent<ECS::NameComponent>(e))
+				{
+					if (!nc->displayName.empty()) label = nc->displayName + " (Entity " + std::to_string(e) + ")";
+				}
+				results.push_back({ label, "Entity (Script)" });
+			}
+		}
+	}
+
+	return results;
+}
+
+std::vector<std::string> AssetManager::getAssetDependencies(const std::string& relPath) const
+{
+	std::vector<std::string> results;
+	if (relPath.empty()) return results;
+
+	auto& diagnostics = DiagnosticsManager::Instance();
+	if (!diagnostics.isProjectLoaded()) return results;
+
+	const fs::path contentDir = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+	const fs::path absPath = contentDir / fs::path(relPath);
+
+	std::ifstream in(absPath, std::ios::in | std::ios::binary);
+	if (!in.is_open()) return results;
+
+	json fileJson;
+	try { fileJson = json::parse(in); }
+	catch (...) { return results; }
+	in.close();
+
+	if (!fileJson.is_object()) return results;
+
+	// Collect all asset path strings from "data" and "Entities" blocks
+	if (fileJson.contains("data"))
+		collectAssetPathStrings(fileJson["data"], results);
+	if (fileJson.contains("Entities"))
+		collectAssetPathStrings(fileJson["Entities"], results);
+
+	// De-duplicate
+	std::sort(results.begin(), results.end());
+	results.erase(std::unique(results.begin(), results.end()), results.end());
+
+	// Remove self-reference
+	results.erase(std::remove(results.begin(), results.end(), relPath), results.end());
+
+	return results;
 }
 
 // ---------------------------------------------------------------------------
