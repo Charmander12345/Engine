@@ -6,6 +6,9 @@
 #include <cstdio>
 #include <functional>
 #include <optional>
+#include <thread>
+#include <mutex>
+#include <atomic>
 #include <SDL3/SDL.h>
 
 #if defined(_WIN32)
@@ -15,11 +18,7 @@
 
 #include "Renderer/Renderer.h"
 #include "Renderer/RendererFactory.h"
-#include "Renderer/ViewportUIManager.h"
 #include "Renderer/SplashWindow.h"
-#include "Renderer/UIWidget.h"
-#include "Renderer/EditorWindows/PopupWindow.h"
-#include "Renderer/EditorWindows/TextureViewerWindow.h"
 #include "Logger/Logger.h"
 #include "Diagnostics/DiagnosticsManager.h"
 #include "AssetManager/AssetManager.h"
@@ -27,12 +26,19 @@
 #include "Core/ECS/ECS.h"
 #include "Core/MathTypes.h"
 #include "Core/AudioManager.h"
-#include "Core/UndoRedoManager.h"
-#include "Core/ShortcutManager.h"
 #include "Core/EngineLevel.h"
 #include "Scripting/PythonScripting.h"
 #include "Physics/PhysicsWorld.h"
+
+#include "Renderer/ViewportUIManager.h"
+#include "Renderer/UIWidget.h"
+#include "Renderer/EditorWindows/PopupWindow.h"
+#include "Renderer/EditorWindows/TextureViewerWindow.h"
 #include "Renderer/EditorTheme.h"
+#if ENGINE_EDITOR
+#include "Core/UndoRedoManager.h"
+#include "Core/ShortcutManager.h"
+#endif
 
 using namespace std;
 
@@ -41,6 +47,7 @@ int main()
 {
     auto& logger = Logger::Instance();
     logger.initialize();
+    Logger::installCrashHandler();
 
     auto logTimed = [&](Logger::Category category, const std::string& message, Logger::LogLevel level)
     {
@@ -90,6 +97,63 @@ int main()
     }();
     logTimed(Logger::Category::Engine, std::string("Selected renderer backend: ") + DiagnosticsManager::rhiTypeToString(diagnostics.getRHIType()), Logger::LogLevel::INFO);
 
+    // --- Runtime mode detection ---
+    // Prefer compile-time baked game config (set via -DGAME_START_LEVEL at build).
+    // Fall back to game.ini next to the executable for legacy/debug builds.
+    bool isRuntimeMode = false;
+    std::string rtStartLevel;
+    std::string rtWindowTitle = "Game";
+    std::string rtBuildProfile = "Development";
+    std::string rtLogLevel = "info";
+    bool rtEnableHotReload = true;
+    bool rtEnableValidation = false;
+    bool rtEnableProfiler = true;
+
+#if defined(GAME_START_LEVEL)
+    // Baked-in game config — the project was compiled directly into the binary.
+    isRuntimeMode = true;
+    rtStartLevel = GAME_START_LEVEL;
+#   if defined(GAME_WINDOW_TITLE_BAKED)
+    rtWindowTitle = GAME_WINDOW_TITLE_BAKED;
+#   endif
+    rtBuildProfile = "Shipping";
+    rtEnableHotReload = false;
+    logTimed(Logger::Category::Engine, "Runtime mode (compiled-in). StartLevel=" + rtStartLevel, Logger::LogLevel::INFO);
+#else
+    {
+        const char* bp = SDL_GetBasePath();
+        if (bp)
+        {
+            const std::filesystem::path iniPath = std::filesystem::path(bp) / "game.ini";
+            if (std::filesystem::exists(iniPath))
+            {
+                std::ifstream iniFile(iniPath);
+                if (iniFile.is_open())
+                {
+                    std::string line;
+                    while (std::getline(iniFile, line))
+                    {
+                        if (line.empty() || line[0] == '#' || line[0] == ';') continue;
+                        const auto eq = line.find('=');
+                        if (eq == std::string::npos) continue;
+                        const std::string key = line.substr(0, eq);
+                        const std::string val = line.substr(eq + 1);
+                        if (key == "StartLevel")         rtStartLevel = val;
+                        else if (key == "WindowTitle")   rtWindowTitle = val;
+                        else if (key == "BuildProfile")  rtBuildProfile = val;
+                        else if (key == "LogLevel")      rtLogLevel = val;
+                        else if (key == "EnableHotReload")  rtEnableHotReload = (val == "true" || val == "1");
+                        else if (key == "EnableValidation") rtEnableValidation = (val == "true" || val == "1");
+                        else if (key == "EnableProfiler")   rtEnableProfiler = (val == "true" || val == "1");
+                    }
+                    isRuntimeMode = true;
+                    logTimed(Logger::Category::Engine, "Runtime mode detected (game.ini). Profile=" + rtBuildProfile + " StartLevel=" + rtStartLevel, Logger::LogLevel::INFO);
+                }
+            }
+        }
+    }
+#endif
+
     std::string chosenPath;
     bool chosenIsNew = false;
     bool chosenSetDefault = false;
@@ -98,12 +162,42 @@ int main()
     bool projectChosen = false;
     bool startupSelectionCancelled = false;
 
-    // Check for a persisted default project
-    auto defaultProj = diagnostics.getState("DefaultProject");
-    if (defaultProj && !defaultProj->empty() && std::filesystem::exists(*defaultProj))
+    // Runtime mode: use the executable directory as the project path
+    if (isRuntimeMode)
     {
-        chosenPath = *defaultProj;
-        projectChosen = true;
+        const char* bp = SDL_GetBasePath();
+        if (bp)
+        {
+            chosenPath = std::filesystem::path(bp).string();
+            // Remove trailing separator if present
+            while (!chosenPath.empty() && (chosenPath.back() == '/' || chosenPath.back() == '\\'))
+                chosenPath.pop_back();
+            projectChosen = true;
+        }
+
+        // Apply profile-based log level
+        if (rtLogLevel == "verbose")
+            Logger::Instance().setMinimumLogLevel(Logger::LogLevel::INFO);
+        else if (rtLogLevel == "error")
+            Logger::Instance().setMinimumLogLevel(Logger::LogLevel::ERROR);
+        else
+            Logger::Instance().setMinimumLogLevel(Logger::LogLevel::INFO);
+
+        // Suppress stdout in Shipping builds
+        if (rtBuildProfile == "Shipping")
+            Logger::Instance().setSuppressStdout(true);
+    }
+
+    // Check for a persisted default project
+#if ENGINE_EDITOR
+    if (!projectChosen)
+    {
+        auto defaultProj = diagnostics.getState("DefaultProject");
+        if (defaultProj && !defaultProj->empty() && std::filesystem::exists(*defaultProj))
+        {
+            chosenPath = *defaultProj;
+            projectChosen = true;
+        }
     }
 
     // If no default project, show project selection screen using a temporary renderer
@@ -279,6 +373,19 @@ int main()
         projectChosen = true;
         logTimed(Logger::Category::Engine, "Fallback to SampleProject: " + chosenPath, Logger::LogLevel::INFO);
     }
+#endif // ENGINE_EDITOR
+
+    // Runtime mode without ENGINE_EDITOR: require game.ini or fail
+#if !ENGINE_EDITOR
+    if (!projectChosen)
+    {
+        logTimed(Logger::Category::Engine,
+            "Runtime build: no game.ini found next to executable. Shutting down.",
+            Logger::LogLevel::FATAL);
+        SDL_Quit();
+        return -1;
+    }
+#endif
 
     // Now we have a project to load/create. Show SplashWindow.
     auto splash = RendererFactory::createSplashWindow(activeBackend);
@@ -327,6 +434,18 @@ int main()
 
         SDL_SetWindowRelativeMouseMode(w, false);
         SDL_StartTextInput(w);
+
+        // Runtime mode: auto-detect display resolution and always start fullscreen
+        if (isRuntimeMode)
+        {
+            SDL_SetWindowTitle(w, rtWindowTitle.c_str());
+            const SDL_DisplayMode* dm = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+            if (dm)
+            {
+                SDL_SetWindowSize(w, dm->w, dm->h);
+            }
+            SDL_SetWindowFullscreen(w, SDL_WINDOW_FULLSCREEN);
+        }
     }
 
     logTimed(Logger::Category::Rendering, std::string("Renderer initialised successfully: ") + renderer->name(), Logger::LogLevel::INFO);
@@ -446,6 +565,7 @@ int main()
         logTimed(Logger::Category::Engine, "AudioManager initialization failed.", Logger::LogLevel::ERROR);
     }
 
+    #if ENGINE_EDITOR
     // --- Detect DPI scale early so widget assets are created at correct size ---
     {
         float dpiScale = 1.0f;
@@ -472,6 +592,7 @@ int main()
         EditorTheme::Get().applyDpiScale(dpiScale);
         logTimed(Logger::Category::Engine, "DPI scale set to " + std::to_string(dpiScale) + " before asset init.", Logger::LogLevel::INFO);
     }
+#endif // ENGINE_EDITOR
 
     // Asset system
     showProgress("Initializing asset system...");
@@ -530,11 +651,13 @@ int main()
         return -1;
     }
 
+    #if ENGINE_EDITOR
     // --- Phase 2b: Load saved editor theme ---
     {
         if (auto savedTheme = diagnostics.getState("EditorTheme"); savedTheme && !savedTheme->empty())
             EditorTheme::Get().loadThemeByName(*savedTheme);
     }
+#endif // ENGINE_EDITOR
 
     // --- Phase 2c: Initialise Script Hot-Reload ---
     {
@@ -548,29 +671,39 @@ int main()
             Scripting::SetScriptHotReloadEnabled(false);
     }
 
-    // --- Phase 3: Load editor UI widgets ---
-    showProgress("Loading editor UI...");
+    #if ENGINE_EDITOR
+    // --- Phase 2d: Load Editor Plugins ---
+    {
+        const auto& projectPath = diagnostics.getProjectInfo().projectPath;
+        if (!projectPath.empty())
+        {
+            Scripting::LoadEditorPlugins(projectPath);
+        }
+    }
+#endif // ENGINE_EDITOR
 
-    std::function<void()> stopPIE;
-
-    // PIE input capture state (declared here so lambdas can capture by reference)
+    // PIE input capture state (declared before ENGINE_EDITOR block – used in game loop)
     bool pieMouseCaptured = false;
     bool pieInputPaused = false;
-    // Mouse position saved before any capture (right-click or PIE) so the cursor
-    // can be warped back on release, keeping it visually fixed in the viewport.
     float preCaptureMouseX = 0.0f;
     float preCaptureMouseY = 0.0f;
 
-    // Gamepad state â€“ we keep the first connected gamepad open for UI navigation
+    // Gamepad state – keep the first connected gamepad open for UI navigation
     SDL_Gamepad* activeGamepad = nullptr;
 
-    // ── Viewport state variables (captured by click-event lambdas + used in game loop) ──
+    // Viewport state variables (used in game loop)
     float cameraSpeedMultiplier = 1.0f;
     bool showMetrics = true;
     bool showOcclusionStats = false;
+
+    // --- Phase 3: Load editor UI widgets ---
+#if ENGINE_EDITOR
+    showProgress("Loading editor UI...");
+
+    std::function<void()> stopPIE;
     bool gridSnapEnabled = false;
 
-    if (renderer)
+    if (renderer && !isRuntimeMode)
     {
         const unsigned int playTexId = renderer->preloadUITexture("Play.tga");
         const unsigned int stopTexId = renderer->preloadUITexture("Stop.tga");
@@ -738,6 +871,93 @@ int main()
                     gridSnapEnabled ? "Grid Snap: ON" : "Grid Snap: OFF", 1.5f);
 
                 DiagnosticsManager::Instance().setState("GridSnapEnabled", gridSnapEnabled ? "1" : "0");
+            });
+
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.Colliders", [&renderer]()
+            {
+                const bool visible = !renderer->isCollidersVisible();
+                renderer->setCollidersVisible(visible);
+                Logger::Instance().log(Logger::Category::Input,
+                    std::string("Toolbar: Colliders ") + (visible ? "ON" : "OFF"),
+                    Logger::LogLevel::INFO);
+                if (auto* el = renderer->getUIManager().findElementById("ViewportOverlay.Colliders"))
+                {
+                    el->style.textColor = visible
+                        ? Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }
+                        : Vec4{ 0.45f, 0.45f, 0.45f, 1.0f };
+                    renderer->getUIManager().markAllWidgetsDirty();
+                }
+                renderer->getUIManager().showToastMessage(
+                    visible ? "Colliders: ON" : "Colliders: OFF", 1.5f);
+
+                DiagnosticsManager::Instance().setState("CollidersVisible", visible ? "1" : "0");
+            });
+
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.Bones", [&renderer]()
+            {
+                const bool visible = !renderer->isBonesVisible();
+                renderer->setBonesVisible(visible);
+                Logger::Instance().log(Logger::Category::Input,
+                    std::string("Toolbar: Bones ") + (visible ? "ON" : "OFF"),
+                    Logger::LogLevel::INFO);
+                if (auto* el = renderer->getUIManager().findElementById("ViewportOverlay.Bones"))
+                {
+                    el->style.textColor = visible
+                        ? Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }
+                        : Vec4{ 0.45f, 0.45f, 0.45f, 1.0f };
+                    renderer->getUIManager().markAllWidgetsDirty();
+                }
+                renderer->getUIManager().showToastMessage(
+                    visible ? "Bones: ON" : "Bones: OFF", 1.5f);
+
+                DiagnosticsManager::Instance().setState("BonesVisible", visible ? "1" : "0");
+            });
+
+        renderer->getUIManager().registerClickEvent("ViewportOverlay.Layout", [&renderer]()
+            {
+                auto& uiMgr = renderer->getUIManager();
+                if (uiMgr.isDropdownMenuOpen())
+                {
+                    uiMgr.closeDropdownMenu();
+                    return;
+                }
+
+                auto* btn = uiMgr.findElementById("ViewportOverlay.Layout");
+                Vec2 anchor{ 0.0f, 0.0f };
+                if (btn && btn->hasBounds)
+                {
+                    anchor = Vec2{ btn->boundsMinPixels.x, btn->boundsMaxPixels.y + 2.0f };
+                }
+
+                struct LayoutEntry { const char* label; Renderer::ViewportLayout layout; };
+                static const LayoutEntry layouts[] = {
+                    { "Single",           Renderer::ViewportLayout::Single },
+                    { "Two Horizontal",   Renderer::ViewportLayout::TwoHorizontal },
+                    { "Two Vertical",     Renderer::ViewportLayout::TwoVertical },
+                    { "Quad",             Renderer::ViewportLayout::Quad },
+                };
+
+                const auto current = renderer->getViewportLayout();
+                std::vector<UIManager::DropdownMenuItem> items;
+                for (auto& e : layouts)
+                {
+                    std::string lbl = e.label;
+                    auto lay = e.layout;
+                    if (current == lay)
+                        lbl = "> " + lbl;
+                    items.push_back({ lbl, [&renderer, lay]()
+                        {
+                            renderer->setViewportLayout(lay);
+                            renderer->setActiveSubViewport(0);
+                            Logger::Instance().log(Logger::Category::Input,
+                                std::string("Viewport Layout: ") + Renderer::viewportLayoutToString(lay),
+                                Logger::LogLevel::INFO);
+                            renderer->getUIManager().showToastMessage(
+                                std::string("Layout: ") + Renderer::viewportLayoutToString(lay), 1.5f);
+                        }
+                    });
+                }
+                uiMgr.showDropdownMenu(anchor, items);
             });
 
         renderer->getUIManager().registerClickEvent("ViewportOverlay.GridSize", [&renderer]()
@@ -944,6 +1164,38 @@ int main()
                     }
                 });
 
+                items.push_back({ "Shader Viewer", [&renderer]()
+                    {
+                        renderer->getUIManager().openShaderViewerTab();
+                    }
+                });
+
+                items.push_back({ "Render Debugger", [&renderer]()
+                    {
+                        renderer->getUIManager().openRenderDebuggerTab();
+                    }
+                });
+
+                items.push_back({ "Sequencer", [&renderer]()
+                    {
+                        renderer->getUIManager().openSequencerTab();
+                    }
+                });
+
+                items.push_back({ "Level Composition", [&renderer]()
+                    {
+                        renderer->getUIManager().openLevelCompositionTab();
+                    }
+                });
+
+                items.push_back({ "---", [](){} });  // separator
+
+                items.push_back({ "Build Game...", [&renderer]()
+                    {
+                        renderer->getUIManager().openBuildGameDialog();
+                    }
+                });
+
                 items.push_back({ "Drop to Surface (End)", [&renderer]()
                     {
                         renderer->getUIManager().dropSelectedEntitiesToSurface([](float ox, float oy, float oz) -> std::pair<bool, float>
@@ -953,6 +1205,18 @@ int main()
                         });
                     }
                 });
+
+                // Plugin menu items (Phase 11.3)
+                const auto& pluginItems = Scripting::GetPluginMenuItems();
+                for (size_t i = 0; i < pluginItems.size(); ++i)
+                {
+                    const auto& pi = pluginItems[i];
+                    items.push_back({ "[Plugin] " + pi.name, [i]()
+                        {
+                            Scripting::InvokePluginMenuCallback(i);
+                        }
+                    });
+                }
 
                 uiMgr.showDropdownMenu(anchor, items);
             });
@@ -1989,33 +2253,475 @@ int main()
                 renderer->getUIManager().showUnsavedChangesDialog(std::move(doLoad));
             });
 
+        // --- Build Game callback (Phase 10) – CMake-based compilation ---
+        renderer->getUIManager().setOnBuildGame([&renderer, &assetManager, &diagnostics, &logTimed](const UIManager::BuildGameConfig& config)
+            {
+                auto& uiMgr = renderer->getUIManager();
+                logTimed(Logger::Category::Engine, "Build Game requested. Output: " + config.outputDir, Logger::LogLevel::INFO);
+
+                // Verify CMake is available
+                if (!uiMgr.isCMakeAvailable())
+                {
+                    uiMgr.showToastMessage("CMake is not available. Cannot build game.", 4.0f,
+                        UIManager::NotificationLevel::Error);
+                    return;
+                }
+
+                // Verify a C++ build toolchain is available
+                if (!uiMgr.isBuildToolchainAvailable())
+                {
+                    uiMgr.showToastMessage("No C++ build toolchain (MSVC/Clang) found. Cannot build game.", 4.0f,
+                        UIManager::NotificationLevel::Error);
+                    return;
+                }
+
+                if (uiMgr.isBuildRunning())
+                {
+                    uiMgr.showToastMessage("A build is already in progress.", 3.0f,
+                        UIManager::NotificationLevel::Warning);
+                    return;
+                }
+
+                uiMgr.showBuildProgress();
+
+                // Capture values needed by the thread (no references to stack locals)
+                const std::string cmakePath = uiMgr.getCMakePath();
+#if defined(ENGINE_SOURCE_DIR)
+                const std::string engineSourceDir = ENGINE_SOURCE_DIR;
+#else
+                const std::string engineSourceDir;
+#endif
+                const std::string projectPath = diagnostics.getProjectInfo().projectPath;
+                const std::string toolchainName = uiMgr.getBuildToolchain().name;
+                const std::string toolchainVersion = uiMgr.getBuildToolchain().version;
+
+                UIManager* uiPtr = &uiMgr;
+
+                uiMgr.m_buildRunning.store(true);
+
+                if (uiMgr.m_buildThread.joinable())
+                    uiMgr.m_buildThread.join();
+
+                uiMgr.m_buildThread = std::thread([uiPtr, config, cmakePath, engineSourceDir, projectPath, toolchainName, toolchainVersion]()
+                {
+                    constexpr int kTotalSteps = 6;
+                    int step = 0;
+                    bool ok = true;
+                    std::string errorMsg;
+
+                    // Log build environment info
+                    uiPtr->appendBuildOutput("CMake: " + cmakePath);
+                    {
+                        std::string tcInfo = "Toolchain: " + toolchainName;
+                        if (!toolchainVersion.empty())
+                            tcInfo += " " + toolchainVersion;
+                        uiPtr->appendBuildOutput(tcInfo);
+                    }
+                    uiPtr->appendBuildOutput("");
+
+                    // Thread-safe helper to push step progress
+                    auto advanceStep = [&](const std::string& status)
+                    {
+                        ++step;
+                        uiPtr->appendBuildOutput("[Step " + std::to_string(step) + "/" + std::to_string(kTotalSteps) + "] " + status);
+                        {
+                            std::lock_guard<std::mutex> lock(uiPtr->m_buildMutex);
+                            uiPtr->m_buildPendingStatus = status;
+                            uiPtr->m_buildPendingStep = step;
+                            uiPtr->m_buildPendingTotalSteps = kTotalSteps;
+                            uiPtr->m_buildPendingStepDirty = true;
+                        }
+                    };
+
+                    // Run a command, capture stdout+stderr line-by-line, return exit code
+                    auto runCmdWithOutput = [&](const std::string& cmd) -> int
+                    {
+                        // Redirect stderr to stdout so we capture everything.
+                        // On Windows _popen() uses cmd /c – wrap the whole
+                        // command in outer quotes so nested quoted paths work.
+#if defined(_WIN32)
+                        const std::string fullCmd = "\"" + cmd + " 2>&1\"";
+#else
+                        const std::string fullCmd = cmd + " 2>&1";
+#endif
+#if defined(_WIN32)
+                        FILE* pipe = _popen(fullCmd.c_str(), "r");
+#else
+                        FILE* pipe = popen(fullCmd.c_str(), "r");
+#endif
+                        if (!pipe)
+                        {
+                            uiPtr->appendBuildOutput("[ERROR] Failed to start process.");
+                            return -1;
+                        }
+
+                        char buffer[512];
+                        while (fgets(buffer, sizeof(buffer), pipe))
+                        {
+                            std::string line(buffer);
+                            // Strip trailing newline
+                            while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+                                line.pop_back();
+                            if (!line.empty())
+                                uiPtr->appendBuildOutput(line);
+                        }
+
+#if defined(_WIN32)
+                        int ret = _pclose(pipe);
+#else
+                        int ret = pclose(pipe);
+#endif
+                        return ret;
+                    };
+
+                  try
+                  {
+                    // Step 1: Create output directory & build directory
+                    advanceStep("Creating output directory...");
+                    {
+                        std::error_code ec;
+                        std::filesystem::create_directories(config.outputDir, ec);
+                        if (ec)
+                        {
+                            ok = false;
+                            errorMsg = "Failed to create output directory: " + ec.message();
+                        }
+                    }
+
+                    const std::filesystem::path buildDir = std::filesystem::path(config.outputDir) / "_build";
+
+                    // Step 2: CMake configure
+                    if (ok)
+                    {
+                        advanceStep("Configuring CMake build...");
+
+                        if (engineSourceDir.empty())
+                        {
+                            ok = false;
+                            errorMsg = "ENGINE_SOURCE_DIR is not defined. Cannot compile runtime.";
+                        }
+                        else
+                        {
+                            std::error_code ec;
+                            std::filesystem::create_directories(buildDir, ec);
+
+                            auto escapeForCMake = [](const std::string& s) -> std::string
+                            {
+                                std::string out;
+                                for (char c : s)
+                                {
+                                    if (c == '\\') out += '/';
+                                    else out += c;
+                                }
+                                return out;
+                            };
+
+                            std::string generatorArg;
+#if defined(CMAKE_GENERATOR)
+                            generatorArg = " -G \"" + std::string(CMAKE_GENERATOR) + "\"";
+#endif
+
+                            std::string configCmd = "\"" + cmakePath + "\""
+                                " -S \"" + escapeForCMake(engineSourceDir) + "\""
+                                " -B \"" + escapeForCMake(buildDir.string()) + "\""
+                                + generatorArg +
+                                " -DENGINE_BUILD_RUNTIME=ON"
+                                " -DENGINE_BUILD_TESTS=OFF"
+                                " -DGAME_START_LEVEL=\"" + config.startLevel + "\""
+                                " -DGAME_WINDOW_TITLE=\"" + config.windowTitle + "\"";
+
+                            uiPtr->appendBuildOutput("> " + configCmd);
+                            int ret = runCmdWithOutput(configCmd);
+                            if (ret != 0)
+                            {
+                                ok = false;
+                                errorMsg = "CMake configure failed (exit code " + std::to_string(ret) + ")";
+                                uiPtr->appendBuildOutput("[ERROR] " + errorMsg);
+                            }
+                        }
+                    }
+
+                    // Step 3: CMake build
+                    if (ok)
+                    {
+                        advanceStep("Compiling game runtime...");
+
+                        std::string buildCmd = "\"" + cmakePath + "\""
+                            " --build \"" + buildDir.string() + "\""
+                            " --target HorizonEngineRuntime"
+                            " --config Release";
+
+                        uiPtr->appendBuildOutput("> " + buildCmd);
+                        int ret = runCmdWithOutput(buildCmd);
+                        if (ret != 0)
+                        {
+                            ok = false;
+                            errorMsg = "CMake build failed (exit code " + std::to_string(ret) + ")";
+                            uiPtr->appendBuildOutput("[ERROR] " + errorMsg);
+                        }
+                    }
+
+                    // Step 4: Deploy exe + DLLs
+                    if (ok)
+                    {
+                        advanceStep("Deploying runtime...");
+
+                        const std::filesystem::path builtExe = buildDir / "Release" / "HorizonEngineRuntime.exe";
+                        const std::filesystem::path dstExe = std::filesystem::path(config.outputDir) / (config.windowTitle + ".exe");
+                        const std::filesystem::path builtDir = buildDir / "Release";
+
+                        if (std::filesystem::exists(builtExe))
+                        {
+                            std::error_code ec;
+                            std::filesystem::copy_file(builtExe, dstExe,
+                                std::filesystem::copy_options::overwrite_existing, ec);
+                            if (ec)
+                            {
+                                ok = false;
+                                errorMsg = "Failed to copy runtime exe: " + ec.message();
+                            }
+
+                            if (ok && std::filesystem::exists(builtDir))
+                            {
+                                for (const auto& entry : std::filesystem::directory_iterator(builtDir))
+                                {
+                                    if (!entry.is_regular_file()) continue;
+                                    const auto ext = entry.path().extension().string();
+                                    if (ext == ".dll" || ext == ".DLL")
+                                    {
+                                        std::error_code copyEc;
+                                        std::filesystem::copy_file(entry.path(),
+                                            std::filesystem::path(config.outputDir) / entry.path().filename(),
+                                            std::filesystem::copy_options::overwrite_existing, copyEc);
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            ok = false;
+                            errorMsg = "Built runtime not found at: " + builtExe.string();
+                        }
+                    }
+
+                    // Step 5: Copy Content + shaders + asset registry
+                    if (ok)
+                    {
+                        advanceStep("Copying game content...");
+
+                        const std::filesystem::path dstDir = config.outputDir;
+
+                        const std::filesystem::path srcContent = std::filesystem::path(projectPath) / "Content";
+                        const std::filesystem::path dstContent = dstDir / "Content";
+                        if (std::filesystem::exists(srcContent))
+                        {
+                            std::error_code ec;
+                            std::filesystem::copy(srcContent, dstContent,
+                                std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing, ec);
+                            if (ec)
+                            {
+                                ok = false;
+                                errorMsg = "Failed to copy Content: " + ec.message();
+                            }
+                        }
+
+                        if (ok)
+                        {
+                            const std::filesystem::path srcShaders = std::filesystem::path(engineSourceDir) / "src" / "Renderer" / "OpenGLRenderer" / "shaders";
+                            const std::filesystem::path dstShaders = dstDir / "shaders";
+                            if (std::filesystem::exists(srcShaders))
+                            {
+                                std::error_code ec;
+                                std::filesystem::copy(srcShaders, dstShaders,
+                                    std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing, ec);
+                            }
+                        }
+
+                        if (ok)
+                        {
+                            const std::filesystem::path srcEngContent = std::filesystem::path(engineSourceDir) / "Content";
+                            const std::filesystem::path dstEngContent = dstDir / "Content";
+                            if (std::filesystem::exists(srcEngContent))
+                            {
+                                std::error_code ec;
+                                std::filesystem::copy(srcEngContent, dstEngContent,
+                                    std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing | std::filesystem::copy_options::skip_existing, ec);
+                            }
+                        }
+
+                        if (ok)
+                        {
+                            const std::filesystem::path dstConfig = dstDir / "Config";
+                            std::error_code ec;
+                            std::filesystem::create_directories(dstConfig, ec);
+                            const std::filesystem::path srcReg = std::filesystem::path(projectPath) / "Config" / "AssetRegistry.bin";
+                            if (std::filesystem::exists(srcReg))
+                            {
+                                std::filesystem::copy_file(srcReg, dstConfig / "AssetRegistry.bin",
+                                    std::filesystem::copy_options::overwrite_existing, ec);
+                            }
+                        }
+                    }
+
+                    // Step 6: Done
+                    advanceStep(ok ? "Build complete!" : "Build failed.");
+
+                    if (ok)
+                    {
+                        uiPtr->appendBuildOutput("Build completed successfully. Output: " + config.outputDir);
+
+                        // Clean up build intermediates
+                        {
+                            std::error_code ec;
+                            std::filesystem::remove_all(std::filesystem::path(config.outputDir) / "_build", ec);
+                        }
+
+                        // Launch if requested
+                        if (config.launchAfterBuild)
+                        {
+                            const std::filesystem::path exePath =
+                                std::filesystem::path(config.outputDir) / (config.windowTitle + ".exe");
+                            if (std::filesystem::exists(exePath))
+                            {
+                                uiPtr->appendBuildOutput("Launching: " + exePath.string());
+#if defined(_WIN32)
+                                ShellExecuteA(nullptr, "open", exePath.string().c_str(),
+                                    nullptr, config.outputDir.c_str(), SW_SHOWNORMAL);
+#else
+                                std::string cmd = "\"" + exePath.string() + "\" &";
+                                std::system(cmd.c_str());
+#endif
+                            }
+                        }
+                    }
+                    else
+                    {
+                        uiPtr->appendBuildOutput("Build failed: " + errorMsg);
+                    }
+
+                  }
+                  catch (const std::exception& e)
+                  {
+                      ok = false;
+                      errorMsg = std::string("Build crashed: ") + e.what();
+                      uiPtr->appendBuildOutput("[FATAL] " + errorMsg);
+                  }
+                  catch (...)
+                  {
+                      ok = false;
+                      errorMsg = "Build crashed: unknown exception";
+                      uiPtr->appendBuildOutput("[FATAL] " + errorMsg);
+                  }
+
+                  // Signal completion to the main thread
+                  {
+                      std::lock_guard<std::mutex> lock(uiPtr->m_buildMutex);
+                      uiPtr->m_buildPendingFinished = true;
+                      uiPtr->m_buildPendingSuccess = ok;
+                      uiPtr->m_buildPendingErrorMsg = errorMsg;
+                  }
+                }); // end std::thread
+            });
+
+    }
+#endif // ENGINE_EDITOR  (Phase 3: editor UI setup)
+
+    // --- Runtime mode: load start level and enter game mode ---
+    if (isRuntimeMode && renderer && !rtStartLevel.empty())
+    {
+        logTimed(Logger::Category::Engine, "Runtime mode: loading start level: " + rtStartLevel, Logger::LogLevel::INFO);
+
+        const std::string absLevelPath = assetManager.getAbsoluteContentPath(rtStartLevel);
+        if (!absLevelPath.empty())
+        {
+            auto loadResult = assetManager.loadLevelAsset(absLevelPath);
+            if (loadResult.success)
+            {
+                diagnostics.setScenePrepared(false);
+                // Activate PIE-like mode so scripts run
+                diagnostics.setPIEActive(true);
+                logTimed(Logger::Category::Engine, "Runtime mode: level loaded successfully.", Logger::LogLevel::INFO);
+            }
+            else
+            {
+                logTimed(Logger::Category::Engine, "Runtime mode: failed to load level – " + loadResult.errorMessage, Logger::LogLevel::ERROR);
+            }
+        }
+        else
+        {
+            logTimed(Logger::Category::Engine, "Runtime mode: could not resolve level path: " + rtStartLevel, Logger::LogLevel::ERROR);
+        }
     }
 
-    // All subsystems initialised â€” render the first frame while the splash is
+    // All subsystems initialised
     // still visible so the main window never appears white / empty.
     if (renderer)
     {
-        // Run the full DPI rebuild at startup so that every widget element
-        // picks up the correct DPI-scaled sizes, theme colours, and dynamic
-        // content.  This is the same path that runs when the user changes
-        // the DPI slider at runtime, and it guarantees consistency:
-        //   1) regenerate widget JSON assets (ensures _dpiScale matches)
-        //   2) reload all element trees from JSON (sizes, padding, fontSize)
-        //   3) apply theme colours to all elements
-        //   4) re-populate dynamic widgets (Outliner, Details, ContentBrowser)
-        renderer->getUIManager().rebuildEditorUIForDpi(EditorTheme::Get().dpiScale);
+#if ENGINE_EDITOR
+        if (!isRuntimeMode)
+        {
+            // Run the full DPI rebuild at startup so that every widget element
+            // picks up the correct DPI-scaled sizes, theme colours, and dynamic
+            // content.  This is the same path that runs when the user changes
+            // the DPI slider at runtime, and it guarantees consistency:
+            //   1) regenerate widget JSON assets (ensures _dpiScale matches)
+            //   2) reload all element trees from JSON (sizes, padding, fontSize)
+            //   3) apply theme colours to all elements
+            //   4) re-populate dynamic widgets (Outliner, Details, ContentBrowser)
+            renderer->getUIManager().rebuildEditorUIForDpi(EditorTheme::Get().dpiScale);
 
-        // Ensure all loaded widgets are marked dirty so the UI FBO is fully redrawn.
-        renderer->getUIManager().markAllWidgetsDirty();
+            // Ensure all loaded widgets are marked dirty so the UI FBO is fully redrawn.
+            renderer->getUIManager().markAllWidgetsDirty();
 
-        renderer->getUIManager().showToastMessage("Engine ready!", 3.0f);
+            renderer->getUIManager().showToastMessage("Engine ready!", 3.0f);
+
+            // --- CMake detection (needed for Build Game) ---
+            {
+                auto& uiMgr = renderer->getUIManager();
+                if (uiMgr.detectCMake())
+                {
+                    logTimed(Logger::Category::Engine,
+                        "CMake found: " + uiMgr.getCMakePath(),
+                        Logger::LogLevel::INFO);
+                }
+                else
+                {
+                    logTimed(Logger::Category::Engine,
+                        "CMake not found – Build Game will not be available.",
+                        Logger::LogLevel::WARNING);
+                    uiMgr.showCMakeInstallPrompt();
+                }
+
+                // --- Build toolchain detection (MSVC / Clang) ---
+                if (uiMgr.detectBuildToolchain())
+                {
+                    const auto& tc = uiMgr.getBuildToolchain();
+                    std::string info = "Build toolchain: " + tc.name;
+                    if (!tc.version.empty())
+                        info += " " + tc.version;
+                    if (!tc.compilerPath.empty())
+                        info += " (" + tc.compilerPath + ")";
+                    logTimed(Logger::Category::Engine, info, Logger::LogLevel::INFO);
+                }
+                else
+                {
+                    logTimed(Logger::Category::Engine,
+                        "No C++ build toolchain found – Build Game will not be available.",
+                        Logger::LogLevel::WARNING);
+                    if (uiMgr.isCMakeAvailable())
+                        uiMgr.showToolchainInstallPrompt();
+                }
+            }
+        }
+#endif // ENGINE_EDITOR
         SDL_Event ev;
         while (SDL_PollEvent(&ev))
         {
             if (ev.type == SDL_EVENT_QUIT)
-                continue; // ignore â€“ may be leftover from popup destruction
+                continue;
         }
-        renderer->getUIManager().updateNotifications(0.016f);
+        if (!isRuntimeMode)
+            renderer->getUIManager().updateNotifications(0.016f);
         renderer->render();
         renderer->present();
     }
@@ -2088,6 +2794,7 @@ int main()
     double cpuLoggerMs = 0.0;
     double cpuGcMs = 0.0;
 
+#if ENGINE_EDITOR
     // ─── Register all keyboard shortcuts with ShortcutManager ───
     {
         auto& sm = ShortcutManager::Instance();
@@ -2468,11 +3175,15 @@ int main()
             }
         }
     }
+#endif // ENGINE_EDITOR (keyboard shortcuts)
 
     while (running)
     {
         const uint64_t frameStartCounter = SDL_GetPerformanceCounter();
         ++frame;
+
+        // Poll the build thread for pending UI updates (non-blocking)
+        renderer->getUIManager().pollBuildThread();
 
         const uint64_t now = SDL_GetPerformanceCounter();
         const double dt = (freq > 0.0) ? (static_cast<double>(now - lastCounter) / freq) : 0.016;
@@ -2677,6 +3388,14 @@ int main()
                             SDL_HideCursor();
                             logTimed(Logger::Category::Input, "PIE: input resumed (viewport click), mouse captured.", Logger::LogLevel::INFO);
                             continue;
+                        }
+                        // Multi-viewport: set active sub-viewport on click
+                        if (renderer->getSubViewportCount() > 1)
+                        {
+                            const int hitSV = renderer->subViewportHitTest(
+                                static_cast<int>(event.button.x), static_cast<int>(event.button.y));
+                            if (hitSV >= 0)
+                                renderer->setActiveSubViewport(hitSV);
                         }
                         // Try gizmo interaction first; only pick/rubber-band if gizmo not hit
                         if (!renderer->beginGizmoDrag(static_cast<int>(event.button.x), static_cast<int>(event.button.y)))
@@ -3620,10 +4339,12 @@ int main()
 
             if (event.type == SDL_EVENT_KEY_UP)
             {
+#if ENGINE_EDITOR
                 if (ShortcutManager::Instance().handleKey(event.key.key, event.key.mod, ShortcutManager::Phase::KeyUp))
                 {
                     continue;
                 }
+#endif // ENGINE_EDITOR
                 if (diagnostics.isPIEActive())
                 {
                     Scripting::HandleKeyUp(event.key.key);
@@ -3631,10 +4352,12 @@ int main()
             }
             else if (event.type == SDL_EVENT_KEY_DOWN)
             {
+#if ENGINE_EDITOR
                 if (ShortcutManager::Instance().handleKey(event.key.key, event.key.mod, ShortcutManager::Phase::KeyDown))
                 {
                     continue;
                 }
+#endif // ENGINE_EDITOR
                 if (renderer)
                 {
                     auto& uiManager = renderer->getUIManager();
@@ -3748,6 +4471,13 @@ int main()
 
         // Poll for .py file changes and hot-reload if needed (self-throttled to 500ms)
         Scripting::PollScriptHotReload();
+        Scripting::PollPluginHotReload();
+
+        // Level-Streaming: auto-load/unload sub-levels based on camera position (Phase 11.4)
+        if (renderer)
+        {
+            renderer->updateLevelStreaming(renderer->getCameraPosition());
+        }
 
         if (renderer)
         {
@@ -3947,6 +4677,8 @@ int main()
     }
 
     // Capture editor camera into the level so it persists across sessions
+#if ENGINE_EDITOR
+    if (!isRuntimeMode)
     {
         auto* lvl = diagnostics.getActiveLevelSoft();
         if (lvl)
@@ -3959,6 +4691,7 @@ int main()
     }
 
     // Save shortcut overrides
+    if (!isRuntimeMode)
     {
         const auto& projPath = diagnostics.getProjectInfo().projectPath;
         if (!projPath.empty())
@@ -3968,8 +4701,12 @@ int main()
         }
     }
 
-    diagnostics.saveProjectConfig();
-    diagnostics.saveConfig();
+    if (!isRuntimeMode)
+    {
+        diagnostics.saveProjectConfig();
+        diagnostics.saveConfig();
+    }
+#endif // ENGINE_EDITOR (shutdown saves)
 
     audioManager.shutdown();
 

@@ -70,6 +70,12 @@ public:
 	uint64_t getLatestSequenceId() const { return m_nextSequenceId - 1; }
 	void clearConsoleBuffer();
 
+	/// Flush all buffered log data to disk immediately.
+	void flush();
+
+	/// Install OS-level crash handlers so the last logs survive a crash.
+	static void installCrashHandler();
+
 	static const char* levelToString(LogLevel level);
 	static const char* categoryToString(Category category);
 

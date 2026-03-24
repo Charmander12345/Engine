@@ -93,6 +93,12 @@ public:
     void resumeCameraPath() override;
     void stopCameraPath() override;
     float getCameraPathProgress() const override;
+    std::vector<CameraPathPoint> getCameraPathPoints() const override;
+    void setCameraPathPoints(const std::vector<CameraPathPoint>& pts) override;
+    float getCameraPathDuration() const override;
+    void setCameraPathDuration(float d) override;
+    bool getCameraPathLoop() const override;
+    void setCameraPathLoop(bool l) override;
 
     void setActiveCameraEntity(unsigned int entity) override;
     unsigned int getActiveCameraEntity() const override;
@@ -112,6 +118,7 @@ public:
     const ViewportUIManager& getViewportUIManager() const { return m_viewportUIManager; }
     std::shared_ptr<Widget> createWidgetFromAsset(const std::shared_ptr<AssetData>& asset) override;
     unsigned int preloadUITexture(const std::string& path) override;
+    void requestShaderReload() override;
     unsigned int generateAssetThumbnail(const std::string& assetPath, int assetType) override;
 
     void addTab(const std::string& id, const std::string& name, bool closable) override;
@@ -132,6 +139,11 @@ public:
 
     // Refresh a single entity's render data without rebuilding the entire scene.
     void refreshEntity(ECS::Entity entity) override;
+
+    // Multi-Viewport overrides (Phase 11.1)
+    SubViewportCamera getSubViewportCamera(int index) const override;
+    void setSubViewportCamera(int index, const SubViewportCamera& cam) override;
+    int subViewportHitTest(int screenX, int screenY) const override;
 
 private:
     void renderWorld();
@@ -216,6 +228,12 @@ private:
     bool m_cameraPathPaused{false};
     uint64_t m_lastPathTick{0};
 
+    // Multi-Viewport sub-cameras (Phase 11.1) – up to 4 sub-viewports
+    static constexpr int kMaxSubViewports = 4;
+    SubViewportCamera m_subViewportCameras[kMaxSubViewports];
+    bool m_subViewportCamerasInitialized{false};
+    void ensureSubViewportCameras();
+
     ParticleSystem m_particleSystem;
     uint64_t m_lastParticleTick{0};
     glm::mat4 m_projectionMatrix;
@@ -291,6 +309,14 @@ private:
     ECS::Schema m_lightSchema{};
     bool m_lightSchemaInitialized{false};
     std::vector<OpenGLMaterial::LightData> m_sceneLights;
+
+    // Multi-viewport render state (Phase 11.1)
+    // When >= 0, renderWorld uses this sub-viewport's camera + scissor rect
+    int m_currentSubViewportIndex{ -1 };
+    struct SubViewportRect { int x, y, w, h; };
+    SubViewportRect m_currentSubViewportRect{};
+    void computeSubViewportRects(int vpX, int vpY, int vpW, int vpH,
+                                 SubViewportRect* outRects, int count) const;
     int m_cachedWindowWidth{0};
     int m_cachedWindowHeight{0};
     uint64_t m_lastUiAnimationTickCounter{0};
@@ -585,6 +611,15 @@ private:
     ECS::TransformComponent m_gizmoDragOldTransform{};  // primary entity transform snapshot for undo
     std::unordered_map<unsigned int, ECS::TransformComponent> m_gizmoDragOldTransforms;  // all selected entities for group undo
 
+    // ---- Collider Debug Visualization ----
+    void renderColliderDebug(const glm::mat4& view, const glm::mat4& projection);
+
+    // ---- Streaming Volume Debug Visualization (Phase 11.4) ----
+    void renderStreamingVolumeDebug(const glm::mat4& view, const glm::mat4& projection);
+
+    // ---- Bone / Skeleton Debug Overlay ----
+    void renderBoneDebug(const glm::mat4& view, const glm::mat4& projection);
+
     // ---- Viewport Grid ----
     bool ensureGridResources();
     void releaseGridResources();
@@ -653,6 +688,7 @@ public:
     uint32_t getLastVisibleCount() const override { return m_lastVisibleCount; }
     uint32_t getLastHiddenCount() const override { return m_lastHiddenCount; }
     uint32_t getLastTotalCount() const override { return m_lastTotalCount; }
+    std::vector<RenderPassInfo> getRenderPassInfo() const override;
     void toggleBoundsDebug() override { m_boundsDebugEnabled = !m_boundsDebugEnabled; }
     bool isBoundsDebugEnabled() const override { return m_boundsDebugEnabled; }
     void setHeightFieldDebugEnabled(bool enabled) override { m_hfDebugEnabled = enabled; }
@@ -758,5 +794,19 @@ public:
     TextureViewerWindow* openTextureViewer(const std::string& assetPath) override;
     void                 closeTextureViewer(const std::string& assetPath) override;
     TextureViewerWindow* getTextureViewer(const std::string& assetPath) override;
+
+    // Skeletal animation queries
+    bool  isEntitySkinned(unsigned int entity) const override;
+    int   getEntityAnimationClipCount(unsigned int entity) const override;
+    AnimationClipInfo getEntityAnimationClipInfo(unsigned int entity, int clipIndex) const override;
+    int   getEntityAnimatorCurrentClip(unsigned int entity) const override;
+    float getEntityAnimatorCurrentTime(unsigned int entity) const override;
+    bool  isEntityAnimatorPlaying(unsigned int entity) const override;
+    void  playEntityAnimation(unsigned int entity, int clipIndex, bool loop) override;
+    void  stopEntityAnimation(unsigned int entity) override;
+    void  setEntityAnimationSpeed(unsigned int entity, float speed) override;
+    int   getEntityBoneCount(unsigned int entity) const override;
+    std::string getEntityBoneName(unsigned int entity, int boneIndex) const override;
+    int   getEntityBoneParent(unsigned int entity, int boneIndex) const override;
 
 };

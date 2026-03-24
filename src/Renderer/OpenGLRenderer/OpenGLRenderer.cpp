@@ -684,6 +684,288 @@ void OpenGLRenderer::handleShaderHotReload()
 		Logger::LogLevel::INFO);
 }
 
+// ---------------------------------------------------------------------------
+// requestShaderReload  – force a full shader hot-reload (called from UI)
+// ---------------------------------------------------------------------------
+void OpenGLRenderer::requestShaderReload()
+{
+	auto& logger = Logger::Instance();
+	logger.log(Logger::Category::Rendering, "requestShaderReload: forced reload", Logger::LogLevel::INFO);
+
+	OpenGLObject3D::ClearCache();
+	m_resourceManager.clearCaches();
+
+	for (auto& [key, prog] : m_uiQuadPrograms)
+	{
+		if (prog)
+			glDeleteProgram(prog);
+	}
+	m_uiQuadPrograms.clear();
+	m_uiPanelUniformCache.clear();
+	m_uiQuadProgram = 0;
+
+	m_postProcessStack.reloadPrograms();
+
+	{
+		auto& ecs = ECS::ECSManager::Instance();
+		m_renderEntries.clear();
+		const auto renderables = m_resourceManager.buildRenderablesForSchema(ecs.getRenderSchema());
+		m_renderEntries.reserve(renderables.size());
+		for (const auto& renderable : renderables)
+		{
+			RenderEntry entry;
+			entry.entity = renderable.entity;
+			entry.transform = renderable.transform;
+			entry.object3D = std::static_pointer_cast<OpenGLObject3D>(renderable.object3D);
+			entry.object2D = std::static_pointer_cast<OpenGLObject2D>(renderable.object2D);
+			if (!entry.object3D && !entry.object2D)
+				continue;
+			m_renderEntries.push_back(std::move(entry));
+		}
+	}
+
+	m_uiFboCacheValid = false;
+}
+
+// ---------------------------------------------------------------------------
+// getRenderPassInfo  – returns a description of every render pass for the
+//                      Render-Pass-Debugger tab
+// ---------------------------------------------------------------------------
+std::vector<Renderer::RenderPassInfo> OpenGLRenderer::getRenderPassInfo() const
+{
+	std::vector<RenderPassInfo> passes;
+
+	// 1. Shadow Map Pass (Directional – CSM)
+	{
+		RenderPassInfo p;
+		p.name     = "Shadow Map (Directional CSM)";
+		p.category = "Shadow";
+		p.enabled  = m_shadowEnabled;
+		p.fboWidth = kShadowMapSize;
+		p.fboHeight = kShadowMapSize;
+		p.fboFormat = "Depth24 Array";
+		p.details  = std::to_string(m_shadowCount) + " cascade(s), "
+				   + std::to_string(m_shadowCasterList.size()) + " caster(s)";
+		passes.push_back(std::move(p));
+	}
+
+	// 2. Point Light Shadow Pass (Cube Maps)
+	{
+		RenderPassInfo p;
+		p.name     = "Shadow Map (Point Lights)";
+		p.category = "Shadow";
+		p.enabled  = m_shadowEnabled && (m_pointShadowCount > 0);
+		p.fboWidth = kPointShadowMapSize;
+		p.fboHeight = kPointShadowMapSize;
+		p.fboFormat = "DepthCube Array";
+		p.details  = std::to_string(m_pointShadowCount) + " point shadow(s)";
+		passes.push_back(std::move(p));
+	}
+
+	// 3. Skybox Pass
+	{
+		RenderPassInfo p;
+		p.name     = "Skybox";
+		p.category = "Geometry";
+		p.enabled  = (m_skyboxCubemap != 0);
+		p.fboFormat = "RGBA16F (HDR)";
+		p.details  = m_skyboxLoadedPath.empty() ? "no skybox" : m_skyboxLoadedPath;
+		passes.push_back(std::move(p));
+	}
+
+	// 4. Geometry Pass (Opaque)
+	{
+		const auto& vp = getViewportSize();
+		RenderPassInfo p;
+		p.name     = "Geometry (Opaque)";
+		p.category = "Geometry";
+		p.enabled  = true;
+		p.fboWidth = static_cast<int>(vp.x);
+		p.fboHeight = static_cast<int>(vp.y);
+		p.fboFormat = m_postProcessEnabled ? "RGBA16F (HDR)" : "RGBA8 (Tab FBO)";
+		p.details  = std::to_string(m_lastVisibleCount) + " visible, "
+				   + std::to_string(m_lastHiddenCount) + " culled, "
+				   + std::to_string(m_renderEntries.size() + m_meshEntries.size()) + " entries";
+		passes.push_back(std::move(p));
+	}
+
+	// 5. Particle Pass
+	{
+		RenderPassInfo p;
+		p.name     = "Particles";
+		p.category = "Geometry";
+		p.enabled  = DiagnosticsManager::Instance().isPIEActive();
+		p.fboFormat = "RGBA16F (HDR)";
+		p.details  = "GL_PROGRAM_POINT_SIZE";
+		passes.push_back(std::move(p));
+	}
+
+	// 6. OIT Transparent Pass
+	{
+		RenderPassInfo p;
+		p.name     = "OIT Transparent";
+		p.category = "Geometry";
+		p.enabled  = m_oitEnabled;
+		p.fboFormat = "RGBA16F (Accum) + R8 (Revealage)";
+		p.details  = std::to_string(m_transparentDrawList.size()) + " transparent object(s)";
+		passes.push_back(std::move(p));
+	}
+
+	// 7. HeightField Debug
+	{
+		RenderPassInfo p;
+		p.name     = "HeightField Debug";
+		p.category = "Overlay";
+		p.enabled  = m_hfDebugEnabled;
+		p.fboFormat = "—";
+		p.details  = "wireframe overlay";
+		passes.push_back(std::move(p));
+	}
+
+	// 8. HZB Build
+	{
+		RenderPassInfo p;
+		p.name     = "HZB (Hi-Z Buffer)";
+		p.category = "Post-Process";
+		p.enabled  = m_occlusionEnabled && (m_lastTotalCount >= 20);
+		p.fboWidth = m_hzbWidth;
+		p.fboHeight = m_hzbHeight;
+		p.fboFormat = "R32F Mipchain";
+		p.details  = std::to_string(m_hzbMipLevels) + " mip level(s)";
+		passes.push_back(std::move(p));
+	}
+
+	// 9. Pick Pass
+	{
+		RenderPassInfo p;
+		p.name     = "Pick Buffer";
+		p.category = "Utility";
+		p.enabled  = (m_pickFbo != 0);
+		p.fboFormat = "RGBA8 (Entity ID)";
+		p.details  = "entity selection";
+		passes.push_back(std::move(p));
+	}
+
+	// 10. Post-Process Resolve (Bloom + SSAO + Tone Mapping + Gamma)
+	{
+		RenderPassInfo p;
+		p.name     = "Post-Process Resolve";
+		p.category = "Post-Process";
+		p.enabled  = m_postProcessEnabled && m_postProcessStack.isInitialized();
+		p.fboFormat = "RGBA8 (Tab FBO)";
+		std::string det;
+		if (m_bloomEnabled) det += "Bloom ";
+		if (m_ssaoEnabled)  det += "SSAO ";
+		if (m_gammaEnabled) det += "Gamma ";
+		if (m_toneMappingEnabled) det += "ToneMap ";
+		if (det.empty()) det = "passthrough";
+		p.details = det;
+		passes.push_back(std::move(p));
+	}
+
+	// 11. Bloom Pass
+	{
+		RenderPassInfo p;
+		p.name     = "Bloom";
+		p.category = "Post-Process";
+		p.enabled  = m_bloomEnabled && m_postProcessEnabled;
+		p.fboFormat = "RGBA16F Mipchain";
+		p.details  = "5 mip downsample + blur, threshold=" + std::to_string(m_bloomThreshold).substr(0, 4)
+				   + ", intensity=" + std::to_string(m_bloomIntensity).substr(0, 4);
+		passes.push_back(std::move(p));
+	}
+
+	// 12. SSAO Pass
+	{
+		RenderPassInfo p;
+		p.name     = "SSAO";
+		p.category = "Post-Process";
+		p.enabled  = m_ssaoEnabled && m_postProcessEnabled;
+		p.fboFormat = "R8 (half-res)";
+		p.details  = "32-sample kernel + blur";
+		passes.push_back(std::move(p));
+	}
+
+	// 13. Grid Overlay
+	{
+		RenderPassInfo p;
+		p.name     = "Viewport Grid";
+		p.category = "Overlay";
+		p.enabled  = m_gridVisible && !DiagnosticsManager::Instance().isPIEActive();
+		p.fboFormat = "—";
+		p.details  = "infinite XZ grid, size=" + std::to_string(m_gridSize).substr(0, 4);
+		passes.push_back(std::move(p));
+	}
+
+	// 14. Collider Debug
+	{
+		RenderPassInfo p;
+		p.name     = "Collider Debug";
+		p.category = "Overlay";
+		p.enabled  = m_collidersVisible;
+		p.fboFormat = "—";
+		p.details  = "wireframe collider shapes";
+		passes.push_back(std::move(p));
+	}
+
+	// 15. Bone Debug
+	{
+		RenderPassInfo p;
+		p.name     = "Bone Debug";
+		p.category = "Overlay";
+		p.enabled  = m_bonesVisible;
+		p.fboFormat = "—";
+		p.details  = "skeleton lines + joint markers";
+		passes.push_back(std::move(p));
+	}
+
+	// 16. Selection Outline
+	{
+		RenderPassInfo p;
+		p.name     = "Selection Outline";
+		p.category = "Overlay";
+		p.enabled  = !m_selectedEntities.empty();
+		p.fboFormat = "—";
+		p.details  = std::to_string(m_selectedEntities.size()) + " selected";
+		passes.push_back(std::move(p));
+	}
+
+	// 17. Gizmo
+	{
+		RenderPassInfo p;
+		p.name     = "Gizmo";
+		p.category = "Overlay";
+		p.enabled  = !m_selectedEntities.empty() && !DiagnosticsManager::Instance().isPIEActive();
+		p.fboFormat = "—";
+		p.details  = "translate/rotate/scale";
+		passes.push_back(std::move(p));
+	}
+
+	// 18. FXAA Pass (deferred)
+	{
+		RenderPassInfo p;
+		p.name     = "FXAA (Deferred)";
+		p.category = "Post-Process";
+		p.enabled  = m_postProcessEnabled && (m_aaMode == AntiAliasingMode::FXAA);
+		p.fboFormat = "RGBA8 (Tab FBO)";
+		p.details  = "applied after overlays";
+		passes.push_back(std::move(p));
+	}
+
+	// 19. UI Pass
+	{
+		RenderPassInfo p;
+		p.name     = "UI Rendering";
+		p.category = "UI";
+		p.enabled  = true;
+		p.fboFormat = "RGBA8 (Tab FBO)";
+		p.details  = "editor widgets + viewport UI";
+		passes.push_back(std::move(p));
+	}
+
+	return passes;
+}
+
 void OpenGLRenderer::render()
 {
 	if (!m_initialized)
@@ -944,10 +1226,48 @@ void main() {
 			}
 			else
 			{
-				renderWorld();
-				if (activeTab->id == "Viewport")
+				// Multi-viewport: render the world once per sub-viewport
+				const int subCount = getSubViewportCount();
+				if (subCount > 1 && activeTab->id == "Viewport")
 				{
+					ensureSubViewportCameras();
+					// Sync sub-viewport 0 (Perspective) from the main editor camera
+					if (m_camera)
+					{
+						m_subViewportCameras[0].position = m_camera->getPosition();
+						const Vec2 rot = m_camera->getRotationDegrees();
+						m_subViewportCameras[0].yawDeg = rot.x;
+						m_subViewportCameras[0].pitchDeg = rot.y;
+					}
+
+					// Compute sub-viewport pixel rects
+					const Vec4 vp = m_cachedViewportContentRect;
+					const bool hasVp = (vp.z > 0.0f && vp.w > 0.0f);
+					const int vpX = hasVp ? static_cast<int>(vp.x) : 0;
+					const int vpY = hasVp ? static_cast<int>(vp.y) : 0;
+					const int vpW = hasVp ? static_cast<int>(vp.z) : width;
+					const int vpH = hasVp ? static_cast<int>(vp.w) : height;
+
+					SubViewportRect rects[kMaxSubViewports];
+					computeSubViewportRects(vpX, vpY, vpW, vpH, rects, subCount);
+
+					for (int sv = 0; sv < subCount; ++sv)
+					{
+						m_currentSubViewportIndex = sv;
+						m_currentSubViewportRect = rects[sv];
+						renderWorld();
+					}
+					m_currentSubViewportIndex = -1;
 					renderViewportUI();
+				}
+				else
+				{
+					m_currentSubViewportIndex = -1;
+					renderWorld();
+					if (activeTab->id == "Viewport")
+					{
+						renderViewportUI();
+					}
 				}
 			}
 		}
@@ -1038,19 +1358,35 @@ void OpenGLRenderer::renderWorld()
 	// Use the viewport content rect (area not covered by editor panels) for
 	// projection and glViewport so resizing the window acts like zoom (showing
 	// more or less of the scene) instead of stretching the image.
+	// In multi-viewport mode, restrict to the sub-viewport rect instead.
 	const Vec4 vpRect = m_cachedViewportContentRect;
 	const bool hasContentRect = (vpRect.z > 0.0f && vpRect.w > 0.0f);
-	const int vpX = hasContentRect ? static_cast<int>(vpRect.x) : 0;
-	const int vpY = hasContentRect ? static_cast<int>(vpRect.y) : 0;
-	const int width = hasContentRect ? static_cast<int>(vpRect.z) : fullWidth;
-	const int height = hasContentRect ? static_cast<int>(vpRect.w) : fullHeight;
+
+	int vpX, vpY, width, height;
+	if (m_currentSubViewportIndex >= 0)
+	{
+		vpX    = m_currentSubViewportRect.x;
+		vpY    = m_currentSubViewportRect.y;
+		width  = m_currentSubViewportRect.w;
+		height = m_currentSubViewportRect.h;
+	}
+	else
+	{
+		vpX    = hasContentRect ? static_cast<int>(vpRect.x) : 0;
+		vpY    = hasContentRect ? static_cast<int>(vpRect.y) : 0;
+		width  = hasContentRect ? static_cast<int>(vpRect.z) : fullWidth;
+		height = hasContentRect ? static_cast<int>(vpRect.w) : fullHeight;
+	}
 	const int viewportY = fullHeight - vpY - height;
 
 	// Render into the active tab's FBO (or HDR FBO when post-processing)
 	const bool usePostProcess = m_postProcessEnabled && ensurePostProcessResources();
 	{
+		// In multi-viewport mode, only bind the FBO for the first sub-viewport;
+		// subsequent sub-viewports reuse the already-bound FBO.
+		const bool isFirstSubViewport = (m_currentSubViewportIndex <= 0);
 		EditorTab* activeTab = m_cachedActiveTab;
-		if (activeTab && activeTab->renderTarget && activeTab->renderTarget->isValid())
+		if (isFirstSubViewport && activeTab && activeTab->renderTarget && activeTab->renderTarget->isValid())
 		{
 			if (usePostProcess)
 			{
@@ -1077,10 +1413,28 @@ void OpenGLRenderer::renderWorld()
 		}
 	}
 
-	// Clear the full FBO, then set glViewport to the content rect area
-	glViewport(0, 0, fullWidth, fullHeight);
-	glClearColor(m_clearColor.x, m_clearColor.y, m_clearColor.z, m_clearColor.w);
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	// Clear & viewport setup
+	if (m_currentSubViewportIndex <= 0)
+	{
+		// First sub-viewport (or single mode): clear the full FBO
+		glViewport(0, 0, fullWidth, fullHeight);
+		glClearColor(m_clearColor.x, m_clearColor.y, m_clearColor.z, m_clearColor.w);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	}
+
+	// In multi-viewport mode, use glScissor to restrict drawing to this sub-viewport
+	if (m_currentSubViewportIndex >= 0)
+	{
+		glEnable(GL_SCISSOR_TEST);
+		glScissor(vpX, viewportY, width, height);
+		if (m_currentSubViewportIndex > 0)
+		{
+			// Clear only this sub-viewport area
+			glViewport(vpX, viewportY, width, height);
+			glClearColor(m_clearColor.x, m_clearColor.y, m_clearColor.z, m_clearColor.w);
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		}
+	}
 	glViewport(vpX, viewportY, width, height);
 
 	// Update projection matrix with current aspect ratio (default, may be overridden by entity camera)
@@ -1322,8 +1676,28 @@ void OpenGLRenderer::renderWorld()
 	// Editor camera (always used outside PIE, or as fallback)
 	if (!usedEntityCamera && m_camera)
 	{
-		Mat4 engineView = m_camera->getViewMatrixColumnMajor();
-		view = glm::make_mat4(engineView.m);
+		// Multi-viewport: use the sub-viewport's dedicated camera
+		if (m_currentSubViewportIndex > 0)
+		{
+			const auto& svCam = m_subViewportCameras[m_currentSubViewportIndex];
+			const float yawRad = glm::radians(svCam.yawDeg);
+			const float pitchRad = glm::radians(svCam.pitchDeg);
+			const glm::vec3 front = glm::normalize(glm::vec3(
+				cosf(yawRad) * cosf(pitchRad),
+				sinf(pitchRad),
+				sinf(yawRad) * cosf(pitchRad)
+			));
+			const glm::vec3 pos(svCam.position.x, svCam.position.y, svCam.position.z);
+			const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+			const glm::vec3 right = glm::normalize(glm::cross(front, worldUp));
+			const glm::vec3 up = glm::normalize(glm::cross(right, front));
+			view = glm::lookAt(pos, pos + front, up);
+		}
+		else
+		{
+			Mat4 engineView = m_camera->getViewMatrixColumnMajor();
+			view = glm::make_mat4(engineView.m);
+		}
 	}
 	const glm::mat4 viewProj = m_projectionMatrix * view;
 	m_lastViewMatrix = view;
@@ -2235,8 +2609,100 @@ void OpenGLRenderer::renderWorld()
 		drawViewportGrid(view, m_projectionMatrix);
 	}
 
+	// Draw collider wireframe debug overlay when not in PIE
+	if (!diagnostics.isPIEActive())
+	{
+		renderColliderDebug(view, m_projectionMatrix);
+	}
+
+	// Draw streaming volume wireframe overlay (Phase 11.4) when not in PIE
+	if (!diagnostics.isPIEActive() && m_streamingVolumesVisible)
+	{
+		renderStreamingVolumeDebug(view, m_projectionMatrix);
+	}
+
+	// Draw bone / skeleton debug overlay for selected entities when not in PIE
+	if (!diagnostics.isPIEActive())
+	{
+		renderBoneDebug(view, m_projectionMatrix);
+	}
+
+	// Draw camera path spline in viewport when Sequencer is open and spline visible
+	if (!diagnostics.isPIEActive() && m_cameraPath.points.size() >= 2)
+	{
+		auto& uiMgr = getUIManager();
+		if (uiMgr.isSequencerOpen())
+		{
+			// Evaluate spline as polyline (100 segments)
+			const int segCount = 100;
+			std::vector<glm::vec3> lineVerts;
+			lineVerts.reserve((segCount + 1) * 2);
+			for (int s = 0; s <= segCount; ++s)
+			{
+				float t = static_cast<float>(s) / static_cast<float>(segCount);
+				CameraPathPoint pt = m_cameraPath.evaluate(t);
+				glm::vec3 v(pt.position.x, pt.position.y, pt.position.z);
+				if (s > 0)
+				{
+					lineVerts.push_back(lineVerts.back());
+					lineVerts.push_back(v);
+				}
+				else
+				{
+					lineVerts.push_back(v);
+				}
+			}
+
+			if (lineVerts.size() >= 2)
+			{
+				glm::mat4 mvp = m_projectionMatrix * view;
+				if (m_gizmoProgram != 0)
+				{
+					glUseProgram(m_gizmoProgram);
+					if (m_gizmoLocMVP >= 0) glUniformMatrix4fv(m_gizmoLocMVP, 1, GL_FALSE, &mvp[0][0]);
+					if (m_gizmoLocColor >= 0) glUniform4f(m_gizmoLocColor, 1.0f, 0.6f, 0.1f, 1.0f); // orange spline
+
+					GLuint vao, vbo;
+					glGenVertexArrays(1, &vao);
+					glGenBuffers(1, &vbo);
+					glBindVertexArray(vao);
+					glBindBuffer(GL_ARRAY_BUFFER, vbo);
+					glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(lineVerts.size() * sizeof(glm::vec3)), lineVerts.data(), GL_STREAM_DRAW);
+					glEnableVertexAttribArray(0);
+					glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), nullptr);
+
+					glLineWidth(2.0f);
+					glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(lineVerts.size()));
+					glLineWidth(1.0f);
+
+					// Draw control point markers
+					std::vector<glm::vec3> cpVerts;
+					for (const auto& cp : m_cameraPath.points)
+					{
+						cpVerts.push_back(glm::vec3(cp.position.x, cp.position.y, cp.position.z));
+					}
+					if (!cpVerts.empty())
+					{
+						if (m_gizmoLocColor >= 0) glUniform4f(m_gizmoLocColor, 1.0f, 1.0f, 0.2f, 1.0f); // yellow points
+						glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(cpVerts.size() * sizeof(glm::vec3)), cpVerts.data(), GL_STREAM_DRAW);
+						glPointSize(8.0f);
+						glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(cpVerts.size()));
+						glPointSize(1.0f);
+					}
+
+					glBindVertexArray(0);
+					glDeleteBuffers(1, &vbo);
+					glDeleteVertexArrays(1, &vao);
+				}
+			}
+		}
+	}
+
+	// Gizmo, selection outline, and rubber-band only in the active sub-viewport
+	const bool isActiveSubViewport = (m_currentSubViewportIndex < 0 || m_currentSubViewportIndex == m_activeSubViewport);
+
 	// Draw selection outline + gizmo AFTER post-process resolve so they are not overwritten
-	if (!m_selectedEntities.empty() && !diagnostics.isPIEActive())
+	if (!m_selectedEntities.empty() && !diagnostics.isPIEActive() && isActiveSubViewport)
 	{
 		if (m_pickColorTex != 0)
 		{
@@ -2248,12 +2714,45 @@ void OpenGLRenderer::renderWorld()
 	}
 
 	// Draw rubber-band rectangle overlay (screen-space)
-	if (m_rubberBandActive && !diagnostics.isPIEActive())
+	if (m_rubberBandActive && !diagnostics.isPIEActive() && isActiveSubViewport)
 	{
 		// Rubber-band coords are in full-window SDL space, so use full FBO viewport
 		glViewport(0, 0, fullWidth, fullHeight);
 		const glm::mat4 rbOrtho = glm::ortho(0.0f, static_cast<float>(fullWidth), static_cast<float>(fullHeight), 0.0f);
 		drawRubberBand(rbOrtho);
+		glViewport(vpX, viewportY, width, height);
+	}
+
+	// Draw active sub-viewport border highlight (thin blue outline)
+	if (m_currentSubViewportIndex >= 0 && isActiveSubViewport)
+	{
+		glViewport(0, 0, fullWidth, fullHeight);
+		const glm::mat4 ortho = glm::ortho(0.0f, static_cast<float>(fullWidth),
+											static_cast<float>(fullHeight), 0.0f);
+		const Vec4 borderColor{ 0.25f, 0.55f, 0.95f, 0.8f };
+		const float bx0 = static_cast<float>(vpX);
+		const float by0 = static_cast<float>(vpY);
+		const float bx1 = bx0 + static_cast<float>(width);
+		const float by1 = by0 + static_cast<float>(height);
+		if (ensureUIQuadRenderer())
+		{
+			ensureUIShaderDefaults();
+			drawUIOutline(bx0, by0, bx1, by1, borderColor, ortho, m_uiQuadProgram);
+		}
+		glViewport(vpX, viewportY, width, height);
+	}
+
+	// Draw sub-viewport preset label (Top/Front/Right/Perspective) in corner
+	if (m_currentSubViewportIndex >= 0 && m_textRenderer)
+	{
+		const auto& svCam = m_subViewportCameras[m_currentSubViewportIndex];
+		const char* presetName = subViewportPresetToString(svCam.preset);
+		const float labelX = static_cast<float>(vpX) + 6.0f;
+		const float labelY = static_cast<float>(fullHeight - vpY) - 6.0f;
+		glViewport(0, 0, fullWidth, fullHeight);
+		m_textRenderer->setScreenSize(fullWidth, fullHeight);
+		m_textRenderer->drawText(presetName, Vec2{ labelX, labelY }, 0.35f,
+			Vec4{ 0.6f, 0.7f, 0.85f, 1.0f });
 		glViewport(vpX, viewportY, width, height);
 	}
 
@@ -2271,6 +2770,12 @@ void OpenGLRenderer::renderWorld()
 			// Restore content-rect viewport for any subsequent rendering
 			glViewport(vpX, viewportY, width, height);
 		}
+	}
+
+	// Disable scissor test that multi-viewport rendering may have enabled
+	if (m_currentSubViewportIndex >= 0)
+	{
+		glDisable(GL_SCISSOR_TEST);
 	}
 }
 
@@ -2780,6 +3285,8 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
 				const float ch2 = std::max(0.0f, chE-2.0f);
 				const float cx = cx0e+ts.x+1.0f;
 				if (cx < cx1e) drawUIPanel(cx, cy0e+1.0f, cx+2.0f, cy0e+1.0f+ch2, element.style.textColor, uiProjection, prog, element.style.textColor, false);
+				// Focus highlight: subtle blue outline around the entry bar
+				drawUIOutline(x0, y0, x1, y1, Vec4{0.25f, 0.55f, 0.95f, 0.8f}, uiProjection, prog);
 			}
 			if (m_uiDebugEnabled) drawUIOutline(x0, y0, x1, y1, Vec4{0.5f,0.8f,1.0f,1.0f}, uiProjection, prog);
 			return;
@@ -5784,6 +6291,8 @@ void OpenGLRenderer::renderUI()
 						drawUIPanel(caretX, contentY0 + 1.0f, caretX + 2.0f, contentY0 + 1.0f + caretHeight,
 							element.style.textColor, uiProjection, program, element.style.textColor, false);
 					}
+					// Focus highlight: subtle blue outline around the entry bar
+					drawUIOutline(x0, y0, x1, y1, Vec4{ 0.25f, 0.55f, 0.95f, 0.8f }, uiProjection, program);
 				}
 
 				if (m_uiDebugEnabled)
@@ -6446,6 +6955,30 @@ void OpenGLRenderer::moveCamera(float forward, float right, float up)
 {
 	if (!m_camera || m_cameraTransition.active || m_cameraPathActive)
 		return;
+
+	// Multi-viewport: route input to active sub-viewport camera if not the main one
+	const int subCount = getSubViewportCount();
+	if (subCount > 1 && m_activeSubViewport > 0 && m_activeSubViewport < kMaxSubViewports)
+	{
+		ensureSubViewportCameras();
+		auto& cam = m_subViewportCameras[m_activeSubViewport];
+		// Build a local front/right/up from yaw/pitch
+		const float yawRad  = glm::radians(cam.yawDeg);
+		const float pitchRad = glm::radians(cam.pitchDeg);
+		glm::vec3 front;
+		front.x = std::cos(pitchRad) * std::cos(yawRad);
+		front.y = std::sin(pitchRad);
+		front.z = std::cos(pitchRad) * std::sin(yawRad);
+		front = glm::normalize(front);
+		const glm::vec3 worldUp(0.0f, 1.0f, 0.0f);
+		const glm::vec3 r = glm::normalize(glm::cross(front, worldUp));
+		const glm::vec3 u = glm::normalize(glm::cross(r, front));
+		cam.position.x += front.x * forward + r.x * right + u.x * up;
+		cam.position.y += front.y * forward + r.y * right + u.y * up;
+		cam.position.z += front.z * forward + r.z * right + u.z * up;
+		return;
+	}
+
 	m_camera->moveRelative(forward, right, up);
 }
 
@@ -9487,6 +10020,20 @@ void OpenGLRenderer::rotateCamera(float yawDeltaDegrees, float pitchDeltaDegrees
 {
 	if (!m_camera || m_cameraTransition.active || m_cameraPathActive)
 		return;
+
+	// Multi-viewport: route rotation to active sub-viewport camera if not the main one
+	const int subCount = getSubViewportCount();
+	if (subCount > 1 && m_activeSubViewport > 0 && m_activeSubViewport < kMaxSubViewports)
+	{
+		ensureSubViewportCameras();
+		auto& cam = m_subViewportCameras[m_activeSubViewport];
+		cam.yawDeg += yawDeltaDegrees;
+		cam.pitchDeg += pitchDeltaDegrees;
+		if (cam.pitchDeg > 89.0f)  cam.pitchDeg = 89.0f;
+		if (cam.pitchDeg < -89.0f) cam.pitchDeg = -89.0f;
+		return;
+	}
+
 	m_camera->rotate(yawDeltaDegrees, pitchDeltaDegrees);
 }
 
@@ -9697,6 +10244,151 @@ float OpenGLRenderer::getCameraPathProgress() const
 	float t = m_cameraPathElapsed / m_cameraPath.duration;
 	if (t > 1.0f) t = 1.0f;
 	return t;
+}
+
+std::vector<CameraPathPoint> OpenGLRenderer::getCameraPathPoints() const
+{
+	return m_cameraPath.points;
+}
+
+void OpenGLRenderer::setCameraPathPoints(const std::vector<CameraPathPoint>& pts)
+{
+	m_cameraPath.points = pts;
+}
+
+float OpenGLRenderer::getCameraPathDuration() const
+{
+	return m_cameraPath.duration;
+}
+
+void OpenGLRenderer::setCameraPathDuration(float d)
+{
+	if (d > 0.0f) m_cameraPath.duration = d;
+}
+
+bool OpenGLRenderer::getCameraPathLoop() const
+{
+	return m_cameraPath.loop;
+}
+
+void OpenGLRenderer::setCameraPathLoop(bool l)
+{
+	m_cameraPath.loop = l;
+}
+
+// ─── Multi-Viewport sub-cameras (Phase 11.1) ───────────────────────────────
+
+void OpenGLRenderer::ensureSubViewportCameras()
+{
+	if (m_subViewportCamerasInitialized) return;
+	m_subViewportCamerasInitialized = true;
+
+	// Default camera 0: Perspective (copy from main editor camera)
+	if (m_camera)
+	{
+		m_subViewportCameras[0].position = m_camera->getPosition();
+		const Vec2 rot = m_camera->getRotationDegrees();
+		m_subViewportCameras[0].yawDeg = rot.x;
+		m_subViewportCameras[0].pitchDeg = rot.y;
+	}
+	m_subViewportCameras[0].preset = SubViewportPreset::Perspective;
+
+	// Camera 1: Top (looking down -Y)
+	m_subViewportCameras[1].position = { 0.0f, 20.0f, 0.0f };
+	m_subViewportCameras[1].yawDeg = -90.0f;
+	m_subViewportCameras[1].pitchDeg = -89.0f;
+	m_subViewportCameras[1].preset = SubViewportPreset::Top;
+
+	// Camera 2: Front (looking down -Z)
+	m_subViewportCameras[2].position = { 0.0f, 2.0f, 15.0f };
+	m_subViewportCameras[2].yawDeg = -90.0f;
+	m_subViewportCameras[2].pitchDeg = 0.0f;
+	m_subViewportCameras[2].preset = SubViewportPreset::Front;
+
+	// Camera 3: Right (looking down -X)
+	m_subViewportCameras[3].position = { 15.0f, 2.0f, 0.0f };
+	m_subViewportCameras[3].yawDeg = -180.0f;
+	m_subViewportCameras[3].pitchDeg = 0.0f;
+	m_subViewportCameras[3].preset = SubViewportPreset::Right;
+}
+
+Renderer::SubViewportCamera OpenGLRenderer::getSubViewportCamera(int index) const
+{
+	if (index < 0 || index >= kMaxSubViewports) return {};
+	return m_subViewportCameras[index];
+}
+
+void OpenGLRenderer::setSubViewportCamera(int index, const SubViewportCamera& cam)
+{
+	if (index < 0 || index >= kMaxSubViewports) return;
+	m_subViewportCameras[index] = cam;
+}
+
+int OpenGLRenderer::subViewportHitTest(int screenX, int screenY) const
+{
+	if (m_viewportLayout == ViewportLayout::Single) return 0;
+
+	const Vec4 vp = m_cachedViewportContentRect;
+	if (vp.z <= 0.0f || vp.w <= 0.0f) return 0;
+
+	const float relX = static_cast<float>(screenX) - vp.x;
+	const float relY = static_cast<float>(screenY) - vp.y;
+	if (relX < 0 || relY < 0 || relX >= vp.z || relY >= vp.w) return -1;
+
+	const float halfW = vp.z * 0.5f;
+	const float halfH = vp.w * 0.5f;
+
+	switch (m_viewportLayout)
+	{
+	case ViewportLayout::TwoHorizontal:
+		return (relY < halfH) ? 0 : 1;
+	case ViewportLayout::TwoVertical:
+		return (relX < halfW) ? 0 : 1;
+	case ViewportLayout::Quad:
+	{
+		const int col = (relX < halfW) ? 0 : 1;
+		const int row = (relY < halfH) ? 0 : 1;
+		return row * 2 + col;
+	}
+	default:
+		return 0;
+	}
+}
+
+void OpenGLRenderer::computeSubViewportRects(int vpX, int vpY, int vpW, int vpH,
+											  SubViewportRect* outRects, int count) const
+{
+	constexpr int kGap = 2; // pixel gap between sub-viewports
+	switch (m_viewportLayout)
+	{
+	case ViewportLayout::TwoHorizontal:
+	{
+		const int halfH = (vpH - kGap) / 2;
+		if (count > 0) outRects[0] = { vpX, vpY, vpW, halfH };
+		if (count > 1) outRects[1] = { vpX, vpY + halfH + kGap, vpW, vpH - halfH - kGap };
+		break;
+	}
+	case ViewportLayout::TwoVertical:
+	{
+		const int halfW = (vpW - kGap) / 2;
+		if (count > 0) outRects[0] = { vpX, vpY, halfW, vpH };
+		if (count > 1) outRects[1] = { vpX + halfW + kGap, vpY, vpW - halfW - kGap, vpH };
+		break;
+	}
+	case ViewportLayout::Quad:
+	{
+		const int halfW = (vpW - kGap) / 2;
+		const int halfH = (vpH - kGap) / 2;
+		if (count > 0) outRects[0] = { vpX,               vpY,               halfW,                halfH };
+		if (count > 1) outRects[1] = { vpX + halfW + kGap, vpY,               vpW - halfW - kGap,   halfH };
+		if (count > 2) outRects[2] = { vpX,               vpY + halfH + kGap, halfW,                vpH - halfH - kGap };
+		if (count > 3) outRects[3] = { vpX + halfW + kGap, vpY + halfH + kGap, vpW - halfW - kGap,   vpH - halfH - kGap };
+		break;
+	}
+	default:
+		if (count > 0) outRects[0] = { vpX, vpY, vpW, vpH };
+		break;
+	}
 }
 
 const std::string& OpenGLRenderer::name() const
@@ -10809,6 +11501,455 @@ void OpenGLRenderer::renderGizmo(const glm::mat4& view, const glm::mat4& project
 	glBindVertexArray(0);
 }
 
+void OpenGLRenderer::renderColliderDebug(const glm::mat4& view, const glm::mat4& projection)
+{
+	if (!m_collidersVisible)
+		return;
+
+	if (!ensureGizmoResources())
+		return;
+
+	auto& ecs = ECS::ECSManager::Instance();
+
+	ECS::Schema colliderSchema;
+	colliderSchema.require<ECS::CollisionComponent>().require<ECS::TransformComponent>();
+	const auto entities = ecs.getEntitiesMatchingSchema(colliderSchema);
+	if (entities.empty())
+		return;
+
+	glUseProgram(m_gizmoProgram);
+	glBindVertexArray(m_gizmoVao);
+	glDisable(GL_DEPTH_TEST);
+	glLineWidth(2.0f);
+
+	std::vector<float> verts;
+
+	for (const auto entity : entities)
+	{
+		const auto* col = ecs.getComponent<ECS::CollisionComponent>(entity);
+		const auto* tc  = ecs.getComponent<ECS::TransformComponent>(entity);
+		if (!col || !tc)
+			continue;
+
+		// Determine wireframe color based on physics motion type and sensor flag
+		glm::vec3 color(0.0f, 0.8f, 0.0f); // default green (static)
+		if (col->isSensor)
+		{
+			color = glm::vec3(1.0f, 0.3f, 0.3f); // red for triggers
+		}
+		else if (ecs.hasComponent<ECS::PhysicsComponent>(entity))
+		{
+			const auto* phys = ecs.getComponent<ECS::PhysicsComponent>(entity);
+			if (phys)
+			{
+				switch (phys->motionType)
+				{
+				case ECS::PhysicsComponent::MotionType::Static:    color = glm::vec3(0.0f, 0.8f, 0.0f); break;
+				case ECS::PhysicsComponent::MotionType::Kinematic: color = glm::vec3(1.0f, 0.7f, 0.0f); break;
+				case ECS::PhysicsComponent::MotionType::Dynamic:   color = glm::vec3(0.0f, 0.7f, 1.0f); break;
+				}
+			}
+		}
+		glUniform3fv(m_gizmoLocColor, 1, &color[0]);
+
+		// Build model matrix: entity position + rotation + collider offset
+		const glm::vec3 entityPos(tc->position[0], tc->position[1], tc->position[2]);
+		const glm::vec3 offset(col->colliderOffset[0], col->colliderOffset[1], col->colliderOffset[2]);
+		const glm::mat3 rot = getEntityRotationMatrix(*tc);
+
+		glm::mat4 model = glm::translate(glm::mat4(1.0f), entityPos);
+		model *= glm::mat4(rot);
+		model = glm::translate(model, offset);
+
+		const glm::mat4 mvp = projection * view * model;
+		glUniformMatrix4fv(m_gizmoLocMVP, 1, GL_FALSE, &mvp[0][0]);
+
+		constexpr float PI = 3.14159265f;
+		constexpr int segments = 32;
+
+		switch (col->colliderType)
+		{
+		case ECS::CollisionComponent::ColliderType::Box:
+		{
+			const float hx = col->colliderSize[0];
+			const float hy = col->colliderSize[1];
+			const float hz = col->colliderSize[2];
+			// 12 edges of a wireframe box = 24 vertices
+			float boxVerts[] = {
+				// Bottom face
+				-hx,-hy,-hz,  hx,-hy,-hz,
+				 hx,-hy,-hz,  hx,-hy, hz,
+				 hx,-hy, hz, -hx,-hy, hz,
+				-hx,-hy, hz, -hx,-hy,-hz,
+				// Top face
+				-hx, hy,-hz,  hx, hy,-hz,
+				 hx, hy,-hz,  hx, hy, hz,
+				 hx, hy, hz, -hx, hy, hz,
+				-hx, hy, hz, -hx, hy,-hz,
+				// Vertical edges
+				-hx,-hy,-hz, -hx, hy,-hz,
+				 hx,-hy,-hz,  hx, hy,-hz,
+				 hx,-hy, hz,  hx, hy, hz,
+				-hx,-hy, hz, -hx, hy, hz,
+			};
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(boxVerts), boxVerts);
+			glDrawArrays(GL_LINES, 0, 24);
+			break;
+		}
+		case ECS::CollisionComponent::ColliderType::Sphere:
+		{
+			const float r = col->colliderSize[0];
+			for (int axis = 0; axis < 3; ++axis)
+			{
+				verts.clear();
+				buildCircleVerts(verts, segments, r, axis);
+				glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+				glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(float), verts.data());
+				glDrawArrays(GL_LINE_STRIP, 0, segments + 1);
+			}
+			break;
+		}
+		case ECS::CollisionComponent::ColliderType::Capsule:
+		{
+			const float r  = col->colliderSize[0];
+			const float hh = col->colliderSize[1]; // half-height of cylinder part
+			constexpr int halfSeg = segments / 2;
+
+			// Top circle (Y = +hh)
+			verts.clear();
+			for (int i = 0; i <= segments; ++i)
+			{
+				const float angle = 2.0f * PI * float(i) / float(segments);
+				verts.push_back(std::cos(angle) * r);
+				verts.push_back(hh);
+				verts.push_back(std::sin(angle) * r);
+			}
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(float), verts.data());
+			glDrawArrays(GL_LINE_STRIP, 0, segments + 1);
+
+			// Bottom circle (Y = -hh)
+			verts.clear();
+			for (int i = 0; i <= segments; ++i)
+			{
+				const float angle = 2.0f * PI * float(i) / float(segments);
+				verts.push_back(std::cos(angle) * r);
+				verts.push_back(-hh);
+				verts.push_back(std::sin(angle) * r);
+			}
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(float), verts.data());
+			glDrawArrays(GL_LINE_STRIP, 0, segments + 1);
+
+			// Top hemisphere arc (XY plane)
+			verts.clear();
+			for (int i = 0; i <= halfSeg; ++i)
+			{
+				const float angle = PI * float(i) / float(halfSeg);
+				verts.push_back(std::cos(angle) * r);
+				verts.push_back(hh + std::sin(angle) * r);
+				verts.push_back(0.0f);
+			}
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(float), verts.data());
+			glDrawArrays(GL_LINE_STRIP, 0, halfSeg + 1);
+
+			// Bottom hemisphere arc (XY plane)
+			verts.clear();
+			for (int i = 0; i <= halfSeg; ++i)
+			{
+				const float angle = PI + PI * float(i) / float(halfSeg);
+				verts.push_back(std::cos(angle) * r);
+				verts.push_back(-hh + std::sin(angle) * r);
+				verts.push_back(0.0f);
+			}
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(float), verts.data());
+			glDrawArrays(GL_LINE_STRIP, 0, halfSeg + 1);
+
+			// Top hemisphere arc (ZY plane)
+			verts.clear();
+			for (int i = 0; i <= halfSeg; ++i)
+			{
+				const float angle = PI * float(i) / float(halfSeg);
+				verts.push_back(0.0f);
+				verts.push_back(hh + std::sin(angle) * r);
+				verts.push_back(std::cos(angle) * r);
+			}
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(float), verts.data());
+			glDrawArrays(GL_LINE_STRIP, 0, halfSeg + 1);
+
+			// Bottom hemisphere arc (ZY plane)
+			verts.clear();
+			for (int i = 0; i <= halfSeg; ++i)
+			{
+				const float angle = PI + PI * float(i) / float(halfSeg);
+				verts.push_back(0.0f);
+				verts.push_back(-hh + std::sin(angle) * r);
+				verts.push_back(std::cos(angle) * r);
+			}
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(float), verts.data());
+			glDrawArrays(GL_LINE_STRIP, 0, halfSeg + 1);
+
+			// 4 vertical connecting lines
+			float capsuleLines[] = {
+				 r, -hh, 0.0f,   r,  hh, 0.0f,
+				-r, -hh, 0.0f,  -r,  hh, 0.0f,
+				0.0f, -hh,  r,  0.0f,  hh,  r,
+				0.0f, -hh, -r,  0.0f,  hh, -r,
+			};
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(capsuleLines), capsuleLines);
+			glDrawArrays(GL_LINES, 0, 8);
+			break;
+		}
+		case ECS::CollisionComponent::ColliderType::Cylinder:
+		{
+			const float r  = col->colliderSize[0];
+			const float hh = col->colliderSize[1];
+
+			// Top circle (Y = +hh)
+			verts.clear();
+			for (int i = 0; i <= segments; ++i)
+			{
+				const float angle = 2.0f * PI * float(i) / float(segments);
+				verts.push_back(std::cos(angle) * r);
+				verts.push_back(hh);
+				verts.push_back(std::sin(angle) * r);
+			}
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(float), verts.data());
+			glDrawArrays(GL_LINE_STRIP, 0, segments + 1);
+
+			// Bottom circle (Y = -hh)
+			verts.clear();
+			for (int i = 0; i <= segments; ++i)
+			{
+				const float angle = 2.0f * PI * float(i) / float(segments);
+				verts.push_back(std::cos(angle) * r);
+				verts.push_back(-hh);
+				verts.push_back(std::sin(angle) * r);
+			}
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(float), verts.data());
+			glDrawArrays(GL_LINE_STRIP, 0, segments + 1);
+
+			// 4 vertical lines
+			float cylLines[] = {
+				 r, -hh, 0.0f,   r,  hh, 0.0f,
+				-r, -hh, 0.0f,  -r,  hh, 0.0f,
+				0.0f, -hh,  r,  0.0f,  hh,  r,
+				0.0f, -hh, -r,  0.0f,  hh, -r,
+			};
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(cylLines), cylLines);
+			glDrawArrays(GL_LINES, 0, 8);
+			break;
+		}
+		default:
+			break; // Mesh and HeightField colliders not visualized as wireframes
+		}
+	}
+
+	glEnable(GL_DEPTH_TEST);
+	glLineWidth(1.0f);
+	glBindVertexArray(0);
+}
+
+void OpenGLRenderer::renderStreamingVolumeDebug(const glm::mat4& view, const glm::mat4& projection)
+{
+	const auto& volumes = getStreamingVolumes();
+	const auto& subLevels = getSubLevels();
+	if (volumes.empty())
+		return;
+
+	if (!ensureGizmoResources())
+		return;
+
+	glUseProgram(m_gizmoProgram);
+	glBindVertexArray(m_gizmoVao);
+	glDisable(GL_DEPTH_TEST);
+	glLineWidth(2.0f);
+
+	for (const auto& vol : volumes)
+	{
+		// Determine color from linked sub-level
+		glm::vec3 color(0.5f, 0.5f, 0.5f);
+		if (vol.subLevelIndex >= 0 && vol.subLevelIndex < static_cast<int>(subLevels.size()))
+		{
+			const auto& c = subLevels[vol.subLevelIndex].color;
+			color = glm::vec3(c.x, c.y, c.z);
+		}
+		glUniform3fv(m_gizmoLocColor, 1, &color[0]);
+
+		const glm::vec3 center(vol.center.x, vol.center.y, vol.center.z);
+		const glm::mat4 model = glm::translate(glm::mat4(1.0f), center);
+		const glm::mat4 mvp = projection * view * model;
+		glUniformMatrix4fv(m_gizmoLocMVP, 1, GL_FALSE, &mvp[0][0]);
+
+		const float hx = vol.halfExtents.x;
+		const float hy = vol.halfExtents.y;
+		const float hz = vol.halfExtents.z;
+
+		float boxVerts[] = {
+			// Bottom face
+			-hx,-hy,-hz,  hx,-hy,-hz,
+			 hx,-hy,-hz,  hx,-hy, hz,
+			 hx,-hy, hz, -hx,-hy, hz,
+			-hx,-hy, hz, -hx,-hy,-hz,
+			// Top face
+			-hx, hy,-hz,  hx, hy,-hz,
+			 hx, hy,-hz,  hx, hy, hz,
+			 hx, hy, hz, -hx, hy, hz,
+			-hx, hy, hz, -hx, hy,-hz,
+			// Vertical edges
+			-hx,-hy,-hz, -hx, hy,-hz,
+			 hx,-hy,-hz,  hx, hy,-hz,
+			 hx,-hy, hz,  hx, hy, hz,
+			-hx,-hy, hz, -hx, hy, hz,
+		};
+		glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+		glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(boxVerts), boxVerts);
+		glDrawArrays(GL_LINES, 0, 24);
+	}
+
+	glEnable(GL_DEPTH_TEST);
+	glLineWidth(1.0f);
+	glBindVertexArray(0);
+}
+
+void OpenGLRenderer::renderBoneDebug(const glm::mat4& view, const glm::mat4& projection)
+{
+	if (!m_bonesVisible)
+		return;
+
+	if (m_selectedEntities.empty())
+		return;
+
+	if (!ensureGizmoResources())
+		return;
+
+	auto& ecs = ECS::ECSManager::Instance();
+
+	glUseProgram(m_gizmoProgram);
+	glBindVertexArray(m_gizmoVao);
+	glDisable(GL_DEPTH_TEST);
+
+	for (const unsigned int entity : m_selectedEntities)
+	{
+		// Find the animator for this entity
+		auto ait = m_entityAnimators.find(entity);
+		if (ait == m_entityAnimators.end())
+			continue;
+
+		const auto& animator = ait->second;
+		const Skeleton* skeleton = animator->getSkeleton();
+		if (!skeleton || skeleton->bones.empty())
+			continue;
+
+		const auto& boneMatrices = animator->getBoneMatrices();
+		if (boneMatrices.empty())
+			continue;
+
+		// Build entity model matrix (position + rotation + scale)
+		const auto* tc = ecs.getComponent<ECS::TransformComponent>(entity);
+		if (!tc)
+			continue;
+
+		const glm::vec3 entityPos(tc->position[0], tc->position[1], tc->position[2]);
+		const glm::mat3 rot = getEntityRotationMatrix(*tc);
+		glm::mat4 modelMatrix = glm::translate(glm::mat4(1.0f), entityPos);
+		modelMatrix *= glm::mat4(rot);
+		modelMatrix = glm::scale(modelMatrix, glm::vec3(tc->scale[0], tc->scale[1], tc->scale[2]));
+
+		const glm::mat4 vp = projection * view;
+
+		// Compute bone world positions from finalBoneMatrices:
+		// globalTransform = finalBoneMatrix * inverse(offsetMatrix)
+		// bonePos_meshSpace = globalTransform * (0,0,0,1) = translation column
+		// bonePos_world = entityModelMatrix * bonePos_meshSpace
+		const size_t boneCount = skeleton->bones.size();
+		std::vector<glm::vec3> boneWorldPositions(boneCount);
+
+		for (size_t b = 0; b < boneCount; ++b)
+		{
+			if (b >= boneMatrices.size()) break;
+
+			// globalTransform = finalBoneMatrix * inverse(offsetMatrix)
+			const Mat4x4 invOffset = skeleton->bones[b].offsetMatrix.inverse();
+			const Mat4x4 globalTf = boneMatrices[b] * invOffset;
+
+			// Row-major: translation is at [12], [13], [14]
+			const glm::vec4 meshPos(globalTf.m[12], globalTf.m[13], globalTf.m[14], 1.0f);
+			const glm::vec4 worldPos = modelMatrix * meshPos;
+			boneWorldPositions[b] = glm::vec3(worldPos);
+		}
+
+		// Draw bone lines (from each bone to its parent)
+		// Use identity MVP since positions are already in world space — use VP only
+		const glm::mat4 identity(1.0f);
+		glUniformMatrix4fv(m_gizmoLocMVP, 1, GL_FALSE, &vp[0][0]);
+
+		glLineWidth(2.0f);
+
+		for (size_t b = 0; b < boneCount; ++b)
+		{
+			const int parentIdx = skeleton->bones[b].parentIndex;
+			if (parentIdx < 0 || parentIdx >= static_cast<int>(boneCount))
+				continue;
+
+			// Bone color: cyan for normal bones
+			const glm::vec3 boneColor(0.0f, 0.9f, 0.9f);
+			glUniform3fv(m_gizmoLocColor, 1, &boneColor[0]);
+
+			const glm::vec3& from = boneWorldPositions[parentIdx];
+			const glm::vec3& to = boneWorldPositions[b];
+
+			float lineVerts[] = {
+				from.x, from.y, from.z,
+				to.x, to.y, to.z
+			};
+
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(lineVerts), lineVerts);
+			glDrawArrays(GL_LINES, 0, 2);
+		}
+
+		// Draw bone joint points as small cross markers
+		for (size_t b = 0; b < boneCount; ++b)
+		{
+			// Root bone: yellow, larger; others: cyan, smaller
+			const bool isRoot = (skeleton->bones[b].parentIndex < 0);
+			const float crossSize = isRoot ? 0.06f : 0.03f;
+			const glm::vec3 pointColor = isRoot
+				? glm::vec3(1.0f, 1.0f, 0.0f)   // yellow for root
+				: glm::vec3(0.0f, 0.9f, 0.9f);   // cyan for others
+			glUniform3fv(m_gizmoLocColor, 1, &pointColor[0]);
+
+			const glm::vec3& p = boneWorldPositions[b];
+
+			// Draw a small 3D cross (3 lines) at the bone position
+			float crossVerts[] = {
+				p.x - crossSize, p.y, p.z, p.x + crossSize, p.y, p.z,
+				p.x, p.y - crossSize, p.z, p.x, p.y + crossSize, p.z,
+				p.x, p.y, p.z - crossSize, p.x, p.y, p.z + crossSize,
+			};
+
+			glLineWidth(isRoot ? 3.0f : 2.0f);
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(crossVerts), crossVerts);
+			glDrawArrays(GL_LINES, 0, 6);
+		}
+	}
+
+	glEnable(GL_DEPTH_TEST);
+	glLineWidth(1.0f);
+	glBindVertexArray(0);
+}
+
 // Pick gizmo axis using rotated (local-space) axes projected to screen
 OpenGLRenderer::GizmoAxis OpenGLRenderer::pickGizmoAxis(const glm::mat4& view, const glm::mat4& projection, int screenX, int screenY) const
 {
@@ -11441,4 +12582,104 @@ void OpenGLRenderer::drawRubberBand(const glm::mat4& ortho)
 	glBindVertexArray(0);
 	glDeleteBuffers(1, &vbo);
 	glDeleteVertexArrays(1, &vao);
+}
+
+// ---------------------------------------------------------------------------
+// Skeletal animation queries
+// ---------------------------------------------------------------------------
+
+bool OpenGLRenderer::isEntitySkinned(unsigned int entity) const
+{
+	return m_entityAnimators.find(entity) != m_entityAnimators.end();
+}
+
+int OpenGLRenderer::getEntityAnimationClipCount(unsigned int entity) const
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return 0;
+	const Skeleton* sk = it->second->getSkeleton();
+	return sk ? static_cast<int>(sk->animations.size()) : 0;
+}
+
+Renderer::AnimationClipInfo OpenGLRenderer::getEntityAnimationClipInfo(unsigned int entity, int clipIndex) const
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return {};
+	const Skeleton* sk = it->second->getSkeleton();
+	if (!sk || clipIndex < 0 || clipIndex >= static_cast<int>(sk->animations.size())) return {};
+	const auto& clip = sk->animations[clipIndex];
+	AnimationClipInfo info;
+	info.name = clip.name;
+	info.duration = clip.duration;
+	info.ticksPerSecond = clip.ticksPerSecond;
+	info.channelCount = static_cast<int>(clip.channels.size());
+	return info;
+}
+
+int OpenGLRenderer::getEntityAnimatorCurrentClip(unsigned int entity) const
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return -1;
+	return it->second->getCurrentClipIndex();
+}
+
+float OpenGLRenderer::getEntityAnimatorCurrentTime(unsigned int entity) const
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return 0.0f;
+	return it->second->getCurrentTime();
+}
+
+bool OpenGLRenderer::isEntityAnimatorPlaying(unsigned int entity) const
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return false;
+	return it->second->isPlaying();
+}
+
+void OpenGLRenderer::playEntityAnimation(unsigned int entity, int clipIndex, bool loop)
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return;
+	it->second->playAnimation(clipIndex, loop);
+}
+
+void OpenGLRenderer::stopEntityAnimation(unsigned int entity)
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return;
+	it->second->stop();
+}
+
+void OpenGLRenderer::setEntityAnimationSpeed(unsigned int entity, float speed)
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return;
+	it->second->setSpeed(speed);
+}
+
+int OpenGLRenderer::getEntityBoneCount(unsigned int entity) const
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return 0;
+	const Skeleton* sk = it->second->getSkeleton();
+	return sk ? static_cast<int>(sk->bones.size()) : 0;
+}
+
+std::string OpenGLRenderer::getEntityBoneName(unsigned int entity, int boneIndex) const
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return {};
+	const Skeleton* sk = it->second->getSkeleton();
+	if (!sk || boneIndex < 0 || boneIndex >= static_cast<int>(sk->bones.size())) return {};
+	return sk->bones[boneIndex].name;
+}
+
+int OpenGLRenderer::getEntityBoneParent(unsigned int entity, int boneIndex) const
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return -1;
+	const Skeleton* sk = it->second->getSkeleton();
+	if (!sk || boneIndex < 0 || boneIndex >= static_cast<int>(sk->bones.size())) return -1;
+	return sk->bones[boneIndex].parentIndex;
 }

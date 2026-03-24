@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 class Renderer;
 
@@ -19,4 +20,21 @@ namespace Scripting
     void PollScriptHotReload();
     bool IsScriptHotReloadEnabled();
     void SetScriptHotReloadEnabled(bool enabled);
+
+    // Editor Plugin System (Phase 11.3)
+    void LoadEditorPlugins(const std::string& projectRoot);
+    void PollPluginHotReload();
+
+    struct PluginMenuItem
+    {
+        std::string menu;
+        std::string name;
+    };
+    struct PluginTab
+    {
+        std::string name;
+    };
+    const std::vector<PluginMenuItem>& GetPluginMenuItems();
+    const std::vector<PluginTab>& GetPluginTabs();
+    void InvokePluginMenuCallback(size_t index);
 }

@@ -1608,6 +1608,66 @@ void AssetManager::ensureEditorWidgetsCreated()
         btnStats["shaderVertex"] = "button_vertex.glsl";
         btnStats["shaderFragment"] = "button_fragment.glsl";
 
+        // Collider visualization toggle
+        json btnColliders = json::object();
+        btnColliders["id"] = "ViewportOverlay.Colliders";
+        btnColliders["type"] = "Button";
+        btnColliders["clickEvent"] = "ViewportOverlay.Colliders";
+        btnColliders["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+        btnColliders["hoverColor"] = json{ {"x", 0.22f}, {"y", 0.22f}, {"z", 0.22f}, {"w", 1.0f} };
+        btnColliders["textColor"] = json{ {"x", 0.45f}, {"y", 0.45f}, {"z", 0.45f}, {"w", 1.0f} };
+        btnColliders["text"] = "Col";
+        btnColliders["font"] = "default.ttf";
+        btnColliders["fontSize"] = t.fontSizeSmall;
+        btnColliders["textAlignH"] = "Center";
+        btnColliders["textAlignV"] = "Center";
+        btnColliders["minSize"] = json{ {"x", S(32.0f)}, {"y", 0.0f} };
+        btnColliders["fillY"] = true;
+        btnColliders["padding"] = json{ {"x", S(4.0f)}, {"y", S(2.0f)} };
+        btnColliders["tooltipText"] = "Show Colliders";
+        btnColliders["shaderVertex"] = "button_vertex.glsl";
+        btnColliders["shaderFragment"] = "button_fragment.glsl";
+
+        // Bone visualization toggle
+        json btnBones = json::object();
+        btnBones["id"] = "ViewportOverlay.Bones";
+        btnBones["type"] = "Button";
+        btnBones["clickEvent"] = "ViewportOverlay.Bones";
+        btnBones["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+        btnBones["hoverColor"] = json{ {"x", 0.22f}, {"y", 0.22f}, {"z", 0.22f}, {"w", 1.0f} };
+        btnBones["textColor"] = json{ {"x", 0.45f}, {"y", 0.45f}, {"z", 0.45f}, {"w", 1.0f} };
+        btnBones["text"] = "Bone";
+        btnBones["font"] = "default.ttf";
+        btnBones["fontSize"] = t.fontSizeSmall;
+        btnBones["textAlignH"] = "Center";
+        btnBones["textAlignV"] = "Center";
+        btnBones["minSize"] = json{ {"x", S(36.0f)}, {"y", 0.0f} };
+        btnBones["fillY"] = true;
+        btnBones["padding"] = json{ {"x", S(4.0f)}, {"y", S(2.0f)} };
+        btnBones["tooltipText"] = "Show Bones (selected entity)";
+        btnBones["shaderVertex"] = "button_vertex.glsl";
+        btnBones["shaderFragment"] = "button_fragment.glsl";
+
+        // Viewport Layout button
+        json btnLayout = json::object();
+        btnLayout["id"] = "ViewportOverlay.Layout";
+        btnLayout["type"] = "Button";
+        btnLayout["clickEvent"] = "ViewportOverlay.Layout";
+        btnLayout["color"] = json{ {"x", 0.0f}, {"y", 0.0f}, {"z", 0.0f}, {"w", 0.0f} };
+        btnLayout["hoverColor"] = json{ {"x", 0.22f}, {"y", 0.22f}, {"z", 0.22f}, {"w", 1.0f} };
+        btnLayout["textColor"] = json{ {"x", 0.70f}, {"y", 0.70f}, {"z", 0.70f}, {"w", 1.0f} };
+        btnLayout["text"] = "\xe2\x96\xa3";
+        btnLayout["font"] = "default.ttf";
+        btnLayout["fontSize"] = t.fontSizeSmall;
+        btnLayout["textAlignH"] = "Center";
+        btnLayout["textAlignV"] = "Center";
+        btnLayout["minSize"] = json{ {"x", S(28.0f)}, {"y", 0.0f} };
+        btnLayout["fillY"] = true;
+        btnLayout["padding"] = json{ {"x", S(4.0f)}, {"y", S(2.0f)} };
+        btnLayout["tooltipText"] = "Viewport Layout";
+        btnLayout["shaderVertex"] = "button_vertex.glsl";
+        btnLayout["shaderFragment"] = "button_fragment.glsl";
+
         // Settings button
         json btnSettings = json::object();
         btnSettings["id"] = "ViewportOverlay.Settings";
@@ -1629,7 +1689,7 @@ void AssetManager::ensureEditorWidgetsCreated()
             btnUndo, btnRedo, makeSep("ViewportOverlay.Sep2"),
             spacerLeft, btnPIE, spacerRight,
             makeSep("ViewportOverlay.Sep3"),
-            btnSnap, btnGridSize, btnCamSpeed, btnStats,
+            btnSnap, btnGridSize, btnCamSpeed, btnStats, btnColliders, btnBones, btnLayout,
             makeSep("ViewportOverlay.Sep4"), btnSettings
         });
         elements.push_back(toolbar);

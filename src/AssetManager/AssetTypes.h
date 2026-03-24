@@ -4,7 +4,6 @@ using json = nlohmann::json;
 
 enum class AssetType
 {
-#define NLOHMANN_DEFINE_TYPE_INTRUSIVE_WITH_DEFAULT(AssetType)
     Unknown,
     Texture,
     Material,

@@ -1,4 +1,4 @@
-#include "UIManager.h"
+﻿#include "UIManager.h"
 
 #include <algorithm>
 #include <numeric>
@@ -12,6 +12,13 @@
 #include <iomanip>
 #include <cctype>
 #include <SDL3/SDL.h>
+#if defined(_WIN32)
+#   ifndef NOMINMAX
+#       define NOMINMAX
+#   endif
+#   include <Windows.h>
+#   include <shellapi.h>
+#endif
 #include "../Logger/Logger.h"
 #include "../Diagnostics/DiagnosticsManager.h"
 #include "../Core/EngineLevel.h"
@@ -1079,7 +1086,7 @@ namespace
                 cursorY += slotH + spacing;
             }
         }
-        // â”€â”€ WrapBox: children flow and wrap â”€â”€
+        // Ã¢â€â‚¬Ã¢â€â‚¬ WrapBox: children flow and wrap Ã¢â€â‚¬Ã¢â€â‚¬
         else if (element.type == WidgetElementType::WrapBox)
         {
             const float spacing = element.spacing;
@@ -1134,7 +1141,7 @@ namespace
                 }
             }
         }
-        // â”€â”€ UniformGrid: all cells equal size â”€â”€
+        // Ã¢â€â‚¬Ã¢â€â‚¬ UniformGrid: all cells equal size Ã¢â€â‚¬Ã¢â€â‚¬
         else if (element.type == WidgetElementType::UniformGrid)
         {
             const int childCount = static_cast<int>(element.children.size());
@@ -1172,7 +1179,7 @@ namespace
                     std::max(0.0f, cellH - child.margin.y * 2.0f), measureText);
             }
         }
-        // â”€â”€ SizeBox: single child with size override â”€â”€
+        // Ã¢â€â‚¬Ã¢â€â‚¬ SizeBox: single child with size override Ã¢â€â‚¬Ã¢â€â‚¬
         else if (element.type == WidgetElementType::SizeBox)
         {
             if (!element.children.empty())
@@ -1183,7 +1190,7 @@ namespace
                 layoutElement(child, contentX, contentY, childW, childH, measureText);
             }
         }
-        // â”€â”€ ScaleBox: single child, scaled to fit â”€â”€
+        // Ã¢â€â‚¬Ã¢â€â‚¬ ScaleBox: single child, scaled to fit Ã¢â€â‚¬Ã¢â€â‚¬
         else if (element.type == WidgetElementType::ScaleBox)
         {
             if (!element.children.empty())
@@ -1223,7 +1230,7 @@ namespace
                 layoutElement(child, contentX + offsetX, contentY + offsetY, scaledW, scaledH, measureText);
             }
         }
-        // â”€â”€ WidgetSwitcher: only active child â”€â”€
+        // Ã¢â€â‚¬Ã¢â€â‚¬ WidgetSwitcher: only active child Ã¢â€â‚¬Ã¢â€â‚¬
         else if (element.type == WidgetElementType::WidgetSwitcher)
         {
             const int activeIdx = element.activeChildIndex;
@@ -1244,7 +1251,7 @@ namespace
                 }
             }
         }
-        // â”€â”€ Overlay: all children stacked, each aligned within the same area â”€â”€
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Overlay: all children stacked, each aligned within the same area Ã¢â€â‚¬Ã¢â€â‚¬
         else if (element.type == WidgetElementType::Overlay)
         {
             for (auto& child : element.children)
@@ -1277,7 +1284,7 @@ namespace
                 layoutElement(child, childX, childY, childW, childH, measureText);
             }
         }
-        // â”€â”€ Border: single child inset by border thickness + content padding â”€â”€
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Border: single child inset by border thickness + content padding Ã¢â€â‚¬Ã¢â€â‚¬
         else if (element.type == WidgetElementType::Border)
         {
             float insetL = element.borderThicknessLeft + element.contentPadding.x;
@@ -1293,7 +1300,7 @@ namespace
                 layoutElement(child, childX, childY, childW, childH, measureText);
             }
         }
-        // â”€â”€ ListView: vertical stack of items â”€â”€
+        // Ã¢â€â‚¬Ã¢â€â‚¬ ListView: vertical stack of items Ã¢â€â‚¬Ã¢â€â‚¬
         else if (element.type == WidgetElementType::ListView)
         {
             float curY = contentY;
@@ -1304,7 +1311,7 @@ namespace
                 curY += itemH;
             }
         }
-        // â”€â”€ TileView: grid of tiles â”€â”€
+        // Ã¢â€â‚¬Ã¢â€â‚¬ TileView: grid of tiles Ã¢â€â‚¬Ã¢â€â‚¬
         else if (element.type == WidgetElementType::TileView)
         {
             int cols = element.columnsPerRow > 0 ? element.columnsPerRow : 4;
@@ -1384,6 +1391,10 @@ UIManager::UIManager()
 
 UIManager::~UIManager()
 {
+    if (m_buildThread.joinable())
+    {
+        m_buildThread.join();
+    }
     if (m_levelChangedCallbackToken != 0)
     {
         DiagnosticsManager::Instance().unregisterActiveLevelChangedCallback(m_levelChangedCallbackToken);
@@ -1957,13 +1968,13 @@ void UIManager::updateNotifications(float deltaSeconds)
         updateToastStackLayout();
     }
 
-    // ── Hover transition interpolation (Phase 1.5) ──────────────────────
+    // â”€â”€ Hover transition interpolation (Phase 1.5) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     updateHoverTransitions(deltaSeconds);
 
-    // ── Scrollbar auto-hide (Phase 1.6) ─────────────────────────────────
+    // â”€â”€ Scrollbar auto-hide (Phase 1.6) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     updateScrollbarVisibility(deltaSeconds);
 
-    // ── Console log refresh ──────────────────────────────────────────────
+    // â”€â”€ Console log refresh â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (m_consoleState.isOpen)
     {
         m_consoleState.refreshTimer += deltaSeconds;
@@ -1978,7 +1989,7 @@ void UIManager::updateNotifications(float deltaSeconds)
         }
     }
 
-    // ── Profiler metrics refresh ─────────────────────────────────────────
+    // â”€â”€ Profiler metrics refresh â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (m_profilerState.isOpen && !m_profilerState.frozen)
     {
         m_profilerState.refreshTimer += deltaSeconds;
@@ -1989,7 +2000,7 @@ void UIManager::updateNotifications(float deltaSeconds)
         }
     }
 
-    // ── Particle editor refresh ──────────────────────────────────────────
+    // â”€â”€ Particle editor refresh â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (m_particleEditorState.isOpen)
     {
         m_particleEditorState.refreshTimer += deltaSeconds;
@@ -2005,7 +2016,29 @@ void UIManager::updateNotifications(float deltaSeconds)
         }
     }
 
-    // ── Tooltip timer ────────────────────────────────────────────────────
+    // â”€â”€ Render debugger refresh â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    if (m_renderDebuggerState.isOpen)
+    {
+        m_renderDebuggerState.refreshTimer += deltaSeconds;
+        if (m_renderDebuggerState.refreshTimer >= 0.5f)
+        {
+            m_renderDebuggerState.refreshTimer = 0.0f;
+            refreshRenderDebugger();
+        }
+    }
+
+    // â”€â”€ Sequencer refresh (while playing) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    if (m_sequencerState.isOpen && m_sequencerState.playing)
+    {
+        m_sequencerState.refreshTimer += deltaSeconds;
+        if (m_sequencerState.refreshTimer >= 0.1f)
+        {
+            m_sequencerState.refreshTimer = 0.0f;
+            refreshSequencerTimeline();
+        }
+    }
+
+    // â”€â”€ Tooltip timer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (!m_tooltipText.empty() && !m_tooltipVisible)
     {
         m_tooltipTimer += deltaSeconds;
@@ -2081,7 +2114,7 @@ void UIManager::updateNotifications(float deltaSeconds)
     }
     else if (m_tooltipVisible && m_tooltipText.empty())
     {
-        // Tooltip was hidden by updateHoverStates — remove the widget
+        // Tooltip was hidden by updateHoverStates â€” remove the widget
         m_tooltipVisible = false;
         unregisterWidget("_Tooltip");
 	}
@@ -2204,7 +2237,7 @@ void UIManager::selectEntity(unsigned int entity)
     populateOutlinerDetails(entity);
 }
 
-// ── Undo/Redo helper: capture old component state, apply mutation, push command ──
+// â”€â”€ Undo/Redo helper: capture old component state, apply mutation, push command â”€â”€
 namespace {
     template<typename CompT>
     void setCompFieldWithUndo(unsigned int entity, const std::string& desc,
@@ -2256,7 +2289,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
 
     detailsPanel->children.clear();
 
-    // Invalidate cached hover pointer â€“ the old elements are destroyed.
+    // Invalidate cached hover pointer Ã¢â‚¬â€œ the old elements are destroyed.
     m_lastHoveredElement = nullptr;
 
     const auto makeTextLine = [](const std::string& text) -> WidgetElement
@@ -2708,7 +2741,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
         });
     }
 
-    // â”€â”€ Collision Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Collision Component Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     if (const auto* collision = ecs.getComponent<ECS::CollisionComponent>(entity))
     {
         std::vector<WidgetElement> lines;
@@ -2816,7 +2849,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
         });
     }
 
-    // â”€â”€ Physics Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Physics Component Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     if (const auto* physics = ecs.getComponent<ECS::PhysicsComponent>(entity))
     {
         std::vector<WidgetElement> lines;
@@ -3129,7 +3162,7 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
                     [val](ECS::ParticleEmitterComponent& c) { c.colorEndA = val; });
             }));
 
-        // "Edit Particles" button → opens dedicated Particle Editor tab
+        // "Edit Particles" button â†’ opens dedicated Particle Editor tab
         {
             WidgetElement editBtn = EditorUIBuilder::makePrimaryButton(
                 "Details.Particle.EditBtn", "Edit Particles",
@@ -3148,6 +3181,59 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
                 "Remove Particle Emitter",
                 [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::ParticleEmitterComponent>(entity); },
                 [entity, saved]() { ECS::ECSManager::Instance().setComponent<ECS::ParticleEmitterComponent>(entity, saved); }
+            });
+        });
+    }
+
+    // -- Animation Component ------------------------------------------------
+    if (const auto* animComp = ecs.getComponent<ECS::AnimationComponent>(entity))
+    {
+        std::vector<WidgetElement> lines;
+
+        lines.push_back(makeFloatEntry("Details.Animation.Speed", "Speed", animComp->speed,
+            [entity](float val) {
+                setCompFieldWithUndo<ECS::AnimationComponent>(entity, "Change Animation Speed",
+                    [val](ECS::AnimationComponent& c) { c.speed = val; });
+            }));
+
+        lines.push_back(makeCheckBoxRow("Details.Animation.Loop", "Loop", animComp->loop,
+            [entity](bool val) {
+                setCompFieldWithUndo<ECS::AnimationComponent>(entity, "Change Animation Loop",
+                    [val](ECS::AnimationComponent& c) { c.loop = val; });
+            }));
+
+        lines.push_back(makeCheckBoxRow("Details.Animation.Playing", "Playing", animComp->playing,
+            [entity](bool val) {
+                setCompFieldWithUndo<ECS::AnimationComponent>(entity, "Change Animation Playing",
+                    [val](ECS::AnimationComponent& c) { c.playing = val; });
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Animation.ClipIndex", "Clip Index", static_cast<float>(animComp->currentClipIndex),
+            [entity](float val) {
+                setCompFieldWithUndo<ECS::AnimationComponent>(entity, "Change Clip Index",
+                    [val](ECS::AnimationComponent& c) { c.currentClipIndex = static_cast<int>(val); });
+            }));
+
+        // "Edit Animation" button -> opens dedicated Animation Editor tab
+        if (m_renderer && m_renderer->isEntitySkinned(entity))
+        {
+            WidgetElement editBtn = EditorUIBuilder::makePrimaryButton(
+                "Details.Animation.EditBtn", "Edit Animation",
+                [this, entity]() { openAnimationEditorTab(entity); },
+                EditorTheme::Scaled(Vec2{ 0.0f, 26.0f }));
+            editBtn.fillX = true;
+            editBtn.padding = EditorTheme::Scaled(Vec2{ 0.0f, 4.0f });
+            lines.push_back(std::move(editBtn));
+        }
+
+        addSeparator("Animation", lines, [this, entity, saved = *animComp]() {
+            ECS::ECSManager::Instance().removeComponent<ECS::AnimationComponent>(entity);
+            if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            populateOutlinerDetails(entity);
+            UndoRedoManager::Instance().pushCommand({
+                "Remove Animation",
+                [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::AnimationComponent>(entity); },
+                [entity, saved]() { ECS::ECSManager::Instance().setComponent<ECS::AnimationComponent>(entity, saved); }
             });
         });
     }
@@ -3207,6 +3293,9 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             { "Particle Emitter", ecs.hasComponent<ECS::ParticleEmitterComponent>(entity),
               [entity]() { ECS::ECSManager::Instance().addComponent<ECS::ParticleEmitterComponent>(entity); },
               [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::ParticleEmitterComponent>(entity); } },
+            { "Animation", ecs.hasComponent<ECS::AnimationComponent>(entity),
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::AnimationComponent>(entity); },
+              [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::AnimationComponent>(entity); } },
         };
 
         for (const auto& opt : options)
@@ -3657,7 +3746,7 @@ bool UIManager::hasEntityClipboard() const
     return m_entityClipboard.valid;
 }
 
-// ── Prefab / Entity Templates ──────────────────────────────────────────────
+// â”€â”€ Prefab / Entity Templates â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 static json prefabSerializeFloat3(const float v[3])
 {
@@ -4210,7 +4299,7 @@ bool UIManager::spawnBuiltinTemplate(const std::string& templateName, const Vec3
         pe.colorEndR = 1.0f; pe.colorEndG = 0.2f; pe.colorEndB = 0.0f; pe.colorEndA = 0.0f;
         ecs.addComponent<ECS::ParticleEmitterComponent>(newEntity, pe);
     }
-    // else: "Empty Entity" – just Transform + Name, already added above
+    // else: "Empty Entity" â€“ just Transform + Name, already added above
 
     if (level) level->onEntityAdded(newEntity);
 
@@ -4324,13 +4413,13 @@ bool UIManager::autoFitColliderForEntity(ECS::Entity entity)
     collision.colliderOffset[1] = centerY;
     collision.colliderOffset[2] = centerZ;
 
-    // Nearly cubic → Sphere if all dimensions similar, else Box
+    // Nearly cubic â†’ Sphere if all dimensions similar, else Box
     const float midHalf = halfX + halfY + halfZ - maxHalf - minHalf;
     const float sphereRatio = (minHalf > 0.001f) ? (maxHalf / minHalf) : 10.0f;
 
     if (sphereRatio < 1.4f)
     {
-        // Approximately cube-like → Sphere
+        // Approximately cube-like â†’ Sphere
         collision.colliderType = ECS::CollisionComponent::ColliderType::Sphere;
         collision.colliderSize[0] = maxHalf; // radius
         collision.colliderSize[1] = 0.0f;
@@ -4338,7 +4427,7 @@ bool UIManager::autoFitColliderForEntity(ECS::Entity entity)
     }
     else if (aspectRatio > 2.5f && halfY > halfX && halfY > halfZ)
     {
-        // Tall and thin → Capsule (vertical)
+        // Tall and thin â†’ Capsule (vertical)
         collision.colliderType = ECS::CollisionComponent::ColliderType::Capsule;
         collision.colliderSize[0] = std::max(halfX, halfZ); // radius
         collision.colliderSize[1] = halfY;                   // half-height
@@ -4346,7 +4435,7 @@ bool UIManager::autoFitColliderForEntity(ECS::Entity entity)
     }
     else
     {
-        // Default → Box
+        // Default â†’ Box
         collision.colliderType = ECS::CollisionComponent::ColliderType::Box;
         collision.colliderSize[0] = halfX;
         collision.colliderSize[1] = halfY;
@@ -4363,7 +4452,7 @@ bool UIManager::autoFitColliderForEntity(ECS::Entity entity)
 }
 
 // ---------------------------------------------------------------------------
-// computeEntityBottomOffset – distance from entity pivot to bottom of mesh
+// computeEntityBottomOffset â€“ distance from entity pivot to bottom of mesh
 // ---------------------------------------------------------------------------
 float UIManager::computeEntityBottomOffset(ECS::Entity entity) const
 {
@@ -4415,7 +4504,7 @@ float UIManager::computeEntityBottomOffset(ECS::Entity entity) const
 }
 
 // ---------------------------------------------------------------------------
-// dropSelectedEntitiesToSurface – raycast each selected entity downward and
+// dropSelectedEntitiesToSurface â€“ raycast each selected entity downward and
 // place it on the first hit surface.
 // ---------------------------------------------------------------------------
 void UIManager::dropSelectedEntitiesToSurface(const RaycastDownFn& raycastDown)
@@ -4616,7 +4705,7 @@ void UIManager::createNewLevelWithTemplate(SceneTemplate tmpl, const std::string
         addMesh(fill, lightMesh, wallMat);
         addLight(fill, ECS::LightComponent::LightType::Point, 0.6f, 0.7f, 1.0f, 0.5f, 15.0f, 0.0f);
 
-        // Skybox — try the first available skybox asset
+        // Skybox â€” try the first available skybox asset
         {
             const auto& registry = AssetManager::Instance().getAssetRegistry();
             for (const auto& entry : registry)
@@ -4688,7 +4777,7 @@ void UIManager::createNewLevelWithTemplate(SceneTemplate tmpl, const std::string
     refreshContentBrowser();
 
     const char* templateNames[] = { "Empty", "Basic Outdoor", "Prototype" };
-    showToastMessage("Created level '" + levelName + "' (" + templateNames[static_cast<int>(tmpl)] + ") – unsaved", 3.0f);
+    showToastMessage("Created level '" + levelName + "' (" + templateNames[static_cast<int>(tmpl)] + ") â€“ unsaved", 3.0f);
     logger.log(Logger::Category::UI, "Created new level: " + levelName + " with template " + templateNames[static_cast<int>(tmpl)], Logger::LogLevel::INFO);
 }
 
@@ -4791,7 +4880,7 @@ static WidgetElement makeTreeRow(const std::string& id,
     const float iconPad  = 0.1f;                                     // 10% vertical padding
     const float iconSize = rowHeight * (1.0f - 2.0f * iconPad);      // square icon in pixels
 
-    // Icon child (left side, square â€” pixel-sized so it stays 1:1 regardless of button width)
+    // Icon child (left side, square Ã¢â‚¬â€ pixel-sized so it stays 1:1 regardless of button width)
     if (!iconPath.empty())
     {
         WidgetElement icon{};
@@ -4917,6 +5006,47 @@ static WidgetElement makeGridTile(const std::string& id,
     }
 
     return tile;
+}
+
+// ---------------------------------------------------------------------------
+// buildReferencedAssetSet – fast ECS-based scan
+// ---------------------------------------------------------------------------
+std::unordered_set<std::string> UIManager::buildReferencedAssetSet() const
+{
+    std::unordered_set<std::string> refs;
+    auto& ecs = ECS::ECSManager::Instance();
+
+    {
+        ECS::Schema schema;
+        schema.require<ECS::MeshComponent>();
+        for (const auto e : ecs.getEntitiesMatchingSchema(schema))
+        {
+            const auto* mesh = ecs.getComponent<ECS::MeshComponent>(e);
+            if (mesh && !mesh->meshAssetPath.empty())
+                refs.insert(mesh->meshAssetPath);
+        }
+    }
+    {
+        ECS::Schema schema;
+        schema.require<ECS::MaterialComponent>();
+        for (const auto e : ecs.getEntitiesMatchingSchema(schema))
+        {
+            const auto* mat = ecs.getComponent<ECS::MaterialComponent>(e);
+            if (mat && !mat->materialAssetPath.empty())
+                refs.insert(mat->materialAssetPath);
+        }
+    }
+    {
+        ECS::Schema schema;
+        schema.require<ECS::ScriptComponent>();
+        for (const auto e : ecs.getEntitiesMatchingSchema(schema))
+        {
+            const auto* sc = ecs.getComponent<ECS::ScriptComponent>(e);
+            if (sc && !sc->scriptPath.empty())
+                refs.insert(sc->scriptPath);
+        }
+    }
+    return refs;
 }
 
 void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>& widget)
@@ -5313,6 +5443,88 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
             pathBar->children.push_back(std::move(renameBtn));
         }
 
+        // "Refs" button – Find References (enabled only when a grid asset is selected)
+        {
+            const auto& theme = EditorTheme::Get();
+            WidgetElement refsBtn = EditorUIBuilder::makeButton(
+                "ContentBrowser.PathBar.Refs", "Refs", {}, EditorTheme::Scaled(Vec2{ 42.0f, theme.rowHeightSmall }));
+            refsBtn.fillX = false;
+            refsBtn.tooltipText = "Find References – who uses this asset?";
+            if (!m_selectedGridAsset.empty())
+            {
+                refsBtn.style.color = Vec4{ theme.accent.x, theme.accent.y, theme.accent.z, 0.5f };
+                refsBtn.style.hoverColor = Vec4{ theme.accent.x, theme.accent.y, theme.accent.z, 0.7f };
+                refsBtn.style.textColor = theme.textPrimary;
+                refsBtn.onClicked = [this]()
+                {
+                    if (m_selectedGridAsset.empty()) return;
+                    const auto refs = AssetManager::Instance().findReferencesTo(m_selectedGridAsset);
+                    std::string msg = "References to:\n  " + m_selectedGridAsset + "\n\n";
+                    if (refs.empty())
+                    {
+                        msg += "No references found.\nThis asset is not used by any other asset or entity.";
+                    }
+                    else
+                    {
+                        msg += std::to_string(refs.size()) + " reference(s) found:\n\n";
+                        for (const auto& r : refs)
+                        {
+                            msg += "  [" + r.sourceType + "]  " + r.sourcePath + "\n";
+                        }
+                    }
+                    showModalMessage(msg);
+                };
+            }
+            else
+            {
+                refsBtn.style.color = Vec4{ theme.buttonDefault.x, theme.buttonDefault.y, theme.buttonDefault.z, 0.4f };
+                refsBtn.style.hoverColor = Vec4{ theme.buttonDefault.x, theme.buttonDefault.y, theme.buttonDefault.z, 0.4f };
+                refsBtn.style.textColor = theme.textMuted;
+            }
+            pathBar->children.push_back(std::move(refsBtn));
+        }
+
+        // "Deps" button – Show Dependencies (enabled only when a grid asset is selected)
+        {
+            const auto& theme = EditorTheme::Get();
+            WidgetElement depsBtn = EditorUIBuilder::makeButton(
+                "ContentBrowser.PathBar.Deps", "Deps", {}, EditorTheme::Scaled(Vec2{ 46.0f, theme.rowHeightSmall }));
+            depsBtn.fillX = false;
+            depsBtn.tooltipText = "Show Dependencies – what does this asset use?";
+            if (!m_selectedGridAsset.empty())
+            {
+                depsBtn.style.color = Vec4{ theme.accent.x, theme.accent.y, theme.accent.z, 0.5f };
+                depsBtn.style.hoverColor = Vec4{ theme.accent.x, theme.accent.y, theme.accent.z, 0.7f };
+                depsBtn.style.textColor = theme.textPrimary;
+                depsBtn.onClicked = [this]()
+                {
+                    if (m_selectedGridAsset.empty()) return;
+                    const auto deps = AssetManager::Instance().getAssetDependencies(m_selectedGridAsset);
+                    std::string msg = "Dependencies of:\n  " + m_selectedGridAsset + "\n\n";
+                    if (deps.empty())
+                    {
+                        msg += "No dependencies found.\nThis asset does not reference any other assets.";
+                    }
+                    else
+                    {
+                        msg += std::to_string(deps.size()) + " dependency(ies):\n\n";
+                        for (const auto& dep : deps)
+                        {
+                            msg += "  " + dep + "\n";
+                        }
+                    }
+                    showModalMessage(msg);
+                };
+            }
+            else
+            {
+                depsBtn.style.color = Vec4{ theme.buttonDefault.x, theme.buttonDefault.y, theme.buttonDefault.z, 0.4f };
+                depsBtn.style.hoverColor = Vec4{ theme.buttonDefault.x, theme.buttonDefault.y, theme.buttonDefault.z, 0.4f };
+                depsBtn.style.textColor = theme.textMuted;
+            }
+            pathBar->children.push_back(std::move(depsBtn));
+        }
+
         // Breadcrumb segments: Content > Folder > SubFolder > ...
         std::vector<std::pair<std::string, std::string>> crumbs; // (label, path)
         crumbs.push_back({ "Content", "" });
@@ -5387,7 +5599,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
             pathBar->children.push_back(std::move(crumbBtn));
         }
 
-        // ── "+ Entity" template dropdown ────────────────────────────
+        // â”€â”€ "+ Entity" template dropdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         {
             const auto& theme = EditorTheme::Get();
             WidgetElement addBtn{};
@@ -5447,7 +5659,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
             pathBar->children.push_back(std::move(addBtn));
         }
 
-        // ── Spacer to push search to the right ──────────────────────
+        // â”€â”€ Spacer to push search to the right â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         {
             WidgetElement spacer{};
             spacer.type        = WidgetElementType::Panel;
@@ -5458,7 +5670,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
             pathBar->children.push_back(std::move(spacer));
         }
 
-        // ── Type filter buttons ──────────────────────────────────────
+        // â”€â”€ Type filter buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         {
             const auto& theme = EditorTheme::Get();
             struct FilterDef { const char* label; AssetType type; };
@@ -5503,7 +5715,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
             }
         }
 
-        // ── Search entry bar ─────────────────────────────────────────
+        // â”€â”€ Search entry bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         {
             WidgetElement search = EditorUIBuilder::makeEntryBar(
                 "ContentBrowser.Search", m_browserSearchText,
@@ -5524,6 +5736,9 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
     {
         gridPanel->children.clear();
         gridPanel->scrollable = true;
+
+        // Build set of all asset paths referenced by ECS entities (for unreferenced indicator)
+        const auto referencedAssets = buildReferencedAssetSet();
 
         const std::string& gridFolder = m_selectedBrowserFolder;
 
@@ -5577,7 +5792,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
         }
         else if (isSearchMode)
         {
-            // ── Search mode: flat list of ALL matching assets across all folders ──
+            // â”€â”€ Search mode: flat list of ALL matching assets across all folders â”€â”€
             struct GridAssetItem { std::string name; std::string relPath; AssetType type; };
             std::vector<GridAssetItem> gridAssets;
             for (const auto& e : registry)
@@ -5618,6 +5833,26 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
 
                 if (relPath == m_selectedGridAsset)
                     tile.style.color = EditorTheme::Get().cbTileSelected;
+
+                // Unreferenced asset indicator
+                if (referencedAssets.count(relPath) == 0 &&
+                    item.type != AssetType::Level && item.type != AssetType::Shader &&
+                    item.type != AssetType::Unknown)
+                {
+                    WidgetElement badge{};
+                    badge.id = tile.id + ".Unref";
+                    badge.type = WidgetElementType::Text;
+                    badge.text = "\xe2\x97\x8f";  // Unicode bullet
+                    badge.font = EditorTheme::Get().fontDefault;
+                    badge.fontSize = EditorTheme::Get().fontSizeSmall;
+                    badge.textAlignH = TextAlignH::Right;
+                    badge.textAlignV = TextAlignV::Top;
+                    badge.style.textColor = EditorTheme::Get().textMuted;
+                    badge.from = Vec2{ 0.75f, 0.0f };
+                    badge.to   = Vec2{ 1.0f, 0.15f };
+                    badge.runtimeOnly = true;
+                    tile.children.push_back(std::move(badge));
+                }
 
                 tile.isDraggable = true;
                 tile.dragPayload = std::to_string(static_cast<int>(item.type)) + "|" + relPath;
@@ -5764,6 +5999,26 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
             if (relPath == m_selectedGridAsset)
             {
                 tile.style.color = EditorTheme::Get().cbTileSelected;
+            }
+
+            // Unreferenced asset indicator
+            if (referencedAssets.count(relPath) == 0 &&
+                item.type != AssetType::Level && item.type != AssetType::Shader &&
+                item.type != AssetType::Unknown)
+            {
+                WidgetElement badge{};
+                badge.id = tile.id + ".Unref";
+                badge.type = WidgetElementType::Text;
+                badge.text = "\xe2\x97\x8f";  // Unicode bullet
+                badge.font = EditorTheme::Get().fontDefault;
+                badge.fontSize = EditorTheme::Get().fontSizeSmall;
+                badge.textAlignH = TextAlignH::Right;
+                badge.textAlignV = TextAlignV::Top;
+                badge.style.textColor = EditorTheme::Get().textMuted;
+                badge.from = Vec2{ 0.75f, 0.0f };
+                badge.to   = Vec2{ 1.0f, 0.15f };
+                badge.runtimeOnly = true;
+                tile.children.push_back(std::move(badge));
             }
 
             // Inline rename: replace the label child with an EntryBar
@@ -6364,7 +6619,7 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
         }
     }
 
-    // Check if this element is draggable â€” set up pending drag
+    // Check if this element is draggable Ã¢â‚¬â€ set up pending drag
     if (target && target->isDraggable && !target->dragPayload.empty())
     {
         m_dragPending = true;
@@ -6417,7 +6672,7 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
     {
         const std::string separatorId = target->id.substr(separatorPrefix.size());
         const std::string contentId = "Separator.Content." + separatorId;
-        // UTF-8: â–¾ = \xe2\x96\xbe, â–¸ = \xe2\x96\xb8
+        // UTF-8: Ã¢â€“Â¾ = \xe2\x96\xbe, Ã¢â€“Â¸ = \xe2\x96\xb8
         const std::string expandedPrefix = std::string("\xe2\x96\xbe") + "  ";
         const std::string collapsedPrefix = std::string("\xe2\x96\xb8") + "  ";
         for (auto& entry : m_widgets)
@@ -6574,7 +6829,7 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
         }
         markAllWidgetsDirty();
     }
-    // Copy target data before callbacks â€” onClicked/onDoubleClicked may rebuild
+    // Copy target data before callbacks Ã¢â‚¬â€ onClicked/onDoubleClicked may rebuild
     // the widget tree (e.g. refreshContentBrowser), invalidating the target pointer.
     const std::string targetId = target->id;
     const std::string targetClickEvent = target->clickEvent;
@@ -6582,7 +6837,7 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
     const auto targetOnDoubleClicked = target->onDoubleClicked;
     const bool targetIsDraggable = target->isDraggable;
 
-    // Suppress click for draggable elements â€” click will fire on mouse-up if no drag occurred
+    // Suppress click for draggable elements Ã¢â‚¬â€ click will fire on mouse-up if no drag occurred
     if (!targetIsDraggable)
     {
         if (targetOnClicked)
@@ -6653,6 +6908,41 @@ bool UIManager::handleKeyDown(int key)
             return true;
     }
 
+    // ── Escape: close dropdowns → modals → unfocus entry → cancel rename ──
+    if (key == SDLK_ESCAPE)
+    {
+        if (m_dropdownVisible)
+        {
+            closeDropdownMenu();
+            return true;
+        }
+        if (m_modalVisible)
+        {
+            closeModalMessage();
+            return true;
+        }
+        if (m_focusedEntry)
+        {
+            setFocusedEntry(nullptr);
+            if (m_renamingGridAsset)
+            {
+                m_renamingGridAsset = false;
+                m_renameOriginalPath.clear();
+                refreshContentBrowser();
+            }
+            return true;
+        }
+        return false;
+    }
+
+    // ── Tab / Shift+Tab: cycle focus through EntryBar elements ────────────
+    if (key == SDLK_TAB)
+    {
+        const bool reverse = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
+        cycleFocusedEntry(reverse);
+        return true;
+    }
+
     // F2: trigger inline rename on selected Content Browser asset
     if (key == SDLK_F2)
     {
@@ -6664,6 +6954,32 @@ bool UIManager::handleKeyDown(int key)
             return true;
         }
         return false;
+    }
+
+    // ── Arrow keys: navigate Outliner entity list ─────────────────────────
+    if ((key == SDLK_UP || key == SDLK_DOWN) && !m_focusedEntry)
+    {
+        // Only navigate if Outliner is the relevant context (entity is selected or exists)
+        if (m_outlinerSelectedEntity != 0 || m_outlinerLevel)
+        {
+            navigateOutlinerByArrow(key == SDLK_UP ? -1 : 1);
+            return true;
+        }
+    }
+
+    // ── Arrow keys: navigate Content Browser grid ─────────────────────────
+    if (!m_focusedEntry && !m_selectedGridAsset.empty())
+    {
+        int dCol = 0, dRow = 0;
+        if (key == SDLK_LEFT)  dCol = -1;
+        if (key == SDLK_RIGHT) dCol =  1;
+        if (key == SDLK_UP)    dRow = -1;
+        if (key == SDLK_DOWN)  dRow =  1;
+        if (dCol != 0 || dRow != 0)
+        {
+            navigateContentBrowserByArrow(dCol, dRow);
+            return true;
+        }
     }
 
     if (!m_focusedEntry)
@@ -6685,17 +7001,6 @@ bool UIManager::handleKeyDown(int key)
         if (m_focusedEntry->onValueChanged)
         {
             m_focusedEntry->onValueChanged(m_focusedEntry->value);
-        }
-        return true;
-    }
-    if (key == SDLK_ESCAPE)
-    {
-        setFocusedEntry(nullptr);
-        if (m_renamingGridAsset)
-        {
-            m_renamingGridAsset = false;
-            m_renameOriginalPath.clear();
-            refreshContentBrowser();
         }
         return true;
     }
@@ -6798,7 +7103,7 @@ bool UIManager::handleScroll(const Vec2& screenPos, float delta)
         }
     }
 
-    // Widget editor canvas zoom â€” only if no scrollable widget claimed the event
+    // Widget editor canvas zoom Ã¢â‚¬â€ only if no scrollable widget claimed the event
     if (auto* weState = getActiveWidgetEditorState())
     {
         if (isOverWidgetEditorCanvas(screenPos))
@@ -6921,7 +7226,7 @@ bool UIManager::handleMouseUp(const Vec2& screenPos, int button)
         return false;
     }
 
-    // We are dropping â€” figure out where
+    // We are dropping Ã¢â‚¬â€ figure out where
     const std::string payload = m_dragPayload;
     const std::string sourceId = m_dragSourceId;
     cancelDrag();
@@ -7002,7 +7307,7 @@ bool UIManager::handleMouseUp(const Vec2& screenPos, int button)
             }
             return true;
         }
-        // Drop on Outliner entity row â†’ apply asset to entity
+        // Drop on Outliner entity row Ã¢â€ â€™ apply asset to entity
         if (dropTarget->id.rfind(outlinerPrefix, 0) == 0)
         {
             const char* start = dropTarget->id.c_str() + outlinerPrefix.size();
@@ -7090,6 +7395,169 @@ void UIManager::setFocusedEntry(WidgetElement* element)
     }
 
     markAllWidgetsDirty();
+}
+
+void UIManager::collectFocusableEntries(WidgetElement& element, std::vector<WidgetElement*>& out)
+{
+    if (element.type == WidgetElementType::EntryBar && !element.id.empty())
+    {
+        out.push_back(&element);
+    }
+    for (auto& child : element.children)
+    {
+        collectFocusableEntries(child, out);
+    }
+}
+
+void UIManager::cycleFocusedEntry(bool reverse)
+{
+    // Collect all visible EntryBar elements across active widgets
+    std::vector<WidgetElement*> entries;
+    for (auto& we : m_widgets)
+    {
+        if (!we.widget)
+            continue;
+        // Only include widgets visible for the active tab
+        if (!we.tabId.empty() && we.tabId != m_activeTabId)
+            continue;
+        for (auto& el : we.widget->getElementsMutable())
+        {
+            collectFocusableEntries(el, entries);
+        }
+    }
+    if (entries.empty())
+        return;
+
+    // Find current focused index
+    int currentIdx = -1;
+    for (int i = 0; i < static_cast<int>(entries.size()); ++i)
+    {
+        if (entries[i] == m_focusedEntry)
+        {
+            currentIdx = i;
+            break;
+        }
+    }
+
+    int nextIdx;
+    if (currentIdx < 0)
+    {
+        nextIdx = reverse ? static_cast<int>(entries.size()) - 1 : 0;
+    }
+    else
+    {
+        nextIdx = reverse ? currentIdx - 1 : currentIdx + 1;
+        if (nextIdx < 0) nextIdx = static_cast<int>(entries.size()) - 1;
+        if (nextIdx >= static_cast<int>(entries.size())) nextIdx = 0;
+    }
+    setFocusedEntry(entries[nextIdx]);
+}
+
+void UIManager::navigateOutlinerByArrow(int direction)
+{
+    auto& ecs = ECS::ECSManager::Instance();
+    ECS::Schema schema;
+    const auto entities = ecs.getEntitiesMatchingSchema(schema);
+    if (entities.empty())
+        return;
+
+    // Find current selection index
+    int currentIdx = -1;
+    for (int i = 0; i < static_cast<int>(entities.size()); ++i)
+    {
+        if (entities[i] == m_outlinerSelectedEntity)
+        {
+            currentIdx = i;
+            break;
+        }
+    }
+
+    int nextIdx;
+    if (currentIdx < 0)
+    {
+        nextIdx = (direction > 0) ? 0 : static_cast<int>(entities.size()) - 1;
+    }
+    else
+    {
+        nextIdx = currentIdx + direction;
+        if (nextIdx < 0) nextIdx = static_cast<int>(entities.size()) - 1;
+        if (nextIdx >= static_cast<int>(entities.size())) nextIdx = 0;
+    }
+
+    m_outlinerSelectedEntity = entities[nextIdx];
+    populateOutlinerDetails(m_outlinerSelectedEntity);
+}
+
+void UIManager::navigateContentBrowserByArrow(int dCol, int dRow)
+{
+    // Collect grid tile IDs (relPaths) from active Content Browser widget
+    std::vector<std::string> tilePaths;
+    const std::string tilePrefix = "ContentBrowser.GridAsset.";
+    for (auto& we : m_widgets)
+    {
+        if (!we.widget)
+            continue;
+        if (!we.tabId.empty() && we.tabId != m_activeTabId)
+            continue;
+        const std::function<void(WidgetElement&)> collect = [&](WidgetElement& el)
+        {
+            if (el.id.rfind(tilePrefix, 0) == 0)
+            {
+                tilePaths.push_back(el.id.substr(tilePrefix.size()));
+            }
+            for (auto& child : el.children)
+            {
+                collect(child);
+            }
+        };
+        for (auto& el : we.widget->getElementsMutable())
+        {
+            collect(el);
+        }
+    }
+    if (tilePaths.empty())
+        return;
+
+    // Find current selection index
+    int currentIdx = -1;
+    for (int i = 0; i < static_cast<int>(tilePaths.size()); ++i)
+    {
+        if (tilePaths[i] == m_selectedGridAsset)
+        {
+            currentIdx = i;
+            break;
+        }
+    }
+    if (currentIdx < 0)
+    {
+        m_selectedGridAsset = tilePaths[0];
+        refreshContentBrowser();
+        return;
+    }
+
+    // Estimate columns per row from the grid (default 4, but could vary)
+    int cols = 4;
+    // Try to find the WrapPanel that holds grid tiles and check its column count
+    if (auto* grid = findElementById("ContentBrowser.Grid"))
+    {
+        if (grid->columns > 0)
+            cols = grid->columns;
+        else if (grid->computedSizePixels.x > 0.0f)
+        {
+            // Estimate from tile width (~100px default)
+            const float tileW = EditorTheme::Scaled(100.0f);
+            if (tileW > 0.0f)
+                cols = std::max(1, static_cast<int>(grid->computedSizePixels.x / tileW));
+        }
+    }
+
+    int newIdx = currentIdx + dCol + dRow * cols;
+    newIdx = std::clamp(newIdx, 0, static_cast<int>(tilePaths.size()) - 1);
+    if (newIdx != currentIdx)
+    {
+        m_selectedGridAsset = tilePaths[newIdx];
+        refreshContentBrowser();
+    }
 }
 
 void UIManager::markAllWidgetsDirty()
@@ -7191,7 +7659,7 @@ void UIManager::rebuildEditorUIForDpi(float newDpi)
 
 void UIManager::applyThemeToAllEditorWidgets()
 {
-    // Close any open dropdown – its Panel/Button elements would receive
+    // Close any open dropdown â€“ its Panel/Button elements would receive
     // generic panelBackground/buttonDefault colors instead of the
     // dropdown-specific ones.  Next open will pick up the new theme.
     closeDropdownMenu();
@@ -7467,17 +7935,17 @@ void UIManager::updateHoverStates()
 
     m_lastHoveredElement = (newHovered && newHovered->hitTestMode == HitTestMode::Enabled) ? newHovered : nullptr;
 
-    // ── Tooltip tracking ─────────────────────────────────────────────────
+    // â”€â”€ Tooltip tracking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (m_lastHoveredElement && !m_lastHoveredElement->tooltipText.empty())
     {
-        // Same element still hovered — accumulate time (caller must pass dt)
+        // Same element still hovered â€” accumulate time (caller must pass dt)
         if (!m_tooltipVisible && m_tooltipText == m_lastHoveredElement->tooltipText)
         {
             // Timer is advanced externally in updateTooltip(dt)
         }
         else if (m_tooltipText != m_lastHoveredElement->tooltipText)
         {
-            // Switched to a new tooltip element — reset timer
+            // Switched to a new tooltip element â€” reset timer
             m_tooltipTimer = 0.0f;
             m_tooltipVisible = false;
             m_tooltipText = m_lastHoveredElement->tooltipText;
@@ -7487,7 +7955,7 @@ void UIManager::updateHoverStates()
     }
     else
     {
-        // No tooltip element hovered — hide immediately
+        // No tooltip element hovered â€” hide immediately
         if (m_tooltipVisible || !m_tooltipText.empty())
         {
             m_tooltipVisible = false;
@@ -7539,7 +8007,7 @@ void UIManager::updateHoverTransitions(float deltaSeconds)
     }
 }
 
-// ── Scrollbar auto-hide (Phase 1.6) ─────────────────────────────────────
+// â”€â”€ Scrollbar auto-hide (Phase 1.6) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 void UIManager::updateScrollbarVisibilityRecursive(WidgetElement& element, float deltaSeconds)
 {
@@ -8422,7 +8890,7 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
     widget->setName("DropdownMenu");
     widget->setSizePixels(Vec2{ menuW, menuH });
 
-    // ── Clamp position so the menu stays on screen ───────────────────────
+    // â”€â”€ Clamp position so the menu stays on screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     float posX = anchorPixels.x;
     float posY = anchorPixels.y;
     const float screenW = m_availableViewportSize.x;
@@ -8433,7 +8901,7 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
     {
         posY = posY - menuH;
     }
-    // Still overflows bottom (and can't flip) – clamp to bottom edge
+    // Still overflows bottom (and can't flip) â€“ clamp to bottom edge
     if (posY + menuH > screenH)
     {
         posY = screenH - menuH;
@@ -8511,7 +8979,7 @@ void UIManager::showDropdownMenu(const Vec2& anchorPixels, const std::vector<Dro
         }
         else
         {
-            // Placeholder item with no callback â€” just close the menu
+            // Placeholder item with no callback Ã¢â‚¬â€ just close the menu
             item.style.textColor = theme.textMuted;
             item.style.hoverColor = item.style.color;
             item.onClicked = [this]()
@@ -9441,7 +9909,7 @@ void UIManager::deleteSelectedWidgetEditorElement(const std::string& tabId)
 }
 
 // ---------------------------------------------------------------------------
-// Widget Editor: public entry point â€“ delete selected element if in editor tab
+// Widget Editor: public entry point Ã¢â‚¬â€œ delete selected element if in editor tab
 // ---------------------------------------------------------------------------
 bool UIManager::tryDeleteWidgetEditorElement()
 {
@@ -9582,7 +10050,7 @@ bool UIManager::selectWidgetEditorElementAtPos(const Vec2& screenPos)
             // (skip subtrees that can't contain the click).
             const bool insideSelf = pointInElement(el);
 
-            // Recurse into children â€“ a matching child takes priority over
+            // Recurse into children Ã¢â‚¬â€œ a matching child takes priority over
             // the parent so we check children first.
             if (!el.children.empty())
             {
@@ -9741,7 +10209,7 @@ void UIManager::handleMouseMotionForPan(const Vec2& screenPos)
 }
 
 // ---------------------------------------------------------------------------
-// General mouse motion – handles slider drag and other continuous interactions
+// General mouse motion â€“ handles slider drag and other continuous interactions
 // ---------------------------------------------------------------------------
 void UIManager::handleMouseMotion(const Vec2& screenPos)
 {
@@ -10758,7 +11226,7 @@ void UIManager::openMaterialEditorPopup(const std::string& materialAssetPath)
 
     if (!popup->uiManager().getRegisteredWidgets().empty()) return;
 
-    // ── Collect material assets from the registry ─────────────────────────
+    // â”€â”€ Collect material assets from the registry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     auto& assetMgr = AssetManager::Instance();
     const auto& registry = assetMgr.getAssetRegistry();
 
@@ -10785,7 +11253,7 @@ void UIManager::openMaterialEditorPopup(const std::string& materialAssetPath)
         return;
     }
 
-    // ── Shared form state ─────────────────────────────────────────────────
+    // â”€â”€ Shared form state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     struct MaterialFormState
     {
         int selectedIndex{ 0 };
@@ -10802,7 +11270,7 @@ void UIManager::openMaterialEditorPopup(const std::string& materialAssetPath)
     auto state = std::make_shared<MaterialFormState>();
     state->selectedIndex = initialSelection;
 
-    // ── Helper: load values from the selected asset ───────────────────────
+    // â”€â”€ Helper: load values from the selected asset â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     auto loadFromAsset = [matEntries](MaterialFormState& s)
     {
         if (s.selectedIndex < 0 || s.selectedIndex >= static_cast<int>(matEntries.size()))
@@ -10850,7 +11318,7 @@ void UIManager::openMaterialEditorPopup(const std::string& materialAssetPath)
 
     loadFromAsset(*state);
 
-    // ── Build UI ──────────────────────────────────────────────────────────
+    // â”€â”€ Build UI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     constexpr float W = 480.0f;
     constexpr float H = 560.0f;
     auto nx = [&](float px) { return px / W; };
@@ -10893,7 +11361,7 @@ void UIManager::openMaterialEditorPopup(const std::string& materialAssetPath)
         elements.push_back(titleText);
     }
 
-    // ── Content area (vertical StackPanel) ────────────────────────────────
+    // â”€â”€ Content area (vertical StackPanel) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     WidgetElement contentStack;
     contentStack.type        = WidgetElementType::StackPanel;
     contentStack.id          = "ME.ContentArea";
@@ -10947,7 +11415,7 @@ void UIManager::openMaterialEditorPopup(const std::string& materialAssetPath)
 
     contentStack.children.push_back(EditorUIBuilder::makeDivider());
 
-    // ── PBR Section ───────────────────────────────────────────────────────
+    // â”€â”€ PBR Section â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         auto pbrCheck = EditorUIBuilder::makeCheckBox("ME.PBR", "PBR Enabled",
             state->pbrEnabled, [state](bool checked) { state->pbrEnabled = checked; });
@@ -10977,7 +11445,7 @@ void UIManager::openMaterialEditorPopup(const std::string& materialAssetPath)
 
     contentStack.children.push_back(EditorUIBuilder::makeDivider());
 
-    // ── Texture Slots ─────────────────────────────────────────────────────
+    // â”€â”€ Texture Slots â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         auto row = EditorUIBuilder::makeStringRow("ME.TexDiffuse", "Diffuse",
             state->texDiffuse, [state](const std::string& v) { state->texDiffuse = v; });
@@ -11006,7 +11474,7 @@ void UIManager::openMaterialEditorPopup(const std::string& materialAssetPath)
 
     elements.push_back(std::move(contentStack));
 
-    // ── Buttons: Save & Close ─────────────────────────────────────────────
+    // â”€â”€ Buttons: Save & Close â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const float btnY0 = H - 48.0f;
     const float btnY1 = btnY0 + 34.0f;
 
@@ -11584,7 +12052,7 @@ void UIManager::openEngineSettingsPopup()
         {
             auto& diag = DiagnosticsManager::Instance();
 
-            // â”€â”€ Backend selector â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // Ã¢â€â‚¬Ã¢â€â‚¬ Backend selector Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
             addSectionLabel("ES.C.Sec.Backend", "Backend");
             {
                 std::vector<std::string> backendItems;
@@ -11819,9 +12287,9 @@ void UIManager::openEngineSettingsPopup()
     rebuildContent();
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // Editor Settings Popup (font size, theme tuning)
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 void UIManager::openEditorSettingsPopup()
 {
     if (!m_renderer)
@@ -11980,7 +12448,7 @@ void UIManager::openEditorSettingsPopup()
             content.children.push_back(spacer);
         }
 
-        // ── Section: UI Scale ──
+        // â”€â”€ Section: UI Scale â”€â”€
         {
             WidgetElement secLabel;
             secLabel.type      = WidgetElementType::Text;
@@ -12058,7 +12526,7 @@ void UIManager::openEditorSettingsPopup()
                 if (idx < 0 || idx >= static_cast<int>(scaleItems.size())) return;
 
                 float newScale = 1.0f;
-                if (idx == 0) // Auto — detect from primary monitor
+                if (idx == 0) // Auto â€” detect from primary monitor
                 {
                     DiagnosticsManager::Instance().setState("UIScale", "");
                     const auto& hwInfo = DiagnosticsManager::Instance().getHardwareInfo();
@@ -12092,7 +12560,7 @@ void UIManager::openEditorSettingsPopup()
         }
 
 
-        // â”€â”€ Section: Font Sizes â”€â”€
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Section: Font Sizes Ã¢â€â‚¬Ã¢â€â‚¬
         {
             WidgetElement secLabel;
             secLabel.type      = WidgetElementType::Text;
@@ -12177,7 +12645,7 @@ void UIManager::openEditorSettingsPopup()
             content.children.push_back(row);
         }
 
-        // â”€â”€ Section: Spacing â”€â”€
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Section: Spacing Ã¢â€â‚¬Ã¢â€â‚¬
         {
             WidgetElement spacer;
             spacer.type    = WidgetElementType::Panel;
@@ -12268,7 +12736,7 @@ void UIManager::openEditorSettingsPopup()
             content.children.push_back(row);
         }
 
-        // ── Section: Keyboard Shortcuts ──
+        // â”€â”€ Section: Keyboard Shortcuts â”€â”€
         {
             WidgetElement spacer;
             spacer.type    = WidgetElementType::Panel;
@@ -12352,7 +12820,7 @@ void UIManager::openEditorSettingsPopup()
                 lbl.minSize   = Vec2{ kLabelW, kRowH };
                 row.children.push_back(lbl);
 
-                // Keybind button – click to start capture, next key press rebinds
+                // Keybind button â€“ click to start capture, next key press rebinds
                 WidgetElement btn;
                 btn.type          = WidgetElementType::Button;
                 btn.id            = rowId + ".Btn";
@@ -12418,7 +12886,7 @@ void UIManager::openEditorSettingsPopup()
                         ShortcutManager::KeyCombo newCombo{ sdlKey, mods };
                         auto& sm = ShortcutManager::Instance();
 
-                        // Check for Escape — cancel capture
+                        // Check for Escape â€” cancel capture
                         if (sdlKey == SDLK_ESCAPE && mods == 0)
                         {
                             captureState->capturingId.clear();
@@ -13091,9 +13559,9 @@ void UIManager::endProgress(ProgressBarHandle handle)
     }
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // Project Selection Screen
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 void UIManager::openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)> onProjectChosen)
 {
     if (!m_renderer)
@@ -13141,7 +13609,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
 
     std::vector<WidgetElement> elements;
 
-    // â”€â”€ Background â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Background Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     {
         WidgetElement bg;
         bg.type  = WidgetElementType::Panel;
@@ -13152,7 +13620,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         elements.push_back(bg);
     }
 
-    // â”€â”€ Title bar (accent stripe) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Title bar (accent stripe) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     {
         WidgetElement titleBg;
         titleBg.type  = WidgetElementType::Panel;
@@ -13174,7 +13642,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         titleText.id        = "PS.TitleText";
         titleText.from      = Vec2{ nx(12.0f), 0.0f };
         titleText.to        = Vec2{ nx(W - 46.0f), ny(kTitleH - 2.0f) };
-        titleText.text      = "HorizonEngine  â€”  Project Selection";
+        titleText.text      = "HorizonEngine  Ã¢â‚¬â€  Project Selection";
         titleText.fontSize  = EditorTheme::Get().fontSizeHeading;
         titleText.style.textColor = EditorTheme::Get().buttonPrimaryText;
         titleText.textAlignV = TextAlignV::Center;
@@ -13205,7 +13673,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         elements.push_back(closeBtn);
     }
 
-    // â”€â”€ Sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Sidebar Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     {
         WidgetElement sidebarBg;
         sidebarBg.type  = WidgetElementType::Panel;
@@ -13224,7 +13692,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         elements.push_back(sep);
     }
 
-    // â”€â”€ Footer background (for checkbox) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Footer background (for checkbox) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     {
         WidgetElement footerSep;
         footerSep.type  = WidgetElementType::Panel;
@@ -13243,7 +13711,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         elements.push_back(footerBg);
     }
 
-    // â”€â”€ "Set as default" checkbox (always visible in footer) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ "Set as default" checkbox (always visible in footer) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     {
         WidgetElement cb;
         cb.type          = WidgetElementType::CheckBox;
@@ -13277,7 +13745,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
     };
     auto rebuildContentPtr = std::make_shared<std::function<void()>>();
 
-    // â”€â”€ Content builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Content builder Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     *rebuildContentPtr = [state, screenMgr, hostWindow, categories, nx, ny, W, H, kSidebarW, kTitleH, kFooterH, renderer, callbackPtr, closeScreen, rebuildContentPtr]()
     {
         auto& pMgr = *screenMgr;
@@ -13398,7 +13866,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
             entry->children.push_back(rowPanel);
         };
 
-        // â”€â”€ Category: Recent Projects â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Category: Recent Projects Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
         if (state->activeCategory == 0)
         {
             addSectionLabel("PS.C.Sec.Recent", "Known Projects");
@@ -13464,7 +13932,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     const std::string rowId = "PS.C.Proj." + std::to_string(i);
                     const bool isEven = (i % 2 == 0);
 
-                    // Outer row container â€“ holds accent bar + content
+                    // Outer row container Ã¢â‚¬â€œ holds accent bar + content
                     WidgetElement row;
                     row.type        = WidgetElementType::StackPanel;
                     row.id          = rowId + ".Row";
@@ -13604,7 +14072,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 }
             }
         }
-        // â”€â”€ Category: Open Project â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Category: Open Project Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
         else if (state->activeCategory == 1)
         {
             addSectionLabel("PS.C.Sec.Open", "Open Existing Project");
@@ -13662,7 +14130,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                     );
                 });
         }
-        // â”€â”€ Category: New Project â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        // Ã¢â€â‚¬Ã¢â€â‚¬ Category: New Project Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
         else if (state->activeCategory == 2)
         {
             addSectionLabel("PS.C.Sec.New", "Create New Project");
@@ -13796,7 +14264,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
                 entry->children.push_back(includeDefaultContentCb);
             }
 
-            // â”€â”€ RHI Type dropdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            // Ã¢â€â‚¬Ã¢â€â‚¬ RHI Type dropdown Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
             {
                 WidgetElement rhiRow;
                 rhiRow.type        = WidgetElementType::StackPanel;
@@ -13907,7 +14375,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         pMgr.markAllWidgetsDirty();
     };
 
-    // â”€â”€ Sidebar category buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Sidebar category buttons Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     for (size_t ci = 0; ci < categories.size(); ++ci)
     {
         const float by0 = kCatBtnY0 + static_cast<float>(ci) * (kCatBtnH + kCatBtnGap);
@@ -13950,7 +14418,7 @@ void UIManager::openProjectScreen(std::function<void(const std::string& projectP
         elements.push_back(catBtn);
     }
 
-    // â”€â”€ Content area (above footer) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Content area (above footer) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     {
         WidgetElement content;
         content.type        = WidgetElementType::StackPanel;
@@ -14665,7 +15133,7 @@ void UIManager::buildTimelineTrackRows(const std::string& tabId, WidgetElement& 
                 WidgetElement delBtn{};
                 delBtn.id = "WE.TL.KFDel." + std::to_string(ti) + "." + std::to_string(ki);
                 delBtn.type = WidgetElementType::Button;
-                delBtn.text = "\xc3\x97"; // Ã— symbol
+                delBtn.text = "\xc3\x97"; // Ãƒâ€” symbol
                 delBtn.font = EditorTheme::Get().fontDefault;
                 delBtn.fontSize = EditorTheme::Get().fontSizeCaption;
                 delBtn.minSize = Vec2{ 18.0f, 18.0f };
@@ -14778,7 +15246,7 @@ void UIManager::buildTimelineRulerAndKeyframes(const std::string& tabId, WidgetE
     const float lanesFrac = 1.0f - rulerFrac;
     const float laneFrac = lanesFrac / static_cast<float>(totalRows);
 
-    // â”€â”€ Ruler background â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Ruler background Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     {
         WidgetElement rulerBg{};
         rulerBg.id = "WE.TL.RulerBg";
@@ -14791,7 +15259,7 @@ void UIManager::buildTimelineRulerAndKeyframes(const std::string& tabId, WidgetE
         container.children.push_back(std::move(rulerBg));
     }
 
-    // â”€â”€ Ruler tick marks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Ruler tick marks Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     {
         float step = 0.25f;
         if (duration > 5.0f) step = 1.0f;
@@ -14821,7 +15289,7 @@ void UIManager::buildTimelineRulerAndKeyframes(const std::string& tabId, WidgetE
         }
     }
 
-    // â”€â”€ Lane backgrounds + keyframe markers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Lane backgrounds + keyframe markers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     int rowIndex = 0;
     for (size_t ti = 0; ti < anim->tracks.size(); ++ti)
     {
@@ -14925,7 +15393,7 @@ void UIManager::buildTimelineRulerAndKeyframes(const std::string& tabId, WidgetE
         }
     }
 
-    // â”€â”€ Scrubber indicator (orange line) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ Scrubber indicator (orange line) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     {
         const float scrubFrac = (duration > 0.0f) ? std::clamp(edState.timelineScrubTime / duration, 0.0f, 1.0f) : 0.0f;
 
@@ -14940,7 +15408,7 @@ void UIManager::buildTimelineRulerAndKeyframes(const std::string& tabId, WidgetE
         container.children.push_back(std::move(scrubber));
     }
 
-    // â”€â”€ End-of-animation line (red) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // Ã¢â€â‚¬Ã¢â€â‚¬ End-of-animation line (red) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
     {
         WidgetElement endLine{};
         endLine.id = "WE.TL.EndLine";
@@ -15012,7 +15480,7 @@ void UIManager::handleTimelineMouseUp(const std::string& tabId)
 }
 
 // ===========================================================================
-// UI Designer Tab  (Gameplay UI â€” operates on ViewportUIManager)
+// UI Designer Tab  (Gameplay UI Ã¢â‚¬â€ operates on ViewportUIManager)
 // ===========================================================================
 
 ViewportUIManager* UIManager::getViewportUIManager() const
@@ -15026,7 +15494,7 @@ bool UIManager::isUIDesignerOpen() const
 }
 
 // ---------------------------------------------------------------------------
-// openUIDesignerTab  â€” creates the tab + left / right / toolbar widgets
+// openUIDesignerTab  Ã¢â‚¬â€ creates the tab + left / right / toolbar widgets
 // ---------------------------------------------------------------------------
 void UIManager::openUIDesignerTab()
 {
@@ -15235,7 +15703,7 @@ void UIManager::openUIDesignerTab()
                 controlsSection.children.push_back(std::move(title));
             }
 
-            // Gameplay-UI element types (subset â€” only those supported by ViewportUIManager)
+            // Gameplay-UI element types (subset Ã¢â‚¬â€ only those supported by ViewportUIManager)
             const std::vector<std::string> controls = {
                 "Panel", "Text", "Label", "Button", "Image", "ProgressBar", "Slider",
                 "WrapBox", "UniformGrid", "SizeBox", "ScaleBox", "WidgetSwitcher", "Overlay",
@@ -15410,7 +15878,7 @@ void UIManager::openUIDesignerTab()
         closeUIDesignerTab();
     });
 
-    // --- Bidirectional sync: viewport click â†’ designer selection ---
+    // --- Bidirectional sync: viewport click Ã¢â€ â€™ designer selection ---
     auto* vpUI = getViewportUIManager();
     if (vpUI)
     {
@@ -15507,7 +15975,7 @@ void UIManager::selectUIDesignerElement(const std::string& widgetName, const std
 }
 
 // ---------------------------------------------------------------------------
-// addElementToViewportWidget â€” adds a new element from the control palette
+// addElementToViewportWidget Ã¢â‚¬â€ adds a new element from the control palette
 // ---------------------------------------------------------------------------
 void UIManager::addElementToViewportWidget(const std::string& elementType)
 {
@@ -15784,7 +16252,7 @@ void UIManager::deleteSelectedUIDesignerElement()
 }
 
 // ---------------------------------------------------------------------------
-// refreshUIDesignerHierarchy â€” traverses ViewportUIManager widgets
+// refreshUIDesignerHierarchy Ã¢â‚¬â€ traverses ViewportUIManager widgets
 // ---------------------------------------------------------------------------
 void UIManager::refreshUIDesignerHierarchy()
 {
@@ -16068,7 +16536,7 @@ bool UIManager::isConsoleOpen() const
 }
 
 // ---------------------------------------------------------------------------
-// openConsoleTab  – creates the Console tab with toolbar + log view
+// openConsoleTab  â€“ creates the Console tab with toolbar + log view
 // ---------------------------------------------------------------------------
 void UIManager::openConsoleTab()
 {
@@ -16125,10 +16593,10 @@ void UIManager::openConsoleTab()
         root.style.color = theme.panelBackground;
         root.runtimeOnly = true;
 
-        // ── Toolbar row ──────────────────────────────────────────────
+        // â”€â”€ Toolbar row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         buildConsoleToolbar(root);
 
-        // ── Separator ────────────────────────────────────────────────
+        // â”€â”€ Separator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         {
             WidgetElement sep{};
             sep.type        = WidgetElementType::Panel;
@@ -16139,7 +16607,7 @@ void UIManager::openConsoleTab()
             root.children.push_back(std::move(sep));
         }
 
-        // ── Scrollable log area ──────────────────────────────────────
+        // â”€â”€ Scrollable log area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         {
             WidgetElement logArea{};
             logArea.id          = "Console.LogArea";
@@ -16158,7 +16626,7 @@ void UIManager::openConsoleTab()
         registerWidget(widgetId, widget, tabId);
     }
 
-    // ── Tab / close click events ─────────────────────────────────────
+    // â”€â”€ Tab / close click events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const std::string tabBtnId   = "TitleBar.Tab." + tabId;
     const std::string closeBtnId = "TitleBar.TabClose." + tabId;
 
@@ -16175,7 +16643,7 @@ void UIManager::openConsoleTab()
         closeConsoleTab();
     });
 
-    // ── Filter & action click events ─────────────────────────────────
+    // â”€â”€ Filter & action click events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     registerClickEvent("Console.Filter.All", [this]()
     {
         m_consoleState.levelFilter = 0xFF;
@@ -16214,7 +16682,7 @@ void UIManager::openConsoleTab()
 }
 
 // ---------------------------------------------------------------------------
-// buildConsoleToolbar  – filter buttons, search bar, clear, auto-scroll
+// buildConsoleToolbar  â€“ filter buttons, search bar, clear, auto-scroll
 // ---------------------------------------------------------------------------
 void UIManager::buildConsoleToolbar(WidgetElement& root)
 {
@@ -16261,7 +16729,7 @@ void UIManager::buildConsoleToolbar(WidgetElement& root)
     toolbar.children.push_back(makeFilterBtn("Console.Filter.Warning", "Warning", warnActive));
     toolbar.children.push_back(makeFilterBtn("Console.Filter.Error",   "Error",   errorActive));
 
-    // ── Spacer ───────────────────────────────────────────────────────
+    // â”€â”€ Spacer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         WidgetElement spacer{};
         spacer.type        = WidgetElementType::Panel;
@@ -16272,7 +16740,7 @@ void UIManager::buildConsoleToolbar(WidgetElement& root)
         toolbar.children.push_back(std::move(spacer));
     }
 
-    // ── Search entry bar ─────────────────────────────────────────────
+    // â”€â”€ Search entry bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         WidgetElement search = EditorUIBuilder::makeEntryBar(
             "Console.Search", m_consoleState.searchText,
@@ -16286,10 +16754,10 @@ void UIManager::buildConsoleToolbar(WidgetElement& root)
         toolbar.children.push_back(std::move(search));
     }
 
-    // ── Clear button ─────────────────────────────────────────────────
+    // â”€â”€ Clear button â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     toolbar.children.push_back(makeFilterBtn("Console.Clear", "Clear", false));
 
-    // ── Auto-scroll toggle ───────────────────────────────────────────
+    // â”€â”€ Auto-scroll toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         WidgetElement toggle{};
         toggle.id           = "Console.AutoScroll";
@@ -16314,7 +16782,7 @@ void UIManager::buildConsoleToolbar(WidgetElement& root)
 }
 
 // ---------------------------------------------------------------------------
-// refreshConsoleLog  – rebuilds the log area from Logger ring-buffer
+// refreshConsoleLog  â€“ rebuilds the log area from Logger ring-buffer
 // ---------------------------------------------------------------------------
 void UIManager::refreshConsoleLog()
 {
@@ -16616,10 +17084,10 @@ void UIManager::openProfilerTab()
         root.style.color = theme.panelBackground;
         root.runtimeOnly = true;
 
-        // ── Toolbar row ──────────────────────────────────────────────
+        // â”€â”€ Toolbar row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         buildProfilerToolbar(root);
 
-        // ── Separator ────────────────────────────────────────────────
+        // â”€â”€ Separator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         {
             WidgetElement sep{};
             sep.type        = WidgetElementType::Panel;
@@ -16630,7 +17098,7 @@ void UIManager::openProfilerTab()
             root.children.push_back(std::move(sep));
         }
 
-        // ── Scrollable metrics area ──────────────────────────────────
+        // â”€â”€ Scrollable metrics area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         {
             WidgetElement metricsArea{};
             metricsArea.id          = "Profiler.MetricsArea";
@@ -16649,7 +17117,7 @@ void UIManager::openProfilerTab()
         registerWidget(widgetId, widget, tabId);
     }
 
-    // ── Tab / close click events ─────────────────────────────────────
+    // â”€â”€ Tab / close click events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const std::string tabBtnId   = "TitleBar.Tab." + tabId;
     const std::string closeBtnId = "TitleBar.TabClose." + tabId;
 
@@ -16666,11 +17134,11 @@ void UIManager::openProfilerTab()
         closeProfilerTab();
     });
 
-    // ── Toolbar button events ────────────────────────────────────────
+    // â”€â”€ Toolbar button events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     registerClickEvent("Profiler.Freeze", [this]()
     {
         m_profilerState.frozen = !m_profilerState.frozen;
-        // Update button text and color in-place (safe — no element deletion during click callback)
+        // Update button text and color in-place (safe â€” no element deletion during click callback)
         auto* btn = findElementById("Profiler.Freeze");
         if (btn)
         {
@@ -16759,7 +17227,7 @@ void UIManager::buildProfilerToolbar(WidgetElement& root)
 }
 
 // ---------------------------------------------------------------------------
-// refreshProfilerMetrics  – rebuilds the metrics area from DiagnosticsManager
+// refreshProfilerMetrics  â€“ rebuilds the metrics area from DiagnosticsManager
 // ---------------------------------------------------------------------------
 void UIManager::refreshProfilerMetrics()
 {
@@ -16822,7 +17290,7 @@ void UIManager::refreshProfilerMetrics()
         return buf;
     };
 
-    // ── FPS bar chart (mini-graph using colored panels) ────────────────
+    // â”€â”€ FPS bar chart (mini-graph using colored panels) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         WidgetElement heading{};
         heading.type            = WidgetElementType::Text;
@@ -16900,10 +17368,10 @@ void UIManager::refreshProfilerMetrics()
         }
     }
 
-    // ── Divider ──────────────────────────────────────────────────────────
+    // â”€â”€ Divider â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     metricsArea->children.push_back(EditorUIBuilder::makeDivider());
 
-    // ── Summary section ──────────────────────────────────────────────────
+    // â”€â”€ Summary section â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         WidgetElement heading{};
         heading.type            = WidgetElementType::Text;
@@ -16960,7 +17428,7 @@ void UIManager::refreshProfilerMetrics()
 
     metricsArea->children.push_back(EditorUIBuilder::makeDivider());
 
-    // ── Breakdown section ────────────────────────────────────────────────
+    // â”€â”€ Breakdown section â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         WidgetElement heading{};
         heading.type            = WidgetElementType::Text;
@@ -17016,7 +17484,7 @@ void UIManager::refreshProfilerMetrics()
 
     metricsArea->children.push_back(EditorUIBuilder::makeDivider());
 
-    // ── Occlusion culling stats ──────────────────────────────────────────
+    // â”€â”€ Occlusion culling stats â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         WidgetElement heading{};
         heading.type            = WidgetElementType::Text;
@@ -17059,7 +17527,7 @@ void UIManager::refreshProfilerMetrics()
         }
     }
 
-    // ── Status line ──────────────────────────────────────────────────────
+    // â”€â”€ Status line â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
         WidgetElement status{};
         status.type            = WidgetElementType::Text;
@@ -17350,7 +17818,7 @@ void UIManager::closeAudioPreviewTab()
 }
 
 // ---------------------------------------------------------------------------
-// refreshAudioPreview  – rebuilds content of the widget
+// refreshAudioPreview  â€“ rebuilds content of the widget
 // ---------------------------------------------------------------------------
 void UIManager::refreshAudioPreview()
 {
@@ -17510,7 +17978,7 @@ void UIManager::buildAudioPreviewToolbar(WidgetElement& root)
 }
 
 // ---------------------------------------------------------------------------
-// buildAudioPreviewWaveform  – simple bar-chart visualisation of audio samples
+// buildAudioPreviewWaveform  â€“ simple bar-chart visualisation of audio samples
 // ---------------------------------------------------------------------------
 void UIManager::buildAudioPreviewWaveform(WidgetElement& root)
 {
@@ -17884,7 +18352,7 @@ void UIManager::openParticleEditorTab(ECS::Entity entity)
         closeParticleEditorTab();
     });
 
-    // Reset button → restore default ParticleEmitterComponent values
+    // Reset button â†’ restore default ParticleEmitterComponent values
     registerClickEvent("ParticleEditor.Reset", [this]()
     {
         auto& ecs = ECS::ECSManager::Instance();
@@ -18000,7 +18468,7 @@ void UIManager::buildParticleEditorToolbar(WidgetElement& root)
             [this](int sel)
             {
                 if (sel <= 0)
-                    return; // "Custom" selected – do nothing
+                    return; // "Custom" selected â€“ do nothing
                 applyParticlePreset(sel - 1); // 0=Fire, 1=Smoke, ...
             });
         dropdown.minSize = EditorTheme::Scaled(Vec2{ 100.0f, 24.0f });
@@ -18020,7 +18488,7 @@ void UIManager::buildParticleEditorToolbar(WidgetElement& root)
 }
 
 // ---------------------------------------------------------------------------
-// refreshParticleEditor  – rebuilds the parameter area from the linked entity
+// refreshParticleEditor  â€“ rebuilds the parameter area from the linked entity
 // ---------------------------------------------------------------------------
 void UIManager::refreshParticleEditor()
 {
@@ -18140,7 +18608,7 @@ void UIManager::refreshParticleEditor()
         paramsArea->children.push_back(std::move(heading));
     };
 
-    // ── General ──────────────────────────────────────────────────────────
+    // â”€â”€ General â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     addHeading("General");
     addCheckBox("Enabled", "Enabled", emitter->enabled,
         [](ECS::ParticleEmitterComponent& c, bool v) { c.enabled = v; });
@@ -18149,7 +18617,7 @@ void UIManager::refreshParticleEditor()
     addIntSlider("MaxParticles", "Max Particles", emitter->maxParticles, 1, 10000,
         [](ECS::ParticleEmitterComponent& c, int v) { c.maxParticles = v; });
 
-    // ── Emission ─────────────────────────────────────────────────────────
+    // â”€â”€ Emission â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     addHeading("Emission");
     addSlider("EmissionRate", "Rate (p/s)", emitter->emissionRate, 0.1f, 500.0f,
         [](ECS::ParticleEmitterComponent& c, float v) { c.emissionRate = v; });
@@ -18158,7 +18626,7 @@ void UIManager::refreshParticleEditor()
     addSlider("ConeAngle", "Cone Angle", emitter->coneAngle, 0.0f, 180.0f,
         [](ECS::ParticleEmitterComponent& c, float v) { c.coneAngle = v; });
 
-    // ── Motion ───────────────────────────────────────────────────────────
+    // â”€â”€ Motion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     addHeading("Motion");
     addSlider("Speed", "Speed (m/s)", emitter->speed, 0.0f, 50.0f,
         [](ECS::ParticleEmitterComponent& c, float v) { c.speed = v; });
@@ -18167,14 +18635,14 @@ void UIManager::refreshParticleEditor()
     addSlider("Gravity", "Gravity", emitter->gravity, -30.0f, 30.0f,
         [](ECS::ParticleEmitterComponent& c, float v) { c.gravity = v; });
 
-    // ── Size ─────────────────────────────────────────────────────────────
+    // â”€â”€ Size â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     addHeading("Size");
     addSlider("Size", "Start Size", emitter->size, 0.01f, 5.0f,
         [](ECS::ParticleEmitterComponent& c, float v) { c.size = v; });
     addSlider("SizeEnd", "End Size", emitter->sizeEnd, 0.0f, 5.0f,
         [](ECS::ParticleEmitterComponent& c, float v) { c.sizeEnd = v; });
 
-    // ── Start Color ──────────────────────────────────────────────────────
+    // â”€â”€ Start Color â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     addHeading("Start Color");
     addSlider("ColorR", "R", emitter->colorR, 0.0f, 1.0f,
         [](ECS::ParticleEmitterComponent& c, float v) { c.colorR = v; });
@@ -18185,7 +18653,7 @@ void UIManager::refreshParticleEditor()
     addSlider("ColorA", "A", emitter->colorA, 0.0f, 1.0f,
         [](ECS::ParticleEmitterComponent& c, float v) { c.colorA = v; });
 
-    // ── End Color ────────────────────────────────────────────────────────
+    // â”€â”€ End Color â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     addHeading("End Color");
     addSlider("ColorEndR", "R", emitter->colorEndR, 0.0f, 1.0f,
         [](ECS::ParticleEmitterComponent& c, float v) { c.colorEndR = v; });
@@ -18201,7 +18669,7 @@ void UIManager::refreshParticleEditor()
 }
 
 // ---------------------------------------------------------------------------
-// buildParticleEditorParams  – called once during open (params rebuilt via refresh)
+// buildParticleEditorParams  â€“ called once during open (params rebuilt via refresh)
 // ---------------------------------------------------------------------------
 void UIManager::buildParticleEditorParams(WidgetElement& /*root*/)
 {
@@ -18209,7 +18677,7 @@ void UIManager::buildParticleEditorParams(WidgetElement& /*root*/)
 }
 
 // ---------------------------------------------------------------------------
-// applyParticlePreset  – applies a named preset to the linked entity
+// applyParticlePreset  â€“ applies a named preset to the linked entity
 // ---------------------------------------------------------------------------
 void UIManager::applyParticlePreset(int presetIndex)
 {
@@ -18353,4 +18821,3889 @@ void UIManager::applyParticlePreset(int presetIndex)
 
     static const char* presetToasts[] = { "Fire", "Smoke", "Sparks", "Rain", "Snow", "Magic" };
     showToastMessage(std::string("Applied preset: ") + presetToasts[presetIndex], 2.0f);
+}
+
+// ===========================================================================
+// Shader Viewer Tab
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// isShaderViewerOpen
+// ---------------------------------------------------------------------------
+bool UIManager::isShaderViewerOpen() const
+{
+    return m_shaderViewerState.isOpen;
+}
+
+// ---------------------------------------------------------------------------
+// openShaderViewerTab
+// ---------------------------------------------------------------------------
+void UIManager::openShaderViewerTab()
+{
+    if (!m_renderer)
+        return;
+
+    const std::string tabId = "ShaderViewer";
+
+    // If already open, just switch to it
+    if (m_shaderViewerState.isOpen)
+    {
+        m_renderer->setActiveTab(tabId);
+        markAllWidgetsDirty();
+        return;
+    }
+
+    m_renderer->addTab(tabId, "Shader Viewer", true);
+    m_renderer->setActiveTab(tabId);
+
+    const std::string widgetId = "ShaderViewer.Main";
+
+    // Clean up any stale registration
+    unregisterWidget(widgetId);
+
+    // Initialise state
+    m_shaderViewerState = {};
+    m_shaderViewerState.tabId    = tabId;
+    m_shaderViewerState.widgetId = widgetId;
+    m_shaderViewerState.isOpen   = true;
+
+    // Scan the shaders directory for .glsl files
+    {
+        const auto shadersDir = std::filesystem::current_path() / "shaders";
+        if (std::filesystem::exists(shadersDir) && std::filesystem::is_directory(shadersDir))
+        {
+            for (const auto& entry : std::filesystem::directory_iterator(shadersDir))
+            {
+                if (entry.is_regular_file() && entry.path().extension() == ".glsl")
+                    m_shaderViewerState.shaderFiles.push_back(entry.path().filename().string());
+            }
+            std::sort(m_shaderViewerState.shaderFiles.begin(), m_shaderViewerState.shaderFiles.end());
+        }
+
+        // Select the first file by default
+        if (!m_shaderViewerState.shaderFiles.empty())
+            m_shaderViewerState.selectedFile = m_shaderViewerState.shaderFiles[0];
+    }
+
+    // Build the main widget (fills entire tab area)
+    {
+        auto widget = std::make_shared<EditorWidget>();
+        widget->setName(widgetId);
+        widget->setAnchor(WidgetAnchor::TopLeft);
+        widget->setFillX(true);
+        widget->setFillY(true);
+        widget->setSizePixels(Vec2{ 0.0f, 0.0f });
+        widget->setZOrder(2);
+
+        const auto& theme = EditorTheme::Get();
+
+        WidgetElement root{};
+        root.id          = "ShaderViewer.Root";
+        root.type        = WidgetElementType::StackPanel;
+        root.from        = Vec2{ 0.0f, 0.0f };
+        root.to          = Vec2{ 1.0f, 1.0f };
+        root.fillX       = true;
+        root.fillY       = true;
+        root.orientation = StackOrientation::Vertical;
+        root.style.color = theme.panelBackground;
+        root.runtimeOnly = true;
+
+        // â”€â”€ Toolbar row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        buildShaderViewerToolbar(root);
+
+        // â”€â”€ Separator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        {
+            WidgetElement sep{};
+            sep.type        = WidgetElementType::Panel;
+            sep.fillX       = true;
+            sep.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+            sep.style.color = theme.panelBorder;
+            sep.runtimeOnly = true;
+            root.children.push_back(std::move(sep));
+        }
+
+        // â”€â”€ Content area (horizontal split: file list | code view) â”€â”€â”€
+        {
+            WidgetElement content{};
+            content.id          = "ShaderViewer.Content";
+            content.type        = WidgetElementType::StackPanel;
+            content.fillX       = true;
+            content.fillY       = true;
+            content.orientation = StackOrientation::Horizontal;
+            content.style.color = Vec4{ 0.08f, 0.09f, 0.11f, 1.0f };
+            content.runtimeOnly = true;
+
+            // Left panel: file list
+            {
+                WidgetElement fileListPanel{};
+                fileListPanel.id          = "ShaderViewer.FileListPanel";
+                fileListPanel.type        = WidgetElementType::StackPanel;
+                fileListPanel.fillY       = true;
+                fileListPanel.scrollable  = true;
+                fileListPanel.orientation = StackOrientation::Vertical;
+                fileListPanel.minSize     = EditorTheme::Scaled(Vec2{ 180.0f, 0.0f });
+                fileListPanel.padding     = EditorTheme::Scaled(Vec2{ 4.0f, 4.0f });
+                fileListPanel.style.color = Vec4{ 0.06f, 0.06f, 0.08f, 1.0f };
+                fileListPanel.runtimeOnly = true;
+                content.children.push_back(std::move(fileListPanel));
+            }
+
+            // Vertical separator
+            {
+                WidgetElement sep{};
+                sep.type        = WidgetElementType::Panel;
+                sep.fillY       = true;
+                sep.minSize     = EditorTheme::Scaled(Vec2{ 1.0f, 0.0f });
+                sep.style.color = theme.panelBorder;
+                sep.runtimeOnly = true;
+                content.children.push_back(std::move(sep));
+            }
+
+            // Right panel: code view
+            {
+                WidgetElement codePanel{};
+                codePanel.id          = "ShaderViewer.CodePanel";
+                codePanel.type        = WidgetElementType::StackPanel;
+                codePanel.fillX       = true;
+                codePanel.fillY       = true;
+                codePanel.scrollable  = true;
+                codePanel.orientation = StackOrientation::Vertical;
+                codePanel.padding     = EditorTheme::Scaled(Vec2{ 8.0f, 6.0f });
+                codePanel.style.color = Vec4{ 0.08f, 0.09f, 0.11f, 1.0f };
+                codePanel.runtimeOnly = true;
+                content.children.push_back(std::move(codePanel));
+            }
+
+            root.children.push_back(std::move(content));
+        }
+
+        widget->setElements({ std::move(root) });
+        registerWidget(widgetId, widget, tabId);
+    }
+
+    // â”€â”€ Tab / close click events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    const std::string tabBtnId   = "TitleBar.Tab." + tabId;
+    const std::string closeBtnId = "TitleBar.TabClose." + tabId;
+
+    registerClickEvent(tabBtnId, [this, tabId]()
+    {
+        if (m_renderer)
+            m_renderer->setActiveTab(tabId);
+        refreshShaderViewer();
+        markAllWidgetsDirty();
+    });
+
+    registerClickEvent(closeBtnId, [this]()
+    {
+        closeShaderViewerTab();
+    });
+
+    // â”€â”€ Toolbar button events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    registerClickEvent("ShaderViewer.Reload", [this]()
+    {
+        if (m_renderer)
+        {
+            m_renderer->requestShaderReload();
+            showToastMessage("Shaders reloaded", 2.0f);
+        }
+    });
+
+    // â”€â”€ File list click events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    for (const auto& filename : m_shaderViewerState.shaderFiles)
+    {
+        const std::string eventId = "ShaderViewer.File." + filename;
+        registerClickEvent(eventId, [this, filename]()
+        {
+            m_shaderViewerState.selectedFile = filename;
+            refreshShaderViewer();
+        });
+    }
+
+    // Initial population
+    refreshShaderViewer();
+    markAllWidgetsDirty();
+}
+
+// ---------------------------------------------------------------------------
+// closeShaderViewerTab
+// ---------------------------------------------------------------------------
+void UIManager::closeShaderViewerTab()
+{
+    if (!m_shaderViewerState.isOpen || !m_renderer)
+        return;
+
+    const std::string tabId = m_shaderViewerState.tabId;
+
+    if (m_renderer->getActiveTabId() == tabId)
+        m_renderer->setActiveTab("Viewport");
+
+    unregisterWidget(m_shaderViewerState.widgetId);
+
+    m_renderer->removeTab(tabId);
+    m_shaderViewerState = {};
+    markAllWidgetsDirty();
+}
+
+// ---------------------------------------------------------------------------
+// buildShaderViewerToolbar
+// ---------------------------------------------------------------------------
+void UIManager::buildShaderViewerToolbar(WidgetElement& root)
+{
+    const auto& theme = EditorTheme::Get();
+
+    WidgetElement toolbar{};
+    toolbar.id          = "ShaderViewer.Toolbar";
+    toolbar.type        = WidgetElementType::StackPanel;
+    toolbar.fillX       = true;
+    toolbar.orientation = StackOrientation::Horizontal;
+    toolbar.padding     = EditorTheme::Scaled(Vec2{ 8.0f, 4.0f });
+    toolbar.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 32.0f });
+    toolbar.style.color = Vec4{ 0.14f, 0.15f, 0.19f, 1.0f };
+    toolbar.runtimeOnly = true;
+
+    // Title label
+    {
+        WidgetElement title{};
+        title.type            = WidgetElementType::Text;
+        title.text            = "Shader Viewer";
+        title.font            = theme.fontDefault;
+        title.fontSize        = theme.fontSizeSubheading;
+        title.style.textColor = theme.textPrimary;
+        title.textAlignH      = TextAlignH::Left;
+        title.textAlignV      = TextAlignV::Center;
+        title.minSize         = EditorTheme::Scaled(Vec2{ 100.0f, 24.0f });
+        title.runtimeOnly     = true;
+        toolbar.children.push_back(std::move(title));
+    }
+
+    // Current file label
+    {
+        WidgetElement fileLabel{};
+        fileLabel.id            = "ShaderViewer.CurrentFile";
+        fileLabel.type          = WidgetElementType::Text;
+        fileLabel.text          = m_shaderViewerState.selectedFile.empty()
+                                  ? "(no file selected)"
+                                  : m_shaderViewerState.selectedFile;
+        fileLabel.font          = theme.fontDefault;
+        fileLabel.fontSize      = theme.fontSizeSmall;
+        fileLabel.style.textColor = theme.accent;
+        fileLabel.textAlignH    = TextAlignH::Left;
+        fileLabel.textAlignV    = TextAlignV::Center;
+        fileLabel.minSize       = EditorTheme::Scaled(Vec2{ 160.0f, 24.0f });
+        fileLabel.runtimeOnly   = true;
+        toolbar.children.push_back(std::move(fileLabel));
+    }
+
+    // Spacer
+    {
+        WidgetElement spacer{};
+        spacer.type        = WidgetElementType::Panel;
+        spacer.fillX       = true;
+        spacer.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+        spacer.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        spacer.runtimeOnly = true;
+        toolbar.children.push_back(std::move(spacer));
+    }
+
+    // Reload button
+    {
+        WidgetElement btn{};
+        btn.id              = "ShaderViewer.Reload";
+        btn.type            = WidgetElementType::Button;
+        btn.text            = "Reload Shaders";
+        btn.font            = theme.fontDefault;
+        btn.fontSize        = theme.fontSizeSmall;
+        btn.style.textColor = theme.textPrimary;
+        btn.style.color     = theme.accent;
+        btn.style.hoverColor = theme.buttonHover;
+        btn.textAlignH      = TextAlignH::Center;
+        btn.textAlignV      = TextAlignV::Center;
+        btn.minSize         = EditorTheme::Scaled(Vec2{ 110.0f, 24.0f });
+        btn.padding         = EditorTheme::Scaled(Vec2{ 8.0f, 2.0f });
+        btn.hitTestMode     = HitTestMode::Enabled;
+        btn.runtimeOnly     = true;
+        btn.clickEvent      = "ShaderViewer.Reload";
+        toolbar.children.push_back(std::move(btn));
+    }
+
+    root.children.push_back(std::move(toolbar));
+}
+
+// ---------------------------------------------------------------------------
+// buildShaderFileList  â€“ populates the left panel with clickable file names
+// ---------------------------------------------------------------------------
+void UIManager::buildShaderFileList(WidgetElement& fileListPanel)
+{
+    const auto& theme = EditorTheme::Get();
+    const float rowH = EditorTheme::Scaled(22.0f);
+
+    // Section heading
+    {
+        WidgetElement heading{};
+        heading.type            = WidgetElementType::Text;
+        heading.text            = "Shader Files";
+        heading.font            = theme.fontDefault;
+        heading.fontSize        = theme.fontSizeSmall;
+        heading.style.textColor = theme.textMuted;
+        heading.textAlignH      = TextAlignH::Left;
+        heading.textAlignV      = TextAlignV::Center;
+        heading.fillX           = true;
+        heading.minSize         = Vec2{ 0.0f, rowH };
+        heading.padding         = EditorTheme::Scaled(Vec2{ 4.0f, 2.0f });
+        heading.runtimeOnly     = true;
+        fileListPanel.children.push_back(std::move(heading));
+    }
+
+    for (const auto& filename : m_shaderViewerState.shaderFiles)
+    {
+        const bool selected = (filename == m_shaderViewerState.selectedFile);
+
+        WidgetElement row{};
+        row.id              = "ShaderViewer.File." + filename;
+        row.type            = WidgetElementType::Button;
+        row.text            = filename;
+        row.font            = theme.fontDefault;
+        row.fontSize        = theme.fontSizeSmall;
+        row.style.textColor = selected ? theme.textPrimary : theme.textSecondary;
+        row.style.color     = selected ? theme.selectionHighlight : Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        row.style.hoverColor = theme.treeRowHover;
+        row.textAlignH      = TextAlignH::Left;
+        row.textAlignV      = TextAlignV::Center;
+        row.fillX           = true;
+        row.minSize         = Vec2{ 0.0f, rowH };
+        row.padding         = EditorTheme::Scaled(Vec2{ 6.0f, 1.0f });
+        row.hitTestMode     = HitTestMode::Enabled;
+        row.runtimeOnly     = true;
+        row.clickEvent      = "ShaderViewer.File." + filename;
+        fileListPanel.children.push_back(std::move(row));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// buildShaderCodeView  â€“ reads the selected shader file and displays it with
+//                        basic GLSL syntax highlighting
+// ---------------------------------------------------------------------------
+void UIManager::buildShaderCodeView(WidgetElement& codePanel)
+{
+    const auto& theme = EditorTheme::Get();
+
+    if (m_shaderViewerState.selectedFile.empty())
+    {
+        WidgetElement hint = EditorUIBuilder::makeSecondaryLabel("Select a shader file from the list.");
+        codePanel.children.push_back(std::move(hint));
+        return;
+    }
+
+    // Read the shader file
+    const auto filePath = std::filesystem::current_path() / "shaders" / m_shaderViewerState.selectedFile;
+    std::ifstream ifs(filePath);
+    if (!ifs.is_open())
+    {
+        WidgetElement err{};
+        err.type            = WidgetElementType::Text;
+        err.text            = "Failed to open: " + m_shaderViewerState.selectedFile;
+        err.font            = theme.fontDefault;
+        err.fontSize        = theme.fontSizeSmall;
+        err.style.textColor = theme.errorColor;
+        err.textAlignH      = TextAlignH::Left;
+        err.textAlignV      = TextAlignV::Center;
+        err.fillX           = true;
+        err.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 20.0f });
+        err.runtimeOnly     = true;
+        codePanel.children.push_back(std::move(err));
+        return;
+    }
+
+    // GLSL syntax-highlighting colour definitions
+    const Vec4 colKeyword   { 0.40f, 0.60f, 1.00f, 1.0f };  // blue â€“ keywords
+    const Vec4 colType      { 0.30f, 0.80f, 0.55f, 1.0f };  // green â€“ types
+    const Vec4 colPreproc   { 0.70f, 0.45f, 0.85f, 1.0f };  // purple â€“ preprocessor
+    const Vec4 colComment   { 0.45f, 0.50f, 0.55f, 1.0f };  // gray â€“ comments
+    const Vec4 colNumber    { 0.85f, 0.65f, 0.30f, 1.0f };  // orange â€“ numeric literals
+    const Vec4 colString    { 0.85f, 0.55f, 0.40f, 1.0f };  // coral â€“ string literals (rare in GLSL)
+    const Vec4 colQualifier { 0.90f, 0.75f, 0.30f, 1.0f };  // gold â€“ uniform/in/out qualifiers
+    const Vec4 colDefault   = theme.textSecondary;            // default text
+
+    // Keyword/type sets for classification
+    static const std::unordered_set<std::string> keywords = {
+        "if", "else", "for", "while", "do", "switch", "case", "default",
+        "break", "continue", "return", "discard", "struct", "const",
+        "true", "false", "void", "main"
+    };
+    static const std::unordered_set<std::string> types = {
+        "float", "int", "uint", "bool", "double",
+        "vec2", "vec3", "vec4", "ivec2", "ivec3", "ivec4",
+        "uvec2", "uvec3", "uvec4", "bvec2", "bvec3", "bvec4",
+        "dvec2", "dvec3", "dvec4",
+        "mat2", "mat3", "mat4", "mat2x2", "mat2x3", "mat2x4",
+        "mat3x2", "mat3x3", "mat3x4", "mat4x2", "mat4x3", "mat4x4",
+        "sampler1D", "sampler2D", "sampler3D", "samplerCube",
+        "sampler2DShadow", "sampler2DArray", "samplerCubeShadow"
+    };
+    static const std::unordered_set<std::string> qualifiers = {
+        "uniform", "in", "out", "inout", "attribute", "varying",
+        "layout", "flat", "smooth", "noperspective",
+        "highp", "mediump", "lowp", "precision"
+    };
+
+    // Helper: classify a token and return its colour
+    auto tokenColor = [&](const std::string& token) -> Vec4
+    {
+        if (keywords.count(token))   return colKeyword;
+        if (types.count(token))      return colType;
+        if (qualifiers.count(token)) return colQualifier;
+        return colDefault;
+    };
+
+    const float lineH = EditorTheme::Scaled(16.0f);
+    int lineNumber = 0;
+    bool inBlockComment = false;
+
+    std::string line;
+    while (std::getline(ifs, line))
+    {
+        ++lineNumber;
+
+        // Determine dominant colour for the line (simplified approach:
+        // one colour per line based on first significant token).
+        Vec4 lineColor = colDefault;
+
+        std::string trimmed = line;
+        // ltrim
+        size_t firstNonSpace = trimmed.find_first_not_of(" \t\r\n");
+        if (firstNonSpace != std::string::npos)
+            trimmed = trimmed.substr(firstNonSpace);
+        else
+            trimmed.clear();
+
+        if (inBlockComment)
+        {
+            lineColor = colComment;
+            if (trimmed.find("*/") != std::string::npos)
+                inBlockComment = false;
+        }
+        else if (trimmed.empty())
+        {
+            lineColor = colDefault;
+        }
+        else if (trimmed.size() >= 2 && trimmed[0] == '/' && trimmed[1] == '/')
+        {
+            lineColor = colComment;
+        }
+        else if (trimmed.size() >= 2 && trimmed[0] == '/' && trimmed[1] == '*')
+        {
+            lineColor = colComment;
+            if (trimmed.find("*/") == std::string::npos)
+                inBlockComment = true;
+        }
+        else if (trimmed[0] == '#')
+        {
+            lineColor = colPreproc;
+        }
+        else
+        {
+            // Extract the first identifier token
+            std::string firstToken;
+            for (size_t i = 0; i < trimmed.size(); ++i)
+            {
+                char c = trimmed[i];
+                if (std::isalnum(static_cast<unsigned char>(c)) || c == '_')
+                    firstToken += c;
+                else
+                    break;
+            }
+            if (!firstToken.empty())
+                lineColor = tokenColor(firstToken);
+        }
+
+        // Build line number prefix
+        char lineNumBuf[12];
+        std::snprintf(lineNumBuf, sizeof(lineNumBuf), "%4d  ", lineNumber);
+
+        WidgetElement row{};
+        row.id              = "ShaderViewer.Line." + std::to_string(lineNumber);
+        row.type            = WidgetElementType::Text;
+        row.text            = std::string(lineNumBuf) + line;
+        row.font            = theme.fontDefault;
+        row.fontSize        = theme.fontSizeMonospace;
+        row.style.textColor = lineColor;
+        row.textAlignH      = TextAlignH::Left;
+        row.textAlignV      = TextAlignV::Center;
+        row.fillX           = true;
+        row.minSize         = Vec2{ 0.0f, lineH };
+        row.runtimeOnly     = true;
+
+        codePanel.children.push_back(std::move(row));
+    }
+
+    // File info footer
+    {
+        WidgetElement footer{};
+        footer.type            = WidgetElementType::Text;
+        footer.text            = "â”€â”€ " + std::to_string(lineNumber) + " lines â”€â”€";
+        footer.font            = theme.fontDefault;
+        footer.fontSize        = theme.fontSizeCaption;
+        footer.style.textColor = theme.textMuted;
+        footer.textAlignH      = TextAlignH::Left;
+        footer.textAlignV      = TextAlignV::Center;
+        footer.fillX           = true;
+        footer.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 20.0f });
+        footer.padding         = EditorTheme::Scaled(Vec2{ 4.0f, 4.0f });
+        footer.runtimeOnly     = true;
+        codePanel.children.push_back(std::move(footer));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// refreshShaderViewer  â€“ rebuilds file list + code view
+// ---------------------------------------------------------------------------
+void UIManager::refreshShaderViewer()
+{
+    if (!m_shaderViewerState.isOpen)
+        return;
+
+    auto* entry = findWidgetEntry(m_shaderViewerState.widgetId);
+    if (!entry || !entry->widget)
+        return;
+
+    auto& elements = entry->widget->getElementsMutable();
+    if (elements.empty())
+        return;
+
+    // Find the content area (horizontal StackPanel)
+    WidgetElement* content = nullptr;
+    for (auto& child : elements[0].children)
+    {
+        if (child.id == "ShaderViewer.Content")
+        {
+            content = &child;
+            break;
+        }
+    }
+    if (!content || content->children.size() < 3)
+        return;
+
+    // Also rebuild toolbar to update current file label
+    {
+        WidgetElement* toolbar = nullptr;
+        for (auto& child : elements[0].children)
+        {
+            if (child.id == "ShaderViewer.Toolbar")
+            {
+                toolbar = &child;
+                break;
+            }
+        }
+        if (toolbar)
+        {
+            toolbar->children.clear();
+            // Rebuild inline (same as buildShaderViewerToolbar but into existing element)
+            const auto& theme = EditorTheme::Get();
+
+            // Title label
+            {
+                WidgetElement title{};
+                title.type            = WidgetElementType::Text;
+                title.text            = "Shader Viewer";
+                title.font            = theme.fontDefault;
+                title.fontSize        = theme.fontSizeSubheading;
+                title.style.textColor = theme.textPrimary;
+                title.textAlignH      = TextAlignH::Left;
+                title.textAlignV      = TextAlignV::Center;
+                title.minSize         = EditorTheme::Scaled(Vec2{ 100.0f, 24.0f });
+                title.runtimeOnly     = true;
+                toolbar->children.push_back(std::move(title));
+            }
+
+            // Current file label
+            {
+                WidgetElement fileLabel{};
+                fileLabel.id            = "ShaderViewer.CurrentFile";
+                fileLabel.type          = WidgetElementType::Text;
+                fileLabel.text          = m_shaderViewerState.selectedFile.empty()
+                                          ? "(no file selected)"
+                                          : m_shaderViewerState.selectedFile;
+                fileLabel.font          = theme.fontDefault;
+                fileLabel.fontSize      = theme.fontSizeSmall;
+                fileLabel.style.textColor = theme.accent;
+                fileLabel.textAlignH    = TextAlignH::Left;
+                fileLabel.textAlignV    = TextAlignV::Center;
+                fileLabel.minSize       = EditorTheme::Scaled(Vec2{ 160.0f, 24.0f });
+                fileLabel.runtimeOnly   = true;
+                toolbar->children.push_back(std::move(fileLabel));
+            }
+
+            // Spacer
+            {
+                WidgetElement spacer{};
+                spacer.type        = WidgetElementType::Panel;
+                spacer.fillX       = true;
+                spacer.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+                spacer.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                spacer.runtimeOnly = true;
+                toolbar->children.push_back(std::move(spacer));
+            }
+
+            // Reload button
+            {
+                WidgetElement btn{};
+                btn.id              = "ShaderViewer.Reload";
+                btn.type            = WidgetElementType::Button;
+                btn.text            = "Reload Shaders";
+                btn.font            = theme.fontDefault;
+                btn.fontSize        = theme.fontSizeSmall;
+                btn.style.textColor = theme.textPrimary;
+                btn.style.color     = theme.accent;
+                btn.style.hoverColor = theme.buttonHover;
+                btn.textAlignH      = TextAlignH::Center;
+                btn.textAlignV      = TextAlignV::Center;
+                btn.minSize         = EditorTheme::Scaled(Vec2{ 110.0f, 24.0f });
+                btn.padding         = EditorTheme::Scaled(Vec2{ 8.0f, 2.0f });
+                btn.hitTestMode     = HitTestMode::Enabled;
+                btn.runtimeOnly     = true;
+                btn.clickEvent      = "ShaderViewer.Reload";
+                toolbar->children.push_back(std::move(btn));
+            }
+        }
+    }
+
+    // Rebuild file list (children[0])
+    content->children[0].children.clear();
+    buildShaderFileList(content->children[0]);
+
+    // Rebuild code view (children[2], after the separator at children[1])
+    content->children[2].children.clear();
+    buildShaderCodeView(content->children[2]);
+
+    entry->widget->markLayoutDirty();
+    m_renderDirty = true;
+}
+
+// ===========================================================================
+// Render-Pass-Debugger Tab
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// isRenderDebuggerOpen
+// ---------------------------------------------------------------------------
+bool UIManager::isRenderDebuggerOpen() const
+{
+    return m_renderDebuggerState.isOpen;
+}
+
+// ---------------------------------------------------------------------------
+// openRenderDebuggerTab
+// ---------------------------------------------------------------------------
+void UIManager::openRenderDebuggerTab()
+{
+    if (!m_renderer)
+        return;
+
+    const std::string tabId = "RenderDebugger";
+
+    // If already open, just switch to it
+    if (m_renderDebuggerState.isOpen)
+    {
+        m_renderer->setActiveTab(tabId);
+        markAllWidgetsDirty();
+        return;
+    }
+
+    m_renderer->addTab(tabId, "Render Debugger", true);
+    m_renderer->setActiveTab(tabId);
+
+    const std::string widgetId = "RenderDebugger.Main";
+
+    // Clean up any stale registration
+    unregisterWidget(widgetId);
+
+    // Initialise state
+    m_renderDebuggerState = {};
+    m_renderDebuggerState.tabId    = tabId;
+    m_renderDebuggerState.widgetId = widgetId;
+    m_renderDebuggerState.isOpen   = true;
+
+    // Build the main widget (fills entire tab area)
+    {
+        auto widget = std::make_shared<EditorWidget>();
+        widget->setName(widgetId);
+        widget->setAnchor(WidgetAnchor::TopLeft);
+        widget->setFillX(true);
+        widget->setFillY(true);
+        widget->setSizePixels(Vec2{ 0.0f, 0.0f });
+        widget->setZOrder(2);
+
+        const auto& theme = EditorTheme::Get();
+
+        WidgetElement root{};
+        root.id          = "RenderDebugger.Root";
+        root.type        = WidgetElementType::StackPanel;
+        root.from        = Vec2{ 0.0f, 0.0f };
+        root.to          = Vec2{ 1.0f, 1.0f };
+        root.fillX       = true;
+        root.fillY       = true;
+        root.orientation = StackOrientation::Vertical;
+        root.style.color = theme.panelBackground;
+        root.runtimeOnly = true;
+
+        // â”€â”€ Toolbar row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        buildRenderDebuggerToolbar(root);
+
+        // â”€â”€ Separator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        {
+            WidgetElement sep{};
+            sep.type        = WidgetElementType::Panel;
+            sep.fillX       = true;
+            sep.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+            sep.style.color = theme.panelBorder;
+            sep.runtimeOnly = true;
+            root.children.push_back(std::move(sep));
+        }
+
+        // â”€â”€ Scrollable pass list area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        {
+            WidgetElement passArea{};
+            passArea.id          = "RenderDebugger.PassArea";
+            passArea.type        = WidgetElementType::StackPanel;
+            passArea.fillX       = true;
+            passArea.fillY       = true;
+            passArea.scrollable  = true;
+            passArea.orientation = StackOrientation::Vertical;
+            passArea.padding     = EditorTheme::Scaled(Vec2{ 10.0f, 8.0f });
+            passArea.style.color = Vec4{ 0.08f, 0.09f, 0.11f, 1.0f };
+            passArea.runtimeOnly = true;
+            root.children.push_back(std::move(passArea));
+        }
+
+        widget->setElements({ std::move(root) });
+        registerWidget(widgetId, widget, tabId);
+    }
+
+    // â”€â”€ Tab / close click events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    const std::string tabBtnId   = "TitleBar.Tab." + tabId;
+    const std::string closeBtnId = "TitleBar.TabClose." + tabId;
+
+    registerClickEvent(tabBtnId, [this, tabId]()
+    {
+        if (m_renderer)
+            m_renderer->setActiveTab(tabId);
+        refreshRenderDebugger();
+        markAllWidgetsDirty();
+    });
+
+    registerClickEvent(closeBtnId, [this]()
+    {
+        closeRenderDebuggerTab();
+    });
+
+    // Initial population
+    refreshRenderDebugger();
+    markAllWidgetsDirty();
+}
+
+// ---------------------------------------------------------------------------
+// closeRenderDebuggerTab
+// ---------------------------------------------------------------------------
+void UIManager::closeRenderDebuggerTab()
+{
+    if (!m_renderDebuggerState.isOpen || !m_renderer)
+        return;
+
+    const std::string tabId = m_renderDebuggerState.tabId;
+
+    if (m_renderer->getActiveTabId() == tabId)
+        m_renderer->setActiveTab("Viewport");
+
+    unregisterWidget(m_renderDebuggerState.widgetId);
+
+    m_renderer->removeTab(tabId);
+    m_renderDebuggerState = {};
+    markAllWidgetsDirty();
+}
+
+// ---------------------------------------------------------------------------
+// buildRenderDebuggerToolbar
+// ---------------------------------------------------------------------------
+void UIManager::buildRenderDebuggerToolbar(WidgetElement& root)
+{
+    const auto& theme = EditorTheme::Get();
+
+    WidgetElement toolbar{};
+    toolbar.id          = "RenderDebugger.Toolbar";
+    toolbar.type        = WidgetElementType::StackPanel;
+    toolbar.fillX       = true;
+    toolbar.orientation = StackOrientation::Horizontal;
+    toolbar.padding     = EditorTheme::Scaled(Vec2{ 8.0f, 4.0f });
+    toolbar.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 32.0f });
+    toolbar.style.color = Vec4{ 0.14f, 0.15f, 0.19f, 1.0f };
+    toolbar.runtimeOnly = true;
+
+    // Title label
+    {
+        WidgetElement title{};
+        title.type            = WidgetElementType::Text;
+        title.text            = "Render-Pass Debugger";
+        title.font            = theme.fontDefault;
+        title.fontSize        = theme.fontSizeSubheading;
+        title.style.textColor = theme.textPrimary;
+        title.textAlignH      = TextAlignH::Left;
+        title.textAlignV      = TextAlignV::Center;
+        title.minSize         = EditorTheme::Scaled(Vec2{ 160.0f, 24.0f });
+        title.runtimeOnly     = true;
+        toolbar.children.push_back(std::move(title));
+    }
+
+    // Spacer
+    {
+        WidgetElement spacer{};
+        spacer.type        = WidgetElementType::Panel;
+        spacer.fillX       = true;
+        spacer.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+        spacer.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        spacer.runtimeOnly = true;
+        toolbar.children.push_back(std::move(spacer));
+    }
+
+    // Pass count summary
+    if (m_renderer)
+    {
+        const auto passes = m_renderer->getRenderPassInfo();
+        int enabledCount = 0;
+        for (const auto& p : passes)
+            if (p.enabled) ++enabledCount;
+
+        WidgetElement summary{};
+        summary.type            = WidgetElementType::Text;
+        summary.text            = std::to_string(enabledCount) + " / " + std::to_string(passes.size()) + " passes active";
+        summary.font            = theme.fontDefault;
+        summary.fontSize        = theme.fontSizeSmall;
+        summary.style.textColor = theme.textMuted;
+        summary.textAlignH      = TextAlignH::Right;
+        summary.textAlignV      = TextAlignV::Center;
+        summary.minSize         = EditorTheme::Scaled(Vec2{ 140.0f, 24.0f });
+        summary.runtimeOnly     = true;
+        toolbar.children.push_back(std::move(summary));
+    }
+
+    root.children.push_back(std::move(toolbar));
+}
+
+// ---------------------------------------------------------------------------
+// refreshRenderDebugger  â€“ rebuilds the pass list with current pipeline state
+// ---------------------------------------------------------------------------
+void UIManager::refreshRenderDebugger()
+{
+    if (!m_renderDebuggerState.isOpen || !m_renderer)
+        return;
+
+    auto* entry = findWidgetEntry(m_renderDebuggerState.widgetId);
+    if (!entry || !entry->widget)
+        return;
+
+    auto& elements = entry->widget->getElementsMutable();
+    if (elements.empty())
+        return;
+
+    // Find the pass-area container
+    WidgetElement* passArea = nullptr;
+    for (auto& child : elements[0].children)
+    {
+        if (child.id == "RenderDebugger.PassArea")
+        {
+            passArea = &child;
+            break;
+        }
+    }
+    if (!passArea)
+        return;
+
+    // Rebuild toolbar
+    {
+        WidgetElement* toolbar = nullptr;
+        for (auto& child : elements[0].children)
+        {
+            if (child.id == "RenderDebugger.Toolbar")
+            {
+                toolbar = &child;
+                break;
+            }
+        }
+        if (toolbar)
+        {
+            toolbar->children.clear();
+            const auto& theme = EditorTheme::Get();
+
+            // Title
+            {
+                WidgetElement title{};
+                title.type            = WidgetElementType::Text;
+                title.text            = "Render-Pass Debugger";
+                title.font            = theme.fontDefault;
+                title.fontSize        = theme.fontSizeSubheading;
+                title.style.textColor = theme.textPrimary;
+                title.textAlignH      = TextAlignH::Left;
+                title.textAlignV      = TextAlignV::Center;
+                title.minSize         = EditorTheme::Scaled(Vec2{ 160.0f, 24.0f });
+                title.runtimeOnly     = true;
+                toolbar->children.push_back(std::move(title));
+            }
+
+            // Spacer
+            {
+                WidgetElement spacer{};
+                spacer.type        = WidgetElementType::Panel;
+                spacer.fillX       = true;
+                spacer.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+                spacer.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                spacer.runtimeOnly = true;
+                toolbar->children.push_back(std::move(spacer));
+            }
+
+            // Summary
+            {
+                const auto passes = m_renderer->getRenderPassInfo();
+                int enabledCount = 0;
+                for (const auto& p : passes)
+                    if (p.enabled) ++enabledCount;
+
+                WidgetElement summary{};
+                summary.type            = WidgetElementType::Text;
+                summary.text            = std::to_string(enabledCount) + " / " + std::to_string(passes.size()) + " passes active";
+                summary.font            = theme.fontDefault;
+                summary.fontSize        = theme.fontSizeSmall;
+                summary.style.textColor = theme.textMuted;
+                summary.textAlignH      = TextAlignH::Right;
+                summary.textAlignV      = TextAlignV::Center;
+                summary.minSize         = EditorTheme::Scaled(Vec2{ 140.0f, 24.0f });
+                summary.runtimeOnly     = true;
+                toolbar->children.push_back(std::move(summary));
+            }
+        }
+    }
+
+    passArea->children.clear();
+
+    const auto& theme = EditorTheme::Get();
+    const auto passes = m_renderer->getRenderPassInfo();
+
+    // Timing summary from DiagnosticsManager
+    const auto& metrics = DiagnosticsManager::Instance().getLatestMetrics();
+
+    // â”€â”€ Frame timing header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    {
+        char buf[256];
+        std::snprintf(buf, sizeof(buf),
+            "Frame: %.1f FPS | CPU World: %.2f ms | CPU UI: %.2f ms | GPU: %.2f ms",
+            metrics.fps, metrics.cpuWorldMs, metrics.cpuUiMs, metrics.gpuFrameMs);
+
+        WidgetElement header{};
+        header.type            = WidgetElementType::Text;
+        header.text            = buf;
+        header.font            = theme.fontDefault;
+        header.fontSize        = theme.fontSizeSmall;
+        header.style.textColor = theme.accent;
+        header.textAlignH      = TextAlignH::Left;
+        header.textAlignV      = TextAlignV::Center;
+        header.fillX           = true;
+        header.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 22.0f });
+        header.runtimeOnly     = true;
+        passArea->children.push_back(std::move(header));
+    }
+
+    // Object count row
+    {
+        char buf[128];
+        std::snprintf(buf, sizeof(buf),
+            "Objects: %u visible, %u culled, %u total",
+            metrics.visibleCount, metrics.hiddenCount, metrics.totalCount);
+
+        WidgetElement row{};
+        row.type            = WidgetElementType::Text;
+        row.text            = buf;
+        row.font            = theme.fontDefault;
+        row.fontSize        = theme.fontSizeSmall;
+        row.style.textColor = theme.textSecondary;
+        row.textAlignH      = TextAlignH::Left;
+        row.textAlignV      = TextAlignV::Center;
+        row.fillX           = true;
+        row.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 20.0f });
+        row.runtimeOnly     = true;
+        passArea->children.push_back(std::move(row));
+    }
+
+    // â”€â”€ Divider â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    {
+        WidgetElement div{};
+        div.type        = WidgetElementType::Panel;
+        div.fillX       = true;
+        div.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+        div.style.color = theme.panelBorder;
+        div.runtimeOnly = true;
+        passArea->children.push_back(std::move(div));
+    }
+
+    // â”€â”€ Pipeline passes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    std::string lastCategory;
+    int passIndex = 0;
+
+    // Category colour mapping
+    auto categoryColor = [&](const std::string& cat) -> Vec4
+    {
+        if (cat == "Shadow")       return Vec4{ 0.60f, 0.45f, 0.80f, 1.0f };
+        if (cat == "Geometry")     return Vec4{ 0.40f, 0.70f, 0.90f, 1.0f };
+        if (cat == "Post-Process") return Vec4{ 0.85f, 0.65f, 0.30f, 1.0f };
+        if (cat == "Overlay")      return Vec4{ 0.40f, 0.80f, 0.55f, 1.0f };
+        if (cat == "Utility")      return Vec4{ 0.65f, 0.65f, 0.65f, 1.0f };
+        if (cat == "UI")           return Vec4{ 0.90f, 0.55f, 0.55f, 1.0f };
+        return theme.textSecondary;
+    };
+
+    const float rowH = EditorTheme::Scaled(20.0f);
+
+    for (const auto& pass : passes)
+    {
+        // Category header when it changes
+        if (pass.category != lastCategory)
+        {
+            lastCategory = pass.category;
+
+            if (passIndex > 0)
+            {
+                WidgetElement space{};
+                space.type        = WidgetElementType::Panel;
+                space.fillX       = true;
+                space.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 6.0f });
+                space.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                space.runtimeOnly = true;
+                passArea->children.push_back(std::move(space));
+            }
+
+            WidgetElement catLabel{};
+            catLabel.type            = WidgetElementType::Text;
+            catLabel.text            = "\xe2\x94\x80\xe2\x94\x80 " + pass.category + " \xe2\x94\x80\xe2\x94\x80";
+            catLabel.font            = theme.fontDefault;
+            catLabel.fontSize        = theme.fontSizeSmall;
+            catLabel.style.textColor = categoryColor(pass.category);
+            catLabel.textAlignH      = TextAlignH::Left;
+            catLabel.textAlignV      = TextAlignV::Center;
+            catLabel.fillX           = true;
+            catLabel.minSize         = Vec2{ 0.0f, rowH };
+            catLabel.padding         = EditorTheme::Scaled(Vec2{ 2.0f, 2.0f });
+            catLabel.runtimeOnly     = true;
+            passArea->children.push_back(std::move(catLabel));
+        }
+
+        // Pass row: [status] [name] [FBO info] [details]
+        {
+            WidgetElement passRow{};
+            passRow.id          = "RenderDebugger.Pass." + std::to_string(passIndex);
+            passRow.type        = WidgetElementType::StackPanel;
+            passRow.fillX       = true;
+            passRow.orientation = StackOrientation::Horizontal;
+            passRow.minSize     = Vec2{ 0.0f, rowH };
+            passRow.padding     = EditorTheme::Scaled(Vec2{ 8.0f, 1.0f });
+            passRow.style.color = (passIndex % 2 == 0)
+                                  ? Vec4{ 0.07f, 0.07f, 0.09f, 1.0f }
+                                  : Vec4{ 0.09f, 0.09f, 0.11f, 1.0f };
+            passRow.runtimeOnly = true;
+
+            // Status indicator
+            {
+                WidgetElement status{};
+                status.type            = WidgetElementType::Text;
+                status.text            = pass.enabled ? "\xe2\x97\x8f" : "\xe2\x97\x8b";
+                status.font            = theme.fontDefault;
+                status.fontSize        = theme.fontSizeSmall;
+                status.style.textColor = pass.enabled ? theme.successColor : theme.textMuted;
+                status.textAlignH      = TextAlignH::Center;
+                status.textAlignV      = TextAlignV::Center;
+                status.minSize         = EditorTheme::Scaled(Vec2{ 20.0f, rowH });
+                status.runtimeOnly     = true;
+                passRow.children.push_back(std::move(status));
+            }
+
+            // Pass name
+            {
+                WidgetElement name{};
+                name.type            = WidgetElementType::Text;
+                name.text            = pass.name;
+                name.font            = theme.fontDefault;
+                name.fontSize        = theme.fontSizeSmall;
+                name.style.textColor = pass.enabled ? theme.textPrimary : theme.textMuted;
+                name.textAlignH      = TextAlignH::Left;
+                name.textAlignV      = TextAlignV::Center;
+                name.minSize         = EditorTheme::Scaled(Vec2{ 200.0f, rowH });
+                name.runtimeOnly     = true;
+                passRow.children.push_back(std::move(name));
+            }
+
+            // FBO format / resolution
+            {
+                std::string fboText = pass.fboFormat;
+                if (pass.fboWidth > 0 && pass.fboHeight > 0)
+                    fboText = std::to_string(pass.fboWidth) + "x" + std::to_string(pass.fboHeight) + " " + pass.fboFormat;
+
+                WidgetElement fbo{};
+                fbo.type            = WidgetElementType::Text;
+                fbo.text            = fboText;
+                fbo.font            = theme.fontDefault;
+                fbo.fontSize        = theme.fontSizeCaption;
+                fbo.style.textColor = categoryColor(pass.category);
+                fbo.textAlignH      = TextAlignH::Left;
+                fbo.textAlignV      = TextAlignV::Center;
+                fbo.minSize         = EditorTheme::Scaled(Vec2{ 200.0f, rowH });
+                fbo.runtimeOnly     = true;
+                passRow.children.push_back(std::move(fbo));
+            }
+
+            // Details
+            {
+                WidgetElement det{};
+                det.type            = WidgetElementType::Text;
+                det.text            = pass.details;
+                det.font            = theme.fontDefault;
+                det.fontSize        = theme.fontSizeCaption;
+                det.style.textColor = theme.textSecondary;
+                det.textAlignH      = TextAlignH::Left;
+                det.textAlignV      = TextAlignV::Center;
+                det.fillX           = true;
+                det.minSize         = Vec2{ 0.0f, rowH };
+                det.runtimeOnly     = true;
+                passRow.children.push_back(std::move(det));
+            }
+
+            passArea->children.push_back(std::move(passRow));
+        }
+
+        ++passIndex;
+    }
+
+    // â”€â”€ Pipeline flow diagram â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    {
+        WidgetElement space{};
+        space.type        = WidgetElementType::Panel;
+        space.fillX       = true;
+        space.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 10.0f });
+        space.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        space.runtimeOnly = true;
+        passArea->children.push_back(std::move(space));
+    }
+
+    {
+        WidgetElement flowTitle{};
+        flowTitle.type            = WidgetElementType::Text;
+        flowTitle.text            = "\xe2\x94\x80\xe2\x94\x80 Pipeline Flow \xe2\x94\x80\xe2\x94\x80";
+        flowTitle.font            = theme.fontDefault;
+        flowTitle.fontSize        = theme.fontSizeSmall;
+        flowTitle.style.textColor = theme.textMuted;
+        flowTitle.textAlignH      = TextAlignH::Left;
+        flowTitle.textAlignV      = TextAlignV::Center;
+        flowTitle.fillX           = true;
+        flowTitle.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 20.0f });
+        flowTitle.runtimeOnly     = true;
+        passArea->children.push_back(std::move(flowTitle));
+    }
+
+    // Build a simplified flow text
+    {
+        std::string flow;
+        flow += "Shadows -> Skybox -> Geometry (Opaque)";
+        flow += " -> Particles -> OIT -> HZB";
+        flow += " -> Resolve (Bloom + SSAO + ToneMap + Gamma)";
+        flow += " -> Grid -> Colliders -> Bones -> Outline -> Gizmo -> FXAA -> UI";
+
+        WidgetElement flowLine{};
+        flowLine.type            = WidgetElementType::Text;
+        flowLine.text            = flow;
+        flowLine.font            = theme.fontDefault;
+        flowLine.fontSize        = theme.fontSizeCaption;
+        flowLine.style.textColor = theme.accent;
+        flowLine.textAlignH      = TextAlignH::Left;
+        flowLine.textAlignV      = TextAlignV::Center;
+        flowLine.fillX           = true;
+        flowLine.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 24.0f });
+        flowLine.padding         = EditorTheme::Scaled(Vec2{ 4.0f, 4.0f });
+        flowLine.runtimeOnly     = true;
+        passArea->children.push_back(std::move(flowLine));
+    }
+
+    entry->widget->markLayoutDirty();
+    m_renderDirty = true;
+}
+
+// ===========================================================================
+// Cinematic Sequencer Tab (Phase 11.2)
+// ===========================================================================
+
+bool UIManager::isSequencerOpen() const
+{
+    return m_sequencerState.isOpen;
+}
+
+void UIManager::openSequencerTab()
+{
+    if (!m_renderer)
+        return;
+
+    const std::string tabId = "Sequencer";
+
+    if (m_sequencerState.isOpen)
+    {
+        m_renderer->setActiveTab(tabId);
+        markAllWidgetsDirty();
+        return;
+    }
+
+    m_renderer->addTab(tabId, "Sequencer", true);
+    m_renderer->setActiveTab(tabId);
+
+    const std::string widgetId = "Sequencer.Main";
+    unregisterWidget(widgetId);
+
+    m_sequencerState = {};
+    m_sequencerState.tabId    = tabId;
+    m_sequencerState.widgetId = widgetId;
+    m_sequencerState.isOpen   = true;
+
+    // Seed from existing camera path if one is set
+    {
+        auto pts = m_renderer->getCameraPathPoints();
+        if (!pts.empty())
+        {
+            m_sequencerState.pathDuration = m_renderer->getCameraPathDuration();
+            m_sequencerState.loopPlayback = m_renderer->getCameraPathLoop();
+        }
+    }
+
+    {
+        auto widget = std::make_shared<EditorWidget>();
+        widget->setName(widgetId);
+        widget->setAnchor(WidgetAnchor::TopLeft);
+        widget->setFillX(true);
+        widget->setFillY(true);
+        widget->setSizePixels(Vec2{ 0.0f, 0.0f });
+        widget->setZOrder(2);
+
+        const auto& theme = EditorTheme::Get();
+
+        WidgetElement root{};
+        root.id          = "Sequencer.Root";
+        root.type        = WidgetElementType::StackPanel;
+        root.from        = Vec2{ 0.0f, 0.0f };
+        root.to          = Vec2{ 1.0f, 1.0f };
+        root.fillX       = true;
+        root.fillY       = true;
+        root.orientation = StackOrientation::Vertical;
+        root.style.color = theme.panelBackground;
+        root.runtimeOnly = true;
+
+        // Toolbar
+        buildSequencerToolbar(root);
+
+        // Separator
+        {
+            WidgetElement sep{};
+            sep.type        = WidgetElementType::Panel;
+            sep.fillX       = true;
+            sep.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+            sep.style.color = theme.panelBorder;
+            sep.runtimeOnly = true;
+            root.children.push_back(std::move(sep));
+        }
+
+        // Timeline area
+        buildSequencerTimeline(root);
+
+        // Separator
+        {
+            WidgetElement sep{};
+            sep.type        = WidgetElementType::Panel;
+            sep.fillX       = true;
+            sep.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+            sep.style.color = theme.panelBorder;
+            sep.runtimeOnly = true;
+            root.children.push_back(std::move(sep));
+        }
+
+        // Keyframe list (scrollable)
+        buildSequencerKeyframeList(root);
+
+        widget->setElements({ std::move(root) });
+        registerWidget(widgetId, widget, tabId);
+    }
+
+    // Tab / close click events
+    const std::string tabBtnId   = "TitleBar.Tab." + tabId;
+    const std::string closeBtnId = "TitleBar.TabClose." + tabId;
+
+    registerClickEvent(tabBtnId, [this, tabId]()
+    {
+        if (m_renderer)
+            m_renderer->setActiveTab(tabId);
+        refreshSequencerTimeline();
+        markAllWidgetsDirty();
+    });
+
+    registerClickEvent(closeBtnId, [this]()
+    {
+        closeSequencerTab();
+    });
+
+    // Toolbar button events
+    registerClickEvent("Sequencer.AddKeyframe", [this]()
+    {
+        if (!m_renderer) return;
+        auto pts = m_renderer->getCameraPathPoints();
+        CameraPathPoint pt;
+        pt.position = m_renderer->getCameraPosition();
+        auto rot = m_renderer->getCameraRotationDegrees();
+        pt.yaw   = rot.x;
+        pt.pitch = rot.y;
+        pts.push_back(pt);
+        m_renderer->setCameraPathPoints(pts);
+        m_sequencerState.selectedKeyframe = static_cast<int>(pts.size()) - 1;
+        refreshSequencerTimeline();
+        markAllWidgetsDirty();
+        showToastMessage("Keyframe " + std::to_string(pts.size()) + " added", 1.5f);
+    });
+
+    registerClickEvent("Sequencer.RemoveKeyframe", [this]()
+    {
+        if (!m_renderer) return;
+        auto pts = m_renderer->getCameraPathPoints();
+        int sel = m_sequencerState.selectedKeyframe;
+        if (sel < 0 || sel >= static_cast<int>(pts.size())) return;
+        pts.erase(pts.begin() + sel);
+        m_renderer->setCameraPathPoints(pts);
+        if (sel >= static_cast<int>(pts.size()))
+            m_sequencerState.selectedKeyframe = static_cast<int>(pts.size()) - 1;
+        refreshSequencerTimeline();
+        markAllWidgetsDirty();
+        showToastMessage("Keyframe removed", 1.5f);
+    });
+
+    registerClickEvent("Sequencer.Play", [this]()
+    {
+        if (!m_renderer) return;
+        auto pts = m_renderer->getCameraPathPoints();
+        if (pts.size() < 2)
+        {
+            showToastMessage("Need at least 2 keyframes", 2.0f);
+            return;
+        }
+        if (m_renderer->isCameraPathPlaying())
+        {
+            m_renderer->pauseCameraPath();
+            m_sequencerState.playing = false;
+        }
+        else if (m_sequencerState.playing)
+        {
+            m_renderer->resumeCameraPath();
+            m_sequencerState.playing = true;
+        }
+        else
+        {
+            m_renderer->setCameraPathDuration(m_sequencerState.pathDuration);
+            m_renderer->setCameraPathLoop(m_sequencerState.loopPlayback);
+            m_renderer->startCameraPath(pts, m_sequencerState.pathDuration, m_sequencerState.loopPlayback);
+            m_sequencerState.playing = true;
+        }
+        refreshSequencerTimeline();
+        markAllWidgetsDirty();
+    });
+
+    registerClickEvent("Sequencer.Stop", [this]()
+    {
+        if (!m_renderer) return;
+        m_renderer->stopCameraPath();
+        m_sequencerState.playing = false;
+        m_sequencerState.scrubberT = 0.0f;
+        refreshSequencerTimeline();
+        markAllWidgetsDirty();
+    });
+
+    registerClickEvent("Sequencer.Loop", [this]()
+    {
+        m_sequencerState.loopPlayback = !m_sequencerState.loopPlayback;
+        if (m_renderer)
+            m_renderer->setCameraPathLoop(m_sequencerState.loopPlayback);
+        refreshSequencerTimeline();
+        markAllWidgetsDirty();
+    });
+
+    registerClickEvent("Sequencer.ShowSpline", [this]()
+    {
+        m_sequencerState.showSplineInViewport = !m_sequencerState.showSplineInViewport;
+        refreshSequencerTimeline();
+        markAllWidgetsDirty();
+    });
+
+    // Keyframe click events (registered dynamically during refresh)
+
+    refreshSequencerTimeline();
+    markAllWidgetsDirty();
+}
+
+void UIManager::closeSequencerTab()
+{
+    if (!m_sequencerState.isOpen || !m_renderer)
+        return;
+
+    const std::string tabId = m_sequencerState.tabId;
+
+    if (m_renderer->getActiveTabId() == tabId)
+        m_renderer->setActiveTab("Viewport");
+
+    unregisterWidget(m_sequencerState.widgetId);
+    m_renderer->removeTab(tabId);
+    m_sequencerState = {};
+    markAllWidgetsDirty();
+}
+
+void UIManager::buildSequencerToolbar(WidgetElement& root)
+{
+    const auto& theme = EditorTheme::Get();
+
+    WidgetElement toolbar{};
+    toolbar.id          = "Sequencer.Toolbar";
+    toolbar.type        = WidgetElementType::StackPanel;
+    toolbar.orientation = StackOrientation::Horizontal;
+    toolbar.fillX       = true;
+    toolbar.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 32.0f });
+    toolbar.padding     = EditorTheme::Scaled(Vec2{ 6.0f, 4.0f });
+    toolbar.spacing     = EditorTheme::Scaled(6.0f);
+    toolbar.style.color = theme.titleBarBackground;
+    toolbar.runtimeOnly = true;
+
+    // Title label
+    {
+        WidgetElement lbl{};
+        lbl.type             = WidgetElementType::Label;
+        lbl.text             = "Sequencer";
+        lbl.style.textColor  = theme.textPrimary;
+        lbl.fontSize         = EditorTheme::Scaled(13.0f);
+        lbl.runtimeOnly      = true;
+        toolbar.children.push_back(std::move(lbl));
+    }
+
+    // Spacer
+    {
+        WidgetElement sp{};
+        sp.type        = WidgetElementType::Panel;
+        sp.fillX       = true;
+        sp.minSize     = EditorTheme::Scaled(Vec2{ 4.0f, 1.0f });
+        sp.style.color = Vec4{ 0,0,0,0 };
+        sp.runtimeOnly = true;
+        toolbar.children.push_back(std::move(sp));
+    }
+
+    auto makeBtn = [&](const std::string& id, const std::string& text, const std::string& tooltip, const Vec4& color) {
+        WidgetElement btn{};
+        btn.id              = id;
+        btn.type            = WidgetElementType::Button;
+        btn.clickEvent      = id;
+        btn.text            = text;
+        btn.tooltipText     = tooltip;
+        btn.minSize         = EditorTheme::Scaled(Vec2{ 26.0f, 24.0f });
+        btn.style.color     = theme.inputBackground;
+        btn.style.textColor = color;
+        btn.fontSize        = EditorTheme::Scaled(13.0f);
+        btn.runtimeOnly     = true;
+        return btn;
+    };
+
+    toolbar.children.push_back(makeBtn("Sequencer.AddKeyframe", "+", "Add Keyframe at Camera", theme.accentGreen));
+    toolbar.children.push_back(makeBtn("Sequencer.RemoveKeyframe", "-", "Remove Selected Keyframe", Vec4{1.0f, 0.4f, 0.4f, 1.0f}));
+
+    // Separator
+    {
+        WidgetElement sep{};
+        sep.type        = WidgetElementType::Panel;
+        sep.minSize     = EditorTheme::Scaled(Vec2{ 1.0f, 20.0f });
+        sep.style.color = theme.panelBorder;
+        sep.runtimeOnly = true;
+        toolbar.children.push_back(std::move(sep));
+    }
+
+    toolbar.children.push_back(makeBtn("Sequencer.Play",
+        m_sequencerState.playing ? "\xe2\x8f\xb8" : "\xe2\x96\xb6",
+        m_sequencerState.playing ? "Pause" : "Play",
+        theme.accent));
+    toolbar.children.push_back(makeBtn("Sequencer.Stop", "\xe2\x96\xa0", "Stop", theme.textPrimary));
+    toolbar.children.push_back(makeBtn("Sequencer.Loop",
+        m_sequencerState.loopPlayback ? "\xe2\x86\xbb" : "\xe2\x86\xbb",
+        m_sequencerState.loopPlayback ? "Loop: ON" : "Loop: OFF",
+        m_sequencerState.loopPlayback ? theme.accent : Vec4{0.45f, 0.45f, 0.45f, 1.0f}));
+
+    // Separator
+    {
+        WidgetElement sep{};
+        sep.type        = WidgetElementType::Panel;
+        sep.minSize     = EditorTheme::Scaled(Vec2{ 1.0f, 20.0f });
+        sep.style.color = theme.panelBorder;
+        sep.runtimeOnly = true;
+        toolbar.children.push_back(std::move(sep));
+    }
+
+    toolbar.children.push_back(makeBtn("Sequencer.ShowSpline",
+        "\xe2\x97\x86",
+        m_sequencerState.showSplineInViewport ? "Spline Visible" : "Spline Hidden",
+        m_sequencerState.showSplineInViewport ? theme.accent : Vec4{0.45f, 0.45f, 0.45f, 1.0f}));
+
+    // Duration label + value
+    {
+        WidgetElement durLbl{};
+        durLbl.type             = WidgetElementType::Label;
+        durLbl.text             = "Duration:";
+        durLbl.style.textColor  = theme.textSecondary;
+        durLbl.fontSize         = EditorTheme::Scaled(12.0f);
+        durLbl.runtimeOnly      = true;
+        toolbar.children.push_back(std::move(durLbl));
+    }
+    {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "%.1fs", static_cast<double>(m_sequencerState.pathDuration));
+        WidgetElement durVal{};
+        durVal.id              = "Sequencer.Duration";
+        durVal.type            = WidgetElementType::Label;
+        durVal.text            = buf;
+        durVal.style.textColor = theme.textPrimary;
+        durVal.fontSize        = EditorTheme::Scaled(12.0f);
+        durVal.runtimeOnly     = true;
+        toolbar.children.push_back(std::move(durVal));
+    }
+
+    root.children.push_back(std::move(toolbar));
+}
+
+void UIManager::buildSequencerTimeline(WidgetElement& root)
+{
+    const auto& theme = EditorTheme::Get();
+
+    WidgetElement timelineArea{};
+    timelineArea.id          = "Sequencer.TimelineArea";
+    timelineArea.type        = WidgetElementType::Panel;
+    timelineArea.fillX       = true;
+    timelineArea.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 60.0f });
+    timelineArea.padding     = EditorTheme::Scaled(Vec2{ 10.0f, 6.0f });
+    timelineArea.style.color = Vec4{ 0.10f, 0.10f, 0.13f, 1.0f };
+    timelineArea.runtimeOnly = true;
+
+    // Track label
+    {
+        WidgetElement lbl{};
+        lbl.type            = WidgetElementType::Label;
+        lbl.text            = "Camera Path";
+        lbl.style.textColor = theme.textSecondary;
+        lbl.fontSize        = EditorTheme::Scaled(11.0f);
+        lbl.from            = Vec2{ 0.0f, 0.0f };
+        lbl.to              = Vec2{ 0.0f, 0.0f };
+        lbl.runtimeOnly     = true;
+        timelineArea.children.push_back(std::move(lbl));
+    }
+
+    // Timeline bar
+    {
+        WidgetElement bar{};
+        bar.id          = "Sequencer.TimelineBar";
+        bar.type        = WidgetElementType::Panel;
+        bar.fillX       = true;
+        bar.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 24.0f });
+        bar.style.color = Vec4{ 0.15f, 0.16f, 0.19f, 1.0f };
+        bar.runtimeOnly = true;
+        bar.style.borderRadius = EditorTheme::Scaled(3.0f);
+
+        // Draw keyframe markers on the bar
+        if (m_renderer)
+        {
+            auto pts = m_renderer->getCameraPathPoints();
+            const int n = static_cast<int>(pts.size());
+            for (int i = 0; i < n; ++i)
+            {
+                float tNorm = (n <= 1) ? 0.5f : static_cast<float>(i) / static_cast<float>(n - 1);
+                WidgetElement marker{};
+                marker.id   = "Sequencer.KF." + std::to_string(i);
+                marker.type = WidgetElementType::Panel;
+                marker.minSize = EditorTheme::Scaled(Vec2{ 8.0f, 18.0f });
+                marker.from = Vec2{ tNorm, 0.1f };
+                marker.to   = Vec2{ tNorm, 0.9f };
+                bool selected = (i == m_sequencerState.selectedKeyframe);
+                marker.style.color = selected
+                    ? theme.accent
+                    : Vec4{ 0.7f, 0.7f, 0.7f, 1.0f };
+                marker.style.borderRadius = EditorTheme::Scaled(2.0f);
+                marker.runtimeOnly = true;
+                marker.clickEvent  = "Sequencer.SelectKF." + std::to_string(i);
+                bar.children.push_back(std::move(marker));
+            }
+
+            // Scrubber position indicator
+            if (m_sequencerState.playing || m_renderer->isCameraPathPlaying())
+            {
+                float progress = m_renderer->getCameraPathProgress();
+                WidgetElement scrubber{};
+                scrubber.id   = "Sequencer.Scrubber";
+                scrubber.type = WidgetElementType::Panel;
+                scrubber.minSize = EditorTheme::Scaled(Vec2{ 3.0f, 24.0f });
+                scrubber.from = Vec2{ progress, 0.0f };
+                scrubber.to   = Vec2{ progress, 1.0f };
+                scrubber.style.color = Vec4{ 1.0f, 0.3f, 0.3f, 1.0f };
+                scrubber.runtimeOnly = true;
+                bar.children.push_back(std::move(scrubber));
+            }
+        }
+
+        timelineArea.children.push_back(std::move(bar));
+    }
+
+    root.children.push_back(std::move(timelineArea));
+}
+
+void UIManager::buildSequencerKeyframeList(WidgetElement& root)
+{
+    const auto& theme = EditorTheme::Get();
+
+    WidgetElement listArea{};
+    listArea.id          = "Sequencer.KeyframeList";
+    listArea.type        = WidgetElementType::StackPanel;
+    listArea.orientation = StackOrientation::Vertical;
+    listArea.fillX       = true;
+    listArea.fillY       = true;
+    listArea.scrollable  = true;
+    listArea.padding     = EditorTheme::Scaled(Vec2{ 8.0f, 6.0f });
+    listArea.spacing     = EditorTheme::Scaled(2.0f);
+    listArea.style.color = Vec4{ 0.08f, 0.09f, 0.11f, 1.0f };
+    listArea.runtimeOnly = true;
+
+    // Header
+    {
+        WidgetElement hdr{};
+        hdr.type            = WidgetElementType::Label;
+        hdr.text            = "Keyframes";
+        hdr.style.textColor = theme.textSecondary;
+        hdr.fontSize        = EditorTheme::Scaled(12.0f);
+        hdr.runtimeOnly     = true;
+        listArea.children.push_back(std::move(hdr));
+    }
+
+    if (m_renderer)
+    {
+        auto pts = m_renderer->getCameraPathPoints();
+        for (int i = 0; i < static_cast<int>(pts.size()); ++i)
+        {
+            const auto& pt = pts[i];
+            bool selected = (i == m_sequencerState.selectedKeyframe);
+
+            WidgetElement row{};
+            row.id          = "Sequencer.Row." + std::to_string(i);
+            row.type        = WidgetElementType::StackPanel;
+            row.orientation = StackOrientation::Horizontal;
+            row.fillX       = true;
+            row.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 22.0f });
+            row.spacing     = EditorTheme::Scaled(8.0f);
+            row.padding     = EditorTheme::Scaled(Vec2{ 6.0f, 2.0f });
+            row.style.color = selected
+                ? Vec4{ theme.accent.x, theme.accent.y, theme.accent.z, 0.15f }
+                : Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.clickEvent  = "Sequencer.SelectKF." + std::to_string(i);
+            row.runtimeOnly = true;
+
+            // Index
+            {
+                WidgetElement idx{};
+                idx.type            = WidgetElementType::Label;
+                idx.text            = std::to_string(i + 1) + ".";
+                idx.style.textColor = selected ? theme.accent : theme.textSecondary;
+                idx.fontSize        = EditorTheme::Scaled(12.0f);
+                idx.minSize         = EditorTheme::Scaled(Vec2{ 24.0f, 0.0f });
+                idx.runtimeOnly     = true;
+                row.children.push_back(std::move(idx));
+            }
+
+            // Position
+            {
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "Pos (%.1f, %.1f, %.1f)",
+                    static_cast<double>(pt.position.x),
+                    static_cast<double>(pt.position.y),
+                    static_cast<double>(pt.position.z));
+                WidgetElement posLbl{};
+                posLbl.type            = WidgetElementType::Label;
+                posLbl.text            = buf;
+                posLbl.style.textColor = theme.textPrimary;
+                posLbl.fontSize        = EditorTheme::Scaled(11.0f);
+                posLbl.runtimeOnly     = true;
+                row.children.push_back(std::move(posLbl));
+            }
+
+            // Rotation
+            {
+                char buf[48];
+                std::snprintf(buf, sizeof(buf), "Yaw %.0f  Pitch %.0f",
+                    static_cast<double>(pt.yaw), static_cast<double>(pt.pitch));
+                WidgetElement rotLbl{};
+                rotLbl.type            = WidgetElementType::Label;
+                rotLbl.text            = buf;
+                rotLbl.style.textColor = theme.textSecondary;
+                rotLbl.fontSize        = EditorTheme::Scaled(11.0f);
+                rotLbl.runtimeOnly     = true;
+                row.children.push_back(std::move(rotLbl));
+            }
+
+            listArea.children.push_back(std::move(row));
+        }
+
+        if (pts.empty())
+        {
+            WidgetElement hint{};
+            hint.type            = WidgetElementType::Label;
+            hint.text            = "No keyframes. Click + to add one at the current camera position.";
+            hint.style.textColor = Vec4{ 0.5f, 0.5f, 0.5f, 1.0f };
+            hint.fontSize        = EditorTheme::Scaled(11.0f);
+            hint.runtimeOnly     = true;
+            listArea.children.push_back(std::move(hint));
+        }
+    }
+
+    root.children.push_back(std::move(listArea));
+}
+
+void UIManager::refreshSequencerTimeline()
+{
+    if (!m_sequencerState.isOpen || !m_renderer)
+        return;
+
+    auto* entry = findWidgetEntry(m_sequencerState.widgetId);
+    if (!entry || !entry->widget) return;
+
+    auto& elements = entry->widget->getElementsMutable();
+    if (elements.empty()) return;
+
+    auto& rootEl = elements[0];
+
+    // Re-register dynamic keyframe click events
+    if (m_renderer)
+    {
+        auto pts = m_renderer->getCameraPathPoints();
+        for (int i = 0; i < static_cast<int>(pts.size()); ++i)
+        {
+            std::string evtId = "Sequencer.SelectKF." + std::to_string(i);
+            registerClickEvent(evtId, [this, i]()
+            {
+                m_sequencerState.selectedKeyframe = i;
+                // Move camera to selected keyframe position
+                if (m_renderer)
+                {
+                    auto pts2 = m_renderer->getCameraPathPoints();
+                    if (i >= 0 && i < static_cast<int>(pts2.size()))
+                    {
+                        const auto& kf = pts2[i];
+                        m_renderer->startCameraTransition(kf.position, kf.yaw, kf.pitch, 0.3f);
+                    }
+                }
+                refreshSequencerTimeline();
+                markAllWidgetsDirty();
+            });
+        }
+    }
+
+    // Update playback state
+    if (m_sequencerState.playing && m_renderer)
+    {
+        if (!m_renderer->isCameraPathPlaying())
+        {
+            m_sequencerState.playing = false;
+            m_sequencerState.scrubberT = 0.0f;
+        }
+        else
+        {
+            m_sequencerState.scrubberT = m_renderer->getCameraPathProgress();
+        }
+    }
+
+    // Rebuild toolbar + timeline + keyframe list
+    rootEl.children.clear();
+    buildSequencerToolbar(rootEl);
+    {
+        WidgetElement sep{};
+        sep.type        = WidgetElementType::Panel;
+        sep.fillX       = true;
+        sep.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+        sep.style.color = EditorTheme::Get().panelBorder;
+        sep.runtimeOnly = true;
+        rootEl.children.push_back(std::move(sep));
+    }
+    buildSequencerTimeline(rootEl);
+    {
+        WidgetElement sep{};
+        sep.type        = WidgetElementType::Panel;
+        sep.fillX       = true;
+        sep.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+        sep.style.color = EditorTheme::Get().panelBorder;
+        sep.runtimeOnly = true;
+        rootEl.children.push_back(std::move(sep));
+    }
+    buildSequencerKeyframeList(rootEl);
+
+    entry->widget->markLayoutDirty();
+    m_renderDirty = true;
+}
+
+// =============================================================================
+// Level Composition Panel (Phase 11.4)
+// =============================================================================
+
+bool UIManager::isLevelCompositionOpen() const
+{
+    return m_levelCompositionState.isOpen;
+}
+
+void UIManager::openLevelCompositionTab()
+{
+    if (!m_renderer)
+        return;
+
+    const std::string tabId = "LevelComposition";
+
+    if (m_levelCompositionState.isOpen)
+    {
+        m_renderer->setActiveTab(tabId);
+        markAllWidgetsDirty();
+        return;
+    }
+
+    m_renderer->addTab(tabId, "Level Composition", true);
+    m_renderer->setActiveTab(tabId);
+
+    const std::string widgetId = "LevelComposition.Main";
+    unregisterWidget(widgetId);
+
+    m_levelCompositionState = {};
+    m_levelCompositionState.tabId    = tabId;
+    m_levelCompositionState.widgetId = widgetId;
+    m_levelCompositionState.isOpen   = true;
+
+    {
+        auto widget = std::make_shared<EditorWidget>();
+        widget->setName(widgetId);
+        widget->setAnchor(WidgetAnchor::TopLeft);
+        widget->setFillX(true);
+        widget->setFillY(true);
+        widget->setSizePixels(Vec2{ 0.0f, 0.0f });
+        widget->setZOrder(2);
+
+        const auto& theme = EditorTheme::Get();
+
+        WidgetElement root{};
+        root.id          = "LC.Root";
+        root.type        = WidgetElementType::StackPanel;
+        root.from        = Vec2{ 0.0f, 0.0f };
+        root.to          = Vec2{ 1.0f, 1.0f };
+        root.fillX       = true;
+        root.fillY       = true;
+        root.orientation = StackOrientation::Vertical;
+        root.style.color = theme.panelBackground;
+        root.runtimeOnly = true;
+
+        buildLevelCompositionToolbar(root);
+
+        {
+            WidgetElement sep{};
+            sep.type        = WidgetElementType::Panel;
+            sep.fillX       = true;
+            sep.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+            sep.style.color = theme.panelBorder;
+            sep.runtimeOnly = true;
+            root.children.push_back(std::move(sep));
+        }
+
+        buildLevelCompositionSubLevelList(root);
+
+        {
+            WidgetElement sep{};
+            sep.type        = WidgetElementType::Panel;
+            sep.fillX       = true;
+            sep.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+            sep.style.color = theme.panelBorder;
+            sep.runtimeOnly = true;
+            root.children.push_back(std::move(sep));
+        }
+
+        buildLevelCompositionVolumeList(root);
+
+        widget->setElements({ std::move(root) });
+        registerWidget(widgetId, widget, tabId);
+    }
+
+    // Tab / close click events
+    const std::string tabBtnId   = "TitleBar.Tab." + tabId;
+    const std::string closeBtnId = "TitleBar.TabClose." + tabId;
+
+    registerClickEvent(tabBtnId, [this, tabId]()
+    {
+        if (m_renderer)
+            m_renderer->setActiveTab(tabId);
+        refreshLevelCompositionPanel();
+        markAllWidgetsDirty();
+    });
+
+    registerClickEvent(closeBtnId, [this]()
+    {
+        closeLevelCompositionTab();
+    });
+
+    // Toolbar button events
+    registerClickEvent("LC.AddSubLevel", [this]()
+    {
+        if (!m_renderer) return;
+        const auto& subs = m_renderer->getSubLevels();
+        std::string name = "SubLevel_" + std::to_string(subs.size());
+        m_renderer->addSubLevel(name, "");
+        refreshLevelCompositionPanel();
+        markAllWidgetsDirty();
+        showToastMessage("Sub-Level '" + name + "' added", 1.5f);
+    });
+
+    registerClickEvent("LC.RemoveSubLevel", [this]()
+    {
+        if (!m_renderer) return;
+        int sel = m_levelCompositionState.selectedSubLevel;
+        if (sel < 0) return;
+        m_renderer->removeSubLevel(sel);
+        m_levelCompositionState.selectedSubLevel = -1;
+        refreshLevelCompositionPanel();
+        markAllWidgetsDirty();
+        showToastMessage("Sub-Level removed", 1.5f);
+    });
+
+    registerClickEvent("LC.AddVolume", [this]()
+    {
+        if (!m_renderer) return;
+        int sel = m_levelCompositionState.selectedSubLevel;
+        if (sel < 0)
+        {
+            showToastMessage("Select a Sub-Level first", 2.0f);
+            return;
+        }
+        m_renderer->addStreamingVolume(Vec3{ 0.0f, 0.0f, 0.0f }, Vec3{ 10.0f, 10.0f, 10.0f }, sel);
+        refreshLevelCompositionPanel();
+        markAllWidgetsDirty();
+        showToastMessage("Streaming Volume added", 1.5f);
+    });
+
+    registerClickEvent("LC.ToggleVolumesVisible", [this]()
+    {
+        if (!m_renderer) return;
+        m_renderer->m_streamingVolumesVisible = !m_renderer->m_streamingVolumesVisible;
+        refreshLevelCompositionPanel();
+        markAllWidgetsDirty();
+    });
+
+    refreshLevelCompositionPanel();
+    markAllWidgetsDirty();
+}
+
+void UIManager::closeLevelCompositionTab()
+{
+    if (!m_levelCompositionState.isOpen || !m_renderer)
+        return;
+
+    const std::string tabId = m_levelCompositionState.tabId;
+
+    if (m_renderer->getActiveTabId() == tabId)
+        m_renderer->setActiveTab("Viewport");
+
+    unregisterWidget(m_levelCompositionState.widgetId);
+    m_renderer->removeTab(tabId);
+    m_levelCompositionState = {};
+    markAllWidgetsDirty();
+}
+
+void UIManager::refreshLevelCompositionPanel()
+{
+    if (!m_levelCompositionState.isOpen || !m_renderer)
+        return;
+
+    WidgetEntry* entry = nullptr;
+    for (auto& w : const_cast<std::vector<WidgetEntry>&>(getRegisteredWidgets()))
+    {
+        if (w.id == m_levelCompositionState.widgetId)
+        {
+            entry = &w;
+            break;
+        }
+    }
+    if (!entry || !entry->widget) return;
+
+    auto* editorWidget = dynamic_cast<EditorWidget*>(entry->widget.get());
+    if (!editorWidget) return;
+
+    auto elems = editorWidget->getElements();
+    if (elems.empty()) return;
+
+    WidgetElement& rootEl = elems[0];
+    rootEl.children.clear();
+
+    buildLevelCompositionToolbar(rootEl);
+    {
+        WidgetElement sep{};
+        sep.type        = WidgetElementType::Panel;
+        sep.fillX       = true;
+        sep.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+        sep.style.color = EditorTheme::Get().panelBorder;
+        sep.runtimeOnly = true;
+        rootEl.children.push_back(std::move(sep));
+    }
+    buildLevelCompositionSubLevelList(rootEl);
+    {
+        WidgetElement sep{};
+        sep.type        = WidgetElementType::Panel;
+        sep.fillX       = true;
+        sep.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+        sep.style.color = EditorTheme::Get().panelBorder;
+        sep.runtimeOnly = true;
+        rootEl.children.push_back(std::move(sep));
+    }
+    buildLevelCompositionVolumeList(rootEl);
+
+    entry->widget->markLayoutDirty();
+    m_renderDirty = true;
+}
+
+void UIManager::buildLevelCompositionToolbar(WidgetElement& root)
+{
+    const auto& theme = EditorTheme::Get();
+
+    WidgetElement toolbar{};
+    toolbar.id          = "LC.Toolbar";
+    toolbar.type        = WidgetElementType::StackPanel;
+    toolbar.orientation = StackOrientation::Horizontal;
+    toolbar.fillX       = true;
+    toolbar.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 32.0f });
+    toolbar.padding     = EditorTheme::Scaled(Vec2{ 6.0f, 4.0f });
+    toolbar.spacing     = EditorTheme::Scaled(6.0f);
+    toolbar.style.color = theme.titleBarBackground;
+    toolbar.runtimeOnly = true;
+
+    // Title label
+    {
+        WidgetElement lbl{};
+        lbl.type        = WidgetElementType::Text;
+        lbl.text        = "Level Composition";
+        lbl.style.color = theme.textPrimary;
+        lbl.fontSize    = EditorTheme::Scaled(13.0f);
+        lbl.runtimeOnly = true;
+        toolbar.children.push_back(std::move(lbl));
+    }
+
+    // Spacer
+    {
+        WidgetElement spacer{};
+        spacer.type    = WidgetElementType::Panel;
+        spacer.fillX   = true;
+        spacer.runtimeOnly = true;
+        toolbar.children.push_back(std::move(spacer));
+    }
+
+    // Add Sub-Level button
+    {
+        WidgetElement btn{};
+        btn.id          = "LC.AddSubLevel";
+        btn.type        = WidgetElementType::Button;
+        btn.text        = "+ Sub-Level";
+        btn.style.color = theme.accent;
+        btn.style.borderRadius = EditorTheme::Scaled(4.0f);
+        btn.padding     = EditorTheme::Scaled(Vec2{ 8.0f, 3.0f });
+        btn.fontSize    = EditorTheme::Scaled(12.0f);
+        btn.runtimeOnly = true;
+        toolbar.children.push_back(std::move(btn));
+    }
+
+    // Remove Sub-Level button
+    {
+        WidgetElement btn{};
+        btn.id          = "LC.RemoveSubLevel";
+        btn.type        = WidgetElementType::Button;
+        btn.text        = "- Remove";
+        btn.style.color = Vec4{ 0.6f, 0.2f, 0.2f, 1.0f };
+        btn.style.borderRadius = EditorTheme::Scaled(4.0f);
+        btn.padding     = EditorTheme::Scaled(Vec2{ 8.0f, 3.0f });
+        btn.fontSize    = EditorTheme::Scaled(12.0f);
+        btn.runtimeOnly = true;
+        toolbar.children.push_back(std::move(btn));
+    }
+
+    // Add Streaming Volume button
+    {
+        WidgetElement btn{};
+        btn.id          = "LC.AddVolume";
+        btn.type        = WidgetElementType::Button;
+        btn.text        = "+ Volume";
+        btn.style.color = theme.accentGreen;
+        btn.style.borderRadius = EditorTheme::Scaled(4.0f);
+        btn.padding     = EditorTheme::Scaled(Vec2{ 8.0f, 3.0f });
+        btn.fontSize    = EditorTheme::Scaled(12.0f);
+        btn.runtimeOnly = true;
+        toolbar.children.push_back(std::move(btn));
+    }
+
+    // Toggle volume visibility
+    {
+        bool vis = m_renderer ? m_renderer->m_streamingVolumesVisible : true;
+        WidgetElement btn{};
+        btn.id          = "LC.ToggleVolumesVisible";
+        btn.type        = WidgetElementType::Button;
+        btn.text        = vis ? "Volumes: ON" : "Volumes: OFF";
+        btn.style.color = vis ? theme.accent : Vec4{ 0.4f, 0.4f, 0.4f, 1.0f };
+        btn.style.borderRadius = EditorTheme::Scaled(4.0f);
+        btn.padding     = EditorTheme::Scaled(Vec2{ 8.0f, 3.0f });
+        btn.fontSize    = EditorTheme::Scaled(12.0f);
+        btn.runtimeOnly = true;
+        toolbar.children.push_back(std::move(btn));
+    }
+
+    root.children.push_back(std::move(toolbar));
+}
+
+void UIManager::buildLevelCompositionSubLevelList(WidgetElement& root)
+{
+    const auto& theme = EditorTheme::Get();
+
+    WidgetElement header{};
+    header.type        = WidgetElementType::Text;
+    header.text        = "Sub-Levels";
+    header.style.color = theme.textSecondary;
+    header.fontSize    = EditorTheme::Scaled(12.0f);
+    header.padding     = EditorTheme::Scaled(Vec2{ 8.0f, 6.0f });
+    header.runtimeOnly = true;
+    root.children.push_back(std::move(header));
+
+    if (!m_renderer) return;
+
+    const auto& subLevels = m_renderer->getSubLevels();
+    if (subLevels.empty())
+    {
+        WidgetElement empty{};
+        empty.type        = WidgetElementType::Text;
+        empty.text        = "No sub-levels. Click '+ Sub-Level' to add one.";
+        empty.style.color = Vec4{ 0.5f, 0.5f, 0.5f, 1.0f };
+        empty.fontSize    = EditorTheme::Scaled(11.0f);
+        empty.padding     = EditorTheme::Scaled(Vec2{ 12.0f, 4.0f });
+        empty.runtimeOnly = true;
+        root.children.push_back(std::move(empty));
+        return;
+    }
+
+    for (int i = 0; i < static_cast<int>(subLevels.size()); ++i)
+    {
+        const auto& sub = subLevels[i];
+        const bool selected = (i == m_levelCompositionState.selectedSubLevel);
+
+        WidgetElement row{};
+        row.id          = "LC.SubLevel." + std::to_string(i);
+        row.type        = WidgetElementType::StackPanel;
+        row.orientation = StackOrientation::Horizontal;
+        row.fillX       = true;
+        row.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 26.0f });
+        row.padding     = EditorTheme::Scaled(Vec2{ 8.0f, 2.0f });
+        row.spacing     = EditorTheme::Scaled(6.0f);
+        row.style.color = selected
+            ? Vec4{ theme.accent.x, theme.accent.y, theme.accent.z, 0.25f }
+            : Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        row.runtimeOnly = true;
+
+        // Color indicator
+        {
+            WidgetElement colorBox{};
+            colorBox.type        = WidgetElementType::Panel;
+            colorBox.minSize     = EditorTheme::Scaled(Vec2{ 14.0f, 14.0f });
+            colorBox.style.color = sub.color;
+            colorBox.style.borderRadius = EditorTheme::Scaled(3.0f);
+            colorBox.runtimeOnly = true;
+            row.children.push_back(std::move(colorBox));
+        }
+
+        // Name
+        {
+            WidgetElement name{};
+            name.type        = WidgetElementType::Text;
+            name.text        = sub.name;
+            name.style.color = theme.textPrimary;
+            name.fontSize    = EditorTheme::Scaled(12.0f);
+            name.fillX       = true;
+            name.runtimeOnly = true;
+            row.children.push_back(std::move(name));
+        }
+
+        // Loaded indicator
+        {
+            WidgetElement loadedLbl{};
+            loadedLbl.type        = WidgetElementType::Text;
+            loadedLbl.text        = sub.loaded ? "[Loaded]" : "[Unloaded]";
+            loadedLbl.style.color = sub.loaded
+                ? Vec4{ 0.2f, 0.9f, 0.3f, 1.0f }
+                : Vec4{ 0.6f, 0.6f, 0.6f, 1.0f };
+            loadedLbl.fontSize    = EditorTheme::Scaled(11.0f);
+            loadedLbl.runtimeOnly = true;
+            row.children.push_back(std::move(loadedLbl));
+        }
+
+        // Loaded toggle button
+        {
+            WidgetElement toggleBtn{};
+            toggleBtn.id          = "LC.ToggleLoaded." + std::to_string(i);
+            toggleBtn.type        = WidgetElementType::Button;
+            toggleBtn.text        = sub.loaded ? "Unload" : "Load";
+            toggleBtn.style.color = theme.inputBackground;
+            toggleBtn.style.borderRadius = EditorTheme::Scaled(3.0f);
+            toggleBtn.padding     = EditorTheme::Scaled(Vec2{ 6.0f, 2.0f });
+            toggleBtn.fontSize    = EditorTheme::Scaled(10.0f);
+            toggleBtn.runtimeOnly = true;
+            row.children.push_back(std::move(toggleBtn));
+
+            const int idx = i;
+            const bool loaded = sub.loaded;
+            registerClickEvent("LC.ToggleLoaded." + std::to_string(i), [this, idx, loaded]()
+            {
+                if (!m_renderer) return;
+                m_renderer->setSubLevelLoaded(idx, !loaded);
+                refreshLevelCompositionPanel();
+                markAllWidgetsDirty();
+            });
+        }
+
+        // Visible toggle button
+        {
+            WidgetElement visBtn{};
+            visBtn.id          = "LC.ToggleVisible." + std::to_string(i);
+            visBtn.type        = WidgetElementType::Button;
+            visBtn.text        = sub.visible ? "Vis" : "Hid";
+            visBtn.style.color = sub.visible ? theme.accent : Vec4{ 0.4f, 0.4f, 0.4f, 1.0f };
+            visBtn.style.borderRadius = EditorTheme::Scaled(3.0f);
+            visBtn.padding     = EditorTheme::Scaled(Vec2{ 6.0f, 2.0f });
+            visBtn.fontSize    = EditorTheme::Scaled(10.0f);
+            visBtn.runtimeOnly = true;
+            row.children.push_back(std::move(visBtn));
+
+            const int idx = i;
+            const bool visible = sub.visible;
+            registerClickEvent("LC.ToggleVisible." + std::to_string(i), [this, idx, visible]()
+            {
+                if (!m_renderer) return;
+                m_renderer->setSubLevelVisible(idx, !visible);
+                refreshLevelCompositionPanel();
+                markAllWidgetsDirty();
+            });
+        }
+
+        // Select this sub-level on row click
+        {
+            const int idx = i;
+            registerClickEvent("LC.SubLevel." + std::to_string(i), [this, idx]()
+            {
+                m_levelCompositionState.selectedSubLevel = idx;
+                refreshLevelCompositionPanel();
+                markAllWidgetsDirty();
+            });
+        }
+
+        root.children.push_back(std::move(row));
+    }
+}
+
+void UIManager::buildLevelCompositionVolumeList(WidgetElement& root)
+{
+    const auto& theme = EditorTheme::Get();
+
+    WidgetElement header{};
+    header.type        = WidgetElementType::Text;
+    header.text        = "Streaming Volumes";
+    header.style.color = theme.textSecondary;
+    header.fontSize    = EditorTheme::Scaled(12.0f);
+    header.padding     = EditorTheme::Scaled(Vec2{ 8.0f, 6.0f });
+    header.runtimeOnly = true;
+    root.children.push_back(std::move(header));
+
+    if (!m_renderer) return;
+
+    const auto& volumes = m_renderer->getStreamingVolumes();
+    const auto& subLevels = m_renderer->getSubLevels();
+
+    if (volumes.empty())
+    {
+        WidgetElement empty{};
+        empty.type        = WidgetElementType::Text;
+        empty.text        = "No streaming volumes. Select a sub-level and click '+ Volume'.";
+        empty.style.color = Vec4{ 0.5f, 0.5f, 0.5f, 1.0f };
+        empty.fontSize    = EditorTheme::Scaled(11.0f);
+        empty.padding     = EditorTheme::Scaled(Vec2{ 12.0f, 4.0f });
+        empty.runtimeOnly = true;
+        root.children.push_back(std::move(empty));
+        return;
+    }
+
+    for (int i = 0; i < static_cast<int>(volumes.size()); ++i)
+    {
+        const auto& vol = volumes[i];
+
+        WidgetElement row{};
+        row.id          = "LC.Volume." + std::to_string(i);
+        row.type        = WidgetElementType::StackPanel;
+        row.orientation = StackOrientation::Horizontal;
+        row.fillX       = true;
+        row.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 24.0f });
+        row.padding     = EditorTheme::Scaled(Vec2{ 8.0f, 2.0f });
+        row.spacing     = EditorTheme::Scaled(6.0f);
+        row.runtimeOnly = true;
+
+        // Color indicator from linked sub-level
+        {
+            Vec4 volColor{ 0.5f, 0.5f, 0.5f, 1.0f };
+            if (vol.subLevelIndex >= 0 && vol.subLevelIndex < static_cast<int>(subLevels.size()))
+                volColor = subLevels[vol.subLevelIndex].color;
+
+            WidgetElement colorBox{};
+            colorBox.type        = WidgetElementType::Panel;
+            colorBox.minSize     = EditorTheme::Scaled(Vec2{ 10.0f, 10.0f });
+            colorBox.style.color = volColor;
+            colorBox.style.borderRadius = EditorTheme::Scaled(2.0f);
+            colorBox.runtimeOnly = true;
+            row.children.push_back(std::move(colorBox));
+        }
+
+        // Label
+        {
+            std::string linkedName = "unlinked";
+            if (vol.subLevelIndex >= 0 && vol.subLevelIndex < static_cast<int>(subLevels.size()))
+                linkedName = subLevels[vol.subLevelIndex].name;
+
+            char buf[128];
+            snprintf(buf, sizeof(buf), "Vol %d -> %s  (%.0f,%.0f,%.0f  %.0f x %.0f x %.0f)",
+                     i, linkedName.c_str(),
+                     vol.center.x, vol.center.y, vol.center.z,
+                     vol.halfExtents.x * 2.0f, vol.halfExtents.y * 2.0f, vol.halfExtents.z * 2.0f);
+
+            WidgetElement lbl{};
+            lbl.type        = WidgetElementType::Text;
+            lbl.text        = buf;
+            lbl.style.color = theme.textPrimary;
+            lbl.fontSize    = EditorTheme::Scaled(11.0f);
+            lbl.fillX       = true;
+            lbl.runtimeOnly = true;
+            row.children.push_back(std::move(lbl));
+        }
+
+        // Remove button
+        {
+            WidgetElement removeBtn{};
+            removeBtn.id          = "LC.RemoveVolume." + std::to_string(i);
+            removeBtn.type        = WidgetElementType::Button;
+            removeBtn.text        = "X";
+            removeBtn.style.color = Vec4{ 0.6f, 0.2f, 0.2f, 1.0f };
+            removeBtn.style.borderRadius = EditorTheme::Scaled(3.0f);
+            removeBtn.padding     = EditorTheme::Scaled(Vec2{ 5.0f, 1.0f });
+            removeBtn.fontSize    = EditorTheme::Scaled(10.0f);
+            removeBtn.runtimeOnly = true;
+            row.children.push_back(std::move(removeBtn));
+
+            const int idx = i;
+            registerClickEvent("LC.RemoveVolume." + std::to_string(i), [this, idx]()
+            {
+                if (!m_renderer) return;
+                m_renderer->removeStreamingVolume(idx);
+                refreshLevelCompositionPanel();
+                markAllWidgetsDirty();
+                showToastMessage("Streaming Volume removed", 1.5f);
+            });
+        }
+
+        root.children.push_back(std::move(row));
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Build Game dialog (Phase 10)
+// ═══════════════════════════════════════════════════════════════════════════
+
+namespace
+{
+    struct FolderBrowseContext
+    {
+        PopupWindow* popup{ nullptr };
+        std::string  entryId;
+    };
+
+    static void SDLCALL OnFolderBrowseCompleted(void* userdata, const char* const* filelist, int /*filter*/)
+    {
+        auto* ctx = static_cast<FolderBrowseContext*>(userdata);
+        if (ctx && filelist && filelist[0])
+        {
+            if (auto* el = ctx->popup->uiManager().findElementById(ctx->entryId))
+            {
+                el->text = filelist[0];
+            }
+        }
+        delete ctx;
+    }
+}
+
+void UIManager::openBuildGameDialog()
+{
+    if (!m_renderer) return;
+
+    constexpr float kBaseW = 500.0f;
+    constexpr float kBaseH = 420.0f;
+    const int kPopupW = static_cast<int>(EditorTheme::Scaled(kBaseW));
+    const int kPopupH = static_cast<int>(EditorTheme::Scaled(kBaseH));
+    PopupWindow* popup = m_renderer->openPopupWindow(
+        "BuildGame", "Build Game", kPopupW, kPopupH);
+    if (!popup) return;
+    if (!popup->uiManager().getRegisteredWidgets().empty()) return;
+
+    const float W = static_cast<float>(kPopupW);
+    const float H = static_cast<float>(kPopupH);
+    auto nx = [&](float px) { return px / W; };
+    auto ny = [&](float py) { return py / H; };
+
+    // Shared mutable state for the form
+    struct FormState
+    {
+        std::string startLevel;
+        std::string windowTitle = "Game";
+        bool launchAfter = true;
+    };
+    auto formState = std::make_shared<FormState>();
+
+    // Collect all available levels for the dropdown
+    std::vector<std::string> levelPaths;
+    int preSelectedLevelIdx = -1;
+    {
+        auto& diag = DiagnosticsManager::Instance();
+        auto& assetMgr = AssetManager::Instance();
+        const auto& registry = assetMgr.getAssetRegistry();
+        for (const auto& entry : registry)
+        {
+            if (entry.type == AssetType::Level)
+                levelPaths.push_back(entry.path);
+        }
+        if (!levelPaths.empty())
+        {
+            preSelectedLevelIdx = 0;
+            formState->startLevel = levelPaths[0];
+        }
+
+        // Pre-fill window title from project name
+        formState->windowTitle = diag.getProjectInfo().projectName;
+        if (formState->windowTitle.empty())
+            formState->windowTitle = "Game";
+    }
+
+    // Pre-fill output directory
+    std::string defaultOutputDir;
+    {
+        auto& diag = DiagnosticsManager::Instance();
+        const auto& projPath = diag.getProjectInfo().projectPath;
+        if (!projPath.empty())
+            defaultOutputDir = (std::filesystem::path(projPath) / "Build").string();
+    }
+
+    std::vector<WidgetElement> elements;
+
+    // Background
+    {
+        WidgetElement bg;
+        bg.type = WidgetElementType::Panel;
+        bg.id = "BG.Bg";
+        bg.from = Vec2{ 0.0f, 0.0f };
+        bg.to = Vec2{ 1.0f, 1.0f };
+        bg.style.color = EditorTheme::Get().panelBackground;
+        elements.push_back(std::move(bg));
+    }
+
+    // Title
+    {
+        WidgetElement title;
+        title.type = WidgetElementType::Text;
+        title.id = "BG.Title";
+        title.from = Vec2{ nx(16.0f), ny(8.0f) };
+        title.to = Vec2{ nx(W - 16.0f), ny(40.0f) };
+        title.text = "Build Game";
+        title.fontSize = EditorTheme::Get().fontSizeHeading;
+        title.style.textColor = EditorTheme::Get().titleBarText;
+        title.textAlignV = TextAlignV::Center;
+        title.padding = Vec2{ 6.0f, 0.0f };
+        elements.push_back(std::move(title));
+    }
+
+    // ── Form fields ──
+    const float rowH = 24.0f;
+    const float entryH = 22.0f;
+    const float labelW = 120.0f;
+    const float gap = 6.0f;
+    const float leftPad = 20.0f;
+    const float rightPad = 20.0f;
+    float curY = 50.0f;
+
+    auto addLabel = [&](const std::string& id, const std::string& text, float y)
+    {
+        WidgetElement lbl;
+        lbl.type = WidgetElementType::Text;
+        lbl.id = id;
+        lbl.from = Vec2{ nx(leftPad), ny(y) };
+        lbl.to = Vec2{ nx(leftPad + labelW), ny(y + rowH) };
+        lbl.text = text;
+        lbl.fontSize = EditorTheme::Get().fontSizeBody;
+        lbl.style.textColor = EditorTheme::Get().textPrimary;
+        lbl.textAlignV = TextAlignV::Center;
+        elements.push_back(std::move(lbl));
+    };
+
+    auto addEntry = [&](const std::string& id, const std::string& defaultVal, float y) -> std::string
+    {
+        WidgetElement entry;
+        entry.type = WidgetElementType::EntryBar;
+        entry.id = id;
+        entry.from = Vec2{ nx(leftPad + labelW + gap), ny(y) };
+        entry.to = Vec2{ nx(W - rightPad), ny(y + entryH) };
+        entry.text = defaultVal;
+        entry.fontSize = EditorTheme::Get().fontSizeBody;
+        entry.style.color = EditorTheme::Get().inputBackground;
+        entry.style.textColor = EditorTheme::Get().textPrimary;
+        entry.padding = Vec2{ 6.0f, 4.0f };
+        entry.minSize = Vec2{ 0.0f, entryH };
+        entry.hitTestMode = HitTestMode::Enabled;
+        elements.push_back(std::move(entry));
+        return id;
+    };
+
+    // Start Level (DropDown)
+    addLabel("BG.Lbl.StartLevel", "Start Level:", curY);
+    {
+        WidgetElement dd;
+        dd.type = WidgetElementType::DropDown;
+        dd.id = "BG.DD.StartLevel";
+        dd.from = Vec2{ nx(leftPad + labelW + gap), ny(curY) };
+        dd.to = Vec2{ nx(W - rightPad), ny(curY + entryH) };
+        dd.items = levelPaths;
+        dd.selectedIndex = preSelectedLevelIdx;
+        if (preSelectedLevelIdx >= 0 && preSelectedLevelIdx < static_cast<int>(levelPaths.size()))
+            dd.text = levelPaths[static_cast<size_t>(preSelectedLevelIdx)];
+        dd.fontSize = EditorTheme::Get().fontSizeBody;
+        dd.style.color = EditorTheme::Get().inputBackground;
+        dd.style.textColor = EditorTheme::Get().textPrimary;
+        dd.padding = Vec2{ 6.0f, 4.0f };
+        dd.hitTestMode = HitTestMode::Enabled;
+        elements.push_back(std::move(dd));
+    }
+    curY += rowH + gap;
+
+    // Window Title
+    addLabel("BG.Lbl.Title", "Window Title:", curY);
+    addEntry("BG.Entry.Title", formState->windowTitle, curY);
+    curY += rowH + gap;
+
+    // Launch after build checkbox
+    addLabel("BG.Lbl.Launch", "Launch after:", curY);
+    {
+        WidgetElement chk;
+        chk.type = WidgetElementType::CheckBox;
+        chk.id = "BG.Chk.Launch";
+        chk.from = Vec2{ nx(leftPad + labelW + gap), ny(curY) };
+        chk.to = Vec2{ nx(leftPad + labelW + gap + 20.0f), ny(curY + rowH) };
+        chk.isChecked = true;
+        chk.style.color = EditorTheme::Get().inputBackground;
+        chk.style.fillColor = EditorTheme::Get().accent;
+        chk.hitTestMode = HitTestMode::Enabled;
+        elements.push_back(std::move(chk));
+    }
+    curY += rowH + gap;
+
+    // Output directory (entry + browse button)
+    const float browseW = 28.0f;
+    addLabel("BG.Lbl.Output", "Output Dir:", curY);
+    {
+        WidgetElement entry;
+        entry.type = WidgetElementType::EntryBar;
+        entry.id = "BG.Entry.Output";
+        entry.from = Vec2{ nx(leftPad + labelW + gap), ny(curY) };
+        entry.to = Vec2{ nx(W - rightPad - browseW - gap), ny(curY + entryH) };
+        entry.text = defaultOutputDir;
+        entry.fontSize = EditorTheme::Get().fontSizeBody;
+        entry.style.color = EditorTheme::Get().inputBackground;
+        entry.style.textColor = EditorTheme::Get().textPrimary;
+        entry.padding = Vec2{ 6.0f, 4.0f };
+        entry.minSize = Vec2{ 0.0f, entryH };
+        entry.hitTestMode = HitTestMode::Enabled;
+        elements.push_back(std::move(entry));
+    }
+    {
+        WidgetElement browseBtn;
+        browseBtn.type = WidgetElementType::Button;
+        browseBtn.id = "BG.Btn.Browse";
+        browseBtn.from = Vec2{ nx(W - rightPad - browseW), ny(curY) };
+        browseBtn.to = Vec2{ nx(W - rightPad), ny(curY + entryH) };
+        browseBtn.text = "...";
+        browseBtn.fontSize = EditorTheme::Get().fontSizeBody;
+        browseBtn.style.color = EditorTheme::Get().buttonDefault;
+        browseBtn.style.textColor = EditorTheme::Get().textPrimary;
+        browseBtn.textAlignH = TextAlignH::Center;
+        browseBtn.textAlignV = TextAlignV::Center;
+        browseBtn.hitTestMode = HitTestMode::Enabled;
+        elements.push_back(std::move(browseBtn));
+    }
+    curY += rowH + gap;
+
+    // ── Info text ──
+    {
+        WidgetElement info;
+        info.type = WidgetElementType::Text;
+        info.id = "BG.Info";
+        info.from = Vec2{ nx(leftPad), ny(curY + gap) };
+        info.to = Vec2{ nx(W - rightPad), ny(curY + gap + rowH) };
+        info.text = "Compiles the engine with baked-in game config (requires CMake).";
+        info.fontSize = EditorTheme::Get().fontSizeSmall;
+        info.style.textColor = EditorTheme::Get().textSecondary;
+        info.textAlignV = TextAlignV::Center;
+        elements.push_back(std::move(info));
+    }
+    curY += rowH + gap * 2;
+
+    // ── Buttons ──
+    const float btnW = 100.0f;
+    const float btnH = 30.0f;
+    const float btnGap = 10.0f;
+    const float btnY = H - 16.0f - btnH;
+
+    // Build button
+    {
+        WidgetElement buildBtn;
+        buildBtn.type = WidgetElementType::Button;
+        buildBtn.id = "BG.Btn.Build";
+        buildBtn.from = Vec2{ nx(W - rightPad - btnW * 2 - btnGap), ny(btnY) };
+        buildBtn.to = Vec2{ nx(W - rightPad - btnW - btnGap), ny(btnY + btnH) };
+        buildBtn.text = "Build";
+        buildBtn.fontSize = EditorTheme::Get().fontSizeSubheading;
+        buildBtn.style.color = EditorTheme::Get().accent;
+        buildBtn.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+        buildBtn.textAlignH = TextAlignH::Center;
+        buildBtn.textAlignV = TextAlignV::Center;
+        buildBtn.hitTestMode = HitTestMode::Enabled;
+        elements.push_back(std::move(buildBtn));
+    }
+
+    // Cancel button
+    {
+        WidgetElement cancelBtn;
+        cancelBtn.type = WidgetElementType::Button;
+        cancelBtn.id = "BG.Btn.Cancel";
+        cancelBtn.from = Vec2{ nx(W - rightPad - btnW), ny(btnY) };
+        cancelBtn.to = Vec2{ nx(W - rightPad), ny(btnY + btnH) };
+        cancelBtn.text = "Cancel";
+        cancelBtn.fontSize = EditorTheme::Get().fontSizeSubheading;
+        cancelBtn.style.color = EditorTheme::Get().buttonDefault;
+        cancelBtn.style.textColor = EditorTheme::Get().textPrimary;
+        cancelBtn.textAlignH = TextAlignH::Center;
+        cancelBtn.textAlignV = TextAlignV::Center;
+        cancelBtn.hitTestMode = HitTestMode::Enabled;
+        elements.push_back(std::move(cancelBtn));
+    }
+
+    auto widget = std::make_shared<EditorWidget>();
+    widget->setName("BuildGameForm");
+    widget->setFillX(true);
+    widget->setFillY(true);
+    widget->setElements(std::move(elements));
+
+    popup->uiManager().registerWidget("BuildGameForm", widget);
+
+    // Cancel button closes the popup
+    popup->uiManager().registerClickEvent("BG.Btn.Cancel", [popup]()
+    {
+        popup->close();
+    });
+
+    // Browse button: open native folder dialog
+    popup->uiManager().registerClickEvent("BG.Btn.Browse", [popup]()
+    {
+        std::string defaultLoc;
+        if (auto* el = popup->uiManager().findElementById("BG.Entry.Output"))
+            defaultLoc = el->text;
+
+        auto* ctx = new FolderBrowseContext{ popup, "BG.Entry.Output" };
+        SDL_ShowOpenFolderDialog(
+            OnFolderBrowseCompleted,
+            ctx,
+            popup->sdlWindow(),
+            defaultLoc.empty() ? nullptr : defaultLoc.c_str(),
+            false);
+    });
+
+    // Build button: gather form values and invoke the build callback
+    auto* parentUIMgr = this;
+    popup->uiManager().registerClickEvent("BG.Btn.Build", [popup, parentUIMgr, formState]()
+    {
+        auto& popupUI = popup->uiManager();
+
+        BuildGameConfig config;
+
+        // Read dropdown / entry bar values
+        if (auto* el = popupUI.findElementById("BG.DD.StartLevel"))
+            config.startLevel = el->text;
+        if (auto* el = popupUI.findElementById("BG.Entry.Title"))
+            config.windowTitle = el->text;
+        if (auto* el = popupUI.findElementById("BG.Chk.Launch"))
+            config.launchAfterBuild = el->isChecked;
+        if (auto* el = popupUI.findElementById("BG.Entry.Output"))
+            config.outputDir = el->text;
+
+        if (config.startLevel.empty())
+        {
+            parentUIMgr->showToastMessage("Start Level is required.", 3.0f, NotificationLevel::Warning);
+            return;
+        }
+        if (config.outputDir.empty())
+        {
+            parentUIMgr->showToastMessage("Output directory is required.", 3.0f, NotificationLevel::Warning);
+            return;
+        }
+
+        // Close AFTER the build callback returns so the popup is not destroyed
+        // by renderPopupWindows() during the nested render() calls inside the
+        // build pipeline (advanceStep calls renderer->render()).
+        if (parentUIMgr->m_onBuildGame)
+            parentUIMgr->m_onBuildGame(config);
+
+        popup->close();
+    });
+}
+
+// ── Build progress modal ────────────────────────────────────────────────
+
+void UIManager::showBuildProgress()
+{
+    m_buildOutputLines.clear();
+    {
+        std::lock_guard<std::mutex> lock(m_buildMutex);
+        m_buildPendingLines.clear();
+        m_buildPendingStepDirty = false;
+        m_buildPendingFinished = false;
+    }
+
+    if (!m_buildProgressWidget)
+    {
+        m_buildProgressWidget = std::make_shared<EditorWidget>();
+        m_buildProgressWidget->setName("BuildProgress");
+        m_buildProgressWidget->setAnchor(WidgetAnchor::TopLeft);
+        m_buildProgressWidget->setFillX(true);
+        m_buildProgressWidget->setFillY(true);
+        m_buildProgressWidget->setZOrder(10002);
+    }
+
+    WidgetElement overlay{};
+    overlay.id = "BP.Overlay";
+    overlay.type = WidgetElementType::Panel;
+    overlay.from = Vec2{ 0.0f, 0.0f };
+    overlay.to = Vec2{ 1.0f, 1.0f };
+    overlay.style.color = EditorTheme::Get().modalOverlay;
+    overlay.hitTestMode = HitTestMode::Enabled;
+    overlay.runtimeOnly = true;
+
+    WidgetElement panel{};
+    panel.id = "BP.Panel";
+    panel.type = WidgetElementType::StackPanel;
+    panel.from = Vec2{ 0.20f, 0.15f };
+    panel.to = Vec2{ 0.80f, 0.85f };
+    panel.padding = Vec2{ 20.0f, 14.0f };
+    panel.orientation = StackOrientation::Vertical;
+    panel.style.color = EditorTheme::Get().modalBackground;
+    panel.runtimeOnly = true;
+
+    WidgetElement title{};
+    title.id = "BP.Title";
+    title.type = WidgetElementType::Text;
+    title.text = "Building Game...";
+    title.font = EditorTheme::Get().fontDefault;
+    title.fontSize = EditorTheme::Get().fontSizeHeading;
+    title.textAlignH = TextAlignH::Center;
+    title.style.textColor = EditorTheme::Get().textPrimary;
+    title.fillX = true;
+    title.minSize = Vec2{ 0.0f, 28.0f };
+    title.runtimeOnly = true;
+
+    WidgetElement status{};
+    status.id = "BP.Status";
+    status.type = WidgetElementType::Text;
+    status.text = "Preparing...";
+    status.font = EditorTheme::Get().fontDefault;
+    status.fontSize = EditorTheme::Get().fontSizeBody;
+    status.textAlignH = TextAlignH::Center;
+    status.style.textColor = EditorTheme::Get().textSecondary;
+    status.fillX = true;
+    status.minSize = Vec2{ 0.0f, 22.0f };
+    status.runtimeOnly = true;
+
+    WidgetElement counter{};
+    counter.id = "BP.Counter";
+    counter.type = WidgetElementType::Text;
+    counter.text = "0 / 0";
+    counter.font = EditorTheme::Get().fontDefault;
+    counter.fontSize = EditorTheme::Get().fontSizeSubheading;
+    counter.textAlignH = TextAlignH::Center;
+    counter.style.textColor = EditorTheme::Get().textSecondary;
+    counter.fillX = true;
+    counter.minSize = Vec2{ 0.0f, 20.0f };
+    counter.runtimeOnly = true;
+
+    WidgetElement progress{};
+    progress.id = "BP.Bar";
+    progress.type = WidgetElementType::ProgressBar;
+    progress.fillX = true;
+    progress.minSize = Vec2{ 0.0f, 18.0f };
+    progress.minValue = 0.0f;
+    progress.maxValue = 1.0f;
+    progress.valueFloat = 0.0f;
+    progress.style.color = EditorTheme::Get().sliderTrack;
+    progress.style.fillColor = Vec4{
+        EditorTheme::Get().accent.x,
+        EditorTheme::Get().accent.y,
+        EditorTheme::Get().accent.z, 0.95f };
+    progress.runtimeOnly = true;
+
+    // Result text (hidden during build, shown after completion)
+    WidgetElement resultText{};
+    resultText.id = "BP.Result";
+    resultText.type = WidgetElementType::Text;
+    resultText.text = "";
+    resultText.font = EditorTheme::Get().fontDefault;
+    resultText.fontSize = EditorTheme::Get().fontSizeBody;
+    resultText.textAlignH = TextAlignH::Center;
+    resultText.style.textColor = EditorTheme::Get().textPrimary;
+    resultText.fillX = true;
+    resultText.minSize = Vec2{ 0.0f, 24.0f };
+    resultText.runtimeOnly = true;
+    resultText.isCollapsed = true;
+
+    // Close button (hidden during build, shown after completion)
+    auto closeBtn = EditorUIBuilder::makePrimaryButton("BP.CloseBtn", "Close", [this]() {
+        dismissBuildProgress();
+    });
+    closeBtn.isCollapsed = true;
+
+    panel.children.push_back(std::move(title));
+    panel.children.push_back(std::move(status));
+    panel.children.push_back(std::move(counter));
+    panel.children.push_back(std::move(progress));
+
+    // Scrollable build output log
+    WidgetElement outputPanel{};
+    outputPanel.id = "BP.OutputScroll";
+    outputPanel.type = WidgetElementType::StackPanel;
+    outputPanel.orientation = StackOrientation::Vertical;
+    outputPanel.fillX = true;
+    outputPanel.minSize = Vec2{ 0.0f, 160.0f };
+    outputPanel.maxSize = Vec2{ 0.0f, 220.0f };
+    outputPanel.scrollable = true;
+    outputPanel.style.color = Vec4{ 0.04f, 0.04f, 0.04f, 0.95f };
+    outputPanel.style.borderRadius = 4.0f;
+    outputPanel.padding = Vec2{ 6.0f, 4.0f };
+    outputPanel.runtimeOnly = true;
+
+    WidgetElement outputText{};
+    outputText.id = "BP.OutputText";
+    outputText.type = WidgetElementType::Text;
+    outputText.text = "";
+    outputText.font = EditorTheme::Get().fontDefault;
+    outputText.fontSize = EditorTheme::Get().fontSizeSmall;
+    outputText.wrapText = true;
+    outputText.fillX = true;
+    outputText.sizeToContent = true;
+    outputText.style.textColor = Vec4{ 0.75f, 0.80f, 0.75f, 1.0f };
+    outputText.runtimeOnly = true;
+
+    outputPanel.children.push_back(std::move(outputText));
+    panel.children.push_back(std::move(outputPanel));
+    panel.children.push_back(std::move(resultText));
+    panel.children.push_back(std::move(closeBtn));
+
+    std::vector<WidgetElement> elems;
+    elems.push_back(std::move(overlay));
+    elems.push_back(std::move(panel));
+    m_buildProgressWidget->setElements(std::move(elems));
+    m_buildProgressWidget->markLayoutDirty();
+
+    registerWidget("BuildProgress", m_buildProgressWidget);
+}
+
+void UIManager::updateBuildProgress(const std::string& status, int step, int totalSteps)
+{
+    if (!m_buildProgressWidget) return;
+
+    auto& elems = m_buildProgressWidget->getElementsMutable();
+
+    WidgetElement* statusEl = FindElementById(elems, "BP.Status");
+    if (statusEl)
+        statusEl->text = status;
+
+    WidgetElement* counterEl = FindElementById(elems, "BP.Counter");
+    if (counterEl)
+        counterEl->text = std::to_string(step) + " / " + std::to_string(totalSteps);
+
+    WidgetElement* barEl = FindElementById(elems, "BP.Bar");
+    if (barEl)
+    {
+        barEl->maxValue = static_cast<float>(totalSteps);
+        barEl->valueFloat = static_cast<float>(step);
+    }
+
+    m_buildProgressWidget->markLayoutDirty();
+    m_renderDirty = true;
+}
+
+void UIManager::closeBuildProgress(bool success, const std::string& message)
+{
+    if (!m_buildProgressWidget) return;
+
+    auto& elems = m_buildProgressWidget->getElementsMutable();
+
+    // Update title to reflect completion
+    WidgetElement* titleEl = FindElementById(elems, "BP.Title");
+    if (titleEl)
+        titleEl->text = success ? "Build Completed" : "Build Failed";
+
+    // Hide the progress bar and counter
+    WidgetElement* barEl = FindElementById(elems, "BP.Bar");
+    if (barEl) barEl->isCollapsed = true;
+
+    WidgetElement* counterEl = FindElementById(elems, "BP.Counter");
+    if (counterEl) counterEl->isCollapsed = true;
+
+    // Update status text
+    WidgetElement* statusEl = FindElementById(elems, "BP.Status");
+    if (statusEl)
+        statusEl->text = success ? "The game was built successfully." : "The build encountered errors.";
+
+    // Show result message
+    WidgetElement* resultEl = FindElementById(elems, "BP.Result");
+    if (resultEl)
+    {
+        resultEl->isCollapsed = false;
+        if (!message.empty())
+            resultEl->text = message;
+        else
+            resultEl->text = success ? "Build completed successfully!" : "Build failed.";
+        resultEl->style.textColor = success
+            ? Vec4{ 0.3f, 0.9f, 0.4f, 1.0f }
+            : Vec4{ 0.95f, 0.3f, 0.3f, 1.0f };
+    }
+
+    // Show the close button
+    WidgetElement* closeBtn = FindElementById(elems, "BP.CloseBtn");
+    if (closeBtn) closeBtn->isCollapsed = false;
+
+    m_buildProgressWidget->markLayoutDirty();
+    m_renderDirty = true;
+}
+
+void UIManager::dismissBuildProgress()
+{
+    unregisterWidget("BuildProgress");
+}
+
+void UIManager::appendBuildOutput(const std::string& line)
+{
+    std::lock_guard<std::mutex> lock(m_buildMutex);
+    m_buildPendingLines.push_back(line);
+}
+
+void UIManager::pollBuildThread()
+{
+    if (!m_buildProgressWidget)
+        return;
+
+    std::vector<std::string> newLines;
+    bool stepDirty = false;
+    std::string stepStatus;
+    int stepNum = 0;
+    int stepTotal = 0;
+    bool finished = false;
+    bool success = false;
+    std::string errorMsg;
+
+    {
+        std::lock_guard<std::mutex> lock(m_buildMutex);
+        if (!m_buildPendingLines.empty())
+        {
+            newLines.swap(m_buildPendingLines);
+        }
+        if (m_buildPendingStepDirty)
+        {
+            stepDirty = true;
+            stepStatus = m_buildPendingStatus;
+            stepNum = m_buildPendingStep;
+            stepTotal = m_buildPendingTotalSteps;
+            m_buildPendingStepDirty = false;
+        }
+        if (m_buildPendingFinished)
+        {
+            finished = true;
+            success = m_buildPendingSuccess;
+            errorMsg = m_buildPendingErrorMsg;
+            m_buildPendingFinished = false;
+        }
+    }
+
+    bool dirty = false;
+
+    if (!newLines.empty())
+    {
+        for (auto& ln : newLines)
+            m_buildOutputLines.push_back(std::move(ln));
+
+        auto& elems = m_buildProgressWidget->getElementsMutable();
+        WidgetElement* outputText = FindElementById(elems, "BP.OutputText");
+        if (outputText)
+        {
+            std::string combined;
+            for (const auto& l : m_buildOutputLines)
+            {
+                combined += l;
+                combined += '\n';
+            }
+            outputText->text = std::move(combined);
+        }
+
+        // Auto-scroll to bottom
+        WidgetElement* outputScroll = FindElementById(elems, "BP.OutputScroll");
+        if (outputScroll && outputScroll->scrollable)
+        {
+            outputScroll->scrollOffset = 1e6f;
+        }
+
+        dirty = true;
+    }
+
+    if (stepDirty)
+    {
+        updateBuildProgress(stepStatus, stepNum, stepTotal);
+        dirty = true;
+    }
+
+    if (finished)
+    {
+        if (m_buildThread.joinable())
+            m_buildThread.join();
+        m_buildRunning.store(false);
+        closeBuildProgress(success, errorMsg);
+        dirty = true;
+    }
+
+    if (dirty)
+    {
+        if (m_buildProgressWidget)
+            m_buildProgressWidget->markLayoutDirty();
+        m_renderDirty = true;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// detectCMake – locate cmake executable
+// ---------------------------------------------------------------------------
+bool UIManager::detectCMake()
+{
+    m_cmakeAvailable = false;
+    m_cmakePath.clear();
+
+    // Helper: run a command silently and check exit code
+    auto tryExec = [](const std::string& path) -> bool
+    {
+#if defined(_WIN32)
+        const std::string cmd = "\"" + path + "\" --version >nul 2>&1";
+#else
+        const std::string cmd = "\"" + path + "\" --version >/dev/null 2>&1";
+#endif
+        return std::system(cmd.c_str()) == 0;
+    };
+
+    // Helper: read the first line of output from a command (Windows)
+#if defined(_WIN32)
+    auto readFirstLine = [](const std::string& cmd) -> std::string
+    {
+        std::string fullCmd = "\"" + cmd + "\"";
+        FILE* pipe = _popen(fullCmd.c_str(), "r");
+        if (!pipe) return {};
+        char buf[1024];
+        std::string result;
+        if (fgets(buf, sizeof(buf), pipe))
+            result = buf;
+        _pclose(pipe);
+        while (!result.empty() && (result.back() == '\n' || result.back() == '\r'))
+            result.pop_back();
+        return result;
+    };
+#endif
+
+    // 1. Bundled location: <engine>/Tools/cmake/bin/cmake.exe
+    {
+        const char* bp = SDL_GetBasePath();
+        if (bp)
+        {
+            auto bundled = std::filesystem::path(bp) / "Tools" / "cmake" / "bin" / "cmake.exe";
+            if (std::filesystem::exists(bundled) && tryExec(bundled.string()))
+            {
+                m_cmakePath = bundled.string();
+                m_cmakeAvailable = true;
+                return true;
+            }
+        }
+    }
+
+    // 2. VS-bundled cmake via vswhere (Windows)
+#if defined(_WIN32)
+    {
+        const std::string vswhere = "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe";
+        if (std::filesystem::exists(vswhere))
+        {
+            std::string vsPath = readFirstLine(
+                "\"" + vswhere + "\" -latest -property installationPath 2>nul");
+            if (!vsPath.empty())
+            {
+                auto vsCmake = std::filesystem::path(vsPath)
+                    / "Common7" / "IDE" / "CommonExtensions"
+                    / "Microsoft" / "CMake" / "CMake" / "bin" / "cmake.exe";
+                if (std::filesystem::exists(vsCmake) && tryExec(vsCmake.string()))
+                {
+                    m_cmakePath = vsCmake.string();
+                    m_cmakeAvailable = true;
+                    return true;
+                }
+            }
+        }
+    }
+#endif
+
+    // 3. System PATH – resolve to absolute path
+    if (tryExec("cmake"))
+    {
+#if defined(_WIN32)
+        std::string resolved = readFirstLine("where cmake 2>nul");
+        if (!resolved.empty() && std::filesystem::exists(resolved))
+            m_cmakePath = resolved;
+        else
+            m_cmakePath = "cmake";
+#else
+        m_cmakePath = "cmake";
+#endif
+        m_cmakeAvailable = true;
+        return true;
+    }
+
+    // 4. Common install locations (Windows)
+#if defined(_WIN32)
+    {
+        static const char* candidates[] = {
+            "C:\\Program Files\\CMake\\bin\\cmake.exe",
+            "C:\\Program Files (x86)\\CMake\\bin\\cmake.exe",
+        };
+        for (const auto* c : candidates)
+        {
+            if (std::filesystem::exists(c) && tryExec(c))
+            {
+                m_cmakePath = c;
+                m_cmakeAvailable = true;
+                return true;
+            }
+        }
+    }
+#endif
+
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// showCMakeInstallPrompt – modal popup if CMake is missing
+// ---------------------------------------------------------------------------
+void UIManager::showCMakeInstallPrompt()
+{
+    showConfirmDialog(
+        "CMake wird zum Bauen des Spiels benoetigt, "
+        "wurde aber nicht gefunden.\n\n"
+        "Soll die CMake-Downloadseite geoeffnet werden?",
+        [this]()
+        {
+            // Open the CMake download page in the default browser
+#if defined(_WIN32)
+            ShellExecuteA(nullptr, "open",
+                "https://cmake.org/download/", nullptr, nullptr, SW_SHOWNORMAL);
+#else
+            std::system("xdg-open https://cmake.org/download/ &");
+#endif
+            showToastMessage("Bitte CMake installieren und den Editor neu starten.", 8.0f,
+                NotificationLevel::Warning);
+        },
+        [this]()
+        {
+            showToastMessage("CMake nicht verfuegbar – Build Game deaktiviert.", 5.0f,
+                NotificationLevel::Warning);
+        }
+    );
+}
+
+// ---------------------------------------------------------------------------
+// detectBuildToolchain – check for MSVC / Clang / GCC
+// ---------------------------------------------------------------------------
+bool UIManager::detectBuildToolchain()
+{
+    m_toolchainAvailable = false;
+    m_toolchainInfo = {};
+
+#if defined(_WIN32)
+    // Helper: read first line from a command
+    auto readLine = [](const std::string& cmd) -> std::string
+    {
+        std::string fullCmd = "\"" + cmd + "\"";
+        FILE* pipe = _popen(fullCmd.c_str(), "r");
+        if (!pipe) return {};
+        char buf[1024];
+        std::string result;
+        if (fgets(buf, sizeof(buf), pipe))
+            result = buf;
+        _pclose(pipe);
+        while (!result.empty() && (result.back() == '\n' || result.back() == '\r'))
+            result.pop_back();
+        return result;
+    };
+
+    // 1. Try vswhere to find Visual Studio
+    const std::string vswhere = "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe";
+    if (std::filesystem::exists(vswhere))
+    {
+        std::string vsPath = readLine(
+            "\"" + vswhere + "\" -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>nul");
+        if (!vsPath.empty() && std::filesystem::exists(vsPath))
+        {
+            m_toolchainInfo.vsInstallPath = vsPath;
+            m_toolchainInfo.name = "MSVC";
+
+            // Get VS product display version (e.g. "18.4.1")
+            std::string ver = readLine(
+                "\"" + vswhere + "\" -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property catalog.productDisplayVersion 2>nul");
+            if (!ver.empty())
+                m_toolchainInfo.version = ver;
+
+            // Try to find cl.exe
+            auto vcToolsDir = std::filesystem::path(vsPath) / "VC" / "Tools" / "MSVC";
+            if (std::filesystem::exists(vcToolsDir))
+            {
+                // Pick the latest version subdirectory
+                std::string latest;
+                for (auto& entry : std::filesystem::directory_iterator(vcToolsDir))
+                {
+                    if (entry.is_directory())
+                    {
+                        std::string name = entry.path().filename().string();
+                        if (name > latest)
+                            latest = name;
+                    }
+                }
+                if (!latest.empty())
+                {
+                    auto cl = vcToolsDir / latest / "bin" / "Hostx64" / "x64" / "cl.exe";
+                    if (std::filesystem::exists(cl))
+                        m_toolchainInfo.compilerPath = cl.string();
+                }
+            }
+
+            m_toolchainAvailable = true;
+            return true;
+        }
+    }
+
+    // 2. Check for cl.exe in PATH
+    if (std::system("where cl.exe >nul 2>&1") == 0)
+    {
+        std::string clPath = readLine("where cl.exe 2>nul");
+        m_toolchainInfo.name = "MSVC";
+        m_toolchainInfo.compilerPath = clPath;
+        m_toolchainAvailable = true;
+        return true;
+    }
+
+    // 3. Check for clang-cl in PATH
+    if (std::system("where clang-cl.exe >nul 2>&1") == 0)
+    {
+        std::string clangPath = readLine("where clang-cl.exe 2>nul");
+        m_toolchainInfo.name = "Clang-CL";
+        m_toolchainInfo.compilerPath = clangPath;
+        m_toolchainAvailable = true;
+        return true;
+    }
+
+#else  // Linux / macOS
+    auto tryWhich = [](const char* tool) -> std::string
+    {
+        std::string cmd = std::string("which ") + tool + " 2>/dev/null";
+        FILE* pipe = popen(cmd.c_str(), "r");
+        if (!pipe) return {};
+        char buf[512];
+        std::string result;
+        if (fgets(buf, sizeof(buf), pipe))
+            result = buf;
+        pclose(pipe);
+        while (!result.empty() && (result.back() == '\n' || result.back() == '\r'))
+            result.pop_back();
+        return result;
+    };
+
+    std::string gpp = tryWhich("g++");
+    if (!gpp.empty())
+    {
+        m_toolchainInfo.name = "GCC";
+        m_toolchainInfo.compilerPath = gpp;
+        m_toolchainAvailable = true;
+        return true;
+    }
+
+    std::string clangpp = tryWhich("clang++");
+    if (!clangpp.empty())
+    {
+        m_toolchainInfo.name = "Clang";
+        m_toolchainInfo.compilerPath = clangpp;
+        m_toolchainAvailable = true;
+        return true;
+    }
+#endif
+
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// showToolchainInstallPrompt – modal popup if no C++ compiler found
+// ---------------------------------------------------------------------------
+void UIManager::showToolchainInstallPrompt()
+{
+    showConfirmDialog(
+        "Keine C++ Build-Toolchain (MSVC / Clang) gefunden.\n\n"
+        "Zum Bauen des Spiels wird ein C++ Compiler benoetigt.\n"
+        "Bitte installiere Visual Studio mit der Workload\n"
+        "\"Desktopentwicklung mit C++\".\n\n"
+        "Soll die Visual Studio-Downloadseite geoeffnet werden?",
+        [this]()
+        {
+#if defined(_WIN32)
+            ShellExecuteA(nullptr, "open",
+                "https://visualstudio.microsoft.com/downloads/", nullptr, nullptr, SW_SHOWNORMAL);
+#else
+            std::system("xdg-open https://visualstudio.microsoft.com/downloads/ &");
+#endif
+            showToastMessage("Bitte C++ Toolchain installieren und den Editor neu starten.", 8.0f,
+                NotificationLevel::Warning);
+        },
+        [this]()
+        {
+            showToastMessage("Keine Build-Toolchain – Build Game deaktiviert.", 5.0f,
+                NotificationLevel::Warning);
+        }
+    );
+}
+
+// ===========================================================================
+// Animation Editor Tab (Phase 2.4)
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// isAnimationEditorOpen
+// ---------------------------------------------------------------------------
+bool UIManager::isAnimationEditorOpen() const
+{
+    return m_animationEditorState.isOpen;
+}
+
+// ---------------------------------------------------------------------------
+// openAnimationEditorTab
+// ---------------------------------------------------------------------------
+void UIManager::openAnimationEditorTab(ECS::Entity entity)
+{
+    if (!m_renderer)
+        return;
+
+    auto& ecs = ECS::ECSManager::Instance();
+    if (!ecs.hasComponent<ECS::AnimationComponent>(entity))
+        return;
+
+    if (!m_renderer->isEntitySkinned(entity))
+        return;
+
+    const std::string tabId = "AnimationEditor";
+
+    // If already open for this entity, just switch to it
+    if (m_animationEditorState.isOpen && m_animationEditorState.linkedEntity == entity)
+    {
+        m_renderer->setActiveTab(tabId);
+        markAllWidgetsDirty();
+        return;
+    }
+
+    // If open for a different entity, close first
+    if (m_animationEditorState.isOpen)
+        closeAnimationEditorTab();
+
+    m_renderer->addTab(tabId, "Animation Editor", true);
+    m_renderer->setActiveTab(tabId);
+
+    const std::string widgetId = "AnimationEditor.Main";
+    unregisterWidget(widgetId);
+
+    m_animationEditorState = {};
+    m_animationEditorState.tabId        = tabId;
+    m_animationEditorState.widgetId     = widgetId;
+    m_animationEditorState.linkedEntity = entity;
+    m_animationEditorState.isOpen       = true;
+    m_animationEditorState.selectedClip = m_renderer->getEntityAnimatorCurrentClip(entity);
+
+    // Build the main widget
+    {
+        auto widget = std::make_shared<EditorWidget>();
+        widget->setName(widgetId);
+        widget->setAnchor(WidgetAnchor::TopLeft);
+        widget->setFillX(true);
+        widget->setFillY(true);
+        widget->setSizePixels(Vec2{ 0.0f, 0.0f });
+        widget->setZOrder(2);
+
+        const auto& theme = EditorTheme::Get();
+
+        WidgetElement root{};
+        root.id          = "AnimationEditor.Root";
+        root.type        = WidgetElementType::StackPanel;
+        root.from        = Vec2{ 0.0f, 0.0f };
+        root.to          = Vec2{ 1.0f, 1.0f };
+        root.fillX       = true;
+        root.fillY       = true;
+        root.orientation = StackOrientation::Vertical;
+        root.style.color = theme.panelBackground;
+        root.runtimeOnly = true;
+
+        // Toolbar
+        buildAnimationEditorToolbar(root);
+
+        // Separator
+        {
+            WidgetElement sep{};
+            sep.type        = WidgetElementType::Panel;
+            sep.fillX       = true;
+            sep.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+            sep.style.color = theme.panelBorder;
+            sep.runtimeOnly = true;
+            root.children.push_back(std::move(sep));
+        }
+
+        // Scrollable content area
+        {
+            WidgetElement contentArea{};
+            contentArea.id          = "AnimationEditor.ContentArea";
+            contentArea.type        = WidgetElementType::StackPanel;
+            contentArea.fillX       = true;
+            contentArea.fillY       = true;
+            contentArea.scrollable  = true;
+            contentArea.orientation = StackOrientation::Vertical;
+            contentArea.padding     = EditorTheme::Scaled(Vec2{ 10.0f, 8.0f });
+            contentArea.style.color = Vec4{ 0.08f, 0.09f, 0.11f, 1.0f };
+            contentArea.runtimeOnly = true;
+            root.children.push_back(std::move(contentArea));
+        }
+
+        widget->setElements({ std::move(root) });
+        registerWidget(widgetId, widget, tabId);
+    }
+
+    // Tab / close click events
+    const std::string tabBtnId   = "TitleBar.Tab." + tabId;
+    const std::string closeBtnId = "TitleBar.TabClose." + tabId;
+
+    registerClickEvent(tabBtnId, [this, tabId]()
+    {
+        if (m_renderer)
+            m_renderer->setActiveTab(tabId);
+        refreshAnimationEditor();
+        markAllWidgetsDirty();
+    });
+
+    registerClickEvent(closeBtnId, [this]()
+    {
+        closeAnimationEditorTab();
+    });
+
+    // Stop button
+    registerClickEvent("AnimationEditor.Stop", [this]()
+    {
+        if (m_renderer)
+        {
+            m_renderer->stopEntityAnimation(m_animationEditorState.linkedEntity);
+            refreshAnimationEditor();
+        }
+    });
+
+    // Initial population
+    refreshAnimationEditor();
+    markAllWidgetsDirty();
+}
+
+// ---------------------------------------------------------------------------
+// closeAnimationEditorTab
+// ---------------------------------------------------------------------------
+void UIManager::closeAnimationEditorTab()
+{
+    if (!m_animationEditorState.isOpen || !m_renderer)
+        return;
+
+    const std::string tabId = m_animationEditorState.tabId;
+
+    if (m_renderer->getActiveTabId() == tabId)
+        m_renderer->setActiveTab("Viewport");
+
+    unregisterWidget(m_animationEditorState.widgetId);
+
+    m_renderer->removeTab(tabId);
+    m_animationEditorState = {};
+    markAllWidgetsDirty();
+}
+
+// ---------------------------------------------------------------------------
+// buildAnimationEditorToolbar
+// ---------------------------------------------------------------------------
+void UIManager::buildAnimationEditorToolbar(WidgetElement& root)
+{
+    const auto& theme = EditorTheme::Get();
+
+    WidgetElement toolbar{};
+    toolbar.id          = "AnimationEditor.Toolbar";
+    toolbar.type        = WidgetElementType::StackPanel;
+    toolbar.fillX       = true;
+    toolbar.orientation = StackOrientation::Horizontal;
+    toolbar.padding     = EditorTheme::Scaled(Vec2{ 8.0f, 4.0f });
+    toolbar.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 32.0f });
+    toolbar.style.color = Vec4{ 0.14f, 0.15f, 0.19f, 1.0f };
+    toolbar.runtimeOnly = true;
+
+    // Title
+    {
+        std::string titleText = "Animation Editor";
+        auto& ecs = ECS::ECSManager::Instance();
+        if (const auto* name = ecs.getComponent<ECS::NameComponent>(m_animationEditorState.linkedEntity))
+        {
+            if (!name->displayName.empty())
+                titleText += "  -  " + name->displayName;
+        }
+        titleText += " (Entity " + std::to_string(m_animationEditorState.linkedEntity) + ")";
+
+        WidgetElement title{};
+        title.type            = WidgetElementType::Text;
+        title.text            = titleText;
+        title.font            = theme.fontDefault;
+        title.fontSize        = theme.fontSizeSubheading;
+        title.style.textColor = theme.textPrimary;
+        title.textAlignV      = TextAlignV::Center;
+        title.minSize         = EditorTheme::Scaled(Vec2{ 200.0f, 24.0f });
+        title.padding         = EditorTheme::Scaled(Vec2{ 4.0f, 2.0f });
+        title.runtimeOnly     = true;
+        toolbar.children.push_back(std::move(title));
+    }
+
+    // Spacer
+    {
+        WidgetElement spacer{};
+        spacer.type        = WidgetElementType::Panel;
+        spacer.fillX       = true;
+        spacer.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+        spacer.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+        spacer.runtimeOnly = true;
+        toolbar.children.push_back(std::move(spacer));
+    }
+
+    // Stop button
+    {
+        WidgetElement stopBtn = EditorUIBuilder::makeButton(
+            "AnimationEditor.Stop", "Stop", {}, EditorTheme::Scaled(Vec2{ 60.0f, 24.0f }));
+        stopBtn.tooltipText = "Stop playback";
+        toolbar.children.push_back(std::move(stopBtn));
+    }
+
+    root.children.push_back(std::move(toolbar));
+}
+
+// ---------------------------------------------------------------------------
+// refreshAnimationEditor – rebuilds the content area from the linked entity
+// ---------------------------------------------------------------------------
+void UIManager::refreshAnimationEditor()
+{
+    if (!m_animationEditorState.isOpen)
+        return;
+
+    auto* entry = findWidgetEntry(m_animationEditorState.widgetId);
+    if (!entry || !entry->widget)
+        return;
+
+    auto& elements = entry->widget->getElementsMutable();
+    if (elements.empty())
+        return;
+
+    // Find ContentArea inside root
+    WidgetElement* contentArea = nullptr;
+    for (auto& child : elements[0].children)
+    {
+        if (child.id == "AnimationEditor.ContentArea")
+        {
+            contentArea = &child;
+            break;
+        }
+    }
+    if (!contentArea)
+        return;
+
+    contentArea->children.clear();
+
+    auto& ecs = ECS::ECSManager::Instance();
+    const ECS::Entity entity = m_animationEditorState.linkedEntity;
+    const auto* animComp = ecs.getComponent<ECS::AnimationComponent>(entity);
+    if (!animComp || !m_renderer)
+    {
+        contentArea->children.push_back(EditorUIBuilder::makeLabel("Entity no longer has an Animation component."));
+        entry->widget->markLayoutDirty();
+        m_renderDirty = true;
+        return;
+    }
+
+    // Build sections
+    buildAnimationEditorClipList(*contentArea);
+    buildAnimationEditorControls(*contentArea);
+    buildAnimationEditorBoneTree(*contentArea);
+
+    entry->widget->markLayoutDirty();
+    m_renderDirty = true;
+}
+
+// ---------------------------------------------------------------------------
+// buildAnimationEditorClipList
+// ---------------------------------------------------------------------------
+void UIManager::buildAnimationEditorClipList(WidgetElement& root)
+{
+    if (!m_renderer) return;
+    const ECS::Entity entity = m_animationEditorState.linkedEntity;
+    const int clipCount = m_renderer->getEntityAnimationClipCount(entity);
+    const int currentClip = m_renderer->getEntityAnimatorCurrentClip(entity);
+
+    // Heading
+    {
+        WidgetElement spacer{};
+        spacer.type        = WidgetElementType::Panel;
+        spacer.fillX       = true;
+        spacer.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 4.0f });
+        spacer.style.color = Vec4{ 0, 0, 0, 0 };
+        spacer.runtimeOnly = true;
+        root.children.push_back(std::move(spacer));
+
+        WidgetElement heading = EditorUIBuilder::makeHeading("Animation Clips");
+        heading.padding = EditorTheme::Scaled(Vec2{ 0.0f, 4.0f });
+        root.children.push_back(std::move(heading));
+    }
+
+    if (clipCount == 0)
+    {
+        root.children.push_back(EditorUIBuilder::makeLabel("No animation clips found."));
+        return;
+    }
+
+    auto& ecs = ECS::ECSManager::Instance();
+    const auto* animComp = ecs.getComponent<ECS::AnimationComponent>(entity);
+
+    for (int i = 0; i < clipCount; ++i)
+    {
+        const auto info = m_renderer->getEntityAnimationClipInfo(entity, i);
+        const bool isCurrent = (i == currentClip);
+        const float durationSec = info.ticksPerSecond > 0.0f ? info.duration / info.ticksPerSecond : 0.0f;
+
+        std::string label = info.name.empty() ? ("Clip " + std::to_string(i)) : info.name;
+        label += "  (" + std::to_string(info.channelCount) + " ch, "
+              + std::to_string(static_cast<int>(durationSec * 10.0f) / 10.0f).substr(0, 4) + "s)";
+
+        const auto& theme = EditorTheme::Get();
+        Vec4 btnColor = isCurrent ? theme.accent : theme.buttonDefault;
+
+        WidgetElement btn = EditorUIBuilder::makeButton(
+            "AnimationEditor.Clip." + std::to_string(i), label,
+            [this, i, entity]()
+            {
+                if (m_renderer)
+                {
+                    auto& ecs2 = ECS::ECSManager::Instance();
+                    auto* comp = ecs2.getComponent<ECS::AnimationComponent>(entity);
+                    bool loop = comp ? comp->loop : true;
+                    m_renderer->playEntityAnimation(entity, i, loop);
+                    if (comp)
+                    {
+                        comp->currentClipIndex = i;
+                        comp->playing = true;
+                    }
+                    m_animationEditorState.selectedClip = i;
+                    if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft())
+                        level->setIsSaved(false);
+                    refreshAnimationEditor();
+                }
+            },
+            EditorTheme::Scaled(Vec2{ 0.0f, 24.0f }));
+        btn.fillX = true;
+        btn.style.color = btnColor;
+        btn.runtimeOnly = true;
+        root.children.push_back(std::move(btn));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// buildAnimationEditorControls
+// ---------------------------------------------------------------------------
+void UIManager::buildAnimationEditorControls(WidgetElement& root)
+{
+    if (!m_renderer) return;
+    const ECS::Entity entity = m_animationEditorState.linkedEntity;
+    auto& ecs = ECS::ECSManager::Instance();
+    const auto* animComp = ecs.getComponent<ECS::AnimationComponent>(entity);
+    if (!animComp) return;
+
+    // Heading
+    {
+        WidgetElement spacer{};
+        spacer.type        = WidgetElementType::Panel;
+        spacer.fillX       = true;
+        spacer.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 6.0f });
+        spacer.style.color = Vec4{ 0, 0, 0, 0 };
+        spacer.runtimeOnly = true;
+        root.children.push_back(std::move(spacer));
+
+        WidgetElement heading = EditorUIBuilder::makeHeading("Playback Controls");
+        heading.padding = EditorTheme::Scaled(Vec2{ 0.0f, 4.0f });
+        root.children.push_back(std::move(heading));
+    }
+
+    // Status info
+    {
+        bool playing = m_renderer->isEntityAnimatorPlaying(entity);
+        float currentTime = m_renderer->getEntityAnimatorCurrentTime(entity);
+        int currentClip = m_renderer->getEntityAnimatorCurrentClip(entity);
+        std::string status = playing ? "Playing" : "Stopped";
+        if (currentClip >= 0)
+        {
+            auto clipInfo = m_renderer->getEntityAnimationClipInfo(entity, currentClip);
+            float tps = clipInfo.ticksPerSecond > 0.0f ? clipInfo.ticksPerSecond : 25.0f;
+            status += "  |  Clip: " + (clipInfo.name.empty() ? std::to_string(currentClip) : clipInfo.name);
+            status += "  |  Time: " + std::to_string(static_cast<int>(currentTime / tps * 100.0f) / 100.0f).substr(0, 5) + "s";
+        }
+        root.children.push_back(EditorUIBuilder::makeLabel(status));
+    }
+
+    // Speed slider
+    {
+        WidgetElement speedRow = EditorUIBuilder::makeSliderRow(
+            "AnimationEditor.Speed", "Speed", animComp->speed, 0.0f, 5.0f,
+            [this, entity](float v)
+            {
+                auto& ecs2 = ECS::ECSManager::Instance();
+                auto* comp = ecs2.getComponent<ECS::AnimationComponent>(entity);
+                if (comp)
+                    comp->speed = v;
+                if (m_renderer)
+                    m_renderer->setEntityAnimationSpeed(entity, v);
+                if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft())
+                    level->setIsSaved(false);
+            });
+        root.children.push_back(std::move(speedRow));
+    }
+
+    // Loop checkbox
+    {
+        WidgetElement loopRow = EditorUIBuilder::makeCheckBox(
+            "AnimationEditor.Loop", "Loop", animComp->loop,
+            [this, entity](bool v)
+            {
+                auto& ecs2 = ECS::ECSManager::Instance();
+                auto* comp = ecs2.getComponent<ECS::AnimationComponent>(entity);
+                if (comp)
+                    comp->loop = v;
+                if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft())
+                    level->setIsSaved(false);
+            });
+        root.children.push_back(std::move(loopRow));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// buildAnimationEditorBoneTree
+// ---------------------------------------------------------------------------
+void UIManager::buildAnimationEditorBoneTree(WidgetElement& root)
+{
+    if (!m_renderer) return;
+    const ECS::Entity entity = m_animationEditorState.linkedEntity;
+    const int boneCount = m_renderer->getEntityBoneCount(entity);
+
+    // Heading
+    {
+        WidgetElement spacer{};
+        spacer.type        = WidgetElementType::Panel;
+        spacer.fillX       = true;
+        spacer.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 6.0f });
+        spacer.style.color = Vec4{ 0, 0, 0, 0 };
+        spacer.runtimeOnly = true;
+        root.children.push_back(std::move(spacer));
+
+        WidgetElement heading = EditorUIBuilder::makeHeading("Bone Hierarchy (" + std::to_string(boneCount) + " bones)");
+        heading.padding = EditorTheme::Scaled(Vec2{ 0.0f, 4.0f });
+        root.children.push_back(std::move(heading));
+    }
+
+    if (boneCount == 0)
+    {
+        root.children.push_back(EditorUIBuilder::makeLabel("No bones found."));
+        return;
+    }
+
+    // Build indented bone list
+    // First pass: determine depth for each bone
+    std::vector<int> depth(boneCount, 0);
+    for (int i = 0; i < boneCount; ++i)
+    {
+        int parent = m_renderer->getEntityBoneParent(entity, i);
+        int d = 0;
+        int curr = parent;
+        while (curr >= 0 && d < 20)
+        {
+            ++d;
+            curr = m_renderer->getEntityBoneParent(entity, curr);
+        }
+        depth[i] = d;
+    }
+
+    const auto& theme = EditorTheme::Get();
+    for (int i = 0; i < boneCount; ++i)
+    {
+        std::string boneName = m_renderer->getEntityBoneName(entity, i);
+        if (boneName.empty())
+            boneName = "Bone " + std::to_string(i);
+
+        std::string indent;
+        for (int d = 0; d < depth[i]; ++d)
+            indent += "  ";
+
+        std::string prefix = (depth[i] > 0) ? "|- " : "";
+
+        WidgetElement lbl{};
+        lbl.type            = WidgetElementType::Text;
+        lbl.text            = indent + prefix + boneName;
+        lbl.font            = theme.fontDefault;
+        lbl.fontSize        = theme.fontSizeSmall;
+        lbl.style.textColor = theme.textSecondary;
+        lbl.fillX           = true;
+        lbl.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 18.0f });
+        lbl.padding         = EditorTheme::Scaled(Vec2{ 4.0f, 1.0f });
+        lbl.runtimeOnly     = true;
+        root.children.push_back(std::move(lbl));
+    }
 }

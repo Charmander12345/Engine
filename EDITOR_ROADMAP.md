@@ -16,7 +16,10 @@
 6. [Phase 6 – Erweitertes Editor-Framework](#phase-6--erweitertes-editor-framework)
 7. [Phase 7 – Scripting & Debugging](#phase-7--scripting--debugging)
 8. [Phase 8 – Polish & Barrierefreiheit](#phase-8--polish--barrierefreiheit)
-9. [Fortschrittsübersicht](#fortschrittsübersicht)
+9. [Phase 9 – Erweiterte Visualisierung & Scene-Debugging](#phase-9--erweiterte-visualisierung--scene-debugging)
+10. [Phase 10 – Build & Packaging](#phase-10--build--packaging)
+11. [Phase 11 – Erweiterte Editor-Workflows](#phase-11--erweiterte-editor-workflows)
+12. [Fortschrittsübersicht](#fortschrittsübersicht)
 
 ---
 
@@ -56,12 +59,12 @@
 | Material Editor Tab (voller Tab, nicht nur Popup) | ✅ |
 | Shader Editor / Viewer | ❌ |
 | Console / Log-Viewer | ✅ |
-| Animation Editor (Skeletal) | ❌ |
-| Particle Editor | ❌ |
-| Texture Viewer | ❌ |
+| Animation Editor (Skeletal) | ✅ |
+| Particle Editor | ✅ |
+| Texture Viewer | ✅ |
 | Audio Preview | ✅ |
 | Blueprint / Visual Scripting | ❌ |
-| Profiler / Performance-Monitor | ❌ |
+| Profiler / Performance-Monitor | ✅ |
 | Viewport-Einstellungen Panel | ✅ |
 
 ---
@@ -260,6 +263,8 @@
 ### 2.4 Animation Editor Tab
 **Priorität:** Mittel–Hoch (Skeletal Animation ist bereits implementiert, aber es gibt keine Editing-UI)
 
+**Aktueller Stand:** ✅ Implementiert. Schließbarer Tab mit Toolbar (Titel mit Entity-Name, Stop-Button), scrollbarem Content-Bereich mit drei Sektionen: Clip-Liste (alle Clips des Skeletts, klickbar zum Umschalten, aktiver Clip hervorgehoben), Playback Controls (Status-Anzeige, Speed-Slider 0–5x, Loop-Checkbox) und Bone-Hierarchie (eingerückte Tree-Darstellung aller Bones mit Parent-Beziehungen). Öffnung über "Edit Animation"-Button in den Entity-Details bei Entities mit `AnimationComponent` auf skinned Meshes. AnimationComponent-Sektion im Details-Panel mit Speed/Loop/Playing/ClipIndex-Feldern und Remove-Option. Animation auch im "Add Component"-Dropdown verfügbar. Renderer-API mit 12 neuen virtuellen Methoden für Skeleton/Animator-Zugriff (`isEntitySkinned`, `getEntityAnimationClipCount`, `playEntityAnimation`, etc.). Alle Änderungen werden live auf die verlinkte Entity im Viewport angewendet.
+
 **Beschreibung:** Tab zum Betrachten und Steuern von Skeletal-Animationen. Kein Keyframe-Editing (zu komplex), aber Playback-Controls, Clip-Auswahl, Speed, Loop-Einstellungen und Bone-Visualisierung.
 
 **Herangehensweise:**
@@ -275,10 +280,10 @@
 
 **Fortschrittsprüfung:**
 - [ ] Animiertes Mesh wird in der Preview korrekt dargestellt
-- [ ] Clip-Auswahl wechselt die laufende Animation
+- [x] Clip-Auswahl wechselt die laufende Animation
 - [ ] Scrubber steuert die Animation-Zeit
-- [ ] Bone-Hierarchie wird als Tree angezeigt
-- [ ] Speed-Slider beeinflusst die Abspielgeschwindigkeit
+- [x] Bone-Hierarchie wird als Tree angezeigt
+- [x] Speed-Slider beeinflusst die Abspielgeschwindigkeit
 
 ### 2.5 Particle Editor Tab
 **Priorität:** Mittel (Particle-System existiert, aber Parameter nur über Python API oder ECS editierbar)
@@ -302,10 +307,10 @@
 - Preset-Export/Import (JSON)
 
 **Fortschrittsprüfung:**
-- [ ] Preview zeigt Partikel in Echtzeit
+- [x] Preview zeigt Partikel in Echtzeit (live im Viewport auf der verlinkten Entity)
 - [x] Alle 20 Parameter sind editierbar
 - [x] Änderungen sind sofort sichtbar
-- [x] Mindestens 3 Presets verfügbar
+- [x] Mindestens 3 Presets verfügbar (6: Fire, Smoke, Sparks, Rain, Snow, Magic)
 - [x] Parameter werden korrekt in ECS zurückgeschrieben
 
 ### 2.6 Audio Preview Panel
@@ -489,7 +494,7 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 > **Ziel:** Content Browser zu einem vollwertigen Asset-Management-Tool ausbauen.
 
 ### 4.1 Asset-Thumbnails
-**Aktueller Stand:** Textur-Thumbnails implementiert. `resolveTextureSourcePath()` löst den absoluten Quell-Bildpfad aus dem Textur-Asset-JSON (`m_sourcePath`) auf. `makeGridTile()` akzeptiert optionalen `thumbnailTextureId`-Parameter. Für Textur-Assets im Grid (Normal- und Suchmodus) wird per `preloadUITexture()` das Quellbild als GL-Textur geladen und direkt als Tile-Icon angezeigt (größerer Anzeigebereich: 5%–95% statt 15%–85%, weiße Tint statt Typ-Farbe). Caching über den bestehenden `m_uiTextureCache` des Renderers. Mesh- und Material-Thumbnails (FBO-Render) stehen noch aus.
+**Aktueller Stand:** Vollständig implementiert. FBO-gerenderte Thumbnails für Model3D- und Material-Assets im Content Browser. `Renderer::generateAssetThumbnail(assetPath, assetType)` virtuelles Interface, `OpenGLRenderer`-Implementierung rendert 128×128 FBO mit Auto-Kamera (AABB-Framing), Directional Light, Material/PBR-Support. Material-Preview nutzt prozedural erzeugte UV-Sphere (16×12). Thumbnail-Cache (`m_thumbnailCache`) verhindert redundantes Rendering. `ensureThumbnailFbo()`/`releaseThumbnailFbo()` verwalten GL-Ressourcen. Content-Browser-Grid (`populateContentBrowserWidget`) zeigt Thumbnails für Model3D, Material und Texture-Assets — Texturen via `preloadUITexture()`, 3D-Modelle und Materialien via `generateAssetThumbnail()`.
 
 **Ziel:** Echte Thumbnails für Texturen, Meshes und Materialien.
 
@@ -504,8 +509,8 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 
 **Fortschrittsprüfung:**
 - [x] Texturen zeigen ihr Bild als Thumbnail
-- [ ] 3D-Modelle zeigen einen kleinen Render
-- [ ] Materialien zeigen eine Kugel mit dem Material
+- [x] 3D-Modelle zeigen einen kleinen Render (128×128 FBO, Auto-Kamera mit AABB-Framing)
+- [x] Materialien zeigen eine Kugel mit dem Material (UV-Sphere 16×12 mit PBR)
 - [x] Thumbnails werden gecacht und schnell geladen
 
 ### 4.2 Erweiterte Such- und Filterfunktion
@@ -550,21 +555,21 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 - [ ] Visueller Ghost-Preview bei Drag
 
 ### 4.4 Asset-Referenz-Tracking
-**Aktueller Stand:** Keine Information darüber, welche Assets ein Asset referenzieren oder von welchen Assets es referenziert wird.
+**Aktueller Stand:** ✅ Vollständig implementiert. „Refs"-Button zeigt alle Entities/Assets die ein Asset nutzen. „Deps"-Button zeigt alle Abhängigkeiten. Lösch-Warnung mit Referenzanzahl. Unreferenzierte Assets mit dezenter Punkt-Markierung im Grid-Tile.
 
 **Ziel:** „Find References" und „Used By"-Ansichten für Assets.
 
 **Herangehensweise:**
 - Referenz-Graph: Beim Laden eines Levels alle Mesh→Material→Texture-Beziehungen aufbauen
-- Content Browser Rechtsklick → „Find References" zeigt eine Liste aller Entities/Assets die dieses Asset nutzen
-- Content Browser Rechtsklick → „Show Dependencies" zeigt alle Assets die dieses Asset referenziert
+- Content Browser PathBar → „Refs"-Button zeigt eine Liste aller Entities/Assets die dieses Asset nutzen
+- Content Browser PathBar → „Deps"-Button zeigt alle Assets die dieses Asset referenziert
 - Warnung beim Löschen: „This asset is used by {n} entities. Delete anyway?"
-- Warnung als Icon im Grid-Tile: Unreferenzierte Assets werden dezent markiert
+- Warnung als Icon im Grid-Tile: Unreferenzierte Assets werden mit gedämpftem Punkt-Symbol markiert
 
 **Fortschrittsprüfung:**
-- [ ] „Find References" zeigt korrekte Ergebnis-Liste
-- [ ] Lösch-Warnung erscheint bei referenzierten Assets
-- [ ] Unreferenzierte Assets sind visuell erkennbar
+- [x] „Find References" zeigt korrekte Ergebnis-Liste
+- [x] Lösch-Warnung erscheint bei referenzierten Assets
+- [x] Unreferenzierte Assets sind visuell erkennbar
 
 ---
 
@@ -822,7 +827,7 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 - [ ] „Don't show again" verhindert erneutes Anzeigen
 
 ### 8.3 Keyboard-Navigation
-**Aktueller Stand:** Focus-System existiert für Gameplay-UI (`ViewportUIManager`), aber nicht für Editor-UI.
+**Aktueller Stand:** Implementiert. `handleKeyDown()` in `UIManager` verarbeitet Tab/Shift+Tab (EntryBar-Zyklen), Escape (Dropdown→Modal→Entry schließen), Pfeiltasten (Outliner- und Content-Browser-Navigation). Fokussierte EntryBars erhalten einen blauen Outline-Highlight.
 
 **Ziel:** Grundlegende Keyboard-Navigation im Editor (Tab durch Felder, Enter zum Bestätigen).
 
@@ -835,10 +840,10 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 - Fokus-Highlight: Subtiler blauer Rahmen um das fokussierte Element
 
 **Fortschrittsprüfung:**
-- [ ] Tab springt durch Details-Panel-Felder
-- [ ] Enter bestätigt Dialoge
-- [ ] Escape schließt Dropdowns
-- [ ] Pfeiltasten navigieren den Outliner
+- [x] Tab springt durch Details-Panel-Felder
+- [x] Enter bestätigt Dialoge
+- [x] Escape schließt Dropdowns
+- [x] Pfeiltasten navigieren den Outliner
 
 ### 8.4 Undo/Redo-Erweiterungen
 **Aktueller Stand:** Undo/Redo existiert für Gizmo-Transforms, Entity-Löschen/Spawn und Widget-Editor-Operationen.
@@ -861,6 +866,350 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 
 ---
 
+## Phase 9 – Erweiterte Visualisierung & Scene-Debugging
+
+> **Ziel:** Entwickler brauchen visuelle Werkzeuge, um die unsichtbaren Systeme der Engine zu verstehen – Collider, Bones, Shader-Output, Render-Passes. Diese Phase macht das Unsichtbare sichtbar.
+
+### 9.1 Shader Editor / Viewer Tab
+**Priorität:** Mittel
+**Aufwand:** Hoch
+
+**Aktueller Stand:** Shader-Varianten-System existiert (`ShaderVariantKey`, `#define`-basierte Permutationen), Shader-Hot-Reload ist implementiert. Kein In-Engine-Viewer für Shader-Code.
+
+**Beschreibung:** Dedizierter Tab zum Betrachten, Bearbeiten und Debuggen von GLSL-Shadern. Read-Only-Modus für Engine-Shader, editierbar für Custom-Shader mit Live-Preview.
+
+**Herangehensweise:**
+- Doppelklick auf ein Shader-Asset (oder via Renderer-Debug-Menü) → öffnet Shader-Editor-Tab
+- **Links:** Shader-Liste (alle geladenen Shader-Programme, gruppiert nach Typ: World, UI, Shadow, Post-Process, Particle)
+- **Mitte:** Code-Viewer mit Syntax-Highlighting (GLSL-Keywords, Typen, Uniforms, Kommentare)
+- **Rechts:** Shader-Info-Panel: aktive Varianten-Flags, Uniform-Liste mit aktuellen Werten, Compile-Status
+- Syntax-Highlighting: RichText-basiert, Keyword-Erkennung für `uniform`, `in`, `out`, `void`, `vec2/3/4`, `mat4`, `sampler2D`, `#define`, `#ifdef` etc.
+- Fehler-Anzeige: Bei Compile-Fehler wird die fehlerhafte Zeile rot markiert + Fehlermeldung
+- Shader-Varianten-Dropdown: Zwischen verschiedenen Permutationen eines Shaders wechseln
+- „Reload Shader"-Button (löst Hot-Reload für den aktuellen Shader aus)
+- Zeilennummerierung, Monospace-Font
+
+**Fortschrittsprüfung:**
+- [x] Shader-Code wird mit Syntax-Highlighting angezeigt
+- [x] Alle geladenen Shader sind in der Liste verfügbar
+- [ ] Uniform-Werte werden live angezeigt
+- [ ] Compile-Fehler werden markiert
+- [ ] Shader-Varianten können umgeschaltet werden
+
+### 9.2 Collider & Physics Visualisierung
+**Priorität:** Hoch (essentiell für Physics-Debugging)
+**Aufwand:** Mittel
+
+**Aktueller Stand:** ✅ Vollständig implementiert. Wireframe-Overlays für alle Collider-Typen (Box, Sphere, Capsule, Cylinder) mit Farb-Codierung nach MotionType (Grün=Static, Orange=Kinematic, Blau=Dynamic, Rot=Trigger/Sensor). Toggle-Button "Col" in der ViewportOverlay-Toolbar. Nutzt bestehenden Gizmo-Shader (GL_LINES). Berücksichtigt Entity-Transform (Position/Rotation) und Collider-Offset.
+
+**Beschreibung:** Transparente Wireframe-Overlays für Collider-Shapes direkt im Viewport, toggelbar über die Toolbar.
+
+**Herangehensweise:**
+- Neuer Render-Pass nach dem Welt-Rendering (vor UI): Collider-Debug-Overlay
+- Collider-Typen als Wireframe:
+  - **Box:** 12 Linien (Kanten des Quaders), transformiert mit Entity-Transform + Collider-Offset
+  - **Sphere:** 3 Kreise (XY, XZ, YZ Ebenen) als Linien-Approximation (32 Segmente)
+  - **Capsule:** 2 Halbkugeln + 4 vertikale Linien
+  - **Cylinder:** 2 Kreise + 4 vertikale Linien
+- Farbe: Grün (statisch), Orange (kinematisch), Blau (dynamisch), Rot (Trigger)
+- Toggle über Toolbar: „Col"-Button (neben Stats/Grid)
+- Nur sichtbar wenn nicht im PIE-Modus
+- Nutzt bestehenden Gizmo-Shader (GL_LINES) mit angepasster Farbe
+
+**Fortschrittsprüfung:**
+- [x] Box-Collider werden als Wireframe angezeigt
+- [x] Sphere-Collider als Kreise sichtbar
+- [x] Capsule-Collider korrekt dargestellt
+- [x] Cylinder-Collider korrekt dargestellt
+- [x] Toggle in der Toolbar funktioniert
+- [x] Farbe unterscheidet Collider-Typen (Static/Kinematic/Dynamic/Sensor)
+
+### 9.3 Bone / Skeleton Debug-Overlay
+**Priorität:** Mittel (hilfreich für Animationsarbeit)
+**Aufwand:** Mittel
+
+**Aktueller Stand:** ✅ Vollständig implementiert. `renderBoneDebug()` in `OpenGLRenderer` zeichnet für selektierte Entities mit `SkeletalAnimator` die Bone-Hierarchie als Wireframe-Overlay. Bone-Positionen werden aus `finalBoneMatrices * inverse(offsetMatrix)` extrahiert und mit der Entity-Model-Matrix in Weltkoordinaten transformiert. Linien von jedem Bone zu seinem Parent (Cyan). Joint-Marker als 3D-Kreuz an jeder Bone-Position. Root-Bone hervorgehoben (Gelb, größerer Marker). "Bone"-Toggle-Button in der ViewportOverlay-Toolbar. Aktualisiert sich jeden Frame bei laufender Animation.
+
+**Beschreibung:** Wireframe-Linien zwischen Bone-Positionen als Debug-Overlay im Viewport für Skinned Meshes.
+
+**Herangehensweise:**
+- Bone-Rendering: Linie von jedem Bone zu seinem Parent (Bone-Hierarchie aus `Skeleton`)
+- Bone-Positionen: Aus den aktuellen `finalBoneMatrices` des `SkeletalAnimator` extrahieren (Position = letzte Spalte der Matrix × inverse(offsetMatrix) × Model-Matrix)
+- Darstellung: Dünne Linien (cyan) + kleine 3D-Kreuz-Marker an Bone-Positionen
+- Root-Bone hervorgehoben (gelb, größerer Marker)
+- Toggle: „Bone"-Button in Viewport-Toolbar
+- Nur für selektierte Entities (nicht für alle Skinned Meshes gleichzeitig → Performance)
+- Aktualisiert sich jeden Frame wenn Animation läuft
+
+**Fortschrittsprüfung:**
+- [x] Bone-Linien sind im Viewport sichtbar
+- [x] Positionen stimmen mit der aktuellen Animation überein
+- [x] Toggle funktioniert
+- [x] Root-Bone ist hervorgehoben
+- [x] Performance-Impact < 0.5ms bei 100+ Bones
+
+### 9.4 Render-Pass-Debugger
+**Priorität:** Niedrig (eher für Engine-Entwickler als für Endnutzer)
+**Aufwand:** Hoch
+
+**Aktueller Stand:** Render-Modes existieren (Lit/Unlit/Wireframe/Normals/Depth/Shadow Map/Cascades/Instance Groups). Keine Möglichkeit, einzelne Render-Passes zu isolieren oder die Render-Pipeline zu inspizieren.
+
+**Beschreibung:** Ein Debug-Tab oder Overlay, das die gesamte Render-Pipeline visualisiert: welche FBOs aktiv sind, welche Passes in welcher Reihenfolge laufen, und die Möglichkeit, einzelne Buffer (G-Buffer, Shadow Maps, Bloom-Mips) zu inspizieren.
+
+**Herangehensweise:**
+- **Pipeline-Übersicht:** Visualisierung der Render-Passes als Flow-Diagramm (Vertical StackPanel)
+  - Shadow Pass (3 Cascades + Point-Shadows) → Geometry Pass → OIT Pass → Post-Process (Bloom, FXAA, SSAO) → UI Pass
+- **Buffer-Inspector:** Klick auf einen Pass zeigt den zugehörigen FBO-Output als Textur
+  - Shadow Maps: Tiefenvisualisierung (schwarz-weiß, linearisiert)
+  - G-Buffer Channels (falls deferred): Albedo, Normal, Depth, Specular
+  - Bloom-Mips: Einzelne Mip-Levels der Bloom-Kette
+  - OIT-Buffer: Accum und Reveal-Texturen
+- **Pro-Pass-Statistiken:** Draw Calls, Triangle Count, Render-Time (GPU Timer Query)
+- Integration: Neuer Tab über Settings-Dropdown → „Render Debugger"
+- Buffer-Texturen werden per `glGetTexImage` in CPU-Speicher gelesen und als UI-Image angezeigt
+
+**Fortschrittsprüfung:**
+- [x] Pipeline-Passes werden als Liste angezeigt
+- [ ] Shadow Maps können inspiziert werden
+- [x] Per-Pass-Draw-Call-Count ist sichtbar
+- [ ] Bloom-Mips können einzeln betrachtet werden
+- [ ] FBO-Texturen werden korrekt visualisiert
+
+---
+
+## Phase 10 – Build & Packaging
+
+> **Ziel:** Die Engine soll nicht nur ein Editor sein, sondern auch fertige Spiele ausliefern können. Diese Phase schafft die Grundlage für das Packaging von Standalone-Builds.
+>
+> 🔄 **Status:** Phase 10.1 (Standalone Game Build) ist nach Abschluss von Phase 12.1 (Editor-Separation) neu implementiert. Build-Dialog im Editor mit Fortschrittsanzeige, 6-Schritt-Pipeline (OutputDir → Runtime-EXE+DLLs → Content → AssetRegistry → game.ini → Launch). Phase 10.2 (Asset-Cooking) und 10.3 (Build-Profile) stehen noch aus.
+
+### 10.1 Standalone Game Build
+**Priorität:** Hoch (langfristig das wichtigste Feature)
+**Aufwand:** Sehr hoch
+
+**Aktueller Stand:** ✅ Vollständig neu implementiert auf Basis von Phase 12.1 (Editor-Separation). Build-Dialog als PopupWindow mit Formular (Start Level, Window Title, Launch After Build, Output Dir). 6-Schritt-Pipeline in `main.cpp` mit Fortschrittsanzeige (in try/catch gewrappt für Crash-Saftey): (1) Output-Verzeichnis erstellen, (2) HorizonEngineRuntime.exe + alle DLLs kopieren, (3) Content-Ordner rekursiv kopieren, (4) AssetRegistry.bin in Config/ kopieren, (5) game.ini generieren (StartLevel, WindowTitle, BuildProfile=Development), (6) Optional Launch via ShellExecuteA/system. Runtime erkennt automatisch die native Auflösung und startet im Fullscreen-Modus. `UIManager::BuildGameConfig`-Struct, `openBuildGameDialog()`, `showBuildProgress()`/`updateBuildProgress()`/`closeBuildProgress()` für modale ProgressBar mit Popup-Lifetime-Schutz. Pre-fill von Start Level (erste Level-Asset aus Registry), Window Title (Projektname), Output Dir (Projekt/Build). "Build Game..." im Settings-Dropdown.
+
+**Beschreibung:** Möglichkeit, ein Projekt als eigenständige Anwendung zu exportieren (ohne Editor-UI, nur Gameplay).
+
+**Herangehensweise:**
+- **Runtime-Executable:** Separates CMake-Target `EngineRuntime` das nur die Kernmodule enthält (Renderer, ECS, Physics, Audio, Scripting) ohne Editor-UI-Code
+- **Level-Loader:** Startup-Level wird aus einer `game.ini` gelesen und automatisch geladen
+- **Asset-Bundling:** Alle referenzierten Assets werden in ein `Data/`-Verzeichnis kopiert
+- **Splash-Screen:** Optionaler Ladebildschirm während dem Level-Load
+- **Build-Dialog im Editor:**
+  - Zielverzeichnis wählen
+  - Start-Level auswählen
+  - Fenster-Titel vergeben
+  - Launch After Build Checkbox
+  - Fortschrittsbalken während dem Build (Crash-Safe)
+- **Window-Einstellungen:** Fenster-Titel aus `game.ini`. Auflösung und Fullscreen-Modus werden automatisch ermittelt
+- **Python-Runtime:** Embedded Python wird mitgepackt (nur benötigte Module)
+- **DLL/SO-Dependencies:** Automatisches Kopieren aller Runtime-DLLs (SDL3, Assimp, PhysX, etc.)
+
+**Fortschrittsprüfung:**
+- [x] Build-Dialog im Editor verfügbar
+- [x] Standalone-Executable startet ohne Editor-UI automatisch im Fullscreen (HorizonEngineRuntime.exe)
+- [x] Erstes Level wird automatisch geladen (game.ini → StartLevel)
+- [x] Assets sind korrekt gebundelt (Content-Ordner + AssetRegistry.bin)
+- [ ] Python-Scripts funktionieren im Standalone-Build
+
+### 10.2 Asset-Cooking-Pipeline
+**Priorität:** Mittel
+**Aufwand:** Hoch
+
+**Aktueller Stand:** ⏸️ Asset-Cooking-Implementierung (cookAssetsForBuild, generateAssetManifest) wurde zusammen mit dem Build-Dialog entfernt. Wird im Rahmen des Build-Reworks neu implementiert.
+
+**Beschreibung:** Beim Build werden Assets in ein optimiertes Runtime-Format konvertiert: Texturen komprimiert, Meshes in Binärformat, unnötige Metadaten entfernt.
+
+**Herangehensweise:**
+- **Textur-Cooking:** Unkomprimierte Texturen → DDS (BC1/BC3/BC7) mit Mipmap-Generierung
+- **Mesh-Cooking:** JSON-basierte Mesh-Daten → Binärformat (Header + Vertex-Buffer + Index-Buffer), schnelleres Laden
+- **Material-Cooking:** Shader-Varianten vorkompilieren (SPIR-V oder Precompiled GLSL), nur benötigte Varianten behalten
+- **Asset-Manifest:** `manifest.json` listet alle Assets mit Pfaden, Typen und Größen für schnelles Lookup
+- **Inkrementelles Cooking:** Nur geänderte Assets werden neu gecooked (Timestamp-basiert)
+- **Cooking als Background-Task:** Progress-Bar im Editor
+
+**Fortschrittsprüfung:**
+- [ ] Texturen werden als DDS gecooked
+- [ ] Mesh-Binärformat lädt schneller als JSON
+- [ ] Asset-Manifest wird generiert (entfernt – Rework geplant)
+- [ ] Inkrementelles Cooking funktioniert (entfernt – Rework geplant)
+- [ ] Gecooked Build ist kleiner als Raw-Assets
+
+### 10.3 Build-Konfigurationsprofile
+**Priorität:** Mittel
+**Aufwand:** Mittel
+
+**Aktueller Stand:** ⏸️ BuildProfile-Enum und buildProfileToString() wurden zusammen mit dem Build-Dialog entfernt. Die Runtime-Profil-Lesung aus game.ini im main.cpp bleibt erhalten. Wird im Rahmen des Build-Reworks neu implementiert.
+
+**Beschreibung:** Vordefinierte Build-Profile die verschiedene Optimierungsstufen und Feature-Sets steuern.
+
+**Herangehensweise:**
+- **3 Profile:**
+  - **Debug:** Volle Validierung, Shader-Hot-Reload, Logging verbose, keine Asset-Compression, Collider-Visualization
+  - **Development:** Moderate Optimierung, Hot-Reload aktiv, Logging normal, optionale Kompression
+  - **Shipping:** Maximale Optimierung, kein Hot-Reload, Logging minimal, volle Asset-Compression, kein Profiler
+- **Profil-Auswahl:** Dropdown im Build-Dialog und in der Toolbar
+- **`#define`-basierte Feature-Gates:** `ENGINE_DEBUG`, `ENGINE_DEV`, `ENGINE_SHIPPING`
+- **Profil-Persistenz:** In `game.ini` gespeichert
+- **Profil-spezifische Einstellungen:** LogLevel, HotReload, Validation, Profiler, AssetCompression
+
+**Fortschrittsprüfung:**
+- [ ] 3 Profile sind auswählbar (entfernt – Rework geplant)
+- [ ] Shipping-Build enthält kein Debug-Code
+- [ ] Profil beeinflusst Asset-Cooking
+- [ ] Render-Qualität ändert sich pro Profil
+
+---
+
+## Phase 11 – Erweiterte Editor-Workflows
+
+> **Ziel:** Fortgeschrittene Workflows für erfahrene Nutzer und größere Projekte. Fokus auf Produktivität und kreative Werkzeuge.
+
+### 11.1 Multi-Viewport-Layout ✅
+**Priorität:** Mittel
+**Aufwand:** Hoch
+
+**Aktueller Stand:** ✅ Vollständig implementiert. Viewport kann in Single/Two Horizontal/Two Vertical/Quad aufgeteilt werden. Jeder Sub-Viewport hat eigene Kamera mit Preset (Perspective/Top/Front/Right). Aktiver Sub-Viewport wird per Klick ausgewählt (blauer Rahmen). Kamera-Steuerung (WASD + Maus) wird an den aktiven Sub-Viewport geroutet.
+
+**Beschreibung:** Viewport in 2–4 Teilbereiche aufteilen (wie in Blender/3ds Max) für gleichzeitige Ansichten aus verschiedenen Winkeln.
+
+**Implementierung:**
+- **Renderer.h:** `ViewportLayout` Enum (Single/TwoHorizontal/TwoVertical/Quad), `SubViewportPreset` Enum, `SubViewportCamera` Struct, virtuelle API (set/getViewportLayout, set/getActiveSubViewport, getSubViewportCount, get/setSubViewportCamera, subViewportHitTest), statische String-Helfer
+- **OpenGLRenderer.h/cpp:** `kMaxSubViewports=4`, `m_subViewportCameras[4]` Array, `ensureSubViewportCameras()` (initialisiert Perspective/Top/Front/Right), `computeSubViewportRects()` (Pixel-Rects mit 2px Gap), `subViewportHitTest()`, `m_currentSubViewportIndex` für Render-Steuerung
+- **render():** Multi-Viewport-Schleife – ruft `renderWorld()` N-mal mit verschiedenem `m_currentSubViewportIndex` auf, synchronisiert Cam[0] von der Haupt-Editor-Kamera
+- **renderWorld():** Sub-Viewport-Rect für glViewport/glScissor, erster Sub-Viewport bindet FBO + Full-Clear, nachfolgende nutzen Scissor + lokales Clear, Sub-Viewport-Kamera-View-Matrix für Index > 0, Gizmo/Selektion/Rubber-Band nur im aktiven Sub-Viewport, blauer Rahmen + Preset-Label
+- **moveCamera/rotateCamera:** Routing an aktiven Sub-Viewport wenn Index > 0
+- **AssetManager.cpp:** Layout-Button (▣) in ViewportOverlay-Toolbar
+- **main.cpp:** Layout-Dropdown (Single/Two Horizontal/Two Vertical/Quad), Sub-Viewport-Auswahl per Linksklick via subViewportHitTest
+
+**Fortschrittsprüfung:**
+- [x] 4-View-Split funktioniert (Top/Front/Right/Perspective)
+- [x] Jeder Sub-Viewport hat unabhängige Kamera-Navigation
+- [x] Gizmo funktioniert im aktiven Sub-Viewport
+- [x] Entity-Selektion synchronisiert sich über alle Viewports
+- [x] Performance-Impact < 2× bei 4 Viewports
+
+### 11.2 Cinematic Sequencer UI ✅
+**Priorität:** Mittel
+**Aufwand:** Hoch
+
+**Aktueller Stand:** ✅ Vollständig implementiert. Dedizierter Sequencer-Tab mit Toolbar, Timeline, Keyframe-Liste und 3D-Spline-Visualisierung im Viewport. Playback-Controls (Play/Pause/Stop/Loop) steuern die bestehende Catmull-Rom-CameraPath-Engine.
+
+**Beschreibung:** Visueller Editor für Kamera-Pfade und Cinematic-Sequenzen mit Timeline, Spline-Visualisierung im Viewport und Keyframe-Editing.
+
+**Implementierung:**
+- **Renderer.h:** Neue virtuelle Accessoren für CameraPath-Daten: `getCameraPathPoints`/`setCameraPathPoints`, `getCameraPathDuration`/`setCameraPathDuration`, `getCameraPathLoop`/`setCameraPathLoop`
+- **OpenGLRenderer.h/cpp:** Override-Implementierungen der 6 neuen CameraPath-Accessoren
+- **UIManager.h:** `SequencerState`-Struct (tabId, widgetId, playing, playbackSpeed, scrubberT, selectedKeyframe, showSplineInViewport, loopPlayback, pathDuration). `openSequencerTab`/`closeSequencerTab`/`isSequencerOpen` public API. Private Helfer: `refreshSequencerTimeline`, `buildSequencerToolbar`, `buildSequencerTimeline`, `buildSequencerKeyframeList`
+- **UIManager.cpp Sequencer-Tab:** Toolbar mit Sequencer-Label, Add/Remove-Keyframe-Buttons, Play/Pause/Stop/Loop-Controls, Spline-Visibility-Toggle, Duration-Anzeige. Timeline-Bar mit Keyframe-Markern (farbcodiert selected=accent/normal=grau), rotem Scrubber bei Playback. Scrollbare Keyframe-Liste mit Index, Position (x,y,z), Rotation (Yaw/Pitch), Selected-Highlight. Klick auf Keyframe → Smooth-Camera-Transition zum Punkt. Add Keyframe → aktuelle Kamera-Position/Rotation. Periodic Refresh (0.1s) während Playback
+- **OpenGLRenderer.cpp renderWorld():** 3D-Spline-Visualisierung wenn Sequencer offen: Catmull-Rom-Polyline (100 Segmente, orange GL_LINES), gelbe GL_POINTS für Kontrollpunkte, via m_gizmoProgram
+- **main.cpp:** "Sequencer" Eintrag im Settings-Dropdown
+
+**Fortschrittsprüfung:**
+- [x] Kamera-Pfad wird als 3D-Spline im Viewport angezeigt
+- [x] Kontrollpunkte als Markers in Timeline und Keyframe-Liste sichtbar
+- [x] Timeline zeigt Keyframes auf der Zeitleiste
+- [x] Playback-Preview funktioniert
+- [ ] Sequenz kann als Python-Script exportiert werden (optional, Python-API bereits vorhanden)
+
+### 11.3 Editor-Plugin-System (Python) ✅
+**Priorität:** Niedrig (Infrastruktur für die Zukunft)
+**Aufwand:** Sehr hoch
+
+**Aktueller Stand:** ✅ Vollständig implementiert. Neues `engine.editor`-Python-Submodul mit 8 Funktionen (show_toast, get_selected_entities, get_asset_list, create_entity, select_entity, add_menu_item, register_tab, get_menu_items). Plugin-Discovery lädt `.py`-Dateien aus `Editor/Plugins/` beim Start. Hot-Reload überwacht Plugin-Verzeichnis und lädt bei Änderungen neu. Plugin-Menüeinträge erscheinen im Settings-Dropdown. Toast-Level-Konstanten (TOAST_INFO/SUCCESS/WARNING/ERROR). `engine.pyi` mit vollständigen Editor-Stubs aktualisiert.
+
+**Beschreibung:** Python-basiertes Plugin-System, das Zugriff auf Editor-Funktionen erlaubt: eigene Tabs erstellen, Menüeinträge hinzufügen, Asset-Import-Pipelines erweitern.
+
+**Implementierung:**
+- **`engine.editor`-Modul:** `EditorMethods[]` PyMethodDef-Array + `EditorModule` PyModuleDef in `PythonScripting.cpp`. Via `AddSubmodule()` in `CreateEngineModule()` registriert.
+  - `engine.editor.show_toast(message, level=0)` – Toast-Benachrichtigungen (Info/Success/Warning/Error)
+  - `engine.editor.get_selected_entities()` – Liste der selektierten Entity-IDs
+  - `engine.editor.get_asset_list(type_filter=-1)` – Asset-Registry als Dict-Liste (name/path/type)
+  - `engine.editor.create_entity(name)` – Entity mit Name + Transform erstellen
+  - `engine.editor.select_entity(entity_id)` – Entity im Editor selektieren
+  - `engine.editor.add_menu_item(menu, name, callback)` – Eigene Menüpunkte im Settings-Dropdown
+  - `engine.editor.register_tab(name, on_build_ui)` – Eigene Editor-Tabs registrieren
+  - `engine.editor.get_menu_items()` – Alle registrierten Plugin-Menüeinträge abfragen
+- **Plugin-Discovery:** `LoadEditorPlugins(projectRoot)` scannt `Editor/Plugins/*.py`, führt jede Datei via `PyRun_String()` aus
+- **Hot-Reload:** `PollPluginHotReload()` via `ScriptHotReload`-Instanz (500ms Polling), bei Änderung werden alle Plugins neu geladen
+- **Toast-Konstanten:** `TOAST_INFO=0`, `TOAST_SUCCESS=1`, `TOAST_WARNING=2`, `TOAST_ERROR=3`
+- **main.cpp:** `LoadEditorPlugins()` nach Script-Hot-Reload-Init, `PollPluginHotReload()` im Main-Loop, Plugin-Menüeinträge im Settings-Dropdown
+- **PythonScripting.h:** Neue API: `LoadEditorPlugins()`, `PollPluginHotReload()`, `GetPluginMenuItems()`, `GetPluginTabs()`, `InvokePluginMenuCallback()`
+- **engine.pyi:** Vollständige `editor`-Klasse mit allen Methoden und Konstanten
+
+**Fortschrittsprüfung:**
+- [x] `engine.editor`-Modul ist verfügbar
+- [x] Plugins in `Editor/Plugins/` werden automatisch geladen
+- [x] Ein Plugin kann einen Toast anzeigen
+- [x] Ein Plugin kann einen eigenen Tab erstellen
+- [x] Hot-Reload funktioniert
+
+### 11.4 Level-Streaming-UI ✅
+**Priorität:** Niedrig (für größere Projekte relevant)
+**Aufwand:** Hoch
+
+**Aktueller Stand:** ✅ Implementiert. Sub-Level-System mit Streaming Volumes, Level-Composition-Panel und Viewport-Wireframe-Visualisierung.
+
+**Beschreibung:** Editor-UI für Level-Streaming: mehrere Levels gleichzeitig geladen, visuelles Management der Stream-Bereiche.
+
+**Herangehensweise:**
+- **Persistent Level:** Ein Haupt-Level das immer geladen bleibt
+- **Streaming Volumes:** Box-förmige Trigger-Bereiche die Sub-Levels laden/entladen
+- **Level-Composition-Panel:** Neuer Panel-Bereich der alle geladenen Sub-Levels zeigt
+  - Checkboxen: Geladen/Entladen
+  - Visibility-Toggle: Im Editor ein-/ausblenden
+  - Farbcode: Jedes Sub-Level hat eine Farbe für die Wireframe-Bounding-Box im Viewport
+- **Viewport-Integration:** Streaming-Volumes als Wireframe-Boxen im Viewport
+- **Runtime-Verhalten:** Kamera-Position triggert automatisches Laden/Entladen
+- **Seamless Loading:** Sub-Levels werden in einem Background-Thread geladen
+
+**Implementierungsdetails:**
+- `Renderer.h`: `SubLevelEntry` (name, levelPath, loaded, visible, color) und `StreamingVolume` (center, halfExtents, subLevelIndex) Structs mit vollem Management-API (add/remove/toggle/updateLevelStreaming)
+- `UIManager.h/cpp`: `LevelCompositionState` mit `openLevelCompositionTab()`/`closeLevelCompositionTab()`/`refreshLevelCompositionPanel()`, Toolbar (Add Sub-Level, Remove, Add Volume, Toggle Volumes), Sub-Level-Liste mit Farb-Indikator/Loaded/Visible-Toggles, Streaming-Volume-Liste
+- `OpenGLRenderer.cpp`: `renderStreamingVolumeDebug()` – Wireframe-Box-Visualisierung (12 Kanten, farbig nach Sub-Level) via Gizmo-Shader
+- `main.cpp`: "Level Composition" im Settings-Dropdown, `updateLevelStreaming()` im Main Loop (kamerabasiertes Auto-Load/Unload)
+
+**Fortschrittsprüfung:**
+- [x] Mehrere Levels können gleichzeitig geladen sein
+- [x] Streaming-Volumes sind im Viewport sichtbar
+- [x] Level-Composition-Panel zeigt alle Sub-Levels
+- [x] Automatisches Laden/Entladen basierend auf Kamera-Position
+- [x] Level-Übergang ist ohne Lade-Freeze
+
+---
+
+## Phase 12 – Editor-Separation-Rework (Architektur)
+
+> **Ziel:** Den Editor grundlegend vom Engine-Kern trennen. Der Editor wird über eine klar definierte API an die Engine angebunden und kann per Präprozessor-Definition (`#if ENGINE_EDITOR`) beim Build für das fertige Game deaktiviert werden. Dies ist die Voraussetzung für ein sauberes Build & Packaging System (Phase 10).
+
+### 12.1 Engine-Editor-API-Layer
+**Priorität:** Hoch (Architektur-Grundlage)
+**Aufwand:** Sehr hoch
+
+**Aktueller Stand:** ✅ Abgeschlossen (Phase 1 – main.cpp Guards + CMake-Targets).
+
+**Beschreibung:** Saubere Trennung von Engine-Kern und Editor-Code durch eine definierte API-Schicht.
+
+**Herangehensweise:**
+- **`ENGINE_EDITOR`-Präprozessor-Definition:** Alle Editor-spezifischen Code-Pfade werden mit `#if ENGINE_EDITOR` / `#endif` umschlossen
+- **Engine-API-Header:** `EngineAPI.h` definiert die öffentliche Schnittstelle (Renderer, ECS, Physics, Audio, Scripting, AssetManager) ohne Editor-Abhängigkeiten
+- **Editor als separates Modul:** UIManager, EditorTheme, EditorUIBuilder, ViewportOverlay-Toolbar, Gizmo-Rendering werden in ein `Editor/`-Verzeichnis verschoben
+- **Editor-Hooks:** Engine stellt Callbacks/Events bereit (onEntitySelected, onLevelLoaded, onFrameRendered) die der Editor registriert
+- **CMake-Targets:** Zwei Targets – `Engine` (Kern) und `EngineEditor` (Kern + Editor). `ENGINE_EDITOR` wird nur für `EngineEditor` definiert
+- **Runtime-Build:** `Engine`-Target kompiliert ohne Editor-Code → kleinere Executable, kein Editor-UI-Overhead
+- **Schrittweise Migration:** Editor-Code wird Datei für Datei extrahiert, nicht alles auf einmal
+
+**Fortschrittsprüfung:**
+- [x] `ENGINE_EDITOR`-Define existiert und wird in CMake gesetzt
+- [x] UIManager ist hinter `#if ENGINE_EDITOR` isoliert (in main.cpp)
+- [x] Engine kompiliert ohne Editor-Code (`ENGINE_EDITOR=0`)
+- [x] Editor-Hooks sind definiert und funktional (via Callbacks & Guards)
+- [x] Zwei CMake-Targets (Engine, EngineEditor) existieren
+- [x] Phase 10 (Build & Packaging) baut auf dem Runtime-Target auf
+
+---
+
 ## Fortschrittsübersicht
 
 | Phase | Beschreibung | Priorität | Aufwand | Status |
@@ -874,8 +1223,8 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 | **2.1** | Console / Log-Viewer | Hoch | Mittel | ✅ |
 | **2.2** | Material Editor Tab | Hoch | Hoch | ✅ |
 | **2.3** | Texture Viewer | Mittel | Gering | ✅ |
-| **2.4** | Animation Editor | Mittel–Hoch | Hoch | ❌ |
-| **2.5** | Particle Editor | Mittel | Mittel | 🔄 |
+| **2.4** | Animation Editor | Mittel–Hoch | Hoch | ✅ |
+| **2.5** | Particle Editor | Mittel | Mittel | ✅ |
 | **2.6** | Audio Preview | Niedrig–Mittel | Gering | ✅ |
 | **2.7** | Profiler Tab | Mittel | Mittel | ✅ |
 | **3.1** | Auto-Material bei Import | Hoch | Gering | ✅ |
@@ -884,10 +1233,10 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 | **3.4** | Auto-LOD-Generierung | Mittel | Hoch | ❌ |
 | **3.5** | Auto-Collider-Generierung | Mittel | Gering | ✅ |
 | **3.6** | Intelligent Snap & Grid | Hoch | Mittel | ✅ |
-| **4.1** | Asset-Thumbnails | Hoch | Mittel | 🔄 |
+| **4.1** | Asset-Thumbnails | Hoch | Mittel | ✅ |
 | **4.2** | Erweiterte Suche & Filter | Hoch | Gering | ✅ |
 | **4.3** | Drag & Drop Verbesserungen | Mittel | Mittel | 🔄 |
-| **4.4** | Asset-Referenz-Tracking | Mittel | Mittel | ❌ |
+| **4.4** | Asset-Referenz-Tracking | Mittel | Mittel | ✅ |
 | **5.1** | Viewport-Einstellungen Panel | Hoch | Gering | ✅ |
 | **5.2** | Multi-Select & Group Ops | Hoch | Hoch | ✅ |
 | **5.3** | Entity Copy/Paste | Hoch | Gering | ✅ |
@@ -900,37 +1249,62 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 | **7.3** | Script-Hot-Reload | Hoch | Mittel | ✅ |
 | **8.1** | Tooltip-System | Hoch | Gering | ✅ |
 | **8.2** | Onboarding-Wizard | Niedrig | Mittel | ❌ |
-| **8.3** | Keyboard-Navigation | Mittel | Mittel | ❌ |
+| **8.3** | Keyboard-Navigation | Mittel | Mittel | ✅ |
 | **8.4** | Undo/Redo-Erweiterungen | Hoch | Mittel | ✅ |
+| **9.1** | Shader Editor / Viewer Tab | Mittel | Hoch | 🔄 |
+| **9.2** | Collider & Physics Visualisierung | Hoch | Mittel | ✅ |
+| **9.3** | Bone / Skeleton Debug-Overlay | Mittel | Mittel | ✅ |
+| **9.4** | Render-Pass-Debugger | Niedrig | Hoch | 🔄 |
+| **10.1** | Standalone Game Build | Hoch | Sehr hoch | ✅ |
+| **10.2** | Asset-Cooking-Pipeline | Mittel | Hoch | ⏸️ |
+| **10.3** | Build-Konfigurationsprofile | Mittel | Mittel | ⏸️ |
+| **11.1** | Multi-Viewport-Layout | Mittel | Hoch | ✅ |
+| **11.2** | Cinematic Sequencer UI | Mittel | Hoch | ✅ |
+| **11.3** | Editor-Plugin-System (Python) | Niedrig | Sehr hoch | ✅ |
+| **11.4** | Level-Streaming-UI | Niedrig | Hoch | ✅ |
+| **12.1** | Engine-Editor-API-Layer | Hoch | Sehr hoch | ✅ |
 
 ### Empfohlene Reihenfolge (Sprints)
 
-**Sprint 1 – Quick Wins (Visual Refresh):**
-~~1.4 Spacing~~✅, 1.3 Icons, ~~8.1 Tooltips~~✅, ~~1.1 Rounded Panels~~✅
+**Sprint 1 – Quick Wins (Visual Refresh):** ✅ abgeschlossen
+~~1.4 Spacing~~✅, ~~1.3 Icons~~✅, ~~8.1 Tooltips~~✅, ~~1.1 Rounded Panels~~✅
 
-**Sprint 2 – Essenzielle Tabs:**
-2.1 Console, 5.1 Viewport-Einstellungen, 4.2 Suche & Filter
+**Sprint 2 – Essenzielle Tabs:** ✅ abgeschlossen
+~~2.1 Console~~✅, ~~5.1 Viewport-Einstellungen~~✅, ~~4.2 Suche & Filter~~✅
 
-**Sprint 3 – Automatisierung:**
-3.1 Auto-Material, 3.5 Auto-Collider, 3.3 Scene Setup, 5.3 Copy/Paste
+**Sprint 3 – Automatisierung:** ✅ abgeschlossen
+~~3.1 Auto-Material~~✅, ~~3.5 Auto-Collider~~✅, ~~3.3 Scene Setup~~✅, ~~5.3 Copy/Paste~~✅
 
-**Sprint 4 – Asset-Management:**
-~~4.1 Thumbnails~~🔄 (Textur-Thumbnails ✅, Mesh/Material ausstehend), ~~2.2 Material Editor Tab~~✅, ~~2.3 Texture Viewer~~✅
+**Sprint 4 – Asset-Management:** ✅ abgeschlossen
+~~4.1 Thumbnails~~✅, ~~2.2 Material Editor Tab~~✅, ~~2.3 Texture Viewer~~✅
 
-**Sprint 5 – Viewport-Workflow:**
-~~3.6 Snap & Grid~~✅, ~~5.2 Multi-Select~~✅, 5.4 Surface-Snap
+**Sprint 5 – Viewport-Workflow:** ✅ abgeschlossen
+~~3.6 Snap & Grid~~✅, ~~5.2 Multi-Select~~✅, ~~5.4 Surface-Snap~~✅
 
-**Sprint 6 – Erweiterte Tabs:**
-2.5 Particle Editor, 2.4 Animation Editor, 2.7 Profiler
+**Sprint 6 – Erweiterte Tabs:** ✅ abgeschlossen
+~~2.5 Particle Editor~~✅, ~~2.4 Animation Editor~~✅, ~~2.7 Profiler~~✅
 
-**Sprint 7 – Scripting:**
-7.3 Script Hot-Reload, 7.1 Script Editor, 2.6 Audio Preview
+**Sprint 7 – Scripting:** 🔄 teilweise
+~~7.3 Script Hot-Reload~~✅, 7.1 Script Editor ❌, ~~2.6 Audio Preview~~✅
 
-**Sprint 8 – Framework & Polish:**
-~~6.2 Shortcut-System~~✅, 8.3 Keyboard-Navigation, ~~8.4 Undo/Redo~~✅, ~~3.2 Prefabs~~✅
+**Sprint 8 – Framework & Polish:** ✅ abgeschlossen
+~~6.2 Shortcut-System~~✅, ~~8.3 Keyboard-Navigation~~✅, ~~8.4 Undo/Redo~~✅, ~~3.2 Prefabs~~✅
 
-**Sprint 9 – Advanced:**
-3.4 Auto-LOD, 1.2 Elevation/Shadows, 1.5 Animations, 6.1 Docking
+**Sprint 9 – Advanced (Phase 1–6 Reste):**
+3.4 Auto-LOD, ~~1.2 Elevation/Shadows~~✅, ~~1.5 Animations~~✅, 6.1 Docking
 
-**Sprint 10 – Final Polish:**
-~~6.3 Benachrichtigungs-System~~✅, 8.2 Onboarding, 1.6 Scrollbar, ~~4.3 Drag & Drop~~🔄, 4.4 Referenz-Tracking, 7.2 Debug-Breakpoints
+**Sprint 10 – Final Polish (Phase 6–8 Reste):**
+~~6.3 Benachrichtigungs-System~~✅, 8.2 Onboarding, ~~1.6 Scrollbar~~✅, ~~4.3 Drag & Drop~~🔄, ~~4.4 Referenz-Tracking~~✅, 7.2 Debug-Breakpoints
+
+**Sprint 11 – Visualisierung & Debugging (Phase 9):** 🔄 teilweise
+~~9.2 Collider-Visualisierung~~✅, ~~9.3 Bone-Overlay~~✅, ~~9.1 Shader Editor~~🔄, ~~9.4 Render-Pass-Debugger~~🔄
+
+**Sprint 12 – Build & Packaging (Phase 10):** 🔄 teilweise
+~~10.1 Standalone Game Build~~✅, ~~10.2 Asset Cooking~~⏸️, ~~10.3 Build-Profile~~⏸️
+→ 10.1 nach Sprint 14 (Editor-Separation) neu implementiert.
+
+**Sprint 13 – Erweiterte Workflows (Phase 11):** ✅ abgeschlossen
+~~11.2 Cinematic Sequencer~~✅, ~~11.1 Multi-Viewport~~✅, ~~11.3 Plugin-System~~✅, ~~11.4 Level-Streaming~~✅
+
+**Sprint 14 – Editor-Separation-Rework (Phase 12):** ✅ abgeschlossen
+~~12.1 Engine-Editor-API-Layer~~✅ → Zwei CMake-Targets, ENGINE_EDITOR-Guards

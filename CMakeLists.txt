@@ -229,6 +229,40 @@ if (NOT TARGET OpenAL::OpenAL)
     message(FATAL_ERROR "OpenAL target not available from external/openal-soft.")
 endif()
 
+# ── Editor-Separation (Phase 12): ENGINE_EDITOR preprocessor define ──
+# ENGINE_EDITOR=1 → full editor build (default)
+# ENGINE_EDITOR=0 → runtime-only build (no editor UI, no editor setup)
+option(ENGINE_BUILD_RUNTIME "Build a runtime-only target without editor" ON)
+
+# Common include directories shared by both targets.
+set(ENGINE_COMMON_INCLUDES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/Renderer
+    ${CMAKE_SOURCE_DIR}/src/Logger
+    ${CMAKE_SOURCE_DIR}/src/AssetManager
+    ${CMAKE_SOURCE_DIR}/src/Diagnostics
+    ${CMAKE_SOURCE_DIR}/src/Core
+    ${CMAKE_SOURCE_DIR}/src/Landscape
+    ${CMAKE_SOURCE_DIR}/src/Physics
+    ${Python3_INCLUDE_DIRS}
+)
+
+# Common link libraries shared by both targets.
+set(ENGINE_COMMON_LIBS
+    SDL3::SDL3
+    Renderer
+    Logger
+    AssetManager
+    Diagnostics
+    Core
+    Scripting
+    Landscape
+    Physics
+    ${ENGINE_PYTHON_LIB}
+    Threads::Threads
+)
+
+# ── Editor target (ENGINE_EDITOR=1) ─────────────────────────────────────
 add_executable(HorizonEngine
     src/main.cpp
     )
@@ -238,33 +272,38 @@ if(WIN32)
     set_target_properties(HorizonEngine PROPERTIES WIN32_EXECUTABLE OFF)
 endif()
 
-target_include_directories(HorizonEngine
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/src/Renderer
-        ${CMAKE_SOURCE_DIR}/src/Logger
-        ${CMAKE_SOURCE_DIR}/src/AssetManager
-        ${CMAKE_SOURCE_DIR}/src/Diagnostics
-        ${CMAKE_SOURCE_DIR}/src/Core
-        ${CMAKE_SOURCE_DIR}/src/Landscape
-        ${CMAKE_SOURCE_DIR}/src/Physics
-        ${Python3_INCLUDE_DIRS}
+target_include_directories(HorizonEngine PRIVATE ${ENGINE_COMMON_INCLUDES})
+target_link_libraries(HorizonEngine PRIVATE ${ENGINE_COMMON_LIBS})
+target_compile_definitions(HorizonEngine PRIVATE ENGINE_EDITOR=1
+    ENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    CMAKE_GENERATOR="${CMAKE_GENERATOR}"
 )
 
-target_link_libraries(HorizonEngine
-    PRIVATE
-        SDL3::SDL3
-        Renderer
-        Logger
-        AssetManager
-        Diagnostics
-        Core
-        Scripting
-        Landscape
-        Physics
-        ${ENGINE_PYTHON_LIB}
-        Threads::Threads
-)
+# ── Runtime target (ENGINE_EDITOR=0) ────────────────────────────────────
+if(ENGINE_BUILD_RUNTIME)
+    add_executable(HorizonEngineRuntime
+        src/main.cpp
+    )
+    if(WIN32)
+        set_target_properties(HorizonEngineRuntime PROPERTIES WIN32_EXECUTABLE OFF)
+    endif()
+    target_include_directories(HorizonEngineRuntime PRIVATE ${ENGINE_COMMON_INCLUDES})
+    target_link_libraries(HorizonEngineRuntime PRIVATE ${ENGINE_COMMON_LIBS})
+    target_compile_definitions(HorizonEngineRuntime PRIVATE ENGINE_EDITOR=0)
+
+    # When building a standalone game, bake the game configuration into the binary
+    # so that the data cannot simply be swapped out.
+    if(DEFINED GAME_START_LEVEL AND NOT "${GAME_START_LEVEL}" STREQUAL "")
+        target_compile_definitions(HorizonEngineRuntime PRIVATE
+            GAME_START_LEVEL="${GAME_START_LEVEL}"
+        )
+    endif()
+    if(DEFINED GAME_WINDOW_TITLE AND NOT "${GAME_WINDOW_TITLE}" STREQUAL "")
+        target_compile_definitions(HorizonEngineRuntime PRIVATE
+            GAME_WINDOW_TITLE_BAKED="${GAME_WINDOW_TITLE}"
+        )
+    endif()
+endif()
 
 if(WIN32 AND Python3_LIBRARY_RELEASE)
     get_filename_component(PYTHON_LIB_BASENAME ${Python3_LIBRARY_RELEASE} NAME_WE)
@@ -275,6 +314,13 @@ if(WIN32 AND Python3_LIBRARY_RELEASE)
         COMMAND ${CMAKE_COMMAND} -E make_directory "${PYTHON_DEBUG_LIB_DIR}"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${Python3_LIBRARY_RELEASE}" "${PYTHON_DEBUG_LIB}"
     )
+    if(ENGINE_BUILD_RUNTIME)
+        target_link_directories(HorizonEngineRuntime PRIVATE "${PYTHON_DEBUG_LIB_DIR}")
+        add_custom_command(TARGET HorizonEngineRuntime PRE_LINK
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${PYTHON_DEBUG_LIB_DIR}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${Python3_LIBRARY_RELEASE}" "${PYTHON_DEBUG_LIB}"
+        )
+    endif()
 endif()
 
 if(NOT DEFINED ENGINE_DEPLOY_DIR)
@@ -306,6 +352,15 @@ if(MSVC)
         PDB_OUTPUT_DIRECTORY_RELEASE "${ENGINE_DEPLOY_DIR}"
         PDB_OUTPUT_DIRECTORY_MINSIZEREL "${ENGINE_DEPLOY_DIR}"
     )
+    if(ENGINE_BUILD_RUNTIME)
+        set_target_properties(HorizonEngineRuntime PROPERTIES
+            PDB_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}"
+            PDB_OUTPUT_DIRECTORY_DEBUG "${ENGINE_DEPLOY_DIR}"
+            PDB_OUTPUT_DIRECTORY_RELWITHDEBINFO "${ENGINE_DEPLOY_DIR}"
+            PDB_OUTPUT_DIRECTORY_RELEASE "${ENGINE_DEPLOY_DIR}"
+            PDB_OUTPUT_DIRECTORY_MINSIZEREL "${ENGINE_DEPLOY_DIR}"
+        )
+    endif()
 endif()
 
 # Always copy from the source tree to avoid stale files in the build directory.
@@ -351,4 +406,14 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${Python3_RUNTIME_LIBRARY_RELEASE}" "${ENGINE_DEPLOY_DIR}"
         )
     endif()
+endif()
+
+# Copy the runtime executable to a Tools/ subdirectory so it is not directly
+# visible next to the editor but Build Game can still locate it.
+if(ENGINE_BUILD_RUNTIME)
+    add_custom_command(TARGET HorizonEngineRuntime POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/Tools"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:HorizonEngineRuntime>" "${ENGINE_DEPLOY_DIR}/Tools/$<TARGET_FILE_NAME:HorizonEngineRuntime>"
+        COMMAND_EXPAND_LISTS
+    )
 endif()

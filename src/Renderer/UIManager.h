@@ -9,6 +9,9 @@
 #include <unordered_set>
 #include <set>
 #include <optional>
+#include <mutex>
+#include <thread>
+#include <atomic>
 
 #include "../Core/MathTypes.h"
 #include "../AssetManager/AssetTypes.h"
@@ -169,6 +172,32 @@ public:
 	void closeParticleEditorTab();
 	bool isParticleEditorOpen() const;
 
+	// Shader Viewer tab
+	void openShaderViewerTab();
+	void closeShaderViewerTab();
+	bool isShaderViewerOpen() const;
+
+	// Render-Pass-Debugger tab
+	void openRenderDebuggerTab();
+	void closeRenderDebuggerTab();
+	bool isRenderDebuggerOpen() const;
+
+	// Cinematic Sequencer tab (Phase 11.2)
+	void openSequencerTab();
+	void closeSequencerTab();
+	bool isSequencerOpen() const;
+
+	// Level Composition tab (Phase 11.4)
+	void openLevelCompositionTab();
+	void closeLevelCompositionTab();
+	bool isLevelCompositionOpen() const;
+	void refreshLevelCompositionPanel();
+
+	// Animation Editor tab (Phase 2.4)
+	void openAnimationEditorTab(ECS::Entity entity);
+	void closeAnimationEditorTab();
+	bool isAnimationEditorOpen() const;
+
 	// Entity clipboard (Copy/Paste/Duplicate)
 	void copySelectedEntity();
 	bool pasteEntity();
@@ -214,13 +243,18 @@ private:
 	void populateOutlinerWidget(const std::shared_ptr<EditorWidget>& widget);
 	void populateOutlinerDetails(unsigned int entity);
 	void populateContentBrowserWidget(const std::shared_ptr<EditorWidget>& widget);
-    void applyAssetToEntity(AssetType type, const std::string& assetPath, unsigned int entity);
+	std::unordered_set<std::string> buildReferencedAssetSet() const;
+	void applyAssetToEntity(AssetType type, const std::string& assetPath, unsigned int entity);
 	void updateHoverStates();
 	void updateHoverTransitions(float deltaSeconds);
 	void updateHoverTransitionsRecursive(WidgetElement& element, float deltaSeconds);
 	void updateScrollbarVisibility(float deltaSeconds);
 	void updateScrollbarVisibilityRecursive(WidgetElement& element, float deltaSeconds);
 	void setFocusedEntry(WidgetElement* element);
+	void collectFocusableEntries(WidgetElement& element, std::vector<WidgetElement*>& out);
+	void cycleFocusedEntry(bool reverse);
+	void navigateOutlinerByArrow(int direction);      // -1 = up, +1 = down
+	void navigateContentBrowserByArrow(int dCol, int dRow); // column/row delta
 	void ensureModalWidget();
 	std::shared_ptr<EditorWidget> createToastWidget(const std::string& message, const std::string& name, NotificationLevel level = NotificationLevel::Info) const;
 	void updateToastStackLayout();
@@ -509,6 +543,87 @@ private:
 	void buildParticleEditorParams(WidgetElement& root);
 	void applyParticlePreset(int presetIndex);
 
+	// Shader Viewer tab state
+	struct ShaderViewerState
+	{
+		std::string tabId;
+		std::string widgetId;
+		bool isOpen{ false };
+		std::string selectedFile;              // currently viewed shader filename
+		std::vector<std::string> shaderFiles;  // cached list of .glsl filenames
+	};
+	ShaderViewerState m_shaderViewerState;
+	void refreshShaderViewer();
+	void buildShaderViewerToolbar(WidgetElement& root);
+	void buildShaderFileList(WidgetElement& root);
+	void buildShaderCodeView(WidgetElement& root);
+
+	// Render-Pass-Debugger tab state
+	struct RenderDebuggerState
+	{
+		std::string tabId;
+		std::string widgetId;
+		bool isOpen{ false };
+		float refreshTimer{ 0.0f };
+	};
+	RenderDebuggerState m_renderDebuggerState;
+	void refreshRenderDebugger();
+	void buildRenderDebuggerToolbar(WidgetElement& root);
+
+	// Cinematic Sequencer tab state (Phase 11.2)
+	struct SequencerState
+	{
+		std::string tabId;
+		std::string widgetId;
+		bool isOpen{ false };
+		float refreshTimer{ 0.0f };
+		// Playback
+		bool playing{ false };
+		float playbackSpeed{ 1.0f };
+		float scrubberT{ 0.0f };       // normalised 0..1
+		// Editing
+		int selectedKeyframe{ -1 };     // -1 = none
+		bool showSplineInViewport{ true };
+		bool loopPlayback{ false };
+		float pathDuration{ 5.0f };     // seconds
+	};
+	SequencerState m_sequencerState;
+	void refreshSequencerTimeline();
+	void buildSequencerToolbar(WidgetElement& root);
+	void buildSequencerTimeline(WidgetElement& root);
+	void buildSequencerKeyframeList(WidgetElement& root);
+
+	// Level Composition tab state (Phase 11.4)
+	struct LevelCompositionState
+	{
+		std::string tabId;
+		std::string widgetId;
+		bool isOpen{ false };
+		float refreshTimer{ 0.0f };
+		int selectedSubLevel{ -1 };
+	};
+	LevelCompositionState m_levelCompositionState;
+	void buildLevelCompositionToolbar(WidgetElement& root);
+	void buildLevelCompositionSubLevelList(WidgetElement& root);
+	void buildLevelCompositionVolumeList(WidgetElement& root);
+
+	// Animation Editor tab state (Phase 2.4)
+	struct AnimationEditorState
+	{
+		std::string tabId;
+		std::string widgetId;
+		ECS::Entity linkedEntity{ 0 };
+		bool isOpen{ false };
+		float refreshTimer{ 0.0f };
+		int selectedClip{ -1 };
+	};
+	AnimationEditorState m_animationEditorState;
+	void refreshAnimationEditor();
+	void buildAnimationEditorToolbar(WidgetElement& root);
+	void buildAnimationEditorClipList(WidgetElement& root);
+	void buildAnimationEditorControls(WidgetElement& root);
+	void buildAnimationEditorBoneTree(WidgetElement& root);
+
 public:
 	bool getWidgetEditorCanvasRect(Vec4& outRect) const;
 	bool isWidgetEditorContentWidget(const std::string& widgetId) const;
@@ -583,6 +698,53 @@ public:
 	using DropOnEntityCallback = std::function<void(const std::string& payload, unsigned int entity)>;
 	void setOnDropOnEntity(DropOnEntityCallback callback) { m_onDropOnEntity = std::move(callback); }
 
+	// ── Build Game (Phase 10) ──────────────────────────────────────────────
+	struct BuildGameConfig
+	{
+		std::string startLevel;                     // relative to Content (e.g. "Levels/MyLevel.level")
+		std::string windowTitle   = "Game";
+		std::string outputDir;                      // absolute path for build output
+		bool        launchAfterBuild = true;
+	};
+
+	void openBuildGameDialog();
+
+	using BuildGameCallback = std::function<void(const BuildGameConfig& config)>;
+	void setOnBuildGame(BuildGameCallback cb) { m_onBuildGame = std::move(cb); }
+
+	// Build progress popup (called by the build pipeline)
+	void showBuildProgress();
+	void updateBuildProgress(const std::string& status, int step, int totalSteps);
+	void closeBuildProgress(bool success, const std::string& message = {});
+	void dismissBuildProgress();
+
+	// Thread-safe: append a line to the build output log (called from build thread)
+	void appendBuildOutput(const std::string& line);
+	// Main-thread: poll the build thread for pending UI updates. Call once per frame.
+	void pollBuildThread();
+	bool isBuildRunning() const { return m_buildRunning.load(); }
+
+	// ── CMake Detection ───────────────────────────────────────────────────
+	// Call once at startup to locate CMake.  Returns true if CMake is available.
+	bool detectCMake();
+	bool isCMakeAvailable() const { return m_cmakeAvailable; }
+	const std::string& getCMakePath() const { return m_cmakePath; }
+	// Show a popup asking the user to install CMake.
+	void showCMakeInstallPrompt();
+
+	// ── Build Toolchain Detection ─────────────────────────────────────────
+	struct ToolchainInfo
+	{
+		std::string name;           // e.g. "MSVC", "Clang", "GCC"
+		std::string version;        // e.g. "2026", "19.50.35727"
+		std::string compilerPath;   // path to cl.exe / clang++ / g++
+		std::string vsInstallPath;  // VS installation path (empty if not VS)
+	};
+	bool detectBuildToolchain();
+	bool isBuildToolchainAvailable() const { return m_toolchainAvailable; }
+	const ToolchainInfo& getBuildToolchain() const { return m_toolchainInfo; }
+	void showToolchainInstallPrompt();
+
 private:
 	// Drag & Drop state
 	bool m_dragging{ false };
@@ -595,4 +757,34 @@ private:
 	DropOnViewportCallback m_onDropOnViewport;
 	DropOnFolderCallback m_onDropOnFolder;
 	DropOnEntityCallback m_onDropOnEntity;
+
+	// Build Game state
+	BuildGameCallback m_onBuildGame;
+	std::shared_ptr<EditorWidget> m_buildProgressWidget;
+
+public:
+	// Build thread state – public so the build lambda (registered from main.cpp) can
+	// push progress/output from the worker thread via the mutex-protected fields.
+	std::thread m_buildThread;
+	std::atomic<bool> m_buildRunning{ false };
+	std::mutex m_buildMutex;
+	std::vector<std::string> m_buildPendingLines;      // lines queued by build thread
+	std::string m_buildPendingStatus;                   // status text queued by build thread
+	int m_buildPendingStep{ 0 };
+	int m_buildPendingTotalSteps{ 0 };
+	bool m_buildPendingStepDirty{ false };
+	bool m_buildPendingFinished{ false };
+	bool m_buildPendingSuccess{ false };
+	std::string m_buildPendingErrorMsg;
+
+private:
+	std::vector<std::string> m_buildOutputLines;        // full log (main-thread only)
+
+	// CMake state
+	bool m_cmakeAvailable{ false };
+	std::string m_cmakePath;
+
+	// Build toolchain state
+	bool m_toolchainAvailable{ false };
+	ToolchainInfo m_toolchainInfo;
 };

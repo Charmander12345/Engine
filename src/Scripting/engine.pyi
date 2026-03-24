@@ -1,6 +1,6 @@
 """Engine scripting API type stubs for IntelliSense."""
 
-from typing import Callable, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Top-level constants
@@ -1180,6 +1180,60 @@ class math:
     @staticmethod
     def clamp(value: float, min_val: float, max_val: float) -> float:
         """Clamp value between min and max."""
+        ...
+
+# ---------------------------------------------------------------------------
+# engine.editor – Editor Plugin API (Phase 11.3)
+# ---------------------------------------------------------------------------
+
+class editor:
+    """Editor plugin scripting API. Access via ``import engine.editor``."""
+
+    TOAST_INFO: int
+    TOAST_SUCCESS: int
+    TOAST_WARNING: int
+    TOAST_ERROR: int
+
+    @staticmethod
+    def show_toast(message: str, level: int = 0) -> None:
+        """Show a toast notification. Levels: 0=Info, 1=Success, 2=Warning, 3=Error."""
+        ...
+
+    @staticmethod
+    def get_selected_entities() -> List[int]:
+        """Get list of currently selected entity IDs."""
+        ...
+
+    @staticmethod
+    def get_asset_list(type_filter: int = -1) -> List[Dict[str, object]]:
+        """Get asset registry entries. Each dict has 'name', 'path', 'type' keys.
+        Optional type_filter (int) to filter by asset type, -1 for all."""
+        ...
+
+    @staticmethod
+    def create_entity(name: str = "New Entity") -> int:
+        """Create a named entity with Transform component. Returns entity ID."""
+        ...
+
+    @staticmethod
+    def select_entity(entity_id: int) -> None:
+        """Select an entity by ID in the editor."""
+        ...
+
+    @staticmethod
+    def add_menu_item(menu: str, name: str, callback: Callable[[], None]) -> None:
+        """Add a custom menu item to the Settings dropdown.
+        The callback is invoked when the user clicks the item."""
+        ...
+
+    @staticmethod
+    def register_tab(name: str, on_build_ui: Callable[[], None]) -> None:
+        """Register a custom editor tab with a build-UI callback."""
+        ...
+
+    @staticmethod
+    def get_menu_items() -> List[Dict[str, str]]:
+        """Get all registered plugin menu items as list of dicts with 'menu' and 'name'."""
         ...
     @staticmethod
     def lerp(a: float, b: float, t: float) -> float:

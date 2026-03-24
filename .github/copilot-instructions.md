@@ -8,6 +8,7 @@
 - Implement new UI controls as separate classes with their own header and cpp files in the UIWidgets folder for easier reuse.
 - Keep the `PROJECT_OVERVIEW.md` document in the repository root up to date whenever changes are made to the engine project. All modifications should be reflected in this overview document.
 - Keep the `ENGINE_STATUS.md` document in the repository root up to date whenever changes are made to the engine project, just like `PROJECT_OVERVIEW.md`. All modifications should be reflected in this status document.
+- A major rework is planned: the editor will be fundamentally separated from the engine. The editor will connect to the engine core via an API and can be disabled during the build for the final game using a preprocessor definition (e.g., `#if ENGINE_EDITOR`). The build game functionality (Phase 10) will be re-implemented after this rework.
 
 ## UI Controls
 - Remember that the ViewportOverlay toolbar previously had Select/Move/Rotate/Scale buttons (tool mode buttons) in a left StackPanel, which were removed by user request but should be considered for potential re-addition later.

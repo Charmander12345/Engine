@@ -142,6 +142,14 @@ public:
     /// Get normalised progress [0,1] of the current camera path.
     virtual float getCameraPathProgress() const { return 0.0f; }
 
+    /// Read/write the control-point list that backs the camera path (Sequencer editing).
+    virtual std::vector<CameraPathPoint> getCameraPathPoints() const { return {}; }
+    virtual void setCameraPathPoints(const std::vector<CameraPathPoint>& pts) { (void)pts; }
+    virtual float getCameraPathDuration() const { return 1.0f; }
+    virtual void setCameraPathDuration(float d) { (void)d; }
+    virtual bool getCameraPathLoop() const { return false; }
+    virtual void setCameraPathLoop(bool l) { (void)l; }
+
     // Active entity camera (used at runtime / PIE)
     virtual void setActiveCameraEntity(unsigned int entity) = 0;
     virtual unsigned int getActiveCameraEntity() const = 0;
@@ -220,6 +228,10 @@ public:
     virtual void toggleBoundsDebug() {}
     virtual bool isHeightFieldDebugEnabled() const { return false; }
     virtual void setHeightFieldDebugEnabled(bool /*enabled*/) {}
+    virtual void setCollidersVisible(bool visible) { m_collidersVisible = visible; }
+    virtual bool isCollidersVisible() const { return m_collidersVisible; }
+    virtual void setBonesVisible(bool visible) { m_bonesVisible = visible; }
+    virtual bool isBonesVisible() const { return m_bonesVisible; }
 
     // --- Entity picking ---
     virtual unsigned int pickEntityAt(int /*x*/, int /*y*/) { return 0; }
@@ -273,6 +285,27 @@ public:
     virtual const std::string& getActiveTabId() const { static const std::string s; return s; }
     virtual void cleanupWidgetEditorPreview(const std::string& /*tabId*/) {}
 
+    // --- Skeletal animation queries (for Animation Editor) ---
+    struct AnimationClipInfo
+    {
+        std::string name;
+        float duration{ 0.0f };
+        float ticksPerSecond{ 25.0f };
+        int channelCount{ 0 };
+    };
+    virtual bool  isEntitySkinned(unsigned int /*entity*/) const { return false; }
+    virtual int   getEntityAnimationClipCount(unsigned int /*entity*/) const { return 0; }
+    virtual AnimationClipInfo getEntityAnimationClipInfo(unsigned int /*entity*/, int /*clipIndex*/) const { return {}; }
+    virtual int   getEntityAnimatorCurrentClip(unsigned int /*entity*/) const { return -1; }
+    virtual float getEntityAnimatorCurrentTime(unsigned int /*entity*/) const { return 0.0f; }
+    virtual bool  isEntityAnimatorPlaying(unsigned int /*entity*/) const { return false; }
+    virtual void  playEntityAnimation(unsigned int /*entity*/, int /*clipIndex*/, bool /*loop*/ = true) {}
+    virtual void  stopEntityAnimation(unsigned int /*entity*/) {}
+    virtual void  setEntityAnimationSpeed(unsigned int /*entity*/, float /*speed*/) {}
+    virtual int   getEntityBoneCount(unsigned int /*entity*/) const { return 0; }
+    virtual std::string getEntityBoneName(unsigned int /*entity*/, int /*boneIndex*/) const { return {}; }
+    virtual int   getEntityBoneParent(unsigned int /*entity*/, int /*boneIndex*/) const { return -1; }
+
     // --- Popup windows ---
     virtual PopupWindow* openPopupWindow(const std::string& /*id*/, const std::string& /*title*/, int /*width*/, int /*height*/) { return nullptr; }
     virtual void closePopupWindow(const std::string& /*id*/) {}
@@ -303,6 +336,8 @@ public:
     virtual void queueText(const std::string& /*text*/, const Vec2& /*screenPos*/, float /*scale*/, const Vec4& /*color*/) {}
     virtual std::shared_ptr<Widget> createWidgetFromAsset(const std::shared_ptr<AssetData>& /*asset*/) { return nullptr; }
     virtual unsigned int preloadUITexture(const std::string& /*path*/) { return 0; }
+    /// Request a full shader hot-reload (invalidate caches, recompile all shaders).
+    virtual void requestShaderReload() {}
     /// Generate an FBO-rendered thumbnail for a 3D model or material asset.
     /// @param assetPath  Content-relative asset path
     /// @param assetType  int-cast of AssetType (Model3D=3, Material=1)
@@ -327,6 +362,169 @@ public:
     virtual uint32_t getLastHiddenCount() const { return 0; }
     virtual uint32_t getLastTotalCount() const { return 0; }
 
+    /// Describes a single render pass for the Render-Pass-Debugger tab.
+    struct RenderPassInfo
+    {
+        std::string name;          // e.g. "Shadow Map", "Geometry", "Bloom"
+        std::string category;      // e.g. "Shadow", "Geometry", "Post-Process", "Overlay"
+        bool        enabled{true}; // whether the pass is currently active
+        int         fboWidth{0};
+        int         fboHeight{0};
+        std::string fboFormat;     // e.g. "RGBA16F", "Depth24", "R8"
+        std::string details;       // extra info (draw counts, cascade count, etc.)
+    };
+    /// Returns info about all render passes in the current pipeline.
+    virtual std::vector<RenderPassInfo> getRenderPassInfo() const { return {}; }
+
+    // --- Multi-Viewport Layout (Phase 11.1) ---
+    enum class ViewportLayout { Single, TwoHorizontal, TwoVertical, Quad };
+    enum class SubViewportPreset { Perspective, Top, Front, Right };
+
+    struct SubViewportCamera
+    {
+        Vec3  position{ 0.0f, 5.0f, 10.0f };
+        float yawDeg{ -90.0f };
+        float pitchDeg{ -15.0f };
+        SubViewportPreset preset{ SubViewportPreset::Perspective };
+    };
+
+    virtual void setViewportLayout(ViewportLayout layout) { m_viewportLayout = layout; }
+    virtual ViewportLayout getViewportLayout() const { return m_viewportLayout; }
+    virtual int  getActiveSubViewport() const { return m_activeSubViewport; }
+    virtual void setActiveSubViewport(int index) { m_activeSubViewport = index; }
+    virtual int  getSubViewportCount() const
+    {
+        switch (m_viewportLayout)
+        {
+        case ViewportLayout::TwoHorizontal:
+        case ViewportLayout::TwoVertical:   return 2;
+        case ViewportLayout::Quad:           return 4;
+        default:                             return 1;
+        }
+    }
+    virtual SubViewportCamera getSubViewportCamera(int /*index*/) const { return {}; }
+    virtual void setSubViewportCamera(int /*index*/, const SubViewportCamera& /*cam*/) {}
+    /// Returns which sub-viewport (0-based) contains the given screen position, or -1.
+    virtual int subViewportHitTest(int /*screenX*/, int /*screenY*/) const { return 0; }
+
+    static const char* viewportLayoutToString(ViewportLayout l)
+    {
+        switch (l)
+        {
+        case ViewportLayout::TwoHorizontal: return "Two Horizontal";
+        case ViewportLayout::TwoVertical:   return "Two Vertical";
+        case ViewportLayout::Quad:          return "Quad";
+        default:                            return "Single";
+        }
+    }
+
+    static const char* subViewportPresetToString(SubViewportPreset p)
+    {
+        switch (p)
+        {
+        case SubViewportPreset::Top:   return "Top";
+        case SubViewportPreset::Front: return "Front";
+        case SubViewportPreset::Right: return "Right";
+        default:                       return "Perspective";
+        }
+    }
+
+    // --- Level-Streaming (Phase 11.4) ---
+    struct SubLevelEntry
+    {
+        std::string name;              // display name
+        std::string levelPath;         // relative asset path
+        bool        loaded{ false };
+        bool        visible{ true };
+        Vec4        color{ 0.2f, 0.6f, 1.0f, 1.0f }; // wireframe tint
+    };
+
+    struct StreamingVolume
+    {
+        Vec3 center{ 0.0f, 0.0f, 0.0f };
+        Vec3 halfExtents{ 10.0f, 10.0f, 10.0f };
+        int  subLevelIndex{ -1 };      // index into m_subLevels
+    };
+
+    const std::vector<SubLevelEntry>& getSubLevels() const { return m_subLevels; }
+    const std::vector<StreamingVolume>& getStreamingVolumes() const { return m_streamingVolumes; }
+
+    void addSubLevel(const std::string& name, const std::string& path)
+    {
+        SubLevelEntry e;
+        e.name      = name;
+        e.levelPath = path;
+        // Assign a unique colour per sub-level (cycle through a small palette)
+        static const Vec4 palette[] = {
+            { 0.2f, 0.6f, 1.0f, 1.0f },  // blue
+            { 0.2f, 0.9f, 0.3f, 1.0f },  // green
+            { 1.0f, 0.6f, 0.1f, 1.0f },  // orange
+            { 0.9f, 0.2f, 0.4f, 1.0f },  // red
+            { 0.7f, 0.3f, 1.0f, 1.0f },  // purple
+            { 1.0f, 0.9f, 0.2f, 1.0f },  // yellow
+        };
+        e.color = palette[m_subLevels.size() % 6];
+        m_subLevels.push_back(e);
+    }
+
+    void removeSubLevel(int index)
+    {
+        if (index < 0 || index >= static_cast<int>(m_subLevels.size())) return;
+        // Remove associated streaming volumes
+        for (auto it = m_streamingVolumes.begin(); it != m_streamingVolumes.end();)
+        {
+            if (it->subLevelIndex == index) it = m_streamingVolumes.erase(it);
+            else
+            {
+                if (it->subLevelIndex > index) --it->subLevelIndex;
+                ++it;
+            }
+        }
+        m_subLevels.erase(m_subLevels.begin() + index);
+    }
+
+    void setSubLevelLoaded(int index, bool loaded)
+    {
+        if (index >= 0 && index < static_cast<int>(m_subLevels.size()))
+            m_subLevels[index].loaded = loaded;
+    }
+
+    void setSubLevelVisible(int index, bool visible)
+    {
+        if (index >= 0 && index < static_cast<int>(m_subLevels.size()))
+            m_subLevels[index].visible = visible;
+    }
+
+    void addStreamingVolume(const Vec3& center, const Vec3& halfExtents, int subLevelIndex)
+    {
+        m_streamingVolumes.push_back({ center, halfExtents, subLevelIndex });
+    }
+
+    void removeStreamingVolume(int index)
+    {
+        if (index >= 0 && index < static_cast<int>(m_streamingVolumes.size()))
+            m_streamingVolumes.erase(m_streamingVolumes.begin() + index);
+    }
+
+    /// Camera-based auto-load/unload: call once per frame with the active camera position.
+    void updateLevelStreaming(const Vec3& cameraPos)
+    {
+        for (auto& vol : m_streamingVolumes)
+        {
+            if (vol.subLevelIndex < 0 || vol.subLevelIndex >= static_cast<int>(m_subLevels.size()))
+                continue;
+
+            bool inside =
+                std::abs(cameraPos.x - vol.center.x) <= vol.halfExtents.x &&
+                std::abs(cameraPos.y - vol.center.y) <= vol.halfExtents.y &&
+                std::abs(cameraPos.z - vol.center.z) <= vol.halfExtents.z;
+
+            m_subLevels[vol.subLevelIndex].loaded = inside;
+        }
+    }
+
+    bool m_streamingVolumesVisible{ true };
+
 protected:
     // Snap & Grid state
     bool  m_snapEnabled{ false };
@@ -334,4 +532,14 @@ protected:
     float m_gridSize{ 1.0f };
     float m_rotationSnapDeg{ 15.0f };
     float m_scaleSnapStep{ 0.1f };
+    bool  m_collidersVisible{ false };
+    bool  m_bonesVisible{ false };
+
+    // Multi-Viewport state
+    ViewportLayout m_viewportLayout{ ViewportLayout::Single };
+    int m_activeSubViewport{ 0 };
+
+    // Level-Streaming state (Phase 11.4)
+    std::vector<SubLevelEntry>   m_subLevels;
+    std::vector<StreamingVolume> m_streamingVolumes;
 };
