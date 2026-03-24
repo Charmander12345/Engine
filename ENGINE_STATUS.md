@@ -5,6 +5,22 @@
 
 ---
 
+## Letzte Änderung (Build-Output-Scroll-Fix & Build-Abbruch-Button)
+
+- ✅ `Build-Output-Scroll-Fix`: Das Build-Output scrollt jetzt korrekt wie der Console-Tab. **UIManager.cpp:** `showBuildProgress()` erstellt das scrollbare Output-Panel (`BP.OutputScroll`) ohne vordefinierten Text-Child – Zeilen werden dynamisch als individuelle `WidgetElement`-Rows hinzugefügt (gleiche Architektur wie `Console.LogArea`). `pollBuildThread()` baut bei neuen Zeilen alle `BP.Row.*`-Children im ScrollPanel neu auf, jede Zeile als eigenständiges Text-Element mit fester Höhe (`fontSizeSmall`, 16px Zeilenhöhe). Auto-Scroll via `scrollOffset = 999999.0f` am Ende jedes Updates.
+
+- ✅ `Build-Abbruch-Button`: Neuer „Abort Build"-Button im Build-Popup ermöglicht den Abbruch eines laufenden Builds. **UIManager.h:** Neues `std::atomic<bool> m_buildCancelRequested` im Build-Thread-State. **UIManager.cpp:** `showBuildProgress()` erstellt einen roten „Abort Build"-Button (`BP.AbortBtn`) zwischen Output-Panel und Close-Button. `closeBuildProgress()` blendet den Abort-Button aus und den Close-Button ein. **main.cpp:** `checkCancelled()`-Lambda prüft `m_buildCancelRequested` und setzt `ok=false` + Fehlermeldung. Wird zwischen allen Build-Steps aufgerufen. `runCmdWithOutput()` prüft das Flag in der Lese-Schleife und terminiert den Prozess via `TerminateProcess()` bei Abbruch.
+
+## Letzte Änderung (Build-System-Verbesserungen: Eigenes OS-Fenster, Konsole versteckt, Python-Deploy, Runtime-Splash-Skip)
+
+- ✅ `Build-Output als eigenes OS-Fenster`: Das Build-Output wird jetzt in einem separaten OS-Fenster (PopupWindow) angezeigt statt als Overlay im Hauptfenster. **UIManager.cpp:** `showBuildProgress()` erstellt via `m_renderer->openPopupWindow("BuildOutput", ...)` ein echtes SDL-Fenster mit eigenem UIManager und Render-Context. Widget wird auf `m_buildPopup->uiManager()` registriert statt auf dem Haupt-UIManager. `dismissBuildProgress()` schließt das Popup-Fenster via `m_renderer->closePopupWindow("BuildOutput")`, setzt `m_buildPopup = nullptr` und gibt das Widget frei. `pollBuildThread()` markiert das Popup-UIManager als dirty für korrekte Neuzeichnung. Output-Panel nutzt `fillY = true` statt fester `maxSize` – scrollt jetzt korrekt mit dem gesamten verfügbaren Platz.
+
+- ✅ `Konsolen-Fenster versteckt`: Während des Build-Vorgangs wird kein sichtbares Konsolenfenster mehr geöffnet. **main.cpp:** `runCmdWithOutput()` nutzt auf Windows jetzt `CreateProcess()` mit `CREATE_NO_WINDOW`-Flag + `STARTF_USESTDHANDLES` + Pipe-Redirection statt `_popen()`. stdout+stderr werden über anonyme Pipes zeilenweise gelesen. Auf Linux/Mac bleibt `popen()` erhalten.
+
+- ✅ `Python-Runtime im Build`: Die Python-DLL und -ZIP-Datei werden automatisch in das Build-Ausgabeverzeichnis kopiert. **main.cpp:** Nach dem DLL-Deploy (Step 4) wird in mehreren Verzeichnissen (Build-Dir, SDL_GetBasePath(), Engine-Source-Dir) nach `python*.dll` und `python*.zip` gesucht und ins Output-Verzeichnis kopiert.
+
+- ✅ `Runtime-Splash-Skip`: Das gebaute Spiel überspringt den Splash-Screen und lädt direkt das Start-Level im Play-Modus. **main.cpp:** `useSplash` wird nach der Runtime-Mode-Erkennung auf `false` gesetzt wenn `isRuntimeMode == true`. Die Runtime nutzt weiterhin `setPIEActive(true)` für vollständige Script- und Physics-Ausführung. Beendigung via Alt+F4 (Standard-SDL-Fenster-Close).
+
 ## Letzte Änderung (Build-Fenster als persistentes Popup)
 
 - ✅ `Build-Fenster Popup`: Das Build-Fortschritts-Fenster ist jetzt ein persistentes Popup, das nach dem Build-Abschluss nicht automatisch verschwindet. Nach Abschluss (Erfolg oder Fehler) werden Titel, Status und Ergebnis-Text aktualisiert, Fortschrittsbalken und Zähler ausgeblendet, und ein „Close"-Button eingeblendet, über den das Popup manuell geschlossen werden kann. **UIManager.h:** Neue Methode `dismissBuildProgress()` zum manuellen Schließen des Build-Popups. **UIManager.cpp:** `closeBuildProgress()` entfernt das Widget nicht mehr, sondern aktualisiert die UI: Titel wird zu „Build Completed"/„Build Failed", Ergebnis-Text (`BP.Result`) wird farbig angezeigt (grün/rot), Close-Button (`BP.CloseBtn`) wird sichtbar. `dismissBuildProgress()` ruft `unregisterWidget("BuildProgress")` auf. `showBuildProgress()` erstellt zusätzlich einen zunächst versteckten Ergebnis-Text und Close-Button.

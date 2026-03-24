@@ -5,6 +5,18 @@
 
 ---
 
+## Aktuelle Änderung (Build-Output-Scroll-Fix & Build-Abbruch-Button)
+
+- `Build-Output-Scroll-Fix`: Build-Output scrollt jetzt korrekt (gleiche Architektur wie Console-Tab). **UIManager.cpp:** Output-Zeilen werden als individuelle `WidgetElement`-Rows im scrollbaren Panel hinzugefügt statt als einzelner großer Text-Block. `pollBuildThread()` baut Zeilen als `BP.Row.*`-Children dynamisch auf. Auto-Scroll ans Ende.
+- `Build-Abbruch-Button`: Roter „Abort Build"-Button (`BP.AbortBtn`) im Build-Popup. **UIManager.h:** `m_buildCancelRequested` (atomic). **main.cpp:** `checkCancelled()`-Lambda zwischen Steps, `TerminateProcess()` bei laufendem Prozess. Button wird nach Build-Abschluss ausgeblendet.
+
+## Aktuelle Änderung (Build-System-Verbesserungen: OS-Fenster, Konsole versteckt, Python-Deploy, Runtime-Splash-Skip)
+
+- `Build-Output als eigenes OS-Fenster`: Build-Output wird in einem separaten OS-Fenster (PopupWindow mit eigenem SDL-Window + UIManager + Render-Context) angezeigt. **UIManager.cpp:** `showBuildProgress()` nutzt `m_renderer->openPopupWindow("BuildOutput", ...)`. Widget auf Popup-UIManager registriert. `dismissBuildProgress()` schließt das Popup via `closePopupWindow()`. Output-Panel nutzt `fillY = true` für korrektes Scrollen.
+- `Konsolen-Fenster versteckt`: Build-Prozesse erzeugen kein sichtbares Konsolenfenster mehr. **main.cpp:** `runCmdWithOutput()` nutzt `CreateProcess()` + `CREATE_NO_WINDOW` + Pipe-Redirection statt `_popen()` auf Windows.
+- `Python-Runtime im Build`: Python-DLL und -ZIP werden automatisch ins Build-Verzeichnis kopiert. **main.cpp:** Deploy-Step sucht in Build-Dir, SDL_GetBasePath() und Engine-Source-Dir nach `python*.dll`/`python*.zip`.
+- `Runtime-Splash-Skip`: Gebautes Spiel überspringt Splash-Screen, lädt Start-Level direkt im Play-Modus (PIE). **main.cpp:** `useSplash = false` bei `isRuntimeMode`. Beendigung via Alt+F4.
+
 ## Aktuelle Änderung (Build-Fenster als persistentes Popup)
 
 - `Build-Fenster Popup`: Das Build-Fortschritts-Fenster verschwindet nicht mehr automatisch nach Build-Abschluss. Stattdessen wird die UI aktualisiert (Titel → „Build Completed"/„Build Failed", farbiger Ergebnis-Text, Close-Button sichtbar) und der Benutzer kann das Popup manuell schließen. **UIManager.h:** Neue Methode `dismissBuildProgress()`. **UIManager.cpp:** `closeBuildProgress()` blendet Fortschrittsbalken/Zähler aus und zeigt Ergebnis + Close-Button. `dismissBuildProgress()` entfernt das Widget. `showBuildProgress()` erstellt versteckten Ergebnis-Text (`BP.Result`) und Close-Button (`BP.CloseBtn`).

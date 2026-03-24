@@ -761,12 +761,14 @@ private:
 	// Build Game state
 	BuildGameCallback m_onBuildGame;
 	std::shared_ptr<EditorWidget> m_buildProgressWidget;
+	PopupWindow* m_buildPopup{ nullptr };  // separate OS window for build output
 
 public:
 	// Build thread state – public so the build lambda (registered from main.cpp) can
 	// push progress/output from the worker thread via the mutex-protected fields.
 	std::thread m_buildThread;
 	std::atomic<bool> m_buildRunning{ false };
+	std::atomic<bool> m_buildCancelRequested{ false };
 	std::mutex m_buildMutex;
 	std::vector<std::string> m_buildPendingLines;      // lines queued by build thread
 	std::string m_buildPendingStatus;                   // status text queued by build thread

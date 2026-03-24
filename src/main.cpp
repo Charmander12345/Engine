@@ -79,11 +79,8 @@ int main()
     }
 
     // Determine startup mode ("fast" = toast progress in main window, "normal" = splash screen)
-    const bool useSplash = [&]() {
-        if (auto v = diagnostics.getState("StartupMode"))
-            return *v == "normal";
-        return true; // default to normal (splash)
-    }();
+    // Moved after runtime mode detection below; declared here for scope.
+    bool useSplash = true;
 
     // Determine renderer backend from config (default: OpenGL)
     const RendererBackend activeBackend = [&]() {
@@ -187,6 +184,12 @@ int main()
         if (rtBuildProfile == "Shipping")
             Logger::Instance().setSuppressStdout(true);
     }
+
+    // Determine startup mode now that isRuntimeMode is known
+    if (isRuntimeMode)
+        useSplash = false; // Runtime mode skips splash entirely
+    else if (auto v = diagnostics.getState("StartupMode"))
+        useSplash = (*v == "normal");
 
     // Check for a persisted default project
 #if ENGINE_EDITOR
@@ -2333,22 +2336,109 @@ int main()
                         }
                     };
 
+                    // Check if build was cancelled – sets ok=false and returns true
+                    auto checkCancelled = [&]() -> bool
+                    {
+                        if (uiPtr->m_buildCancelRequested.load())
+                        {
+                            ok = false;
+                            errorMsg = "Build cancelled by user.";
+                            uiPtr->appendBuildOutput("[INFO] Build cancelled.");
+                            return true;
+                        }
+                        return false;
+                    };
+
                     // Run a command, capture stdout+stderr line-by-line, return exit code
                     auto runCmdWithOutput = [&](const std::string& cmd) -> int
                     {
-                        // Redirect stderr to stdout so we capture everything.
-                        // On Windows _popen() uses cmd /c – wrap the whole
-                        // command in outer quotes so nested quoted paths work.
 #if defined(_WIN32)
-                        const std::string fullCmd = "\"" + cmd + " 2>&1\"";
+                        // Use CreateProcess with CREATE_NO_WINDOW to hide the console.
+                        // Redirect stdout+stderr through a pipe.
+                        SECURITY_ATTRIBUTES sa{};
+                        sa.nLength = sizeof(sa);
+                        sa.bInheritHandle = TRUE;
+                        sa.lpSecurityDescriptor = nullptr;
+
+                        HANDLE hReadPipe = nullptr;
+                        HANDLE hWritePipe = nullptr;
+                        if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0))
+                        {
+                            uiPtr->appendBuildOutput("[ERROR] Failed to create pipe.");
+                            return -1;
+                        }
+                        // Ensure the read handle is NOT inherited
+                        SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
+
+                        STARTUPINFOA si{};
+                        si.cb = sizeof(si);
+                        si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+                        si.wShowWindow = SW_HIDE;
+                        si.hStdOutput = hWritePipe;
+                        si.hStdError = hWritePipe;
+
+                        PROCESS_INFORMATION pi{};
+                        // cmd /c wraps the command so redirections work
+                        std::string fullCmd = "cmd /c \"" + cmd + " 2>&1\"";
+                        BOOL created = CreateProcessA(
+                            nullptr, fullCmd.data(),
+                            nullptr, nullptr, TRUE,
+                            CREATE_NO_WINDOW, nullptr, nullptr,
+                            &si, &pi);
+                        // Close our copy of the write end so ReadFile will eventually return 0
+                        CloseHandle(hWritePipe);
+
+                        if (!created)
+                        {
+                            CloseHandle(hReadPipe);
+                            uiPtr->appendBuildOutput("[ERROR] Failed to start process (CreateProcess).");
+                            return -1;
+                        }
+
+                        // Read output line by line
+                        {
+                            char buffer[512];
+                            DWORD bytesRead = 0;
+                            std::string lineBuffer;
+                            while (ReadFile(hReadPipe, buffer, sizeof(buffer) - 1, &bytesRead, nullptr) && bytesRead > 0)
+                            {
+                                // Check for cancel request
+                                if (uiPtr->m_buildCancelRequested.load())
+                                {
+                                    TerminateProcess(pi.hProcess, 1);
+                                    break;
+                                }
+                                buffer[bytesRead] = '\0';
+                                lineBuffer += buffer;
+                                // Split into lines
+                                size_t pos;
+                                while ((pos = lineBuffer.find('\n')) != std::string::npos)
+                                {
+                                    std::string line = lineBuffer.substr(0, pos);
+                                    while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
+                                        line.pop_back();
+                                    if (!line.empty())
+                                        uiPtr->appendBuildOutput(line);
+                                    lineBuffer.erase(0, pos + 1);
+                                }
+                            }
+                            // Flush remaining
+                            while (!lineBuffer.empty() && (lineBuffer.back() == '\r' || lineBuffer.back() == '\n'))
+                                lineBuffer.pop_back();
+                            if (!lineBuffer.empty())
+                                uiPtr->appendBuildOutput(lineBuffer);
+                        }
+                        CloseHandle(hReadPipe);
+
+                        WaitForSingleObject(pi.hProcess, INFINITE);
+                        DWORD exitCode = 0;
+                        GetExitCodeProcess(pi.hProcess, &exitCode);
+                        CloseHandle(pi.hProcess);
+                        CloseHandle(pi.hThread);
+                        return static_cast<int>(exitCode);
 #else
                         const std::string fullCmd = cmd + " 2>&1";
-#endif
-#if defined(_WIN32)
-                        FILE* pipe = _popen(fullCmd.c_str(), "r");
-#else
                         FILE* pipe = popen(fullCmd.c_str(), "r");
-#endif
                         if (!pipe)
                         {
                             uiPtr->appendBuildOutput("[ERROR] Failed to start process.");
@@ -2359,19 +2449,15 @@ int main()
                         while (fgets(buffer, sizeof(buffer), pipe))
                         {
                             std::string line(buffer);
-                            // Strip trailing newline
                             while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
                                 line.pop_back();
                             if (!line.empty())
                                 uiPtr->appendBuildOutput(line);
                         }
 
-#if defined(_WIN32)
-                        int ret = _pclose(pipe);
-#else
                         int ret = pclose(pipe);
-#endif
                         return ret;
+#endif
                     };
 
                   try
@@ -2391,7 +2477,7 @@ int main()
                     const std::filesystem::path buildDir = std::filesystem::path(config.outputDir) / "_build";
 
                     // Step 2: CMake configure
-                    if (ok)
+                    if (ok && !checkCancelled())
                     {
                         advanceStep("Configuring CMake build...");
 
@@ -2442,7 +2528,7 @@ int main()
                     }
 
                     // Step 3: CMake build
-                    if (ok)
+                    if (ok && !checkCancelled())
                     {
                         advanceStep("Compiling game runtime...");
 
@@ -2462,7 +2548,7 @@ int main()
                     }
 
                     // Step 4: Deploy exe + DLLs
-                    if (ok)
+                    if (ok && !checkCancelled())
                     {
                         advanceStep("Deploying runtime...");
 
@@ -2496,6 +2582,41 @@ int main()
                                     }
                                 }
                             }
+
+                            // Copy Python runtime (DLL + zip) from engine directory
+                            if (ok && !engineSourceDir.empty())
+                            {
+                                // Check engine build dir first, then engine base dir
+                                std::vector<std::filesystem::path> searchDirs;
+                                searchDirs.push_back(builtDir);
+                                const char* bp = SDL_GetBasePath();
+                                if (bp) searchDirs.push_back(std::filesystem::path(bp));
+                                searchDirs.push_back(std::filesystem::path(engineSourceDir));
+
+                                for (const auto& searchDir : searchDirs)
+                                {
+                                    if (!std::filesystem::exists(searchDir)) continue;
+                                    for (const auto& entry : std::filesystem::directory_iterator(searchDir))
+                                    {
+                                        if (!entry.is_regular_file()) continue;
+                                        const auto fname = entry.path().filename().string();
+                                        const auto ext = entry.path().extension().string();
+                                        // Match python3*.dll and python3*.zip
+                                        if ((ext == ".dll" || ext == ".zip") && fname.size() >= 8 && fname.substr(0, 6) == "python")
+                                        {
+                                            const auto dst = std::filesystem::path(config.outputDir) / entry.path().filename();
+                                            if (!std::filesystem::exists(dst))
+                                            {
+                                                std::error_code copyEc;
+                                                std::filesystem::copy_file(entry.path(), dst,
+                                                    std::filesystem::copy_options::overwrite_existing, copyEc);
+                                                if (!copyEc)
+                                                    uiPtr->appendBuildOutput("  Copied Python file: " + fname);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                         else
                         {
@@ -2505,7 +2626,7 @@ int main()
                     }
 
                     // Step 5: Copy Content + shaders + asset registry
-                    if (ok)
+                    if (ok && !checkCancelled())
                     {
                         advanceStep("Copying game content...");
 

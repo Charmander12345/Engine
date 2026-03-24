@@ -21582,6 +21582,7 @@ void UIManager::openBuildGameDialog()
 void UIManager::showBuildProgress()
 {
     m_buildOutputLines.clear();
+    m_buildCancelRequested.store(false);
     {
         std::lock_guard<std::mutex> lock(m_buildMutex);
         m_buildPendingLines.clear();
@@ -21589,33 +21590,34 @@ void UIManager::showBuildProgress()
         m_buildPendingFinished = false;
     }
 
-    if (!m_buildProgressWidget)
+    // Open a separate OS window for build output
+    if (m_renderer)
     {
-        m_buildProgressWidget = std::make_shared<EditorWidget>();
-        m_buildProgressWidget->setName("BuildProgress");
-        m_buildProgressWidget->setAnchor(WidgetAnchor::TopLeft);
-        m_buildProgressWidget->setFillX(true);
-        m_buildProgressWidget->setFillY(true);
-        m_buildProgressWidget->setZOrder(10002);
+        m_buildPopup = m_renderer->openPopupWindow("BuildOutput", "Build Output", 820, 520);
+    }
+    if (!m_buildPopup)
+    {
+        // Fallback: just log a warning and bail
+        showToastMessage("Failed to open build output window.", 4.0f, NotificationLevel::Error);
+        return;
     }
 
-    WidgetElement overlay{};
-    overlay.id = "BP.Overlay";
-    overlay.type = WidgetElementType::Panel;
-    overlay.from = Vec2{ 0.0f, 0.0f };
-    overlay.to = Vec2{ 1.0f, 1.0f };
-    overlay.style.color = EditorTheme::Get().modalOverlay;
-    overlay.hitTestMode = HitTestMode::Enabled;
-    overlay.runtimeOnly = true;
+    m_buildProgressWidget = std::make_shared<EditorWidget>();
+    m_buildProgressWidget->setName("BuildProgress");
+    m_buildProgressWidget->setAnchor(WidgetAnchor::TopLeft);
+    m_buildProgressWidget->setFillX(true);
+    m_buildProgressWidget->setFillY(true);
+    m_buildProgressWidget->setZOrder(100);
 
+    // Full-window background panel as StackPanel
     WidgetElement panel{};
     panel.id = "BP.Panel";
     panel.type = WidgetElementType::StackPanel;
-    panel.from = Vec2{ 0.20f, 0.15f };
-    panel.to = Vec2{ 0.80f, 0.85f };
-    panel.padding = Vec2{ 20.0f, 14.0f };
+    panel.from = Vec2{ 0.0f, 0.0f };
+    panel.to = Vec2{ 1.0f, 1.0f };
+    panel.padding = Vec2{ 18.0f, 12.0f };
     panel.orientation = StackOrientation::Vertical;
-    panel.style.color = EditorTheme::Get().modalBackground;
+    panel.style.color = EditorTheme::Get().windowBackground;
     panel.runtimeOnly = true;
 
     WidgetElement title{};
@@ -21694,44 +21696,40 @@ void UIManager::showBuildProgress()
     panel.children.push_back(std::move(counter));
     panel.children.push_back(std::move(progress));
 
-    // Scrollable build output log
+    // Scrollable build output log (children added dynamically per-line by pollBuildThread)
     WidgetElement outputPanel{};
     outputPanel.id = "BP.OutputScroll";
     outputPanel.type = WidgetElementType::StackPanel;
     outputPanel.orientation = StackOrientation::Vertical;
     outputPanel.fillX = true;
-    outputPanel.minSize = Vec2{ 0.0f, 160.0f };
-    outputPanel.maxSize = Vec2{ 0.0f, 220.0f };
+    outputPanel.fillY = true;
     outputPanel.scrollable = true;
     outputPanel.style.color = Vec4{ 0.04f, 0.04f, 0.04f, 0.95f };
     outputPanel.style.borderRadius = 4.0f;
     outputPanel.padding = Vec2{ 6.0f, 4.0f };
     outputPanel.runtimeOnly = true;
 
-    WidgetElement outputText{};
-    outputText.id = "BP.OutputText";
-    outputText.type = WidgetElementType::Text;
-    outputText.text = "";
-    outputText.font = EditorTheme::Get().fontDefault;
-    outputText.fontSize = EditorTheme::Get().fontSizeSmall;
-    outputText.wrapText = true;
-    outputText.fillX = true;
-    outputText.sizeToContent = true;
-    outputText.style.textColor = Vec4{ 0.75f, 0.80f, 0.75f, 1.0f };
-    outputText.runtimeOnly = true;
-
-    outputPanel.children.push_back(std::move(outputText));
     panel.children.push_back(std::move(outputPanel));
     panel.children.push_back(std::move(resultText));
+
+    // Abort Build button (visible during build, hidden after completion)
+    auto abortBtn = EditorUIBuilder::makeButton("BP.AbortBtn", "Abort Build", [this]() {
+        m_buildCancelRequested.store(true);
+        appendBuildOutput("[INFO] Build cancellation requested...");
+    });
+    abortBtn.style.color = Vec4{ 0.7f, 0.15f, 0.15f, 1.0f };
+    abortBtn.style.hoverColor = Vec4{ 0.85f, 0.2f, 0.2f, 1.0f };
+    abortBtn.style.textColor = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+    panel.children.push_back(std::move(abortBtn));
+
     panel.children.push_back(std::move(closeBtn));
 
     std::vector<WidgetElement> elems;
-    elems.push_back(std::move(overlay));
     elems.push_back(std::move(panel));
     m_buildProgressWidget->setElements(std::move(elems));
     m_buildProgressWidget->markLayoutDirty();
 
-    registerWidget("BuildProgress", m_buildProgressWidget);
+    m_buildPopup->uiManager().registerWidget("BuildProgress", m_buildProgressWidget);
 }
 
 void UIManager::updateBuildProgress(const std::string& status, int step, int totalSteps)
@@ -21796,9 +21794,12 @@ void UIManager::closeBuildProgress(bool success, const std::string& message)
             : Vec4{ 0.95f, 0.3f, 0.3f, 1.0f };
     }
 
-    // Show the close button
+    // Show the close button, hide the abort button
     WidgetElement* closeBtn = FindElementById(elems, "BP.CloseBtn");
     if (closeBtn) closeBtn->isCollapsed = false;
+
+    WidgetElement* abortBtn = FindElementById(elems, "BP.AbortBtn");
+    if (abortBtn) abortBtn->isCollapsed = true;
 
     m_buildProgressWidget->markLayoutDirty();
     m_renderDirty = true;
@@ -21806,7 +21807,14 @@ void UIManager::closeBuildProgress(bool success, const std::string& message)
 
 void UIManager::dismissBuildProgress()
 {
-    unregisterWidget("BuildProgress");
+    if (m_buildPopup)
+    {
+        m_buildPopup->uiManager().unregisterWidget("BuildProgress");
+        if (m_renderer)
+            m_renderer->closePopupWindow("BuildOutput");
+        m_buildPopup = nullptr;
+    }
+    m_buildProgressWidget.reset();
 }
 
 void UIManager::appendBuildOutput(const std::string& line)
@@ -21860,23 +21868,33 @@ void UIManager::pollBuildThread()
             m_buildOutputLines.push_back(std::move(ln));
 
         auto& elems = m_buildProgressWidget->getElementsMutable();
-        WidgetElement* outputText = FindElementById(elems, "BP.OutputText");
-        if (outputText)
-        {
-            std::string combined;
-            for (const auto& l : m_buildOutputLines)
-            {
-                combined += l;
-                combined += '\n';
-            }
-            outputText->text = std::move(combined);
-        }
-
-        // Auto-scroll to bottom
         WidgetElement* outputScroll = FindElementById(elems, "BP.OutputScroll");
-        if (outputScroll && outputScroll->scrollable)
+        if (outputScroll)
         {
-            outputScroll->scrollOffset = 1e6f;
+            const auto& theme = EditorTheme::Get();
+            const float rowH = EditorTheme::Scaled(16.0f);
+
+            // Rebuild all rows from m_buildOutputLines
+            outputScroll->children.clear();
+            for (size_t i = 0; i < m_buildOutputLines.size(); ++i)
+            {
+                WidgetElement row{};
+                row.id        = "BP.Row." + std::to_string(i);
+                row.type      = WidgetElementType::Text;
+                row.text      = m_buildOutputLines[i];
+                row.font      = theme.fontDefault;
+                row.fontSize  = theme.fontSizeSmall;
+                row.style.textColor = Vec4{ 0.75f, 0.80f, 0.75f, 1.0f };
+                row.textAlignH = TextAlignH::Left;
+                row.textAlignV = TextAlignV::Center;
+                row.fillX     = true;
+                row.minSize   = Vec2{ 0.0f, rowH };
+                row.runtimeOnly = true;
+                outputScroll->children.push_back(std::move(row));
+            }
+
+            // Auto-scroll to bottom
+            outputScroll->scrollOffset = 999999.0f;
         }
 
         dirty = true;
@@ -21901,6 +21919,8 @@ void UIManager::pollBuildThread()
     {
         if (m_buildProgressWidget)
             m_buildProgressWidget->markLayoutDirty();
+        if (m_buildPopup && m_buildPopup->isOpen())
+            m_buildPopup->uiManager().m_renderDirty = true;
         m_renderDirty = true;
     }
 }
