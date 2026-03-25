@@ -11,10 +11,12 @@
 
 class UIManager;
 class ViewportUIManager;
+#if ENGINE_EDITOR
 class PopupWindow;
 class MeshViewerWindow;
 class MaterialEditorWindow;
 class TextureViewerWindow;
+#endif
 class Widget;
 class AssetData;
 
@@ -307,6 +309,7 @@ public:
     virtual int   getEntityBoneParent(unsigned int /*entity*/, int /*boneIndex*/) const { return -1; }
 
     // --- Popup windows ---
+#if ENGINE_EDITOR
     virtual PopupWindow* openPopupWindow(const std::string& /*id*/, const std::string& /*title*/, int /*width*/, int /*height*/) { return nullptr; }
     virtual void closePopupWindow(const std::string& /*id*/) {}
     virtual PopupWindow* getPopupWindow(const std::string& /*id*/) { return nullptr; }
@@ -326,6 +329,7 @@ public:
     virtual MaterialEditorWindow* openMaterialEditorTab(const std::string& /*assetPath*/) { return nullptr; }
     virtual void closeMaterialEditorTab(const std::string& /*assetPath*/) {}
     virtual MaterialEditorWindow* getMaterialEditor(const std::string& /*assetPath*/) { return nullptr; }
+#endif // ENGINE_EDITOR
 
     // --- Viewport & visuals ---
     virtual Vec2 getViewportSize() const { return {}; }

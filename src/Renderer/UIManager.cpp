@@ -1,4 +1,4 @@
-﻿#include "UIManager.h"
+#include "UIManager.h"
 
 #include <algorithm>
 #include <numeric>
@@ -32,16 +32,19 @@
 #include "UIWidgets/DropDownWidget.h"
 #include "UIWidgets/ColorPickerWidget.h"
 #include "EditorTheme.h"
+#include "Renderer.h"
+#include "ViewportUIManager.h"
+#include "../AssetManager/AssetTypes.h"
+#if ENGINE_EDITOR
 #include "EditorUIBuilder.h"
 #include "WidgetDetailSchema.h"
 #include "../Core/ShortcutManager.h"
 #include "../Core/AudioManager.h"
 #include "../AssetManager/AssetManager.h"
-#include "../AssetManager/AssetTypes.h"
-#include "Renderer.h"
-#include "ViewportUIManager.h"
 #include "EditorWindows/PopupWindow.h"
 #include "../Landscape/LandscapeManager.h"
+#include "../AssetManager/json.hpp"
+#endif // ENGINE_EDITOR
 
 namespace
 {
@@ -1374,6 +1377,7 @@ void UIManager::SetActiveInstance(UIManager* instance)
 UIManager::UIManager()
 {
     SetActiveInstance(this);
+#if ENGINE_EDITOR
     m_levelChangedCallbackToken = DiagnosticsManager::Instance().registerActiveLevelChangedCallback(
         [this](EngineLevel* level)
         {
@@ -1387,10 +1391,12 @@ UIManager::UIManager()
             }
             refreshWorldOutliner();
         });
+#endif // ENGINE_EDITOR
 }
 
 UIManager::~UIManager()
 {
+#if ENGINE_EDITOR
     if (m_buildThread.joinable())
     {
         m_buildThread.join();
@@ -1399,12 +1405,14 @@ UIManager::~UIManager()
     {
         DiagnosticsManager::Instance().unregisterActiveLevelChangedCallback(m_levelChangedCallbackToken);
     }
+#endif // ENGINE_EDITOR
     if (GetActiveInstance() == this)
     {
         SetActiveInstance(nullptr);
     }
 }
 
+#if ENGINE_EDITOR
 void UIManager::refreshWorldOutliner()
 {
     if (auto* entry = findWidgetEntry("WorldOutliner"))
@@ -1416,6 +1424,7 @@ void UIManager::refreshWorldOutliner()
         }
     }
 }
+#endif // ENGINE_EDITOR
 
 Vec2 UIManager::getAvailableViewportSize() const
 {
@@ -1470,6 +1479,7 @@ void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Edit
 
     if (entry->widget)
     {
+#if ENGINE_EDITOR
         if (id == "WorldOutliner")
         {
             populateOutlinerWidget(entry->widget);
@@ -1486,6 +1496,7 @@ void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Edit
         {
             refreshStatusBar();
         }
+#endif // ENGINE_EDITOR
         entry->widget->markLayoutDirty();
     }
     m_widgetOrderDirty = true;
@@ -1550,6 +1561,7 @@ void UIManager::closeModalMessage()
     }
 }
 
+#if ENGINE_EDITOR
 void UIManager::showConfirmDialog(const std::string& message, std::function<void()> onConfirm, std::function<void()> onCancel)
 {
     if (message.empty())
@@ -1833,6 +1845,7 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
     m_modalVisible = true;
     m_modalOnClosed = {};
 }
+#endif // ENGINE_EDITOR
 
 void UIManager::showToastMessage(const std::string& message, float durationSeconds)
 {
@@ -1866,6 +1879,7 @@ void UIManager::showToastMessage(const std::string& message, float durationSecon
         updateToastStackLayout();
     }
 
+#if ENGINE_EDITOR
     // Record in notification history
     NotificationHistoryEntry entry{};
     entry.message = message;
@@ -1878,10 +1892,12 @@ void UIManager::showToastMessage(const std::string& message, float durationSecon
 
     // Update badge in StatusBar
     refreshNotificationBadge();
+#endif // ENGINE_EDITOR
 }
 
 void UIManager::updateNotifications(float deltaSeconds)
 {
+#if ENGINE_EDITOR
     // Detect when the asset registry becomes ready and refresh the Content Browser
     {
         const bool registryReady = DiagnosticsManager::Instance().isAssetRegistryReady();
@@ -1918,6 +1934,7 @@ void UIManager::updateNotifications(float deltaSeconds)
             }
         }
     }
+#endif // ENGINE_EDITOR
 
     m_notificationPollTimer += deltaSeconds;
     if (m_notificationPollTimer >= 1.0f)
@@ -1974,7 +1991,7 @@ void UIManager::updateNotifications(float deltaSeconds)
     // â”€â”€ Scrollbar auto-hide (Phase 1.6) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     updateScrollbarVisibility(deltaSeconds);
 
-    // â”€â”€ Console log refresh â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+#if ENGINE_EDITOR
     if (m_consoleState.isOpen)
     {
         m_consoleState.refreshTimer += deltaSeconds;
@@ -2037,6 +2054,7 @@ void UIManager::updateNotifications(float deltaSeconds)
             refreshSequencerTimeline();
         }
     }
+#endif // ENGINE_EDITOR
 
     // â”€â”€ Tooltip timer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (!m_tooltipText.empty() && !m_tooltipVisible)
@@ -2120,6 +2138,7 @@ void UIManager::updateNotifications(float deltaSeconds)
 	}
 }
 
+#if ENGINE_EDITOR
 // Forward declarations for static helpers defined later in this file
 static const char* iconForEntity(ECS::Entity entity);
 static Vec4 iconTintForEntity(ECS::Entity entity);
@@ -6131,6 +6150,7 @@ void UIManager::populateContentBrowserWidget(const std::shared_ptr<EditorWidget>
 
     widget->markLayoutDirty();
 }
+#endif // ENGINE_EDITOR
 
 const std::vector<UIManager::WidgetEntry>& UIManager::getRegisteredWidgets() const
 {
@@ -6229,7 +6249,9 @@ WidgetElement* UIManager::findElementById(const std::string& elementId)
 void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float)>& measureText)
 {
     // Apply deferred theme color updates before layout calculation
+#if ENGINE_EDITOR
     applyPendingThemeUpdate();
+#endif // ENGINE_EDITOR
 
     bool anyDirty = false;
     for (const auto& entry : m_widgets)
@@ -6241,6 +6263,7 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
         }
     }
 
+#if ENGINE_EDITOR
     // Also check widget editor preview dirty flags
     if (!anyDirty)
     {
@@ -6253,6 +6276,7 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
             }
         }
     }
+#endif // ENGINE_EDITOR
 
     if (!anyDirty)
     {
@@ -6520,6 +6544,7 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
     }
 
     // Layout widget editor preview widgets (not registered in UI system)
+#if ENGINE_EDITOR
     for (auto& [tabId, state] : m_widgetEditorStates)
     {
         if (!state.editedWidget || tabId != m_activeTabId)
@@ -6547,6 +6572,7 @@ void UIManager::updateLayouts(const std::function<Vec2(const std::string&, float
         state.editedWidget->setLayoutDirty(false);
         state.previewDirty = true;  // trigger FBO re-render
     }
+#endif // ENGINE_EDITOR
 
     m_pointerCacheDirty = true;
 
@@ -6571,6 +6597,7 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
         return false;
     }
 
+#if ENGINE_EDITOR
     // Laptop mode: left-click on widget editor canvas starts panning
     {
         auto v = DiagnosticsManager::Instance().getState("LaptopMode");
@@ -6595,6 +6622,7 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
     {
         return true;
     }
+#endif // ENGINE_EDITOR
 
     // Cancel any active drag on fresh mouse down
     if (m_dragging)
@@ -6604,6 +6632,7 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
 
     WidgetElement* target = hitTest(screenPos, true);
 
+#if ENGINE_EDITOR
     // Dismiss dropdown menu on click outside
     if (m_dropdownVisible)
     {
@@ -6618,6 +6647,7 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
             }
         }
     }
+#endif // ENGINE_EDITOR
 
     // Check if this element is draggable Ã¢â‚¬â€ set up pending drag
     if (target && target->isDraggable && !target->dragPayload.empty())
@@ -6655,6 +6685,7 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
     {
         Logger::Instance().log(Logger::Category::UI, "Click: " + target->id, Logger::LogLevel::INFO);
     }
+#if ENGINE_EDITOR
     const std::string outlinerPrefix = "Outliner.Entity.";
     if (target->id.rfind(outlinerPrefix, 0) == 0)
     {
@@ -6667,6 +6698,7 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
             populateOutlinerDetails(m_outlinerSelectedEntity);
         }
     }
+#endif // ENGINE_EDITOR
     const std::string separatorPrefix = "Separator.Toggle.";
     if (target->id.rfind(separatorPrefix, 0) == 0)
     {
@@ -6777,6 +6809,7 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
         }
         markAllWidgetsDirty();
     }
+#if ENGINE_EDITOR
     if (target->type == WidgetElementType::DropdownButton)
     {
         // Toggle: if clicking the same button that opened the menu, just close it
@@ -6829,6 +6862,7 @@ bool UIManager::handleMouseDown(const Vec2& screenPos, int button)
         }
         markAllWidgetsDirty();
     }
+#endif // ENGINE_EDITOR
     // Copy target data before callbacks Ã¢â‚¬â€ onClicked/onDoubleClicked may rebuild
     // the widget tree (e.g. refreshContentBrowser), invalidating the target pointer.
     const std::string targetId = target->id;
@@ -6900,6 +6934,7 @@ bool UIManager::handleTextInput(const std::string& text)
 
 bool UIManager::handleKeyDown(int key)
 {
+#if ENGINE_EDITOR
     // Key capture callback (e.g. shortcut rebinding)
     if (m_keyCaptureCallback)
     {
@@ -6907,15 +6942,18 @@ bool UIManager::handleKeyDown(int key)
         if (m_keyCaptureCallback(static_cast<uint32_t>(key), mods))
             return true;
     }
+#endif // ENGINE_EDITOR
 
     // ── Escape: close dropdowns → modals → unfocus entry → cancel rename ──
     if (key == SDLK_ESCAPE)
     {
+#if ENGINE_EDITOR
         if (m_dropdownVisible)
         {
             closeDropdownMenu();
             return true;
         }
+#endif // ENGINE_EDITOR
         if (m_modalVisible)
         {
             closeModalMessage();
@@ -6924,12 +6962,14 @@ bool UIManager::handleKeyDown(int key)
         if (m_focusedEntry)
         {
             setFocusedEntry(nullptr);
+#if ENGINE_EDITOR
             if (m_renamingGridAsset)
             {
                 m_renamingGridAsset = false;
                 m_renameOriginalPath.clear();
                 refreshContentBrowser();
             }
+#endif // ENGINE_EDITOR
             return true;
         }
         return false;
@@ -6943,6 +6983,7 @@ bool UIManager::handleKeyDown(int key)
         return true;
     }
 
+#if ENGINE_EDITOR
     // F2: trigger inline rename on selected Content Browser asset
     if (key == SDLK_F2)
     {
@@ -6981,6 +7022,7 @@ bool UIManager::handleKeyDown(int key)
             return true;
         }
     }
+#endif // ENGINE_EDITOR
 
     if (!m_focusedEntry)
     {
@@ -7103,7 +7145,8 @@ bool UIManager::handleScroll(const Vec2& screenPos, float delta)
         }
     }
 
-    // Widget editor canvas zoom Ã¢â‚¬â€ only if no scrollable widget claimed the event
+#if ENGINE_EDITOR
+    // Widget editor canvas zoom
     if (auto* weState = getActiveWidgetEditorState())
     {
         if (isOverWidgetEditorCanvas(screenPos))
@@ -7116,6 +7159,7 @@ bool UIManager::handleScroll(const Vec2& screenPos, float delta)
             return true;
         }
     }
+#endif // ENGINE_EDITOR
 
     return false;
 }
@@ -7145,8 +7189,10 @@ void UIManager::setMousePosition(const Vec2& screenPos)
 
     updateHoverStates();
 
+#if ENGINE_EDITOR
     // Update widget editor hover preview
     updateWidgetEditorHover(screenPos);
+#endif // ENGINE_EDITOR
 }
 
 void UIManager::cancelDrag()
@@ -7171,6 +7217,7 @@ bool UIManager::handleMouseUp(const Vec2& screenPos, int button)
         m_sliderDragElementId.clear();
     }
 
+#if ENGINE_EDITOR
     // End laptop-mode left-click panning
     if (auto* weState = getActiveWidgetEditorState())
     {
@@ -7180,6 +7227,7 @@ bool UIManager::handleMouseUp(const Vec2& screenPos, int button)
             return true;
         }
     }
+#endif // ENGINE_EDITOR
 
     // If we had a pending drag that never started, fire the deferred click
     if (m_dragPending && !m_dragging)
@@ -7236,6 +7284,7 @@ bool UIManager::handleMouseUp(const Vec2& screenPos, int button)
         Logger::LogLevel::INFO);
 
     // Widget editor: drop a control onto the canvas
+#if ENGINE_EDITOR
     const std::string weControlPrefix = "WidgetControl|";
     if (payload.rfind(weControlPrefix, 0) == 0)
     {
@@ -7277,6 +7326,7 @@ bool UIManager::handleMouseUp(const Vec2& screenPos, int button)
             }
         }
     }
+#endif // ENGINE_EDITOR
 
     // Check if dropped on a content browser folder (grid folder tile)
     WidgetElement* dropTarget = hitTest(screenPos, false);
@@ -7320,6 +7370,7 @@ bool UIManager::handleMouseUp(const Vec2& screenPos, int button)
             return true;
         }
 
+#if ENGINE_EDITOR
         // Drop on EntityDetails dropdown buttons (Mesh, Material, Script)
         const std::string detailsDropPrefix = "Details.";
         const std::string dropSuffix = ".Dropdown";
@@ -7361,6 +7412,7 @@ bool UIManager::handleMouseUp(const Vec2& screenPos, int button)
                 return true;
             }
         }
+#endif // ENGINE_EDITOR
     }
 
     // If not dropped on UI at all, it's a viewport drop
@@ -7453,6 +7505,7 @@ void UIManager::cycleFocusedEntry(bool reverse)
     setFocusedEntry(entries[nextIdx]);
 }
 
+#if ENGINE_EDITOR
 void UIManager::navigateOutlinerByArrow(int direction)
 {
     auto& ecs = ECS::ECSManager::Instance();
@@ -7559,6 +7612,7 @@ void UIManager::navigateContentBrowserByArrow(int dCol, int dRow)
         refreshContentBrowser();
     }
 }
+#endif // ENGINE_EDITOR
 
 void UIManager::markAllWidgetsDirty()
 {
@@ -7573,6 +7627,7 @@ void UIManager::markAllWidgetsDirty()
     m_renderDirty = true;
 }
 
+#if ENGINE_EDITOR
 void UIManager::rebuildAllEditorUI()
 {
     // Defer the actual color update to the next frame via updateLayouts().
@@ -7698,6 +7753,7 @@ void UIManager::applyPendingThemeUpdate()
 
     markAllWidgetsDirty();
 }
+#endif // ENGINE_EDITOR
 
 bool UIManager::isRenderDirty() const
 {
@@ -7759,7 +7815,26 @@ void UIManager::ensureModalWidget()
     message.minSize = Vec2{ 0.0f, 28.0f };
     message.runtimeOnly = true;
 
-    WidgetElement closeButton = EditorUIBuilder::makeButton("Modal.Close", "Close", {}, Vec2{ 0.0f, 32.0f });
+    WidgetElement closeButton{};
+    closeButton.id = "Modal.Close";
+    closeButton.type = WidgetElementType::Button;
+    closeButton.text = "Close";
+    closeButton.font = theme.fontDefault;
+    closeButton.fontSize = theme.fontSizeBody;
+    closeButton.textAlignH = TextAlignH::Center;
+    closeButton.textAlignV = TextAlignV::Center;
+    closeButton.padding = theme.paddingNormal;
+    closeButton.minSize = Vec2{ 0.0f, 32.0f };
+    closeButton.style.color = theme.buttonDefault;
+    closeButton.style.hoverColor = theme.buttonHover;
+    closeButton.style.textColor = theme.buttonText;
+    closeButton.style.borderRadius = theme.borderRadius;
+    closeButton.style.transitionDuration = theme.hoverTransitionSpeed;
+    closeButton.shaderVertex = "button_vertex.glsl";
+    closeButton.shaderFragment = "button_fragment.glsl";
+    closeButton.hitTestMode = HitTestMode::Enabled;
+    closeButton.fillX = true;
+    closeButton.runtimeOnly = true;
     closeButton.onClicked = [this]()
         {
             closeModalMessage();
@@ -8348,6 +8423,7 @@ void UIManager::bindClickEventsForElement(WidgetElement& element)
     }
 }
 
+#if ENGINE_EDITOR
 void UIManager::refreshStatusBar()
 {
     auto* entry = findWidgetEntry("StatusBar");
@@ -10163,11 +10239,14 @@ void UIManager::updateWidgetEditorHover(const Vec2& screenPos)
     }
 }
 
+#endif // ENGINE_EDITOR
+
 // ---------------------------------------------------------------------------
 // Widget Editor: right-mouse-down starts panning on the canvas
 // ---------------------------------------------------------------------------
 bool UIManager::handleRightMouseDown(const Vec2& screenPos)
 {
+#if ENGINE_EDITOR
     auto* state = getActiveWidgetEditorState();
     if (!state)
         return false;
@@ -10179,6 +10258,10 @@ bool UIManager::handleRightMouseDown(const Vec2& screenPos)
     state->panStartMouse = screenPos;
     state->panStartOffset = state->panOffset;
     return true;
+#else
+    (void)screenPos;
+    return false;
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -10186,6 +10269,7 @@ bool UIManager::handleRightMouseDown(const Vec2& screenPos)
 // ---------------------------------------------------------------------------
 bool UIManager::handleRightMouseUp(const Vec2& screenPos)
 {
+#if ENGINE_EDITOR
     (void)screenPos;
     auto* state = getActiveWidgetEditorState();
     if (!state || !state->isPanning)
@@ -10193,19 +10277,10 @@ bool UIManager::handleRightMouseUp(const Vec2& screenPos)
 
     state->isPanning = false;
     return true;
-}
-
-// ---------------------------------------------------------------------------
-// Widget Editor: mouse motion updates pan offset
-// ---------------------------------------------------------------------------
-void UIManager::handleMouseMotionForPan(const Vec2& screenPos)
-{
-    auto* state = getActiveWidgetEditorState();
-    if (!state || !state->isPanning)
-        return;
-
-    state->panOffset.x = state->panStartOffset.x + (screenPos.x - state->panStartMouse.x);
-    state->panOffset.y = state->panStartOffset.y + (screenPos.y - state->panStartMouse.y);
+#else
+    (void)screenPos;
+    return false;
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -10213,7 +10288,17 @@ void UIManager::handleMouseMotionForPan(const Vec2& screenPos)
 // ---------------------------------------------------------------------------
 void UIManager::handleMouseMotion(const Vec2& screenPos)
 {
-    handleMouseMotionForPan(screenPos);
+#if ENGINE_EDITOR
+    // Widget Editor: mouse motion updates pan offset
+    {
+        auto* state = getActiveWidgetEditorState();
+        if (state && state->isPanning)
+        {
+            state->panOffset.x = state->panStartOffset.x + (screenPos.x - state->panStartMouse.x);
+            state->panOffset.y = state->panStartOffset.y + (screenPos.y - state->panStartMouse.y);
+        }
+    }
+#endif
 
     if (!m_sliderDragElementId.empty())
     {
@@ -10238,6 +10323,7 @@ void UIManager::handleMouseMotion(const Vec2& screenPos)
     }
 }
 
+#if ENGINE_EDITOR
 // ---------------------------------------------------------------------------
 // Widget Editor: add a new element of the given type to the edited widget
 // ---------------------------------------------------------------------------
@@ -21247,12 +21333,134 @@ namespace
     }
 }
 
+// ── Build Profiles (Phase 10.3) ─────────────────────────────────────────
+
+void UIManager::loadBuildProfiles()
+{
+    m_buildProfiles.clear();
+
+    const auto& projPath = DiagnosticsManager::Instance().getProjectInfo().projectPath;
+    if (projPath.empty()) return;
+
+    const auto profileDir = std::filesystem::path(projPath) / "Config" / "BuildProfiles";
+
+    // Load existing profiles from JSON files
+    if (std::filesystem::exists(profileDir))
+    {
+        for (const auto& entry : std::filesystem::directory_iterator(profileDir))
+        {
+            if (!entry.is_regular_file()) continue;
+            if (entry.path().extension() != ".json") continue;
+
+            try
+            {
+                std::ifstream ifs(entry.path());
+                if (!ifs.is_open()) continue;
+                auto j = nlohmann::json::parse(ifs);
+
+                BuildProfile p;
+                if (j.contains("name"))            p.name            = j["name"].get<std::string>();
+                if (j.contains("cmakeBuildType"))   p.cmakeBuildType  = j["cmakeBuildType"].get<std::string>();
+                if (j.contains("logLevel"))         p.logLevel        = j["logLevel"].get<std::string>();
+                if (j.contains("enableHotReload"))  p.enableHotReload = j["enableHotReload"].get<bool>();
+                if (j.contains("enableValidation")) p.enableValidation= j["enableValidation"].get<bool>();
+                if (j.contains("enableProfiler"))   p.enableProfiler  = j["enableProfiler"].get<bool>();
+                if (j.contains("compressAssets"))    p.compressAssets  = j["compressAssets"].get<bool>();
+
+                m_buildProfiles.push_back(std::move(p));
+            }
+            catch (...) { /* skip malformed files */ }
+        }
+    }
+
+    // If no profiles exist, create 3 defaults
+    if (m_buildProfiles.empty())
+    {
+        BuildProfile debug;
+        debug.name            = "Debug";
+        debug.cmakeBuildType  = "Debug";
+        debug.logLevel        = "verbose";
+        debug.enableHotReload = true;
+        debug.enableValidation= true;
+        debug.enableProfiler  = true;
+        debug.compressAssets  = false;
+
+        BuildProfile dev;
+        dev.name              = "Development";
+        dev.cmakeBuildType    = "RelWithDebInfo";
+        dev.logLevel          = "info";
+        dev.enableHotReload   = true;
+        dev.enableValidation  = false;
+        dev.enableProfiler    = true;
+        dev.compressAssets    = false;
+
+        BuildProfile ship;
+        ship.name             = "Shipping";
+        ship.cmakeBuildType   = "Release";
+        ship.logLevel         = "error";
+        ship.enableHotReload  = false;
+        ship.enableValidation = false;
+        ship.enableProfiler   = false;
+        ship.compressAssets   = true;
+
+        m_buildProfiles.push_back(debug);
+        m_buildProfiles.push_back(dev);
+        m_buildProfiles.push_back(ship);
+
+        for (const auto& p : m_buildProfiles)
+            saveBuildProfile(p);
+    }
+}
+
+void UIManager::saveBuildProfile(const BuildProfile& profile)
+{
+    const auto& projPath = DiagnosticsManager::Instance().getProjectInfo().projectPath;
+    if (projPath.empty()) return;
+
+    const auto profileDir = std::filesystem::path(projPath) / "Config" / "BuildProfiles";
+    std::error_code ec;
+    std::filesystem::create_directories(profileDir, ec);
+
+    nlohmann::json j;
+    j["name"]            = profile.name;
+    j["cmakeBuildType"]  = profile.cmakeBuildType;
+    j["logLevel"]        = profile.logLevel;
+    j["enableHotReload"] = profile.enableHotReload;
+    j["enableValidation"]= profile.enableValidation;
+    j["enableProfiler"]  = profile.enableProfiler;
+    j["compressAssets"]  = profile.compressAssets;
+
+    const auto filePath = profileDir / (profile.name + ".json");
+    std::ofstream ofs(filePath);
+    if (ofs.is_open())
+        ofs << j.dump(4);
+}
+
+void UIManager::deleteBuildProfile(const std::string& name)
+{
+    const auto& projPath = DiagnosticsManager::Instance().getProjectInfo().projectPath;
+    if (projPath.empty()) return;
+
+    const auto filePath = std::filesystem::path(projPath) / "Config" / "BuildProfiles" / (name + ".json");
+    std::error_code ec;
+    std::filesystem::remove(filePath, ec);
+
+    m_buildProfiles.erase(
+        std::remove_if(m_buildProfiles.begin(), m_buildProfiles.end(),
+            [&](const BuildProfile& p) { return p.name == name; }),
+        m_buildProfiles.end());
+}
+
 void UIManager::openBuildGameDialog()
 {
     if (!m_renderer) return;
 
-    constexpr float kBaseW = 500.0f;
-    constexpr float kBaseH = 420.0f;
+    // Ensure profiles are loaded
+    if (m_buildProfiles.empty())
+        loadBuildProfiles();
+
+    constexpr float kBaseW = 520.0f;
+    constexpr float kBaseH = 520.0f;
     const int kPopupW = static_cast<int>(EditorTheme::Scaled(kBaseW));
     const int kPopupH = static_cast<int>(EditorTheme::Scaled(kBaseH));
     PopupWindow* popup = m_renderer->openPopupWindow(
@@ -21270,7 +21478,9 @@ void UIManager::openBuildGameDialog()
     {
         std::string startLevel;
         std::string windowTitle = "Game";
+        int profileIndex = 0;
         bool launchAfter = true;
+        bool cleanBuild = false;
     };
     auto formState = std::make_shared<FormState>();
 
@@ -21298,14 +21508,29 @@ void UIManager::openBuildGameDialog()
             formState->windowTitle = "Game";
     }
 
-    // Pre-fill output directory
+    // Standardized output and binary dirs
     std::string defaultOutputDir;
+    std::string defaultBinaryDir;
     {
         auto& diag = DiagnosticsManager::Instance();
         const auto& projPath = diag.getProjectInfo().projectPath;
         if (!projPath.empty())
+        {
             defaultOutputDir = (std::filesystem::path(projPath) / "Build").string();
+            defaultBinaryDir = (std::filesystem::path(projPath) / "Binary").string();
+        }
     }
+
+    // Build profile names for dropdown
+    std::vector<std::string> profileNames;
+    int preSelectedProfileIdx = 0;
+    for (size_t i = 0; i < m_buildProfiles.size(); ++i)
+    {
+        profileNames.push_back(m_buildProfiles[i].name);
+        if (m_buildProfiles[i].name == "Development")
+            preSelectedProfileIdx = static_cast<int>(i);
+    }
+    formState->profileIndex = preSelectedProfileIdx;
 
     std::vector<WidgetElement> elements;
 
@@ -21376,6 +21601,50 @@ void UIManager::openBuildGameDialog()
         return id;
     };
 
+    // Build Profile (DropDown)
+    addLabel("BG.Lbl.Profile", "Build Profile:", curY);
+    {
+        WidgetElement dd;
+        dd.type = WidgetElementType::DropDown;
+        dd.id = "BG.DD.Profile";
+        dd.from = Vec2{ nx(leftPad + labelW + gap), ny(curY) };
+        dd.to = Vec2{ nx(W - rightPad), ny(curY + entryH) };
+        dd.items = profileNames;
+        dd.selectedIndex = preSelectedProfileIdx;
+        if (preSelectedProfileIdx >= 0 && preSelectedProfileIdx < static_cast<int>(profileNames.size()))
+            dd.text = profileNames[static_cast<size_t>(preSelectedProfileIdx)];
+        dd.fontSize = EditorTheme::Get().fontSizeBody;
+        dd.style.color = EditorTheme::Get().inputBackground;
+        dd.style.textColor = EditorTheme::Get().textPrimary;
+        dd.padding = Vec2{ 6.0f, 4.0f };
+        dd.hitTestMode = HitTestMode::Enabled;
+        elements.push_back(std::move(dd));
+    }
+    curY += rowH + gap;
+
+    // Profile info line (read-only, shows brief profile settings)
+    {
+        std::string profileInfo;
+        if (!m_buildProfiles.empty())
+        {
+            const auto& p = m_buildProfiles[static_cast<size_t>(preSelectedProfileIdx)];
+            profileInfo = "CMake: " + p.cmakeBuildType + "  |  Log: " + p.logLevel
+                + "  |  HotReload: " + (p.enableHotReload ? "on" : "off")
+                + "  |  Profiler: " + (p.enableProfiler ? "on" : "off");
+        }
+        WidgetElement info;
+        info.type = WidgetElementType::Text;
+        info.id = "BG.ProfileInfo";
+        info.from = Vec2{ nx(leftPad + labelW + gap), ny(curY) };
+        info.to = Vec2{ nx(W - rightPad), ny(curY + rowH) };
+        info.text = profileInfo;
+        info.fontSize = EditorTheme::Get().fontSizeSmall;
+        info.style.textColor = EditorTheme::Get().textMuted;
+        info.textAlignV = TextAlignV::Center;
+        elements.push_back(std::move(info));
+    }
+    curY += rowH + gap;
+
     // Start Level (DropDown)
     addLabel("BG.Lbl.StartLevel", "Start Level:", curY);
     {
@@ -21418,38 +21687,51 @@ void UIManager::openBuildGameDialog()
     }
     curY += rowH + gap;
 
-    // Output directory (entry + browse button)
-    const float browseW = 28.0f;
+    // Clean build checkbox
+    addLabel("BG.Lbl.Clean", "Clean build:", curY);
+    {
+        WidgetElement chk;
+        chk.type = WidgetElementType::CheckBox;
+        chk.id = "BG.Chk.Clean";
+        chk.from = Vec2{ nx(leftPad + labelW + gap), ny(curY) };
+        chk.to = Vec2{ nx(leftPad + labelW + gap + 20.0f), ny(curY + rowH) };
+        chk.isChecked = false;
+        chk.style.color = EditorTheme::Get().inputBackground;
+        chk.style.fillColor = EditorTheme::Get().accent;
+        chk.hitTestMode = HitTestMode::Enabled;
+        elements.push_back(std::move(chk));
+    }
+    curY += rowH + gap;
+
+    // Output directory (read-only info)
     addLabel("BG.Lbl.Output", "Output Dir:", curY);
     {
-        WidgetElement entry;
-        entry.type = WidgetElementType::EntryBar;
-        entry.id = "BG.Entry.Output";
-        entry.from = Vec2{ nx(leftPad + labelW + gap), ny(curY) };
-        entry.to = Vec2{ nx(W - rightPad - browseW - gap), ny(curY + entryH) };
-        entry.text = defaultOutputDir;
-        entry.fontSize = EditorTheme::Get().fontSizeBody;
-        entry.style.color = EditorTheme::Get().inputBackground;
-        entry.style.textColor = EditorTheme::Get().textPrimary;
-        entry.padding = Vec2{ 6.0f, 4.0f };
-        entry.minSize = Vec2{ 0.0f, entryH };
-        entry.hitTestMode = HitTestMode::Enabled;
-        elements.push_back(std::move(entry));
+        WidgetElement outputText;
+        outputText.type = WidgetElementType::Text;
+        outputText.id = "BG.Text.Output";
+        outputText.from = Vec2{ nx(leftPad + labelW + gap), ny(curY) };
+        outputText.to = Vec2{ nx(W - rightPad), ny(curY + rowH) };
+        outputText.text = defaultOutputDir;
+        outputText.fontSize = EditorTheme::Get().fontSizeSmall;
+        outputText.style.textColor = EditorTheme::Get().textSecondary;
+        outputText.textAlignV = TextAlignV::Center;
+        elements.push_back(std::move(outputText));
     }
+    curY += rowH + gap;
+
+    // Binary cache directory (read-only info)
+    addLabel("BG.Lbl.Binary", "Binary Cache:", curY);
     {
-        WidgetElement browseBtn;
-        browseBtn.type = WidgetElementType::Button;
-        browseBtn.id = "BG.Btn.Browse";
-        browseBtn.from = Vec2{ nx(W - rightPad - browseW), ny(curY) };
-        browseBtn.to = Vec2{ nx(W - rightPad), ny(curY + entryH) };
-        browseBtn.text = "...";
-        browseBtn.fontSize = EditorTheme::Get().fontSizeBody;
-        browseBtn.style.color = EditorTheme::Get().buttonDefault;
-        browseBtn.style.textColor = EditorTheme::Get().textPrimary;
-        browseBtn.textAlignH = TextAlignH::Center;
-        browseBtn.textAlignV = TextAlignV::Center;
-        browseBtn.hitTestMode = HitTestMode::Enabled;
-        elements.push_back(std::move(browseBtn));
+        WidgetElement binaryText;
+        binaryText.type = WidgetElementType::Text;
+        binaryText.id = "BG.Text.Binary";
+        binaryText.from = Vec2{ nx(leftPad + labelW + gap), ny(curY) };
+        binaryText.to = Vec2{ nx(W - rightPad), ny(curY + rowH) };
+        binaryText.text = defaultBinaryDir;
+        binaryText.fontSize = EditorTheme::Get().fontSizeSmall;
+        binaryText.style.textColor = EditorTheme::Get().textSecondary;
+        binaryText.textAlignV = TextAlignV::Center;
+        elements.push_back(std::move(binaryText));
     }
     curY += rowH + gap;
 
@@ -21460,7 +21742,7 @@ void UIManager::openBuildGameDialog()
         info.id = "BG.Info";
         info.from = Vec2{ nx(leftPad), ny(curY + gap) };
         info.to = Vec2{ nx(W - rightPad), ny(curY + gap + rowH) };
-        info.text = "Compiles the engine with baked-in game config (requires CMake).";
+        info.text = "Output goes to <Project>/Build, binaries cached in <Project>/Binary.";
         info.fontSize = EditorTheme::Get().fontSizeSmall;
         info.style.textColor = EditorTheme::Get().textSecondary;
         info.textAlignV = TextAlignV::Center;
@@ -21522,39 +21804,36 @@ void UIManager::openBuildGameDialog()
         popup->close();
     });
 
-    // Browse button: open native folder dialog
-    popup->uiManager().registerClickEvent("BG.Btn.Browse", [popup]()
-    {
-        std::string defaultLoc;
-        if (auto* el = popup->uiManager().findElementById("BG.Entry.Output"))
-            defaultLoc = el->text;
-
-        auto* ctx = new FolderBrowseContext{ popup, "BG.Entry.Output" };
-        SDL_ShowOpenFolderDialog(
-            OnFolderBrowseCompleted,
-            ctx,
-            popup->sdlWindow(),
-            defaultLoc.empty() ? nullptr : defaultLoc.c_str(),
-            false);
-    });
-
     // Build button: gather form values and invoke the build callback
     auto* parentUIMgr = this;
-    popup->uiManager().registerClickEvent("BG.Btn.Build", [popup, parentUIMgr, formState]()
+    auto profilesCopy = std::make_shared<std::vector<BuildProfile>>(m_buildProfiles);
+    popup->uiManager().registerClickEvent("BG.Btn.Build",
+        [popup, parentUIMgr, formState, profilesCopy, defaultOutputDir, defaultBinaryDir]()
     {
         auto& popupUI = popup->uiManager();
 
         BuildGameConfig config;
 
-        // Read dropdown / entry bar values
+        // Read profile selection
+        int profileIdx = 0;
+        if (auto* el = popupUI.findElementById("BG.DD.Profile"))
+            profileIdx = el->selectedIndex;
+        if (profileIdx >= 0 && profileIdx < static_cast<int>(profilesCopy->size()))
+            config.profile = (*profilesCopy)[static_cast<size_t>(profileIdx)];
+
+        // Read other form values
         if (auto* el = popupUI.findElementById("BG.DD.StartLevel"))
             config.startLevel = el->text;
         if (auto* el = popupUI.findElementById("BG.Entry.Title"))
             config.windowTitle = el->text;
         if (auto* el = popupUI.findElementById("BG.Chk.Launch"))
             config.launchAfterBuild = el->isChecked;
-        if (auto* el = popupUI.findElementById("BG.Entry.Output"))
-            config.outputDir = el->text;
+        if (auto* el = popupUI.findElementById("BG.Chk.Clean"))
+            config.cleanBuild = el->isChecked;
+
+        // Standardized paths
+        config.outputDir = defaultOutputDir;
+        config.binaryDir = defaultBinaryDir;
 
         if (config.startLevel.empty())
         {
@@ -21567,9 +21846,6 @@ void UIManager::openBuildGameDialog()
             return;
         }
 
-        // Close AFTER the build callback returns so the popup is not destroyed
-        // by renderPopupWindows() during the nested render() calls inside the
-        // build pipeline (advanceStep calls renderer->render()).
         if (parentUIMgr->m_onBuildGame)
             parentUIMgr->m_onBuildGame(config);
 
@@ -22727,3 +23003,4 @@ void UIManager::buildAnimationEditorBoneTree(WidgetElement& root)
         root.children.push_back(std::move(lbl));
     }
 }
+#endif // ENGINE_EDITOR

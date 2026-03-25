@@ -3,12 +3,14 @@
 #include <filesystem>
 #include <vector>
 #include <limits>
+#include <fstream>
 
 #include "OpenGLMaterial.h"
 #include "OpenGLShader.h"
 #include "Logger.h"
 
 #include "../../Core/Asset.h"
+#include "../../AssetManager/AssetCooker.h"
 
 #include <unordered_map>
 #include <glm/glm.hpp>
@@ -173,6 +175,78 @@ namespace
     }
 
     std::unordered_map<std::string, std::shared_ptr<OpenGLMaterial>> s_materialCache;
+
+    // Try to find a .cooked (CMSH) file for this mesh asset path
+    std::string FindCookedMeshPath(const std::string& assetPath)
+    {
+        namespace fs = std::filesystem;
+        fs::path p(assetPath);
+        fs::path cookedPath = p;
+        cookedPath.replace_extension(".cooked");
+        if (fs::exists(cookedPath))
+            return cookedPath.string();
+        return {};
+    }
+
+    // Detect CMSH magic in the first 4 bytes of a file
+    bool IsCookedMesh(const std::string& filePath)
+    {
+        std::ifstream in(filePath, std::ios::binary);
+        if (!in) return false;
+        uint32_t magic = 0;
+        in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+        return magic == CMSH_MAGIC;
+    }
+
+    struct CookedMeshData
+    {
+        std::vector<float> vertexData;
+        uint32_t vertexCount{ 0 };
+        uint32_t vertexStride{ 0 };
+        bool hasBones{ false };
+        glm::vec3 boundsMin{ 0.f };
+        glm::vec3 boundsMax{ 0.f };
+        json metaJson;  // skeleton/animation/shader data
+    };
+
+    bool LoadCookedMesh(const std::string& path, CookedMeshData& out)
+    {
+        std::ifstream in(path, std::ios::binary);
+        if (!in) return false;
+
+        CookedMeshHeader header{};
+        if (!in.read(reinterpret_cast<char*>(&header), sizeof(header)))
+            return false;
+
+        if (header.magic != CMSH_MAGIC || header.version != CMSH_VERSION)
+            return false;
+
+        out.vertexCount  = header.vertexCount;
+        out.vertexStride = header.vertexStride;
+        out.hasBones     = (header.flags & CMSH_FLAG_HAS_BONES) != 0;
+        out.boundsMin    = glm::vec3(header.boundsMin[0], header.boundsMin[1], header.boundsMin[2]);
+        out.boundsMax    = glm::vec3(header.boundsMax[0], header.boundsMax[1], header.boundsMax[2]);
+
+        const size_t floatsPerVertex = header.vertexStride / sizeof(float);
+        const size_t totalFloats = static_cast<size_t>(header.vertexCount) * floatsPerVertex;
+        out.vertexData.resize(totalFloats);
+        if (!in.read(reinterpret_cast<char*>(out.vertexData.data()), totalFloats * sizeof(float)))
+            return false;
+
+        // Read JSON metadata blob
+        uint32_t blobSize = 0;
+        if (in.read(reinterpret_cast<char*>(&blobSize), sizeof(blobSize)) && blobSize > 0)
+        {
+            std::string blob(blobSize, '\0');
+            if (in.read(blob.data(), blobSize))
+            {
+                out.metaJson = json::parse(blob, nullptr, false);
+                if (out.metaJson.is_discarded())
+                    out.metaJson = json::object();
+            }
+        }
+        return true;
+    }
 }
 
 OpenGLObject3D::OpenGLObject3D(const std::shared_ptr<AssetData>& asset)
@@ -248,6 +322,197 @@ bool OpenGLObject3D::prepare()
     }
 
     const auto& data = m_asset->getData();
+
+    // ── Try cooked binary mesh (CMSH) first ─────────────────────────────
+    const std::string cookedPath = FindCookedMeshPath(m_asset->getPath());
+    if (!cookedPath.empty() && IsCookedMesh(cookedPath))
+    {
+        CookedMeshData cmsh;
+        if (LoadCookedMesh(cookedPath, cmsh) && cmsh.vertexCount > 0)
+        {
+            logger.log(Logger::Category::Rendering,
+                "OpenGLObject3D: loading cooked mesh (" + std::to_string(cmsh.vertexCount) + " verts)",
+                Logger::LogLevel::INFO);
+
+            // Extract shader overrides from cooked metadata
+            std::string vertexOverride, fragmentOverride;
+            if (cmsh.metaJson.is_object())
+            {
+                if (cmsh.metaJson.contains("m_shaderVertex"))
+                    vertexOverride = cmsh.metaJson.at("m_shaderVertex").get<std::string>();
+                if (cmsh.metaJson.contains("m_shaderFragment"))
+                    fragmentOverride = cmsh.metaJson.at("m_shaderFragment").get<std::string>();
+            }
+
+            bool hasBones = cmsh.hasBones;
+            m_isSkinned = hasBones;
+
+            const std::string defaultVS = hasBones ? "skinned_vertex.glsl" : "vertex.glsl";
+            const std::string vsPath = ResolveShaderPath(vertexOverride.empty() ? defaultVS : vertexOverride);
+            const std::string fsName = !m_fragmentShaderOverride.empty() ? m_fragmentShaderOverride
+                                     : !fragmentOverride.empty()        ? fragmentOverride
+                                     :                                    "fragment.glsl";
+            const std::string fsPath = ResolveShaderPath(fsName);
+            if (vsPath.empty() || fsPath.empty())
+            {
+                logger.log(Logger::Category::Rendering, "OpenGLObject3D: CMSH – shader not found.", Logger::LogLevel::ERROR);
+                return false;
+            }
+
+            auto vs = std::make_shared<OpenGLShader>();
+            auto fs = std::make_shared<OpenGLShader>();
+            if (!vs->loadFromFile(Shader::Type::Vertex, vsPath) ||
+                !fs->loadFromFile(Shader::Type::Fragment, fsPath))
+            {
+                logger.log(Logger::Category::Rendering, "OpenGLObject3D: CMSH – shader compile failed.", Logger::LogLevel::ERROR);
+                return false;
+            }
+
+            auto mat = std::make_shared<OpenGLMaterial>();
+            mat->addShader(vs);
+            mat->addShader(fs);
+            mat->setFragmentShaderPath(fsPath);
+            mat->setVertexData(cmsh.vertexData);
+            mat->setIndexData({});
+
+            // Bounds from header
+            m_localBoundsMin = cmsh.boundsMin;
+            m_localBoundsMax = cmsh.boundsMax;
+            m_hasLocalBounds = true;
+
+            // Set vertex layout
+            if (hasBones)
+            {
+                const GLsizei stride = static_cast<GLsizei>(22 * sizeof(float));
+                std::vector<OpenGLMaterial::LayoutElement> layout;
+                layout.push_back({ 0, 3, GL_FLOAT, GL_FALSE, stride, 0 });
+                layout.push_back({ 1, 3, GL_FLOAT, GL_FALSE, stride, size_t(3 * sizeof(float)) });
+                layout.push_back({ 2, 2, GL_FLOAT, GL_FALSE, stride, size_t(6 * sizeof(float)) });
+                layout.push_back({ 3, 3, GL_FLOAT, GL_FALSE, stride, size_t(8 * sizeof(float)) });
+                layout.push_back({ 4, 3, GL_FLOAT, GL_FALSE, stride, size_t(11 * sizeof(float)) });
+                layout.push_back({ 5, 4, GL_FLOAT, GL_FALSE, stride, size_t(14 * sizeof(float)) });
+                layout.push_back({ 6, 4, GL_FLOAT, GL_FALSE, stride, size_t(18 * sizeof(float)) });
+                mat->setLayout(layout);
+            }
+            else
+            {
+                const GLsizei stride = static_cast<GLsizei>(14 * sizeof(float));
+                std::vector<OpenGLMaterial::LayoutElement> layout;
+                layout.push_back({ 0, 3, GL_FLOAT, GL_FALSE, stride, 0 });
+                layout.push_back({ 1, 3, GL_FLOAT, GL_FALSE, stride, size_t(3 * sizeof(float)) });
+                layout.push_back({ 2, 2, GL_FLOAT, GL_FALSE, stride, size_t(6 * sizeof(float)) });
+                layout.push_back({ 3, 3, GL_FLOAT, GL_FALSE, stride, size_t(8 * sizeof(float)) });
+                layout.push_back({ 4, 3, GL_FLOAT, GL_FALSE, stride, size_t(11 * sizeof(float)) });
+                mat->setLayout(layout);
+            }
+
+            // Load skeleton from cooked metadata JSON
+            if (hasBones && cmsh.metaJson.contains("m_bones"))
+            {
+                m_skeleton = std::make_shared<Skeleton>();
+                const auto& bonesJson = cmsh.metaJson.at("m_bones");
+                for (const auto& bj : bonesJson)
+                {
+                    BoneInfo bone;
+                    bone.name = bj.at("name").get<std::string>();
+                    if (bj.contains("offsetMatrix"))
+                    {
+                        const auto& om = bj.at("offsetMatrix");
+                        for (int i = 0; i < 16 && i < static_cast<int>(om.size()); ++i)
+                            bone.offsetMatrix.m[i] = om[i].get<float>();
+                    }
+                    m_skeleton->boneNameToIndex[bone.name] = static_cast<int>(m_skeleton->bones.size());
+                    m_skeleton->bones.push_back(bone);
+                }
+                if (cmsh.metaJson.contains("m_nodes"))
+                {
+                    for (const auto& nj : cmsh.metaJson.at("m_nodes"))
+                    {
+                        Skeleton::Node node;
+                        node.name = nj.at("name").get<std::string>();
+                        node.parentIndex = nj.value("parent", -1);
+                        node.boneIndex = nj.value("boneIndex", -1);
+                        if (nj.contains("transform"))
+                        {
+                            const auto& t = nj.at("transform");
+                            for (int i = 0; i < 16 && i < static_cast<int>(t.size()); ++i)
+                                node.localTransform.m[i] = t[i].get<float>();
+                        }
+                        m_skeleton->nodes.push_back(node);
+                    }
+                    for (int i = 0; i < static_cast<int>(m_skeleton->nodes.size()); ++i)
+                    {
+                        int parent = m_skeleton->nodes[i].parentIndex;
+                        if (parent >= 0 && parent < static_cast<int>(m_skeleton->nodes.size()))
+                            m_skeleton->nodes[parent].children.push_back(i);
+                    }
+                }
+                if (cmsh.metaJson.contains("m_animations"))
+                {
+                    for (const auto& aj : cmsh.metaJson.at("m_animations"))
+                    {
+                        AnimationClip clip;
+                        clip.name = aj.value("name", "");
+                        clip.duration = aj.value("duration", 0.0f);
+                        clip.ticksPerSecond = aj.value("ticksPerSecond", 25.0f);
+                        if (aj.contains("channels"))
+                        {
+                            for (const auto& cj : aj.at("channels"))
+                            {
+                                BoneChannel ch;
+                                ch.boneName = cj.value("boneName", "");
+                                auto bit = m_skeleton->boneNameToIndex.find(ch.boneName);
+                                ch.boneIndex = (bit != m_skeleton->boneNameToIndex.end()) ? bit->second : -1;
+                                if (cj.contains("positionKeys"))
+                                    for (const auto& pk : cj.at("positionKeys"))
+                                    {
+                                        VectorKey k; k.time = pk.value("t", 0.f);
+                                        if (pk.contains("v") && pk.at("v").size() >= 3)
+                                        { k.value[0] = pk.at("v")[0].get<float>(); k.value[1] = pk.at("v")[1].get<float>(); k.value[2] = pk.at("v")[2].get<float>(); }
+                                        ch.positionKeys.push_back(k);
+                                    }
+                                if (cj.contains("rotationKeys"))
+                                    for (const auto& rk : cj.at("rotationKeys"))
+                                    {
+                                        QuatKey k; k.time = rk.value("t", 0.f);
+                                        if (rk.contains("q") && rk.at("q").size() >= 4)
+                                        { k.value.x = rk.at("q")[0].get<float>(); k.value.y = rk.at("q")[1].get<float>(); k.value.z = rk.at("q")[2].get<float>(); k.value.w = rk.at("q")[3].get<float>(); }
+                                        ch.rotationKeys.push_back(k);
+                                    }
+                                if (cj.contains("scalingKeys"))
+                                    for (const auto& sk : cj.at("scalingKeys"))
+                                    {
+                                        VectorKey k; k.time = sk.value("t", 0.f);
+                                        if (sk.contains("v") && sk.at("v").size() >= 3)
+                                        { k.value[0] = sk.at("v")[0].get<float>(); k.value[1] = sk.at("v")[1].get<float>(); k.value[2] = sk.at("v")[2].get<float>(); }
+                                        ch.scalingKeys.push_back(k);
+                                    }
+                                clip.channels.push_back(ch);
+                            }
+                        }
+                        m_skeleton->animations.push_back(clip);
+                    }
+                }
+                logger.log(Logger::Category::Rendering,
+                    "OpenGLObject3D: CMSH skeleton – " + std::to_string(m_skeleton->bones.size()) + " bones, "
+                    + std::to_string(m_skeleton->animations.size()) + " anim(s)",
+                    Logger::LogLevel::INFO);
+            }
+
+            if (!mat->build())
+            {
+                logger.log(Logger::Category::Rendering, "OpenGLObject3D: CMSH – material build failed.", Logger::LogLevel::ERROR);
+                return false;
+            }
+
+            m_material = mat;
+            if (!cacheKey.empty())
+                s_materialCache[cacheKey] = m_material;
+            return true;
+        }
+    }
+
+    // ── Fallback: JSON asset loading (editor / uncooked) ────────────────
     std::string vertexOverride;
     std::string fragmentOverride;
     if (data.is_object())

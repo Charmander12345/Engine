@@ -5,10 +5,12 @@
 #include "../RenderResourceManager.h"
 #include "../UIManager.h"
 #include "../ViewportUIManager.h"
+#if ENGINE_EDITOR
 #include "../EditorWindows/PopupWindow.h"
 #include "../EditorWindows/MeshViewerWindow.h"
 #include "../EditorWindows/MaterialEditorWindow.h"
 #include "../EditorWindows/TextureViewerWindow.h"
+#endif
 #include "../IRenderTarget.h"
 #include "OpenGLRenderTarget.h"
 #include "PostProcessStack.h"
@@ -43,6 +45,7 @@ struct WindowHitTestContext
     bool buttonsOnLeft{ false };
 };
 
+#if ENGINE_EDITOR
 struct EditorTab
 {
     std::string id;
@@ -51,6 +54,7 @@ struct EditorTab
     bool active{ false };
     std::unique_ptr<IRenderTarget> renderTarget;
 };
+#endif
 
 class OpenGLRenderer : public Renderer
 {
@@ -121,12 +125,14 @@ public:
     void requestShaderReload() override;
     unsigned int generateAssetThumbnail(const std::string& assetPath, int assetType) override;
 
+    #if ENGINE_EDITOR
     void addTab(const std::string& id, const std::string& name, bool closable) override;
     void removeTab(const std::string& id) override;
     void setActiveTab(const std::string& id) override;
     const std::string& getActiveTabId() const override;
     const std::vector<EditorTab>& getTabs() const;
     void cleanupWidgetEditorPreview(const std::string& tabId) override;
+#endif
 
     unsigned int pickEntityAt(int x, int y) override;
 
@@ -634,6 +640,7 @@ private:
     GLint m_gridLocColor{ -1 };
     GLint m_gridLocFadeRadius{ -1 };
 
+    #if ENGINE_EDITOR
     // Editor tab system
     void releaseAllTabFbos();
     std::vector<EditorTab> m_editorTabs;
@@ -648,17 +655,21 @@ private:
     std::unordered_map<std::string, std::unordered_set<unsigned int>> m_tabSelectedEntities;
 
     // Popup window management (multi-window)
-    void drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int height);
     void ensurePopupUIVao();
     void renderPopupWindows();
     std::unordered_map<std::string, std::unique_ptr<PopupWindow>> m_popupWindows;
     GLuint m_popupUiVao{ 0 };
+#endif
+
+    // Popup window management (multi-window)
+    void drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int height);
 
     // Current rendering viewport size (set at the start of drawUIWidgetsToFramebuffer
     // so that drawUIPanel/drawUIBrush pass the correct uViewportSize to shaders,
     // even when rendering into popup windows).
     Vec2 m_currentRenderViewportSize{};
 
+#if ENGINE_EDITOR
     // Mesh viewer editor windows
     std::unordered_map<std::string, std::unique_ptr<MeshViewerWindow>> m_meshViewers;
 
@@ -681,6 +692,7 @@ private:
 
     // Widget editor preview FBOs (one per open editor tab)
     std::unordered_map<std::string, std::unique_ptr<OpenGLRenderTarget>> m_widgetEditorPreviews;
+#endif
 
 public:
     void toggleUIDebug() override { m_uiDebugEnabled = !m_uiDebugEnabled; }
@@ -772,6 +784,7 @@ public:
     void endGizmoDrag() override;
     bool isGizmoDragging() const override { return m_gizmoDragging; }
 
+#if ENGINE_EDITOR
     // Multi-window / popup management
     // Opens (or returns existing) a popup window with shared GL context.
     PopupWindow* openPopupWindow(const std::string& id, const std::string& title, int width, int height) override;
@@ -794,6 +807,7 @@ public:
     TextureViewerWindow* openTextureViewer(const std::string& assetPath) override;
     void                 closeTextureViewer(const std::string& assetPath) override;
     TextureViewerWindow* getTextureViewer(const std::string& assetPath) override;
+#endif // ENGINE_EDITOR
 
     // Skeletal animation queries
     bool  isEntitySkinned(unsigned int entity) const override;

@@ -29,8 +29,10 @@
 #include "../../Core/Asset.h"
 #include "../../Core/MathTypes.h"
 #include "../EditorTheme.h"
+#if ENGINE_EDITOR
 #include "../EditorUIBuilder.h"
 #include "../../AssetManager/AssetManager.h"
+#endif
 #include "../../Core/UndoRedoManager.h"
 #include "../Texture.h"
 
@@ -301,15 +303,19 @@ void OpenGLRenderer::shutdown()
 	releaseInstanceResources();
 	releaseOitResources();
 	releaseUiFbo();
+#if ENGINE_EDITOR
 	releaseAllTabFbos();
+#endif
 	m_particleSystem.shutdown();
 	m_textureStreaming.shutdown();
 
+#if ENGINE_EDITOR
 	// Release mesh viewer state before destroying GL resources.
 	m_meshViewers.clear();
 
 	// Destroy all popup windows before releasing main GL resources.
 	m_popupWindows.clear();
+#endif
 
 	auto& logger = Logger::Instance();
 	logger.log(Logger::Category::Rendering, "OpenGLRenderer shutdown: releasing GPU resources...", Logger::LogLevel::INFO);
@@ -323,11 +329,13 @@ void OpenGLRenderer::shutdown()
 	OpenGLObject2D::ClearCache();
 	OpenGLObject3D::ClearCache();
 
+#if ENGINE_EDITOR
 	if (m_popupUiVao)
 	{
 		glDeleteVertexArrays(1, &m_popupUiVao);
 		m_popupUiVao = 0;
 	}
+#endif
 	if (m_uiQuadVbo)
 	{
 		glDeleteBuffers(1, &m_uiQuadVbo);
@@ -994,6 +1002,7 @@ void OpenGLRenderer::render()
 	m_cachedWindowWidth = width;
 	m_cachedWindowHeight = height;
 
+	#if ENGINE_EDITOR
 	// Ensure active tab has a valid FBO (cache for renderWorld reuse)
 	m_cachedActiveTab = nullptr;
 	for (auto& tab : m_editorTabs)
@@ -1008,6 +1017,7 @@ void OpenGLRenderer::render()
 		}
 	}
 	EditorTab* activeTab = m_cachedActiveTab;
+#endif
 
 	// Render content for the active tab (world or mesh viewer)
 	const uint64_t worldStart = SDL_GetPerformanceCounter();
@@ -1076,6 +1086,7 @@ void OpenGLRenderer::render()
 			m_lastPathTick = 0;
 		}
 
+		#if ENGINE_EDITOR
 		if (activeTab)
 		{
 			// Texture viewer tabs: render texture preview into the tab FBO
@@ -1271,10 +1282,15 @@ void main() {
 				}
 			}
 		}
+#else
+		// Runtime: render world directly to default framebuffer
+		renderWorld();
+#endif
 	}
 	const uint64_t worldEnd = SDL_GetPerformanceCounter();
 	m_cpuRenderWorldMs = (freq > 0) ? (static_cast<double>(worldEnd - worldStart) * 1000.0 / static_cast<double>(freq)) : 0.0;
 
+#if ENGINE_EDITOR
 	// Composite: blit world content to default framebuffer.
 	// Keep source/destination restricted to the viewport content rect so the
 	// scene is shown only in the available viewport area (excluding UI docks).
@@ -1313,9 +1329,12 @@ void main() {
 	}
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glViewport(0, 0, width, height);
+#endif
 
 	renderUI();
+#if ENGINE_EDITOR
 	renderPopupWindows();
+#endif
 
 	if (m_gpuQueriesInitialized)
 	{
@@ -1385,6 +1404,7 @@ void OpenGLRenderer::renderWorld()
 		// In multi-viewport mode, only bind the FBO for the first sub-viewport;
 		// subsequent sub-viewports reuse the already-bound FBO.
 		const bool isFirstSubViewport = (m_currentSubViewportIndex <= 0);
+#if ENGINE_EDITOR
 		EditorTab* activeTab = m_cachedActiveTab;
 		if (isFirstSubViewport && activeTab && activeTab->renderTarget && activeTab->renderTarget->isValid())
 		{
@@ -1411,6 +1431,22 @@ void OpenGLRenderer::renderWorld()
 				activeTab->renderTarget->bind();
 			}
 		}
+#else
+		if (isFirstSubViewport && usePostProcess)
+		{
+			m_postProcessStack.resize(fullWidth, fullHeight);
+			const int aaModeInt = static_cast<int>(m_aaMode);
+			int msaaSamples = 0;
+			if (m_aaMode == AntiAliasingMode::MSAA_2x) msaaSamples = 2;
+			else if (m_aaMode == AntiAliasingMode::MSAA_4x) msaaSamples = 4;
+			m_postProcessStack.setAntiAliasingMode(aaModeInt);
+			if (msaaSamples > 0)
+				m_postProcessStack.ensureMsaaFbo(fullWidth, fullHeight, msaaSamples);
+			else
+				m_postProcessStack.ensureMsaaFbo(fullWidth, fullHeight, 0);
+			m_postProcessStack.bindHdrTarget();
+		}
+#endif
 	}
 
 	// Clear & viewport setup
@@ -1454,6 +1490,7 @@ void OpenGLRenderer::renderWorld()
 		m_lastProjectionHeight = height;
 	}
 
+	#if ENGINE_EDITOR
 	// Widget editor tabs render only their UI workspace in the center canvas.
 	// The tab framebuffer is still cleared each frame to provide the fill color
 	// around the preview area, but no 3D world content is drawn.
@@ -1461,6 +1498,7 @@ void OpenGLRenderer::renderWorld()
 	{
 		return;
 	}
+#endif
 
 	auto& diagnostics = DiagnosticsManager::Instance();
 	EngineLevel* level = diagnostics.getActiveLevelSoft();
@@ -1801,18 +1839,20 @@ void OpenGLRenderer::renderWorld()
 	const auto& objs = level->getWorldObjects();
 	const auto& groups = level->getGroups();
 
-	// Sync selection state with UIManager (outliner may have changed it)
-	const unsigned int uiSelected = m_uiManager.getSelectedEntity();
-	if (uiSelected != 0 && !m_pickRequested)
-	{
-		if (m_selectedEntities.empty() || *m_selectedEntities.begin() != uiSelected)
+	#if ENGINE_EDITOR
+		// Sync selection state with UIManager (outliner may have changed it)
+		const unsigned int uiSelected = m_uiManager.getSelectedEntity();
+		if (uiSelected != 0 && !m_pickRequested)
 		{
-			m_selectedEntities.clear();
-			m_selectedEntities.insert(uiSelected);
+			if (m_selectedEntities.empty() || *m_selectedEntities.begin() != uiSelected)
+			{
+				m_selectedEntities.clear();
+				m_selectedEntities.insert(uiSelected);
+			}
 		}
-	}
+	#endif // ENGINE_EDITOR
 
-	// Collect all visible 3D objects into a unified draw list for batching
+		// Collect all visible 3D objects
 	m_drawList.clear();
 	m_shadowCasterList.clear();
 	m_drawList.reserve(m_renderEntries.size() + objs.size() + m_meshEntries.size() + 16);
@@ -2493,8 +2533,10 @@ void OpenGLRenderer::renderWorld()
 		GLuint srcFbo = 0;
 		if (usePostProcess && m_postProcessStack.isInitialized())
 			srcFbo = m_postProcessStack.getHdrFbo();
+#if ENGINE_EDITOR
 		else if (m_cachedActiveTab && m_cachedActiveTab->renderTarget && m_cachedActiveTab->renderTarget->isValid())
 			srcFbo = static_cast<OpenGLRenderTarget*>(m_cachedActiveTab->renderTarget.get())->getGLFramebuffer();
+#endif
 
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, srcFbo);
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_oitFbo);
@@ -2551,7 +2593,9 @@ void OpenGLRenderer::renderWorld()
 				if (picked != 0)
 					m_selectedEntities.insert(picked);
 			}
+#if ENGINE_EDITOR
 			m_uiManager.selectEntity(m_selectedEntities.empty() ? 0u : *m_selectedEntities.begin());
+#endif // ENGINE_EDITOR
 			m_pickCtrlHeld = false;
 		}
 	}
@@ -2580,6 +2624,7 @@ void OpenGLRenderer::renderWorld()
 	// FXAA is deferred to after gizmo/outline so those overlays also get AA.
 	if (usePostProcess)
 	{
+#if ENGINE_EDITOR
 		EditorTab* activeTab = m_cachedActiveTab;
 		if (activeTab && activeTab->renderTarget && activeTab->renderTarget->isValid())
 		{
@@ -2601,6 +2646,21 @@ void OpenGLRenderer::renderWorld()
 			// Restore content-rect viewport so outline/gizmo draw in the right area
 			glViewport(vpX, viewportY, width, height);
 		}
+#else
+		m_postProcessStack.setGammaEnabled(m_gammaEnabled);
+		m_postProcessStack.setToneMappingEnabled(m_toneMappingEnabled);
+		m_postProcessStack.setExposure(m_exposure);
+		const int resolveAaMode = (m_aaMode == AntiAliasingMode::FXAA)
+			? 0 : static_cast<int>(m_aaMode);
+		m_postProcessStack.setAntiAliasingMode(resolveAaMode);
+		m_postProcessStack.setBloomEnabled(m_bloomEnabled);
+		m_postProcessStack.setBloomThreshold(m_bloomThreshold);
+		m_postProcessStack.setBloomIntensity(m_bloomIntensity);
+		m_postProcessStack.setSsaoEnabled(m_ssaoEnabled);
+		m_postProcessStack.setProjectionMatrix(m_projectionMatrix);
+		m_postProcessStack.execute(0, 0, 0, fullWidth, fullHeight);
+		glViewport(vpX, viewportY, width, height);
+#endif
 	}
 
 	// Draw viewport grid overlay (XZ plane) when not in PIE
@@ -2627,11 +2687,12 @@ void OpenGLRenderer::renderWorld()
 		renderBoneDebug(view, m_projectionMatrix);
 	}
 
-	// Draw camera path spline in viewport when Sequencer is open and spline visible
-	if (!diagnostics.isPIEActive() && m_cameraPath.points.size() >= 2)
-	{
-		auto& uiMgr = getUIManager();
-		if (uiMgr.isSequencerOpen())
+	#if ENGINE_EDITOR
+		// Draw camera path spline in viewport when Sequencer is open and spline visible
+		if (!diagnostics.isPIEActive() && m_cameraPath.points.size() >= 2)
+		{
+			auto& uiMgr = getUIManager();
+			if (uiMgr.isSequencerOpen())
 		{
 			// Evaluate spline as polyline (100 segments)
 			const int segCount = 100;
@@ -2697,6 +2758,7 @@ void OpenGLRenderer::renderWorld()
 			}
 		}
 	}
+#endif // ENGINE_EDITOR
 
 	// Gizmo, selection outline, and rubber-band only in the active sub-viewport
 	const bool isActiveSubViewport = (m_currentSubViewportIndex < 0 || m_currentSubViewportIndex == m_activeSubViewport);
@@ -2760,16 +2822,20 @@ void OpenGLRenderer::renderWorld()
 	// Use content-rect viewport so FXAA does not process the clear-colour border.
 	if (usePostProcess && m_aaMode == AntiAliasingMode::FXAA)
 	{
+#if ENGINE_EDITOR
 		EditorTab* activeTab = m_cachedActiveTab;
 		if (activeTab && activeTab->renderTarget && activeTab->renderTarget->isValid())
 		{
 			auto* glRT = static_cast<OpenGLRenderTarget*>(activeTab->renderTarget.get());
 			m_postProcessStack.setAntiAliasingMode(static_cast<int>(m_aaMode));
 			m_postProcessStack.executeFxaaPass(glRT->getGLFramebuffer(), vpX, viewportY, width, height);
-
-			// Restore content-rect viewport for any subsequent rendering
 			glViewport(vpX, viewportY, width, height);
 		}
+#else
+		m_postProcessStack.setAntiAliasingMode(static_cast<int>(m_aaMode));
+		m_postProcessStack.executeFxaaPass(0, vpX, viewportY, width, height);
+		glViewport(vpX, viewportY, width, height);
+#endif
 	}
 
 	// Disable scissor test that multi-viewport rendering may have enabled
@@ -2993,10 +3059,12 @@ void OpenGLRenderer::blitUiCache(int width, int height)
 // ---------------------------------------------------------------------------
 // cleanupWidgetEditorPreview
 // ---------------------------------------------------------------------------
+#if ENGINE_EDITOR
 void OpenGLRenderer::cleanupWidgetEditorPreview(const std::string& tabId)
 {
 	m_widgetEditorPreviews.erase(tabId);
 }
+#endif
 
 // ---------------------------------------------------------------------------
 // drawUIWidgetsToFramebuffer
@@ -3005,7 +3073,9 @@ void OpenGLRenderer::cleanupWidgetEditorPreview(const std::string& tabId)
 // ---------------------------------------------------------------------------
 void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int height)
 {
+#if ENGINE_EDITOR
 	if (mgr.isUIRenderingPaused()) return;
+#endif
 	if (!m_textRenderer || !ensureUIQuadRenderer()) return;
 
 	m_textRenderer->setScreenSize(width, height);
@@ -3701,8 +3771,10 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
 	};
 
 	const auto& ordered = mgr.getWidgetsOrderedByZ();
+#if ENGINE_EDITOR
 	Vec4 editorCanvasRect{};
 	const bool hasCanvasClip = mgr.getWidgetEditorCanvasRect(editorCanvasRect);
+#endif
 
 	for (const auto* entry : ordered)
 	{
@@ -3715,6 +3787,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
 		if (widgetSize.x <= 0.0f) widgetSize.x = static_cast<float>(width);
 		if (widgetSize.y <= 0.0f) widgetSize.y = static_cast<float>(height);
 
+#if ENGINE_EDITOR
 		// Clip widget editor preview to canvas area
 		const bool needsClip = hasCanvasClip && mgr.isWidgetEditorContentWidget(entry->id);
 		if (needsClip)
@@ -3726,14 +3799,17 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
 			glEnable(GL_SCISSOR_TEST);
 			glScissor(cx, cy, cw, ch);
 		}
+#endif
 
 		for (const auto& element : widget->getElements())
 			renderElement(renderElement, element, widgetPosition.x, widgetPosition.y, widgetSize.x, widgetSize.y, 1.0f);
 
+#if ENGINE_EDITOR
 		if (needsClip)
 		{
 			glDisable(GL_SCISSOR_TEST);
 		}
+#endif
 	}
 
 	// Deferred pass: draw expanded DropDown items on top of everything
@@ -3770,8 +3846,9 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
 	glDisable(GL_BLEND);
 }
 
+#if ENGINE_EDITOR
 // ---------------------------------------------------------------------------
-// ensurePopupUIVao – creates a context-local VAO in the currently-current
+// ensurePopupUIVao
 // popup GL context that reuses the shared m_uiQuadVbo.
 // ---------------------------------------------------------------------------
 void OpenGLRenderer::ensurePopupUIVao()
@@ -5132,6 +5209,7 @@ TextureViewerWindow* OpenGLRenderer::getTextureViewer(const std::string& assetPa
 	auto it = m_textureViewers.find(assetPath);
 	return (it != m_textureViewers.end()) ? it->second.get() : nullptr;
 }
+#endif // ENGINE_EDITOR
 
 void OpenGLRenderer::renderViewportUI()
 {
@@ -5772,9 +5850,11 @@ void OpenGLRenderer::renderViewportUI()
 
 void OpenGLRenderer::renderUI()
 {
+#if ENGINE_EDITOR
 	// Skip editor UI rendering while a DPI rebuild is in progress
 	if (m_uiManager.isUIRenderingPaused())
 		return;
+#endif
 
 	const uint64_t freq = SDL_GetPerformanceFrequency();
 	const uint64_t uiStart = SDL_GetPerformanceCounter();
@@ -6707,9 +6787,10 @@ void OpenGLRenderer::renderUI()
 			}
 		}
 
-		// ---- Widget Editor FBO preview rendering ----
-		{
-			UIManager::WidgetEditorPreviewInfo previewInfo;
+		#if ENGINE_EDITOR
+				// ---- Widget Editor FBO preview rendering ----
+				{
+					UIManager::WidgetEditorPreviewInfo previewInfo;
 			if (m_uiManager.getWidgetEditorPreviewInfo(previewInfo) && previewInfo.editedWidget)
 			{
 				const auto& widget = previewInfo.editedWidget;
@@ -6836,6 +6917,7 @@ void OpenGLRenderer::renderUI()
 				}
 			}
 		}
+#endif // ENGINE_EDITOR
 
 			glDisable(GL_BLEND);
 			glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -8931,6 +9013,7 @@ void OpenGLRenderer::buildHzb()
 
 	// Copy viewport tab FBO depth into the depth texture via blit
 	GLuint viewportFbo = 0;
+#if ENGINE_EDITOR
 	for (const auto& tab : m_editorTabs)
 	{
 		if (tab.id == "Viewport" && tab.renderTarget && tab.renderTarget->isValid())
@@ -8939,6 +9022,7 @@ void OpenGLRenderer::buildHzb()
 			break;
 		}
 	}
+#endif
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, viewportFbo);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_hzbDepthCopyFbo);
 	glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
@@ -10406,7 +10490,9 @@ RendererCapabilities OpenGLRenderer::getCapabilities() const
 	caps.supportsEntityPicking      = true;
 	caps.supportsGizmos             = true;
 	caps.supportsSkybox             = true;
+#if ENGINE_EDITOR
 	caps.supportsPopupWindows       = true;
+#endif
 	caps.supportsPostProcessing     = true;
 	caps.supportsTextureCompression = true;
 	caps.supportsTessellation       = true;
@@ -10562,6 +10648,7 @@ void OpenGLRenderer::renderPickBuffer(const glm::mat4& view, const glm::mat4& pr
 	// Restore viewport tab FBO so selection outline draws into the tab
 	GLuint vpFbo = 0;
 	int vpFboH = 0;
+#if ENGINE_EDITOR
 	for (const auto& tab : m_editorTabs)
 	{
 		if (tab.active && tab.renderTarget && tab.renderTarget->isValid())
@@ -10571,6 +10658,7 @@ void OpenGLRenderer::renderPickBuffer(const glm::mat4& view, const glm::mat4& pr
 			break;
 		}
 	}
+#endif
 	glBindFramebuffer(GL_FRAMEBUFFER, vpFbo);
 	// Restore content-rect viewport so subsequent passes (outline, gizmo) draw in the right area
 	{
@@ -10631,6 +10719,7 @@ void OpenGLRenderer::renderPickBufferSelectedEntities(const glm::mat4& view, con
 	glUseProgram(0);
 	GLuint vpFbo = 0;
 	int vpFboH2 = 0;
+#if ENGINE_EDITOR
 	for (const auto& tab : m_editorTabs)
 	{
 		if (tab.active && tab.renderTarget && tab.renderTarget->isValid())
@@ -10640,6 +10729,7 @@ void OpenGLRenderer::renderPickBufferSelectedEntities(const glm::mat4& view, con
 			break;
 		}
 	}
+#endif
 	glBindFramebuffer(GL_FRAMEBUFFER, vpFbo);
 	// Restore content-rect viewport
 	{
@@ -10687,6 +10777,7 @@ bool OpenGLRenderer::screenToWorldPos(int screenX, int screenY, Vec3& outWorldPo
 	// Find the active tab FBO to read depth from
 	GLuint fbo = 0;
 	int fboW = 0, fboH = 0;
+#if ENGINE_EDITOR
 	for (const auto& tab : m_editorTabs)
 	{
 		if (tab.active && tab.renderTarget && tab.renderTarget->isValid())
@@ -10697,6 +10788,7 @@ bool OpenGLRenderer::screenToWorldPos(int screenX, int screenY, Vec3& outWorldPo
 			break;
 		}
 	}
+#endif
 
 	if (fbo == 0)
 	{
@@ -10858,6 +10950,7 @@ void OpenGLRenderer::drawSelectionOutline()
 }
 
 // â”€â”€â”€ Editor tab system â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+#if ENGINE_EDITOR
 void OpenGLRenderer::addTab(const std::string& id, const std::string& tabName, bool closable)
 {
 	for (const auto& tab : m_editorTabs)
@@ -11139,6 +11232,7 @@ void OpenGLRenderer::releaseAllTabFbos()
 		tab.renderTarget.reset();
 	}
 }
+#endif // ENGINE_EDITOR
 
 // ============================================================================
 // Editor Gizmos

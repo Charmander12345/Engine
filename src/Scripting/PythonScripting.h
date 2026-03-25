@@ -21,6 +21,7 @@ namespace Scripting
     bool IsScriptHotReloadEnabled();
     void SetScriptHotReloadEnabled(bool enabled);
 
+#if ENGINE_EDITOR
     // Editor Plugin System (Phase 11.3)
     void LoadEditorPlugins(const std::string& projectRoot);
     void PollPluginHotReload();
@@ -37,4 +38,5 @@ namespace Scripting
     const std::vector<PluginMenuItem>& GetPluginMenuItems();
     const std::vector<PluginTab>& GetPluginTabs();
     void InvokePluginMenuCallback(size_t index);
+#endif
 }

@@ -247,19 +247,31 @@ set(ENGINE_COMMON_INCLUDES
     ${Python3_INCLUDE_DIRS}
 )
 
-# Common link libraries shared by both targets.
-set(ENGINE_COMMON_LIBS
+# Common link libraries shared by both targets (minus Renderer – differs per target).
+set(ENGINE_COMMON_LIBS_BASE
     SDL3::SDL3
-    Renderer
     Logger
-    AssetManager
     Diagnostics
     Core
-    Scripting
-    Landscape
     Physics
     ${ENGINE_PYTHON_LIB}
     Threads::Threads
+)
+
+# Editor-specific libraries (link to editor AssetManager, Scripting, Landscape)
+set(ENGINE_EDITOR_LIBS
+    ${ENGINE_COMMON_LIBS_BASE}
+    AssetManager
+    Scripting
+    Landscape
+)
+
+# Runtime-specific libraries (link to runtime variants – no assimp)
+set(ENGINE_RUNTIME_LIBS
+    ${ENGINE_COMMON_LIBS_BASE}
+    AssetManagerRuntime
+    ScriptingRuntime
+    LandscapeRuntime
 )
 
 # ── Editor target (ENGINE_EDITOR=1) ─────────────────────────────────────
@@ -273,7 +285,7 @@ if(WIN32)
 endif()
 
 target_include_directories(HorizonEngine PRIVATE ${ENGINE_COMMON_INCLUDES})
-target_link_libraries(HorizonEngine PRIVATE ${ENGINE_COMMON_LIBS})
+target_link_libraries(HorizonEngine PRIVATE ${ENGINE_EDITOR_LIBS} Renderer)
 target_compile_definitions(HorizonEngine PRIVATE ENGINE_EDITOR=1
     ENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
     CMAKE_GENERATOR="${CMAKE_GENERATOR}"
@@ -288,7 +300,7 @@ if(ENGINE_BUILD_RUNTIME)
         set_target_properties(HorizonEngineRuntime PROPERTIES WIN32_EXECUTABLE OFF)
     endif()
     target_include_directories(HorizonEngineRuntime PRIVATE ${ENGINE_COMMON_INCLUDES})
-    target_link_libraries(HorizonEngineRuntime PRIVATE ${ENGINE_COMMON_LIBS})
+    target_link_libraries(HorizonEngineRuntime PRIVATE ${ENGINE_RUNTIME_LIBS} RendererRuntime)
     target_compile_definitions(HorizonEngineRuntime PRIVATE ENGINE_EDITOR=0)
 
     # When building a standalone game, bake the game configuration into the binary

@@ -23,6 +23,7 @@
 #include "Diagnostics/DiagnosticsManager.h"
 #include "AssetManager/AssetManager.h"
 #include "AssetManager/AssetTypes.h"
+#include "AssetManager/AssetCooker.h"
 #include "Core/ECS/ECS.h"
 #include "Core/MathTypes.h"
 #include "Core/AudioManager.h"
@@ -617,6 +618,7 @@ int main()
 
     bool projectLoaded = false;
 
+#if ENGINE_EDITOR
     if (chosenIsNew)
     {
         const std::string parentDir = std::filesystem::path(chosenPath).parent_path().string();
@@ -628,6 +630,7 @@ int main()
         }
     }
     else
+#endif
     {
         logTimed(Logger::Category::Engine, "Loading project: " + chosenPath, Logger::LogLevel::INFO);
         if (assetManager.loadProject(chosenPath))
@@ -2307,7 +2310,7 @@ int main()
 
                 uiMgr.m_buildThread = std::thread([uiPtr, config, cmakePath, engineSourceDir, projectPath, toolchainName, toolchainVersion]()
                 {
-                    constexpr int kTotalSteps = 6;
+                    constexpr int kTotalSteps = 7;
                     int step = 0;
                     bool ok = true;
                     std::string errorMsg;
@@ -2320,34 +2323,35 @@ int main()
                             tcInfo += " " + toolchainVersion;
                         uiPtr->appendBuildOutput(tcInfo);
                     }
+                    uiPtr->appendBuildOutput("Profile: " + config.profile.name + " (" + config.profile.cmakeBuildType + ")");
                     uiPtr->appendBuildOutput("");
 
-                    // Thread-safe helper to push step progress
-                    auto advanceStep = [&](const std::string& status)
-                    {
-                        ++step;
-                        uiPtr->appendBuildOutput("[Step " + std::to_string(step) + "/" + std::to_string(kTotalSteps) + "] " + status);
+                        // Thread-safe helper to push step progress
+                        auto advanceStep = [&](const std::string& status)
                         {
-                            std::lock_guard<std::mutex> lock(uiPtr->m_buildMutex);
-                            uiPtr->m_buildPendingStatus = status;
-                            uiPtr->m_buildPendingStep = step;
-                            uiPtr->m_buildPendingTotalSteps = kTotalSteps;
-                            uiPtr->m_buildPendingStepDirty = true;
-                        }
-                    };
+                            ++step;
+                            uiPtr->appendBuildOutput("[Step " + std::to_string(step) + "/" + std::to_string(kTotalSteps) + "] " + status);
+                            {
+                                std::lock_guard<std::mutex> lock(uiPtr->m_buildMutex);
+                                uiPtr->m_buildPendingStatus = status;
+                                uiPtr->m_buildPendingStep = step;
+                                uiPtr->m_buildPendingTotalSteps = kTotalSteps;
+                                uiPtr->m_buildPendingStepDirty = true;
+                            }
+                        };
 
-                    // Check if build was cancelled – sets ok=false and returns true
-                    auto checkCancelled = [&]() -> bool
-                    {
-                        if (uiPtr->m_buildCancelRequested.load())
+                        // Check if build was cancelled – sets ok=false and returns true
+                        auto checkCancelled = [&]() -> bool
                         {
-                            ok = false;
-                            errorMsg = "Build cancelled by user.";
-                            uiPtr->appendBuildOutput("[INFO] Build cancelled.");
-                            return true;
-                        }
-                        return false;
-                    };
+                            if (uiPtr->m_buildCancelRequested.load())
+                            {
+                                ok = false;
+                                errorMsg = "Build cancelled by user.";
+                                uiPtr->appendBuildOutput("[INFO] Build cancelled.");
+                                return true;
+                            }
+                            return false;
+                        };
 
                     // Run a command, capture stdout+stderr line-by-line, return exit code
                     auto runCmdWithOutput = [&](const std::string& cmd) -> int
@@ -2474,7 +2478,24 @@ int main()
                         }
                     }
 
-                    const std::filesystem::path buildDir = std::filesystem::path(config.outputDir) / "_build";
+                    const std::filesystem::path buildDir = config.binaryDir.empty()
+                        ? std::filesystem::path(config.outputDir) / "_build"
+                        : std::filesystem::path(config.binaryDir);
+
+                    // Clean build: delete previous build cache so CMake starts fresh
+                    if (ok && config.cleanBuild)
+                    {
+                        if (std::filesystem::exists(buildDir))
+                        {
+                            uiPtr->appendBuildOutput("Clean build: removing previous build cache...");
+                            std::error_code ec;
+                            std::filesystem::remove_all(buildDir, ec);
+                            if (ec)
+                            {
+                                uiPtr->appendBuildOutput("[WARNING] Failed to remove build cache: " + ec.message());
+                            }
+                        }
+                    }
 
                     // Step 2: CMake configure
                     if (ok && !checkCancelled())
@@ -2532,10 +2553,12 @@ int main()
                     {
                         advanceStep("Compiling game runtime...");
 
+                        const std::string cmakeBuildType = config.profile.cmakeBuildType.empty()
+                            ? std::string("Release") : config.profile.cmakeBuildType;
                         std::string buildCmd = "\"" + cmakePath + "\""
                             " --build \"" + buildDir.string() + "\""
                             " --target HorizonEngineRuntime"
-                            " --config Release";
+                            " --config " + cmakeBuildType;
 
                         uiPtr->appendBuildOutput("> " + buildCmd);
                         int ret = runCmdWithOutput(buildCmd);
@@ -2552,9 +2575,11 @@ int main()
                     {
                         advanceStep("Deploying runtime...");
 
-                        const std::filesystem::path builtExe = buildDir / "Release" / "HorizonEngineRuntime.exe";
+                        const std::string deployBuildType = config.profile.cmakeBuildType.empty()
+                            ? std::string("Release") : config.profile.cmakeBuildType;
+                        const std::filesystem::path builtExe = buildDir / deployBuildType / "HorizonEngineRuntime.exe";
                         const std::filesystem::path dstExe = std::filesystem::path(config.outputDir) / (config.windowTitle + ".exe");
-                        const std::filesystem::path builtDir = buildDir / "Release";
+                        const std::filesystem::path builtDir = buildDir / deployBuildType;
 
                         if (std::filesystem::exists(builtExe))
                         {
@@ -2569,12 +2594,33 @@ int main()
 
                             if (ok && std::filesystem::exists(builtDir))
                             {
+                                // Editor-only DLLs that have Runtime counterparts – skip them
+                                static const std::array<std::string, 3> editorOnlyDlls = {
+                                    "AssetManager.dll", "Scripting.dll", "Renderer.dll"
+                                };
+
                                 for (const auto& entry : std::filesystem::directory_iterator(builtDir))
                                 {
                                     if (!entry.is_regular_file()) continue;
                                     const auto ext = entry.path().extension().string();
                                     if (ext == ".dll" || ext == ".DLL")
                                     {
+                                        const std::string fname = entry.path().filename().string();
+                                        bool isEditorOnly = false;
+                                        for (const auto& edDll : editorOnlyDlls)
+                                        {
+                                            if (_stricmp(fname.c_str(), edDll.c_str()) == 0)
+                                            {
+                                                isEditorOnly = true;
+                                                break;
+                                            }
+                                        }
+                                        if (isEditorOnly)
+                                        {
+                                            uiPtr->appendBuildOutput("  Skipped editor DLL: " + fname);
+                                            continue;
+                                        }
+
                                         std::error_code copyEc;
                                         std::filesystem::copy_file(entry.path(),
                                             std::filesystem::path(config.outputDir) / entry.path().filename(),
@@ -2625,27 +2671,47 @@ int main()
                         }
                     }
 
-                    // Step 5: Copy Content + shaders + asset registry
+                    // Step 5: Cook assets + copy shaders + asset registry
                     if (ok && !checkCancelled())
                     {
-                        advanceStep("Copying game content...");
+                        advanceStep("Cooking assets...");
 
                         const std::filesystem::path dstDir = config.outputDir;
 
-                        const std::filesystem::path srcContent = std::filesystem::path(projectPath) / "Content";
-                        const std::filesystem::path dstContent = dstDir / "Content";
-                        if (std::filesystem::exists(srcContent))
+                        // Cook project assets via AssetCooker
                         {
-                            std::error_code ec;
-                            std::filesystem::copy(srcContent, dstContent,
-                                std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing, ec);
-                            if (ec)
+                            AssetCooker cooker;
+                            AssetCooker::CookConfig cookCfg;
+                            cookCfg.projectRoot    = projectPath;
+                            cookCfg.engineRoot     = engineSourceDir;
+                            cookCfg.outputDir      = (dstDir / "Content").string();
+                            cookCfg.compressAssets  = config.profile.compressAssets;
+                            cookCfg.buildType       = config.profile.cmakeBuildType.empty()
+                                                        ? std::string("Release") : config.profile.cmakeBuildType;
+
+                            auto result = cooker.cookAll(cookCfg,
+                                [&](size_t done, size_t total, const std::string& current)
+                                {
+                                    uiPtr->appendBuildOutput("  [" + std::to_string(done) + "/" + std::to_string(total) + "] " + current);
+                                },
+                                &uiPtr->m_buildCancelRequested);
+
+                            uiPtr->appendBuildOutput("Asset cooking complete: "
+                                + std::to_string(result.cookedAssets) + " cooked, "
+                                + std::to_string(result.skippedAssets) + " skipped, "
+                                + std::to_string(result.failedAssets) + " failed ("
+                                + std::to_string(static_cast<int>(result.elapsedSeconds * 1000)) + " ms)");
+
+                            if (!result.success)
                             {
                                 ok = false;
-                                errorMsg = "Failed to copy Content: " + ec.message();
+                                errorMsg = "Asset cooking failed.";
+                                for (const auto& e : result.errors)
+                                    uiPtr->appendBuildOutput("  [ERROR] " + e);
                             }
                         }
 
+                        // Copy shaders (not part of asset registry)
                         if (ok)
                         {
                             const std::filesystem::path srcShaders = std::filesystem::path(engineSourceDir) / "src" / "Renderer" / "OpenGLRenderer" / "shaders";
@@ -2658,6 +2724,7 @@ int main()
                             }
                         }
 
+                        // Copy engine-bundled Content (shipped assets not in project registry)
                         if (ok)
                         {
                             const std::filesystem::path srcEngContent = std::filesystem::path(engineSourceDir) / "Content";
@@ -2670,6 +2737,7 @@ int main()
                             }
                         }
 
+                        // Copy AssetRegistry.bin
                         if (ok)
                         {
                             const std::filesystem::path dstConfig = dstDir / "Config";
@@ -2684,18 +2752,39 @@ int main()
                         }
                     }
 
-                    // Step 6: Done
+                    // Step 6: Generate game.ini with profile settings
+                    if (ok && !checkCancelled())
+                    {
+                        advanceStep("Generating game.ini...");
+
+                        const std::filesystem::path iniPath = std::filesystem::path(config.outputDir) / "game.ini";
+                        std::ofstream iniFile(iniPath);
+                        if (iniFile.is_open())
+                        {
+                            iniFile << "# Generated by HorizonEngine Build\n";
+                            iniFile << "StartLevel=" << config.startLevel << "\n";
+                            iniFile << "WindowTitle=" << config.windowTitle << "\n";
+                            iniFile << "BuildProfile=" << config.profile.name << "\n";
+                            iniFile << "LogLevel=" << config.profile.logLevel << "\n";
+                            iniFile << "EnableHotReload=" << (config.profile.enableHotReload ? "true" : "false") << "\n";
+                            iniFile << "EnableValidation=" << (config.profile.enableValidation ? "true" : "false") << "\n";
+                            iniFile << "EnableProfiler=" << (config.profile.enableProfiler ? "true" : "false") << "\n";
+                            iniFile.close();
+                            uiPtr->appendBuildOutput("  Written: " + iniPath.string());
+                        }
+                        else
+                        {
+                            ok = false;
+                            errorMsg = "Failed to write game.ini";
+                        }
+                    }
+
+                    // Step 7: Done
                     advanceStep(ok ? "Build complete!" : "Build failed.");
 
                     if (ok)
                     {
                         uiPtr->appendBuildOutput("Build completed successfully. Output: " + config.outputDir);
-
-                        // Clean up build intermediates
-                        {
-                            std::error_code ec;
-                            std::filesystem::remove_all(std::filesystem::path(config.outputDir) / "_build", ec);
-                        }
 
                         // Launch if requested
                         if (config.launchAfterBuild)
@@ -3303,8 +3392,10 @@ int main()
         const uint64_t frameStartCounter = SDL_GetPerformanceCounter();
         ++frame;
 
-        // Poll the build thread for pending UI updates (non-blocking)
-        renderer->getUIManager().pollBuildThread();
+        #if ENGINE_EDITOR
+                // Poll the build thread for pending UI updates (non-blocking)
+                renderer->getUIManager().pollBuildThread();
+        #endif
 
         const uint64_t now = SDL_GetPerformanceCounter();
         const double dt = (freq > 0.0) ? (static_cast<double>(now - lastCounter) / freq) : 0.016;
@@ -3399,10 +3490,12 @@ int main()
 		while (SDL_PollEvent(&event))
 		{
 			// Route events belonging to popup windows first.
+#if ENGINE_EDITOR
 			if (renderer && renderer->routeEventToPopup(event))
 			{
 				continue;
 			}
+#endif
 
 			if (event.type == SDL_EVENT_QUIT)
 			{
@@ -3488,15 +3581,17 @@ int main()
                         }();
                         if (laptopModeLocal)
                         {
+#if ENGINE_EDITOR
                             auto* texViewer = renderer->getTextureViewer(renderer->getActiveTabId());
                             if (texViewer)
                             {
                                 texViewerPanning = true;
                                 continue;
                             }
+#endif
                         }
 
-                        // PIE: recapture mouse when clicking on viewport while input is paused
+                        // PIE: recapture mouse
                         if (diagnostics.isPIEActive() && pieInputPaused)
                         {
                             pieInputPaused = false;
@@ -3613,6 +3708,7 @@ int main()
                     }
 
                     // Right-click context menu on Content Browser grid
+#if ENGINE_EDITOR
                     if (isOverUI && uiManager.isOverContentBrowserGrid(mousePos))
                     {
                         if (uiManager.isDropdownMenuOpen())
@@ -4291,9 +4387,11 @@ int main()
                         uiManager.showDropdownMenu(mousePos, items);
                         continue;
                     }
+#endif // ENGINE_EDITOR
                 }
                 if (!isOverUI && !diagnostics.isPIEActive())
                 {
+#if ENGINE_EDITOR
                     // Texture viewer: right-click starts panning instead of camera rotation
                     auto* texViewer = renderer->getTextureViewer(renderer->getActiveTabId());
                     if (texViewer)
@@ -4301,6 +4399,7 @@ int main()
                         texViewerPanning = true;
                         continue;
                     }
+#endif
 
                     rightMouseDown = true;
                     SDL_GetMouseState(&preCaptureMouseX, &preCaptureMouseY);
@@ -4367,6 +4466,7 @@ int main()
                 }
 
                 // Texture viewer zoom
+#if ENGINE_EDITOR
                 if (renderer)
                 {
                     auto* texViewer = renderer->getTextureViewer(renderer->getActiveTabId());
@@ -4380,6 +4480,7 @@ int main()
                         continue;
                     }
                 }
+#endif
 
                 if (rightMouseDown)
                 {
@@ -4406,6 +4507,7 @@ int main()
             // Texture viewer pan via right-click drag (or left-click in laptop mode)
             if (event.type == SDL_EVENT_MOUSE_MOTION && texViewerPanning)
             {
+#if ENGINE_EDITOR
                 if (renderer)
                 {
                     auto* texViewer = renderer->getTextureViewer(renderer->getActiveTabId());
@@ -4416,6 +4518,7 @@ int main()
                         renderer->getUIManager().markAllWidgetsDirty();
                     }
                 }
+#endif
                 continue;
             }
 
@@ -4541,6 +4644,7 @@ int main()
                 }
             }
 
+            #if ENGINE_EDITOR
             // --- OS file drop: import files dragged from the OS file explorer ---
             if (event.type == SDL_EVENT_DROP_FILE)
             {
@@ -4571,6 +4675,7 @@ int main()
                     }
                 }
             }
+#endif // ENGINE_EDITOR
         }
         const uint64_t eventEndCounter = SDL_GetPerformanceCounter();
         cpuEventMs = (freq > 0.0) ? (static_cast<double>(eventEndCounter - eventStartCounter) / freq * 1000.0) : 0.0;
@@ -4592,7 +4697,9 @@ int main()
 
         // Poll for .py file changes and hot-reload if needed (self-throttled to 500ms)
         Scripting::PollScriptHotReload();
+#if ENGINE_EDITOR
         Scripting::PollPluginHotReload();
+#endif
 
         // Level-Streaming: auto-load/unload sub-levels based on camera position (Phase 11.4)
         if (renderer)

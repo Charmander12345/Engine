@@ -37,6 +37,7 @@ bool RenderResourceManager::prepareActiveLevel()
 	}
 
 	// Validate entity asset references after ECS is populated
+#if ENGINE_EDITOR
 	{
 		auto& assetMgr = AssetManager::Instance();
 
@@ -60,6 +61,7 @@ bool RenderResourceManager::prepareActiveLevel()
 				Logger::LogLevel::WARNING);
 		}
 	}
+#endif
 
     logger.log(Logger::Category::Rendering, "RenderResourceManager: prepareActiveLevel() start", Logger::LogLevel::INFO);
 

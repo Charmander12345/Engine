@@ -19,7 +19,9 @@
 
 using json = nlohmann::json;
 
+#if ENGINE_EDITOR
 struct SDL_Window;
+#endif
 
 struct AssetRegistryEntry
 {
@@ -61,24 +63,28 @@ public:
     static AssetManager& Instance();
 
 	bool initialize();
+#if ENGINE_EDITOR
 	void ensureEditorWidgetsCreated();
+#endif
 
 	// Load and return the asset object if successful (also registers with GC) - Returns nullptr on failure.
 	int loadAsset(const std::string& path, AssetType type, SyncState syncState = Sync);
 	int loadAssetAsync(const std::string& path, AssetType type, bool allowGc = false);
 	bool tryConsumeAssetLoadResult(int jobId, int& outAssetId);
 	std::vector<int> getRunningAssetLoadJobs() const;
-    //Saves the specified asset to a file. returns whether saving was successful. Note: when saving async function returns whether the job was queued successfully.
-    bool saveAsset(const Asset& asset, SyncState syncState = Async, DiagnosticsManager::Action action = DiagnosticsManager::Action{});
+	#if ENGINE_EDITOR
+	//Saves the specified asset to a file. returns whether saving was successful. Note: when saving async function returns whether the job was queued successfully.
+	bool saveAsset(const Asset& asset, SyncState syncState = Async, DiagnosticsManager::Action action = DiagnosticsManager::Action{});
 	//Saves all currently loaded and altered assets. returns whether all saves were successful. Note: when saving async function returns whether the job was queued successfully.
-    bool saveAllAssets(SyncState syncState = Async);
+	bool saveAllAssets(SyncState syncState = Async);
 	//Create a new asset of the specified type at the specified path with the specified name. returns the asset ID if successful, 0 on failure.
-    int createAsset(AssetType type, const std::string& path, const std::string& name, const std::string& sourcePath = "", SyncState syncState = Async);
+	int createAsset(AssetType type, const std::string& path, const std::string& name, const std::string& sourcePath = "", SyncState syncState = Async);
 
-    //import asset
+	//import asset
 	bool OpenImportDialog(SDL_Window* parentWindow, AssetType forcedType = AssetType::Unknown, SyncState syncState = Async);
-    //Worker function for importing an asset from a selected file path
-    void importAssetFromPath(std::string path, AssetType preferredType, unsigned int ActionID);
+	//Worker function for importing an asset from a selected file path
+	void importAssetFromPath(std::string path, AssetType preferredType, unsigned int ActionID);
+#endif
 
 	// Synchronous: tidies up expired weak_ptr tracked resources.
 	void collectGarbage();
@@ -91,8 +97,10 @@ public:
 	std::string getAbsoluteContentPath(const std::string& relativeToContent) const;
 	// Resolve <engine_exe>/Content/<relative> (built-in engine assets).
 	std::string getAbsoluteEngineContentPath(const std::string& relativeToContent) const;
+#if ENGINE_EDITOR
 	// Resolve <engine>/Editor/Widgets/<relative>.
 	std::string getEditorWidgetPath(const std::string& relativeToEditorWidgets) const;
+#endif
 
 	// Load an audio asset by content-relative path (.asset or .wav). Returns asset ID or 0 on failure.
 	int loadAudioFromContentPath(const std::string& relativeToContent, bool allowGc = false);
@@ -111,6 +119,7 @@ public:
 	std::shared_ptr<AssetData> getLoadedAssetByID(unsigned int id) const;
 	std::shared_ptr<AssetData> getLoadedAssetByPath(const std::string& path) const;
 	bool isAssetLoaded(const std::string& path) const;
+	#if ENGINE_EDITOR
 	size_t getUnsavedAssetCount() const;
 
 	// Information about a single unsaved asset for the save dialog.
@@ -133,11 +142,14 @@ public:
 	void saveSelectedAssetsAsync(const std::vector<unsigned int>& selectedIds, bool includeLevel,
 		std::function<void(size_t saved, size_t total)> onProgress = {},
 		std::function<void(bool success)> onFinished = {});
+#endif
 
 	//Project management
 	bool loadProject(const std::string& projectPath, SyncState syncState = Sync, bool ensureDefaultContent = true);
+#if ENGINE_EDITOR
 	bool saveProject(const std::string& projectPath, SyncState syncState = Sync);
 	bool createProject(const std::string& parentDir, const std::string& projectName, const DiagnosticsManager::ProjectInfo& info, SyncState syncState = Sync, bool includeDefaultContent = true);
+#endif
 	void unloadAllAssets();
 
 	// Returns the full flat asset registry (all discovered .asset files with type + relative path).
@@ -146,6 +158,7 @@ public:
 	// Monotonically increasing version; bumped whenever the registry changes.
 	uint64_t getRegistryVersion() const { return m_registryVersion.load(std::memory_order_relaxed); }
 
+	#if ENGINE_EDITOR
 	// Move an asset to a new folder, updating all references (registry, ECS components, .asset files).
 	bool moveAsset(const std::string& oldRelPath, const std::string& newRelPath);
 
@@ -187,15 +200,17 @@ public:
 	// Return all content-relative asset paths that the given asset depends on (e.g. textures in a material).
 	std::vector<std::string> getAssetDependencies(const std::string& relPath) const;
 
-	// Register an asset entry in the registry (public for external create flows)
-	void registerAssetInRegistry(const AssetRegistryEntry& entry);
 	// Remove an asset from the registry and optionally delete from disk. Returns true on success.
 	bool deleteAsset(const std::string& relPath, bool deleteFromDisk = true);
-	// Register a loaded asset object and return its runtime ID (public for external create flows)
-	unsigned int registerLoadedAsset(const std::shared_ptr<AssetData>& object);
 
 	// Save a level asset to disk (public wrapper). Returns true on success.
 	bool saveNewLevelAsset(EngineLevel* level);
+#endif
+
+	// Register an asset entry in the registry (public for external create flows)
+	void registerAssetInRegistry(const AssetRegistryEntry& entry);
+	// Register a loaded asset object and return its runtime ID (public for external create flows)
+	unsigned int registerLoadedAsset(const std::shared_ptr<AssetData>& object);
 
 	// --- Parallel loading API ---
 	// Read an asset from disk without touching any shared state (thread-safe).
@@ -219,25 +234,32 @@ private:
 	void stopWorkerPool();
 	void enqueueJob(std::function<void()> job);
 
-    void createWorldSettingsWidgetAsset();
+	#if ENGINE_EDITOR
+	void createWorldSettingsWidgetAsset();
+#endif
 
 	bool loadAssetRegistry(const std::string& projectRoot);
+#if ENGINE_EDITOR
 	bool saveAssetRegistry(const std::string& projectRoot) const;
+#endif
 	bool discoverAssetsAndBuildRegistry(const std::string& projectRoot);
 	void discoverAssetsAndBuildRegistryAsync(const std::string& projectRoot);
 
+#if ENGINE_EDITOR
 	// Scan all .asset files under contentDir for string references to oldRelPath and replace with newRelPath.
 	void updateAssetFileReferences(const std::filesystem::path& contentDir, const std::string& oldRelPath, const std::string& newRelPath);
 
 	// Default assets
-    void ensureDefaultAssetsCreated();
+	void ensureDefaultAssetsCreated();
+#endif
 
-    //Saving specific assettypes
-    struct SaveResult
-    {
-        bool success{ false };
+	#if ENGINE_EDITOR
+	//Saving specific assettypes
+	struct SaveResult
+	{
+		bool success{ false };
 		std::string errorMessage;
-    };
+	};
 
 	SaveResult saveTextureAsset(const std::shared_ptr<AssetData>& texture);
 	SaveResult saveAudioAsset(const std::shared_ptr<AssetData>& audio);
@@ -248,6 +270,7 @@ private:
 	SaveResult saveLevelAsset(EngineLevel* level);
 	SaveResult saveWidgetAsset(const std::shared_ptr<AssetData>& widget);
 	SaveResult saveSkyboxAsset(const std::shared_ptr<AssetData>& skybox);
+#endif
 
 	//Loading specific assettypes
 	LoadResult ReadAssetHeader(const std::string& path, AssetType& outType);
@@ -259,8 +282,9 @@ private:
 	LoadResult loadWidgetAsset(const std::string& path);
 	LoadResult loadSkyboxAsset(const std::string& path);
 
+	#if ENGINE_EDITOR
 	// Creating specific assettypes
-    struct CreateResult
+	struct CreateResult
 	{
 		std::shared_ptr<AssetData> object{ nullptr };
 		std::string errorMessage;
@@ -273,13 +297,16 @@ private:
 	CreateResult createObject3DAsset(const std::string& path, const std::string& name, const std::string& sourcePath);
 	CreateResult createLevelAsset(const std::string& path, const std::string& name, const std::string& sourcePath);
 	CreateResult createSkyboxAsset(const std::string& path, const std::string& name, const std::string& sourcePath);
+#endif
 
     AssetManager() = default;
     ~AssetManager();
     AssetManager(const AssetManager&) = delete;
     AssetManager& operator=(const AssetManager&) = delete;
 	GarbageCollector m_garbageCollector;
+#if ENGINE_EDITOR
 	std::function<void()> m_onImportCompleted;
+#endif
 
 	std::vector<AssetRegistryEntry> m_registry;
 	std::unordered_map<std::string, size_t> m_registryByPath;

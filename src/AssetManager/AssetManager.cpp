@@ -13,106 +13,112 @@
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_audio.h>
+#if ENGINE_EDITOR
 #include <SDL3/SDL_dialog.h>
+#endif
 
 #include "../Renderer/Material.h"
 #include "../Core/AudioManager.h"
 
+#if ENGINE_EDITOR
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 
 #include "../Core/ECS/ECS.h"
 #include "../Renderer/EditorTheme.h"
+#endif
 
 namespace fs = std::filesystem;
 
 int AssetManager::s_nextAssetID = 1;
 
+#if ENGINE_EDITOR
 namespace
 {
-    struct ImportDialogContext
-    {
-        AssetType preferredType{ AssetType::Unknown };
+	struct ImportDialogContext
+	{
+		AssetType preferredType{ AssetType::Unknown };
 		unsigned int ActionID{ 0 };
-    };
+	};
 
-    // Map file extension -> asset type (extensible)
-    static AssetType DetectAssetTypeFromPath(const fs::path& p)
-    {
-        std::string ext = p.extension().string();
-        for (auto& c : ext)
-        {
-            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-        }
-        // Textures
-        if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga" || ext == ".hdr" || ext == ".dds")
-            return AssetType::Texture;
+	// Map file extension -> asset type (extensible)
+	static AssetType DetectAssetTypeFromPath(const fs::path& p)
+	{
+		std::string ext = p.extension().string();
+		for (auto& c : ext)
+		{
+			if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+		}
+		// Textures
+		if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".tga" || ext == ".hdr" || ext == ".dds")
+			return AssetType::Texture;
 
-        if (ext == ".wav")
-            return AssetType::Audio;
+		if (ext == ".wav")
+			return AssetType::Audio;
 
-        // 3D Models (Assimp-supported)
-        if (ext == ".obj" || ext == ".fbx" || ext == ".gltf" || ext == ".glb" ||
-            ext == ".dae" || ext == ".3ds" || ext == ".blend" || ext == ".stl" ||
-            ext == ".ply" || ext == ".x3d")
-            return AssetType::Model3D;
+		// 3D Models (Assimp-supported)
+		if (ext == ".obj" || ext == ".fbx" || ext == ".gltf" || ext == ".glb" ||
+			ext == ".dae" || ext == ".3ds" || ext == ".blend" || ext == ".stl" ||
+			ext == ".ply" || ext == ".x3d")
+			return AssetType::Model3D;
 
-        // Shaders
-        if (ext == ".glsl" || ext == ".vert" || ext == ".frag" || ext == ".geom" || ext == ".comp")
-            return AssetType::Shader;
+		// Shaders
+		if (ext == ".glsl" || ext == ".vert" || ext == ".frag" || ext == ".geom" || ext == ".comp")
+			return AssetType::Shader;
 
-        // Scripts
-        if (ext == ".py")
-            return AssetType::Script;
+		// Scripts
+		if (ext == ".py")
+			return AssetType::Script;
 
-        return AssetType::Unknown;
-    }
+		return AssetType::Unknown;
+	}
 
 
-    static void SDLCALL OnImportDialogClosed(void* userdata, const char* const* filelist, int filter)
-    {
+	static void SDLCALL OnImportDialogClosed(void* userdata, const char* const* filelist, int filter)
+	{
 		Logger::Instance().log(Logger::Category::AssetManagement, "Import dialog closed callback invoked.", Logger::LogLevel::INFO);
-        auto* ctx = static_cast<ImportDialogContext*>(userdata);
-        if (!ctx)
-        {
-            Logger::Instance().log(Logger::Category::AssetManagement, "Import dialog context is null!", Logger::LogLevel::ERROR);
-            return;
-        }
+		auto* ctx = static_cast<ImportDialogContext*>(userdata);
+		if (!ctx)
+		{
+			Logger::Instance().log(Logger::Category::AssetManagement, "Import dialog context is null!", Logger::LogLevel::ERROR);
+			return;
+		}
 
-        if (!filelist || !filelist[0])
-        {
-            Logger::Instance().log(Logger::Category::AssetManagement, "Import dialog cancelled or no file selected.", Logger::LogLevel::INFO);
+		if (!filelist || !filelist[0])
+		{
+			Logger::Instance().log(Logger::Category::AssetManagement, "Import dialog cancelled or no file selected.", Logger::LogLevel::INFO);
 			DiagnosticsManager::Instance().updateActionProgress(ctx->ActionID, false);
-            delete ctx;
-            return;
-        }
+			delete ctx;
+			return;
+		}
 
-        const std::string selectedPath = filelist[0];
-        Logger::Instance().log(Logger::Category::AssetManagement, "Queueing import job for file: " + selectedPath, Logger::LogLevel::INFO);
-        AssetManager::Instance().importAssetFromPath(selectedPath, ctx->preferredType, ctx->ActionID);
-        delete ctx;
-    }
+		const std::string selectedPath = filelist[0];
+		Logger::Instance().log(Logger::Category::AssetManagement, "Queueing import job for file: " + selectedPath, Logger::LogLevel::INFO);
+		AssetManager::Instance().importAssetFromPath(selectedPath, ctx->preferredType, ctx->ActionID);
+		delete ctx;
+	}
 
-    static std::string sanitizeName(const std::string& name)
-    {
-        std::string out;
-        out.reserve(name.size());
-        for (char c : name)
-        {
-            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-')
-            {
-                out.push_back(c);
-            }
-            else
-            {
-                out.push_back('_');
-            }
-        }
-        if (out.empty()) out = "Imported";
-        return out;
-    }
+	static std::string sanitizeName(const std::string& name)
+	{
+		std::string out;
+		out.reserve(name.size());
+		for (char c : name)
+		{
+			if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-')
+			{
+				out.push_back(c);
+			}
+			else
+			{
+				out.push_back('_');
+			}
+		}
+		if (out.empty()) out = "Imported";
+		return out;
+	}
 }
+#endif
 
 static void writeString(std::ofstream& out, const std::string& s)
 {
@@ -136,10 +142,12 @@ static fs::path getRegistryPath(const std::string& projectRoot)
     return fs::path(projectRoot) / "Config" / "AssetRegistry.bin";
 }
 
+#if ENGINE_EDITOR
 static fs::path getEditorWidgetsRootPath()
 {
     return fs::current_path() / "Editor" / "Widgets";
 }
+#endif
 
 static bool readAssetHeaderType(const fs::path& absoluteAssetPath, AssetType& outType)
 {
@@ -422,6 +430,7 @@ bool AssetManager::loadAssetRegistry(const std::string& projectRoot)
     return true;
 }
 
+#if ENGINE_EDITOR
 bool AssetManager::saveAssetRegistry(const std::string& projectRoot) const
 {
     const fs::path regPath = getRegistryPath(projectRoot);
@@ -453,6 +462,7 @@ bool AssetManager::saveAssetRegistry(const std::string& projectRoot) const
 
     return out.good();
 }
+#endif
 
 void AssetManager::registerAssetInRegistry(const AssetRegistryEntry& entry)
 {
@@ -470,6 +480,7 @@ void AssetManager::registerAssetInRegistry(const AssetRegistryEntry& entry)
 
     m_registryVersion.fetch_add(1, std::memory_order_relaxed);
 
+    #if ENGINE_EDITOR
     // Persist the updated registry to disk (skipped during batch operations)
     if (!m_suppressRegistrySave)
     {
@@ -479,8 +490,10 @@ void AssetManager::registerAssetInRegistry(const AssetRegistryEntry& entry)
             saveAssetRegistry(diagnostics.getProjectInfo().projectPath);
         }
     }
+#endif
 }
 
+#if ENGINE_EDITOR
 bool AssetManager::deleteAsset(const std::string& relPath, bool deleteFromDisk)
 {
     auto& logger = Logger::Instance();
@@ -791,6 +804,7 @@ size_t AssetManager::repairEntityReferences()
 
     return repaired;
 }
+#endif
 
 bool AssetManager::discoverAssetsAndBuildRegistry(const std::string& projectRoot)
 {
@@ -1005,16 +1019,20 @@ void AssetManager::discoverAssetsAndBuildRegistryAsync(const std::string& projec
         }
 
         // Save registry to disk
+#if ENGINE_EDITOR
         saveAssetRegistry(projectRoot);
+#endif
 
         diagnostics.setAssetRegistryReady(true);
 
         // Validate registry entries against disk to catch externally deleted files
+#if ENGINE_EDITOR
         const size_t staleCount = validateRegistry();
         if (staleCount > 0)
         {
             log.log(Logger::Category::AssetManagement, "[Registry] Cleaned " + std::to_string(staleCount) + " stale entries after discovery.", Logger::LogLevel::WARNING);
         }
+#endif
 
         log.log(Logger::Category::AssetManagement, "[Registry] async registry ready. Total assets: " + std::to_string(m_registry.size()), Logger::LogLevel::INFO);
     });
@@ -1072,10 +1090,13 @@ bool AssetManager::initialize()
     {
         AssetManager::Instance().releaseAudioAsset(assetId);
     });
+#if ENGINE_EDITOR
     ensureEditorWidgetsCreated();
+#endif
     return true;
 }
 
+#if ENGINE_EDITOR
 void AssetManager::ensureEditorWidgetsCreated()
 {
     auto& logger = Logger::Instance();
@@ -2921,6 +2942,7 @@ void AssetManager::ensureDefaultAssetsCreated()
 
 	logger.log(Logger::Category::AssetManagement, "Default assets ensured.", Logger::LogLevel::INFO);
 }
+#endif
 
 void AssetManager::startWorkerPool()
 {
@@ -3232,6 +3254,7 @@ bool AssetManager::isAssetLoaded(const std::string& path) const
 	return false;
 }
 
+#if ENGINE_EDITOR
 bool AssetManager::saveAllAssets(SyncState syncState)
 {
     std::lock_guard<std::mutex> lock(m_stateMutex);
@@ -3505,6 +3528,7 @@ void AssetManager::saveSelectedAssetsAsync(const std::vector<unsigned int>& sele
             onFinished(allOk);
     });
 }
+#endif
 
 std::string AssetManager::getAbsoluteContentPath(const std::string& relativeToContent) const
 {
@@ -3543,11 +3567,13 @@ std::string AssetManager::getAbsoluteEngineContentPath(const std::string& relati
     return (fs::current_path() / "Content" / inputPath).lexically_normal().string();
 }
 
+#if ENGINE_EDITOR
 std::string AssetManager::getEditorWidgetPath(const std::string& relativeToEditorWidgets) const
 {
     fs::path p = getEditorWidgetsRootPath() / fs::path(relativeToEditorWidgets);
     return p.lexically_normal().string();
 }
+#endif
 
 int AssetManager::loadAudioFromContentPath(const std::string& relativeToContent, bool allowGc)
 {
@@ -3800,6 +3826,7 @@ int AssetManager::loadAsset(const std::string& path, AssetType type, SyncState s
 	return 0;
 }
 
+#if ENGINE_EDITOR
 bool AssetManager::saveAsset(const Asset& asset, SyncState syncState, DiagnosticsManager::Action action)
 {
 	auto& diagnostics = DiagnosticsManager::Instance();
@@ -5411,6 +5438,7 @@ void AssetManager::updateAssetFileReferences(const std::filesystem::path& conten
 		}
 	}
 }
+#endif
 
 bool AssetManager::loadProject(const std::string& projectPath, SyncState syncState, bool ensureDefaultContent)
 {
@@ -5512,38 +5540,42 @@ bool AssetManager::loadProject(const std::string& projectPath, SyncState syncSta
     diagnostics.setScenePrepared(false);
 
 	{
+#if ENGINE_EDITOR
 		const fs::path scriptsRoot = fs::path(info.projectPath) / "Content" / "Scripts";
 		std::error_code scriptsEc;
 		fs::create_directories(scriptsRoot, scriptsEc);
 		const fs::path stubPath = scriptsRoot / "engine.pyi";
 		const fs::path srcStub = fs::current_path() / "Content" / "Scripting" / "engine.pyi";
 		fs::copy_file(srcStub, stubPath, fs::copy_options::overwrite_existing, scriptsEc);
+#endif
 	}
 
-    // Ensure default assets if requested (new-project flow may opt out for blank projects).
-    if (ensureDefaultContent)
-    {
-        try
-        {
-            ensureDefaultAssetsCreated();
-        }
-        catch (const std::exception& ex)
-        {
-            logger.log(Logger::Category::Project,
-                std::string("Exception while ensuring default assets during project load: ") + ex.what(),
-                Logger::LogLevel::ERROR);
-            diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingProject, false);
-            return false;
-        }
-        catch (...)
-        {
-            logger.log(Logger::Category::Project,
-                "Unknown exception while ensuring default assets during project load.",
-                Logger::LogLevel::ERROR);
-            diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingProject, false);
-            return false;
-        }
-    }
+#if ENGINE_EDITOR
+	// Ensure default assets if requested (new-project flow may opt out for blank projects).
+	if (ensureDefaultContent)
+	{
+		try
+		{
+			ensureDefaultAssetsCreated();
+		}
+		catch (const std::exception& ex)
+		{
+			logger.log(Logger::Category::Project,
+				std::string("Exception while ensuring default assets during project load: ") + ex.what(),
+				Logger::LogLevel::ERROR);
+			diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingProject, false);
+			return false;
+		}
+		catch (...)
+		{
+			logger.log(Logger::Category::Project,
+				"Unknown exception while ensuring default assets during project load.",
+				Logger::LogLevel::ERROR);
+			diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingProject, false);
+			return false;
+		}
+	}
+#endif
 
 	// Registry handling: build asynchronously so project loading is not blocked.
 	logger.log(Logger::Category::Project, "Starting async asset registry build for project: " + info.projectName, Logger::LogLevel::INFO);
@@ -5573,6 +5605,7 @@ void AssetManager::unloadAllAssets()
 	m_garbageCollector.clear();
 }
 
+#if ENGINE_EDITOR
 bool AssetManager::saveProject(const std::string& projectPath, SyncState syncState)
 {
     auto& logger = Logger::Instance();
@@ -5716,6 +5749,7 @@ bool AssetManager::createProject(const std::string& parentDir, const std::string
 	}
     return loaded;
 }
+#endif
 
 AssetManager::LoadResult AssetManager::loadTextureAsset(const std::string& path)
 {
@@ -5919,6 +5953,7 @@ AssetManager::LoadResult AssetManager::loadLevelAsset(const std::string& path)
 	return result;
 }
 
+#if ENGINE_EDITOR
 AssetManager::SaveResult AssetManager::saveTextureAsset(const std::shared_ptr<AssetData>& texture)
 {
     SaveResult result;
@@ -6567,6 +6602,7 @@ AssetManager::SaveResult AssetManager::saveSkyboxAsset(const std::shared_ptr<Ass
     result.success = true;
     return result;
 }
+#endif
 
 AssetManager::LoadResult AssetManager::loadSkyboxAsset(const std::string& path)
 {
@@ -6587,6 +6623,7 @@ AssetManager::LoadResult AssetManager::loadSkyboxAsset(const std::string& path)
     return result;
 }
 
+#if ENGINE_EDITOR
 AssetManager::CreateResult AssetManager::createSkyboxAsset(const std::string& path, const std::string& name, const std::string& sourcePath)
 {
     CreateResult result;
@@ -6679,6 +6716,7 @@ AssetManager::CreateResult AssetManager::createSkyboxAsset(const std::string& pa
     result.success = true;
     return result;
 }
+#endif
 
 unsigned char* AssetManager::loadRawImageData(const std::string& path, int& width, int& height, int& channels)
 {
@@ -6707,10 +6745,12 @@ void AssetManager::freeRawImageData(unsigned char* data)
     }
 }
 
+#if ENGINE_EDITOR
 bool AssetManager::saveNewLevelAsset(EngineLevel* level)
 {
     return saveLevelAsset(level).success;
 }
+#endif
 
 // ---------------------------------------------------------------------------
 // Parallel loading: disk-only read (no shared state), finalize, batch API

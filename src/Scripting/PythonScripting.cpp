@@ -2040,6 +2040,7 @@ namespace
         return PyLong_FromLong(jobId);
     }
 
+#if ENGINE_EDITOR
     PyObject* py_save_asset(PyObject*, PyObject* args)
     {
         unsigned long id = 0;
@@ -2061,6 +2062,7 @@ namespace
         }
         Py_RETURN_TRUE;
     }
+#endif
 
     PyObject* py_unload_asset(PyObject*, PyObject* args)
     {
@@ -2278,7 +2280,9 @@ namespace
         { "is_asset_loaded", py_is_asset_loaded, METH_VARARGS, "Check if an asset is loaded by path." },
         { "load_asset", py_load_asset, METH_VARARGS, "Load an asset by path and type (sync)." },
         { "load_asset_async", py_load_asset_async, METH_VARARGS, "Load an asset by path and type (async)." },
+#if ENGINE_EDITOR
         { "save_asset", py_save_asset, METH_VARARGS, "Save an asset by id and type." },
+#endif
         { "unload_asset", py_unload_asset, METH_VARARGS, "Unload an asset by id." },
         { nullptr, nullptr, 0, nullptr }
     };
@@ -3147,6 +3151,7 @@ namespace
 
     // ── engine.editor ───────────────────────────────────────────────────
 
+#if ENGINE_EDITOR
     // Stored Python callbacks for plugin menu items and custom tabs
     struct InternalPluginMenuItem
     {
@@ -3320,6 +3325,7 @@ namespace
         { "get_menu_items",        py_editor_get_menu_items,        METH_NOARGS,  "Get all registered plugin menu items." },
         { nullptr, nullptr, 0, nullptr }
     };
+#endif
 
     PyMethodDef EngineMethods[] = {
         { nullptr, nullptr, 0, nullptr }
@@ -3421,6 +3427,7 @@ namespace
         ParticleMethods
     };
 
+#if ENGINE_EDITOR
     PyModuleDef EditorModule = {
         PyModuleDef_HEAD_INIT,
         "engine.editor",
@@ -3428,6 +3435,7 @@ namespace
         -1,
         EditorMethods
     };
+#endif
 
     bool AddSubmodule(PyObject* parent, PyObject* submodule, const char* name)
     {
@@ -3522,9 +3530,15 @@ namespace
         PyObject* physicsModule = PyModule_Create(&PhysicsModule);
         PyObject* mathModule = PyModule_Create(&MathModule);
         PyObject* particleModule = PyModule_Create(&ParticleModule);
+#if ENGINE_EDITOR
         PyObject* editorModule = PyModule_Create(&EditorModule);
+#endif
 
-        if (!entityModule || !assetModule || !audioModule || !inputModule || !uiModule || !cameraModule || !diagnosticsModule || !loggingModule || !physicsModule || !mathModule || !particleModule || !editorModule)
+        if (!entityModule || !assetModule || !audioModule || !inputModule || !uiModule || !cameraModule || !diagnosticsModule || !loggingModule || !physicsModule || !mathModule || !particleModule
+#if ENGINE_EDITOR
+            || !editorModule
+#endif
+            )
         {
             Py_XDECREF(entityModule);
             Py_XDECREF(assetModule);
@@ -3537,7 +3551,9 @@ namespace
             Py_XDECREF(physicsModule);
             Py_XDECREF(mathModule);
             Py_XDECREF(particleModule);
+#if ENGINE_EDITOR
             Py_XDECREF(editorModule);
+#endif
             Py_DECREF(module);
             return nullptr;
         }
@@ -3565,18 +3581,23 @@ namespace
             !AddSubmodule(module, loggingModule, "logging") ||
             !AddSubmodule(module, physicsModule, "physics") ||
             !AddSubmodule(module, mathModule, "math") ||
-            !AddSubmodule(module, particleModule, "particle") ||
-            !AddSubmodule(module, editorModule, "editor"))
+            !AddSubmodule(module, particleModule, "particle")
+#if ENGINE_EDITOR
+            || !AddSubmodule(module, editorModule, "editor")
+#endif
+            )
         {
             Py_DECREF(module);
             return nullptr;
         }
 
+#if ENGINE_EDITOR
         // Toast-level constants on the editor submodule
         PyModule_AddIntConstant(editorModule, "TOAST_INFO",    0);
         PyModule_AddIntConstant(editorModule, "TOAST_SUCCESS", 1);
         PyModule_AddIntConstant(editorModule, "TOAST_WARNING", 2);
         PyModule_AddIntConstant(editorModule, "TOAST_ERROR",   3);
+#endif
 
         return module;
     }
@@ -4144,6 +4165,7 @@ namespace Scripting
         s_scriptHotReloadEnabled = enabled;
     }
 
+    #if ENGINE_EDITOR
     // ── Editor Plugin Discovery & Hot-Reload ────────────────────────────
 
     static void ExecutePluginFile(const std::string& absPath)
@@ -4307,4 +4329,5 @@ namespace Scripting
             Py_DECREF(result);
         PyGILState_Release(gilState);
     }
+#endif
 }

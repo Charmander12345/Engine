@@ -1036,11 +1036,11 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 - [ ] Inkrementelles Cooking funktioniert (entfernt – Rework geplant)
 - [ ] Gecooked Build ist kleiner als Raw-Assets
 
-### 10.3 Build-Konfigurationsprofile
+### 10.3 Build-Konfigurationsprofile ✅
 **Priorität:** Mittel
 **Aufwand:** Mittel
 
-**Aktueller Stand:** ⏸️ BuildProfile-Enum und buildProfileToString() wurden zusammen mit dem Build-Dialog entfernt. Die Runtime-Profil-Lesung aus game.ini im main.cpp bleibt erhalten. Wird im Rahmen des Build-Reworks neu implementiert.
+**Aktueller Stand:** ✅ Vollständig implementiert. 3 Standard-Profile (Debug/Development/Shipping) mit JSON-Persistierung in `<Projekt>/Config/BuildProfiles/`. Profil-Dropdown im Build-Dialog. Binary-Cache in `<Projekt>/Binary` für inkrementelle Builds. game.ini enthält Profil-Settings.
 
 **Beschreibung:** Vordefinierte Build-Profile die verschiedene Optimierungsstufen und Feature-Sets steuern.
 
@@ -1055,7 +1055,7 @@ Surface-Snap implementiert: `dropSelectedEntitiesToSurface()` in `UIManager` mit
 - **Profil-spezifische Einstellungen:** LogLevel, HotReload, Validation, Profiler, AssetCompression
 
 **Fortschrittsprüfung:**
-- [ ] 3 Profile sind auswählbar (entfernt – Rework geplant)
+- [x] 3 Profile sind auswählbar (Debug/Development/Shipping)
 - [ ] Shipping-Build enthält kein Debug-Code
 - [ ] Profil beeinflusst Asset-Cooking
 - [ ] Render-Qualität ändert sich pro Profil

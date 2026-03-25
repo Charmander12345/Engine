@@ -22,7 +22,9 @@
 
 class EngineLevel;
 class Renderer;
+#if ENGINE_EDITOR
 class PopupWindow;
+#endif
 class ViewportUIManager;
 
 class UIManager
@@ -73,37 +75,42 @@ public:
     bool handleMouseUp(const Vec2& screenPos, int button);
     bool handleScroll(const Vec2& screenPos, float delta);
     bool handleRightMouseDown(const Vec2& screenPos);
-    bool handleRightMouseUp(const Vec2& screenPos);
-	void handleMouseMotionForPan(const Vec2& screenPos);
+	bool handleRightMouseUp(const Vec2& screenPos);
 	void handleMouseMotion(const Vec2& screenPos);
     bool handleTextInput(const std::string& text);
 	bool handleKeyDown(int key);
 
+	#if ENGINE_EDITOR
 	// Key capture: when set, handleKeyDown forwards key+mods to this callback first.
 	// If callback returns true, the event is consumed. Used for shortcut rebinding.
 	using KeyCaptureCallback = std::function<bool(uint32_t sdlKey, uint16_t sdlMod)>;
 	void setKeyCaptureCallback(KeyCaptureCallback cb) { m_keyCaptureCallback = std::move(cb); }
 	void clearKeyCaptureCallback() { m_keyCaptureCallback = nullptr; }
+#endif
     void setMousePosition(const Vec2& screenPos);
     const Vec2& getMousePosition() const { return m_mousePosition; }
-    bool isPointerOverUI(const Vec2& screenPos) const;
-    bool hasClickEvent(const std::string& eventId) const;
+	bool isPointerOverUI(const Vec2& screenPos) const;
+	bool hasClickEvent(const std::string& eventId) const;
 	void registerClickEvent(const std::string& eventId, std::function<void()> callback);
 	void markAllWidgetsDirty();
+	#if ENGINE_EDITOR
 	void rebuildAllEditorUI();
 	void rebuildEditorUIForDpi(float newDpi);
 	void applyThemeToAllEditorWidgets();
 
 	bool isUIRenderingPaused() const { return m_uiRenderingPaused; }
+#endif
 
 	bool isRenderDirty() const;
-    void clearRenderDirty();
+	void clearRenderDirty();
 
     void showModalMessage(const std::string& message, std::function<void()> onClosed = {});
     void closeModalMessage();
-    void showConfirmDialog(const std::string& message, std::function<void()> onConfirm, std::function<void()> onCancel = {});
-    void showConfirmDialogWithCheckbox(const std::string& message, const std::string& checkboxLabel, bool checkedByDefault,
-        std::function<void(bool checked)> onConfirm, std::function<void()> onCancel = {});
+	#if ENGINE_EDITOR
+	void showConfirmDialog(const std::string& message, std::function<void()> onConfirm, std::function<void()> onCancel = {});
+	void showConfirmDialogWithCheckbox(const std::string& message, const std::string& checkboxLabel, bool checkedByDefault,
+		std::function<void(bool checked)> onConfirm, std::function<void()> onCancel = {});
+#endif
 	// Notification levels for priority-based styling (alias from DiagnosticsManager)
 	using NotificationLevel = DiagnosticsManager::NotificationLevel;
 
@@ -111,6 +118,7 @@ public:
 	void showToastMessage(const std::string& message, float durationSeconds, NotificationLevel level);
 	void updateNotifications(float deltaSeconds);
 
+	#if ENGINE_EDITOR
 	// Notification history
 	struct NotificationHistoryEntry
 	{
@@ -124,15 +132,15 @@ public:
 	void openNotificationHistoryPopup();
 	void refreshNotificationBadge();
 
-    struct DropdownMenuItem
-    {
-        std::string label;
-        std::function<void()> onClick;
-        bool isSeparator{ false };
-    };
-    void showDropdownMenu(const Vec2& anchorPixels, const std::vector<DropdownMenuItem>& items, float minWidth = 0.0f);
-    void closeDropdownMenu();
-    bool isDropdownMenuOpen() const { return m_dropdownVisible; }
+	struct DropdownMenuItem
+	{
+		std::string label;
+		std::function<void()> onClick;
+		bool isSeparator{ false };
+	};
+	void showDropdownMenu(const Vec2& anchorPixels, const std::vector<DropdownMenuItem>& items, float minWidth = 0.0f);
+	void closeDropdownMenu();
+	bool isDropdownMenuOpen() const { return m_dropdownVisible; }
 
 	void openLandscapeManagerPopup();
 	void openEngineSettingsPopup();
@@ -226,25 +234,28 @@ public:
 	bool spawnBuiltinTemplate(const std::string& templateName, const Vec3& pos);
     void openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)> onProjectChosen);
 
-    // Returns true if the active tab is a widget editor and had a selected element to delete
-    bool tryDeleteWidgetEditorElement();
+	// Returns true if the active tab is a widget editor and had a selected element to delete
+	bool tryDeleteWidgetEditorElement();
+
+	void applyPendingThemeUpdate();
+#endif // ENGINE_EDITOR
 
 	static UIManager* GetActiveInstance();
 	static void SetActiveInstance(UIManager* instance);
-
-	void applyPendingThemeUpdate();
 
 private:
 	WidgetEntry* findWidgetEntry(const std::string& id);
 	const WidgetEntry* findWidgetEntry(const std::string& id) const;
 	WidgetElement* hitTest(const Vec2& screenPos, bool logDetails = false) const;
 
+	#if ENGINE_EDITOR
 	KeyCaptureCallback m_keyCaptureCallback;
 	void populateOutlinerWidget(const std::shared_ptr<EditorWidget>& widget);
 	void populateOutlinerDetails(unsigned int entity);
 	void populateContentBrowserWidget(const std::shared_ptr<EditorWidget>& widget);
 	std::unordered_set<std::string> buildReferencedAssetSet() const;
 	void applyAssetToEntity(AssetType type, const std::string& assetPath, unsigned int entity);
+#endif
 	void updateHoverStates();
 	void updateHoverTransitions(float deltaSeconds);
 	void updateHoverTransitionsRecursive(WidgetElement& element, float deltaSeconds);
@@ -253,8 +264,10 @@ private:
 	void setFocusedEntry(WidgetElement* element);
 	void collectFocusableEntries(WidgetElement& element, std::vector<WidgetElement*>& out);
 	void cycleFocusedEntry(bool reverse);
+	#if ENGINE_EDITOR
 	void navigateOutlinerByArrow(int direction);      // -1 = up, +1 = down
 	void navigateContentBrowserByArrow(int dCol, int dRow); // column/row delta
+#endif
 	void ensureModalWidget();
 	std::shared_ptr<EditorWidget> createToastWidget(const std::string& message, const std::string& name, NotificationLevel level = NotificationLevel::Info) const;
 	void updateToastStackLayout();
@@ -302,6 +315,7 @@ private:
 	std::vector<ToastNotification> m_toasts;
 	uint64_t m_nextToastId{ 1 };
 
+#if ENGINE_EDITOR
 	// Notification history (circular buffer of last 50)
 	static constexpr size_t kMaxNotificationHistory = 50;
 	std::deque<NotificationHistoryEntry> m_notificationHistory;
@@ -318,13 +332,16 @@ private:
 	std::vector<ProgressEntry> m_progressBars;
 	uint64_t m_nextProgressId{ 1 };
 
-    // Dropdown menu state
+	// Dropdown menu state
 	std::shared_ptr<EditorWidget> m_dropdownWidget;
-    bool m_dropdownVisible{ false };
-    std::string m_dropdownSourceId;  // id of the DropdownButton that opened the menu
+	bool m_dropdownVisible{ false };
+	std::string m_dropdownSourceId;  // id of the DropdownButton that opened the menu
+#endif // ENGINE_EDITOR
 
 	void bindClickEventsForWidget(const std::shared_ptr<EditorWidget>& widget);
 	void bindClickEventsForElement(WidgetElement& element);
+
+#if ENGINE_EDITOR
 	EngineLevel* m_outlinerLevel{ nullptr };
 	size_t m_levelChangedCallbackToken{ 0 };
 	unsigned int m_outlinerSelectedEntity{ 0 };
@@ -360,6 +377,7 @@ private:
 	std::string m_renameOriginalPath;   // relPath of the asset being renamed
 	uint64_t m_lastEcsComponentVersion{ 0 }; // tracks ECS component changes for auto-refresh
 	uint64_t m_lastRegistryVersion{ 0 };     // tracks asset registry changes for auto-refresh
+#endif // ENGINE_EDITOR
 
 	// Double-click detection
 	std::string m_lastClickedElementId;
@@ -375,6 +393,7 @@ private:
 	bool m_tooltipVisible{ false };
 	static constexpr float kTooltipDelay = 0.45f; // seconds before showing
 
+#if ENGINE_EDITOR
 	// Save progress modal state
 	std::shared_ptr<EditorWidget> m_saveProgressWidget;
 	bool m_saveProgressVisible{ false };
@@ -679,13 +698,16 @@ public:
 	// Level-load request callback (registered by main.cpp to handle level switch orchestration)
 	using LevelLoadCallback = std::function<void(const std::string& levelRelPath)>;
 	void setOnLevelLoadRequested(LevelLoadCallback callback) { m_onLevelLoadRequested = std::move(callback); }
+#endif // ENGINE_EDITOR
 
+public:
 	// Drag & Drop
 	bool isDragging() const { return m_dragging; }
 	const std::string& getDragPayload() const { return m_dragPayload; }
 	const std::string& getDragSourceId() const { return m_dragSourceId; }
 	void cancelDrag();
 
+#if ENGINE_EDITOR
 	// Callback invoked when an asset is dropped on the viewport (not over UI)
 	using DropOnViewportCallback = std::function<void(const std::string& payload, const Vec2& screenPos)>;
 	void setOnDropOnViewport(DropOnViewportCallback callback) { m_onDropOnViewport = std::move(callback); }
@@ -698,13 +720,33 @@ public:
 	using DropOnEntityCallback = std::function<void(const std::string& payload, unsigned int entity)>;
 	void setOnDropOnEntity(DropOnEntityCallback callback) { m_onDropOnEntity = std::move(callback); }
 
+	// ── Build Profiles (Phase 10.3) ───────────────────────────────────────
+	struct BuildProfile
+	{
+		std::string name            = "Development";
+		std::string cmakeBuildType  = "RelWithDebInfo";  // "Debug", "RelWithDebInfo", "Release"
+		std::string logLevel        = "info";             // "verbose", "info", "warning", "error"
+		bool enableHotReload        = true;
+		bool enableValidation       = false;
+		bool enableProfiler         = true;
+		bool compressAssets         = false;
+	};
+
+	void loadBuildProfiles();
+	void saveBuildProfile(const BuildProfile& profile);
+	void deleteBuildProfile(const std::string& name);
+	const std::vector<BuildProfile>& getBuildProfiles() const { return m_buildProfiles; }
+
 	// ── Build Game (Phase 10) ──────────────────────────────────────────────
 	struct BuildGameConfig
 	{
-		std::string startLevel;                     // relative to Content (e.g. "Levels/MyLevel.level")
-		std::string windowTitle   = "Game";
-		std::string outputDir;                      // absolute path for build output
-		bool        launchAfterBuild = true;
+		std::string  startLevel;                     // relative to Content (e.g. "Levels/MyLevel.level")
+		std::string  windowTitle   = "Game";
+		std::string  outputDir;                      // standardised: <project>/Build
+		std::string  binaryDir;                      // binary cache: <project>/Binary
+		BuildProfile profile;                        // active build profile
+		bool         launchAfterBuild = true;
+		bool         cleanBuild       = false;        // delete binary cache before compiling (disables incremental)
 	};
 
 	void openBuildGameDialog();
@@ -744,6 +786,7 @@ public:
 	bool isBuildToolchainAvailable() const { return m_toolchainAvailable; }
 	const ToolchainInfo& getBuildToolchain() const { return m_toolchainInfo; }
 	void showToolchainInstallPrompt();
+#endif // ENGINE_EDITOR
 
 private:
 	// Drag & Drop state
@@ -754,14 +797,16 @@ private:
 	std::string m_dragSourceId;
 	std::string m_dragLabel;
 	std::string m_sliderDragElementId;
-	DropOnViewportCallback m_onDropOnViewport;
-	DropOnFolderCallback m_onDropOnFolder;
-	DropOnEntityCallback m_onDropOnEntity;
+	std::function<void(const std::string&, const Vec2&)> m_onDropOnViewport;
+	std::function<void(const std::string&, const std::string&)> m_onDropOnFolder;
+	std::function<void(const std::string&, unsigned int)> m_onDropOnEntity;
 
+#if ENGINE_EDITOR
 	// Build Game state
 	BuildGameCallback m_onBuildGame;
 	std::shared_ptr<EditorWidget> m_buildProgressWidget;
 	PopupWindow* m_buildPopup{ nullptr };  // separate OS window for build output
+	std::vector<BuildProfile> m_buildProfiles;           // loaded build profiles
 
 public:
 	// Build thread state – public so the build lambda (registered from main.cpp) can
@@ -789,4 +834,5 @@ private:
 	// Build toolchain state
 	bool m_toolchainAvailable{ false };
 	ToolchainInfo m_toolchainInfo;
+#endif // ENGINE_EDITOR
 };
