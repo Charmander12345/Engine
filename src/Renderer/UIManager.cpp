@@ -22202,6 +22202,95 @@ void UIManager::pollBuildThread()
 }
 
 // ---------------------------------------------------------------------------
+// Silent process helpers (no console window) for CMake / Toolchain detection
+// ---------------------------------------------------------------------------
+#if defined(_WIN32)
+namespace {
+
+// Run a shell command silently (CREATE_NO_WINDOW) and return the exit code.
+static int shellExecSilent(const std::string& shellCmd)
+{
+    std::string cmdLine = "cmd.exe /c " + shellCmd;
+
+    STARTUPINFOA si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+
+    PROCESS_INFORMATION pi{};
+    BOOL ok = CreateProcessA(nullptr, cmdLine.data(), nullptr, nullptr,
+        FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+    if (!ok) return -1;
+
+    WaitForSingleObject(pi.hProcess, 10000); // 10 s timeout
+    DWORD exitCode = 1;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    return static_cast<int>(exitCode);
+}
+
+// Run a shell command silently and capture the first line of stdout.
+static std::string shellReadSilent(const std::string& shellCmd)
+{
+    SECURITY_ATTRIBUTES sa{};
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+
+    HANDLE hRead = nullptr, hWrite = nullptr;
+    if (!CreatePipe(&hRead, &hWrite, &sa, 0))
+        return {};
+    SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0);
+
+    std::string cmdLine = "cmd.exe /c " + shellCmd;
+
+    STARTUPINFOA si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW | STARTF_USESTDHANDLES;
+    si.wShowWindow = SW_HIDE;
+    si.hStdOutput = hWrite;
+    si.hStdError  = hWrite;
+    si.hStdInput  = INVALID_HANDLE_VALUE;
+
+    PROCESS_INFORMATION pi{};
+    BOOL ok = CreateProcessA(nullptr, cmdLine.data(), nullptr, nullptr,
+        TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+    CloseHandle(hWrite);
+
+    if (!ok)
+    {
+        CloseHandle(hRead);
+        return {};
+    }
+
+    std::string result;
+    char buf[1024];
+    DWORD bytesRead = 0;
+    while (ReadFile(hRead, buf, sizeof(buf) - 1, &bytesRead, nullptr) && bytesRead > 0)
+    {
+        buf[bytesRead] = '\0';
+        result += buf;
+        if (result.find('\n') != std::string::npos)
+            break;
+    }
+    CloseHandle(hRead);
+
+    WaitForSingleObject(pi.hProcess, 10000);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    auto pos = result.find('\n');
+    if (pos != std::string::npos)
+        result = result.substr(0, pos);
+    while (!result.empty() && (result.back() == '\r' || result.back() == '\n'))
+        result.pop_back();
+    return result;
+}
+
+} // anonymous namespace
+#endif // _WIN32
+
+// ---------------------------------------------------------------------------
 // detectCMake – locate cmake executable
 // ---------------------------------------------------------------------------
 bool UIManager::detectCMake()
@@ -22214,27 +22303,18 @@ bool UIManager::detectCMake()
     {
 #if defined(_WIN32)
         const std::string cmd = "\"" + path + "\" --version >nul 2>&1";
+        return shellExecSilent(cmd) == 0;
 #else
         const std::string cmd = "\"" + path + "\" --version >/dev/null 2>&1";
-#endif
         return std::system(cmd.c_str()) == 0;
+#endif
     };
 
-    // Helper: read the first line of output from a command (Windows)
+    // Helper: read the first line of output from a command
 #if defined(_WIN32)
     auto readFirstLine = [](const std::string& cmd) -> std::string
     {
-        std::string fullCmd = "\"" + cmd + "\"";
-        FILE* pipe = _popen(fullCmd.c_str(), "r");
-        if (!pipe) return {};
-        char buf[1024];
-        std::string result;
-        if (fgets(buf, sizeof(buf), pipe))
-            result = buf;
-        _pclose(pipe);
-        while (!result.empty() && (result.back() == '\n' || result.back() == '\r'))
-            result.pop_back();
-        return result;
+        return shellReadSilent(cmd);
     };
 #endif
 
@@ -22353,20 +22433,10 @@ bool UIManager::detectBuildToolchain()
     m_toolchainInfo = {};
 
 #if defined(_WIN32)
-    // Helper: read first line from a command
+    // Helper: read first line from a command (silent, no console window)
     auto readLine = [](const std::string& cmd) -> std::string
     {
-        std::string fullCmd = "\"" + cmd + "\"";
-        FILE* pipe = _popen(fullCmd.c_str(), "r");
-        if (!pipe) return {};
-        char buf[1024];
-        std::string result;
-        if (fgets(buf, sizeof(buf), pipe))
-            result = buf;
-        _pclose(pipe);
-        while (!result.empty() && (result.back() == '\n' || result.back() == '\r'))
-            result.pop_back();
-        return result;
+        return shellReadSilent(cmd);
     };
 
     // 1. Try vswhere to find Visual Studio
@@ -22415,9 +22485,9 @@ bool UIManager::detectBuildToolchain()
     }
 
     // 2. Check for cl.exe in PATH
-    if (std::system("where cl.exe >nul 2>&1") == 0)
+    if (shellExecSilent("where cl.exe >nul 2>&1") == 0)
     {
-        std::string clPath = readLine("where cl.exe 2>nul");
+        std::string clPath = shellReadSilent("where cl.exe 2>nul");
         m_toolchainInfo.name = "MSVC";
         m_toolchainInfo.compilerPath = clPath;
         m_toolchainAvailable = true;
@@ -22425,9 +22495,9 @@ bool UIManager::detectBuildToolchain()
     }
 
     // 3. Check for clang-cl in PATH
-    if (std::system("where clang-cl.exe >nul 2>&1") == 0)
+    if (shellExecSilent("where clang-cl.exe >nul 2>&1") == 0)
     {
-        std::string clangPath = readLine("where clang-cl.exe 2>nul");
+        std::string clangPath = shellReadSilent("where clang-cl.exe 2>nul");
         m_toolchainInfo.name = "Clang-CL";
         m_toolchainInfo.compilerPath = clangPath;
         m_toolchainAvailable = true;
@@ -22500,6 +22570,65 @@ void UIManager::showToolchainInstallPrompt()
                 NotificationLevel::Warning);
         }
     );
+}
+
+// ---------------------------------------------------------------------------
+// startAsyncToolchainDetection – run CMake + toolchain detection on a
+//                                 background thread (non-blocking)
+// ---------------------------------------------------------------------------
+void UIManager::startAsyncToolchainDetection()
+{
+    m_toolDetectDone.store(false);
+    m_toolDetectPolled = false;
+
+    std::thread([this]()
+    {
+        detectCMake();
+        detectBuildToolchain();
+        m_toolDetectDone.store(true);
+    }).detach();
+}
+
+// ---------------------------------------------------------------------------
+// pollToolchainDetection – call once per frame from the main thread.
+//                          When detection finishes, logs results and shows
+//                          install prompts if needed.
+// ---------------------------------------------------------------------------
+void UIManager::pollToolchainDetection()
+{
+    if (m_toolDetectPolled || !m_toolDetectDone.load())
+        return;
+    m_toolDetectPolled = true;
+
+    auto& logger = Logger::Instance();
+
+    if (!m_cmakeAvailable)
+    {
+        logger.log(Logger::Category::Engine,
+            "CMake not found \xe2\x80\x93 Build Game will not be available.",
+            Logger::LogLevel::WARNING);
+        showCMakeInstallPrompt();
+    }
+    else
+    {
+        logger.log(Logger::Category::Engine,
+            "CMake found: " + m_cmakePath,
+            Logger::LogLevel::INFO);
+    }
+
+    if (!m_toolchainAvailable)
+    {
+        logger.log(Logger::Category::Engine,
+            "C++ toolchain not found \xe2\x80\x93 Build Game will not be available.",
+            Logger::LogLevel::WARNING);
+        showToolchainInstallPrompt();
+    }
+    else
+    {
+        logger.log(Logger::Category::Engine,
+            "Toolchain: " + m_toolchainInfo.name + " " + m_toolchainInfo.version,
+            Logger::LogLevel::INFO);
+    }
 }
 
 // ===========================================================================

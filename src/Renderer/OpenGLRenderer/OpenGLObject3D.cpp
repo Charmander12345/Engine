@@ -4,6 +4,7 @@
 #include <vector>
 #include <limits>
 #include <fstream>
+#include <cstring>
 
 #include "OpenGLMaterial.h"
 #include "OpenGLShader.h"
@@ -11,6 +12,7 @@
 
 #include "../../Core/Asset.h"
 #include "../../AssetManager/AssetCooker.h"
+#include "../../AssetManager/HPKArchive.h"
 
 #include <unordered_map>
 #include <glm/glm.hpp>
@@ -31,6 +33,28 @@ namespace
         if (std::filesystem::exists(shadersfolder))
         {
             result = shadersfolder.string();
+        }
+        else
+        {
+            // HPK fallback: return path anyway if shader exists in archive
+            auto* hpk = HPKReader::GetMounted();
+            if (hpk)
+            {
+                std::string vpath = "shaders/" + filename;
+                if (hpk->contains(vpath))
+                {
+                    result = shadersfolder.string();
+                    Logger::Instance().log("HPK ResolveShaderPath3D: " + filename + " -> " + vpath, Logger::LogLevel::INFO);
+                }
+                else
+                {
+                    Logger::Instance().log("HPK ResolveShaderPath3D: " + filename + " not found in archive", Logger::LogLevel::WARNING);
+                }
+            }
+            else
+            {
+                Logger::Instance().log("HPK not mounted in ResolveShaderPath3D: " + filename, Logger::LogLevel::WARNING);
+            }
         }
         s_shaderPathCache[filename] = result;
         return result;
@@ -185,6 +209,15 @@ namespace
         cookedPath.replace_extension(".cooked");
         if (fs::exists(cookedPath))
             return cookedPath.string();
+
+        // HPK fallback: check if .cooked exists in the archive
+        auto* hpk = HPKReader::GetMounted();
+        if (hpk)
+        {
+            std::string vpath = hpk->makeVirtualPath(cookedPath.string());
+            if (!vpath.empty() && hpk->contains(vpath))
+                return cookedPath.string(); // Return the path; LoadCookedMesh will read from HPK
+        }
         return {};
     }
 
@@ -192,10 +225,30 @@ namespace
     bool IsCookedMesh(const std::string& filePath)
     {
         std::ifstream in(filePath, std::ios::binary);
-        if (!in) return false;
-        uint32_t magic = 0;
-        in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
-        return magic == CMSH_MAGIC;
+        if (in)
+        {
+            uint32_t magic = 0;
+            in.read(reinterpret_cast<char*>(&magic), sizeof(magic));
+            return magic == CMSH_MAGIC;
+        }
+
+        // HPK fallback: read the first 4 bytes from the archive
+        auto* hpk = HPKReader::GetMounted();
+        if (hpk)
+        {
+            std::string vpath = hpk->makeVirtualPath(filePath);
+            if (!vpath.empty())
+            {
+                auto buf = hpk->readFile(vpath);
+                if (buf && buf->size() >= sizeof(uint32_t))
+                {
+                    uint32_t magic = 0;
+                    std::memcpy(&magic, buf->data(), sizeof(magic));
+                    return magic == CMSH_MAGIC;
+                }
+            }
+        }
+        return false;
     }
 
     struct CookedMeshData
@@ -211,12 +264,60 @@ namespace
 
     bool LoadCookedMesh(const std::string& path, CookedMeshData& out)
     {
+        // Try disk first
         std::ifstream in(path, std::ios::binary);
-        if (!in) return false;
+        if (in)
+        {
+            CookedMeshHeader header{};
+            if (!in.read(reinterpret_cast<char*>(&header), sizeof(header)))
+                return false;
+
+            if (header.magic != CMSH_MAGIC || header.version != CMSH_VERSION)
+                return false;
+
+            out.vertexCount  = header.vertexCount;
+            out.vertexStride = header.vertexStride;
+            out.hasBones     = (header.flags & CMSH_FLAG_HAS_BONES) != 0;
+            out.boundsMin    = glm::vec3(header.boundsMin[0], header.boundsMin[1], header.boundsMin[2]);
+            out.boundsMax    = glm::vec3(header.boundsMax[0], header.boundsMax[1], header.boundsMax[2]);
+
+            const size_t floatsPerVertex = header.vertexStride / sizeof(float);
+            const size_t totalFloats = static_cast<size_t>(header.vertexCount) * floatsPerVertex;
+            out.vertexData.resize(totalFloats);
+            if (!in.read(reinterpret_cast<char*>(out.vertexData.data()), totalFloats * sizeof(float)))
+                return false;
+
+            uint32_t blobSize = 0;
+            if (in.read(reinterpret_cast<char*>(&blobSize), sizeof(blobSize)) && blobSize > 0)
+            {
+                std::string blob(blobSize, '\0');
+                if (in.read(blob.data(), blobSize))
+                {
+                    out.metaJson = json::parse(blob, nullptr, false);
+                    if (out.metaJson.is_discarded())
+                        out.metaJson = json::object();
+                }
+            }
+            return true;
+        }
+
+        // HPK fallback
+        auto* hpk = HPKReader::GetMounted();
+        if (!hpk) return false;
+
+        std::string vpath = hpk->makeVirtualPath(path);
+        if (vpath.empty()) return false;
+
+        auto buf = hpk->readFile(vpath);
+        if (!buf || buf->size() < sizeof(CookedMeshHeader))
+            return false;
+
+        const char* ptr = buf->data();
+        const char* end = ptr + buf->size();
 
         CookedMeshHeader header{};
-        if (!in.read(reinterpret_cast<char*>(&header), sizeof(header)))
-            return false;
+        std::memcpy(&header, ptr, sizeof(header));
+        ptr += sizeof(header);
 
         if (header.magic != CMSH_MAGIC || header.version != CMSH_VERSION)
             return false;
@@ -229,17 +330,21 @@ namespace
 
         const size_t floatsPerVertex = header.vertexStride / sizeof(float);
         const size_t totalFloats = static_cast<size_t>(header.vertexCount) * floatsPerVertex;
-        out.vertexData.resize(totalFloats);
-        if (!in.read(reinterpret_cast<char*>(out.vertexData.data()), totalFloats * sizeof(float)))
-            return false;
+        const size_t dataBytes = totalFloats * sizeof(float);
+        if (ptr + dataBytes > end) return false;
 
-        // Read JSON metadata blob
-        uint32_t blobSize = 0;
-        if (in.read(reinterpret_cast<char*>(&blobSize), sizeof(blobSize)) && blobSize > 0)
+        out.vertexData.resize(totalFloats);
+        std::memcpy(out.vertexData.data(), ptr, dataBytes);
+        ptr += dataBytes;
+
+        if (ptr + 4 <= end)
         {
-            std::string blob(blobSize, '\0');
-            if (in.read(blob.data(), blobSize))
+            uint32_t blobSize = 0;
+            std::memcpy(&blobSize, ptr, sizeof(blobSize));
+            ptr += 4;
+            if (blobSize > 0 && ptr + blobSize <= end)
             {
+                std::string blob(ptr, blobSize);
                 out.metaJson = json::parse(blob, nullptr, false);
                 if (out.metaJson.is_discarded())
                     out.metaJson = json::object();

@@ -9,6 +9,7 @@
 
 #include "OpenGLShader.h"
 #include "Logger.h"
+#include "../../AssetManager/HPKArchive.h"
 
 OpenGLTextRenderer::~OpenGLTextRenderer()
 {
@@ -295,11 +296,44 @@ bool OpenGLTextRenderer::buildGlyphAtlas(const std::string& fontPath)
     }
 
     FT_Face face;
+    std::vector<char> fontBuffer; // must outlive face when using FT_New_Memory_Face
     if (FT_New_Face(ft, fontPath.c_str(), 0, &face))
     {
-        Logger::Instance().log("OpenGLTextRenderer: Failed to load font: " + fontPath, Logger::LogLevel::ERROR);
-        FT_Done_FreeType(ft);
-        return false;
+        // HPK fallback: load font from archive into memory
+        bool loaded = false;
+        auto* hpk = HPKReader::GetMounted();
+        if (hpk)
+        {
+            std::string vpath = hpk->makeVirtualPath(fontPath);
+            Logger::Instance().log("HPK font fallback: file=" + fontPath
+                + " vpath=" + (vpath.empty() ? "(empty)" : vpath), Logger::LogLevel::INFO);
+            if (!vpath.empty())
+            {
+                auto buf = hpk->readFile(vpath);
+                if (buf)
+                {
+                    fontBuffer = std::move(*buf);
+                    if (!FT_New_Memory_Face(ft,
+                        reinterpret_cast<const FT_Byte*>(fontBuffer.data()),
+                        static_cast<FT_Long>(fontBuffer.size()), 0, &face))
+                    {
+                        loaded = true;
+                        Logger::Instance().log("HPK font loaded: " + vpath
+                            + " (" + std::to_string(fontBuffer.size()) + " bytes)", Logger::LogLevel::INFO);
+                    }
+                }
+            }
+        }
+        else
+        {
+            Logger::Instance().log("HPK not mounted when loading font: " + fontPath, Logger::LogLevel::WARNING);
+        }
+        if (!loaded)
+        {
+            Logger::Instance().log("OpenGLTextRenderer: Failed to load font: " + fontPath, Logger::LogLevel::ERROR);
+            FT_Done_FreeType(ft);
+            return false;
+        }
     }
 
     FT_Set_Pixel_Sizes(face, 0, 48);

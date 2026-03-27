@@ -9,6 +9,8 @@ set_target_properties(Logger PROPERTIES
 target_include_directories(Logger
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/CrashHandler
 )
 if (WIN32)
     set_target_properties(Logger PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)

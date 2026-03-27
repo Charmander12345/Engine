@@ -3027,7 +3027,12 @@ bool OpenGLRenderer::ensurePostProcessResources()
 	const std::string vertPath = (shadersDir / "resolve_vertex.glsl").string();
 	const std::string fragPath = (shadersDir / "resolve_fragment.glsl").string();
 	if (!m_postProcessStack.init(vertPath.c_str(), fragPath.c_str()))
+	{
+		Logger::Instance().log(Logger::Category::Rendering,
+			"ensurePostProcessResources: failed to init resolve shaders (vert=" + vertPath + ", frag=" + fragPath + ")",
+			Logger::LogLevel::ERROR);
 		return false;
+	}
 
 	const std::string bloomDownPath = (shadersDir / "bloom_downsample.glsl").string();
 	const std::string bloomBlurPath = (shadersDir / "bloom_blur.glsl").string();

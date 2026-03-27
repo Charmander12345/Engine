@@ -7,6 +7,8 @@ set(ASSET_MANAGER_SOURCES
     AssetTypes.h
     AssetCooker.h
     AssetCooker.cpp
+    HPKArchive.h
+    HPKArchive.cpp
     stb_image.h
     json.hpp
 )

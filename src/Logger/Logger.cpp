@@ -1,4 +1,5 @@
 #include "Logger.h"
+#include "CrashProtocol.h"
 #include <filesystem>
 #include <chrono>
 #include <ctime>
@@ -9,6 +10,14 @@
 #include <deque>
 #include <cstdio>
 #include <csignal>
+
+#if !defined(_WIN32)
+#  include <sys/socket.h>
+#  include <sys/un.h>
+#  include <unistd.h>
+#  include <sys/wait.h>
+#  include <signal.h>
+#endif
 
 namespace
 {
@@ -142,6 +151,7 @@ void Logger::initialize()
 
 Logger::~Logger()
 {
+    stopCrashHandler();
     if (logFile.is_open())
     {
         logFile.close();
@@ -184,6 +194,14 @@ void Logger::log(Category category, const std::string& message, LogLevel level)
     if (!suppressStdout)
     {
         std::cout << "[" << ts << "][" << catStr << "][" << levelStr << "] " << message << std::endl;
+    }
+
+    // Forward to CrashHandler pipe (non-blocking best-effort)
+    if (m_crashHandlerRunning)
+    {
+        std::string logData = std::string(levelStr) + "|" + catStr + "|[" + ts + "] " + message;
+        std::string msg = CrashProtocol::buildMessage(CrashProtocol::Tag::LogEntry, logData);
+        writePipe(msg.data(), msg.size());
     }
 
     // Append to console ring-buffer
@@ -246,10 +264,98 @@ void Logger::flush()
 }
 
 // ── Crash handler ────────────────────────────────────────────────────────
+
+// Collect stack trace into a string (used by SEH / signal handlers).
 #if defined(_WIN32)
-#include <Windows.h>
+#  define WIN32_LEAN_AND_MEAN
+#  define NOMINMAX
+#  include <Windows.h>
+#  ifdef ERROR
+#    undef ERROR
+#  endif
+#  ifdef WARNING
+#    undef WARNING
+#  endif
 #include <DbgHelp.h>
 #pragma comment(lib, "Dbghelp.lib")
+
+static std::string captureStackTrace(EXCEPTION_POINTERS* ep)
+{
+    if (!ep) return {};
+
+    HANDLE process = GetCurrentProcess();
+    HANDLE thread  = GetCurrentThread();
+    SymInitialize(process, nullptr, TRUE);
+
+    CONTEXT ctx = *ep->ContextRecord;
+    STACKFRAME64 frame{};
+    DWORD machineType = 0;
+#if defined(_M_X64)
+    machineType = IMAGE_FILE_MACHINE_AMD64;
+    frame.AddrPC.Offset    = ctx.Rip;
+    frame.AddrFrame.Offset = ctx.Rbp;
+    frame.AddrStack.Offset = ctx.Rsp;
+#elif defined(_M_IX86)
+    machineType = IMAGE_FILE_MACHINE_I386;
+    frame.AddrPC.Offset    = ctx.Eip;
+    frame.AddrFrame.Offset = ctx.Ebp;
+    frame.AddrStack.Offset = ctx.Esp;
+#endif
+    frame.AddrPC.Mode    = AddrModeFlat;
+    frame.AddrFrame.Mode = AddrModeFlat;
+    frame.AddrStack.Mode = AddrModeFlat;
+
+    std::string result;
+    constexpr int kMaxFrames = 32;
+    for (int i = 0; i < kMaxFrames; ++i)
+    {
+        if (!StackWalk64(machineType, process, thread, &frame, &ctx,
+            nullptr, SymFunctionTableAccess64, SymGetModuleBase64, nullptr))
+            break;
+        if (frame.AddrPC.Offset == 0)
+            break;
+
+        char symbolBuf[sizeof(SYMBOL_INFO) + 256];
+        auto* symbol = reinterpret_cast<SYMBOL_INFO*>(symbolBuf);
+        symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+        symbol->MaxNameLen   = 255;
+
+        char frameBuf[512];
+        if (SymFromAddr(process, frame.AddrPC.Offset, nullptr, symbol))
+        {
+            IMAGEHLP_LINE64 line{};
+            line.SizeOfStruct = sizeof(line);
+            DWORD displacement = 0;
+            if (SymGetLineFromAddr64(process, frame.AddrPC.Offset, &displacement, &line))
+            {
+                std::snprintf(frameBuf, sizeof(frameBuf), "  [%d] %s (%s:%lu)",
+                    i, symbol->Name, line.FileName, line.LineNumber);
+            }
+            else
+            {
+                std::snprintf(frameBuf, sizeof(frameBuf), "  [%d] %s (0x%llX)",
+                    i, symbol->Name, static_cast<unsigned long long>(frame.AddrPC.Offset));
+            }
+        }
+        else
+        {
+            std::snprintf(frameBuf, sizeof(frameBuf), "  [%d] 0x%llX",
+                i, static_cast<unsigned long long>(frame.AddrPC.Offset));
+        }
+        result += frameBuf;
+        result += "\n";
+    }
+
+    SymCleanup(process);
+    return result;
+}
+
+static void sendCrashToPipe(const char* description, const std::string& stackTrace = {})
+{
+    auto& logger = Logger::Instance();
+    std::string data = std::string(description ? description : "Unknown") + "|" + stackTrace;
+    logger.sendToCrashHandler(CrashProtocol::Tag::Crash, data);
+}
 
 static LONG WINAPI EngineCrashHandler(EXCEPTION_POINTERS* ep)
 {
@@ -273,81 +379,20 @@ static LONG WINAPI EngineCrashHandler(EXCEPTION_POINTERS* ep)
 
     char buf[512];
     std::snprintf(buf, sizeof(buf),
-        "FATAL CRASH — %s (code 0x%08lX) at address %p",
+        "FATAL CRASH \u2014 %s (code 0x%08lX) at address %p",
         desc, static_cast<unsigned long>(code), addr);
 
+    // Capture stack trace before logging (logging may fail in a crash)
+    std::string stackTrace = captureStackTrace(ep);
+
     logger.log(Logger::Category::Engine, buf, Logger::LogLevel::FATAL);
-
-    // Walk the call stack for extra context
-    if (ep)
-    {
-        HANDLE process = GetCurrentProcess();
-        HANDLE thread  = GetCurrentThread();
-        SymInitialize(process, nullptr, TRUE);
-
-        CONTEXT ctx = *ep->ContextRecord;
-        STACKFRAME64 frame{};
-        DWORD machineType = 0;
-#if defined(_M_X64)
-        machineType = IMAGE_FILE_MACHINE_AMD64;
-        frame.AddrPC.Offset    = ctx.Rip;
-        frame.AddrFrame.Offset = ctx.Rbp;
-        frame.AddrStack.Offset = ctx.Rsp;
-#elif defined(_M_IX86)
-        machineType = IMAGE_FILE_MACHINE_I386;
-        frame.AddrPC.Offset    = ctx.Eip;
-        frame.AddrFrame.Offset = ctx.Ebp;
-        frame.AddrStack.Offset = ctx.Esp;
-#endif
-        frame.AddrPC.Mode    = AddrModeFlat;
-        frame.AddrFrame.Mode = AddrModeFlat;
-        frame.AddrStack.Mode = AddrModeFlat;
-
-        logger.log(Logger::Category::Engine, "--- Stack Trace ---", Logger::LogLevel::FATAL);
-
-        constexpr int kMaxFrames = 32;
-        for (int i = 0; i < kMaxFrames; ++i)
-        {
-            if (!StackWalk64(machineType, process, thread, &frame, &ctx,
-                nullptr, SymFunctionTableAccess64, SymGetModuleBase64, nullptr))
-                break;
-            if (frame.AddrPC.Offset == 0)
-                break;
-
-            char symbolBuf[sizeof(SYMBOL_INFO) + 256];
-            auto* symbol = reinterpret_cast<SYMBOL_INFO*>(symbolBuf);
-            symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
-            symbol->MaxNameLen   = 255;
-
-            char frameBuf[512];
-            if (SymFromAddr(process, frame.AddrPC.Offset, nullptr, symbol))
-            {
-                IMAGEHLP_LINE64 line{};
-                line.SizeOfStruct = sizeof(line);
-                DWORD displacement = 0;
-                if (SymGetLineFromAddr64(process, frame.AddrPC.Offset, &displacement, &line))
-                {
-                    std::snprintf(frameBuf, sizeof(frameBuf), "  [%d] %s (%s:%lu)",
-                        i, symbol->Name, line.FileName, line.LineNumber);
-                }
-                else
-                {
-                    std::snprintf(frameBuf, sizeof(frameBuf), "  [%d] %s (0x%llX)",
-                        i, symbol->Name, static_cast<unsigned long long>(frame.AddrPC.Offset));
-                }
-            }
-            else
-            {
-                std::snprintf(frameBuf, sizeof(frameBuf), "  [%d] 0x%llX",
-                    i, static_cast<unsigned long long>(frame.AddrPC.Offset));
-            }
-            logger.log(Logger::Category::Engine, frameBuf, Logger::LogLevel::FATAL);
-        }
-
-        SymCleanup(process);
-    }
-
+    if (!stackTrace.empty())
+        logger.log(Logger::Category::Engine, "--- Stack Trace ---\n" + stackTrace, Logger::LogLevel::FATAL);
     logger.flush();
+
+    // Send CRASH message to CrashHandler via pipe
+    sendCrashToPipe(buf, stackTrace);
+
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
@@ -355,9 +400,10 @@ static void EngineCppTerminateHandler()
 {
     auto& logger = Logger::Instance();
     logger.log(Logger::Category::Engine,
-        "FATAL CRASH — std::terminate() called (unhandled C++ exception)",
+        "FATAL CRASH \u2014 std::terminate() called (unhandled C++ exception)",
         Logger::LogLevel::FATAL);
     logger.flush();
+    sendCrashToPipe("std::terminate() called (unhandled C++ exception)");
     std::abort();
 }
 
@@ -368,9 +414,174 @@ void Logger::installCrashHandler()
     Instance().log(Category::Engine, "Crash handlers installed (SEH + std::terminate)", LogLevel::INFO);
 }
 
-#else // non-Windows
-#include <csignal>
-#include <cstdlib>
+// ── CrashHandler pipe integration (Windows) ─────────────────────────────
+
+void Logger::launchCrashHandlerProcess()
+{
+    char exePath[MAX_PATH]{};
+    GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+    std::filesystem::path crashExe = std::filesystem::path(exePath).parent_path() / "Tools" / "CrashHandler.exe";
+    if (!std::filesystem::exists(crashExe))
+    {
+        log(Category::Engine, "CrashHandler.exe not found at: " + crashExe.string(), LogLevel::WARNING);
+        return;
+    }
+
+    DWORD pid = GetCurrentProcessId();
+    std::string cmdLine = "\"" + crashExe.string() + "\" " + std::to_string(pid);
+
+    STARTUPINFOA si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    if (!CreateProcessA(nullptr, cmdLine.data(), nullptr, nullptr, FALSE,
+                        DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP, nullptr, nullptr, &si, &pi))
+    {
+        log(Category::Engine, "Failed to launch CrashHandler process", LogLevel::WARNING);
+        return;
+    }
+
+    m_crashHandlerProcess = pi.hProcess;
+    if (pi.hThread) CloseHandle(pi.hThread);
+}
+
+void Logger::connectPipe()
+{
+    // Try connecting to the CrashHandler's named pipe server with retries
+    for (int attempt = 0; attempt < 50; ++attempt)
+    {
+        m_pipe = CreateFileA(
+            CrashProtocol::pipeName(GetCurrentProcessId()).c_str(),
+            GENERIC_WRITE,
+            0,
+            nullptr,
+            OPEN_EXISTING,
+            0,
+            nullptr);
+
+        if (m_pipe != INVALID_HANDLE_VALUE)
+        {
+            m_crashHandlerRunning = true;
+            return;
+        }
+
+        Sleep(100); // Wait for CrashHandler to create the pipe
+    }
+
+    log(Category::Engine, "Failed to connect to CrashHandler pipe after retries", LogLevel::WARNING);
+}
+
+void Logger::writePipe(const void* data, size_t size)
+{
+    std::lock_guard<std::mutex> lock(m_pipeMutex);
+    if (m_pipe == INVALID_HANDLE_VALUE)
+        return;
+
+    DWORD written = 0;
+    if (!WriteFile(m_pipe, data, static_cast<DWORD>(size), &written, nullptr))
+    {
+        // Pipe broken – CrashHandler may have died
+        m_crashHandlerRunning = false;
+    }
+}
+
+void Logger::startCrashHandler()
+{
+    launchCrashHandlerProcess();
+    if (!m_crashHandlerProcess)
+        return;
+
+    connectPipe();
+
+    if (m_crashHandlerRunning)
+    {
+        // Send initial info: working directory, PID, command line
+        sendToCrashHandler(CrashProtocol::Tag::WorkingDir, std::filesystem::current_path().string());
+
+        char cmdBuf[32768];
+        GetModuleFileNameA(nullptr, cmdBuf, sizeof(cmdBuf));
+        sendToCrashHandler(CrashProtocol::Tag::Commandline, cmdBuf);
+
+        log(Category::Engine, "CrashHandler connected via pipe", LogLevel::INFO);
+    }
+}
+
+void Logger::ensureCrashHandlerAlive()
+{
+    if (!m_crashHandlerProcess)
+        return;
+
+    DWORD exitCode = 0;
+    if (GetExitCodeProcess(m_crashHandlerProcess, &exitCode) && exitCode != STILL_ACTIVE)
+    {
+        log(Category::Engine, "CrashHandler process died – restarting...", LogLevel::WARNING);
+        CloseHandle(m_crashHandlerProcess);
+        m_crashHandlerProcess = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(m_pipeMutex);
+            if (m_pipe != INVALID_HANDLE_VALUE)
+            {
+                CloseHandle(m_pipe);
+                m_pipe = INVALID_HANDLE_VALUE;
+            }
+        }
+        m_crashHandlerRunning = false;
+
+        launchCrashHandlerProcess();
+        if (m_crashHandlerProcess)
+        {
+            connectPipe();
+            if (m_crashHandlerRunning)
+            {
+                sendToCrashHandler(CrashProtocol::Tag::WorkingDir, std::filesystem::current_path().string());
+                log(Category::Engine, "CrashHandler restarted successfully", LogLevel::INFO);
+            }
+        }
+    }
+}
+
+void Logger::sendToCrashHandler(const std::string& tag, const std::string& data)
+{
+    if (!m_crashHandlerRunning)
+        return;
+    std::string msg = CrashProtocol::buildMessage(tag.c_str(), data);
+    writePipe(msg.data(), msg.size());
+}
+
+void Logger::stopCrashHandler()
+{
+    if (!m_crashHandlerRunning)
+        return;
+
+    sendToCrashHandler(CrashProtocol::Tag::Shutdown, "");
+    m_crashHandlerRunning = false;
+
+    {
+        std::lock_guard<std::mutex> lock(m_pipeMutex);
+        if (m_pipe != INVALID_HANDLE_VALUE)
+        {
+            FlushFileBuffers(m_pipe);
+            CloseHandle(m_pipe);
+            m_pipe = INVALID_HANDLE_VALUE;
+        }
+    }
+
+    // Give CrashHandler time to exit gracefully, then close handle
+    if (m_crashHandlerProcess)
+    {
+        WaitForSingleObject(m_crashHandlerProcess, 2000);
+        CloseHandle(m_crashHandlerProcess);
+        m_crashHandlerProcess = nullptr;
+    }
+}
+
+#else // non-Windows ─────────────────────────────────────────────────────
+
+static void sendCrashToPipe(const char* description, const std::string& stackTrace = {})
+{
+    auto& logger = Logger::Instance();
+    std::string data = std::string(description ? description : "Unknown") + "|" + stackTrace;
+    logger.sendToCrashHandler(CrashProtocol::Tag::Crash, data);
+}
 
 static void EngineSignalHandler(int sig)
 {
@@ -386,9 +597,10 @@ static void EngineSignalHandler(int sig)
 
     auto& logger = Logger::Instance();
     logger.log(Logger::Category::Engine,
-        std::string("FATAL CRASH — signal ") + name,
+        std::string("FATAL CRASH \u2014 signal ") + name,
         Logger::LogLevel::FATAL);
     logger.flush();
+    sendCrashToPipe(name);
     std::_Exit(128 + sig);
 }
 
@@ -396,9 +608,10 @@ static void EngineCppTerminateHandler()
 {
     auto& logger = Logger::Instance();
     logger.log(Logger::Category::Engine,
-        "FATAL CRASH — std::terminate() called (unhandled C++ exception)",
+        "FATAL CRASH \u2014 std::terminate() called (unhandled C++ exception)",
         Logger::LogLevel::FATAL);
     logger.flush();
+    sendCrashToPipe("std::terminate() called (unhandled C++ exception)");
     std::abort();
 }
 
@@ -411,4 +624,136 @@ void Logger::installCrashHandler()
     std::set_terminate(EngineCppTerminateHandler);
     Instance().log(Category::Engine, "Crash handlers installed (signal + std::terminate)", LogLevel::INFO);
 }
+
+// ── CrashHandler pipe integration (Linux/macOS) ────────────────────────
+
+void Logger::launchCrashHandlerProcess()
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path self = fs::read_symlink("/proc/self/exe", ec);
+    if (ec) return;
+    fs::path crashExe = self.parent_path() / "Tools" / "CrashHandler";
+    if (!fs::exists(crashExe))
+    {
+        log(Category::Engine, "CrashHandler not found at: " + crashExe.string(), LogLevel::WARNING);
+        return;
+    }
+
+    pid_t pid = fork();
+    if (pid == 0)
+    {
+        // Child – exec CrashHandler
+        std::string pidStr = std::to_string(getppid());
+        execl(crashExe.c_str(), crashExe.c_str(), pidStr.c_str(), nullptr);
+        _exit(1);
+    }
+    else if (pid > 0)
+    {
+        m_crashHandlerPid = pid;
+    }
+}
+
+void Logger::connectPipe()
+{
+    for (int attempt = 0; attempt < 50; ++attempt)
+    {
+        int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (fd < 0) { usleep(100000); continue; }
+
+        struct sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        std::strncpy(addr.sun_path, CrashProtocol::kPipeName, sizeof(addr.sun_path) - 1);
+
+        if (connect(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0)
+        {
+            m_pipeFd = fd;
+            m_crashHandlerRunning = true;
+            return;
+        }
+        close(fd);
+        usleep(100000);
+    }
+    log(Category::Engine, "Failed to connect to CrashHandler socket after retries", LogLevel::WARNING);
+}
+
+void Logger::writePipe(const void* data, size_t size)
+{
+    std::lock_guard<std::mutex> lock(m_pipeMutex);
+    if (m_pipeFd < 0) return;
+
+    ssize_t n = write(m_pipeFd, data, size);
+    if (n < 0)
+        m_crashHandlerRunning = false;
+}
+
+void Logger::startCrashHandler()
+{
+    launchCrashHandlerProcess();
+    if (m_crashHandlerPid <= 0) return;
+
+    connectPipe();
+    if (m_crashHandlerRunning)
+    {
+        sendToCrashHandler(CrashProtocol::Tag::WorkingDir, std::filesystem::current_path().string());
+        log(Category::Engine, "CrashHandler connected via socket", LogLevel::INFO);
+    }
+}
+
+void Logger::ensureCrashHandlerAlive()
+{
+    if (m_crashHandlerPid <= 0) return;
+
+    int status = 0;
+    pid_t result = waitpid(m_crashHandlerPid, &status, WNOHANG);
+    if (result == m_crashHandlerPid)
+    {
+        log(Category::Engine, "CrashHandler process died – restarting...", LogLevel::WARNING);
+        {
+            std::lock_guard<std::mutex> lock(m_pipeMutex);
+            if (m_pipeFd >= 0) { close(m_pipeFd); m_pipeFd = -1; }
+        }
+        m_crashHandlerRunning = false;
+        m_crashHandlerPid = 0;
+
+        launchCrashHandlerProcess();
+        if (m_crashHandlerPid > 0)
+        {
+            connectPipe();
+            if (m_crashHandlerRunning)
+            {
+                sendToCrashHandler(CrashProtocol::Tag::WorkingDir, std::filesystem::current_path().string());
+                log(Category::Engine, "CrashHandler restarted successfully", LogLevel::INFO);
+            }
+        }
+    }
+}
+
+void Logger::sendToCrashHandler(const std::string& tag, const std::string& data)
+{
+    if (!m_crashHandlerRunning) return;
+    std::string msg = CrashProtocol::buildMessage(tag.c_str(), data);
+    writePipe(msg.data(), msg.size());
+}
+
+void Logger::stopCrashHandler()
+{
+    if (!m_crashHandlerRunning) return;
+
+    sendToCrashHandler(CrashProtocol::Tag::Shutdown, "");
+    m_crashHandlerRunning = false;
+
+    {
+        std::lock_guard<std::mutex> lock(m_pipeMutex);
+        if (m_pipeFd >= 0) { close(m_pipeFd); m_pipeFd = -1; }
+    }
+
+    if (m_crashHandlerPid > 0)
+    {
+        int status = 0;
+        waitpid(m_crashHandlerPid, &status, 0);
+        m_crashHandlerPid = 0;
+    }
+}
+
 #endif

@@ -218,7 +218,7 @@ add_subdirectory(src/Scripting)
 add_subdirectory(src/Landscape)
 add_subdirectory(src/Physics)
 
-# ── Tests (GTest) ───────────────────────────────────────────────────────
+# ── Tests (GTest)
 option(ENGINE_BUILD_TESTS "Build engine GTest suite" ON)
 if(ENGINE_BUILD_TESTS)
     enable_testing()
@@ -244,6 +244,7 @@ set(ENGINE_COMMON_INCLUDES
     ${CMAKE_SOURCE_DIR}/src/Core
     ${CMAKE_SOURCE_DIR}/src/Landscape
     ${CMAKE_SOURCE_DIR}/src/Physics
+    ${CMAKE_SOURCE_DIR}/CrashHandler
     ${Python3_INCLUDE_DIRS}
 )
 
@@ -314,6 +315,24 @@ if(ENGINE_BUILD_RUNTIME)
         target_compile_definitions(HorizonEngineRuntime PRIVATE
             GAME_WINDOW_TITLE_BAKED="${GAME_WINDOW_TITLE}"
         )
+    endif()
+
+    # ── Build-profile compile definitions ────────────────────────────────
+    # ENGINE_BUILD_PROFILE = "Debug" | "Development" | "Shipping" (default)
+    # Each profile enables a unique define that controls which dev features
+    # are compiled into the runtime binary.
+    #   ENGINE_BUILD_SHIPPING    – pure game, no dev/debug features
+    #   ENGINE_BUILD_DEVELOPMENT – metrics overlay (F10), basic diagnostics
+    #   ENGINE_BUILD_DEBUG       – all dev tools, debug shortcuts, validation
+    if(NOT DEFINED ENGINE_BUILD_PROFILE OR "${ENGINE_BUILD_PROFILE}" STREQUAL "")
+        set(ENGINE_BUILD_PROFILE "Shipping")
+    endif()
+    if(ENGINE_BUILD_PROFILE STREQUAL "Debug")
+        target_compile_definitions(HorizonEngineRuntime PRIVATE ENGINE_BUILD_DEBUG=1)
+    elseif(ENGINE_BUILD_PROFILE STREQUAL "Development")
+        target_compile_definitions(HorizonEngineRuntime PRIVATE ENGINE_BUILD_DEVELOPMENT=1)
+    else()
+        target_compile_definitions(HorizonEngineRuntime PRIVATE ENGINE_BUILD_SHIPPING=1)
     endif()
 endif()
 
@@ -429,3 +448,6 @@ if(ENGINE_BUILD_RUNTIME)
         COMMAND_EXPAND_LISTS
     )
 endif()
+
+# ── CrashHandler (out-of-process crash reporter) ────────────────────────
+add_subdirectory(CrashHandler)

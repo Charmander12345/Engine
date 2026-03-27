@@ -143,6 +143,7 @@ namespace
         PyObject* onBeginOverlapFunc{ nullptr };
         PyObject* onEndOverlapFunc{ nullptr };
         std::unordered_set<unsigned long> startedEntities;
+        bool loadFailed{ false };
     };
 
     struct LevelScriptState
@@ -420,13 +421,39 @@ namespace
             "Python: resolved script path: " + resolvedPath.string(),
             Logger::LogLevel::INFO);
 
-        std::ifstream file(resolvedPath, std::ios::in | std::ios::binary);
-        if (!file.is_open())
+        std::string code;
         {
-            Logger::Instance().log(Logger::Category::Engine, "Python script not found: " + resolvedPath.string(), Logger::LogLevel::ERROR);
-            return false;
+            std::ifstream file(resolvedPath, std::ios::in | std::ios::binary);
+            if (file.is_open())
+            {
+                code.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+            }
+            else
+            {
+                // HPK fallback: read script from the mounted archive
+                auto* hpk = HPKReader::GetMounted();
+                if (hpk)
+                {
+                    std::string vpath = hpk->makeVirtualPath(resolvedPath.string());
+                    if (!vpath.empty())
+                    {
+                        auto buf = hpk->readFile(vpath);
+                        if (buf && !buf->empty())
+                        {
+                            code.assign(buf->data(), buf->size());
+                            Logger::Instance().log(Logger::Category::Engine,
+                                "Python: loaded script from HPK: " + vpath,
+                                Logger::LogLevel::INFO);
+                        }
+                    }
+                }
+                if (code.empty())
+                {
+                    Logger::Instance().log(Logger::Category::Engine, "Python script not found: " + resolvedPath.string(), Logger::LogLevel::ERROR);
+                    return false;
+                }
+            }
         }
-        const std::string code((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         if (code.empty())
         {
             Logger::Instance().log(Logger::Category::Engine, "Python script empty: " + resolvedPath.string(), Logger::LogLevel::ERROR);
@@ -519,13 +546,39 @@ namespace
         }
 
         std::filesystem::path resolvedPath = ResolveScriptPath(scriptPath);
-        std::ifstream file(resolvedPath, std::ios::in | std::ios::binary);
-        if (!file.is_open())
+        std::string code;
         {
-            Logger::Instance().log(Logger::Category::Engine, "Python level script not found: " + resolvedPath.string(), Logger::LogLevel::ERROR);
-            return false;
+            std::ifstream file(resolvedPath, std::ios::in | std::ios::binary);
+            if (file.is_open())
+            {
+                code.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+            }
+            else
+            {
+                // HPK fallback: read level script from the mounted archive
+                auto* hpk = HPKReader::GetMounted();
+                if (hpk)
+                {
+                    std::string vpath = hpk->makeVirtualPath(resolvedPath.string());
+                    if (!vpath.empty())
+                    {
+                        auto buf = hpk->readFile(vpath);
+                        if (buf && !buf->empty())
+                        {
+                            code.assign(buf->data(), buf->size());
+                            Logger::Instance().log(Logger::Category::Engine,
+                                "Python: loaded level script from HPK: " + vpath,
+                                Logger::LogLevel::INFO);
+                        }
+                    }
+                }
+                if (code.empty())
+                {
+                    Logger::Instance().log(Logger::Category::Engine, "Python level script not found: " + resolvedPath.string(), Logger::LogLevel::ERROR);
+                    return false;
+                }
+            }
         }
-        const std::string code((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         if (code.empty())
         {
             Logger::Instance().log(Logger::Category::Engine, "Python level script empty: " + resolvedPath.string(), Logger::LogLevel::ERROR);
@@ -3898,8 +3951,11 @@ namespace Scripting
             auto& state = s_scripts[component->scriptPath];
             if (!state.module)
             {
+                if (state.loadFailed)
+                    continue;
                 if (!LoadScriptModule(component->scriptPath, state))
                 {
+                    state.loadFailed = true;
                     continue;
                 }
             }

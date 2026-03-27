@@ -769,7 +769,7 @@ public:
 	// ── CMake Detection ───────────────────────────────────────────────────
 	// Call once at startup to locate CMake.  Returns true if CMake is available.
 	bool detectCMake();
-	bool isCMakeAvailable() const { return m_cmakeAvailable; }
+	bool isCMakeAvailable() const { return m_cmakeAvailable.load(); }
 	const std::string& getCMakePath() const { return m_cmakePath; }
 	// Show a popup asking the user to install CMake.
 	void showCMakeInstallPrompt();
@@ -783,9 +783,15 @@ public:
 		std::string vsInstallPath;  // VS installation path (empty if not VS)
 	};
 	bool detectBuildToolchain();
-	bool isBuildToolchainAvailable() const { return m_toolchainAvailable; }
+	bool isBuildToolchainAvailable() const { return m_toolchainAvailable.load(); }
 	const ToolchainInfo& getBuildToolchain() const { return m_toolchainInfo; }
 	void showToolchainInstallPrompt();
+
+	// ── Async Detection (non-blocking startup) ───────────────────────────
+	// Starts CMake + toolchain detection on a background thread.
+	void startAsyncToolchainDetection();
+	// Main-thread poll: once detection finishes, logs results and shows prompts.
+	void pollToolchainDetection();
 #endif // ENGINE_EDITOR
 
 private:
@@ -828,11 +834,15 @@ private:
 	std::vector<std::string> m_buildOutputLines;        // full log (main-thread only)
 
 	// CMake state
-	bool m_cmakeAvailable{ false };
+	std::atomic<bool> m_cmakeAvailable{ false };
 	std::string m_cmakePath;
 
 	// Build toolchain state
-	bool m_toolchainAvailable{ false };
+	std::atomic<bool> m_toolchainAvailable{ false };
 	ToolchainInfo m_toolchainInfo;
+
+	// Async detection state
+	std::atomic<bool> m_toolDetectDone{ false };
+	bool m_toolDetectPolled{ false };
 #endif // ENGINE_EDITOR
 };

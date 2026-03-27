@@ -24,12 +24,14 @@
 #include "AssetManager/AssetManager.h"
 #include "AssetManager/AssetTypes.h"
 #include "AssetManager/AssetCooker.h"
+#include "AssetManager/HPKArchive.h"
 #include "Core/ECS/ECS.h"
 #include "Core/MathTypes.h"
 #include "Core/AudioManager.h"
 #include "Core/EngineLevel.h"
 #include "Scripting/PythonScripting.h"
 #include "Physics/PhysicsWorld.h"
+#include "CrashProtocol.h"
 
 #include "Renderer/ViewportUIManager.h"
 #include "Renderer/UIWidget.h"
@@ -49,6 +51,7 @@ int main()
     auto& logger = Logger::Instance();
     logger.initialize();
     Logger::installCrashHandler();
+    logger.startCrashHandler();
 
     auto logTimed = [&](Logger::Category category, const std::string& message, Logger::LogLevel level)
     {
@@ -143,6 +146,10 @@ int main()
                         else if (key == "EnableHotReload")  rtEnableHotReload = (val == "true" || val == "1");
                         else if (key == "EnableValidation") rtEnableValidation = (val == "true" || val == "1");
                         else if (key == "EnableProfiler")   rtEnableProfiler = (val == "true" || val == "1");
+                        else {
+                            // Unknown key — treat as engine state (renderer settings etc.)
+                            diagnostics.setState(key, val);
+                        }
                     }
                     isRuntimeMode = true;
                     logTimed(Logger::Category::Engine, "Runtime mode detected (game.ini). Profile=" + rtBuildProfile + " StartLevel=" + rtStartLevel, Logger::LogLevel::INFO);
@@ -171,6 +178,24 @@ int main()
             while (!chosenPath.empty() && (chosenPath.back() == '/' || chosenPath.back() == '\\'))
                 chosenPath.pop_back();
             projectChosen = true;
+
+            // Sync working directory with exe directory so that all
+            // current_path()-based asset/shader lookups resolve correctly
+            // (HPK virtual-path resolution depends on this).
+            std::error_code cwdEc;
+            std::filesystem::current_path(chosenPath, cwdEc);
+
+            // Re-try loading config/config.ini now that current_path points
+            // to the exe directory where the build placed the loose file.
+            // Use merge mode so that engine settings already loaded from
+            // game.ini (via setState) are preserved — config.ini only fills
+            // in keys that game.ini didn't provide (e.g. RHI, WindowSize).
+            {
+                std::error_code ec2;
+                auto cfgFile = std::filesystem::path(chosenPath) / "config" / "config.ini";
+                if (std::filesystem::exists(cfgFile, ec2) && !ec2)
+                    diagnostics.loadConfig(/*merge=*/true);
+            }
         }
 
         // Apply profile-based log level
@@ -181,9 +206,13 @@ int main()
         else
             Logger::Instance().setMinimumLogLevel(Logger::LogLevel::INFO);
 
-        // Suppress stdout in Shipping builds
+        // Suppress stdout in Shipping builds (compile-time for baked, runtime for game.ini)
+#if defined(ENGINE_BUILD_SHIPPING)
+        Logger::Instance().setSuppressStdout(true);
+#else
         if (rtBuildProfile == "Shipping")
             Logger::Instance().setSuppressStdout(true);
+#endif
     }
 
     // Determine startup mode now that isRuntimeMode is known
@@ -402,6 +431,34 @@ int main()
         }
     }
 
+    // Runtime mode: early-mount HPK so shaders are available during renderer init.
+    // AssetManager::loadProject() will mount its own reader later and replace the
+    // global singleton; the early reader is then released.
+    std::unique_ptr<HPKReader> earlyHpkReader;
+    if (isRuntimeMode && !chosenPath.empty())
+    {
+        const auto hpkPath = std::filesystem::path(chosenPath) / "content.hpk";
+        if (std::filesystem::exists(hpkPath))
+        {
+            earlyHpkReader = std::make_unique<HPKReader>();
+            if (earlyHpkReader->mount(hpkPath.string()))
+            {
+                HPKReader::SetMounted(earlyHpkReader.get());
+                logTimed(Logger::Category::Engine,
+                    "Early-mounted content archive: " + hpkPath.string()
+                    + " (" + std::to_string(earlyHpkReader->getFileCount()) + " files)",
+                    Logger::LogLevel::INFO);
+            }
+            else
+            {
+                logTimed(Logger::Category::Engine,
+                    "Failed to early-mount content archive: " + hpkPath.string(),
+                    Logger::LogLevel::WARNING);
+                earlyHpkReader.reset();
+            }
+        }
+    }
+
     logTimed(Logger::Category::Rendering, std::string("Initialising Renderer (") + DiagnosticsManager::rhiTypeToString(diagnostics.getRHIType()) + ")...", Logger::LogLevel::INFO);
     Renderer* renderer = RendererFactory::createRenderer(activeBackend);
 
@@ -515,6 +572,71 @@ int main()
         {
             try { renderer->setTessellationLevel(std::stof(*v)); } catch (...) {}
         }
+    }
+
+    // Runtime mode: apply sensible rendering defaults when no persisted editor config exists.
+    // Without these, gamma correction / tone mapping / post-processing stay at renderer
+    // defaults (typically off), which makes the scene appear washed-out and too bright.
+    if (isRuntimeMode)
+    {
+        auto& diag = DiagnosticsManager::Instance();
+        if (!diag.getState("PostProcessingEnabled"))
+            renderer->setPostProcessingEnabled(true);
+        if (!diag.getState("GammaCorrectionEnabled"))
+            renderer->setGammaCorrectionEnabled(true);
+        if (!diag.getState("ToneMappingEnabled"))
+            renderer->setToneMappingEnabled(true);
+        if (!diag.getState("ShadowsEnabled"))
+            renderer->setShadowsEnabled(true);
+        if (!diag.getState("CsmEnabled"))
+            renderer->setCsmEnabled(true);
+        if (!diag.getState("FogEnabled"))
+            renderer->setFogEnabled(false);
+        if (!diag.getState("BloomEnabled"))
+            renderer->setBloomEnabled(false);
+        if (!diag.getState("SsaoEnabled"))
+            renderer->setSsaoEnabled(false);
+        if (!diag.getState("OcclusionCullingEnabled"))
+            renderer->setOcclusionCullingEnabled(true);
+        if (!diag.getState("AntiAliasingMode"))
+            renderer->setAntiAliasingMode(Renderer::AntiAliasingMode::FXAA);
+        if (!diag.getState("WireframeEnabled"))
+            renderer->setWireframeEnabled(false);
+        if (!diag.getState("HeightFieldDebugEnabled"))
+            renderer->setHeightFieldDebugEnabled(false);
+        if (!diag.getState("TextureCompressionEnabled"))
+            renderer->setTextureCompressionEnabled(false);
+        if (!diag.getState("TextureStreamingEnabled"))
+            renderer->setTextureStreamingEnabled(false);
+        if (!diag.getState("DisplacementMappingEnabled"))
+            renderer->setDisplacementMappingEnabled(false);
+        if (!diag.getState("DisplacementScale"))
+            renderer->setDisplacementScale(0.5f);
+        if (!diag.getState("TessellationLevel"))
+            renderer->setTessellationLevel(16.0f);
+        if (!diag.getState("VSyncEnabled"))
+            renderer->setVSyncEnabled(true);
+    }
+
+    // Send initial hardware + engine info to CrashHandler
+    {
+        const auto& hw = diagnostics.getHardwareInfo();
+        std::ostringstream hwStr;
+        hwStr << "CPU=" << hw.cpu.brand << " (" << hw.cpu.physicalCores << "C/" << hw.cpu.logicalCores << "T)\n"
+              << "GPU=" << hw.gpu.renderer << "\n"
+              << "GPU Vendor=" << hw.gpu.vendor << "\n"
+              << "GPU Driver=" << hw.gpu.driverVersion << "\n"
+              << "VRAM=" << hw.gpu.vramTotalMB << " MB (free: " << hw.gpu.vramFreeMB << " MB)\n"
+              << "RAM=" << hw.ram.totalMB << " MB (available: " << hw.ram.availableMB << " MB)\n";
+        for (size_t i = 0; i < hw.monitors.size(); ++i)
+        {
+            const auto& mon = hw.monitors[i];
+            hwStr << "Monitor[" << i << "]=" << mon.name << " " << mon.width << "x" << mon.height
+                  << "@" << mon.refreshRate << "Hz DPI=" << mon.dpiScale
+                  << (mon.primary ? " (primary)" : "") << "\n";
+        }
+        logger.sendToCrashHandler(CrashProtocol::Tag::Hardware, hwStr.str());
+        logger.sendToCrashHandler(CrashProtocol::Tag::EngineVer, renderer->name());
     }
 
     // In fast mode, show the main window immediately (splash mode keeps it hidden until ready).
@@ -644,6 +766,13 @@ int main()
         diagnostics.addKnownProject(diagnostics.getProjectInfo().projectPath);
         if (chosenSetDefault)
             diagnostics.setState("DefaultProject", diagnostics.getProjectInfo().projectPath);
+
+        // Release the early HPK reader; loadProject has mounted its own.
+        if (earlyHpkReader)
+        {
+            earlyHpkReader.reset();
+            logTimed(Logger::Category::Engine, "Released early HPK reader (AssetManager owns it now).", Logger::LogLevel::INFO);
+        }
     }
     else
     {
@@ -699,8 +828,15 @@ int main()
 
     // Viewport state variables (used in game loop)
     float cameraSpeedMultiplier = 1.0f;
-    bool showMetrics = true;
+    // Show metrics in editor and in runtime dev/debug builds (EnableProfiler=true).
+    // Completely compiled out in Shipping builds.
+#if defined(ENGINE_BUILD_SHIPPING)
+    bool showMetrics = false;
     bool showOcclusionStats = false;
+#else
+    bool showMetrics = !isRuntimeMode || rtEnableProfiler;
+    bool showOcclusionStats = false;
+#endif
 
     // --- Phase 3: Load editor UI widgets ---
 #if ENGINE_EDITOR
@@ -2259,27 +2395,14 @@ int main()
                 renderer->getUIManager().showUnsavedChangesDialog(std::move(doLoad));
             });
 
-        // --- Build Game callback (Phase 10) – CMake-based compilation ---
+        // --- CMake & Toolchain detection (async, non-blocking) ---
+        renderer->getUIManager().startAsyncToolchainDetection();
+
+        // --- Build Game callback (Phase 10) – CMake configure + build ---
         renderer->getUIManager().setOnBuildGame([&renderer, &assetManager, &diagnostics, &logTimed](const UIManager::BuildGameConfig& config)
             {
                 auto& uiMgr = renderer->getUIManager();
                 logTimed(Logger::Category::Engine, "Build Game requested. Output: " + config.outputDir, Logger::LogLevel::INFO);
-
-                // Verify CMake is available
-                if (!uiMgr.isCMakeAvailable())
-                {
-                    uiMgr.showToastMessage("CMake is not available. Cannot build game.", 4.0f,
-                        UIManager::NotificationLevel::Error);
-                    return;
-                }
-
-                // Verify a C++ build toolchain is available
-                if (!uiMgr.isBuildToolchainAvailable())
-                {
-                    uiMgr.showToastMessage("No C++ build toolchain (MSVC/Clang) found. Cannot build game.", 4.0f,
-                        UIManager::NotificationLevel::Error);
-                    return;
-                }
 
                 if (uiMgr.isBuildRunning())
                 {
@@ -2288,42 +2411,82 @@ int main()
                     return;
                 }
 
-                uiMgr.showBuildProgress();
+                // Verify CMake and toolchain are available
+                if (!uiMgr.isCMakeAvailable())
+                {
+                    uiMgr.showToastMessage("CMake is required to build the game.\nPlease install CMake and restart the editor.", 5.0f,
+                        UIManager::NotificationLevel::Error);
+                    return;
+                }
+                if (!uiMgr.isBuildToolchainAvailable())
+                {
+                    uiMgr.showToastMessage("C++ toolchain is required to build the game.\nPlease install Visual Studio with C++ workload.", 5.0f,
+                        UIManager::NotificationLevel::Error);
+                    return;
+                }
 
-                // Capture values needed by the thread (no references to stack locals)
                 const std::string cmakePath = uiMgr.getCMakePath();
-#if defined(ENGINE_SOURCE_DIR)
                 const std::string engineSourceDir = ENGINE_SOURCE_DIR;
-#else
-                const std::string engineSourceDir;
-#endif
-                const std::string projectPath = diagnostics.getProjectInfo().projectPath;
                 const std::string toolchainName = uiMgr.getBuildToolchain().name;
                 const std::string toolchainVersion = uiMgr.getBuildToolchain().version;
 
+                const char* bp = SDL_GetBasePath();
+                const std::string editorBaseDir = bp ? std::string(bp) : std::string();
+
+                uiMgr.showBuildProgress();
+
+                // Capture values needed by the thread (no references to stack locals)
+                const std::string projectPath = diagnostics.getProjectInfo().projectPath;
+
                 UIManager* uiPtr = &uiMgr;
+
+                // Sync current renderer state to DiagnosticsManager so that
+                // game.ini (written by the build thread) captures all settings.
+                // These are only stored in DiagnosticsManager when the user
+                // toggles them in the UI, so they may be missing otherwise.
+                {
+                    auto& diag = DiagnosticsManager::Instance();
+                    diag.setState("PostProcessingEnabled", renderer->isPostProcessingEnabled() ? "1" : "0");
+                    diag.setState("GammaCorrectionEnabled", renderer->isGammaCorrectionEnabled() ? "1" : "0");
+                    diag.setState("ToneMappingEnabled", renderer->isToneMappingEnabled() ? "1" : "0");
+                    diag.setState("ShadowsEnabled", renderer->isShadowsEnabled() ? "1" : "0");
+                    diag.setState("CsmEnabled", renderer->isCsmEnabled() ? "1" : "0");
+                    diag.setState("FogEnabled", renderer->isFogEnabled() ? "1" : "0");
+                    diag.setState("BloomEnabled", renderer->isBloomEnabled() ? "1" : "0");
+                    diag.setState("SsaoEnabled", renderer->isSsaoEnabled() ? "1" : "0");
+                    diag.setState("OcclusionCullingEnabled", renderer->isOcclusionCullingEnabled() ? "1" : "0");
+                    diag.setState("AntiAliasingMode", std::to_string(static_cast<int>(renderer->getAntiAliasingMode())));
+                    diag.setState("WireframeEnabled", renderer->isWireframeEnabled() ? "1" : "0");
+                    diag.setState("VSyncEnabled", renderer->isVSyncEnabled() ? "1" : "0");
+                    diag.setState("HeightFieldDebugEnabled", renderer->isHeightFieldDebugEnabled() ? "1" : "0");
+                    diag.setState("TextureCompressionEnabled", renderer->isTextureCompressionEnabled() ? "1" : "0");
+                    diag.setState("TextureStreamingEnabled", renderer->isTextureStreamingEnabled() ? "1" : "0");
+                    diag.setState("DisplacementMappingEnabled", renderer->isDisplacementMappingEnabled() ? "1" : "0");
+                    diag.setState("DisplacementScale", std::to_string(renderer->getDisplacementScale()));
+                    diag.setState("TessellationLevel", std::to_string(renderer->getTessellationLevel()));
+
+                    // Flush to disk so the build thread copies an up-to-date config.ini
+                    diag.saveConfig();
+                }
 
                 uiMgr.m_buildRunning.store(true);
 
                 if (uiMgr.m_buildThread.joinable())
                     uiMgr.m_buildThread.join();
 
-                uiMgr.m_buildThread = std::thread([uiPtr, config, cmakePath, engineSourceDir, projectPath, toolchainName, toolchainVersion]()
+                uiMgr.m_buildThread = std::thread([uiPtr, config, cmakePath, engineSourceDir, toolchainName, toolchainVersion, editorBaseDir, projectPath]()
                 {
-                    constexpr int kTotalSteps = 7;
+                    constexpr int kTotalSteps = 8;
                     int step = 0;
                     bool ok = true;
                     std::string errorMsg;
 
                     // Log build environment info
-                    uiPtr->appendBuildOutput("CMake: " + cmakePath);
-                    {
-                        std::string tcInfo = "Toolchain: " + toolchainName;
-                        if (!toolchainVersion.empty())
-                            tcInfo += " " + toolchainVersion;
-                        uiPtr->appendBuildOutput(tcInfo);
-                    }
                     uiPtr->appendBuildOutput("Profile: " + config.profile.name + " (" + config.profile.cmakeBuildType + ")");
+                    uiPtr->appendBuildOutput("CMake: " + cmakePath);
+                    uiPtr->appendBuildOutput("Toolchain: " + toolchainName + " " + toolchainVersion);
+                    uiPtr->appendBuildOutput("Engine Source: " + engineSourceDir);
+                    uiPtr->appendBuildOutput("Binary Cache: " + config.binaryDir);
                     uiPtr->appendBuildOutput("");
 
                         // Thread-safe helper to push step progress
@@ -2353,323 +2516,378 @@ int main()
                             return false;
                         };
 
-                    // Run a command, capture stdout+stderr line-by-line, return exit code
-                    auto runCmdWithOutput = [&](const std::string& cmd) -> int
+                    try
                     {
+                      // Step 1: Create output directory (clean any previous build)
+                      advanceStep("Preparing output directory...");
+                      {
+                          const std::filesystem::path outDir = config.outputDir;
+                          // Remove all existing files and subdirectories so no
+                          // stale artefacts from a previous build remain.
+                          if (std::filesystem::exists(outDir))
+                          {
+                              std::error_code ec;
+                              std::filesystem::remove_all(outDir, ec);
+                              if (ec)
+                              {
+                                  ok = false;
+                                  errorMsg = "Failed to clean output directory: " + ec.message();
+                              }
+                              else
+                              {
+                                  uiPtr->appendBuildOutput("  Cleaned output directory.");
+                              }
+                          }
+
+                          if (ok)
+                          {
+                              std::error_code ec;
+                              std::filesystem::create_directories(outDir, ec);
+                              if (ec)
+                              {
+                                  ok = false;
+                                  errorMsg = "Failed to create output directory: " + ec.message();
+                              }
+                          }
+                      }
+
+                      // Helper: run a command, capture output line-by-line (no visible console)
 #if defined(_WIN32)
-                        // Use CreateProcess with CREATE_NO_WINDOW to hide the console.
-                        // Redirect stdout+stderr through a pipe.
-                        SECURITY_ATTRIBUTES sa{};
-                        sa.nLength = sizeof(sa);
-                        sa.bInheritHandle = TRUE;
-                        sa.lpSecurityDescriptor = nullptr;
+                      auto runCmdWithOutput = [&](const std::string& cmd) -> int
+                      {
+                          uiPtr->appendBuildOutput("> " + cmd);
 
-                        HANDLE hReadPipe = nullptr;
-                        HANDLE hWritePipe = nullptr;
-                        if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0))
-                        {
-                            uiPtr->appendBuildOutput("[ERROR] Failed to create pipe.");
-                            return -1;
-                        }
-                        // Ensure the read handle is NOT inherited
-                        SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
+                          SECURITY_ATTRIBUTES sa{};
+                          sa.nLength = sizeof(sa);
+                          sa.bInheritHandle = TRUE;
 
-                        STARTUPINFOA si{};
-                        si.cb = sizeof(si);
-                        si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-                        si.wShowWindow = SW_HIDE;
-                        si.hStdOutput = hWritePipe;
-                        si.hStdError = hWritePipe;
+                          HANDLE hReadPipe = nullptr, hWritePipe = nullptr;
+                          if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0))
+                              return -1;
+                          SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
 
-                        PROCESS_INFORMATION pi{};
-                        // cmd /c wraps the command so redirections work
-                        std::string fullCmd = "cmd /c \"" + cmd + " 2>&1\"";
-                        BOOL created = CreateProcessA(
-                            nullptr, fullCmd.data(),
-                            nullptr, nullptr, TRUE,
-                            CREATE_NO_WINDOW, nullptr, nullptr,
-                            &si, &pi);
-                        // Close our copy of the write end so ReadFile will eventually return 0
-                        CloseHandle(hWritePipe);
+                          STARTUPINFOA si{};
+                          si.cb = sizeof(si);
+                          si.dwFlags = STARTF_USESTDHANDLES;
+                          si.hStdOutput = hWritePipe;
+                          si.hStdError = hWritePipe;
 
-                        if (!created)
-                        {
-                            CloseHandle(hReadPipe);
-                            uiPtr->appendBuildOutput("[ERROR] Failed to start process (CreateProcess).");
-                            return -1;
-                        }
+                          PROCESS_INFORMATION pi{};
+                          std::string cmdLine = cmd;
+                          BOOL created = CreateProcessA(
+                              nullptr, cmdLine.data(), nullptr, nullptr, TRUE,
+                              CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+                          CloseHandle(hWritePipe);
 
-                        // Read output line by line
-                        {
-                            char buffer[512];
-                            DWORD bytesRead = 0;
-                            std::string lineBuffer;
-                            while (ReadFile(hReadPipe, buffer, sizeof(buffer) - 1, &bytesRead, nullptr) && bytesRead > 0)
-                            {
-                                // Check for cancel request
-                                if (uiPtr->m_buildCancelRequested.load())
-                                {
-                                    TerminateProcess(pi.hProcess, 1);
-                                    break;
-                                }
-                                buffer[bytesRead] = '\0';
-                                lineBuffer += buffer;
-                                // Split into lines
-                                size_t pos;
-                                while ((pos = lineBuffer.find('\n')) != std::string::npos)
-                                {
-                                    std::string line = lineBuffer.substr(0, pos);
-                                    while (!line.empty() && (line.back() == '\r' || line.back() == '\n'))
-                                        line.pop_back();
-                                    if (!line.empty())
-                                        uiPtr->appendBuildOutput(line);
-                                    lineBuffer.erase(0, pos + 1);
-                                }
-                            }
-                            // Flush remaining
-                            while (!lineBuffer.empty() && (lineBuffer.back() == '\r' || lineBuffer.back() == '\n'))
-                                lineBuffer.pop_back();
-                            if (!lineBuffer.empty())
-                                uiPtr->appendBuildOutput(lineBuffer);
-                        }
-                        CloseHandle(hReadPipe);
+                          if (!created)
+                          {
+                              CloseHandle(hReadPipe);
+                              uiPtr->appendBuildOutput("  [ERROR] Failed to launch process.");
+                              return -1;
+                          }
 
-                        WaitForSingleObject(pi.hProcess, INFINITE);
-                        DWORD exitCode = 0;
-                        GetExitCodeProcess(pi.hProcess, &exitCode);
-                        CloseHandle(pi.hProcess);
-                        CloseHandle(pi.hThread);
-                        return static_cast<int>(exitCode);
+                          // Read output line by line
+                          char buf[4096];
+                          DWORD bytesRead = 0;
+                          std::string lineBuffer;
+                          while (ReadFile(hReadPipe, buf, sizeof(buf) - 1, &bytesRead, nullptr) && bytesRead > 0)
+                          {
+                              if (uiPtr->m_buildCancelRequested.load())
+                              {
+                                  TerminateProcess(pi.hProcess, 1);
+                                  break;
+                              }
+                              buf[bytesRead] = '\0';
+                              lineBuffer += buf;
+                              size_t pos;
+                              while ((pos = lineBuffer.find('\n')) != std::string::npos)
+                              {
+                                  std::string line = lineBuffer.substr(0, pos);
+                                  if (!line.empty() && line.back() == '\r') line.pop_back();
+                                  uiPtr->appendBuildOutput("  " + line);
+                                  lineBuffer.erase(0, pos + 1);
+                              }
+                          }
+                          if (!lineBuffer.empty())
+                              uiPtr->appendBuildOutput("  " + lineBuffer);
+
+                          WaitForSingleObject(pi.hProcess, INFINITE);
+                          DWORD exitCode = 0;
+                          GetExitCodeProcess(pi.hProcess, &exitCode);
+                          CloseHandle(pi.hProcess);
+                          CloseHandle(pi.hThread);
+                          CloseHandle(hReadPipe);
+                          return static_cast<int>(exitCode);
+                      };
 #else
-                        const std::string fullCmd = cmd + " 2>&1";
-                        FILE* pipe = popen(fullCmd.c_str(), "r");
-                        if (!pipe)
-                        {
-                            uiPtr->appendBuildOutput("[ERROR] Failed to start process.");
-                            return -1;
-                        }
-
-                        char buffer[512];
-                        while (fgets(buffer, sizeof(buffer), pipe))
-                        {
-                            std::string line(buffer);
-                            while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
-                                line.pop_back();
-                            if (!line.empty())
-                                uiPtr->appendBuildOutput(line);
-                        }
-
-                        int ret = pclose(pipe);
-                        return ret;
+                      auto runCmdWithOutput = [&](const std::string& cmd) -> int
+                      {
+                          uiPtr->appendBuildOutput("> " + cmd);
+                          std::string fullCmd = cmd + " 2>&1";
+                          FILE* pipe = popen(fullCmd.c_str(), "r");
+                          if (!pipe) return -1;
+                          char buf[4096];
+                          while (fgets(buf, sizeof(buf), pipe))
+                          {
+                              if (uiPtr->m_buildCancelRequested.load()) break;
+                              std::string line = buf;
+                              while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+                                  line.pop_back();
+                              uiPtr->appendBuildOutput("  " + line);
+                          }
+                          return pclose(pipe);
+                      };
 #endif
-                    };
 
-                  try
-                  {
-                    // Step 1: Create output directory & build directory
-                    advanceStep("Creating output directory...");
-                    {
-                        std::error_code ec;
-                        std::filesystem::create_directories(config.outputDir, ec);
-                        if (ec)
-                        {
-                            ok = false;
-                            errorMsg = "Failed to create output directory: " + ec.message();
-                        }
-                    }
+                      // Step 2: CMake configure
+                      if (ok && !checkCancelled())
+                      {
+                          advanceStep("CMake configure...");
 
-                    const std::filesystem::path buildDir = config.binaryDir.empty()
-                        ? std::filesystem::path(config.outputDir) / "_build"
-                        : std::filesystem::path(config.binaryDir);
+                          const std::string buildDir = config.binaryDir;
 
-                    // Clean build: delete previous build cache so CMake starts fresh
-                    if (ok && config.cleanBuild)
-                    {
-                        if (std::filesystem::exists(buildDir))
-                        {
-                            uiPtr->appendBuildOutput("Clean build: removing previous build cache...");
-                            std::error_code ec;
-                            std::filesystem::remove_all(buildDir, ec);
-                            if (ec)
-                            {
-                                uiPtr->appendBuildOutput("[WARNING] Failed to remove build cache: " + ec.message());
-                            }
-                        }
-                    }
+                          // Optionally clean the binary cache
+                          if (config.cleanBuild)
+                          {
+                              uiPtr->appendBuildOutput("  Clean build: removing " + buildDir);
+                              std::error_code ec;
+                              std::filesystem::remove_all(buildDir, ec);
+                          }
 
-                    // Step 2: CMake configure
-                    if (ok && !checkCancelled())
-                    {
-                        advanceStep("Configuring CMake build...");
+                          {
+                              std::error_code ec;
+                              std::filesystem::create_directories(buildDir, ec);
+                          }
 
-                        if (engineSourceDir.empty())
-                        {
-                            ok = false;
-                            errorMsg = "ENGINE_SOURCE_DIR is not defined. Cannot compile runtime.";
-                        }
-                        else
-                        {
-                            std::error_code ec;
-                            std::filesystem::create_directories(buildDir, ec);
-
-                            auto escapeForCMake = [](const std::string& s) -> std::string
-                            {
-                                std::string out;
-                                for (char c : s)
-                                {
-                                    if (c == '\\') out += '/';
-                                    else out += c;
-                                }
-                                return out;
-                            };
-
-                            std::string generatorArg;
+                          // Build the cmake configure command
+                          std::string configureCmd = "\"" + cmakePath + "\"";
+                          configureCmd += " -S \"" + engineSourceDir + "\"";
+                          configureCmd += " -B \"" + buildDir + "\"";
 #if defined(CMAKE_GENERATOR)
-                            generatorArg = " -G \"" + std::string(CMAKE_GENERATOR) + "\"";
+                          configureCmd += " -G \"" CMAKE_GENERATOR "\"";
 #endif
+                          configureCmd += " -DENGINE_BUILD_RUNTIME=ON";
+                          configureCmd += " -DGAME_START_LEVEL=\"" + config.startLevel + "\"";
+                          configureCmd += " -DGAME_WINDOW_TITLE=\"" + config.windowTitle + "\"";
+                          configureCmd += " -DENGINE_BUILD_PROFILE=" + config.profile.name;
 
-                            std::string configCmd = "\"" + cmakePath + "\""
-                                " -S \"" + escapeForCMake(engineSourceDir) + "\""
-                                " -B \"" + escapeForCMake(buildDir.string()) + "\""
-                                + generatorArg +
-                                " -DENGINE_BUILD_RUNTIME=ON"
-                                " -DENGINE_BUILD_TESTS=OFF"
-                                " -DGAME_START_LEVEL=\"" + config.startLevel + "\""
-                                " -DGAME_WINDOW_TITLE=\"" + config.windowTitle + "\"";
+                          int ret = runCmdWithOutput(configureCmd);
+                          if (ret != 0)
+                          {
+                              ok = false;
+                              errorMsg = "CMake configure failed (exit code " + std::to_string(ret) + ").";
+                          }
+                      }
 
-                            uiPtr->appendBuildOutput("> " + configCmd);
-                            int ret = runCmdWithOutput(configCmd);
-                            if (ret != 0)
-                            {
-                                ok = false;
-                                errorMsg = "CMake configure failed (exit code " + std::to_string(ret) + ")";
-                                uiPtr->appendBuildOutput("[ERROR] " + errorMsg);
-                            }
-                        }
-                    }
+                      // Step 3: CMake build
+                      if (ok && !checkCancelled())
+                      {
+                          advanceStep("CMake build...");
 
-                    // Step 3: CMake build
-                    if (ok && !checkCancelled())
-                    {
-                        advanceStep("Compiling game runtime...");
+                          std::string buildCmd = "\"" + cmakePath + "\"";
+                          buildCmd += " --build \"" + config.binaryDir + "\"";
+                          buildCmd += " --target HorizonEngineRuntime";
+                          buildCmd += " --config " + config.profile.cmakeBuildType;
 
-                        const std::string cmakeBuildType = config.profile.cmakeBuildType.empty()
-                            ? std::string("Release") : config.profile.cmakeBuildType;
-                        std::string buildCmd = "\"" + cmakePath + "\""
-                            " --build \"" + buildDir.string() + "\""
-                            " --target HorizonEngineRuntime"
-                            " --config " + cmakeBuildType;
+                          int ret = runCmdWithOutput(buildCmd);
+                          if (ret != 0)
+                          {
+                              ok = false;
+                              errorMsg = "CMake build failed (exit code " + std::to_string(ret) + ").";
+                          }
+                      }
 
-                        uiPtr->appendBuildOutput("> " + buildCmd);
-                        int ret = runCmdWithOutput(buildCmd);
-                        if (ret != 0)
-                        {
-                            ok = false;
-                            errorMsg = "CMake build failed (exit code " + std::to_string(ret) + ")";
-                            uiPtr->appendBuildOutput("[ERROR] " + errorMsg);
-                        }
-                    }
+                      // Step 4: Deploy built runtime exe + DLLs
+                      if (ok && !checkCancelled())
+                      {
+                          advanceStep("Deploying runtime...");
 
-                    // Step 4: Deploy exe + DLLs
-                    if (ok && !checkCancelled())
-                    {
-                        advanceStep("Deploying runtime...");
+                          const std::filesystem::path editorDir = editorBaseDir;
+                          const std::filesystem::path dstDir = config.outputDir;
 
-                        const std::string deployBuildType = config.profile.cmakeBuildType.empty()
-                            ? std::string("Release") : config.profile.cmakeBuildType;
-                        const std::filesystem::path builtExe = buildDir / deployBuildType / "HorizonEngineRuntime.exe";
-                        const std::filesystem::path dstExe = std::filesystem::path(config.outputDir) / (config.windowTitle + ".exe");
-                        const std::filesystem::path builtDir = buildDir / deployBuildType;
+                          // Find the built runtime exe in the binary cache
+                          // Multi-config generators put it under <config>/ subdir
+                          std::filesystem::path builtExe;
+                          {
+                              auto tryPath = std::filesystem::path(config.binaryDir) / config.profile.cmakeBuildType / "HorizonEngineRuntime.exe";
+                              if (std::filesystem::exists(tryPath))
+                                  builtExe = tryPath;
+                              else
+                              {
+                                  // Single-config generators put it directly in the build dir
+                                  tryPath = std::filesystem::path(config.binaryDir) / "HorizonEngineRuntime.exe";
+                                  if (std::filesystem::exists(tryPath))
+                                      builtExe = tryPath;
+                              }
+                          }
 
-                        if (std::filesystem::exists(builtExe))
-                        {
-                            std::error_code ec;
-                            std::filesystem::copy_file(builtExe, dstExe,
-                                std::filesystem::copy_options::overwrite_existing, ec);
-                            if (ec)
-                            {
-                                ok = false;
-                                errorMsg = "Failed to copy runtime exe: " + ec.message();
-                            }
+                          if (builtExe.empty())
+                          {
+                              ok = false;
+                              errorMsg = "Built runtime exe not found in binary cache: " + config.binaryDir;
+                          }
+                          else
+                          {
+                              // Copy runtime exe as <WindowTitle>.exe
+                              const std::filesystem::path dstExe = dstDir / (config.windowTitle + ".exe");
+                              {
+                                  std::error_code ec;
+                                  std::filesystem::copy_file(builtExe, dstExe,
+                                      std::filesystem::copy_options::overwrite_existing, ec);
+                                  if (ec)
+                                  {
+                                      ok = false;
+                                      errorMsg = "Failed to copy runtime exe: " + ec.message();
+                                  }
+                                  else
+                                  {
+                                      uiPtr->appendBuildOutput("  Copied runtime: " + builtExe.string());
+                                  }
+                              }
 
-                            if (ok && std::filesystem::exists(builtDir))
-                            {
-                                // Editor-only DLLs that have Runtime counterparts – skip them
-                                static const std::array<std::string, 3> editorOnlyDlls = {
-                                    "AssetManager.dll", "Scripting.dll", "Renderer.dll"
-                                };
+                              // Copy PDB for non-Shipping into Symbols/ subdirectory
+                              if (ok && config.profile.name != "Shipping")
+                              {
+                                  auto builtPdb = builtExe;
+                                  builtPdb.replace_extension(".pdb");
+                                  if (std::filesystem::exists(builtPdb))
+                                  {
+                                      const auto symbolsDir = dstDir / "Symbols";
+                                      std::error_code ec;
+                                      std::filesystem::create_directories(symbolsDir, ec);
+                                      std::filesystem::copy_file(builtPdb,
+                                          symbolsDir / (config.windowTitle + ".pdb"),
+                                          std::filesystem::copy_options::overwrite_existing, ec);
+                                      if (!ec)
+                                          uiPtr->appendBuildOutput("  Copied PDB: Symbols/" + config.windowTitle + ".pdb");
+                                  }
+                              }
+                          }
 
-                                for (const auto& entry : std::filesystem::directory_iterator(builtDir))
-                                {
-                                    if (!entry.is_regular_file()) continue;
-                                    const auto ext = entry.path().extension().string();
-                                    if (ext == ".dll" || ext == ".DLL")
-                                    {
-                                        const std::string fname = entry.path().filename().string();
-                                        bool isEditorOnly = false;
-                                        for (const auto& edDll : editorOnlyDlls)
-                                        {
-                                            if (_stricmp(fname.c_str(), edDll.c_str()) == 0)
-                                            {
-                                                isEditorOnly = true;
-                                                break;
-                                            }
-                                        }
-                                        if (isEditorOnly)
-                                        {
-                                            uiPtr->appendBuildOutput("  Skipped editor DLL: " + fname);
-                                            continue;
-                                        }
+                          // Copy DLLs from the binary cache (Runtime DLLs built alongside the exe)
+                          if (ok)
+                          {
+                              const std::filesystem::path builtDir = builtExe.parent_path();
+                              for (const auto& entry : std::filesystem::directory_iterator(builtDir))
+                              {
+                                  if (!entry.is_regular_file()) continue;
+                                  const auto ext = entry.path().extension().string();
+                                  if (ext != ".dll" && ext != ".DLL") continue;
 
-                                        std::error_code copyEc;
-                                        std::filesystem::copy_file(entry.path(),
-                                            std::filesystem::path(config.outputDir) / entry.path().filename(),
-                                            std::filesystem::copy_options::overwrite_existing, copyEc);
-                                    }
-                                }
-                            }
+                                  std::error_code copyEc;
+                                  std::filesystem::copy_file(entry.path(),
+                                      dstDir / entry.path().filename(),
+                                      std::filesystem::copy_options::overwrite_existing, copyEc);
+                              }
 
-                            // Copy Python runtime (DLL + zip) from engine directory
-                            if (ok && !engineSourceDir.empty())
-                            {
-                                // Check engine build dir first, then engine base dir
-                                std::vector<std::filesystem::path> searchDirs;
-                                searchDirs.push_back(builtDir);
-                                const char* bp = SDL_GetBasePath();
-                                if (bp) searchDirs.push_back(std::filesystem::path(bp));
-                                searchDirs.push_back(std::filesystem::path(engineSourceDir));
+                              // Copy PDBs from binary cache into Symbols/ for non-Shipping
+                              if (config.profile.name != "Shipping")
+                              {
+                                  const auto symbolsDir = dstDir / "Symbols";
+                                  std::error_code mkEc;
+                                  std::filesystem::create_directories(symbolsDir, mkEc);
+                                  for (const auto& entry : std::filesystem::directory_iterator(builtDir))
+                                  {
+                                      if (!entry.is_regular_file()) continue;
+                                      if (entry.path().extension().string() != ".pdb") continue;
+                                      std::error_code copyEc;
+                                      std::filesystem::copy_file(entry.path(),
+                                          symbolsDir / entry.path().filename(),
+                                          std::filesystem::copy_options::overwrite_existing, copyEc);
+                                  }
+                              }
+                          }
 
-                                for (const auto& searchDir : searchDirs)
-                                {
-                                    if (!std::filesystem::exists(searchDir)) continue;
-                                    for (const auto& entry : std::filesystem::directory_iterator(searchDir))
-                                    {
-                                        if (!entry.is_regular_file()) continue;
-                                        const auto fname = entry.path().filename().string();
-                                        const auto ext = entry.path().extension().string();
-                                        // Match python3*.dll and python3*.zip
-                                        if ((ext == ".dll" || ext == ".zip") && fname.size() >= 8 && fname.substr(0, 6) == "python")
-                                        {
-                                            const auto dst = std::filesystem::path(config.outputDir) / entry.path().filename();
-                                            if (!std::filesystem::exists(dst))
-                                            {
-                                                std::error_code copyEc;
-                                                std::filesystem::copy_file(entry.path(), dst,
-                                                    std::filesystem::copy_options::overwrite_existing, copyEc);
-                                                if (!copyEc)
-                                                    uiPtr->appendBuildOutput("  Copied Python file: " + fname);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        else
-                        {
-                            ok = false;
-                            errorMsg = "Built runtime not found at: " + builtExe.string();
-                        }
-                    }
+                          // Copy remaining DLLs from editor directory (e.g. Python, plugins)
+                          if (ok)
+                          {
+                              // DLLs already present in the output (from binary cache) are skipped
+                              for (const auto& entry : std::filesystem::directory_iterator(editorDir))
+                              {
+                                  if (!entry.is_regular_file()) continue;
+                                  const auto ext = entry.path().extension().string();
+                                  if (ext != ".dll" && ext != ".DLL") continue;
+
+                                  const auto dst = dstDir / entry.path().filename();
+                                  if (std::filesystem::exists(dst)) continue; // already deployed from binary cache
+
+                                  // Skip editor-only DLLs that the runtime does not need
+                                  const std::string fname = entry.path().filename().string();
+                                  static const std::array<std::string, 3> editorOnlyDlls = {
+                                      "AssetManager.dll", "Scripting.dll", "Renderer.dll"
+                                  };
+                                  bool isEditorOnly = false;
+                                  for (const auto& edDll : editorOnlyDlls)
+                                  {
+                                      if (_stricmp(fname.c_str(), edDll.c_str()) == 0)
+                                      {
+                                          isEditorOnly = true;
+                                          break;
+                                      }
+                                  }
+                                  if (isEditorOnly) continue;
+
+                                  std::error_code copyEc;
+                                  std::filesystem::copy_file(entry.path(), dst,
+                                      std::filesystem::copy_options::overwrite_existing, copyEc);
+                              }
+                          }
+
+                          // Copy Python runtime (DLL + zip) from editor directory
+                          if (ok)
+                          {
+                              for (const auto& entry : std::filesystem::directory_iterator(editorDir))
+                              {
+                                  if (!entry.is_regular_file()) continue;
+                                  const auto fname = entry.path().filename().string();
+                                  const auto fext = entry.path().extension().string();
+                                  if ((fext == ".dll" || fext == ".zip") && fname.size() >= 8 && fname.substr(0, 6) == "python")
+                                  {
+                                      const auto dst = dstDir / entry.path().filename();
+                                      if (!std::filesystem::exists(dst))
+                                      {
+                                          std::error_code copyEc;
+                                          std::filesystem::copy_file(entry.path(), dst,
+                                              std::filesystem::copy_options::overwrite_existing, copyEc);
+                                          if (!copyEc)
+                                              uiPtr->appendBuildOutput("  Copied Python file: " + fname);
+                                      }
+                                  }
+                              }
+                          }
+
+                          // Copy CrashHandler from editor's Tools/ directory
+                          if (ok)
+                          {
+                              const auto srcCrashHandler = editorDir / "Tools" / "CrashHandler.exe";
+                              if (std::filesystem::exists(srcCrashHandler))
+                              {
+                                  const auto dstTools = dstDir / "Tools";
+                                  std::error_code ec;
+                                  std::filesystem::create_directories(dstTools, ec);
+                                  std::filesystem::copy_file(srcCrashHandler, dstTools / "CrashHandler.exe",
+                                      std::filesystem::copy_options::overwrite_existing, ec);
+                                  if (!ec)
+                                      uiPtr->appendBuildOutput("  Copied CrashHandler.exe");
+
+                                  // Also copy CrashHandler PDB for non-Shipping
+                                  if (config.profile.name != "Shipping")
+                                  {
+                                      const auto srcPdb = editorDir / "Tools" / "CrashHandler.pdb";
+                                      if (std::filesystem::exists(srcPdb))
+                                      {
+                                          std::error_code ec2;
+                                          std::filesystem::copy_file(srcPdb, dstTools / "CrashHandler.pdb",
+                                              std::filesystem::copy_options::overwrite_existing, ec2);
+                                      }
+                                  }
+                              }
+                              else
+                              {
+                                  uiPtr->appendBuildOutput("  [WARN] CrashHandler.exe not found at: " + srcCrashHandler.string());
+                              }
+                          }
+                      }
 
                     // Step 5: Cook assets + copy shaders + asset registry
                     if (ok && !checkCancelled())
@@ -2683,11 +2901,10 @@ int main()
                             AssetCooker cooker;
                             AssetCooker::CookConfig cookCfg;
                             cookCfg.projectRoot    = projectPath;
-                            cookCfg.engineRoot     = engineSourceDir;
+                            cookCfg.engineRoot     = editorBaseDir;
                             cookCfg.outputDir      = (dstDir / "Content").string();
                             cookCfg.compressAssets  = config.profile.compressAssets;
-                            cookCfg.buildType       = config.profile.cmakeBuildType.empty()
-                                                        ? std::string("Release") : config.profile.cmakeBuildType;
+                            cookCfg.buildType       = config.profile.name;
 
                             auto result = cooker.cookAll(cookCfg,
                                 [&](size_t done, size_t total, const std::string& current)
@@ -2714,7 +2931,7 @@ int main()
                         // Copy shaders (not part of asset registry)
                         if (ok)
                         {
-                            const std::filesystem::path srcShaders = std::filesystem::path(engineSourceDir) / "src" / "Renderer" / "OpenGLRenderer" / "shaders";
+                            const std::filesystem::path srcShaders = std::filesystem::path(editorBaseDir) / "shaders";
                             const std::filesystem::path dstShaders = dstDir / "shaders";
                             if (std::filesystem::exists(srcShaders))
                             {
@@ -2727,7 +2944,7 @@ int main()
                         // Copy engine-bundled Content (shipped assets not in project registry)
                         if (ok)
                         {
-                            const std::filesystem::path srcEngContent = std::filesystem::path(engineSourceDir) / "Content";
+                            const std::filesystem::path srcEngContent = std::filesystem::path(editorBaseDir) / "Content";
                             const std::filesystem::path dstEngContent = dstDir / "Content";
                             if (std::filesystem::exists(srcEngContent))
                             {
@@ -2737,7 +2954,7 @@ int main()
                             }
                         }
 
-                        // Copy AssetRegistry.bin
+                        // Copy AssetRegistry.bin + project defaults.ini
                         if (ok)
                         {
                             const std::filesystem::path dstConfig = dstDir / "Config";
@@ -2749,10 +2966,97 @@ int main()
                                 std::filesystem::copy_file(srcReg, dstConfig / "AssetRegistry.bin",
                                     std::filesystem::copy_options::overwrite_existing, ec);
                             }
+                            // Copy project config (defaults.ini) so engine settings persist in the build
+                            const std::filesystem::path srcDefaults = std::filesystem::path(projectPath) / "Config" / "defaults.ini";
+                            if (std::filesystem::exists(srcDefaults))
+                            {
+                                std::filesystem::copy_file(srcDefaults, dstConfig / "defaults.ini",
+                                    std::filesystem::copy_options::overwrite_existing, ec);
+                                uiPtr->appendBuildOutput("  Copied project config: defaults.ini");
+                            }
+                        }
+
+                        }
+
+                        // Step 6: Package content into HPK archive
+                        if (ok && !checkCancelled())
+                        {
+                            advanceStep("Packaging content into HPK...");
+
+                        const std::filesystem::path dstDir = config.outputDir;
+                        const std::filesystem::path hpkPath = dstDir / "content.hpk";
+
+                        HPKWriter writer;
+                        if (!writer.begin(hpkPath.string()))
+                        {
+                            ok = false;
+                            errorMsg = "Failed to create HPK archive: " + hpkPath.string();
+                        }
+
+                        // Collect all files from Content/, shaders/, Config/
+                        auto packDirectory = [&](const std::filesystem::path& dir)
+                        {
+                            if (!ok || !std::filesystem::exists(dir)) return;
+                            for (const auto& entry : std::filesystem::recursive_directory_iterator(dir))
+                            {
+                                if (!entry.is_regular_file()) continue;
+                                if (checkCancelled()) { ok = false; errorMsg = "Cancelled."; return; }
+
+                                auto relPath = std::filesystem::relative(entry.path(), dstDir);
+                                std::string vpath = relPath.generic_string();
+                                if (!writer.addFileFromDisk(vpath, entry.path().string()))
+                                {
+                                    uiPtr->appendBuildOutput("  [WARN] Failed to pack: " + vpath);
+                                }
+                            }
+                        };
+
+                        if (ok) packDirectory(dstDir / "Content");
+                        if (ok) packDirectory(dstDir / "shaders");
+                        if (ok) packDirectory(dstDir / "Config");
+
+                        if (ok)
+                        {
+                            if (!writer.finalize())
+                            {
+                                ok = false;
+                                errorMsg = "Failed to finalize HPK archive.";
+                            }
+                            else
+                            {
+                                uiPtr->appendBuildOutput("  HPK archive: " + hpkPath.string()
+                                    + " (" + std::to_string(writer.getFileCount()) + " files)");
+
+                                // Remove loose directories now that they're packed
+                                std::error_code ec;
+                                std::filesystem::remove_all(dstDir / "Content", ec);
+                                std::filesystem::remove_all(dstDir / "shaders", ec);
+                                std::filesystem::remove_all(dstDir / "Config", ec);
+                            }
+                        }
+
+                        // Copy engine config as a loose file AFTER HPK packaging.
+                        // Must happen after remove_all("Config") because on Windows
+                        // NTFS (case-insensitive) "Config/" and "config/" are the
+                        // same directory — packing + deleting "Config" would also
+                        // remove "config/config.ini" if it were placed earlier.
+                        if (ok)
+                        {
+                            const std::filesystem::path srcEngineConfig = std::filesystem::current_path() / "config" / "config.ini";
+                            if (std::filesystem::exists(srcEngineConfig))
+                            {
+                                const std::filesystem::path dstEngineConfig = dstDir / "config" / "config.ini";
+                                std::error_code ec2;
+                                std::filesystem::create_directories(dstEngineConfig.parent_path(), ec2);
+                                std::filesystem::copy_file(srcEngineConfig, dstEngineConfig,
+                                    std::filesystem::copy_options::overwrite_existing, ec2);
+                                if (!ec2)
+                                    uiPtr->appendBuildOutput("  Copied engine config: config/config.ini");
+                            }
                         }
                     }
 
-                    // Step 6: Generate game.ini with profile settings
+                    // Step 7: Generate game.ini with profile settings
                     if (ok && !checkCancelled())
                     {
                         advanceStep("Generating game.ini...");
@@ -2769,6 +3073,21 @@ int main()
                             iniFile << "EnableHotReload=" << (config.profile.enableHotReload ? "true" : "false") << "\n";
                             iniFile << "EnableValidation=" << (config.profile.enableValidation ? "true" : "false") << "\n";
                             iniFile << "EnableProfiler=" << (config.profile.enableProfiler ? "true" : "false") << "\n";
+
+                            // Persist all engine/renderer settings so the runtime
+                            // can restore them without needing config/config.ini
+                            iniFile << "\n# Engine Settings\n";
+                            auto allStates = DiagnosticsManager::Instance().getStates();
+                            for (const auto& [sKey, sVal] : allStates)
+                            {
+                                // Skip editor-only keys that are not useful at runtime
+                                if (sKey == "RHI" || sKey == "WindowWidth" || sKey == "WindowHeight"
+                                    || sKey == "WindowState" || sKey == "KnownProjects"
+                                    || sKey == "StartupMode")
+                                    continue;
+                                iniFile << sKey << "=" << sVal << "\n";
+                            }
+
                             iniFile.close();
                             uiPtr->appendBuildOutput("  Written: " + iniPath.string());
                         }
@@ -2779,7 +3098,7 @@ int main()
                         }
                     }
 
-                    // Step 7: Done
+                    // Step 8: Done
                     advanceStep(ok ? "Build complete!" : "Build failed.");
 
                     if (ok)
@@ -2848,13 +3167,65 @@ int main()
             if (loadResult.success)
             {
                 diagnostics.setScenePrepared(false);
-                // Activate PIE-like mode so scripts run
+
+                // Initialize physics (same setup as editor PIE)
+                PhysicsWorld::Instance().initialize(PhysicsWorld::Backend::Jolt);
+                PhysicsWorld::Instance().setGravity(0.0f, -9.81f, 0.0f);
+                PhysicsWorld::Instance().setFixedTimestep(1.0f / 60.0f);
+                PhysicsWorld::Instance().setSleepThreshold(0.05f);
+
+                // Activate PIE-like mode so scripts and physics run
                 diagnostics.setPIEActive(true);
+
+                // Apply per-level settings (skybox) to the renderer
+                if (auto* newLevel = diagnostics.getActiveLevelSoft())
+                {
+                    renderer->setSkyboxPath(newLevel->getSkyboxPath());
+                }
+
+                // Find the first active CameraComponent and hand control to it
+                {
+                    ECS::Schema camSchema;
+                    camSchema.require<ECS::CameraComponent>().require<ECS::TransformComponent>();
+                    auto& ecs = ECS::ECSManager::Instance();
+                    const auto camEntities = ecs.getEntitiesMatchingSchema(camSchema);
+                    unsigned int activeCamEntity = 0;
+                    for (const auto e : camEntities)
+                    {
+                        const auto* cam = ecs.getComponent<ECS::CameraComponent>(e);
+                        if (cam && cam->isActive)
+                        {
+                            activeCamEntity = static_cast<unsigned int>(e);
+                            break;
+                        }
+                    }
+                    if (activeCamEntity == 0 && !camEntities.empty())
+                        activeCamEntity = static_cast<unsigned int>(camEntities.front());
+
+                    if (activeCamEntity != 0)
+                    {
+                        renderer->setActiveCameraEntity(activeCamEntity);
+                        logTimed(Logger::Category::Engine,
+                            "Runtime: using entity camera " + std::to_string(activeCamEntity),
+                            Logger::LogLevel::INFO);
+                    }
+                }
+
+                // Capture mouse for game input
+                pieMouseCaptured = true;
+                pieInputPaused = false;
+                if (auto* w = renderer->window())
+                {
+                    SDL_SetWindowRelativeMouseMode(w, true);
+                    SDL_SetWindowMouseGrab(w, true);
+                }
+                SDL_HideCursor();
+
                 logTimed(Logger::Category::Engine, "Runtime mode: level loaded successfully.", Logger::LogLevel::INFO);
             }
             else
             {
-                logTimed(Logger::Category::Engine, "Runtime mode: failed to load level – " + loadResult.errorMessage, Logger::LogLevel::ERROR);
+                logTimed(Logger::Category::Engine, "Runtime mode: failed to load level - " + loadResult.errorMessage, Logger::LogLevel::ERROR);
             }
         }
         else
@@ -2884,44 +3255,6 @@ int main()
             renderer->getUIManager().markAllWidgetsDirty();
 
             renderer->getUIManager().showToastMessage("Engine ready!", 3.0f);
-
-            // --- CMake detection (needed for Build Game) ---
-            {
-                auto& uiMgr = renderer->getUIManager();
-                if (uiMgr.detectCMake())
-                {
-                    logTimed(Logger::Category::Engine,
-                        "CMake found: " + uiMgr.getCMakePath(),
-                        Logger::LogLevel::INFO);
-                }
-                else
-                {
-                    logTimed(Logger::Category::Engine,
-                        "CMake not found – Build Game will not be available.",
-                        Logger::LogLevel::WARNING);
-                    uiMgr.showCMakeInstallPrompt();
-                }
-
-                // --- Build toolchain detection (MSVC / Clang) ---
-                if (uiMgr.detectBuildToolchain())
-                {
-                    const auto& tc = uiMgr.getBuildToolchain();
-                    std::string info = "Build toolchain: " + tc.name;
-                    if (!tc.version.empty())
-                        info += " " + tc.version;
-                    if (!tc.compilerPath.empty())
-                        info += " (" + tc.compilerPath + ")";
-                    logTimed(Logger::Category::Engine, info, Logger::LogLevel::INFO);
-                }
-                else
-                {
-                    logTimed(Logger::Category::Engine,
-                        "No C++ build toolchain found – Build Game will not be available.",
-                        Logger::LogLevel::WARNING);
-                    if (uiMgr.isCMakeAvailable())
-                        uiMgr.showToolchainInstallPrompt();
-                }
-            }
         }
 #endif // ENGINE_EDITOR
         SDL_Event ev;
@@ -2972,6 +3305,7 @@ int main()
 
     uint64_t lastCounter = SDL_GetPerformanceCounter();
     const double freq = static_cast<double>(SDL_GetPerformanceFrequency());
+    const uint64_t engineStartCounter = lastCounter;
 
     double fpsTimer = 0.0;
     uint32_t fpsFrames = 0;
@@ -2995,6 +3329,10 @@ int main()
     uint64_t lastGcCounter = lastCounter;
     constexpr double kGcIntervalSec = 60.0;
     uint64_t gcRuns = 0;
+
+    // CrashHandler heartbeat / state sync timer
+    double crashHandlerTimer = 0.0;
+    constexpr double kCrashHandlerIntervalSec = 2.0;
 
     bool fpscap = true;
     double cpuInputMs = 0.0;
@@ -3395,6 +3733,8 @@ int main()
         #if ENGINE_EDITOR
                 // Poll the build thread for pending UI updates (non-blocking)
                 renderer->getUIManager().pollBuildThread();
+                // Poll background CMake/toolchain detection (non-blocking)
+                renderer->getUIManager().pollToolchainDetection();
         #endif
 
         const uint64_t now = SDL_GetPerformanceCounter();
@@ -3415,6 +3755,61 @@ int main()
         {
             metricsUpdateTimer = 0.0;
             metricsUpdatePending = true;
+        }
+
+        // ── CrashHandler heartbeat + state sync (every ~2s) ─────────────
+        crashHandlerTimer += dt;
+        if (crashHandlerTimer >= kCrashHandlerIntervalSec)
+        {
+            crashHandlerTimer = 0.0;
+
+            // Check if process is still alive; restart if needed
+            logger.ensureCrashHandlerAlive();
+
+            // Heartbeat
+            logger.sendToCrashHandler(CrashProtocol::Tag::Heartbeat,
+                std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count()));
+
+            // Engine state (all DiagnosticsManager states)
+            {
+                auto states = diagnostics.getStates();
+                std::string stateStr;
+                for (const auto& [k, v] : states)
+                    stateStr += k + "=" + v + "\n";
+                if (!stateStr.empty())
+                    logger.sendToCrashHandler(CrashProtocol::Tag::EngineState, stateStr);
+            }
+
+            // Project info
+            if (diagnostics.isProjectLoaded())
+            {
+                const auto& proj = diagnostics.getProjectInfo();
+                auto* level = diagnostics.getActiveLevelSoft();
+                std::string levelName = level ? level->getName() : "";
+                logger.sendToCrashHandler(CrashProtocol::Tag::Project,
+                    proj.projectName + "|" + proj.projectVersion + "|" + proj.projectPath + "|" + levelName);
+            }
+
+            // Frame metrics
+            {
+                const auto& m = diagnostics.getLatestMetrics();
+                std::ostringstream fs;
+                fs << "FPS=" << m.fps
+                   << " | CPU=" << m.cpuFrameMs << "ms"
+                   << " | GPU=" << m.gpuFrameMs << "ms"
+                   << " | Entities=" << m.totalCount
+                   << " (visible=" << m.visibleCount << ", hidden=" << m.hiddenCount << ")";
+                logger.sendToCrashHandler(CrashProtocol::Tag::FrameInfo, fs.str());
+            }
+
+            // Uptime
+            {
+                double uptimeSec = (freq > 0.0) ? (static_cast<double>(SDL_GetPerformanceCounter() - engineStartCounter) / freq) : 0.0;
+                char uptimeBuf[64];
+                std::snprintf(uptimeBuf, sizeof(uptimeBuf), "%.1f", uptimeSec);
+                logger.sendToCrashHandler(CrashProtocol::Tag::Uptime, uptimeBuf);
+            }
         }
 
         audioManager.update();
@@ -4582,6 +4977,36 @@ int main()
                     continue;
                 }
 #endif // ENGINE_EDITOR
+
+#if !ENGINE_EDITOR && !defined(ENGINE_BUILD_SHIPPING)
+                // F10: toggle on-screen performance metrics (Debug/Development runtime)
+                if (event.key.key == SDLK_F10 && !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_SHIFT)))
+                {
+                    showMetrics = !showMetrics;
+                    continue;
+                }
+#   if defined(ENGINE_BUILD_DEBUG)
+                // F9: toggle occlusion stats overlay
+                if (event.key.key == SDLK_F9 && !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_SHIFT)))
+                {
+                    showOcclusionStats = !showOcclusionStats;
+                    continue;
+                }
+                // F8: toggle bounding-box debug draw
+                if (event.key.key == SDLK_F8 && !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_SHIFT)))
+                {
+                    if (renderer) renderer->toggleBoundsDebug();
+                    continue;
+                }
+                // F11: toggle UI debug bounds
+                if (event.key.key == SDLK_F11 && !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_SHIFT)))
+                {
+                    if (renderer) renderer->toggleUIDebug();
+                    continue;
+                }
+#   endif // ENGINE_BUILD_DEBUG
+#endif // !ENGINE_EDITOR && !ENGINE_BUILD_SHIPPING
+
                 if (renderer)
                 {
                     auto& uiManager = renderer->getUIManager();
@@ -4726,7 +5151,7 @@ int main()
                 speedText = speedBuf;
             }
 
-            if (isViewportTab)
+            if (showMetrics && isViewportTab)
             {
                 renderer->queueText(fpsText,
                     Vec2{ 0.02f, 0.05f },
@@ -4970,5 +5395,6 @@ int main()
 
     logTimed(Logger::Category::Engine, "Engine shutdown complete.", Logger::LogLevel::INFO);
     Scripting::Shutdown();
+    logger.stopCrashHandler();
     return 0;
 }

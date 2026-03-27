@@ -7,6 +7,7 @@
 #include <fstream>
 #include <cstdint>
 #include <cctype>
+#include <cstring>
 #include <exception>
 #include <algorithm>
 #include "AssetTypes.h"
@@ -274,9 +275,10 @@ static bool readAssetJson(std::ifstream& in, json& outJson, std::string& errorMe
 	return true;
 }
 
-static bool readAssetHeaderFromMemory(const std::vector<char>& buffer, AssetType& outType, std::string& outName, bool& outIsJson, size_t& headerEndPos)
+static bool readAssetHeaderFromMemory(const std::vector<char>& buffer, AssetType& outType, std::string& outName, bool& outIsJson, size_t& headerEndPos, bool& outIsMsgPack)
 {
 	outIsJson = false;
+	outIsMsgPack = false;
 	if (buffer.empty()) return false;
 
 	// Check for JSON start
@@ -292,26 +294,26 @@ static bool readAssetHeaderFromMemory(const std::vector<char>& buffer, AssetType
 			if (!j.is_object() || !j.contains("type") || !j.contains("name")) return false;
 			outType = static_cast<AssetType>(j.at("type").get<int>());
 			outName = j.at("name").get<std::string>();
-			headerEndPos = 0; // JSON format logic usually just parses the whole thing
+			headerEndPos = 0;
 			return true;
 		} catch (...) {
 			return false;
 		}
 	}
 
-	// Binary format check
-	if (buffer.size() < 12) return false; // Magic(4) + Version(4) + Type(4)
+	// Binary format check (version 2 = JSON body, version 3 = MessagePack body)
+	if (buffer.size() < 12) return false;
 
 	const char* ptr = buffer.data();
 	uint32_t magic = *reinterpret_cast<const uint32_t*>(ptr); ptr += 4;
 	uint32_t version = *reinterpret_cast<const uint32_t*>(ptr); ptr += 4;
 
-	if (magic != 0x41535453 || version != 2) return false;
+	if (magic != 0x41535453 || (version != 2 && version != 3)) return false;
+	outIsMsgPack = (version == 3);
 
 	int32_t typeInt = *reinterpret_cast<const int32_t*>(ptr); ptr += 4;
 	outType = static_cast<AssetType>(typeInt);
 
-	// Read string name length
 	if (ptr + 4 > buffer.data() + buffer.size()) return false;
 	uint32_t nameLen = *reinterpret_cast<const uint32_t*>(ptr); ptr += 4;
 
@@ -323,8 +325,27 @@ static bool readAssetHeaderFromMemory(const std::vector<char>& buffer, AssetType
 	return true;
 }
 
-static bool readAssetJsonFromMemory(const std::vector<char>& buffer, json& outJson, std::string& errorMessage, bool isJsonFormat, size_t headerEndPos)
+static bool readAssetJsonFromMemory(const std::vector<char>& buffer, json& outJson, std::string& errorMessage, bool isJsonFormat, size_t headerEndPos, bool isMsgPack = false)
 {
+	if (isMsgPack)
+	{
+		// MessagePack body after binary header (cooked format, version 3)
+		if (headerEndPos >= buffer.size()) {
+			outJson = json::object();
+			return true;
+		}
+		const auto* start = reinterpret_cast<const uint8_t*>(buffer.data() + headerEndPos);
+		const auto* end   = reinterpret_cast<const uint8_t*>(buffer.data() + buffer.size());
+		outJson = json::from_msgpack(start, end, true, false);
+		if (outJson.is_discarded())
+		{
+			errorMessage = "Failed to parse MessagePack asset body.";
+			return false;
+		}
+		// MessagePack body is the data directly (no "data" wrapper)
+		return true;
+	}
+
 	if (isJsonFormat)
 	{
 		// Find start of JSON
@@ -338,9 +359,9 @@ static bool readAssetJsonFromMemory(const std::vector<char>& buffer, json& outJs
 	}
 	else
 	{
-		// Binary format: headerEndPos is where JSON body starts
+		// Binary header v2: headerEndPos is where JSON body starts
 		if (headerEndPos >= buffer.size()) {
-			 outJson = json::object(); // Empty body is valid?
+			 outJson = json::object();
 			 return true; 
 		}
 		const char* start = buffer.data() + headerEndPos;
@@ -391,6 +412,55 @@ bool AssetManager::loadAssetRegistry(const std::string& projectRoot)
     const fs::path regPath = getRegistryPath(projectRoot);
     if (!fs::exists(regPath))
     {
+        // Try loading from HPK archive
+        if (m_hpkReader && m_hpkReader->isMounted())
+        {
+            const std::string vpath = m_hpkReader->makeVirtualPath(regPath.string());
+            if (!vpath.empty())
+            {
+                auto data = m_hpkReader->readFile(vpath);
+                if (data && data->size() >= 12)
+                {
+                    const char* ptr = data->data();
+                    const char* end = ptr + data->size();
+
+                    uint32_t magic = 0, version = 0;
+                    std::memcpy(&magic, ptr, 4);   ptr += 4;
+                    std::memcpy(&version, ptr, 4); ptr += 4;
+                    if (magic != 0x41525247 || version != 1) return false;
+
+                    uint32_t count = 0;
+                    std::memcpy(&count, ptr, 4); ptr += 4;
+
+                    m_registry.reserve(count);
+                    for (uint32_t i = 0; i < count; ++i)
+                    {
+                        if (ptr + 4 > end) return false;
+                        uint32_t nameLen = 0;
+                        std::memcpy(&nameLen, ptr, 4); ptr += 4;
+                        if (ptr + nameLen > end) return false;
+                        std::string name(ptr, nameLen); ptr += nameLen;
+
+                        if (ptr + 4 > end) return false;
+                        uint32_t pathLen = 0;
+                        std::memcpy(&pathLen, ptr, 4); ptr += 4;
+                        if (ptr + pathLen > end) return false;
+                        std::string path(ptr, pathLen); ptr += pathLen;
+
+                        if (ptr + 4 > end) return false;
+                        int32_t typeInt = 0;
+                        std::memcpy(&typeInt, ptr, 4); ptr += 4;
+
+                        AssetRegistryEntry e;
+                        e.name = std::move(name);
+                        e.path = std::move(path);
+                        e.type = static_cast<AssetType>(typeInt);
+                        registerAssetInRegistry(e);
+                    }
+                    return true;
+                }
+            }
+        }
         return false;
     }
 
@@ -3567,6 +3637,33 @@ std::string AssetManager::getAbsoluteEngineContentPath(const std::string& relati
     return (fs::current_path() / "Content" / inputPath).lexically_normal().string();
 }
 
+bool AssetManager::mountContentArchive(const std::string& hpkPath)
+{
+    unmountContentArchive();
+    m_hpkReader = std::make_unique<HPKReader>();
+    if (!m_hpkReader->mount(hpkPath))
+    {
+        m_hpkReader.reset();
+        return false;
+    }
+    HPKReader::SetMounted(m_hpkReader.get());
+    return true;
+}
+
+void AssetManager::unmountContentArchive()
+{
+    if (m_hpkReader)
+    {
+        m_hpkReader->unmount();
+        m_hpkReader.reset();
+    }
+}
+
+bool AssetManager::isContentArchiveMounted() const
+{
+    return m_hpkReader && m_hpkReader->isMounted();
+}
+
 #if ENGINE_EDITOR
 std::string AssetManager::getEditorWidgetPath(const std::string& relativeToEditorWidgets) const
 {
@@ -5458,6 +5555,7 @@ bool AssetManager::loadProject(const std::string& projectPath, SyncState syncSta
     }
 
     fs::path projectFile = root;
+    bool isPackagedBuild = false;
     if (fs::is_directory(root))
     {
         bool found = false;
@@ -5472,9 +5570,23 @@ bool AssetManager::loadProject(const std::string& projectPath, SyncState syncSta
         }
         if (!found)
         {
-            logger.log("No .project file found in: " + root.string(), Logger::LogLevel::ERROR);
-            diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingProject, false);
-            return false;
+            // No .project file on disk — check if this is a packaged build
+            // (content.hpk exists). Runtime builds don't need a .project file;
+            // all essential info comes from game.ini / compile-time defines.
+            const fs::path hpkCandidate = root / "content.hpk";
+            if (fs::exists(hpkCandidate))
+            {
+                isPackagedBuild = true;
+                logger.log(Logger::Category::Project,
+                    "No .project file found, but content.hpk detected — treating as packaged build.",
+                    Logger::LogLevel::INFO);
+            }
+            else
+            {
+                logger.log("No .project file found in: " + root.string(), Logger::LogLevel::ERROR);
+                diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingProject, false);
+                return false;
+            }
         }
     }
     else if (projectFile.extension() != ".project")
@@ -5485,55 +5597,67 @@ bool AssetManager::loadProject(const std::string& projectPath, SyncState syncSta
     }
 
     DiagnosticsManager::ProjectInfo info;
-    info.projectName = projectFile.stem().string();
-    info.projectVersion = "";
-    info.engineVersion = "";
     info.projectPath = root.string();
     info.selectedRHI = DiagnosticsManager::RHIType::Unknown;
 
-    std::ifstream in(projectFile);
-    if (!in.is_open())
+    if (isPackagedBuild)
     {
-        logger.log("Failed to open project file: " + projectFile.string(), Logger::LogLevel::ERROR);
-        diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingProject, false);
-        return false;
+        // Derive a project name from the directory
+        info.projectName = root.filename().string();
+        if (info.projectName.empty())
+            info.projectName = "Game";
+        logger.log(Logger::Category::Project,
+            "Packaged build project info: name=" + info.projectName + " path=" + info.projectPath,
+            Logger::LogLevel::INFO);
     }
-
-    std::string LevelPath;
-    std::string line;
-    while (std::getline(in, line))
+    else
     {
-        if (line.empty() || line[0] == '#')
-            continue;
-        auto pos = line.find('=');
-        if (pos == std::string::npos)
-            continue;
-        std::string key = line.substr(0, pos);
-        std::string value = line.substr(pos + 1);
-        if (key == "Name") info.projectName = value;
-        else if (key == "Version") info.projectVersion = value;
-        else if (key == "EngineVersion") info.engineVersion = value;
-        else if (key == "Path") info.projectPath = value;
-        else if (key == "RHI")
+        info.projectName = projectFile.stem().string();
+
+        std::ifstream in(projectFile);
+        if (!in.is_open())
         {
-            if (value == "OpenGL") info.selectedRHI = DiagnosticsManager::RHIType::OpenGL;
-            else if (value == "DirectX11") info.selectedRHI = DiagnosticsManager::RHIType::DirectX11;
-            else if (value == "DirectX12") info.selectedRHI = DiagnosticsManager::RHIType::DirectX12;
-            else info.selectedRHI = DiagnosticsManager::RHIType::Unknown;
+            logger.log("Failed to open project file: " + projectFile.string(), Logger::LogLevel::ERROR);
+            diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingProject, false);
+            return false;
         }
-        else if (key == "Level")
+
+        std::string LevelPath;
+        std::string line;
+        while (std::getline(in, line))
         {
-            LevelPath = value;
+            if (line.empty() || line[0] == '#')
+                continue;
+            auto pos = line.find('=');
+            if (pos == std::string::npos)
+                continue;
+            std::string key = line.substr(0, pos);
+            std::string value = line.substr(pos + 1);
+            if (key == "Name") info.projectName = value;
+            else if (key == "Version") info.projectVersion = value;
+            else if (key == "EngineVersion") info.engineVersion = value;
+            else if (key == "Path") info.projectPath = value;
+            else if (key == "RHI")
+            {
+                if (value == "OpenGL") info.selectedRHI = DiagnosticsManager::RHIType::OpenGL;
+                else if (value == "DirectX11") info.selectedRHI = DiagnosticsManager::RHIType::DirectX11;
+                else if (value == "DirectX12") info.selectedRHI = DiagnosticsManager::RHIType::DirectX12;
+                else info.selectedRHI = DiagnosticsManager::RHIType::Unknown;
+            }
+            else if (key == "Level")
+            {
+                LevelPath = value;
+            }
+        }
+
+        // Ensure path is always set even if missing from file
+        if (info.projectPath.empty())
+        {
+            info.projectPath = root.string();
         }
     }
 
-    // Ensure path is always set even if missing from file
-    if (info.projectPath.empty())
-    {
-        info.projectPath = root.string();
-    }
-
-    // Project file fully parsed - apply it.
+    // Project file fully parsed (or packaged build defaults) - apply it.
     diagnostics.setProjectInfo(info);
 
     // New project/level context: force re-prepare of renderer resources.
@@ -5577,13 +5701,72 @@ bool AssetManager::loadProject(const std::string& projectPath, SyncState syncSta
 	}
 #endif
 
-	// Registry handling: build asynchronously so project loading is not blocked.
-	logger.log(Logger::Category::Project, "Starting async asset registry build for project: " + info.projectName, Logger::LogLevel::INFO);
-	discoverAssetsAndBuildRegistryAsync(info.projectPath);
+	// Try to mount an HPK content archive (packaged builds).
+	{
+		const fs::path hpkPath = fs::path(info.projectPath) / "content.hpk";
+		if (fs::exists(hpkPath))
+		{
+			if (mountContentArchive(hpkPath.string()))
+				logger.log(Logger::Category::Project, "Mounted content archive: " + hpkPath.string(), Logger::LogLevel::INFO);
+			else
+				logger.log(Logger::Category::Project, "Failed to mount content archive: " + hpkPath.string(), Logger::LogLevel::WARNING);
+		}
+	}
+
+	// Registry handling.
+	if (isPackagedBuild)
+	{
+		// Packaged runtime: load the pre-built binary registry (from HPK or disk).
+		// A full filesystem discovery is pointless because the Content/ directory
+		// has been removed and packed into content.hpk.
+		logger.log(Logger::Category::Project,
+			"Packaged build: loading asset registry from binary (no filesystem discovery).",
+			Logger::LogLevel::INFO);
+		if (loadAssetRegistry(info.projectPath))
+		{
+			logger.log(Logger::Category::Project,
+				"Asset registry loaded: " + std::to_string(m_registry.size()) + " entries.",
+				Logger::LogLevel::INFO);
+			DiagnosticsManager::Instance().setAssetRegistryReady(true);
+		}
+		else
+		{
+			logger.log(Logger::Category::Project,
+				"Failed to load asset registry for packaged build.",
+				Logger::LogLevel::WARNING);
+			DiagnosticsManager::Instance().setAssetRegistryReady(true);
+		}
+	}
+	else
+	{
+		// Editor / dev mode: discover assets from the Content/ folder on disk.
+		logger.log(Logger::Category::Project,
+			"Starting async asset registry build for project: " + info.projectName,
+			Logger::LogLevel::INFO);
+		discoverAssetsAndBuildRegistryAsync(info.projectPath);
+	}
 
     if (!diagnostics.loadProjectConfig())
     {
-        logger.log("Failed to load project config.", Logger::LogLevel::ERROR);
+        // HPK fallback: read defaults.ini from the mounted archive
+        bool loaded = false;
+        auto* hpk = HPKReader::GetMounted();
+        if (hpk)
+        {
+            std::filesystem::path cfgPath = std::filesystem::path(info.projectPath) / "Config" / "defaults.ini";
+            std::string vpath = hpk->makeVirtualPath(cfgPath.string());
+            if (!vpath.empty())
+            {
+                auto buf = hpk->readFile(vpath);
+                if (buf && !buf->empty())
+                {
+                    loaded = diagnostics.loadProjectConfigFromString(
+                        std::string(buf->data(), buf->size()));
+                }
+            }
+        }
+        if (!loaded)
+            logger.log("Failed to load project config.", Logger::LogLevel::ERROR);
     }
 
     diagnostics.setActionInProgress(DiagnosticsManager::ActionType::LoadingProject, false);
@@ -5877,8 +6060,33 @@ AssetManager::LoadResult AssetManager::loadObject3DAsset(const std::string& path
 	auto raw = readAssetFromDisk(path, AssetType::Model3D);
 	if (!raw.success)
 	{
-		result.errorMessage = raw.errorMessage;
-		return result;
+		// HPK fallback for cooked-only meshes (.cooked exists but .asset does not)
+		auto* hpk = HPKReader::GetMounted();
+		if (hpk)
+		{
+			fs::path cookedPath = fs::path(path);
+			cookedPath.replace_extension(".cooked");
+			std::string vpath = hpk->makeVirtualPath(cookedPath.string());
+			if (!vpath.empty() && hpk->contains(vpath))
+			{
+				// Create a minimal stub asset – OpenGLObject3D::prepare() will load the
+				// CMSH binary via FindCookedMeshPath / LoadCookedMesh.
+				raw.data = json::object();
+				raw.name = fs::path(path).stem().string();
+				raw.path = path;
+				raw.type = AssetType::Model3D;
+				raw.success = true;
+				raw.errorMessage.clear();
+				Logger::Instance().log(Logger::Category::AssetManagement,
+					"loadObject3DAsset: using cooked mesh from HPK for '" + path + "'",
+					Logger::LogLevel::INFO);
+			}
+		}
+		if (!raw.success)
+		{
+			result.errorMessage = raw.errorMessage;
+			return result;
+		}
 	}
 	result.j = raw.data;
 	auto id = finalizeAssetLoad(std::move(raw));
@@ -5893,10 +6101,79 @@ AssetManager::LoadResult AssetManager::loadObject3DAsset(const std::string& path
 AssetManager::LoadResult AssetManager::loadLevelAsset(const std::string& path)
 {
 	LoadResult result;
+	auto& logger = Logger::Instance();
+
 	std::ifstream in(path, std::ios::binary);
 	if (!in.is_open())
 	{
-		result.errorMessage = "Failed to open level asset file.";
+		// HPK fallback: try reading the level file from the mounted archive
+		auto* hpk = HPKReader::GetMounted();
+		if (hpk)
+		{
+			std::string vpath = hpk->makeVirtualPath(path);
+			logger.log(Logger::Category::AssetManagement,
+				"HPK level fallback: file=" + path + " vpath=" + (vpath.empty() ? "(empty)" : vpath),
+				Logger::LogLevel::INFO);
+			if (!vpath.empty())
+			{
+				auto hpkBuf = hpk->readFile(vpath);
+				if (hpkBuf && !hpkBuf->empty())
+				{
+					logger.log(Logger::Category::AssetManagement,
+						"HPK level loaded: " + vpath + " (" + std::to_string(hpkBuf->size()) + " bytes)",
+						Logger::LogLevel::INFO);
+
+					AssetType headerType{ AssetType::Unknown };
+					std::string name;
+					bool isJson = false;
+					bool isMsgPack = false;
+					size_t headerEndPos = 0;
+					if (!readAssetHeaderFromMemory(*hpkBuf, headerType, name, isJson, headerEndPos, isMsgPack))
+					{
+						result.errorMessage = "Invalid level asset header (HPK).";
+						return result;
+					}
+					if (headerType != AssetType::Level)
+					{
+						result.errorMessage = "Asset type mismatch for level (HPK).";
+						return result;
+					}
+					if (!readAssetJsonFromMemory(*hpkBuf, result.j, result.errorMessage, isJson, headerEndPos, isMsgPack))
+					{
+						return result;
+					}
+					if (name.empty())
+						name = fs::path(path).stem().string();
+
+					auto level = std::make_unique<EngineLevel>();
+					level->setName(name);
+					level->setAssetType(headerType);
+					level->setIsSaved(true);
+					level->setLevelData(result.j);
+
+					auto& diagnostics = DiagnosticsManager::Instance();
+					const fs::path contentRoot = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+					fs::path absLevel = fs::absolute(fs::path(path));
+					std::error_code relEc;
+					fs::path relPath = fs::relative(absLevel, contentRoot, relEc);
+					if (relEc || relPath.empty() || relPath.string().find("..") == 0)
+						level->setPath(path);
+					else
+						level->setPath(relPath.generic_string());
+
+					diagnostics.setActiveLevel(std::move(level));
+					diagnostics.setScenePrepared(false);
+					result.success = true;
+					return result;
+				}
+			}
+		}
+		else
+		{
+			logger.log(Logger::Category::AssetManagement,
+				"HPK not mounted when loading level: " + path, Logger::LogLevel::WARNING);
+		}
+		result.errorMessage = "Failed to open level asset file: " + path;
 		return result;
 	}
 
@@ -6761,6 +7038,25 @@ RawAssetData AssetManager::readAssetFromDisk(const std::string& path, AssetType 
     RawAssetData raw;
     raw.path = path;
 
+    // Helper lambda: load WAV from memory buffer via SDL_IOFromMem
+    auto loadWavFromBuffer = [](const std::vector<char>& buf, json& outData) -> bool
+    {
+        SDL_IOStream* io = SDL_IOFromMem(const_cast<char*>(buf.data()), buf.size());
+        if (!io) return false;
+        SDL_AudioSpec spec{};
+        Uint8* wavBuf = nullptr;
+        Uint32 wavLen = 0;
+        bool ok = SDL_LoadWAV_IO(io, true, &spec, &wavBuf, &wavLen);
+        if (!ok) return false;
+        outData = json::object();
+        outData["m_channels"]   = static_cast<int>(spec.channels);
+        outData["m_sampleRate"] = static_cast<int>(spec.freq);
+        outData["m_format"]     = static_cast<int>(spec.format);
+        outData["m_data"]       = std::vector<unsigned char>(wavBuf, wavBuf + wavLen);
+        SDL_free(wavBuf);
+        return true;
+    };
+
     // Special case: raw WAV files loaded directly via SDL
     if (expectedType == AssetType::Audio)
     {
@@ -6774,11 +7070,36 @@ RawAssetData AssetManager::readAssetFromDisk(const std::string& path, AssetType 
             SDL_AudioSpec spec{};
             Uint8* buffer = nullptr;
             Uint32 length = 0;
-            if (!SDL_LoadWAV(path.c_str(), &spec, &buffer, &length))
+            bool loaded = SDL_LoadWAV(path.c_str(), &spec, &buffer, &length);
+
+            // HPK fallback for raw WAV
+            if (!loaded)
             {
+                auto* hpk = HPKReader::GetMounted();
+                if (hpk)
+                {
+                    std::string vpath = hpk->makeVirtualPath(path);
+                    if (!vpath.empty())
+                    {
+                        auto hpkBuf = hpk->readFile(vpath);
+                        if (hpkBuf)
+                        {
+                            json audioData;
+                            if (loadWavFromBuffer(*hpkBuf, audioData))
+                            {
+                                raw.data = std::move(audioData);
+                                raw.name = inputPath.stem().string();
+                                raw.type = AssetType::Audio;
+                                raw.success = true;
+                                return raw;
+                            }
+                        }
+                    }
+                }
                 raw.errorMessage = "Failed to load WAV data.";
                 return raw;
             }
+
             json audioData = json::object();
             audioData["m_channels"] = static_cast<int>(spec.channels);
             audioData["m_sampleRate"] = static_cast<int>(spec.freq);
@@ -6794,20 +7115,56 @@ RawAssetData AssetManager::readAssetFromDisk(const std::string& path, AssetType 
         }
     }
 
-    std::ifstream in(path, std::ios::binary);
-    if (!in.is_open())
-    {
-        raw.errorMessage = "Failed to open asset file: " + path;
-        return raw;
-    }
-
+    // Try to open the asset file from disk first
     AssetType headerType{ AssetType::Unknown };
     std::string name;
     bool isJson = false;
-    if (!readAssetHeader(in, headerType, name, isJson))
+    json j;
+
+    std::ifstream in(path, std::ios::binary);
+    if (in.is_open())
     {
-        raw.errorMessage = "Invalid asset header: " + path;
-        return raw;
+        if (!readAssetHeader(in, headerType, name, isJson))
+        {
+            raw.errorMessage = "Invalid asset header: " + path;
+            return raw;
+        }
+
+        if (!readAssetJson(in, j, raw.errorMessage, isJson))
+            return raw;
+        in.close();
+    }
+    else
+    {
+        // HPK fallback: read the entire asset from the mounted archive
+        auto* hpk = HPKReader::GetMounted();
+        if (!hpk)
+        {
+            raw.errorMessage = "Failed to open asset file: " + path;
+            return raw;
+        }
+        std::string vpath = hpk->makeVirtualPath(path);
+        if (vpath.empty())
+        {
+            raw.errorMessage = "Failed to open asset file (no virtual path): " + path;
+            return raw;
+        }
+        auto hpkBuf = hpk->readFile(vpath);
+        if (!hpkBuf)
+        {
+            raw.errorMessage = "Failed to read asset from HPK: " + vpath;
+            return raw;
+        }
+
+        size_t headerEndPos = 0;
+        bool isMsgPack = false;
+        if (!readAssetHeaderFromMemory(*hpkBuf, headerType, name, isJson, headerEndPos, isMsgPack))
+        {
+            raw.errorMessage = "Invalid asset header (HPK): " + path;
+            return raw;
+        }
+        if (!readAssetJsonFromMemory(*hpkBuf, j, raw.errorMessage, isJson, headerEndPos, isMsgPack))
+            return raw;
     }
 
     // Type validation (Model3D assets may also be PointLight)
@@ -6826,13 +7183,6 @@ RawAssetData AssetManager::readAssetFromDisk(const std::string& path, AssetType 
         return raw;
     }
 
-    json j;
-    if (!readAssetJson(in, j, raw.errorMessage, isJson))
-    {
-        return raw;
-    }
-    in.close();
-
     // For textures: decode source image on this thread (CPU-intensive)
     if (headerType == AssetType::Texture && j.is_object() && j.contains("m_sourcePath"))
     {
@@ -6850,7 +7200,25 @@ RawAssetData AssetManager::readAssetFromDisk(const std::string& path, AssetType 
                     resolved = fs::current_path() / sourcePath;
                 sourcePath = resolved;
             }
-            if (fs::exists(sourcePath))
+
+            bool sourceFound = fs::exists(sourcePath);
+            std::optional<std::vector<char>> hpkImageBuf;
+
+            // HPK fallback for texture source images
+            if (!sourceFound)
+            {
+                auto* hpk = HPKReader::GetMounted();
+                if (hpk)
+                {
+                    std::string vpath = hpk->makeVirtualPath(sourcePath.string());
+                    if (!vpath.empty())
+                        hpkImageBuf = hpk->readFile(vpath);
+                    if (hpkImageBuf)
+                        sourceFound = true;
+                }
+            }
+
+            if (sourceFound)
             {
                 // Check if this is a DDS (compressed) texture
                 std::string srcExt = sourcePath.extension().string();
@@ -6859,15 +7227,18 @@ RawAssetData AssetManager::readAssetFromDisk(const std::string& path, AssetType 
 
                 if (srcExt == ".dds" || (j.contains("m_compressed") && j["m_compressed"].get<bool>()))
                 {
-                    // DDS files are loaded at runtime via DDSLoader on the GPU-upload side.
-                    // Store the resolved absolute path so the renderer can find the file.
                     j["m_compressed"] = true;
                     j["m_ddsPath"] = sourcePath.string();
                 }
                 else
                 {
                     int width = 0, height = 0, channels = 0;
-                    unsigned char* data = stbi_load(sourcePath.string().c_str(), &width, &height, &channels, 4);
+                    unsigned char* data = nullptr;
+                    if (hpkImageBuf)
+                        data = stbi_load_from_memory(reinterpret_cast<const unsigned char*>(hpkImageBuf->data()),
+                            static_cast<int>(hpkImageBuf->size()), &width, &height, &channels, 4);
+                    else
+                        data = stbi_load(sourcePath.string().c_str(), &width, &height, &channels, 4);
                     if (data)
                     {
                         channels = 4;
@@ -6911,6 +7282,30 @@ RawAssetData AssetManager::readAssetFromDisk(const std::string& path, AssetType 
                     j["m_format"] = static_cast<int>(spec.format);
                     j["m_data"] = std::vector<unsigned char>(buffer, buffer + length);
                     SDL_free(buffer);
+                }
+            }
+            else
+            {
+                // HPK fallback for audio source files
+                auto* hpk = HPKReader::GetMounted();
+                if (hpk)
+                {
+                    std::string vpath = hpk->makeVirtualPath(sourcePath.string());
+                    if (!vpath.empty())
+                    {
+                        auto hpkBuf = hpk->readFile(vpath);
+                        if (hpkBuf)
+                        {
+                            json audioData;
+                            if (loadWavFromBuffer(*hpkBuf, audioData))
+                            {
+                                if (audioData.contains("m_channels"))   j["m_channels"]   = audioData["m_channels"];
+                                if (audioData.contains("m_sampleRate")) j["m_sampleRate"] = audioData["m_sampleRate"];
+                                if (audioData.contains("m_format"))     j["m_format"]     = audioData["m_format"];
+                                if (audioData.contains("m_data"))       j["m_data"]       = audioData["m_data"];
+                            }
+                        }
+                    }
                 }
             }
         }

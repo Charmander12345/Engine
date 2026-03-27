@@ -8,6 +8,7 @@
 #include "Logger.h"
 
 #include "../../Core/Asset.h"
+#include "../../AssetManager/HPKArchive.h"
 
 #include <unordered_map>
 
@@ -20,6 +21,22 @@ namespace
         if (std::filesystem::exists(shadersfolder))
         {
             return shadersfolder.string();
+        }
+        // HPK fallback: return path anyway if shader exists in archive
+        auto* hpk = HPKReader::GetMounted();
+        if (hpk)
+        {
+            std::string vpath = "shaders/" + filename;
+            if (hpk->contains(vpath))
+            {
+                Logger::Instance().log("HPK ResolveShaderPath2D: " + filename + " -> " + vpath, Logger::LogLevel::INFO);
+                return shadersfolder.string();
+            }
+            Logger::Instance().log("HPK ResolveShaderPath2D: " + filename + " not found in archive", Logger::LogLevel::WARNING);
+        }
+        else
+        {
+            Logger::Instance().log("HPK not mounted in ResolveShaderPath2D: " + filename, Logger::LogLevel::WARNING);
         }
         return {};
     }

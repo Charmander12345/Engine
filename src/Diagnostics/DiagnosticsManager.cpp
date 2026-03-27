@@ -104,6 +104,12 @@ std::optional<std::string> DiagnosticsManager::getState(const std::string& key) 
     return std::nullopt;
 }
 
+std::unordered_map<std::string, std::string> DiagnosticsManager::getStates() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_states;
+}
+
 void DiagnosticsManager::setProjectState(const std::string& key, const std::string& value)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -270,18 +276,35 @@ bool DiagnosticsManager::saveConfig() const
     return saveConfigInternal();
 }
 
-bool DiagnosticsManager::loadConfig()
+bool DiagnosticsManager::loadConfig(bool merge)
 {
     //std::lock_guard<std::mutex> lock(m_mutex);
 
     std::unordered_map<std::string, std::string> data;
     const auto cfg = getConfigPath();
-    if (cfg.empty() || !readKeyValueFile(cfg, data))
+    bool loaded = false;
+    if (!cfg.empty())
+        loaded = readKeyValueFile(cfg, data);
+
+    if (!loaded)
     {
         data["RHI"] = "OpenGL";
     }
 
-    m_states = data;
+    if (merge)
+    {
+        // Only add keys that are not already present (e.g. game.ini values
+        // loaded earlier via setState take precedence over config.ini).
+        for (const auto& [k, v] : data)
+        {
+            if (m_states.find(k) == m_states.end())
+                m_states[k] = v;
+        }
+    }
+    else
+    {
+        m_states = data;
+    }
 
     auto it = m_states.find("RHI");
     if (it != m_states.end())
@@ -368,6 +391,32 @@ bool DiagnosticsManager::loadProjectConfig()
     }
 
     return readKeyValueFile(cfg, m_projectStates);
+}
+
+bool DiagnosticsManager::loadProjectConfigFromString(const std::string& content)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_projectStates.clear();
+    std::istringstream stream(content);
+    std::string line;
+    while (std::getline(stream, line))
+    {
+        if (line.empty() || line[0] == '#')
+            continue;
+        auto pos = line.find('=');
+        if (pos == std::string::npos)
+            continue;
+        std::string key = line.substr(0, pos);
+        std::string val = line.substr(pos + 1);
+        const auto notSpace = [](unsigned char c) { return !std::isspace(c); };
+        key.erase(key.begin(), std::find_if(key.begin(), key.end(), notSpace));
+        key.erase(std::find_if(key.rbegin(), key.rend(), notSpace).base(), key.end());
+        val.erase(val.begin(), std::find_if(val.begin(), val.end(), notSpace));
+        val.erase(std::find_if(val.rbegin(), val.rend(), notSpace).base(), val.end());
+        if (!key.empty())
+            m_projectStates[key] = val;
+    }
+    return !m_projectStates.empty();
 }
 
 bool DiagnosticsManager::isProjectLoaded() const

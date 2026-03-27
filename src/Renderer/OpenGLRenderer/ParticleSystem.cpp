@@ -7,6 +7,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include "../../Core/ECS/ECS.h"
 #include "Logger.h"
+#include "../../AssetManager/HPKArchive.h"
 
 // ---------------------------------------------------------------------------
 // Random helpers
@@ -54,7 +55,32 @@ static GLuint compileShaderSource(GLenum type, const std::string& source)
 static std::string readFile(const std::string& path)
 {
     std::ifstream f(path, std::ios::in | std::ios::binary);
-    if (!f) return {};
+    if (!f)
+    {
+        // HPK fallback
+        auto* hpk = HPKReader::GetMounted();
+        if (hpk)
+        {
+            std::string vpath = hpk->makeVirtualPath(path);
+            Logger::Instance().log("HPK particle shader fallback: file=" + path
+                + " vpath=" + (vpath.empty() ? "(empty)" : vpath), Logger::LogLevel::INFO);
+            if (!vpath.empty())
+            {
+                auto buf = hpk->readFile(vpath);
+                if (buf)
+                {
+                    Logger::Instance().log("HPK particle shader loaded: " + vpath
+                        + " (" + std::to_string(buf->size()) + " bytes)", Logger::LogLevel::INFO);
+                    return std::string(buf->data(), buf->size());
+                }
+            }
+        }
+        else
+        {
+            Logger::Instance().log("HPK not mounted when loading particle shader: " + path, Logger::LogLevel::WARNING);
+        }
+        return {};
+    }
     std::stringstream ss;
     ss << f.rdbuf();
     return ss.str();

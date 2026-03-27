@@ -385,7 +385,7 @@ bool AssetCooker::cookMesh(const AssetRegistryEntry& entry,
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// cookStrippedJson – strip editor metadata, compact serialize
+// cookStrippedJson – strip editor metadata, binary header + MessagePack
 // ─────────────────────────────────────────────────────────────────────────
 bool AssetCooker::cookStrippedJson(const AssetRegistryEntry& entry,
                                     const std::string& absAssetPath,
@@ -413,7 +413,23 @@ bool AssetCooker::cookStrippedJson(const AssetRegistryEntry& entry,
 
     std::ofstream out(outputPath, std::ios::binary);
     if (!out) return false;
-    out << data.dump(); // compact (no indentation)
+
+    // Binary header (version 3 = MessagePack body)
+    const uint32_t magic   = 0x41535453;
+    const uint32_t version = 3;
+    const int32_t  typeInt = static_cast<int32_t>(entry.type);
+    const std::string name = raw.name.empty() ? fs::path(absAssetPath).stem().string() : raw.name;
+    const uint32_t nameLen = static_cast<uint32_t>(name.size());
+
+    out.write(reinterpret_cast<const char*>(&magic),   4);
+    out.write(reinterpret_cast<const char*>(&version), 4);
+    out.write(reinterpret_cast<const char*>(&typeInt), 4);
+    out.write(reinterpret_cast<const char*>(&nameLen), 4);
+    out.write(name.data(), nameLen);
+
+    // MessagePack body (compact binary, no JSON text parsing needed at runtime)
+    const auto msgpack = json::to_msgpack(data);
+    out.write(reinterpret_cast<const char*>(msgpack.data()), msgpack.size());
     return out.good();
 }
 
@@ -428,13 +444,27 @@ bool AssetCooker::cookAudio(const AssetRegistryEntry& entry,
     auto raw = AssetManager::readAssetFromDisk(absAssetPath, AssetType::Audio);
     if (!raw.success) return false;
 
-    // Copy the .asset itself (stripped)
+    // Copy the .asset itself (binary header + MessagePack)
     json& data = raw.data;
     fs::create_directories(fs::path(outputPath).parent_path());
     {
         std::ofstream out(outputPath, std::ios::binary);
         if (!out) return false;
-        out << data.dump();
+
+        const uint32_t magic   = 0x41535453;
+        const uint32_t version = 3;
+        const int32_t  typeInt = static_cast<int32_t>(AssetType::Audio);
+        const std::string name = raw.name.empty() ? fs::path(absAssetPath).stem().string() : raw.name;
+        const uint32_t nameLen = static_cast<uint32_t>(name.size());
+
+        out.write(reinterpret_cast<const char*>(&magic),   4);
+        out.write(reinterpret_cast<const char*>(&version), 4);
+        out.write(reinterpret_cast<const char*>(&typeInt), 4);
+        out.write(reinterpret_cast<const char*>(&nameLen), 4);
+        out.write(name.data(), nameLen);
+
+        const auto msgpack = json::to_msgpack(data);
+        out.write(reinterpret_cast<const char*>(msgpack.data()), msgpack.size());
     }
 
     // Also copy the source audio file if referenced

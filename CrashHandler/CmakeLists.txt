@@ -1,0 +1,32 @@
+# -- CrashHandler -- out-of-process crash reporter ----------------------------
+# Minimal standalone executable with no engine library dependencies.
+# Receives continuous state/log data from the engine via a named pipe.
+# When the pipe disconnects unexpectedly, shows a crash report dialog.
+
+add_executable(CrashHandler
+    CrashMain.cpp
+    CrashProtocol.h
+)
+
+set_target_properties(CrashHandler PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+)
+
+target_include_directories(CrashHandler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+# On Windows this is a GUI application (no console window).
+if(WIN32)
+    set_target_properties(CrashHandler PROPERTIES WIN32_EXECUTABLE ON)
+endif()
+
+# Deploy into Tools/ next to the runtime executable.
+set_target_properties(CrashHandler PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}/Tools"
+)
+foreach(_cfg DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+    string(TOUPPER ${_cfg} _cfg_upper)
+    set_target_properties(CrashHandler PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY_${_cfg_upper} "${ENGINE_DEPLOY_DIR}/Tools"
+    )
+endforeach()

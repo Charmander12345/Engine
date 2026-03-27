@@ -68,6 +68,7 @@ public:
     // Engine-wide states
     void setState(const std::string& key, const std::string& value);
     std::optional<std::string> getState(const std::string& key) const;
+    std::unordered_map<std::string, std::string> getStates() const;
 
     // Project-specific states (stored in <project>/Config/defaults.ini)
     void setProjectState(const std::string& key, const std::string& value);
@@ -86,11 +87,12 @@ public:
 
     // Persist/load simple key=value pairs to/from config/config.ini in the engine directory
     bool saveConfig() const;
-    bool loadConfig();
+    bool loadConfig(bool merge = false);
 
     // Project config (defaults.ini)
     bool saveProjectConfig() const;
     bool loadProjectConfig();
+    bool loadProjectConfigFromString(const std::string& content);
 
 	// Project info
 	bool isProjectLoaded() const;

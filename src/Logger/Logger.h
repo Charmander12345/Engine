@@ -8,6 +8,8 @@
 #include <functional>
 #include <vector>
 #include <cstdint>
+#include <atomic>
+#include <thread>
 
 #ifdef ERROR
 #undef ERROR
@@ -79,6 +81,20 @@ public:
 	static const char* levelToString(LogLevel level);
 	static const char* categoryToString(Category category);
 
+	// ── CrashHandler pipe integration ───────────────────────────────────
+	/// Launch the out-of-process CrashHandler and establish the pipe.
+	/// Called once during startup (after initialize()).
+	void startCrashHandler();
+
+	/// Send arbitrary data to the CrashHandler via the pipe.
+	void sendToCrashHandler(const std::string& tag, const std::string& data);
+
+	/// Check if the CrashHandler process is still alive; restart if not.
+	void ensureCrashHandlerAlive();
+
+	/// Send a graceful QUIT message and close the pipe.  Called on clean shutdown.
+	void stopCrashHandler();
+
 private:
 	Logger() = default;
 	~Logger();
@@ -101,4 +117,19 @@ private:
 	// Console ring-buffer
 	std::deque<ConsoleEntry> m_consoleEntries;
 	uint64_t m_nextSequenceId{ 1 };
+
+	// ── CrashHandler pipe state ─────────────────────────────────────────
+	void launchCrashHandlerProcess();
+	void connectPipe();
+	void writePipe(const void* data, size_t size);
+
+#if defined(_WIN32)
+	void* m_crashHandlerProcess{ nullptr };
+	void* m_pipe{ reinterpret_cast<void*>(static_cast<intptr_t>(-1)) }; // INVALID_HANDLE_VALUE
+#else
+	int    m_crashHandlerPid{ 0 };
+	int    m_pipeFd{ -1 };
+#endif
+	std::mutex m_pipeMutex;
+	bool m_crashHandlerRunning{ false };
 };

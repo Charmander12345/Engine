@@ -5,6 +5,7 @@
 #include <sstream>
 #include <glm/gtc/type_ptr.hpp>
 #include "Logger.h"
+#include "../../AssetManager/HPKArchive.h"
 
 OpenGLShader::OpenGLShader() = default;
 
@@ -29,6 +30,32 @@ bool OpenGLShader::loadFromFile(Shader::Type type, const std::string& filePath)
     std::ifstream file(filePath, std::ios::in | std::ios::binary);
     if (!file)
     {
+        // HPK fallback
+        auto* hpk = HPKReader::GetMounted();
+        if (hpk)
+        {
+            std::string vpath = hpk->makeVirtualPath(filePath);
+            Logger::Instance().log("HPK shader fallback: file=" + filePath
+                + " vpath=" + (vpath.empty() ? "(empty)" : vpath)
+                + " baseDir=" + hpk->getBaseDir(), Logger::LogLevel::INFO);
+            if (!vpath.empty())
+            {
+                auto buf = hpk->readFile(vpath);
+                if (buf)
+                {
+                    Logger::Instance().log("HPK shader loaded: " + vpath
+                        + " (" + std::to_string(buf->size()) + " bytes)", Logger::LogLevel::INFO);
+                    m_source.assign(buf->data(), buf->size());
+                    m_type = type;
+                    return compile();
+                }
+                Logger::Instance().log("HPK shader read failed: " + vpath, Logger::LogLevel::ERROR);
+            }
+        }
+        else
+        {
+            Logger::Instance().log("HPK not mounted when loading shader: " + filePath, Logger::LogLevel::WARNING);
+        }
         Logger::Instance().log("Shader-Datei konnte nicht geoeffnet werden: " + filePath, Logger::LogLevel::ERROR);
         return false;
     }
@@ -42,16 +69,46 @@ bool OpenGLShader::loadFromFile(Shader::Type type, const std::string& filePath)
 
 bool OpenGLShader::loadFromFileWithDefines(Shader::Type type, const std::string& filePath, const std::string& defines)
 {
-    std::ifstream file(filePath, std::ios::in | std::ios::binary);
-    if (!file)
+    std::string src;
     {
-        Logger::Instance().log("Shader-Datei konnte nicht geoeffnet werden: " + filePath, Logger::LogLevel::ERROR);
-        return false;
+        std::ifstream file(filePath, std::ios::in | std::ios::binary);
+        if (!file)
+        {
+            // HPK fallback
+            auto* hpk = HPKReader::GetMounted();
+            if (hpk)
+            {
+                std::string vpath = hpk->makeVirtualPath(filePath);
+                Logger::Instance().log("HPK shader(defines) fallback: file=" + filePath
+                    + " vpath=" + (vpath.empty() ? "(empty)" : vpath), Logger::LogLevel::INFO);
+                if (!vpath.empty())
+                {
+                    auto buf = hpk->readFile(vpath);
+                    if (buf)
+                    {
+                        src.assign(buf->data(), buf->size());
+                        Logger::Instance().log("HPK shader(defines) loaded: " + vpath
+                            + " (" + std::to_string(buf->size()) + " bytes)", Logger::LogLevel::INFO);
+                    }
+                }
+            }
+            else
+            {
+                Logger::Instance().log("HPK not mounted when loading shader(defines): " + filePath, Logger::LogLevel::WARNING);
+            }
+            if (src.empty())
+            {
+                Logger::Instance().log("Shader-Datei konnte nicht geoeffnet werden: " + filePath, Logger::LogLevel::ERROR);
+                return false;
+            }
+        }
+        else
+        {
+            std::stringstream buffer;
+            buffer << file.rdbuf();
+            src = buffer.str();
+        }
     }
-
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    std::string src = buffer.str();
     m_type = type;
 
     // Insert defines right after the #version line

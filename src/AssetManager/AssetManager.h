@@ -14,6 +14,7 @@
 #include "../Diagnostics/DiagnosticsManager.h"
 #include "../Logger/Logger.h"
 #include "GarbageCollector.h"
+#include "HPKArchive.h"
 #include "json.hpp"
 #include "Core.h"
 
@@ -97,6 +98,12 @@ public:
 	std::string getAbsoluteContentPath(const std::string& relativeToContent) const;
 	// Resolve <engine_exe>/Content/<relative> (built-in engine assets).
 	std::string getAbsoluteEngineContentPath(const std::string& relativeToContent) const;
+
+	// HPK content archive support
+	bool mountContentArchive(const std::string& hpkPath);
+	void unmountContentArchive();
+	bool isContentArchiveMounted() const;
+
 #if ENGINE_EDITOR
 	// Resolve <engine>/Editor/Widgets/<relative>.
 	std::string getEditorWidgetPath(const std::string& relativeToEditorWidgets) const;
@@ -339,5 +346,8 @@ private:
 	int m_nextAsyncJobId{ 1 };
 	std::unordered_set<int> m_runningAssetJobs;
 	std::unordered_map<int, int> m_finishedAssetJobs;
-    static int s_nextAssetID;
+	static int s_nextAssetID;
+
+	// HPK content archive reader (mounted at runtime for packaged builds)
+	std::unique_ptr<HPKReader> m_hpkReader;
 };
