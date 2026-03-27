@@ -5,6 +5,26 @@
 
 ---
 
+## Aktuelle Änderung (Toast/Modal Messages Editor-Only)
+
+- `Toast- und Modal-Nachrichten aus Runtime-Builds entfernt`: Toast-Notifications und modale Dialoge waren in allen Runtime-Builds sichtbar. **Root Cause:** `showToastMessage()`, `showModalMessage()`, `closeModalMessage()`, Notification-Polling und Toast-Timer in `UIManager.cpp` sowie `enqueueToastNotification()`/`enqueueModalNotification()` in `DiagnosticsManager.cpp` hatten keine `#if ENGINE_EDITOR`-Guards. **Fix:** (1) `UIManager.cpp`: Alle Toast/Modal-Methodenrümpfe (`showModalMessage`, `closeModalMessage`, `showToastMessage` ×2, `ensureModalWidget`, `createToastWidget`, `updateToastStackLayout`) in `#if ENGINE_EDITOR` gewrappt — leere No-Ops in Runtime. (2) `updateNotifications()`: Notification-Polling aus DiagnosticsManager und Toast-Timer/Fade-Logik in eigenen `#if ENGINE_EDITOR`-Block. Shared-Logik (Hover-Transitions, Scrollbar-Visibility) bleibt. (3) `DiagnosticsManager.cpp`: `enqueueModalNotification`/`enqueueToastNotification` Bodies hinter `#if ENGINE_EDITOR` (No-Op in Runtime). `consumeModalNotifications`/`consumeToastNotifications` geben in Runtime leere Vektoren zurück. (4) Deklarationen bleiben sichtbar (71+ Aufrufstellen in Shared-Code). Ergebnis: Kein Toast, kein Modal in Runtime-Builds.
+
+## Aktuelle Änderung (PIE-Entfernung aus Runtime/Packaged Builds)
+
+- `PIE-Konzept aus Runtime-Builds entfernt`: Runtime/Packaged Builds benutzten `diagnostics.setPIEActive(true)` als Hack, damit Physik und Scripting liefen. PIE (Play In Editor) ist ein reines Editor-Konzept. **Build-Fehler-Root-Cause:** PIE.Stop/PIE.ToggleInput-Shortcuts referenzierten `stopPIE` (editor-only, `#if ENGINE_EDITOR`), waren aber im `#if !defined(ENGINE_BUILD_SHIPPING)`-Scope. **Fix (main.cpp):** (1) PIE.Stop und PIE.ToggleInput in `#if ENGINE_EDITOR`-Block verschoben. (2) `diagnostics.setPIEActive(true)` aus Runtime-Init entfernt. (3) Physik/Scripting-Gate zu `if (isRuntimeMode || isPIEActive())` geändert — laufen in Runtime bedingungslos. (4) Kamerabewegung, Mouse-Motion/Click/Scroll-Gates, Kamerarotation, Recapture und Script-Key-Events um `isRuntimeMode` erweitert. Ergebnis: Sauberer Game-Loop ohne PIE-Abstraktion, Development/Debug-Runtime-Builds kompilieren wieder.
+
+## Aktuelle Änderung (ShortcutManager in Debug/Development Runtime-Builds)
+
+- `ShortcutManager in Debug/Development Runtime-Builds`: Tastenkombinationen (F10/F9/F8/F11/F12/ESC/Shift+F1) funktionierten nur im Editor, nicht in gebauten Debug/Development-Spielen. **Root Cause:** `ShortcutManager.h`-Include, alle Shortcut-Registrierungen und der Event-Dispatch waren vollständig hinter `#if ENGINE_EDITOR` — in ALLEN Runtime-Builds nicht verfügbar. **Fix (main.cpp):** Dreistufiges Guard-Modell: (1) `#include "Core/ShortcutManager.h"` zu `#if !defined(ENGINE_BUILD_SHIPPING)` verschoben. (2) Registrierungsblock aufgespalten: äußerer `#if !defined(ENGINE_BUILD_SHIPPING)` mit inneren `#if ENGINE_EDITOR`-Blöcken für Editor-only Shortcuts (Undo/Redo/Save/Search/Copy/Paste/Duplicate/Gizmo/Focus/DropToSurface/Help/Import/Delete). Debug/Runtime-Shortcuts (F11/F8/F10/F9/ESC/Shift+F1/F12) im äußeren Scope. (3) KEY_UP/KEY_DOWN Dispatch von `#if ENGINE_EDITOR` zu `#if !defined(ENGINE_BUILD_SHIPPING)` geändert. (4) Redundanter Fallback-Key-Handling-Block entfernt. Debug- und Development-Builds haben vollen ShortcutManager-Support, Shipping ist auf bare minimum gestripped.
+
+## Aktuelle Änderung (Build-Flow Audit: Shipping-Optimierungen & Profil-Korrekturen)
+
+- `Landscape.dll aus Shipping-Deploy entfernt`: `Landscape.dll` fehlte in der `editorOnlyDlls`-Ausschlussliste und wurde in Standalone-Builds mitkopiert. **Fix (main.cpp):** `editorOnlyDlls`-Array um `Landscape.dll` erweitert (3→4 Einträge).
+- `ScriptHotReload im Shipping deaktiviert`: `InitScriptHotReload()` und `PollScriptHotReload()`/`PollPluginHotReload()` liefen auch in Shipping-Builds und scannten unnötig das Dateisystem. **Fix (main.cpp):** Init und Poll hinter `#if !defined(ENGINE_BUILD_SHIPPING)` geschützt.
+- `Metrics-Formatierung im Shipping eliminiert`: ~15 `snprintf`-Aufrufe + String-Allokationen pro Frame für Metriken, die in Shipping nie angezeigt werden. **Fix (main.cpp):** Beide Metrics-Text-Blöcke (System-Metrics + GPU-Metrics) hinter `#if !defined(ENGINE_BUILD_SHIPPING)`.
+- `Editor-Only Includes geschützt`: `PopupWindow.h`, `TextureViewerWindow.h`, `EditorTheme.h`, `AssetCooker.h` wurden in Runtime-Builds eingebunden. **Fix (main.cpp):** Includes hinter `#if ENGINE_EDITOR` verschoben, explizites `#include "Renderer/UIManager.h"` hinzugefügt (war vorher transitiv über PopupWindow.h).
+- `Baked Build-Profil korrigiert`: `rtBuildProfile` war bei gebackenen Builds immer `"Shipping"` unabhängig vom tatsächlichen Profil. **Fix (main.cpp):** `rtBuildProfile`, `rtEnableHotReload`, `rtEnableProfiler` werden jetzt über `#if defined(ENGINE_BUILD_DEBUG)` / `ENGINE_BUILD_DEVELOPMENT` / else korrekt zur Compile-Zeit gesetzt.
+
 ## Aktuelle Änderung (Build-Profile Compile-Defines, PDB-Separation & Async Toolchain-Detection)
 
 - `Build-Profile Compile-Time Definitions`: Drei Compile-Defines für Runtime-Build-Profile: `ENGINE_BUILD_DEBUG`, `ENGINE_BUILD_DEVELOPMENT`, `ENGINE_BUILD_SHIPPING`. Neuer CMake-Parameter `ENGINE_BUILD_PROFILE` (Default: Shipping). Build-Pipeline übergibt `-DENGINE_BUILD_PROFILE=<name>` an CMake configure. **Shipping:** Kein Overlay, keine Metrics, keine Debug-Shortcuts, stdout unterdrückt – reines Spiel. **Development:** F10-Metrics, FPS-Overlay. **Debug:** F10 Metrics + F9 Occlusion-Stats + F8 Bounds-Debug + F11 UI-Debug.
@@ -1002,7 +1022,7 @@ uint64_t getComponentVersion(); // Globaler Zähler, inkrementiert bei jeder Kom
 ### 8.7 ShortcutManager
 **Datei:** `src/Core/ShortcutManager.h/.cpp`
 
-Zentrales, konfigurierbares Keyboard-Shortcut-System (Singleton).
+Zentrales, konfigurierbares Keyboard-Shortcut-System (Singleton). Verfügbar in Editor und Debug/Development-Runtime-Builds (`#if !defined(ENGINE_BUILD_SHIPPING)`). In Shipping-Builds vollständig entfernt.
 
 **Architektur:**
 - **Action-Registry:** Jede Aktion hat id, displayName, category, defaultCombo, currentCombo, phase (KeyDown/KeyUp) und callback
@@ -1012,13 +1032,18 @@ Zentrales, konfigurierbares Keyboard-Shortcut-System (Singleton).
 - **Konflikt-Erkennung:** `findConflict(combo, phase, excludeId)` → id des kollidierenden Shortcuts
 - **Persistenz:** `saveToFile()`/`loadFromFile()` → Text-Format (`shortcuts.cfg` im Projektverzeichnis)
 
+**Dreistufiges Guard-Modell (main.cpp):**
+- **`#if !defined(ENGINE_BUILD_SHIPPING)`** (äußerer Guard): ShortcutManager-Include, Instanz-Setup, Debug/Runtime-Shortcuts, Config-Load, Event-Dispatch
+- **`#if ENGINE_EDITOR`** (innerer Guard, verschachtelt): Editor-only Shortcuts (Undo/Redo/Save/Search/Copy/Paste/Duplicate/Gizmo/Focus/DropToSurface/Help/Import/Delete)
+- **Shipping**: Kein ShortcutManager, kein Dispatch — bare minimum zum Laufen
+
 **Registrierte Shortcuts (20):**
-| Kategorie | Shortcuts |
-|-----------|-----------|
-| Editor    | Ctrl+Z Undo, Ctrl+Y Redo, Ctrl+S Save, Ctrl+F Search, Ctrl+C/V/D Copy/Paste/Duplicate, F1 Help, F2 Import, DELETE Delete, END Drop-to-Surface, F12 FPS Cap |
-| Gizmo     | W Translate, E Rotate, R Scale, F Focus |
-| Debug     | F8 Bounds, F9 Occlusion Stats, F10 Metrics, F11 UI Debug |
-| PIE       | Escape Stop, Shift+F1 Toggle Input |
+| Kategorie | Verfügbarkeit | Shortcuts |
+|-----------|--------------|-----------|
+| Editor    | Nur Editor (`#if ENGINE_EDITOR`) | Ctrl+Z Undo, Ctrl+Y Redo, Ctrl+S Save, Ctrl+F Search, Ctrl+C/V/D Copy/Paste/Duplicate, F1 Help, F2 Import, DELETE Delete, END Drop-to-Surface |
+| Gizmo     | Nur Editor (`#if ENGINE_EDITOR`) | W Translate, E Rotate, R Scale, F Focus |
+| Debug     | Editor + Debug/Dev Runtime (`!ENGINE_BUILD_SHIPPING`) | F8 Bounds, F9 Occlusion Stats, F10 Metrics, F11 UI Debug, F12 FPS Cap |
+| PIE       | Editor + Debug/Dev Runtime (`!ENGINE_BUILD_SHIPPING`) | Escape Stop, Shift+F1 Toggle Input |
 
 **Editor-Integration:**
 - Konfigurations-UI in Editor Settings Popup (Rebind-Buttons mit KeyCaptureCallback, Konflikt-Warnung, Reset All)
@@ -1207,7 +1232,7 @@ virtual Mat4 getViewMatrixColumnMajor() const = 0;
 | Datei                     | Zweck                          |
 |---------------------------|--------------------------------|
 | `vertex.glsl`             | 3D-Welt Vertex-Shader (TBN-Matrix für Normal Mapping) |
-| `fragment.glsl`           | 3D-Welt Fragment-Shader (Blinn-Phong + PBR Cook-Torrance, Normal Mapping, Emissive Maps, CSM, Fog) |
+| `fragment.glsl`           | 3D-Welt Fragment-Shader (Blinn-Phong + PBR Cook-Torrance mit Specular-Map × SpecularMultiplier auf specBRDF, Normal Mapping, Emissive Maps, CSM, Fog) |
 | `light_fragment.glsl`     | Beleuchtungs-Fragment-Shader   |
 | `panel_vertex/fragment`   | UI-Panel-Rendering             |
 | `button_vertex/fragment`  | UI-Button-Rendering            |
@@ -1224,12 +1249,12 @@ virtual Mat4 getViewMatrixColumnMajor() const = 0;
 #### Material (CPU-seitig):
 - Hält Texturen (`std::vector<shared_ptr<Texture>>`) — Slot 0: Diffuse, Slot 1: Specular, Slot 2: Normal Map, Slot 3: Emissive Map, Slot 4: MetallicRoughness (PBR)
 - Textur-Pfade für Serialisierung
-- Shininess-Wert, Metallic/Roughness-Werte, PBR-Enabled Flag
+- Shininess-Wert, Metallic/Roughness-Werte, Specular-Multiplier (Standard: 1.0), PBR-Enabled Flag
 
 #### OpenGLMaterial:
 - Hält Shader-Liste, Vertex-Daten, Index-Daten, Layout
 - `build()` → Erstellt VAO, VBO, EBO, linkt Shader-Programm
-- `bind()` → Setzt Uniformen (Model/View/Projection, Lights, Shininess, PBR-Parameter, uHasNormalMap, uHasEmissiveMap, uHasMetallicRoughnessMap) und bindet Texturen (Diffuse/Specular/Normal Map/Emissive Map/MetallicRoughness)
+- `bind()` → Setzt Uniformen (Model/View/Projection, Lights, Shininess, PBR-Parameter, uSpecularMultiplier, uHasNormalMap, uHasEmissiveMap, uHasMetallicRoughnessMap) und bindet Texturen (Diffuse/Specular/Normal Map/Emissive Map/MetallicRoughness)
 - **Default World-Grid-Material**: Objekte ohne Diffuse-Textur zeigen automatisch ein World-Space-Grid-Muster (`uHasDiffuseMap` Uniform, `worldGrid()` in `fragment.glsl`). Das Grid nutzt XZ-Weltkoordinaten mit Major-Linien (1.0 Einheit) und Minor-Linien (0.25 Einheit).
 - **Beleuchtung**: Bis zu 8 Lichtquellen (`kMaxLights = 8`)
   - Typen: Point (0), Directional (1), Spot (2)
@@ -1523,6 +1548,7 @@ Alle Komponentenwerte sind über passende Steuerelemente direkt im Details-Panel
 | **Physics** | `mass`, `restitution`, `friction` | Float-EntryBars |
 | **Physics** | `colliderSize`, `velocity`, `angularVelocity` | Vec3-Reihen |
 | **Mesh/Material/Script** | Asset-Pfad | DropdownButton (bestehend) |
+| **Material** | `metallic`, `roughness`, `specularMultiplier` | Float-EntryBars (MaterialOverrides mit Undo/Redo + invalidateEntity) |
 
 - **Änderungsfluss**: Jedes Control ruft bei Commit `ecs.setComponent<T>(entity, updated)` auf, was `m_componentVersion` inkrementiert und das Panel beim nächsten Frame automatisch aktualisiert. **Alle Callbacks markieren das Level als unsaved** (`setIsSaved(false)`), damit Änderungen sofort im StatusBar-Dirty-Zähler reflektiert werden.
 - **Sofortige visuelle Rückmeldung**: Transform-, Light- und Camera-Werte werden vom Renderer jeden Frame direkt aus dem ECS gelesen (`updateModelMatrices`-Lambda, Light-Schema-Query, Camera-Query) — Änderungen sind sofort im Viewport sichtbar ohne Render-Invalidierung. Mesh/Material-Pfadänderungen nutzen `invalidateEntity(entity)`, das die betroffene Entität in eine Dirty-Queue (`DiagnosticsManager::m_dirtyEntities`) einreiht. Im nächsten Frame ruft `renderWorld()` für jede Dirty-Entität `refreshEntity()` → `refreshEntityRenderable()` auf, das bestehende GPU-Caches nutzt und nur fehlende Assets nachlädt — statt den gesamten Scene-Graph neu aufzubauen.

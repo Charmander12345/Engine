@@ -117,6 +117,7 @@ public:
     void setOverrideMetallic(float v) { m_pbrMetallic = v; }
     void setOverrideRoughness(float v) { m_pbrRoughness = v; }
     void setOverrideShininess(float v) { m_shininess = v; }
+    void setOverrideSpecularMultiplier(float v) { m_specularMultiplier = v; }
 
     // Skeletal Animation
     void setSkinned(bool skinned) { m_skinned = skinned; }
@@ -254,9 +255,11 @@ private:
     bool  m_pbrEnabled{false};
     float m_pbrMetallic{0.0f};
     float m_pbrRoughness{0.5f};
+    float m_specularMultiplier{1.0f};
     GLint m_locPbrEnabled{-1};
     GLint m_locMetallic{-1};
     GLint m_locRoughness{-1};
+    GLint m_locSpecularMultiplier{-1};
     GLint m_locHasMetallicRoughnessMap{-1};
 
     // Instancing

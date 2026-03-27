@@ -145,6 +145,7 @@ static json serializeMaterialComponent(const ECS::MaterialComponent& component)
 		if (ov.hasMetallic)    ovJson["metallic"]    = ov.metallic;
 		if (ov.hasRoughness)   ovJson["roughness"]   = ov.roughness;
 		if (ov.hasShininess)   ovJson["shininess"]   = ov.shininess;
+		if (ov.hasSpecularMultiplier) ovJson["specularMultiplier"] = ov.specularMultiplier;
 		if (ov.hasEmissive)    ovJson["emissive"]    = serializeFloat3(ov.emissiveColor);
 		j["overrides"] = ovJson;
 	}
@@ -179,6 +180,11 @@ static void deserializeMaterialComponent(const json& value, ECS::MaterialCompone
 		{
 			component.overrides.shininess = ov.at("shininess").get<float>();
 			component.overrides.hasShininess = true;
+		}
+		if (ov.contains("specularMultiplier"))
+		{
+			component.overrides.specularMultiplier = ov.at("specularMultiplier").get<float>();
+			component.overrides.hasSpecularMultiplier = true;
 		}
 		if (ov.contains("emissive"))
 		{

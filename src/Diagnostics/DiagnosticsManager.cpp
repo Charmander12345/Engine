@@ -146,6 +146,7 @@ void DiagnosticsManager::clear()
 
 void DiagnosticsManager::enqueueModalNotification(const std::string& message, bool dedupe)
 {
+#if ENGINE_EDITOR
     if (message.empty())
     {
         return;
@@ -156,10 +157,12 @@ void DiagnosticsManager::enqueueModalNotification(const std::string& message, bo
         return;
     }
     m_modalNotifications.push_back(message);
+#endif
 }
 
 void DiagnosticsManager::enqueueToastNotification(const std::string& message, float durationSeconds, NotificationLevel level)
 {
+#if ENGINE_EDITOR
     if (message.empty())
     {
         return;
@@ -170,22 +173,31 @@ void DiagnosticsManager::enqueueToastNotification(const std::string& message, fl
     toast.durationSeconds = durationSeconds;
     toast.level = level;
     m_toastNotifications.push_back(std::move(toast));
+#endif
 }
 
 std::vector<std::string> DiagnosticsManager::consumeModalNotifications()
 {
+#if ENGINE_EDITOR
     std::lock_guard<std::mutex> lock(m_mutex);
     std::vector<std::string> result = std::move(m_modalNotifications);
     m_modalNotifications.clear();
     return result;
+#else
+    return {};
+#endif
 }
 
 std::vector<DiagnosticsManager::ToastNotification> DiagnosticsManager::consumeToastNotifications()
 {
+#if ENGINE_EDITOR
     std::lock_guard<std::mutex> lock(m_mutex);
     std::vector<ToastNotification> result = std::move(m_toastNotifications);
     m_toastNotifications.clear();
     return result;
+#else
+    return {};
+#endif
 }
 
 void DiagnosticsManager::setRHIType(RHIType type)

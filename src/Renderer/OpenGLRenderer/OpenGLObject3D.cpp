@@ -1052,6 +1052,14 @@ void OpenGLObject3D::setPbrData(bool enabled, float metallic, float roughness)
     }
 }
 
+void OpenGLObject3D::setSpecularMultiplier(float value)
+{
+    if (m_material)
+    {
+        m_material->setOverrideSpecularMultiplier(value);
+    }
+}
+
 void OpenGLObject3D::setDebugMode(int mode)
 {
     if (m_material)

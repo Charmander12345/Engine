@@ -23,7 +23,6 @@
 #include "Diagnostics/DiagnosticsManager.h"
 #include "AssetManager/AssetManager.h"
 #include "AssetManager/AssetTypes.h"
-#include "AssetManager/AssetCooker.h"
 #include "AssetManager/HPKArchive.h"
 #include "Core/ECS/ECS.h"
 #include "Core/MathTypes.h"
@@ -34,12 +33,16 @@
 #include "CrashProtocol.h"
 
 #include "Renderer/ViewportUIManager.h"
+#include "Renderer/UIManager.h"
 #include "Renderer/UIWidget.h"
+#if ENGINE_EDITOR
+#include "AssetManager/AssetCooker.h"
 #include "Renderer/EditorWindows/PopupWindow.h"
 #include "Renderer/EditorWindows/TextureViewerWindow.h"
 #include "Renderer/EditorTheme.h"
-#if ENGINE_EDITOR
 #include "Core/UndoRedoManager.h"
+#endif
+#if !defined(ENGINE_BUILD_SHIPPING)
 #include "Core/ShortcutManager.h"
 #endif
 
@@ -117,9 +120,21 @@ int main()
 #   if defined(GAME_WINDOW_TITLE_BAKED)
     rtWindowTitle = GAME_WINDOW_TITLE_BAKED;
 #   endif
+    // Match rtBuildProfile to the compile-time build profile define
+#   if defined(ENGINE_BUILD_DEBUG)
+    rtBuildProfile = "Debug";
+    rtEnableHotReload = true;
+    rtEnableProfiler = true;
+#   elif defined(ENGINE_BUILD_DEVELOPMENT)
+    rtBuildProfile = "Development";
+    rtEnableHotReload = true;
+    rtEnableProfiler = true;
+#   else
     rtBuildProfile = "Shipping";
     rtEnableHotReload = false;
-    logTimed(Logger::Category::Engine, "Runtime mode (compiled-in). StartLevel=" + rtStartLevel, Logger::LogLevel::INFO);
+    rtEnableProfiler = false;
+#   endif
+    logTimed(Logger::Category::Engine, "Runtime mode (compiled-in). Profile=" + rtBuildProfile + " StartLevel=" + rtStartLevel, Logger::LogLevel::INFO);
 #else
     {
         const char* bp = SDL_GetBasePath();
@@ -795,6 +810,7 @@ int main()
 #endif // ENGINE_EDITOR
 
     // --- Phase 2c: Initialise Script Hot-Reload ---
+#if !defined(ENGINE_BUILD_SHIPPING)
     {
         const auto& projectPath = diagnostics.getProjectInfo().projectPath;
         if (!projectPath.empty())
@@ -805,6 +821,7 @@ int main()
         if (auto saved = diagnostics.getState("ScriptHotReloadEnabled"); saved && *saved == "false")
             Scripting::SetScriptHotReloadEnabled(false);
     }
+#endif // !ENGINE_BUILD_SHIPPING
 
     #if ENGINE_EDITOR
     // --- Phase 2d: Load Editor Plugins ---
@@ -2813,8 +2830,8 @@ int main()
 
                                   // Skip editor-only DLLs that the runtime does not need
                                   const std::string fname = entry.path().filename().string();
-                                  static const std::array<std::string, 3> editorOnlyDlls = {
-                                      "AssetManager.dll", "Scripting.dll", "Renderer.dll"
+                                  static const std::array<std::string, 4> editorOnlyDlls = {
+                                      "AssetManager.dll", "Scripting.dll", "Renderer.dll", "Landscape.dll"
                                   };
                                   bool isEditorOnly = false;
                                   for (const auto& edDll : editorOnlyDlls)
@@ -3174,8 +3191,7 @@ int main()
                 PhysicsWorld::Instance().setFixedTimestep(1.0f / 60.0f);
                 PhysicsWorld::Instance().setSleepThreshold(0.05f);
 
-                // Activate PIE-like mode so scripts and physics run
-                diagnostics.setPIEActive(true);
+                // Runtime mode: physics and scripts run unconditionally (no PIE needed)
 
                 // Apply per-level settings (skybox) to the renderer
                 if (auto* newLevel = diagnostics.getActiveLevelSoft())
@@ -3342,14 +3358,15 @@ int main()
     double cpuLoggerMs = 0.0;
     double cpuGcMs = 0.0;
 
-#if ENGINE_EDITOR
+#if !defined(ENGINE_BUILD_SHIPPING)
     // ─── Register all keyboard shortcuts with ShortcutManager ───
     {
         auto& sm = ShortcutManager::Instance();
         using Phase = ShortcutManager::Phase;
         using Mod = ShortcutManager::Mod;
 
-        // --- KeyDown shortcuts (Ctrl+combos) ---
+#if ENGINE_EDITOR
+        // --- Editor-only KeyDown shortcuts (Ctrl+combos) ---
 
         sm.registerAction("Editor.Undo", "Undo", "Editor",
             { SDLK_Z, Mod::Ctrl }, Phase::KeyDown,
@@ -3423,8 +3440,9 @@ int main()
                 renderer->getUIManager().duplicateSelectedEntity();
                 return true;
             });
+#endif // ENGINE_EDITOR (editor-only KeyDown shortcuts)
 
-        // --- KeyUp shortcuts ---
+        // --- Debug/Runtime KeyUp shortcuts (available in Debug & Development builds) ---
 
         sm.registerAction("Editor.ToggleUIDebug", "Toggle UI Debug", "Debug",
             { SDLK_F11, Mod::None }, Phase::KeyUp,
@@ -3462,32 +3480,34 @@ int main()
                 return true;
             });
 
-        sm.registerAction("PIE.Stop", "Stop PIE", "PIE",
-            { SDLK_ESCAPE, Mod::None }, Phase::KeyUp,
-            [&]() -> bool {
-                if (!diagnostics.isPIEActive() || !stopPIE) return false;
-                stopPIE();
-                return true;
-            });
+        #if ENGINE_EDITOR
+                sm.registerAction("PIE.Stop", "Stop PIE", "PIE",
+                    { SDLK_ESCAPE, Mod::None }, Phase::KeyUp,
+                    [&]() -> bool {
+                        if (!diagnostics.isPIEActive() || !stopPIE) return false;
+                        stopPIE();
+                        return true;
+                    });
 
-        sm.registerAction("PIE.ToggleInput", "Toggle PIE Input", "PIE",
-            { SDLK_F1, Mod::Shift }, Phase::KeyUp,
-            [&]() -> bool {
-                if (!diagnostics.isPIEActive()) return false;
-                if (pieMouseCaptured && !pieInputPaused)
-                {
-                    pieInputPaused = true;
-                    if (auto* w = renderer->window())
-                    {
-                        SDL_SetWindowRelativeMouseMode(w, false);
-                        SDL_SetWindowMouseGrab(w, false);
-                        SDL_WarpMouseInWindow(w, preCaptureMouseX, preCaptureMouseY);
-                    }
-                    SDL_ShowCursor();
-                    logTimed(Logger::Category::Input, "PIE: input paused (Shift+F1), mouse released.", Logger::LogLevel::INFO);
-                }
-                return true;
-            });
+                sm.registerAction("PIE.ToggleInput", "Toggle PIE Input", "PIE",
+                    { SDLK_F1, Mod::Shift }, Phase::KeyUp,
+                    [&]() -> bool {
+                        if (!diagnostics.isPIEActive()) return false;
+                        if (pieMouseCaptured && !pieInputPaused)
+                        {
+                            pieInputPaused = true;
+                            if (auto* w = renderer->window())
+                            {
+                                SDL_SetWindowRelativeMouseMode(w, false);
+                                SDL_SetWindowMouseGrab(w, false);
+                                SDL_WarpMouseInWindow(w, preCaptureMouseX, preCaptureMouseY);
+                            }
+                            SDL_ShowCursor();
+                            logTimed(Logger::Category::Input, "PIE: input paused (Shift+F1), mouse released.", Logger::LogLevel::INFO);
+                        }
+                        return true;
+                    });
+        // --- Editor-only KeyUp shortcuts (Gizmo, Focus, etc.) ---
 
         sm.registerAction("Gizmo.Translate", "Translate Mode", "Gizmo",
             { SDLK_W, Mod::None }, Phase::KeyUp,
@@ -3532,6 +3552,7 @@ int main()
                 });
                 return true;
             });
+#endif // ENGINE_EDITOR (Gizmo, Focus, DropToSurface)
 
         sm.registerAction("Editor.ToggleFPSCap", "Toggle FPS Cap", "Debug",
             { SDLK_F12, Mod::None }, Phase::KeyUp,
@@ -3539,6 +3560,9 @@ int main()
                 fpscap = !fpscap;
                 return true;
             });
+
+#if ENGINE_EDITOR
+        // --- Editor-only KeyUp shortcuts (Help, Import, Delete) ---
 
         sm.registerAction("Editor.ShortcutHelp", "Shortcut Help", "Editor",
             { SDLK_F1, Mod::None }, Phase::KeyUp,
@@ -3706,6 +3730,7 @@ int main()
                 UndoRedoManager::Instance().pushCommand(std::move(cmd));
                 return true;
             });
+#endif // ENGINE_EDITOR (Help, Import, Delete)
 
         logTimed(Logger::Category::Engine, "Registered " + std::to_string(sm.getActions().size()) + " keyboard shortcuts.", Logger::LogLevel::INFO);
 
@@ -3723,7 +3748,7 @@ int main()
             }
         }
     }
-#endif // ENGINE_EDITOR (keyboard shortcuts)
+#endif // !ENGINE_BUILD_SHIPPING (keyboard shortcuts)
 
     while (running)
     {
@@ -3844,8 +3869,8 @@ int main()
                 if (auto v = diagnostics.getState("LaptopMode")) return *v == "1";
                 return false;
             }();
-            // In PIE (and not paused): always move. Outside PIE: require right-click (unless laptop mode).
-            const bool canMove = (inPIE && pieMouseCaptured && !pieInputPaused) || (!inPIE && (rightMouseDown || laptopMode));
+            // In runtime or PIE (and not paused): always move. Outside PIE: require right-click (unless laptop mode).
+            const bool canMove = ((isRuntimeMode || inPIE) && pieMouseCaptured && !pieInputPaused) || (!inPIE && !isRuntimeMode && (rightMouseDown || laptopMode));
             if (canMove)
             {
                 if (keys[SDL_SCANCODE_W]) renderer->moveCamera(+moveSpeed, 0.0f, 0.0f);
@@ -3864,7 +3889,7 @@ int main()
             SDL_GetMouseState(&mouseX, &mouseY);
             mousePosPixels = Vec2{ mouseX, mouseY };
             hasMousePos = true;
-            if (renderer && !(diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused))
+            if (renderer && !((isRuntimeMode || diagnostics.isPIEActive()) && pieMouseCaptured && !pieInputPaused))
             {
                 auto& uiManager = renderer->getUIManager();
                 uiManager.setMousePosition(mousePosPixels);
@@ -3905,8 +3930,8 @@ int main()
                     mousePosPixels = Vec2{ event.motion.x, event.motion.y };
                     hasMousePos = true;
 
-                    // During active PIE capture, skip UI updates so editor stays inert (no hover effects)
-                    if (!(diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused))
+                    // During active runtime/PIE capture, skip UI updates so editor stays inert (no hover effects)
+                    if (!((isRuntimeMode || diagnostics.isPIEActive()) && pieMouseCaptured && !pieInputPaused))
                     {
                         auto& uiManager = renderer->getUIManager();
                         uiManager.setMousePosition(mousePosPixels);
@@ -3939,8 +3964,8 @@ int main()
 
             if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT)
             {
-                // During active PIE capture, ignore left-click so editor UI stays inert
-                if (diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused)
+                // During active runtime/PIE capture, ignore left-click so editor UI stays inert
+                if ((isRuntimeMode || diagnostics.isPIEActive()) && pieMouseCaptured && !pieInputPaused)
                     continue;
 
                 if (renderer)
@@ -3986,8 +4011,8 @@ int main()
 #endif
                         }
 
-                        // PIE: recapture mouse
-                        if (diagnostics.isPIEActive() && pieInputPaused)
+                        // PIE/Runtime: recapture mouse
+                        if ((isRuntimeMode || diagnostics.isPIEActive()) && pieInputPaused)
                         {
                             pieInputPaused = false;
                             SDL_GetMouseState(&preCaptureMouseX, &preCaptureMouseY);
@@ -4027,7 +4052,7 @@ int main()
                     continue;
                 }
 
-                if (diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused)
+                if ((isRuntimeMode || diagnostics.isPIEActive()) && pieMouseCaptured && !pieInputPaused)
                     continue;
 
                 if (renderer)
@@ -4076,7 +4101,7 @@ int main()
 
             if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_RIGHT)
             {
-                if (diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused)
+                if ((isRuntimeMode || diagnostics.isPIEActive()) && pieMouseCaptured && !pieInputPaused)
                     continue;
 
                 if (renderer)
@@ -4476,7 +4501,9 @@ int main()
                                     std::string fragmentShader = "fragment.glsl";
                                     std::string diffuseTexture;
                                     std::string specularTexture;
-                                    float shininess = 32.0f;
+                                    float metallic = 0.0f;
+                                    float roughness = 0.5f;
+                                    float specularMultiplier = 1.0f;
                                     std::string folder;
                                 };
                                 auto state = std::make_shared<MaterialState>();
@@ -4583,11 +4610,29 @@ int main()
                                     formStack.children.push_back(std::move(entry));
                                 }
 
-                                formStack.children.push_back(makeLabel("NM.ShinLbl", "Shininess"));
+                                formStack.children.push_back(makeLabel("NM.MetLbl", "Metallic"));
                                 {
-                                    auto entry = makeEntry("NM.Shininess", "32");
+                                    auto entry = makeEntry("NM.Metallic", "0");
                                     entry.onValueChanged = [state](const std::string& v) {
-                                        try { state->shininess = std::stof(v); } catch (...) {}
+                                        try { state->metallic = std::stof(v); } catch (...) {}
+                                    };
+                                    formStack.children.push_back(std::move(entry));
+                                }
+
+                                formStack.children.push_back(makeLabel("NM.RoughLbl", "Roughness"));
+                                {
+                                    auto entry = makeEntry("NM.Roughness", "0.5");
+                                    entry.onValueChanged = [state](const std::string& v) {
+                                        try { state->roughness = std::stof(v); } catch (...) {}
+                                    };
+                                    formStack.children.push_back(std::move(entry));
+                                }
+
+                                formStack.children.push_back(makeLabel("NM.SpecMulLbl", "Specular Multiplier"));
+                                {
+                                    auto entry = makeEntry("NM.SpecularMultiplier", "1");
+                                    entry.onValueChanged = [state](const std::string& v) {
+                                        try { state->specularMultiplier = std::stof(v); } catch (...) {}
                                     };
                                     formStack.children.push_back(std::move(entry));
                                 }
@@ -4650,7 +4695,10 @@ int main()
                                             texPaths.push_back(state->specularTexture);
                                         if (!texPaths.empty())
                                             matData["m_textureAssetPaths"] = texPaths;
-                                        matData["m_shininess"] = state->shininess;
+                                        matData["m_metallic"] = state->metallic;
+                                        matData["m_roughness"] = state->roughness;
+                                        matData["m_specularMultiplier"] = state->specularMultiplier;
+                                        matData["m_pbrEnabled"] = true;
                                         mat->setData(std::move(matData));
 
                                         Asset asset;
@@ -4784,7 +4832,7 @@ int main()
                     }
 #endif // ENGINE_EDITOR
                 }
-                if (!isOverUI && !diagnostics.isPIEActive())
+                if (!isOverUI && !diagnostics.isPIEActive() && !isRuntimeMode)
                 {
 #if ENGINE_EDITOR
                     // Texture viewer: right-click starts panning instead of camera rotation
@@ -4844,7 +4892,7 @@ int main()
 
             if (event.type == SDL_EVENT_MOUSE_WHEEL)
             {
-                if (renderer && !(diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused))
+                if (renderer && !((isRuntimeMode || diagnostics.isPIEActive()) && pieMouseCaptured && !pieInputPaused))
                 {
                     auto& uiManager = renderer->getUIManager();
                     if (uiManager.handleScroll(mousePosPixels, event.wheel.y))
@@ -4917,11 +4965,11 @@ int main()
                 continue;
             }
 
-            if (event.type == SDL_EVENT_MOUSE_MOTION && (rightMouseDown || (diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused)))
+            if (event.type == SDL_EVENT_MOUSE_MOTION && (rightMouseDown || ((isRuntimeMode || diagnostics.isPIEActive()) && pieMouseCaptured && !pieInputPaused)))
             {
                 // Block camera rotation when gameplay cursor is visible
                 bool cursorBlocksCamera = false;
-                if (diagnostics.isPIEActive() && pieMouseCaptured && !pieInputPaused)
+                if ((isRuntimeMode || diagnostics.isPIEActive()) && pieMouseCaptured && !pieInputPaused)
                 {
                     if (auto* vpUI = renderer->getViewportUIManagerPtr())
                         cursorBlocksCamera = vpUI->isGameplayCursorVisible();
@@ -4958,54 +5006,25 @@ int main()
 
             if (event.type == SDL_EVENT_KEY_UP)
             {
-#if ENGINE_EDITOR
+#if !defined(ENGINE_BUILD_SHIPPING)
                 if (ShortcutManager::Instance().handleKey(event.key.key, event.key.mod, ShortcutManager::Phase::KeyUp))
                 {
                     continue;
                 }
-#endif // ENGINE_EDITOR
-                if (diagnostics.isPIEActive())
+#endif // !ENGINE_BUILD_SHIPPING
+                if (isRuntimeMode || diagnostics.isPIEActive())
                 {
                     Scripting::HandleKeyUp(event.key.key);
                 }
             }
             else if (event.type == SDL_EVENT_KEY_DOWN)
             {
-#if ENGINE_EDITOR
+#if !defined(ENGINE_BUILD_SHIPPING)
                 if (ShortcutManager::Instance().handleKey(event.key.key, event.key.mod, ShortcutManager::Phase::KeyDown))
                 {
                     continue;
                 }
-#endif // ENGINE_EDITOR
-
-#if !ENGINE_EDITOR && !defined(ENGINE_BUILD_SHIPPING)
-                // F10: toggle on-screen performance metrics (Debug/Development runtime)
-                if (event.key.key == SDLK_F10 && !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_SHIFT)))
-                {
-                    showMetrics = !showMetrics;
-                    continue;
-                }
-#   if defined(ENGINE_BUILD_DEBUG)
-                // F9: toggle occlusion stats overlay
-                if (event.key.key == SDLK_F9 && !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_SHIFT)))
-                {
-                    showOcclusionStats = !showOcclusionStats;
-                    continue;
-                }
-                // F8: toggle bounding-box debug draw
-                if (event.key.key == SDLK_F8 && !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_SHIFT)))
-                {
-                    if (renderer) renderer->toggleBoundsDebug();
-                    continue;
-                }
-                // F11: toggle UI debug bounds
-                if (event.key.key == SDLK_F11 && !(event.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_SHIFT)))
-                {
-                    if (renderer) renderer->toggleUIDebug();
-                    continue;
-                }
-#   endif // ENGINE_BUILD_DEBUG
-#endif // !ENGINE_EDITOR && !ENGINE_BUILD_SHIPPING
+#endif // !ENGINE_BUILD_SHIPPING
 
                 if (renderer)
                 {
@@ -5023,7 +5042,7 @@ int main()
                     }
                 }
                 diagnostics.dispatchKeyDown(event.key.key);
-                if (diagnostics.isPIEActive())
+                if (isRuntimeMode || diagnostics.isPIEActive())
                 {
                     Scripting::HandleKeyDown(event.key.key);
                 }
@@ -5114,14 +5133,16 @@ int main()
             running = false;
         }
 
-        if (diagnostics.isPIEActive())
+        if (isRuntimeMode || diagnostics.isPIEActive())
         {
             PhysicsWorld::Instance().step(static_cast<float>(dt));
             Scripting::UpdateScripts(static_cast<float>(dt));
         }
 
         // Poll for .py file changes and hot-reload if needed (self-throttled to 500ms)
+#if !defined(ENGINE_BUILD_SHIPPING)
         Scripting::PollScriptHotReload();
+#endif
 #if ENGINE_EDITOR
         Scripting::PollPluginHotReload();
 #endif
@@ -5139,6 +5160,7 @@ int main()
 
         if (renderer)
         {
+#if !defined(ENGINE_BUILD_SHIPPING)
             // Only show performance stats on the Viewport tab, not in Mesh Viewer tabs
             const bool isViewportTab = (renderer->getActiveTabId() == "Viewport");
 
@@ -5163,6 +5185,7 @@ int main()
                     0.4f,
                     Vec4{ 0.9f, 0.9f, 0.9f, 1.0f });
             }
+#endif // !ENGINE_BUILD_SHIPPING
         }
 
         const uint64_t renderStartCounter = SDL_GetPerformanceCounter();
@@ -5199,6 +5222,7 @@ int main()
 
         if (renderer)
         {
+#if !defined(ENGINE_BUILD_SHIPPING)
             const bool isViewportTab = (renderer->getActiveTabId() == "Viewport");
 
             if (metricsUpdatePending)
@@ -5281,6 +5305,7 @@ int main()
             {
                 renderer->queueText(occlusionText, Vec2{ 0.02f, 0.45f }, 0.35f, Vec4{ 1.0f, 0.85f, 0.4f, 1.0f });
             }
+#endif // !ENGINE_BUILD_SHIPPING
         }
 
         if (metricsUpdatePending)

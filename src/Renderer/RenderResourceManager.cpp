@@ -297,6 +297,7 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
         float shininess = 32.0f;
         float metallic = 0.0f;
         float roughness = 0.5f;
+        float specularMultiplier = 1.0f;
         bool pbrEnabled = false;
         std::string fragmentShaderOverride;
         if (!match.material.materialAssetPath.empty())
@@ -310,6 +311,7 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
                 shininess = cachedMat->second.shininess;
                 metallic = cachedMat->second.metallic;
                 roughness = cachedMat->second.roughness;
+                specularMultiplier = cachedMat->second.specularMultiplier;
                 pbrEnabled = cachedMat->second.pbrEnabled;
                 fragmentShaderOverride = cachedMat->second.shaderFragment;
             }
@@ -339,6 +341,10 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
                             if (matData.contains("m_roughness"))
                             {
                                 roughness = matData.at("m_roughness").get<float>();
+                            }
+                            if (matData.contains("m_specularMultiplier"))
+                            {
+                                specularMultiplier = matData.at("m_specularMultiplier").get<float>();
                             }
                             if (matData.contains("m_pbrEnabled"))
                             {
@@ -426,7 +432,7 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
 
                 if (!materialCacheKey.empty())
                 {
-                    m_materialDataCache[materialCacheKey] = { textures, shininess, metallic, roughness, pbrEnabled, fragmentShaderOverride };
+                    m_materialDataCache[materialCacheKey] = { textures, shininess, metallic, roughness, specularMultiplier, pbrEnabled, fragmentShaderOverride };
                 }
             }
         }
@@ -459,6 +465,7 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
         renderable.shininess = shininess;
         renderable.metallic = metallic;
         renderable.roughness = roughness;
+        renderable.specularMultiplier = specularMultiplier;
         renderable.pbrEnabled = pbrEnabled;
 
         // Determine effective fragment shader override: material > default parameter
@@ -501,6 +508,7 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
                     obj->setTextures(textures);
                     obj->setShininess(shininess);
                     obj->setPbrData(pbrEnabled, metallic, roughness);
+                    obj->setSpecularMultiplier(specularMultiplier);
                     renderable.object3D = obj;
                     m_object3DCache[obj3DCacheKey] = obj;
                     AssetManager::Instance().registerRuntimeResource(obj);
@@ -717,6 +725,7 @@ RenderResourceManager::RenderableAsset RenderResourceManager::refreshEntityRende
 	float shininess = 32.0f;
 	float metallic = 0.0f;
 	float roughness = 0.5f;
+	float specularMultiplier = 1.0f;
 	bool pbrEnabled = false;
 	std::string fragmentShaderOverride;
 
@@ -732,6 +741,7 @@ RenderResourceManager::RenderableAsset RenderResourceManager::refreshEntityRende
 			shininess = cachedMat->second.shininess;
 			metallic = cachedMat->second.metallic;
 			roughness = cachedMat->second.roughness;
+			specularMultiplier = cachedMat->second.specularMultiplier;
 			pbrEnabled = cachedMat->second.pbrEnabled;
 			fragmentShaderOverride = cachedMat->second.shaderFragment;
 		}
@@ -753,6 +763,8 @@ RenderResourceManager::RenderableAsset RenderResourceManager::refreshEntityRende
 							metallic = matData.at("m_metallic").get<float>();
 						if (matData.contains("m_roughness"))
 							roughness = matData.at("m_roughness").get<float>();
+						if (matData.contains("m_specularMultiplier"))
+							specularMultiplier = matData.at("m_specularMultiplier").get<float>();
 						if (matData.contains("m_pbrEnabled"))
 							pbrEnabled = matData.at("m_pbrEnabled").get<bool>();
 						if (matData.contains("m_textureAssetPaths"))
@@ -791,14 +803,14 @@ RenderResourceManager::RenderableAsset RenderResourceManager::refreshEntityRende
 					}
 				}
 			}
-			if (!materialCacheKey.empty())
-			{
-				m_materialDataCache[materialCacheKey] = { textures, shininess, metallic, roughness, pbrEnabled, fragmentShaderOverride };
+				if (!materialCacheKey.empty())
+					{
+						m_materialDataCache[materialCacheKey] = { textures, shininess, metallic, roughness, specularMultiplier, pbrEnabled, fragmentShaderOverride };
+					}
+				}
 			}
-		}
-	}
 
-	// --- Resolve mesh ---
+			// --- Resolve mesh ---
 	std::string meshPath = resolveContentPath(meshComp->meshAssetPath);
 	int assetId = assetManager.loadAsset(meshPath, AssetType::Model3D, AssetManager::Sync);
 	if (assetId == 0)
@@ -822,6 +834,7 @@ RenderResourceManager::RenderableAsset RenderResourceManager::refreshEntityRende
 	result.shininess = shininess;
 	result.metallic = metallic;
 	result.roughness = roughness;
+	result.specularMultiplier = specularMultiplier;
 	result.pbrEnabled = pbrEnabled;
 
 	std::string effectiveFragShader = fragmentShaderOverride.empty() ? defaultFragmentShader : fragmentShaderOverride;
@@ -853,6 +866,7 @@ RenderResourceManager::RenderableAsset RenderResourceManager::refreshEntityRende
 				obj->setTextures(textures);
 				obj->setShininess(shininess);
 				obj->setPbrData(pbrEnabled, metallic, roughness);
+				obj->setSpecularMultiplier(specularMultiplier);
 				result.object3D = obj;
 				m_object3DCache[obj3DCacheKey] = obj;
 				AssetManager::Instance().registerRuntimeResource(obj);

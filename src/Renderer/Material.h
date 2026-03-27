@@ -36,6 +36,9 @@ public:
     void setRoughness(float roughness) { m_roughness = roughness; }
     float getRoughness() const { return m_roughness; }
 
+    void setSpecularMultiplier(float v) { m_specularMultiplier = v; }
+    float getSpecularMultiplier() const { return m_specularMultiplier; }
+
     void setPbrEnabled(bool enabled) { m_pbrEnabled = enabled; }
     bool getPbrEnabled() const { return m_pbrEnabled; }
 
@@ -49,6 +52,7 @@ protected:
     float m_shininess{32.0f};
     float m_metallic{0.0f};
     float m_roughness{0.5f};
+    float m_specularMultiplier{1.0f};
     bool m_pbrEnabled{false};
     bool m_transparent{false};
 };

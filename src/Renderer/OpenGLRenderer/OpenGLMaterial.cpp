@@ -345,6 +345,7 @@ void OpenGLMaterial::cacheUniformLocations()
     m_locPbrEnabled              = glGetUniformLocation(m_program, "uPbrEnabled");
     m_locMetallic                = glGetUniformLocation(m_program, "uMetallic");
     m_locRoughness               = glGetUniformLocation(m_program, "uRoughness");
+    m_locSpecularMultiplier      = glGetUniformLocation(m_program, "uSpecularMultiplier");
     m_locHasMetallicRoughnessMap = glGetUniformLocation(m_program, "uHasMetallicRoughnessMap");
     m_locInstanced = glGetUniformLocation(m_program, "uInstanced");
     m_locDebugMode  = glGetUniformLocation(m_program, "uDebugMode");
@@ -580,6 +581,8 @@ void OpenGLMaterial::bind()
         glUniform1f(m_locMetallic, m_pbrMetallic);
     if (m_locRoughness >= 0)
         glUniform1f(m_locRoughness, m_pbrRoughness);
+    if (m_locSpecularMultiplier >= 0)
+        glUniform1f(m_locSpecularMultiplier, m_specularMultiplier);
     if (m_locHasMetallicRoughnessMap >= 0)
         glUniform1i(m_locHasMetallicRoughnessMap, (m_textures.size() >= 5 && m_textures[4]) ? 1 : 0);
 

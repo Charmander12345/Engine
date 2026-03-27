@@ -2351,7 +2351,6 @@ void OpenGLRenderer::renderWorld()
 				first.obj->setSkinned(true);
 				first.obj->setBoneMatrices(bones.empty() ? nullptr : bones[0].m, static_cast<int>(bones.size()));
 			}
-			// Apply material overrides for skinned entities too
 			if (first.overrides.hasAnyOverride() && first.material)
 			{
 				if (first.overrides.hasColorTint)
@@ -2362,6 +2361,8 @@ void OpenGLRenderer::renderWorld()
 					first.material->setOverrideRoughness(first.overrides.roughness);
 				if (first.overrides.hasShininess)
 					first.material->setOverrideShininess(first.overrides.shininess);
+				if (first.overrides.hasSpecularMultiplier)
+					first.material->setOverrideSpecularMultiplier(first.overrides.specularMultiplier);
 			}
 			first.obj->render();
 			// Restore defaults after override draw
@@ -2403,6 +2404,8 @@ void OpenGLRenderer::renderWorld()
 					first.material->setOverrideRoughness(first.overrides.roughness);
 				if (first.overrides.hasShininess)
 					first.material->setOverrideShininess(first.overrides.shininess);
+				if (first.overrides.hasSpecularMultiplier)
+					first.material->setOverrideSpecularMultiplier(first.overrides.specularMultiplier);
 			}
 			first.obj->render();
 			// Restore defaults

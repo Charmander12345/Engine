@@ -5,6 +5,58 @@
 
 ---
 
+## Letzte Änderung (PBR Specular Fix + Material Editor Redesign)
+
+- ✅ `Specular Map eliminiert Reflexionen vollständig bei Wert 0`: Die vorherige Fix (`F0 *= specColor`) war unzureichend — Fresnel-Schlick `F = F0 + (1-F0)*pow(1-cosTheta,5)` erzeugte weiterhin nicht-null Specular bei Glancing Angles selbst mit F0=0. **Neuer Fix (fragment.glsl):** Statt F0 zu modulieren wird jetzt der finale `specBRDF` mit `specColor * uSpecularMultiplier` multipliziert. Dies garantiert `specBRDF * vec3(0) = vec3(0)` unabhängig von Fresnel/NDF/Geometrie. Blinn-Phong-Pfad ebenfalls mit `uSpecularMultiplier` versehen.
+- ✅ `Specular Multiplier als neues Material-Property`: Neues `uSpecularMultiplier`-Uniform (Standard: 1.0) durch die gesamte Pipeline: `Material.h` → `Components.h` (MaterialOverrides) → `OpenGLMaterial` → `RenderResourceManager` → `OpenGLObject3D` → `OpenGLRenderer` Overrides → `EngineLevel` Serialisierung. Erlaubt Künstlern die globale Specular-Intensität pro Material/Entity zu steuern.
+- ✅ `Material Editor Redesign (Entity Details)`: Material-Sektion im Entity Details Panel zeigt jetzt editierbare Float-Felder für Metallic, Roughness und Specular Multiplier mit Undo/Redo-Support und Entity-Invalidierung.
+- ✅ `New Material Dialog Redesign`: Shininess-Feld ersetzt durch Metallic, Roughness und Specular Multiplier. Neue Materialien werden mit PBR-enabled erstellt.
+
+## Letzte Änderung (PBR Specular Map Fix — Initial)
+
+- ✅ `PBR-Pfad nutzt jetzt Specular Map`: Der Cook-Torrance-PBR-Pfad im Fragment-Shader ignorierte die Specular Map komplett — `specColor` wurde zwar korrekt gesampelt und an `calcLight()` übergeben, aber nur im Blinn-Phong-Fallback verwendet. Im PBR-Pfad wurde `F0 = mix(vec3(0.04), diffColor, metallic)` ohne Berücksichtigung der Specular Map berechnet. **Auswirkung:** Bereiche mit Specular-Map-Wert 0 (z.B. Holz beim Container-Material) zeigten trotzdem Reflexionen (dielectric F0 = 0.04). **Fix (fragment.glsl):** `F0 *= specColor;` nach der F0-Berechnung eingefügt. Wurde in Phase 2 durch vollständigere specBRDF-Multiplikation ersetzt.
+
+## Letzte Änderung (Toast/Modal Messages Editor-Only)
+
+- ✅ `Toast- und Modal-Nachrichten aus Runtime-Builds entfernt`: Toast-Notifications und modale Dialoge waren in allen Runtime-Builds (Debug/Development/Shipping) sichtbar. **Root Cause:** `showToastMessage()`, `showModalMessage()`, `closeModalMessage()`, Notification-Polling und Toast-Timer/Fade in `UIManager.cpp` sowie `enqueueToastNotification()`/`enqueueModalNotification()` in `DiagnosticsManager.cpp` waren komplett ungeschützt — keine `#if ENGINE_EDITOR`-Guards. **Fix:**
+  - **UIManager.cpp:** `showModalMessage()`, `closeModalMessage()`, `showToastMessage()` (beide Überladungen), `ensureModalWidget()`, `createToastWidget()`, `updateToastStackLayout()` — alle Methodenrümpfe in `#if ENGINE_EDITOR` gewrappt (leere No-Op-Funktionen in Runtime).
+  - **UIManager.cpp `updateNotifications()`:** Notification-Polling aus `DiagnosticsManager` (Modal + Toast Consume) und Toast-Timer/Fade/Removal-Logik in eigenen `#if ENGINE_EDITOR`-Block verschoben. Shared-Logik (Hover-Transitions, Scrollbar-Visibility) bleibt unberührt.
+  - **DiagnosticsManager.cpp:** `enqueueModalNotification()` und `enqueueToastNotification()` — Bodies in `#if ENGINE_EDITOR` (No-Op in Runtime, kein Memory-Accumulation). `consumeModalNotifications()` und `consumeToastNotifications()` — geben in Runtime leere Vektoren zurück.
+  - **Deklarationen bleiben sichtbar:** Alle Methoden-Deklarationen in den Headers sind NICHT hinter Guards (71+ Aufrufstellen in Shared-Code). Die leeren Methodenrümpfe verhindern Compile-Fehler.
+  - **Ergebnis:** Kein Toast, kein Modal, kein Notification-Polling, kein Toast-Timer in Runtime-Builds. Python `engine.ui.show_toast_message()` / `show_modal_message()` sind funktionslose No-Ops. Alle Build-Profile (Debug/Development/Shipping) kompilieren fehlerfrei.
+
+## Letzte Änderung (PIE-Entfernung aus Runtime/Packaged Builds)
+
+- ✅ `PIE-Konzept aus Runtime-Builds entfernt`: Runtime/Packaged Builds nutzten `diagnostics.setPIEActive(true)` als Hack, damit Physik und Scripting liefen — PIE (Play In Editor) ist aber ein reines Editor-Konzept (Snapshot/Restore, Play/Stop-Toggle). **Root Cause des Build-Fehlers:** PIE.Stop- und PIE.ToggleInput-Shortcuts referenzierten `stopPIE` (editor-only Variable, hinter `#if ENGINE_EDITOR`), waren aber im `#if !defined(ENGINE_BUILD_SHIPPING)`-Block registriert. **Fix (main.cpp):**
+  - **PIE-Shortcuts hinter ENGINE_EDITOR:** `PIE.Stop` und `PIE.ToggleInput` in inneren `#if ENGINE_EDITOR`-Block verschoben (existieren nur noch im Editor).
+  - **setPIEActive(true) entfernt:** Künstliche PIE-Aktivierung aus der Runtime-Initialisierung entfernt — Runtime braucht kein PIE mehr.
+  - **Physik/Scripting direkt:** Main-Loop-Gate von `if (isPIEActive())` zu `if (isRuntimeMode || isPIEActive())` geändert. Physik und Scripting laufen in Runtime-Builds bedingungslos.
+  - **Kamerabewegung direkt:** Kamera-Bewegung (`canMove`) nutzt `isRuntimeMode` als eigene Bedingung neben dem PIE-Pfad. Kein PIE nötig für WASD-Steuerung.
+  - **Input-Gates aktualisiert:** Alle Mouse-Motion/Click/Scroll-PIE-Guards um `isRuntimeMode` erweitert: Mausbewegung (UI-Skip bei Capture), Linksklick (Ignore bei Capture), Rechtsklick (Ignore bei Capture), Mouse-Up (Ignore bei Capture), Mausrad (Skip bei Capture), Kamerarotation (isRuntimeMode-Trigger), Recapture nach Input-Pause.
+  - **Script-Key-Events:** `HandleKeyUp`/`HandleKeyDown` feuern in Runtime-Builds direkt (über `isRuntimeMode || isPIEActive()`).
+  - **Ergebnis:** Runtime-Builds haben einen sauberen Game-Loop ohne PIE-Abstraktion. Physik, Scripting, Kamera und Input funktionieren direkt. Development/Debug-Runtime-Builds kompilieren wieder fehlerfrei.
+
+## Letzte Änderung (ShortcutManager in Debug/Development Runtime-Builds)
+
+- ✅ `ShortcutManager in Debug/Development Runtime-Builds`: Tastenkombinationen (F10/F9/F8/F11/F12/ESC/Shift+F1) funktionierten nur im Editor, nicht in gebauten Debug/Development-Spielen. **Root Cause:** `ShortcutManager.h`-Include und alle Shortcut-Registrierungen + Event-Dispatch waren vollständig hinter `#if ENGINE_EDITOR` geschützt — d.h. in ALLEN Runtime-Builds (auch Debug/Development) nicht verfügbar. Ein Fallback-Block handelte F10/F9/F8/F11 direkt, war aber unvollständig (F9/F8/F11 nur in ENGINE_BUILD_DEBUG, kein F12/ESC/Shift+F1). **Fix (main.cpp):** Dreistufiges Guard-Modell implementiert:
+  - **Include:** `#include "Core/ShortcutManager.h"` von `#if ENGINE_EDITOR` zu `#if !defined(ENGINE_BUILD_SHIPPING)` verschoben.
+  - **Registrierung:** Block in `#if !defined(ENGINE_BUILD_SHIPPING)` (äußerer Guard) mit verschachtelten `#if ENGINE_EDITOR`-Blöcken für Editor-only Shortcuts (Undo/Redo/Save/Search/Copy/Paste/Duplicate/Gizmo/Focus/DropToSurface/Help/Import/Delete). Debug/Runtime-Shortcuts (F11 UIDebug, F8 BoundsDebug, F10 Metrics, F9 OcclusionStats, ESC PIE.Stop, Shift+F1 PIE.ToggleInput, F12 FPSCap) bleiben im äußeren `!SHIPPING`-Scope.
+  - **Dispatch:** KEY_UP/KEY_DOWN `ShortcutManager::handleKey()`-Guards von `#if ENGINE_EDITOR` zu `#if !defined(ENGINE_BUILD_SHIPPING)` geändert.
+  - **Fallback entfernt:** Redundanter direkter Key-Handling-Block (`#if !ENGINE_EDITOR && !defined(ENGINE_BUILD_SHIPPING)`) vollständig entfernt — ShortcutManager übernimmt alles.
+  - **Ergebnis:** Debug- und Development-Builds haben vollen ShortcutManager-Support (F10/F9/F8/F11/F12/ESC/Shift+F1). Shipping-Builds enthalten keinen ShortcutManager — bare minimum zum Laufen.
+
+## Letzte Änderung (Build-Flow Audit: Shipping-Optimierungen & Profil-Korrekturen)
+
+- ✅ `Landscape.dll in Editor-Only-DLL-Ausschlussliste`: Die Build-Deploy-Step kopierte `Landscape.dll` (Editor-Variante) in den Build-Output, obwohl die Runtime `LandscapeRuntime.dll` verwendet. **Fix (main.cpp, Deploy Step 4):** `Landscape.dll` zur `editorOnlyDlls`-Ausschlussliste hinzugefügt (3→4 Einträge). Shipping-Builds enthalten keine unnötige Editor-DLL mehr.
+
+- ✅ `ScriptHotReload in Shipping deaktiviert`: `Scripting::InitScriptHotReload()` und `Scripting::PollScriptHotReload()` liefen auch in Shipping-Builds — unnötiger Filesystem-Scan nach .py-Änderungen alle 500ms. **Fix (main.cpp):** Beide Aufrufe hinter `#if !defined(ENGINE_BUILD_SHIPPING)` Guard. Kein Hot-Reload-Overhead im Shipping-Build.
+
+- ✅ `Metrics-Textformatierung in Shipping eliminiert`: Die FPS/CPU/GPU-Metriken-Strings (snprintf + std::string-Allokationen) wurden pro Frame formatiert, auch wenn `showMetrics=false` in Shipping. **Fix (main.cpp):** Beide Textformatierungs- und queueText-Blöcke hinter `#if !defined(ENGINE_BUILD_SHIPPING)` Guard. Eliminiert ~15 snprintf-Aufrufe und String-Allokationen pro Frame im Shipping-Build.
+
+- ✅ `Editor-Only Includes hinter ENGINE_EDITOR Guard`: `PopupWindow.h`, `TextureViewerWindow.h`, `EditorTheme.h`, `AssetCooker.h` wurden in main.cpp außerhalb von `#if ENGINE_EDITOR` inkludiert, obwohl sie nur im Editor-Code verwendet werden. **Fix (main.cpp):** Alle vier Includes hinter `#if ENGINE_EDITOR` verschoben. Explizites `#include "UIManager.h"` hinzugefügt (war zuvor transitiv über PopupWindow.h eingebunden). Runtime-Build kompiliert weniger Header.
+
+- ✅ `Build-Profil korrekt bei Baked-In Config`: Bei kompiliertem `GAME_START_LEVEL` war `rtBuildProfile` fest auf "Shipping" gesetzt, unabhängig vom tatsächlichen `ENGINE_BUILD_PROFILE`. `rtEnableHotReload` und `rtEnableProfiler` stimmten nicht mit dem Profil überein. **Fix (main.cpp):** `rtBuildProfile`, `rtEnableHotReload` und `rtEnableProfiler` werden jetzt über `#if defined(ENGINE_BUILD_DEBUG)` / `ENGINE_BUILD_DEVELOPMENT` / else korrekt gesetzt. Debug-Profil aktiviert HotReload+Profiler, Shipping deaktiviert beides.
+
 ## Letzte Änderung (Build-Profile Compile-Defines & PDB-Separation)
 
 - ✅ `Build-Profile Compile-Time Definitions`: Drei separate Compile-Defines für die Runtime-Build-Profile: `ENGINE_BUILD_DEBUG`, `ENGINE_BUILD_DEVELOPMENT`, `ENGINE_BUILD_SHIPPING`. Jedes Profil kompiliert unterschiedlich viele Dev-Features in die Runtime-Binary. **CMakeLists.txt:** Neuer CMake-Parameter `ENGINE_BUILD_PROFILE` (Debug/Development/Shipping, Default: Shipping) setzt das entsprechende Define auf `HorizonEngineRuntime`. **main.cpp (Build-Pipeline):** `-DENGINE_BUILD_PROFILE=<name>` wird an CMake configure übergeben. **Feature-Gating (main.cpp):**

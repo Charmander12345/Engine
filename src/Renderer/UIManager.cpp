@@ -1517,6 +1517,7 @@ void UIManager::registerWidget(const std::string& id, const std::shared_ptr<Widg
 
 void UIManager::showModalMessage(const std::string& message, std::function<void()> onClosed)
 {
+#if ENGINE_EDITOR
     if (message.empty())
     {
         return;
@@ -1533,10 +1534,12 @@ void UIManager::showModalMessage(const std::string& message, std::function<void(
     ensureModalWidget();
     registerWidget("ModalMessage", m_modalWidget);
     m_modalVisible = true;
+#endif
 }
 
 void UIManager::closeModalMessage()
 {
+#if ENGINE_EDITOR
     if (!m_modalVisible)
     {
         return;
@@ -1559,6 +1562,7 @@ void UIManager::closeModalMessage()
         registerWidget("ModalMessage", m_modalWidget);
         m_modalVisible = true;
     }
+#endif
 }
 
 #if ENGINE_EDITOR
@@ -1849,11 +1853,14 @@ void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const 
 
 void UIManager::showToastMessage(const std::string& message, float durationSeconds)
 {
+#if ENGINE_EDITOR
     showToastMessage(message, durationSeconds, NotificationLevel::Info);
+#endif
 }
 
 void UIManager::showToastMessage(const std::string& message, float durationSeconds, NotificationLevel level)
 {
+#if ENGINE_EDITOR
     if (message.empty())
     {
         return;
@@ -1892,7 +1899,8 @@ void UIManager::showToastMessage(const std::string& message, float durationSecon
 
     // Update badge in StatusBar
     refreshNotificationBadge();
-#endif // ENGINE_EDITOR
+#endif // ENGINE_EDITOR (notification history)
+#endif // ENGINE_EDITOR (showToastMessage)
 }
 
 void UIManager::updateNotifications(float deltaSeconds)
@@ -1936,6 +1944,7 @@ void UIManager::updateNotifications(float deltaSeconds)
     }
 #endif // ENGINE_EDITOR
 
+#if ENGINE_EDITOR
     m_notificationPollTimer += deltaSeconds;
     if (m_notificationPollTimer >= 1.0f)
     {
@@ -1953,37 +1962,40 @@ void UIManager::updateNotifications(float deltaSeconds)
         }
     }
 
-    bool removed = false;
-    constexpr float toastFadeDuration = 0.3f;
-    for (auto it = m_toasts.begin(); it != m_toasts.end();)
     {
-        it->timer = std::max(0.0f, it->timer - deltaSeconds);
-        if (it->timer <= 0.0f)
+        bool removed = false;
+        constexpr float toastFadeDuration = 0.3f;
+        for (auto it = m_toasts.begin(); it != m_toasts.end();)
         {
-            unregisterWidget(it->id);
-            it = m_toasts.erase(it);
-            removed = true;
-            continue;
+            it->timer = std::max(0.0f, it->timer - deltaSeconds);
+            if (it->timer <= 0.0f)
+            {
+                unregisterWidget(it->id);
+                it = m_toasts.erase(it);
+                removed = true;
+                continue;
+            }
+            // Fade in/out: first 0.3s fade in, last 0.3s fade out
+            float fadeAlpha = 1.0f;
+            const float age = it->duration - it->timer;
+            if (age < toastFadeDuration)
+                fadeAlpha = age / toastFadeDuration;
+            if (it->timer < toastFadeDuration)
+                fadeAlpha = std::min(fadeAlpha, it->timer / toastFadeDuration);
+            if (it->widget)
+            {
+                for (auto& el : it->widget->getElementsMutable())
+                    el.style.opacity = fadeAlpha;
+                m_renderDirty = true;
+            }
+            ++it;
         }
-        // Fade in/out: first 0.3s fade in, last 0.3s fade out
-        float fadeAlpha = 1.0f;
-        const float age = it->duration - it->timer;
-        if (age < toastFadeDuration)
-            fadeAlpha = age / toastFadeDuration;
-        if (it->timer < toastFadeDuration)
-            fadeAlpha = std::min(fadeAlpha, it->timer / toastFadeDuration);
-        if (it->widget)
+        if (removed)
         {
-            for (auto& el : it->widget->getElementsMutable())
-                el.style.opacity = fadeAlpha;
-            m_renderDirty = true;
+            updateToastStackLayout();
         }
-        ++it;
     }
-    if (removed)
-    {
-        updateToastStackLayout();
-    }
+#endif // ENGINE_EDITOR
 
     // â”€â”€ Hover transition interpolation (Phase 1.5) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     updateHoverTransitions(deltaSeconds);
@@ -2602,6 +2614,28 @@ void UIManager::populateOutlinerDetails(unsigned int entity)
             dropdownEl.runtimeOnly = true;
             lines.push_back(std::move(dropdownEl));
         }
+
+        // Material property overrides (Metallic, Roughness, Specular Multiplier)
+        lines.push_back(makeFloatEntry("Details.Material.Metallic", "Metallic", material->overrides.metallic,
+            [entity](float val) {
+                setCompFieldWithUndo<ECS::MaterialComponent>(entity, "Change Metallic",
+                    [val](ECS::MaterialComponent& c) { c.overrides.metallic = val; c.overrides.hasMetallic = true; });
+                DiagnosticsManager::Instance().invalidateEntity(entity);
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Material.Roughness", "Roughness", material->overrides.roughness,
+            [entity](float val) {
+                setCompFieldWithUndo<ECS::MaterialComponent>(entity, "Change Roughness",
+                    [val](ECS::MaterialComponent& c) { c.overrides.roughness = val; c.overrides.hasRoughness = true; });
+                DiagnosticsManager::Instance().invalidateEntity(entity);
+            }));
+
+        lines.push_back(makeFloatEntry("Details.Material.SpecularMultiplier", "Specular Multiplier", material->overrides.specularMultiplier,
+            [entity](float val) {
+                setCompFieldWithUndo<ECS::MaterialComponent>(entity, "Change Specular Multiplier",
+                    [val](ECS::MaterialComponent& c) { c.overrides.specularMultiplier = val; c.overrides.hasSpecularMultiplier = true; });
+                DiagnosticsManager::Instance().invalidateEntity(entity);
+            }));
 
         addSeparator("Material", lines, [this, entity, saved = *material]() {
             ECS::ECSManager::Instance().removeComponent<ECS::MaterialComponent>(entity);
@@ -7765,6 +7799,7 @@ void UIManager::clearRenderDirty()
     m_renderDirty = false;
 }
 
+#if ENGINE_EDITOR
 void UIManager::ensureModalWidget()
 {
     if (!m_modalWidget)
@@ -7971,6 +8006,7 @@ void UIManager::updateToastStackLayout()
         toast.widget->setZOrder(9000 + static_cast<int>(index));
     }
 }
+#endif // ENGINE_EDITOR
 
 bool UIManager::hasClickEvent(const std::string& eventId) const
 {

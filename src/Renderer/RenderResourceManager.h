@@ -39,6 +39,7 @@ public:
         float shininess{32.0f};
         float metallic{0.0f};
         float roughness{0.5f};
+        float specularMultiplier{1.0f};
         bool pbrEnabled{false};
         std::string fragmentShaderOverride;
     };
@@ -73,6 +74,7 @@ private:
         float shininess{32.0f};
         float metallic{0.0f};
         float roughness{0.5f};
+        float specularMultiplier{1.0f};
         bool pbrEnabled{false};
         std::string shaderFragment;
     };

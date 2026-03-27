@@ -27,16 +27,18 @@ namespace ECS
 		float metallic{ 0.0f };
 		float roughness{ 0.5f };
 		float shininess{ 32.0f };
+		float specularMultiplier{ 1.0f };
 		float emissiveColor[3]{ 0.0f, 0.0f, 0.0f };
 		bool hasColorTint{ false };
 		bool hasMetallic{ false };
 		bool hasRoughness{ false };
 		bool hasShininess{ false };
+		bool hasSpecularMultiplier{ false };
 		bool hasEmissive{ false };
 
 		bool hasAnyOverride() const
 		{
-			return hasColorTint || hasMetallic || hasRoughness || hasShininess || hasEmissive;
+			return hasColorTint || hasMetallic || hasRoughness || hasShininess || hasSpecularMultiplier || hasEmissive;
 		}
 	};
 

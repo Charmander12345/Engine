@@ -81,8 +81,9 @@ uniform int   uPbrEnabled;
 uniform int   uHasMetallicRoughnessMap;
 uniform float uMetallic;
 uniform float uRoughness;
+uniform float uSpecularMultiplier;
 
-// Debug render mode (0=Lit, 1=Unlit, 2=Wireframe, 3=ShadowMap, 4=ShadowCascades,
+// Debug render mode
 //                     5=InstanceGroups, 6=Normals, 7=Depth, 8=Overdraw)
 uniform int   uDebugMode;
 uniform vec3  uDebugColor; // per-batch tint for InstanceGroups mode
@@ -307,7 +308,7 @@ vec3 calcLight(Light light, vec3 normal, vec3 viewDir, vec3 diffColor, vec3 spec
 
         vec3 numerator  = NDF * G * F;
         float denominator = 4.0 * max(dot(normal, viewDir), 0.0) * NdotL + 0.0001;
-        vec3 specBRDF = numerator / denominator;
+        vec3 specBRDF = (numerator / denominator) * specColor * uSpecularMultiplier;
 
         vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
 
@@ -319,7 +320,7 @@ vec3 calcLight(Light light, vec3 normal, vec3 viewDir, vec3 diffColor, vec3 spec
         vec3 diffuse = diffColor * radiance * NdotL;
         vec3 halfwayDir = normalize(lightDir + viewDir);
         float spec = pow(max(dot(normal, halfwayDir), 0.0), material.shininess);
-        vec3 specular = specColor * radiance * spec;
+        vec3 specular = specColor * radiance * spec * uSpecularMultiplier;
         return (1.0 - shadow) * (diffuse + specular);
     }
 }
