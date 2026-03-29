@@ -5,6 +5,19 @@
 
 ---
 
+## Aktuelle Änderung (Codebase-Cleanup 2.3+2.4+2.5: Gizmo, Grid & Tab-System extrahiert)
+
+- `OpenGLRendererGizmo.cpp – Gizmo+Grid Split`: 14 Gizmo-/Grid-Methoden aus `OpenGLRenderer.cpp` in `OpenGLRendererGizmo.cpp` (846 Zeilen) verschoben: `ensureGizmoResources`, `releaseGizmoResources`, `ensureGridResources`, `releaseGridResources`, `drawViewportGrid`, `getGizmoWorldAxis`, `renderGizmo`, `pickGizmoAxis`, `beginGizmoDrag`, `updateGizmoDrag`, `endGizmoDrag` + statische Helper `buildCircleVerts`, `screenToRay`, `closestTOnAxis`.
+- `OpenGLRendererTabs.cpp – Tab-System Split`: 7 Editor-Tab-Methoden in `OpenGLRendererTabs.cpp` (294 Zeilen) verschoben: `addTab`, `removeTab`, `rebuildTitleBarTabs`, `setActiveTab`, `getActiveTabId`, `getTabs`, `releaseAllTabFbos`. `getEntityRotationMatrix` bleibt im Hauptfile (shared von Debug + Gizmo). **CMakeLists.txt:** Beide Dateien zu `OPENGL_RENDERER_SOURCES` hinzugefügt. **Ergebnis:** `OpenGLRenderer.cpp` von ~11.018 auf ~9.906 Zeilen (-1.112 Zeilen).
+
+## Aktuelle Änderung (Codebase-Cleanup 2.2: Debug-Rendering extrahiert)
+
+- `OpenGLRendererDebug.cpp – Debug-Rendering Split`: 5 Debug-Rendering-Methoden (`drawSelectionOutline`, `renderColliderDebug`, `renderStreamingVolumeDebug`, `renderBoneDebug`, `drawRubberBand`) aus `OpenGLRenderer.cpp` in eigene Übersetzungseinheit `OpenGLRendererDebug.cpp` verschoben. Statischer `buildCircleVerts`-Helper als Kopie. **Ergebnis:** `OpenGLRenderer.cpp` von ~11.563 auf ~11.018 Zeilen (-545 Zeilen).
+
+## Aktuelle Änderung (Codebase-Cleanup 2.1: UI-Rendering vereinheitlicht)
+
+- `renderWidgetElement – Unified UI Rendering`: Drei nahezu identische `renderElement`-Lambdas (~450–800 Zeilen je) in `drawUIWidgetsToFramebuffer`, `renderViewportUI` und `renderUI` (OpenGLRenderer.cpp) durch eine einzige `renderWidgetElement()`-Methode (~665 Zeilen) ersetzt. `UIRenderContext`-Struct (OpenGLRenderer.h) mit `projection`, `screenHeight`, `debugEnabled`, `scissorOffset` (Vec2) und `DeferredDropDown`-Vektor-Pointer. Die drei Rendering-Methoden sind jetzt dünne Wrapper (UIRenderContext-Setup + Widget-Iteration). `scissorOffset` löst den Viewport-UI-Offset. Widget-Editor-Preview-FBO nutzt separaten `previewCtx`. **Ergebnis:** `OpenGLRenderer.cpp` von ~12.787 auf ~11.563 Zeilen (-1.224 Zeilen).
+
 ## Aktuelle Änderung (Toast/Modal Messages Editor-Only)
 
 - `Toast- und Modal-Nachrichten aus Runtime-Builds entfernt`: Toast-Notifications und modale Dialoge waren in allen Runtime-Builds sichtbar. **Root Cause:** `showToastMessage()`, `showModalMessage()`, `closeModalMessage()`, Notification-Polling und Toast-Timer in `UIManager.cpp` sowie `enqueueToastNotification()`/`enqueueModalNotification()` in `DiagnosticsManager.cpp` hatten keine `#if ENGINE_EDITOR`-Guards. **Fix:** (1) `UIManager.cpp`: Alle Toast/Modal-Methodenrümpfe (`showModalMessage`, `closeModalMessage`, `showToastMessage` ×2, `ensureModalWidget`, `createToastWidget`, `updateToastStackLayout`) in `#if ENGINE_EDITOR` gewrappt — leere No-Ops in Runtime. (2) `updateNotifications()`: Notification-Polling aus DiagnosticsManager und Toast-Timer/Fade-Logik in eigenen `#if ENGINE_EDITOR`-Block. Shared-Logik (Hover-Transitions, Scrollbar-Visibility) bleibt. (3) `DiagnosticsManager.cpp`: `enqueueModalNotification`/`enqueueToastNotification` Bodies hinter `#if ENGINE_EDITOR` (No-Op in Runtime). `consumeModalNotifications`/`consumeToastNotifications` geben in Runtime leere Vektoren zurück. (4) Deklarationen bleiben sichtbar (71+ Aufrufstellen in Shared-Code). Ergebnis: Kein Toast, kein Modal in Runtime-Builds.
@@ -50,9 +63,13 @@
 
 - `Vollständige Renderer-Config-Sync`: 5 fehlende Renderer-Settings (TextureCompressionEnabled, TextureStreamingEnabled, DisplacementMappingEnabled, DisplacementScale, TessellationLevel) wurden nicht vor dem Build in den DiagnosticsManager synchronisiert. **Fix (main.cpp):** Alle 5 Settings zum Pre-Build-Sync-Block hinzugefügt. `diag.saveConfig()` wird nach dem Sync aufgerufen, damit `config/config.ini` auf Disk aktuell ist bevor der Build-Thread die Datei kopiert. Runtime-Fallback-Defaults um dieselben 5 Settings erweitert.
 
+## Aktuelle Änderung (PythonScripting Module Split – Phase 2: Alle Module extrahiert)
+
+- `PythonScripting Module Split (Phase 2)`: Alle 9 verbleibenden Python-Submodule aus `PythonScripting.cpp` (~3.690 Zeilen) in eigenständige Dateien extrahiert. **Ergebnis:** 13 Scripting-Dateien, ~4.670 Zeilen gesamt, `PythonScripting.cpp` auf 1.380 Zeilen reduziert (~63%). **Neue Dateien:** `EntityModule.cpp` (468Z, entity CRUD + Transform/Mesh/Light), `AudioModule.cpp` (354Z, Audio-Handle-Lifecycle + Playback), `InputModule.cpp` (307Z, Key-Callbacks + Modifier-Queries + Shared State), `CameraModule.cpp` (213Z, Position/Rotation + Transitions + Spline-Pfade), `UIModule.cpp` (489Z, Modal/Toast/Widget-Spawn + Animationen + Focus/Drag&Drop), `ParticleModule.cpp` (98Z, Emitter-Properties), `DiagnosticsModule.cpp` (126Z, Timing + Hardware-Info + State), `LoggingModule.cpp` (53Z, Log mit Level), `EditorModule.cpp` (393Z, Editor-Funktionen + Plugin-Discovery/Hot-Reload). **Architektur:** `ScriptingInternal.h` als Shared Header mit `ScriptDetail`-Namespace (Shared State + Utilities). Jedes Modul exportiert eine `Create*Module()`-Factory. `PythonScripting.cpp` behält Init/Shutdown, Script-Tick-Dispatch, Level-Script-Management, Asset-Modul, Hot-Reload und `CreateEngineModule()` mit Factory-Calls. Input-Callback-State (`s_onKeyPressed` etc.) und Invocation-Funktionen in `InputModule.cpp` definiert, über `ScriptDetail::` von `PythonScripting.cpp` referenziert. Editor-Plugin-Management (LoadEditorPlugins etc.) nach `EditorModule.cpp` verschoben.
+
 ## Aktuelle Änderung (PythonScripting Module Split – Phase 1: Math + Physics)
 
-- `PythonScripting Module Split (Phase 1)`: Codebase-Cleanup von `PythonScripting.cpp` (~3.900 Zeilen) durch Extraktion der `engine.math`- und `engine.physics`-Module in eigene Dateien. **ScriptingInternal.h:** Zentraler Shared-Header mit MSVC-Debug-Workaround für `Python.h`, `ScriptDetail`-Namespace (`extern Renderer* s_renderer`, `extern PyObject* s_onCollision`) und Forward-Deklarationen für `CreateMathModule()`/`CreatePhysicsModule()`. **MathModule.cpp:** 50+ Funktionen (Vec2/Vec3/Quaternion/Scalar/Trig/Common-Math) mit `MathMethods[]` und `CreateMathModule()`. **PhysicsModule.cpp:** 11 Funktionen (set/get_velocity, add_force, add_impulse, set/get_angular_velocity, set/get_gravity, set_on_collision, raycast, is_body_sleeping) mit `PhysicsMethods[]` und `CreatePhysicsModule()`. **PythonScripting.cpp:** `ScriptDetail`-Namespace-Definitionen + `using`-Aliase im Anonymous-Namespace für rückwärtskompatiblen Zugriff. `CreateEngineModule()` nutzt jetzt `CreateMathModule()`/`CreatePhysicsModule()` statt lokaler `PyModule_Create`-Aufrufe. Duplikate (PyModuleDef, Funktionen, Methoden-Tabellen) entfernt. **CMakeLists.txt:** `ScriptingInternal.h`, `MathModule.cpp`, `PhysicsModule.cpp` zu `SCRIPTING_SOURCES` hinzugefügt.
+- `PythonScripting Module Split (Phase 1)`:
 
 ## Aktuelle Änderung (Out-of-Process CrashHandler – Pipe-basiert)
 
@@ -1364,7 +1381,28 @@ Caches:
 ### 10.1 UIManager
 **Datei:** `src/Renderer/UIManager.h/.cpp`
 
-Zentrale Verwaltung aller UI-Widgets:
+Zentrale Verwaltung aller UI-Widgets. Editor-Tabs sind in eigenständige Klassen unter `src/Renderer/EditorTabs/` extrahiert:
+
+| Klasse | Datei | Beschreibung |
+|--------|-------|-------------|
+| `IEditorTab` | `IEditorTab.h` | Interface (open/close/isOpen/update/getTabId) |
+| `ConsoleTab` | `ConsoleTab.h/.cpp` | Log-Viewer mit Filter/Suche |
+| `ProfilerTab` | `ProfilerTab.h/.cpp` | Performance-Monitor |
+| `AudioPreviewTab` | `AudioPreviewTab.h/.cpp` | Audio-Asset-Vorschau |
+| `ParticleEditorTab` | `ParticleEditorTab.h/.cpp` | Partikel-Parameter-Editor |
+| `ShaderViewerTab` | `ShaderViewerTab.h/.cpp` | Shader-Quellcode-Anzeige |
+| `RenderDebuggerTab` | `RenderDebuggerTab.h/.cpp` | Render-Pipeline-Debugger |
+| `SequencerTab` | `SequencerTab.h/.cpp` | Kamera-Sequenz-Editor |
+| `LevelCompositionTab` | `LevelCompositionTab.h/.cpp` | Level-Kompositions-Übersicht |
+| `AnimationEditorTab` | `AnimationEditorTab.h/.cpp` | Skelett-Animations-Editor |
+| `UIDesignerTab` | `UIDesignerTab.h/.cpp` | Viewport-UI-Designer |
+| `WidgetEditorTab` | `WidgetEditorTab.h/.cpp` | Widget-Editor (Multi-Instanz, State-Map) |
+| `ContentBrowserPanel` | `ContentBrowserPanel.h/.cpp` | Content Browser (Pfad-Navigation, Grid, Suche/Filter, Rename, Asset-Referenz-Tracking) |
+| `OutlinerPanel` | `OutlinerPanel.h/.cpp` | World Outliner (Entity-Baumansicht) + Entity Details (Komponenten-Property-Editor, Undo/Redo) |
+| `BuildSystemUI` | `BuildSystemUI.h/.cpp` | Build-System-UI (Build-Profile, Build-Game-Dialog, Progress-Popup, CMake/Toolchain-Detection) |
+| `EditorDialogs` | `EditorDialogs.h/.cpp` | Dialog-System (Modale Dialoge, Confirm-Dialoge, Save-Progress, Level-Load-Progress, Projekt-Screen) |
+
+Jeder Tab hält `UIManager*` + `Renderer*` Pointer. UIManager delegiert via Thin Wrappers. `ContentBrowserPanel` verwaltet 9 eigene Member-Variablen (Pfad, Selektion, Filter, Rename-State) und wird lazy-initialisiert. `OutlinerPanel` verwaltet Entity-Selektion, Entity-Clipboard, ECS-Versions-Tracking und wird im UIManager-Konstruktor initialisiert. `BuildSystemUI` verwaltet Build-Profile, Build-Thread-State, CMake/Toolchain-Detection und wird im UIManager-Konstruktor initialisiert. `EditorDialogs` verwaltet modale Dialoge, Confirm-Dialoge, Save/Level-Load-Progress und den Projekt-Auswahl-Screen (13 Methoden, ~1.840 Zeilen). Type-Aliases in `UIManager.h` (`UIManager::BuildGameConfig` etc.) erhalten API-Kompatibilität.
 
 #### Registrierung:
 ```cpp

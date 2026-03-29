@@ -59,6 +59,24 @@ struct EditorTab
 class OpenGLRenderer : public Renderer
 {
 public:
+    // Context passed to the unified renderWidgetElement method.
+    struct UIRenderContext
+    {
+        glm::mat4 projection;
+        int screenHeight = 0;
+        bool debugEnabled = false;
+        Vec2 scissorOffset{0.0f, 0.0f};
+
+        struct DeferredDropDown
+        {
+            float x0, y0, x1, y1, fontSize;
+            int selectedIndex;
+            std::vector<std::string> items;
+            Vec4 textColor, hoverColor;
+            Vec2 padding;
+        };
+        std::vector<DeferredDropDown>* deferredDropdowns = nullptr;
+    };
     OpenGLRenderer();
     ~OpenGLRenderer() override;
 
@@ -155,6 +173,9 @@ private:
     void renderWorld();
     void renderViewportUI();
     void renderUI();
+    void renderWidgetElement(const WidgetElement& element,
+        float parentX, float parentY, float parentW, float parentH,
+        float parentOpacity, UIRenderContext& ctx);
     bool ensureUIQuadRenderer();
     GLuint getUIQuadProgram(const std::string& vertexShaderPath, const std::string& fragmentShaderPath);
     void ensureUIShaderDefaults();

@@ -18,6 +18,7 @@
 #endif
 
 #include "Renderer/Renderer.h"
+#include "Renderer/EditorTabs/BuildSystemUI.h"
 #include "Logger/Logger.h"
 #include "Diagnostics/DiagnosticsManager.h"
 #include "AssetManager/AssetCooker.h"
@@ -65,7 +66,8 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
     auto& diagnostics = DiagnosticsManager::Instance();
     const std::string projectPath = diagnostics.getProjectInfo().projectPath;
 
-    UIManager* uiPtr = &uiMgr;
+    BuildSystemUI& buildUI = uiMgr.getBuildSystemUI();
+    BuildSystemUI* buildPtr = &buildUI;
 
     // Sync current renderer state to DiagnosticsManager so that
     // game.ini (written by the build thread) captures all settings.
@@ -97,12 +99,12 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
         diag.saveConfig();
     }
 
-    uiMgr.m_buildRunning.store(true);
+    buildUI.m_buildRunning.store(true);
 
-    if (uiMgr.m_buildThread.joinable())
-        uiMgr.m_buildThread.join();
+    if (buildUI.m_buildThread.joinable())
+        buildUI.m_buildThread.join();
 
-    uiMgr.m_buildThread = std::thread([uiPtr, config, cmakePath, engineSourceDir, toolchainName, toolchainVersion, editorBaseDir, projectPath]()
+    buildUI.m_buildThread = std::thread([buildPtr, config, cmakePath, engineSourceDir, toolchainName, toolchainVersion, editorBaseDir, projectPath]()
     {
         constexpr int kTotalSteps = 8;
         int step = 0;
@@ -110,35 +112,35 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
         std::string errorMsg;
 
         // Log build environment info
-        uiPtr->appendBuildOutput("Profile: " + config.profile.name + " (" + config.profile.cmakeBuildType + ")");
-        uiPtr->appendBuildOutput("CMake: " + cmakePath);
-        uiPtr->appendBuildOutput("Toolchain: " + toolchainName + " " + toolchainVersion);
-        uiPtr->appendBuildOutput("Engine Source: " + engineSourceDir);
-        uiPtr->appendBuildOutput("Binary Cache: " + config.binaryDir);
-        uiPtr->appendBuildOutput("");
+        buildPtr->appendBuildOutput("Profile: " + config.profile.name + " (" + config.profile.cmakeBuildType + ")");
+        buildPtr->appendBuildOutput("CMake: " + cmakePath);
+        buildPtr->appendBuildOutput("Toolchain: " + toolchainName + " " + toolchainVersion);
+        buildPtr->appendBuildOutput("Engine Source: " + engineSourceDir);
+        buildPtr->appendBuildOutput("Binary Cache: " + config.binaryDir);
+        buildPtr->appendBuildOutput("");
 
             // Thread-safe helper to push step progress
             auto advanceStep = [&](const std::string& status)
             {
                 ++step;
-                uiPtr->appendBuildOutput("[Step " + std::to_string(step) + "/" + std::to_string(kTotalSteps) + "] " + status);
+                buildPtr->appendBuildOutput("[Step " + std::to_string(step) + "/" + std::to_string(kTotalSteps) + "] " + status);
                 {
-                    std::lock_guard<std::mutex> lock(uiPtr->m_buildMutex);
-                    uiPtr->m_buildPendingStatus = status;
-                    uiPtr->m_buildPendingStep = step;
-                    uiPtr->m_buildPendingTotalSteps = kTotalSteps;
-                    uiPtr->m_buildPendingStepDirty = true;
+                    std::lock_guard<std::mutex> lock(buildPtr->m_buildMutex);
+                    buildPtr->m_buildPendingStatus = status;
+                    buildPtr->m_buildPendingStep = step;
+                    buildPtr->m_buildPendingTotalSteps = kTotalSteps;
+                    buildPtr->m_buildPendingStepDirty = true;
                 }
             };
 
             // Check if build was cancelled – sets ok=false and returns true
             auto checkCancelled = [&]() -> bool
             {
-                if (uiPtr->m_buildCancelRequested.load())
+                if (buildPtr->m_buildCancelRequested.load())
                 {
                     ok = false;
                     errorMsg = "Build cancelled by user.";
-                    uiPtr->appendBuildOutput("[INFO] Build cancelled.");
+                    buildPtr->appendBuildOutput("[INFO] Build cancelled.");
                     return true;
                 }
                 return false;
@@ -163,7 +165,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                   }
                   else
                   {
-                      uiPtr->appendBuildOutput("  Cleaned output directory.");
+                      buildPtr->appendBuildOutput("  Cleaned output directory.");
                   }
               }
 
@@ -183,7 +185,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
 #if defined(_WIN32)
           auto runCmdWithOutput = [&](const std::string& cmd) -> int
           {
-              uiPtr->appendBuildOutput("> " + cmd);
+              buildPtr->appendBuildOutput("> " + cmd);
 
               SECURITY_ATTRIBUTES sa{};
               sa.nLength = sizeof(sa);
@@ -210,7 +212,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
               if (!created)
               {
                   CloseHandle(hReadPipe);
-                  uiPtr->appendBuildOutput("  [ERROR] Failed to launch process.");
+                  buildPtr->appendBuildOutput("  [ERROR] Failed to launch process.");
                   return -1;
               }
 
@@ -220,7 +222,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
               std::string lineBuffer;
               while (ReadFile(hReadPipe, buf, sizeof(buf) - 1, &bytesRead, nullptr) && bytesRead > 0)
               {
-                  if (uiPtr->m_buildCancelRequested.load())
+                  if (buildPtr->m_buildCancelRequested.load())
                   {
                       TerminateProcess(pi.hProcess, 1);
                       break;
@@ -232,12 +234,12 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                   {
                       std::string line = lineBuffer.substr(0, pos);
                       if (!line.empty() && line.back() == '\r') line.pop_back();
-                      uiPtr->appendBuildOutput("  " + line);
+                      buildPtr->appendBuildOutput("  " + line);
                       lineBuffer.erase(0, pos + 1);
                   }
               }
               if (!lineBuffer.empty())
-                  uiPtr->appendBuildOutput("  " + lineBuffer);
+                  buildPtr->appendBuildOutput("  " + lineBuffer);
 
               WaitForSingleObject(pi.hProcess, INFINITE);
               DWORD exitCode = 0;
@@ -250,18 +252,18 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
 #else
           auto runCmdWithOutput = [&](const std::string& cmd) -> int
           {
-              uiPtr->appendBuildOutput("> " + cmd);
+              buildPtr->appendBuildOutput("> " + cmd);
               std::string fullCmd = cmd + " 2>&1";
               FILE* pipe = popen(fullCmd.c_str(), "r");
               if (!pipe) return -1;
               char buf[4096];
               while (fgets(buf, sizeof(buf), pipe))
               {
-                  if (uiPtr->m_buildCancelRequested.load()) break;
+                  if (buildPtr->m_buildCancelRequested.load()) break;
                   std::string line = buf;
                   while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
                       line.pop_back();
-                  uiPtr->appendBuildOutput("  " + line);
+                  buildPtr->appendBuildOutput("  " + line);
               }
               return pclose(pipe);
           };
@@ -277,7 +279,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
               // Optionally clean the binary cache
               if (config.cleanBuild)
               {
-                  uiPtr->appendBuildOutput("  Clean build: removing " + buildDir);
+                  buildPtr->appendBuildOutput("  Clean build: removing " + buildDir);
                   std::error_code ec;
                   std::filesystem::remove_all(buildDir, ec);
               }
@@ -369,7 +371,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                       }
                       else
                       {
-                          uiPtr->appendBuildOutput("  Copied runtime: " + builtExe.string());
+                          buildPtr->appendBuildOutput("  Copied runtime: " + builtExe.string());
                       }
                   }
 
@@ -387,7 +389,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                               symbolsDir / (config.windowTitle + ".pdb"),
                               std::filesystem::copy_options::overwrite_existing, ec);
                           if (!ec)
-                              uiPtr->appendBuildOutput("  Copied PDB: Symbols/" + config.windowTitle + ".pdb");
+                              buildPtr->appendBuildOutput("  Copied PDB: Symbols/" + config.windowTitle + ".pdb");
                       }
                   }
               }
@@ -478,7 +480,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                               std::filesystem::copy_file(entry.path(), dst,
                                   std::filesystem::copy_options::overwrite_existing, copyEc);
                               if (!copyEc)
-                                  uiPtr->appendBuildOutput("  Copied Python file: " + fname);
+                                  buildPtr->appendBuildOutput("  Copied Python file: " + fname);
                           }
                       }
                   }
@@ -496,7 +498,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                       std::filesystem::copy_file(srcCrashHandler, dstTools / "CrashHandler.exe",
                           std::filesystem::copy_options::overwrite_existing, ec);
                       if (!ec)
-                          uiPtr->appendBuildOutput("  Copied CrashHandler.exe");
+                          buildPtr->appendBuildOutput("  Copied CrashHandler.exe");
 
                       // Also copy CrashHandler PDB for non-Shipping
                       if (config.profile.name != "Shipping")
@@ -512,7 +514,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                   }
                   else
                   {
-                      uiPtr->appendBuildOutput("  [WARN] CrashHandler.exe not found at: " + srcCrashHandler.string());
+                      buildPtr->appendBuildOutput("  [WARN] CrashHandler.exe not found at: " + srcCrashHandler.string());
                   }
               }
           }
@@ -537,11 +539,11 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                 auto result = cooker.cookAll(cookCfg,
                     [&](size_t done, size_t total, const std::string& current)
                     {
-                        uiPtr->appendBuildOutput("  [" + std::to_string(done) + "/" + std::to_string(total) + "] " + current);
+                        buildPtr->appendBuildOutput("  [" + std::to_string(done) + "/" + std::to_string(total) + "] " + current);
                     },
-                    &uiPtr->m_buildCancelRequested);
+                    &buildPtr->m_buildCancelRequested);
 
-                uiPtr->appendBuildOutput("Asset cooking complete: "
+                buildPtr->appendBuildOutput("Asset cooking complete: "
                     + std::to_string(result.cookedAssets) + " cooked, "
                     + std::to_string(result.skippedAssets) + " skipped, "
                     + std::to_string(result.failedAssets) + " failed ("
@@ -552,7 +554,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                     ok = false;
                     errorMsg = "Asset cooking failed.";
                     for (const auto& e : result.errors)
-                        uiPtr->appendBuildOutput("  [ERROR] " + e);
+                        buildPtr->appendBuildOutput("  [ERROR] " + e);
                 }
             }
 
@@ -600,7 +602,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                 {
                     std::filesystem::copy_file(srcDefaults, dstConfig / "defaults.ini",
                         std::filesystem::copy_options::overwrite_existing, ec);
-                    uiPtr->appendBuildOutput("  Copied project config: defaults.ini");
+                    buildPtr->appendBuildOutput("  Copied project config: defaults.ini");
                 }
             }
 
@@ -634,7 +636,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                     std::string vpath = relPath.generic_string();
                     if (!writer.addFileFromDisk(vpath, entry.path().string()))
                     {
-                        uiPtr->appendBuildOutput("  [WARN] Failed to pack: " + vpath);
+                        buildPtr->appendBuildOutput("  [WARN] Failed to pack: " + vpath);
                     }
                 }
             };
@@ -652,7 +654,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                 }
                 else
                 {
-                    uiPtr->appendBuildOutput("  HPK archive: " + hpkPath.string()
+                    buildPtr->appendBuildOutput("  HPK archive: " + hpkPath.string()
                         + " (" + std::to_string(writer.getFileCount()) + " files)");
 
                     // Remove loose directories now that they're packed
@@ -679,7 +681,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                     std::filesystem::copy_file(srcEngineConfig, dstEngineConfig,
                         std::filesystem::copy_options::overwrite_existing, ec2);
                     if (!ec2)
-                        uiPtr->appendBuildOutput("  Copied engine config: config/config.ini");
+                        buildPtr->appendBuildOutput("  Copied engine config: config/config.ini");
                 }
             }
         }
@@ -717,7 +719,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                 }
 
                 iniFile.close();
-                uiPtr->appendBuildOutput("  Written: " + iniPath.string());
+                buildPtr->appendBuildOutput("  Written: " + iniPath.string());
             }
             else
             {
@@ -731,7 +733,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
 
         if (ok)
         {
-            uiPtr->appendBuildOutput("Build completed successfully. Output: " + config.outputDir);
+            buildPtr->appendBuildOutput("Build completed successfully. Output: " + config.outputDir);
 
             // Launch if requested
             if (config.launchAfterBuild)
@@ -740,7 +742,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                     std::filesystem::path(config.outputDir) / (config.windowTitle + ".exe");
                 if (std::filesystem::exists(exePath))
                 {
-                    uiPtr->appendBuildOutput("Launching: " + exePath.string());
+                    buildPtr->appendBuildOutput("Launching: " + exePath.string());
 #if defined(_WIN32)
                     ShellExecuteA(nullptr, "open", exePath.string().c_str(),
                         nullptr, config.outputDir.c_str(), SW_SHOWNORMAL);
@@ -753,7 +755,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
         }
         else
         {
-            uiPtr->appendBuildOutput("Build failed: " + errorMsg);
+            buildPtr->appendBuildOutput("Build failed: " + errorMsg);
         }
 
       }
@@ -761,21 +763,21 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
       {
           ok = false;
           errorMsg = std::string("Build crashed: ") + e.what();
-          uiPtr->appendBuildOutput("[FATAL] " + errorMsg);
+          buildPtr->appendBuildOutput("[FATAL] " + errorMsg);
       }
       catch (...)
       {
           ok = false;
           errorMsg = "Build crashed: unknown exception";
-          uiPtr->appendBuildOutput("[FATAL] " + errorMsg);
+          buildPtr->appendBuildOutput("[FATAL] " + errorMsg);
       }
 
       // Signal completion to the main thread
       {
-          std::lock_guard<std::mutex> lock(uiPtr->m_buildMutex);
-          uiPtr->m_buildPendingFinished = true;
-          uiPtr->m_buildPendingSuccess = ok;
-          uiPtr->m_buildPendingErrorMsg = errorMsg;
+          std::lock_guard<std::mutex> lock(buildPtr->m_buildMutex);
+          buildPtr->m_buildPendingFinished = true;
+          buildPtr->m_buildPendingSuccess = ok;
+          buildPtr->m_buildPendingErrorMsg = errorMsg;
       }
     }); // end std::thread
 }

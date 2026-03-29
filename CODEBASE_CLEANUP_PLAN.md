@@ -9,8 +9,8 @@
 
 | Datei | Zeilen | Größe |
 |-------|--------|-------|
-| `UIManager.cpp` | **20.801** | 968 KB |
-| `OpenGLRenderer.cpp` | **11.403** | 448 KB |
+| `UIManager.cpp` | **~13.100** | ~580 KB |
+| `OpenGLRenderer.cpp` | **9.906** | ~385 KB |
 | `AssetManager.cpp` | **6.634** | 255 KB |
 | `main.cpp` | **4.898** | 271 KB |
 | `PythonScripting.cpp` | **3.928** | 160 KB |
@@ -37,68 +37,62 @@
 
 ### Konkrete Aufteilung
 
-#### 1.1 Editor-Tabs in eigene Klassen extrahieren
-Jeder Tab hat bereits ein eigenes State-Struct (`ConsoleState`, `ProfilerState`, etc.) und eigene Methoden (`open*Tab`, `close*Tab`, `refresh*`, `build*Toolbar`, `build*`). Diese können 1:1 in eigene Klassen extrahiert werden:
+#### 1.1 Editor-Tabs in eigene Klassen extrahieren ✅ ABGESCHLOSSEN
 
-| Neuer Dateiname | Methoden-Umfang | Zeilen ca. |
+**Ergebnis:** 11 Editor-Tabs + 1 Interface in `src/Renderer/EditorTabs/` extrahiert. UIManager.cpp von ~22.100 auf ~14.450 Zeilen reduziert (~7.650 Zeilen, ~35% Reduktion).
+
+| Datei | Zeilen entfernt | Beschreibung |
 |---|---|---|
-| `EditorTabs/ConsoleTab.h/.cpp` | `openConsoleTab`, `closeConsoleTab`, `refreshConsoleLog`, `buildConsoleToolbar` + `ConsoleState` | ~250 |
-| `EditorTabs/ProfilerTab.h/.cpp` | `openProfilerTab`, `closeProfilerTab`, `refreshProfilerMetrics`, `buildProfilerToolbar` + `ProfilerState` | ~300 |
-| `EditorTabs/SequencerTab.h/.cpp` | 6 Methoden + `SequencerState` + Alle `registerClickEvent("Sequencer.*")` | ~700 |
-| `EditorTabs/LevelCompositionTab.h/.cpp` | 7 Methoden + `LevelCompositionState` | ~500 |
-| `EditorTabs/ShaderViewerTab.h/.cpp` | 6 Methoden + `ShaderViewerState` | ~300 |
-| `EditorTabs/RenderDebuggerTab.h/.cpp` | 4 Methoden + `RenderDebuggerState` | ~250 |
-| `EditorTabs/AudioPreviewTab.h/.cpp` | 6 Methoden + `AudioPreviewState` | ~350 |
-| `EditorTabs/ParticleEditorTab.h/.cpp` | 6 Methoden + `ParticleEditorState` | ~400 |
-| `EditorTabs/AnimationEditorTab.h/.cpp` | 7 Methoden + `AnimationEditorState` | ~500 |
-| `EditorTabs/WidgetEditorTab.h/.cpp` | 18 Methoden + `WidgetEditorState` | ~2.500 |
-| `EditorTabs/UIDesignerTab.h/.cpp` | 6 Methoden + `UIDesignerState` | ~400 |
+| `IEditorTab.h` | — | Interface (open/close/isOpen/update/getTabId) |
+| `ConsoleTab.h/.cpp` | ~478 | Log-Viewer mit Filter/Suche |
+| `ProfilerTab.h/.cpp` | ~548 | Performance-Monitor |
+| `AudioPreviewTab.h/.cpp` | ~630 | Audio-Asset-Vorschau |
+| `ParticleEditorTab.h/.cpp` | ~570 | Partikel-Parameter-Editor |
+| `ShaderViewerTab.h/.cpp` | ~631 | Shader-Quellcode-Anzeige |
+| `RenderDebuggerTab.h/.cpp` | ~527 | Render-Pipeline-Debugger |
+| `SequencerTab.h/.cpp` | ~586 | Kamera-Sequenz-Editor |
+| `LevelCompositionTab.h/.cpp` | ~538 | Level-Kompositions-Übersicht |
+| `AnimationEditorTab.h/.cpp` | ~475 | Skelett-Animations-Editor |
+| `UIDesignerTab.h/.cpp` | ~983 | Viewport-UI-Designer |
+| `WidgetEditorTab.h/.cpp` | ~2843 | Widget-Editor (Multi-Instanz, State-Map, kein IEditorTab) |
 
-**Erwartete Reduktion: ~6.500 Zeilen aus UIManager.cpp**
+Jeder Tab hält `UIManager*` + `Renderer*`. UIManager behält Thin-Wrapper-Delegationsmethoden.
 
-**Wie:** Jede Tab-Klasse bekommt einen Pointer auf `UIManager*` und `Renderer*` für den Zugriff auf gemeinsame Funktionen (`showToastMessage`, `markAllWidgetsDirty`, `registerClickEvent`, `registerWidget`, etc.). UIManager behält nur eine `std::unordered_map<std::string, std::unique_ptr<IEditorTab>>` und delegiert `open/close/refresh` Aufrufe.
+#### 1.2 Content Browser in eigene Klasse ✅ ABGESCHLOSSEN
 
-```cpp
-// Vorschlag: Gemeinsames Interface
-class IEditorTab {
-public:
-    virtual ~IEditorTab() = default;
-    virtual void open() = 0;
-    virtual void close() = 0;
-    virtual bool isOpen() const = 0;
-    virtual void refresh(float deltaSeconds) = 0; // Timer-basierte Updates
-    virtual const std::string& getTabId() const = 0;
-};
-```
+**Ergebnis:** Content Browser in `src/Renderer/EditorTabs/ContentBrowserPanel.h/.cpp` extrahiert. UIManager.cpp von ~14.450 auf ~13.100 Zeilen reduziert (~1.350 Zeilen).
 
-#### 1.2 Content Browser in eigene Klasse
-Der Content Browser (Pfad-Navigation, Grid-Rendering, Suche/Filter, Rename, Typ-Filter, Asset-Referenz-Tracking) ist ein eigener großer Bereich:
-- `ContentBrowserPanel.h/.cpp`
-- Alle `m_contentBrowser*` / `m_browser*` / `m_selectedGrid*` Member
-- `populateContentBrowserWidget`, `refreshContentBrowser`, `focusContentBrowserSearch`, `buildReferencedAssetSet`, `navigateContentBrowserByArrow`
+| Aspekt | Details |
+|---|---|
+| `ContentBrowserPanel.h/.cpp` | ~1.400 Zeilen, eigene Klasse mit `UIManager*` + `Renderer*` |
+| Extrahierte Methoden | `populateWidget`, `refresh`, `focusSearch`, `buildReferencedAssetSet`, `navigateByArrow`, `isOverGrid` |
+| Extrahierte Member | 9 Variablen (`m_contentBrowserPath`, `m_selectedBrowserFolder`, `m_selectedGridAsset`, `m_expandedFolders`, `m_browserSearchText`, `m_browserTypeFilter`, `m_registryWasReady`, `m_renamingGridAsset`, `m_renameOriginalPath`) |
+| Statische Helfer | `iconForAssetType`, `iconTintForAssetType`, `resolveTextureSourcePath`, `makeGridTile`, `makeTreeRow` (dupliziert, Shared mit Outliner) |
+| Neue UIManager-APIs | `getRegisteredWidgetsMutable()`, `requestLevelLoad()`, `getSelectedBrowserFolder()`, `getSelectedGridAsset()`, `clearSelectedGridAsset()` |
+| Cross-References | `handleKeyDown` (Escape/F2/Arrows), `updateNotifications` — delegieren an `m_contentBrowserPanel` |
 
-**Erwartete Reduktion: ~2.000 Zeilen**
+UIManager behält Thin-Wrapper-Delegationsmethoden (`refreshContentBrowser`, `focusContentBrowserSearch`, `isOverContentBrowserGrid`).
 
-#### 1.3 World Outliner + Entity Details in eigene Klasse
+#### 1.3 World Outliner + Entity Details in eigene Klasse ✅
 - `OutlinerPanel.h/.cpp`
 - `populateOutlinerWidget`, `populateOutlinerDetails`, `refreshWorldOutliner`, `navigateOutlinerByArrow`, `selectEntity`
 - `m_outlinerLevel`, `m_outlinerSelectedEntity`, Entity-Clipboard
 
-**Erwartete Reduktion: ~2.000 Zeilen**
+**Ergebnis:** Outliner + Entity Details in `src/Renderer/EditorTabs/OutlinerPanel.h/.cpp` extrahiert. UIManager.cpp von ~13.100 auf ~11.560 Zeilen reduziert (~1.545 Zeilen entfernt). OutlinerPanel.cpp: ~1.808 Zeilen.
 
-#### 1.4 Build-System-UI extrahieren
+#### 1.4 Build-System-UI extrahieren ✅
 - `BuildSystemUI.h/.cpp`
 - `BuildProfile`, `BuildGameConfig`, Build-Methoden (`openBuildGameDialog`, `showBuildProgress`, `updateBuildProgress`, etc.)
 - CMake/Toolchain-Detection (`detectCMake`, `detectBuildToolchain`, `startAsyncToolchainDetection`, `pollToolchainDetection`)
 
-**Erwartete Reduktion: ~1.500 Zeilen**
+**Ergebnis:** Build-System-UI in `src/Renderer/EditorTabs/BuildSystemUI.h/.cpp` extrahiert. UIManager.cpp von ~11.560 auf ~10.300 Zeilen reduziert (~1.260 Zeilen entfernt). BuildSystemUI.cpp: ~1.370 Zeilen. BuildPipeline.cpp aktualisiert (Zugriff auf Build-Thread-State über getBuildSystemUI()).
 
-#### 1.5 Dialog-System extrahieren
+#### 1.5 Dialog-System extrahieren ✅
 - `EditorDialogs.h/.cpp`
 - Modale Dialoge, Confirm-Dialoge, Unsaved-Changes, Save-Progress, Level-Load-Progress, Projekt-Screen
 - `showModalMessage`, `showConfirmDialog`, `showUnsavedChangesDialog`, `openProjectScreen`
 
-**Erwartete Reduktion: ~1.500 Zeilen**
+**Ergebnis:** Dialog-System in `src/Renderer/EditorTabs/EditorDialogs.h/.cpp` extrahiert. 13 Methoden verschoben (showModalMessage, closeModalMessage, showConfirmDialog, showConfirmDialogWithCheckbox, ensureModalWidget, showSaveProgressModal, updateSaveProgress, closeSaveProgressModal, showUnsavedChangesDialog, showLevelLoadProgress, updateLevelLoadProgress, closeLevelLoadProgress, openProjectScreen). UIManager.cpp von ~10.300 auf ~8.550 Zeilen reduziert (~1.750 Zeilen entfernt). EditorDialogs.cpp: ~1.840 Zeilen. UIManager behält dünne Delegation-Wrapper.
 
 **Gesamtpotenzial: UIManager.cpp von ~20.800 auf ~5.000–7.000 Zeilen reduzieren.**
 
@@ -257,26 +251,27 @@ Eine einzige Datei definiert **13 Python-Module** mit insgesamt ~200 C-Funktione
 
 **✅ Phase 1 abgeschlossen:** `engine.math` (54 Funktionen, ~530 Zeilen) und `engine.physics` (11 Funktionen, ~200 Zeilen) wurden in eigenständige Übersetzungseinheiten extrahiert (`MathModule.cpp`, `PhysicsModule.cpp`). Shared State über `ScriptingInternal.h` (`ScriptDetail`-Namespace). ~700 Zeilen aus `PythonScripting.cpp` entfernt.
 
-### Konkrete Verbesserung (Phase 2+)
+**✅ Phase 2 abgeschlossen:** Alle verbleibenden 9 Module extrahiert. `PythonScripting.cpp` von ~3.690 auf 1.380 Zeilen reduziert (~63% Reduktion). Gesamt: 13 Dateien, ~4.670 Zeilen.
 
-Verbleibende Module in eigene Dateien:
+### Modul-Übersicht (Final)
 
-| Neue Datei | Aktuelles Modul | Zeilen ca. | Status |
+| Datei | Modul | Zeilen | Status |
 |---|---|---|---|
-| `ScriptModules/EntityModule.cpp` | `engine.entity` | ~300 | ❌ |
-| `ScriptModules/AssetModule.cpp` | `engine.asset` | ~150 | ❌ |
-| `ScriptModules/AudioModule.cpp` | `engine.audio` | ~200 | ❌ |
-| `ScriptModules/InputModule.cpp` | `engine.input` | ~200 | ❌ |
-| `ScriptModules/UIModule.cpp` | `engine.ui` | ~400 | ❌ |
-| `ScriptModules/CameraModule.cpp` | `engine.camera` | ~300 | ❌ |
-| ~~`ScriptModules/PhysicsModule.cpp`~~ `PhysicsModule.cpp` | `engine.physics` | ~200 | ✅ |
-| ~~`ScriptModules/MathModule.cpp`~~ `MathModule.cpp` | `engine.math` | ~530 | ✅ |
-| `ScriptModules/ParticleModule.cpp` | `engine.particle` | ~200 | ❌ |
-| `ScriptModules/EditorModule.cpp` | `engine.editor` | ~200 | ❌ |
+| `EntityModule.cpp` | `engine.entity` | 468 | ✅ |
+| `AudioModule.cpp` | `engine.audio` | 354 | ✅ |
+| `InputModule.cpp` | `engine.input` | 307 | ✅ |
+| `CameraModule.cpp` | `engine.camera` | 213 | ✅ |
+| `UIModule.cpp` | `engine.ui` | 489 | ✅ |
+| `ParticleModule.cpp` | `engine.particle` | 98 | ✅ |
+| `DiagnosticsModule.cpp` | `engine.diagnostics` | 126 | ✅ |
+| `LoggingModule.cpp` | `engine.logging` | 53 | ✅ |
+| `EditorModule.cpp` | `engine.editor` + Plugin-System | 393 | ✅ |
+| `MathModule.cpp` | `engine.math` | 532 | ✅ (Phase 1) |
+| `PhysicsModule.cpp` | `engine.physics` | 198 | ✅ (Phase 1) |
+| `ScriptingInternal.h` | Shared State Header | 57 | ✅ |
+| `PythonScripting.cpp` | Core (Init/Shutdown/Tick/HotReload/Assets) | 1.380 | ✅ |
 
-`PythonScripting.cpp` behält nur die Initialisierung (`Initialize`, `Shutdown`, `SetRenderer`) und die Modul-Registrierung.
-
-**Erwartete Reduktion: PythonScripting.cpp von ~3.900 auf ~500 Zeilen**
+`PythonScripting.cpp` behält: Initialisierung (`Initialize`, `Shutdown`, `SetRenderer`), Script-Laden/Tick-Dispatch, Level-Script-Management, Asset-Modul (`engine.assetmanagement`), Hot-Reload, `CreateEngineModule()` mit Factory-Calls, `PyLogWriter`.
 
 ---
 
@@ -464,16 +459,19 @@ struct WidgetElement {
 
 | Priorität | Maßnahme | Aufwand | Wirkung |
 |-----------|----------|---------|---------|
-| 🔴 Hoch | 1.1 – Editor-Tabs aus UIManager extrahieren | Mittel | ~6.500 Zeilen weniger, klar getrennte Verantwortlichkeiten |
-| 🔴 Hoch | 2.1 – UI-Rendering vereinheitlichen | Mittel | ~2.500 Zeilen weniger, keine 3-fache Code-Wartung |
+| 🔴 Hoch | ~~1.1 – Editor-Tabs aus UIManager extrahieren~~ | ~~Mittel~~ | ✅ Erledigt (~7.650 Zeilen, 11 Tabs + IEditorTab Interface) |
+| 🔴 Hoch | ~~2.1 – UI-Rendering vereinheitlichen~~ | ~~Mittel~~ | ✅ Erledigt (~1.224 Zeilen, renderWidgetElement unified method) |
+| 🔴 Hoch | ~~2.2 – Debug-Rendering extrahieren~~ | ~~Gering~~ | ✅ Erledigt (-545 Zeilen → OpenGLRendererDebug.cpp) |
 | 🔴 Hoch | ~~3.1 – Build-Pipeline aus main.cpp extrahieren~~ | ~~Gering~~ | ✅ Erledigt (-747 Zeilen) |
-| 🟡 Mittel | 1.2 – Content Browser extrahieren | Mittel | ~2.000 Zeilen weniger |
-| 🟡 Mittel | 1.3 – Outliner/Details extrahieren | Mittel | ~2.000 Zeilen weniger |
-| 🟡 Mittel | 6 – PythonScripting Module aufteilen | Gering | 🟡 Phase 1 ✅ (~730 Zeilen extrahiert: Math + Physics), Phase 2+ ausstehend (~2.700 Zeilen) |
-| 🟡 Mittel | 4 – Dupliziertes ECS konsolidieren | Gering | Architektur-Bereinigung |
-| 🟡 Mittel | 5 – Leere .cpp-Dateien entfernen | Trivial | 12 Dateien weniger |
+| 🟡 Mittel | ~~1.2 – Content Browser extrahieren~~ | ~~Mittel~~ | ✅ Erledigt (~1.212 Zeilen, ContentBrowserPanel) |
+| 🟡 Mittel | ~~1.3 – Outliner/Details extrahieren~~ | ~~Mittel~~ | ✅ Erledigt (~1.545 Zeilen, OutlinerPanel) |
+| 🟡 Mittel | ~~1.4 – Build-System-UI extrahieren~~ | ~~Mittel~~ | ✅ Erledigt (~1.260 Zeilen, BuildSystemUI) |
+| 🟡 Mittel | ~~1.5 – Dialog-System extrahieren~~ | ~~Mittel~~ | ✅ Erledigt (~1.750 Zeilen, EditorDialogs) |
+| 🟡 Mittel | ~~6 – PythonScripting Module aufteilen~~ | ~~Gering~~ | ✅ Erledigt (Phase 1+2: 11 Module extrahiert, PythonScripting.cpp -63%) |
+| 🟡 Mittel | ~~4 – Dupliziertes ECS konsolidieren~~ | ~~Gering~~ | ✅ Erledigt (Legacy-ECS `src/ECS/` entfernt) |
+| 🟡 Mittel | ~~5 – Leere .cpp-Dateien entfernen~~ | ~~Trivial~~ | ✅ Erledigt (12 UIWidget .cpp-Stubs entfernt) |
 | 🟢 Niedrig | 8 – AssetManager aufteilen | Mittel | ~2.600 Zeilen weniger |
-| 🟢 Niedrig | 9 – OpenGLRenderer Member-Structs | Gering | Bessere Lesbarkeit |
+| 🟢 Niedrig | ~~9 – OpenGLRenderer Member-Structs~~ | ~~Gering~~ | ✅ Erledigt (12 Sub-Structs, ~108 Member gruppiert) |
 | 🟢 Niedrig | 7 – Renderer.h Interfaces | Hoch | Sauberes API-Design |
 | 🟢 Niedrig | 10.7 – WidgetElement Typ-Daten | Hoch | Speicherersparnis, sauberes Design |
 
@@ -626,3 +624,75 @@ PhysX-Backend ist **korrekt optional** implementiert:
 - `CMakeLists.txt`: `BuildPipeline.cpp` zum Editor-Target hinzugefügt
 
 **Ergebnis:** `main.cpp` von ~5.425 auf ~4.678 Zeilen reduziert (-747 Zeilen).
+
+### ✅ Abschnitt 2.1: UI-Rendering vereinheitlicht (`renderWidgetElement`)
+Drei nahezu identische `renderElement`-Lambdas (je ~450–800 Zeilen) in `drawUIWidgetsToFramebuffer`, `renderViewportUI` und `renderUI` durch eine einzige `renderWidgetElement()`-Methode (~665 Zeilen) ersetzt.
+
+**Neue Strukturen (OpenGLRenderer.h):**
+- `UIRenderContext`-Struct: `projection` (glm::mat4), `screenHeight` (int), `debugEnabled` (bool), `scissorOffset` (Vec2, Default {0,0}), `DeferredDropDown`-Substruct + Vektor-Pointer
+- `renderWidgetElement(const WidgetElement&, float parentX, float parentY, float parentW, float parentH, float parentOpacity, UIRenderContext& ctx)` — private Methode
+
+**Geänderte Dateien:**
+- `OpenGLRenderer.h`: `UIRenderContext`-Struct + `renderWidgetElement`-Deklaration
+- `OpenGLRenderer.cpp`: Methode eingefügt (Zeile ~3077–3755), drei Lambdas durch jeweils 5–7-zeilige `UIRenderContext`-Setups + direkte Aufrufe ersetzt
+
+**Besonderheiten:**
+- `scissorOffset` in `UIRenderContext` löst den Viewport-UI-Offset (Scissor relativ zu Fenster, Widgets relativ zu Viewport-Rect)
+- RAII-Structs `RtRestore`/`ScissorRestore` innerhalb der Methode für rekursive Aufrufe
+- Widget-Editor-Preview-FBO in `renderUI` nutzt separaten `previewCtx`
+- Deferred-Dropdown-Overlay-Pass bleibt in den Wrapper-Methoden
+
+**Ergebnis:** `OpenGLRenderer.cpp` von ~12.787 auf ~11.563 Zeilen reduziert (-1.224 Zeilen).
+
+### ✅ Abschnitt 2.2: Debug-Rendering extrahiert (`OpenGLRendererDebug.cpp`)
+5 Debug-Rendering-Methoden aus `OpenGLRenderer.cpp` in eine eigene Übersetzungseinheit `OpenGLRendererDebug.cpp` verschoben (Split-Implementierungsdatei, gleiche Klasse).
+
+**Verschobene Methoden:**
+- `drawSelectionOutline()` (~28 Zeilen) – Outline-Shader über Pick-Textur
+- `renderColliderDebug()` (~257 Zeilen) – Wireframe-Box/Sphere/Capsule/Cylinder für CollisionComponents
+- `renderStreamingVolumeDebug()` (~61 Zeilen) – Wireframe-Boxen für Streaming Volumes
+- `renderBoneDebug()` (~128 Zeilen) – Skelett-Knochen-Linien und Joint-Kreuz-Marker
+- `drawRubberBand()` (~66 Zeilen) – Halbtransparentes Auswahlrechteck
+
+**Neue Datei:**
+- `src/Renderer/OpenGLRenderer/OpenGLRendererDebug.cpp` (583 Zeilen): Alle 5 Methoden + statischer `buildCircleVerts`-Helper (Duplikat, da auch von `renderGizmo` im Hauptfile genutzt)
+
+**Geänderte Dateien:**
+- `OpenGLRenderer.cpp`: 5 Methodenimplementierungen entfernt
+- `OpenGLRenderer/CMakeLists.txt`: `OpenGLRendererDebug.cpp` zu `OPENGL_RENDERER_SOURCES` hinzugefügt
+
+**Ergebnis:** `OpenGLRenderer.cpp` von ~11.563 auf ~11.018 Zeilen reduziert (-545 Zeilen).
+
+### ✅ Abschnitt 2.3+2.4+2.5: Gizmo, Grid & Tab-System extrahiert
+Gizmo-/Grid-Rendering und Editor-Tab-Verwaltung aus `OpenGLRenderer.cpp` in zwei neue Split-Implementierungsdateien verschoben.
+
+**Verschobene Methoden (OpenGLRendererGizmo.cpp, 846 Zeilen):**
+- `ensureGizmoResources()` (~49Z) – Gizmo-Shader + VAO/VBO
+- `releaseGizmoResources()` (~6Z)
+- `ensureGridResources()` (~101Z) – Grid-Shader (fwidth-basiert, Achsen-Highlights, Distance-Fade)
+- `releaseGridResources()` (~5Z)
+- `drawViewportGrid()` (~30Z)
+- `getGizmoWorldAxis()` (~5Z)
+- `renderGizmo()` (~120Z) – Translate/Rotate/Scale-Achsen
+- `pickGizmoAxis()` (~122Z) – Screen-Space Hit-Testing
+- `beginGizmoDrag()` (~53Z)
+- `updateGizmoDrag()` (~218Z) – Translate/Rotate/Scale mit Snap + Multi-Entity
+- `endGizmoDrag()` (~48Z) – UndoRedo-Command
+- Statische Helper: `buildCircleVerts`, `screenToRay`, `closestTOnAxis`
+
+**Verschobene Methoden (OpenGLRendererTabs.cpp, 294 Zeilen):**
+- `addTab()` (~22Z)
+- `removeTab()` (~19Z)
+- `rebuildTitleBarTabs()` (~78Z) – Dynamische Tab-Buttons im TitleBar
+- `setActiveTab()` (~141Z) – Level-Swap, Kamera-/Selektions-Persistenz
+- `getActiveTabId()` (~4Z)
+- `getTabs()` (~4Z)
+- `releaseAllTabFbos()` (~7Z)
+
+**Beibehaltene Methode:** `getEntityRotationMatrix()` bleibt im Hauptfile (wird von Debug + Gizmo genutzt).
+
+**Geänderte Dateien:**
+- `OpenGLRenderer.cpp`: Alle o.g. Methoden entfernt
+- `OpenGLRenderer/CMakeLists.txt`: `OpenGLRendererGizmo.cpp` + `OpenGLRendererTabs.cpp` zu `OPENGL_RENDERER_SOURCES` hinzugefügt
+
+**Ergebnis:** `OpenGLRenderer.cpp` von ~11.018 auf ~9.906 Zeilen reduziert (-1.112 Zeilen).

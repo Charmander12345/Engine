@@ -5,6 +5,15 @@ set(SCRIPTING_SOURCES
     ScriptingInternal.h
     MathModule.cpp
     PhysicsModule.cpp
+    EntityModule.cpp
+    AudioModule.cpp
+    InputModule.cpp
+    CameraModule.cpp
+    ParticleModule.cpp
+    DiagnosticsModule.cpp
+    LoggingModule.cpp
+    UIModule.cpp
+    EditorModule.cpp
     ScriptHotReload.cpp
     ScriptHotReload.h
 )

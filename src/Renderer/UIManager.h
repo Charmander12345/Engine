@@ -24,11 +24,33 @@ class EngineLevel;
 class Renderer;
 #if ENGINE_EDITOR
 class PopupWindow;
+class ConsoleTab;
+class ProfilerTab;
+class AudioPreviewTab;
+class ParticleEditorTab;
+class ShaderViewerTab;
+class RenderDebuggerTab;
+class SequencerTab;
+class LevelCompositionTab;
+class AnimationEditorTab;
+class UIDesignerTab;
+class WidgetEditorTab;
+class ContentBrowserPanel;
+class OutlinerPanel;
+#include "EditorTabs/BuildSystemUI.h"
+#include "EditorTabs/EditorDialogs.h"
+#include "EditorTabs/OutlinerPanel.h"
 #endif
 class ViewportUIManager;
 
 class UIManager
 {
+#if ENGINE_EDITOR
+	friend class ContentBrowserPanel;
+	friend class OutlinerPanel;
+	friend class EditorDialogs;
+	friend class BuildSystemUI;
+#endif
 public:
 	struct UIEntry
 	{
@@ -46,8 +68,16 @@ public:
     UIManager();
     ~UIManager();
 
-    void setRenderer(Renderer* renderer) { m_renderer = renderer; }
-    Renderer* getRenderer() const { return m_renderer; }
+	void setRenderer(Renderer* renderer)
+	{
+		m_renderer = renderer;
+#if ENGINE_EDITOR
+		if (m_buildSystemUI) m_buildSystemUI->setRenderer(renderer);
+		if (m_editorDialogs) m_editorDialogs->setRenderer(renderer);
+		if (m_outlinerPanel) m_outlinerPanel->setRenderer(renderer);
+#endif
+	}
+	Renderer* getRenderer() const { return m_renderer; }
 
     Vec2 getAvailableViewportSize() const;
     void setAvailableViewportSize(const Vec2& size);
@@ -61,6 +91,7 @@ public:
 	void registerWidget(const std::string& id, const std::shared_ptr<Widget>& widget);
 	void registerWidget(const std::string& id, const std::shared_ptr<Widget>& widget, const std::string& tabId);
 	const std::vector<WidgetEntry>& getRegisteredWidgets() const;
+	std::vector<WidgetEntry>& getRegisteredWidgetsMutable();
 	const std::vector<const WidgetEntry*>& getWidgetsOrderedByZ() const;
 	void unregisterWidget(const std::string& id);
 	WidgetElement* findElementById(const std::string& elementId);
@@ -103,6 +134,8 @@ public:
 
 	bool isRenderDirty() const;
 	void clearRenderDirty();
+	void markRenderDirty() { m_renderDirty = true; }
+	void clearLastHoveredElement() { m_lastHoveredElement = nullptr; }
 
     void showModalMessage(const std::string& message, std::function<void()> onClosed = {});
     void closeModalMessage();
@@ -248,18 +281,13 @@ public:
 	static UIManager* GetActiveInstance();
 	static void SetActiveInstance(UIManager* instance);
 
-private:
 	WidgetEntry* findWidgetEntry(const std::string& id);
 	const WidgetEntry* findWidgetEntry(const std::string& id) const;
+private:
 	WidgetElement* hitTest(const Vec2& screenPos, bool logDetails = false) const;
 
 	#if ENGINE_EDITOR
 	KeyCaptureCallback m_keyCaptureCallback;
-	void populateOutlinerWidget(const std::shared_ptr<EditorWidget>& widget);
-	void populateOutlinerDetails(unsigned int entity);
-	void populateContentBrowserWidget(const std::shared_ptr<EditorWidget>& widget);
-	std::unordered_set<std::string> buildReferencedAssetSet() const;
-	void applyAssetToEntity(AssetType type, const std::string& assetPath, unsigned int entity);
 #endif
 	void updateHoverStates();
 	void updateHoverTransitions(float deltaSeconds);
@@ -270,10 +298,7 @@ private:
 	void collectFocusableEntries(WidgetElement& element, std::vector<WidgetElement*>& out);
 	void cycleFocusedEntry(bool reverse);
 	#if ENGINE_EDITOR
-	void navigateOutlinerByArrow(int direction);      // -1 = up, +1 = down
-	void navigateContentBrowserByArrow(int dCol, int dRow); // column/row delta
 #endif
-	void ensureModalWidget();
 	std::shared_ptr<EditorWidget> createToastWidget(const std::string& message, const std::string& name, NotificationLevel level = NotificationLevel::Info) const;
 	void updateToastStackLayout();
 
@@ -298,16 +323,7 @@ private:
 	bool m_uiRenderingPaused{ false };
 	std::string m_activeTabId{ "Viewport" };
 
-	std::shared_ptr<EditorWidget> m_modalWidget;
-    std::string m_modalMessage;
-    bool m_modalVisible{ false };
-    std::function<void()> m_modalOnClosed;
-    float m_notificationPollTimer{ 0.0f };
-    struct ModalRequest
-    {
-        std::string message;
-        std::function<void()> onClosed;
-    };
+	float m_notificationPollTimer{ 0.0f };
 	struct ToastNotification
 	{
 		std::string id;
@@ -316,7 +332,6 @@ private:
 		float duration{ 0.0f };
 		NotificationLevel level{ NotificationLevel::Info };
 	};
-	std::vector<ModalRequest> m_modalQueue;
 	std::vector<ToastNotification> m_toasts;
 	uint64_t m_nextToastId{ 1 };
 
@@ -347,41 +362,15 @@ private:
 	void bindClickEventsForElement(WidgetElement& element);
 
 #if ENGINE_EDITOR
-	EngineLevel* m_outlinerLevel{ nullptr };
+	// World Outliner + Entity Details (extracted to EditorTabs/OutlinerPanel)
+	std::unique_ptr<OutlinerPanel> m_outlinerPanel;
 	size_t m_levelChangedCallbackToken{ 0 };
-	unsigned int m_outlinerSelectedEntity{ 0 };
+	void populateOutlinerWidget(const std::shared_ptr<EditorWidget>& widget);
+	void populateOutlinerDetails(unsigned int entity);
+	void navigateOutlinerByArrow(int direction);
 
-	// Entity clipboard for Copy/Paste
-	struct EntityClipboard
-	{
-		bool valid{ false };
-		std::optional<ECS::TransformComponent>       transform;
-		std::optional<ECS::MeshComponent>            mesh;
-		std::optional<ECS::MaterialComponent>        material;
-		std::optional<ECS::LightComponent>           light;
-		std::optional<ECS::CameraComponent>          camera;
-		std::optional<ECS::PhysicsComponent>         physics;
-		std::optional<ECS::ScriptComponent>          script;
-		std::optional<ECS::NameComponent>            name;
-		std::optional<ECS::CollisionComponent>       collision;
-		std::optional<ECS::HeightFieldComponent>     heightField;
-		std::optional<ECS::LodComponent>             lod;
-		std::optional<ECS::AnimationComponent>       animation;
-		std::optional<ECS::ParticleEmitterComponent> particleEmitter;
-	};
-	EntityClipboard m_entityClipboard;
-
-	std::string m_contentBrowserPath;  // current subfolder relative to Content (empty = root)
-	std::string m_selectedBrowserFolder; // folder highlighted in tree (shown in grid)
-	std::string m_selectedGridAsset;     // relative asset path selected in grid (empty = none)
-	std::unordered_set<std::string> m_expandedFolders; // set of expanded folder paths
-	std::string m_browserSearchText;     // real-time search filter text
-	uint16_t m_browserTypeFilter{ 0xFFFF }; // bitmask: 1 bit per AssetType (0xFFFF = all)
-	bool m_registryWasReady{ false }; // tracks previous registry state for change detection
-	bool m_renamingGridAsset{ false };  // true while inline rename entry bar is shown
-	std::string m_renameOriginalPath;   // relPath of the asset being renamed
-	uint64_t m_lastEcsComponentVersion{ 0 }; // tracks ECS component changes for auto-refresh
-	uint64_t m_lastRegistryVersion{ 0 };     // tracks asset registry changes for auto-refresh
+	// Content Browser (extracted to EditorTabs/ContentBrowserPanel)
+	std::unique_ptr<ContentBrowserPanel> m_contentBrowserPanel;
 #endif // ENGINE_EDITOR
 
 	// Double-click detection
@@ -399,72 +388,15 @@ private:
 	static constexpr float kTooltipDelay = 0.45f; // seconds before showing
 
 #if ENGINE_EDITOR
-	// Save progress modal state
-	std::shared_ptr<EditorWidget> m_saveProgressWidget;
-	bool m_saveProgressVisible{ false };
-	size_t m_saveProgressTotal{ 0 };
-	size_t m_saveProgressSaved{ 0 };
-
-	// Level load progress modal state
-	std::shared_ptr<EditorWidget> m_levelLoadProgressWidget;
-
 	// Level-load request callback
 	std::function<void(const std::string&)> m_onLevelLoadRequested;
 
-	// Widget editor state (per open editor tab)
-	struct WidgetEditorState
-	{
-		std::string tabId;
-		std::string assetPath;
-		std::shared_ptr<Widget> editedWidget;          // the widget being edited
-		std::string selectedElementId;                  // id of the currently selected element
-		std::string contentWidgetId;
-		std::string leftWidgetId;
-		std::string rightWidgetId;
-		std::string canvasWidgetId;
-		std::string toolbarWidgetId;
-
-		unsigned int assetId{ 0 };
-		bool isDirty{ false };
-		bool showAnimationsPanel{ false };
-		std::string selectedAnimationName;
-
-		// Bottom animation timeline panel
-		std::string bottomWidgetId;
-		float timelineScrubTime{ 0.0f };      // current scrubber position in seconds
-		float timelineZoom{ 1.0f };            // horizontal zoom for timeline
-		float timelineScrollX{ 0.0f };         // horizontal scroll offset
-		int selectedTrackIndex{ -1 };          // which track row is selected
-		int draggingKeyframeTrack{ -1 };       // track index of keyframe being dragged (-1=none)
-		int draggingKeyframeIndex{ -1 };       // keyframe index being dragged
-		bool isDraggingScrubber{ false };       // true while dragging the scrubber
-		bool isDraggingEndLine{ false };        // true while dragging the end-of-animation duration line
-		std::set<std::string> expandedTimelineElements; // element IDs expanded in tree-view
-
-		// Zoom & pan
-		float zoom{ 1.0f };
-		Vec2 panOffset{ 0.0f, 0.0f };
-		bool isPanning{ false };
-		Vec2 panStartMouse{};
-		Vec2 panStartOffset{};
-
-		// Original (unscaled) preview placement
-		Vec2 basePreviewPos{};
-		Vec2 basePreviewSize{};
-
-		// FBO preview dirty flag – set true whenever the preview needs re-rendering
-		bool previewDirty{ true };
-
-		// Hover tracking for canvas preview
-		std::string hoveredElementId;
-	};
-	std::unordered_map<std::string, WidgetEditorState> m_widgetEditorStates; // key = tabId
+	// Widget editor tab (extracted to EditorTabs/WidgetEditorTab.h)
+	std::unique_ptr<WidgetEditorTab> m_widgetEditorTab;
 	void refreshWidgetEditorHierarchy(const std::string& tabId);
 	void refreshWidgetEditorDetails(const std::string& tabId);
 	void selectWidgetEditorElement(const std::string& tabId, const std::string& elementId);
 	void applyWidgetEditorTransform(const std::string& tabId);
-	WidgetEditorState* getActiveWidgetEditorState();
-	bool isOverWidgetEditorCanvas(const Vec2& screenPos) const;
 	void addElementToEditedWidget(const std::string& tabId, const std::string& elementType);
 	void saveWidgetEditorAsset(const std::string& tabId);
 	void markWidgetEditorDirty(const std::string& tabId);
@@ -479,180 +411,47 @@ private:
 	void handleTimelineMouseMove(const std::string& tabId, const Vec2& localPos, float trackAreaWidth);
 	void handleTimelineMouseUp(const std::string& tabId);
 
-	// UI Designer state (Gameplay UI designer tab)
-	struct UIDesignerState
-	{
-		std::string tabId;
-		std::string leftWidgetId;
-		std::string rightWidgetId;
-		std::string toolbarWidgetId;
-		std::string selectedWidgetName;   // currently selected viewport widget
-		std::string selectedElementId;    // currently selected element within that widget
-		bool isOpen{ false };
-	};
-	UIDesignerState m_uiDesignerState;
+	// UI Designer tab (extracted to EditorTabs/UIDesignerTab.h)
+	std::unique_ptr<UIDesignerTab> m_uiDesignerTab;
+	ViewportUIManager* getViewportUIManager() const;
 	void refreshUIDesignerHierarchy();
 	void refreshUIDesignerDetails();
 	void selectUIDesignerElement(const std::string& widgetName, const std::string& elementId);
 	void addElementToViewportWidget(const std::string& elementType);
 	void deleteSelectedUIDesignerElement();
-	ViewportUIManager* getViewportUIManager() const;
 
-	// Console / Log-Viewer tab state
-	struct ConsoleState
-	{
-		std::string tabId;
-		std::string widgetId;
-		uint64_t lastSeenSequenceId{ 0 };
-		uint8_t levelFilter{ 0xFF }; // bitmask: bit0=INFO, bit1=WARNING, bit2=ERROR, bit3=FATAL
-		std::string searchText;
-		bool autoScroll{ true };
-		bool isOpen{ false };
-		float refreshTimer{ 0.0f };
-	};
-	ConsoleState m_consoleState;
-	void refreshConsoleLog();
-	void buildConsoleToolbar(WidgetElement& root);
+	// Console / Log-Viewer tab (extracted to EditorTabs/ConsoleTab.h)
+	std::unique_ptr<ConsoleTab> m_consoleTab;
 
-	// Profiler / Performance-Monitor tab state
-	struct ProfilerState
-	{
-		std::string tabId;
-		std::string widgetId;
-		bool isOpen{ false };
-		bool frozen{ false };
-		float refreshTimer{ 0.0f };
-	};
-	ProfilerState m_profilerState;
-	void refreshProfilerMetrics();
-	void buildProfilerToolbar(WidgetElement& root);
+	// Profiler / Performance-Monitor tab (extracted to EditorTabs/ProfilerTab.h)
+	std::unique_ptr<ProfilerTab> m_profilerTab;
 
-	// Audio Preview tab state
-	struct AudioPreviewState
-	{
-		std::string tabId;
-		std::string widgetId;
-		std::string assetPath;       // Content-relative path of the open audio asset
-		bool isOpen{ false };
-		bool isPlaying{ false };
-		unsigned int playHandle{ 0 }; // AudioManager source handle
-		float volume{ 1.0f };
-		// Metadata extracted from asset JSON
-		int channels{ 0 };
-		int sampleRate{ 0 };
-		int format{ 0 };
-		size_t dataBytes{ 0 };
-		float durationSeconds{ 0.0f };
-		std::string displayName;
-	};
-	AudioPreviewState m_audioPreviewState;
-	void refreshAudioPreview();
-	void buildAudioPreviewToolbar(WidgetElement& root);
-	void buildAudioPreviewWaveform(WidgetElement& root);
-	void buildAudioPreviewMetadata(WidgetElement& root);
+	// Audio Preview tab (extracted to EditorTabs/AudioPreviewTab.h)
+	std::unique_ptr<AudioPreviewTab> m_audioPreviewTab;
 
-	// Particle Editor tab state
-	struct ParticleEditorState
-	{
-		std::string tabId;
-		std::string widgetId;
-		ECS::Entity linkedEntity{ 0 };
-		bool isOpen{ false };
-		float refreshTimer{ 0.0f };
-		int presetIndex{ -1 };    // currently selected preset (-1 = custom)
-	};
-	ParticleEditorState m_particleEditorState;
-	void refreshParticleEditor();
-	void buildParticleEditorToolbar(WidgetElement& root);
-	void buildParticleEditorParams(WidgetElement& root);
-	void applyParticlePreset(int presetIndex);
+	// Particle Editor tab (extracted to EditorTabs/ParticleEditorTab.h)
+	std::unique_ptr<ParticleEditorTab> m_particleEditorTab;
 
-	// Shader Viewer tab state
-	struct ShaderViewerState
-	{
-		std::string tabId;
-		std::string widgetId;
-		bool isOpen{ false };
-		std::string selectedFile;              // currently viewed shader filename
-		std::vector<std::string> shaderFiles;  // cached list of .glsl filenames
-	};
-	ShaderViewerState m_shaderViewerState;
-	void refreshShaderViewer();
-	void buildShaderViewerToolbar(WidgetElement& root);
-	void buildShaderFileList(WidgetElement& root);
-	void buildShaderCodeView(WidgetElement& root);
+	// Shader Viewer tab (extracted to EditorTabs/ShaderViewerTab.h)
+	std::unique_ptr<ShaderViewerTab> m_shaderViewerTab;
 
-	// Render-Pass-Debugger tab state
-	struct RenderDebuggerState
-	{
-		std::string tabId;
-		std::string widgetId;
-		bool isOpen{ false };
-		float refreshTimer{ 0.0f };
-	};
-	RenderDebuggerState m_renderDebuggerState;
-	void refreshRenderDebugger();
-	void buildRenderDebuggerToolbar(WidgetElement& root);
+	// Render-Pass-Debugger tab (extracted to EditorTabs/RenderDebuggerTab.h)
+	std::unique_ptr<RenderDebuggerTab> m_renderDebuggerTab;
 
-	// Cinematic Sequencer tab state (Phase 11.2)
-	struct SequencerState
-	{
-		std::string tabId;
-		std::string widgetId;
-		bool isOpen{ false };
-		float refreshTimer{ 0.0f };
-		// Playback
-		bool playing{ false };
-		float playbackSpeed{ 1.0f };
-		float scrubberT{ 0.0f };       // normalised 0..1
-		// Editing
-		int selectedKeyframe{ -1 };     // -1 = none
-		bool showSplineInViewport{ true };
-		bool loopPlayback{ false };
-		float pathDuration{ 5.0f };     // seconds
-	};
-	SequencerState m_sequencerState;
-	void refreshSequencerTimeline();
-	void buildSequencerToolbar(WidgetElement& root);
-	void buildSequencerTimeline(WidgetElement& root);
-	void buildSequencerKeyframeList(WidgetElement& root);
+	// Cinematic Sequencer tab (extracted to EditorTabs/SequencerTab.h)
+	std::unique_ptr<SequencerTab> m_sequencerTab;
 
-	// Level Composition tab state (Phase 11.4)
-	struct LevelCompositionState
-	{
-		std::string tabId;
-		std::string widgetId;
-		bool isOpen{ false };
-		float refreshTimer{ 0.0f };
-		int selectedSubLevel{ -1 };
-	};
-	LevelCompositionState m_levelCompositionState;
-	void buildLevelCompositionToolbar(WidgetElement& root);
-	void buildLevelCompositionSubLevelList(WidgetElement& root);
-	void buildLevelCompositionVolumeList(WidgetElement& root);
+	// Level Composition tab (extracted to EditorTabs/LevelCompositionTab.h)
+	std::unique_ptr<LevelCompositionTab> m_levelCompositionTab;
 
-	// Animation Editor tab state (Phase 2.4)
-	struct AnimationEditorState
-	{
-		std::string tabId;
-		std::string widgetId;
-		ECS::Entity linkedEntity{ 0 };
-		bool isOpen{ false };
-		float refreshTimer{ 0.0f };
-		int selectedClip{ -1 };
-	};
-	AnimationEditorState m_animationEditorState;
-	void refreshAnimationEditor();
-	void buildAnimationEditorToolbar(WidgetElement& root);
-	void buildAnimationEditorClipList(WidgetElement& root);
-	void buildAnimationEditorControls(WidgetElement& root);
-	void buildAnimationEditorBoneTree(WidgetElement& root);
+	// Animation Editor tab (extracted to EditorTabs/AnimationEditorTab.h)
+	std::unique_ptr<AnimationEditorTab> m_animationEditorTab;
 
 public:
 	bool getWidgetEditorCanvasRect(Vec4& outRect) const;
 	bool isWidgetEditorContentWidget(const std::string& widgetId) const;
 
-	// FBO preview accessors for the renderer
+	// FBO preview accessors for the renderer (delegates to WidgetEditorTab)
 	struct WidgetEditorPreviewInfo
 	{
 		std::shared_ptr<Widget> editedWidget;
@@ -672,13 +471,16 @@ public:
 	void refreshWorldOutliner();
 	void refreshContentBrowser(const std::string& subfolder = "");
 	void focusContentBrowserSearch();
+	void requestLevelLoad(const std::string& levelRelPath);
 	void selectEntity(unsigned int entity);
-	unsigned int getSelectedEntity() const { return m_outlinerSelectedEntity; }
-	const std::string& getSelectedBrowserFolder() const { return m_selectedBrowserFolder; }
+	unsigned int getSelectedEntity() const;
+	void applyAssetToEntity(AssetType type, const std::string& assetPath, unsigned int entity);
+	void invalidateHoveredElement();
+	std::string getSelectedBrowserFolder() const;
 
 	// Grid asset selection
-	const std::string& getSelectedGridAsset() const { return m_selectedGridAsset; }
-	void clearSelectedGridAsset() { m_selectedGridAsset.clear(); }
+	std::string getSelectedGridAsset() const;
+	void clearSelectedGridAsset();
 
 	// True when a text entry bar has keyboard focus (blocks engine shortcuts).
 	bool hasEntryFocused() const { return m_focusedEntry != nullptr; }
@@ -725,78 +527,47 @@ public:
 	using DropOnEntityCallback = std::function<void(const std::string& payload, unsigned int entity)>;
 	void setOnDropOnEntity(DropOnEntityCallback callback) { m_onDropOnEntity = std::move(callback); }
 
-	// ── Build Profiles (Phase 10.3) ───────────────────────────────────────
-	struct BuildProfile
-	{
-		std::string name            = "Development";
-		std::string cmakeBuildType  = "RelWithDebInfo";  // "Debug", "RelWithDebInfo", "Release"
-		std::string logLevel        = "info";             // "verbose", "info", "warning", "error"
-		bool enableHotReload        = true;
-		bool enableValidation       = false;
-		bool enableProfiler         = true;
-		bool compressAssets         = false;
-	};
+	// ── Build System UI (extracted to EditorTabs/BuildSystemUI) ──────────
+	// Type aliases for external consumers (main.cpp, BuildPipeline)
+	using BuildProfile     = BuildSystemUI::BuildProfile;
+	using BuildGameConfig  = BuildSystemUI::BuildGameConfig;
+	using ToolchainInfo    = BuildSystemUI::ToolchainInfo;
+	using BuildGameCallback = BuildSystemUI::BuildGameCallback;
+
+	BuildSystemUI& getBuildSystemUI();
 
 	void loadBuildProfiles();
 	void saveBuildProfile(const BuildProfile& profile);
 	void deleteBuildProfile(const std::string& name);
-	const std::vector<BuildProfile>& getBuildProfiles() const { return m_buildProfiles; }
-
-	// ── Build Game (Phase 10) ──────────────────────────────────────────────
-	struct BuildGameConfig
-	{
-		std::string  startLevel;                     // relative to Content (e.g. "Levels/MyLevel.level")
-		std::string  windowTitle   = "Game";
-		std::string  outputDir;                      // standardised: <project>/Build
-		std::string  binaryDir;                      // binary cache: <project>/Binary
-		BuildProfile profile;                        // active build profile
-		bool         launchAfterBuild = true;
-		bool         cleanBuild       = false;        // delete binary cache before compiling (disables incremental)
-	};
+	const std::vector<BuildProfile>& getBuildProfiles() const;
 
 	void openBuildGameDialog();
+	void setOnBuildGame(BuildGameCallback cb);
 
-	using BuildGameCallback = std::function<void(const BuildGameConfig& config)>;
-	void setOnBuildGame(BuildGameCallback cb) { m_onBuildGame = std::move(cb); }
-
-	// Build progress popup (called by the build pipeline)
 	void showBuildProgress();
 	void updateBuildProgress(const std::string& status, int step, int totalSteps);
 	void closeBuildProgress(bool success, const std::string& message = {});
 	void dismissBuildProgress();
 
-	// Thread-safe: append a line to the build output log (called from build thread)
 	void appendBuildOutput(const std::string& line);
-	// Main-thread: poll the build thread for pending UI updates. Call once per frame.
 	void pollBuildThread();
-	bool isBuildRunning() const { return m_buildRunning.load(); }
+	bool isBuildRunning() const;
 
-	// ── CMake Detection ───────────────────────────────────────────────────
-	// Call once at startup to locate CMake.  Returns true if CMake is available.
 	bool detectCMake();
-	bool isCMakeAvailable() const { return m_cmakeAvailable.load(); }
-	const std::string& getCMakePath() const { return m_cmakePath; }
-	// Show a popup asking the user to install CMake.
+	bool isCMakeAvailable() const;
+	const std::string& getCMakePath() const;
 	void showCMakeInstallPrompt();
 
-	// ── Build Toolchain Detection ─────────────────────────────────────────
-	struct ToolchainInfo
-	{
-		std::string name;           // e.g. "MSVC", "Clang", "GCC"
-		std::string version;        // e.g. "2026", "19.50.35727"
-		std::string compilerPath;   // path to cl.exe / clang++ / g++
-		std::string vsInstallPath;  // VS installation path (empty if not VS)
-	};
 	bool detectBuildToolchain();
-	bool isBuildToolchainAvailable() const { return m_toolchainAvailable.load(); }
-	const ToolchainInfo& getBuildToolchain() const { return m_toolchainInfo; }
+	bool isBuildToolchainAvailable() const;
+	const ToolchainInfo& getBuildToolchain() const;
 	void showToolchainInstallPrompt();
 
-	// ── Async Detection (non-blocking startup) ───────────────────────────
-	// Starts CMake + toolchain detection on a background thread.
 	void startAsyncToolchainDetection();
-	// Main-thread poll: once detection finishes, logs results and shows prompts.
 	void pollToolchainDetection();
+
+	// ── Editor Dialogs (extracted to EditorTabs/EditorDialogs) ──────────
+	EditorDialogs& getEditorDialogs();
 #endif // ENGINE_EDITOR
 
 private:
@@ -813,41 +584,10 @@ private:
 	std::function<void(const std::string&, unsigned int)> m_onDropOnEntity;
 
 #if ENGINE_EDITOR
-	// Build Game state
-	BuildGameCallback m_onBuildGame;
-	std::shared_ptr<EditorWidget> m_buildProgressWidget;
-	PopupWindow* m_buildPopup{ nullptr };  // separate OS window for build output
-	std::vector<BuildProfile> m_buildProfiles;           // loaded build profiles
+	// Build System UI (extracted to EditorTabs/BuildSystemUI)
+	std::unique_ptr<BuildSystemUI> m_buildSystemUI;
 
-public:
-	// Build thread state – public so the build lambda (registered from main.cpp) can
-	// push progress/output from the worker thread via the mutex-protected fields.
-	std::thread m_buildThread;
-	std::atomic<bool> m_buildRunning{ false };
-	std::atomic<bool> m_buildCancelRequested{ false };
-	std::mutex m_buildMutex;
-	std::vector<std::string> m_buildPendingLines;      // lines queued by build thread
-	std::string m_buildPendingStatus;                   // status text queued by build thread
-	int m_buildPendingStep{ 0 };
-	int m_buildPendingTotalSteps{ 0 };
-	bool m_buildPendingStepDirty{ false };
-	bool m_buildPendingFinished{ false };
-	bool m_buildPendingSuccess{ false };
-	std::string m_buildPendingErrorMsg;
-
-private:
-	std::vector<std::string> m_buildOutputLines;        // full log (main-thread only)
-
-	// CMake state
-	std::atomic<bool> m_cmakeAvailable{ false };
-	std::string m_cmakePath;
-
-	// Build toolchain state
-	std::atomic<bool> m_toolchainAvailable{ false };
-	ToolchainInfo m_toolchainInfo;
-
-	// Async detection state
-	std::atomic<bool> m_toolDetectDone{ false };
-	bool m_toolDetectPolled{ false };
+	// Editor Dialogs (extracted to EditorTabs/EditorDialogs)
+	std::unique_ptr<EditorDialogs> m_editorDialogs;
 #endif // ENGINE_EDITOR
 };

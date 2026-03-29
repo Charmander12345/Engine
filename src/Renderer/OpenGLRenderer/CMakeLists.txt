@@ -1,6 +1,9 @@
 # ── OpenGL backend source files (shared by both library variants) ─────────
 set(OPENGL_RENDERER_SOURCES
     OpenGLRenderer.cpp
+    OpenGLRendererDebug.cpp
+    OpenGLRendererGizmo.cpp
+    OpenGLRendererTabs.cpp
     OpenGLRenderer.h
     OpenGLCamera.cpp
     OpenGLCamera.h

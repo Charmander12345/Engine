@@ -64,6 +64,37 @@ set(RENDERER_CORE_EDITOR_SOURCES
     EditorWindows/TextureViewerWindow.h
     EditorWindows/PopupWindow.cpp
     EditorWindows/PopupWindow.h
+    EditorTabs/IEditorTab.h
+    EditorTabs/ConsoleTab.h
+    EditorTabs/ConsoleTab.cpp
+    EditorTabs/ProfilerTab.h
+    EditorTabs/ProfilerTab.cpp
+    EditorTabs/AudioPreviewTab.h
+    EditorTabs/AudioPreviewTab.cpp
+    EditorTabs/ParticleEditorTab.h
+    EditorTabs/ParticleEditorTab.cpp
+    EditorTabs/ShaderViewerTab.h
+    EditorTabs/ShaderViewerTab.cpp
+    EditorTabs/RenderDebuggerTab.h
+    EditorTabs/RenderDebuggerTab.cpp
+    EditorTabs/SequencerTab.h
+    EditorTabs/SequencerTab.cpp
+    EditorTabs/LevelCompositionTab.h
+    EditorTabs/LevelCompositionTab.cpp
+    EditorTabs/AnimationEditorTab.h
+    EditorTabs/AnimationEditorTab.cpp
+    EditorTabs/UIDesignerTab.h
+    EditorTabs/UIDesignerTab.cpp
+    EditorTabs/WidgetEditorTab.h
+    EditorTabs/WidgetEditorTab.cpp
+    EditorTabs/ContentBrowserPanel.h
+    EditorTabs/ContentBrowserPanel.cpp
+    EditorTabs/OutlinerPanel.h
+    EditorTabs/OutlinerPanel.cpp
+    EditorTabs/BuildSystemUI.h
+    EditorTabs/BuildSystemUI.cpp
+    EditorTabs/EditorDialogs.h
+    EditorTabs/EditorDialogs.cpp
 )
 
 # Shared properties for both RendererCore variants
