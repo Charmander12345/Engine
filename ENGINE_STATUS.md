@@ -5,6 +5,10 @@
 
 ---
 
+## Letzte Änderung (PythonScripting Module Split – Phase 1: Math + Physics)
+
+- ✅ `PythonScripting Module Split (Phase 1)`: Math- und Physics-Submodule aus der monolithischen `PythonScripting.cpp` in eigenständige Übersetzungseinheiten extrahiert. **ScriptingInternal.h (NEU):** Shared Header für alle extrahierten Module — zentralisiert den `Python.h`-Include mit MSVC-Debug-Workaround (`#undef _DEBUG`), deklariert `ScriptDetail`-Namespace mit `extern Renderer* s_renderer` und `extern PyObject* s_onCollision` für modulübergreifenden Shared State, Forward-Deklarationen für `CreateMathModule()` und `CreatePhysicsModule()`. **MathModule.cpp (NEU):** Eigenständige Übersetzungseinheit mit allen 54 Math-Funktionen — Vec3 (17: add/sub/mul/scale/dot/cross/normalize/length/distance/lerp/negate/reflect/min/max/angle/project/reject), Vec2 (9: add/sub/mul/scale/dot/normalize/length/distance/lerp), Quaternion (7: from_euler/to_euler/mul/normalize/slerp/inverse/rotate_vec3), Scalar (4: clamp/lerp/inverse_lerp/remap), Trig (7: sin/cos/tan/asin/acos/atan/atan2), Common (10: sqrt/abs/pow/floor/ceil/round/sign/min/max/pi). `MathMethods[]`-Tabelle, `MathModuleDef`, `CreateMathModule()`. **PhysicsModule.cpp (NEU):** Eigenständige Übersetzungseinheit mit allen 11 Physics-Funktionen — `set_velocity`, `get_velocity`, `apply_force`, `apply_impulse`, `set_gravity`, `get_gravity`, `set_collision_callback`, `raycast`, `set_body_sleeping`, `is_body_sleeping`, `get_collision_normal`. Nutzt `ScriptDetail::s_onCollision` für Callback-Management. `PhysicsMethods[]`-Tabelle, `PhysicsModuleDef`, `CreatePhysicsModule()`. **PythonScripting.cpp:** `#include "ScriptingInternal.h"` ersetzt direkten `Python.h`-Include. `ScriptDetail`-Namespace-Definitionen (`s_renderer`, `s_onCollision`). `using`-Aliase im anonymen Namespace (`auto*& s_renderer = ScriptDetail::s_renderer`) für null-Change-Kompatibilität an allen Aufrufstellen. ~700 Zeilen Math-/Physics-Code entfernt (Funktionen, `PyMethodDef`-Tabellen, `PyModuleDef`-Einträge). `CreateEngineModule()` ruft `CreateMathModule()` und `CreatePhysicsModule()` statt `PyModule_Create(&MathModule/&PhysicsModule)`. **CMakeLists.txt (Scripting):** `SCRIPTING_SOURCES` um `ScriptingInternal.h`, `MathModule.cpp`, `PhysicsModule.cpp` erweitert — werden in beide Targets (`Scripting` + `ScriptingRuntime`) kompiliert.
+
 ## Letzte Änderung (PBR Specular Fix + Material Editor Redesign)
 
 - ✅ `Specular Map eliminiert Reflexionen vollständig bei Wert 0`: Die vorherige Fix (`F0 *= specColor`) war unzureichend — Fresnel-Schlick `F = F0 + (1-F0)*pow(1-cosTheta,5)` erzeugte weiterhin nicht-null Specular bei Glancing Angles selbst mit F0=0. **Neuer Fix (fragment.glsl):** Statt F0 zu modulieren wird jetzt der finale `specBRDF` mit `specColor * uSpecularMultiplier` multipliziert. Dies garantiert `specBRDF * vec3(0) = vec3(0)` unabhängig von Fresnel/NDF/Geometrie. Blinn-Phong-Pfad ebenfalls mit `uSpecularMultiplier` versehen.
@@ -1649,6 +1653,7 @@ Gameplay-UI wird ausschließlich über Widget-Assets gesteuert. Widgets werden i
 - Kein Script-Debugger (Breakpoints etc.)
 - Kein Zugriff auf Renderer-Parameter (z.B. Material-Uniforms) aus Python
 - `engine.math` bietet 54 Funktionen: Vec3 (17), Vec2 (9), Quaternion (7), Scalar (4), Trigonometrie (7: sin, cos, tan, asin, acos, atan, atan2), Common Math (10: sqrt, abs, pow, floor, ceil, round, sign, min, max, pi) — alle Berechnungen laufen in C++
+- **Modularer Aufbau:** `MathModule.cpp` (54 Funktionen), `PhysicsModule.cpp` (11 Funktionen) als eigenständige Übersetzungseinheiten, Shared State über `ScriptingInternal.h` (`ScriptDetail`-Namespace). Verbleibende Module (Entity, Asset, Audio, Input, UI, Camera, Diagnostics, Logging, Particle, Editor) noch in `PythonScripting.cpp` — weitere Extraktion in Phase 2+ geplant.
 
 ---
 
@@ -1799,4 +1804,17 @@ Große Feature-Blöcke, die noch nicht existieren:
 
 ---
 
-*Generiert aus Analyse des Quellcodes. Stand: aktueller Branch `Json_and_ecs`.*
+### Codebase-Cleanup (Quick Wins)
+
+- ✅ **12 leere UIWidget .cpp-Stubs entfernt** – Alle UIWidgets außer ColorPickerWidget sind header-only. 11 .cpp-Referenzen aus `src/Renderer/CMakeLists.txt` entfernt.
+- ✅ **Toast-Dauer-Konstanten** – `kToastShort` (1.5f), `kToastMedium` (3.0f), `kToastLong` (5.0f) in `UIManager.h` eingeführt. 73 hartcodierte Literale über 4 Dateien ersetzt.
+- ✅ **Legacy-ECS-System entfernt** – `src/ECS/` Verzeichnis (15 Dateien, `ecs::` Namespace) komplett gelöscht. War nicht im Build-System eingebunden und nur intern referenziert. Aktives System: `src/Core/ECS/` (`ECS::` Namespace).
+- ✅ **`markAllWidgetsDirty()` in 13 `refresh*`-Methoden integriert** – 50 redundante Aufrufer-seitige Calls entfernt (49 in UIManager.cpp, 1 in main.cpp).
+- ✅ **OpenGLRenderer Member-Struct-Gruppierung** – 12 Sub-Structs (`ThumbnailResources`, `GridResources`, `SkyboxResources`, `BoundsDebugResources`, `HeightFieldDebugResources`, `PickingResources`, `OutlineResources`, `GizmoResources`, `ShadowResources`, `PointShadowResources`, `CsmResources`, `OitResources`) fassen ~108 Member-Variablen zusammen. ~565 Referenzen in `OpenGLRenderer.cpp` aktualisiert.
+- ✅ **PhysX-Backend-Untersuchung** – Korrekt optionales Backend (CMake-Flag `ENGINE_PHYSX_BACKEND`, Preprocessor-Guard `ENGINE_PHYSX_BACKEND_AVAILABLE`). Kein toter Code, wird beibehalten.
+- ✅ **`#if ENGINE_EDITOR`-Konsolidierung** – Preprocessor-Guards in `main.cpp` von 21 auf 19 reduziert. 3 Shutdown-Blöcke zusammengeführt, Shortcut-Registrierung konsolidiert, Startup-Init-Blöcke umgeordnet und verschmolzen.
+- ✅ **Build-Pipeline extrahiert** – ~750-Zeilen Build-Lambda aus `main.cpp` in `BuildPipeline.h/.cpp` ausgelagert (8 Schritte: Verzeichnis, CMake configure/build, Deploy, Asset-Cooking, HPK-Packaging, game.ini, Launch). `main.cpp` von ~5.425 auf ~4.678 Zeilen reduziert.
+
+---
+
+*Generiert aus Analyse des Quellcodes. Stand: aktueller Branch `master`.*

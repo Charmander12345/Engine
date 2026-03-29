@@ -33,30 +33,19 @@ set(RENDERER_CORE_COMMON_SOURCES
     ViewportUITheme.h
     EditorUI/EditorWidget.h
     GameplayUI/GameplayWidget.h
-    UIWidgets/ButtonWidget.cpp
     UIWidgets/ButtonWidget.h
-    UIWidgets/GridWidget.cpp
     UIWidgets/GridWidget.h
-    UIWidgets/StackPanelWidget.cpp
     UIWidgets/StackPanelWidget.h
-    UIWidgets/TextWidget.cpp
     UIWidgets/TextWidget.h
     UIWidgets/ColorPickerWidget.cpp
     UIWidgets/ColorPickerWidget.h
     UIWidgets/EntryBarWidget.h
-    UIWidgets/SeparatorWidget.cpp
     UIWidgets/SeparatorWidget.h
-    UIWidgets/ProgressBarWidget.cpp
     UIWidgets/ProgressBarWidget.h
-    UIWidgets/SliderWidget.cpp
     UIWidgets/SliderWidget.h
-    UIWidgets/CheckBoxWidget.cpp
     UIWidgets/CheckBoxWidget.h
-    UIWidgets/DropDownWidget.cpp
     UIWidgets/DropDownWidget.h
-    UIWidgets/TreeViewWidget.cpp
     UIWidgets/TreeViewWidget.h
-    UIWidgets/TabViewWidget.cpp
     UIWidgets/TabViewWidget.h
     EditorTheme.h
 )

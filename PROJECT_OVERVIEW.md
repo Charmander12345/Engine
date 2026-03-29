@@ -50,6 +50,10 @@
 
 - `Vollständige Renderer-Config-Sync`: 5 fehlende Renderer-Settings (TextureCompressionEnabled, TextureStreamingEnabled, DisplacementMappingEnabled, DisplacementScale, TessellationLevel) wurden nicht vor dem Build in den DiagnosticsManager synchronisiert. **Fix (main.cpp):** Alle 5 Settings zum Pre-Build-Sync-Block hinzugefügt. `diag.saveConfig()` wird nach dem Sync aufgerufen, damit `config/config.ini` auf Disk aktuell ist bevor der Build-Thread die Datei kopiert. Runtime-Fallback-Defaults um dieselben 5 Settings erweitert.
 
+## Aktuelle Änderung (PythonScripting Module Split – Phase 1: Math + Physics)
+
+- `PythonScripting Module Split (Phase 1)`: Codebase-Cleanup von `PythonScripting.cpp` (~3.900 Zeilen) durch Extraktion der `engine.math`- und `engine.physics`-Module in eigene Dateien. **ScriptingInternal.h:** Zentraler Shared-Header mit MSVC-Debug-Workaround für `Python.h`, `ScriptDetail`-Namespace (`extern Renderer* s_renderer`, `extern PyObject* s_onCollision`) und Forward-Deklarationen für `CreateMathModule()`/`CreatePhysicsModule()`. **MathModule.cpp:** 50+ Funktionen (Vec2/Vec3/Quaternion/Scalar/Trig/Common-Math) mit `MathMethods[]` und `CreateMathModule()`. **PhysicsModule.cpp:** 11 Funktionen (set/get_velocity, add_force, add_impulse, set/get_angular_velocity, set/get_gravity, set_on_collision, raycast, is_body_sleeping) mit `PhysicsMethods[]` und `CreatePhysicsModule()`. **PythonScripting.cpp:** `ScriptDetail`-Namespace-Definitionen + `using`-Aliase im Anonymous-Namespace für rückwärtskompatiblen Zugriff. `CreateEngineModule()` nutzt jetzt `CreateMathModule()`/`CreatePhysicsModule()` statt lokaler `PyModule_Create`-Aufrufe. Duplikate (PyModuleDef, Funktionen, Methoden-Tabellen) entfernt. **CMakeLists.txt:** `ScriptingInternal.h`, `MathModule.cpp`, `PhysicsModule.cpp` zu `SCRIPTING_SOURCES` hinzugefügt.
+
 ## Aktuelle Änderung (Out-of-Process CrashHandler – Pipe-basiert)
 
 - `CrashHandler (Out-of-Process, Named-Pipe IPC)`: Vollständig überarbeiteter Out-of-Process-CrashHandler mit Named-Pipe-basierter Echtzeit-Kommunikation. Die Engine startet den CrashHandler beim Boot, sendet kontinuierlich State-Daten über eine Named Pipe, und der CrashHandler erstellt bei unerwartetem Pipe-Abbruch (Crash) einen ausführlichen Crash-Bericht mit Hardware-Info, Engine-State, Frame-Metriken, Projekt-Info, Uptime und Log-Einträgen. **CrashProtocol.h:** Shared IPC-Protokoll (Length-Prefixed Messages, 13 Tags: HB/LOG/STATE/HW/PROJ/FRAME/CRASH/QUIT/MODS/UP/CMD/CWD/VER). **CrashMain.cpp:** Pipe-Server mit `CrashReport`-Akkumulator, Report-Generierung + Dialog bei Crash, Datei-Export in `CrashReports/`. **Logger.h:** `startCrashHandler()`/`sendToCrashHandler()`/`ensureCrashHandlerAlive()`/`stopCrashHandler()` API. `void*` statt `HANDLE` im Header (kein `<Windows.h>` wegen ERROR-Makro-Konflikt). **Logger.cpp:** `log()` leitet an Pipe weiter. Windows: `CreateProcessA`→`CreateFileA`-Pipe→`WriteFile`. Linux: `fork()`→`AF_UNIX`-Socket. Prozess-Monitoring mit Restart. **main.cpp:** Startup (`startCrashHandler()`), 2s-Heartbeat im Main-Loop (State/Project/Frame/Uptime), Hardware-Info nach Renderer-Init, Shutdown (`stopCrashHandler()`). **CMakeLists.txt:** CrashHandler deployed nach `Tools/`, Include in `ENGINE_COMMON_INCLUDES`.
@@ -467,19 +471,19 @@ Engine/
 │   │   │       ├── oit_composite_fragment.glsl      # Weighted Blended OIT Composite Pass (Accumulation + Revealage → opake Szene)
 │   │   │   └── CMakeLists.txt
 │   │   ├── UIWidgets/
-│   │   │   ├── ButtonWidget.h/.cpp
-│   │   │   ├── TextWidget.h/.cpp
-│   │   │   ├── StackPanelWidget.h/.cpp
-│   │   │   ├── GridWidget.h/.cpp
+│   │   │   ├── ButtonWidget.h              # header-only (kein .cpp)
+│   │   │   ├── TextWidget.h                # header-only
+│   │   │   ├── StackPanelWidget.h           # header-only
+│   │   │   ├── GridWidget.h                 # header-only
 │   │   │   ├── ColorPickerWidget.h/.cpp
 │   │   │   ├── EntryBarWidget.h
-│   │   │   ├── SeparatorWidget.h/.cpp
-│   │   │   ├── ProgressBarWidget.h/.cpp
-│   │   │   ├── SliderWidget.h/.cpp
-│   │   │   ├── CheckBoxWidget.h/.cpp
-│   │   │   ├── DropDownWidget.h/.cpp
-│   │   │   ├── TreeViewWidget.h/.cpp
-│   │   │   ├── TabViewWidget.h/.cpp
+│   │   │   ├── SeparatorWidget.h            # header-only
+│   │   │   ├── ProgressBarWidget.h          # header-only
+│   │   │   ├── SliderWidget.h               # header-only
+│   │   │   ├── CheckBoxWidget.h             # header-only
+│   │   │   ├── DropDownWidget.h             # header-only
+│   │   │   ├── TreeViewWidget.h             # header-only
+│   │   │   ├── TabViewWidget.h              # header-only
 │   │   │   ├── LabelWidget.h           # NEU – leichtgewichtiges Text-Element
 │   │   │   ├── ToggleButtonWidget.h    # NEU – Button mit An/Aus-Zustand
 │   │   │   ├── ScrollViewWidget.h      # NEU – scrollbarer Container
@@ -494,7 +498,10 @@ Engine/
 │   │   └── CMakeLists.txt          # RendererCore OBJECT-Lib (abstrakte Schicht, eingebettet in Renderer.dll)
 ├── RENDERER_ABSTRACTION_PLAN.md     # Detaillierter Plan zur Backend-Abstrahierung des Renderers
 │   └── Scripting/                  # Eingebettetes Python-Scripting
-│       ├── PythonScripting.h/.cpp
+│       ├── PythonScripting.h/.cpp  # Kern-Initialisierung, Modul-Registrierung, Entity/Asset/Audio/Input/UI/Camera/Diagnostics/Logging/Particle/Editor-Module
+│       ├── ScriptingInternal.h     # Shared Header für extrahierte Module (Python.h-Workaround, ScriptDetail-Namespace)
+│       ├── MathModule.cpp          # Extrahiertes engine.math-Modul (Vec2/Vec3/Quat/Scalar/Trig-Operationen)
+│       ├── PhysicsModule.cpp       # Extrahiertes engine.physics-Modul (Velocity/Force/Gravity/Collision/Raycast)
 │       ├── ScriptHotReload.h/.cpp  # Script-Hot-Reload: Überwacht Content/ rekursiv per last_write_time (500ms Poll) auf .py-Änderungen, löst Modul-Neuladen im Python-Interpreter aus
 │       └── engine.pyi              # Python-Stubs für IntelliSense
 └── PROJECT_OVERVIEW.md             # Diese Datei
@@ -2687,4 +2694,13 @@ Editor-Tab (wie MeshViewer, kein Popup) für visuelles Viewport-UI-Design:
 
 ---
 
-*Generiert aus dem Quellcode des Engine-Projekts. Stand: aktueller Branch `Json_and_ecs`.*
+*Generiert aus dem Quellcode des Engine-Projekts. Stand: aktueller Branch `master`.*
+
+### Cleanup-Änderungen
+- **12 leere UIWidget .cpp-Stubs entfernt** (alle Widgets außer ColorPickerWidget sind header-only)
+- **Legacy-ECS-System entfernt** (`src/ECS/` Verzeichnis, `ecs::` Namespace – war nicht im Build)
+- **Toast-Dauer-Konstanten** (`kToastShort`/`kToastMedium`/`kToastLong`) in `UIManager.h` eingeführt
+- **`markAllWidgetsDirty()` in 13 `refresh*`-Methoden integriert** (50 redundante Aufrufe entfernt)
+- **OpenGLRenderer Member-Struct-Gruppierung**: 12 Sub-Structs (`ThumbnailResources`, `GridResources`, `SkyboxResources`, `BoundsDebugResources`, `HeightFieldDebugResources`, `PickingResources`, `OutlineResources`, `GizmoResources`, `ShadowResources`, `PointShadowResources`, `CsmResources`, `OitResources`) fassen ~108 Member-Variablen zusammen (~565 Referenzen in `.cpp` aktualisiert)
+- **`#if ENGINE_EDITOR`-Konsolidierung** in `main.cpp`: Guards von 21 auf 19 reduziert (Shutdown, Shortcuts, Startup-Init zusammengeführt)
+- **Build-Pipeline extrahiert**: ~750-Zeilen Build-Lambda aus `main.cpp` in `BuildPipeline.h/.cpp` ausgelagert (CMake configure/build, Asset-Cooking, HPK-Packaging, Deployment)

@@ -1,4 +1,4 @@
-#include "OpenGLRenderer.h"
+﻿#include "OpenGLRenderer.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <array>
@@ -748,11 +748,11 @@ std::vector<Renderer::RenderPassInfo> OpenGLRenderer::getRenderPassInfo() const
 		RenderPassInfo p;
 		p.name     = "Shadow Map (Directional CSM)";
 		p.category = "Shadow";
-		p.enabled  = m_shadowEnabled;
+		p.enabled  = m_shadow.enabled;
 		p.fboWidth = kShadowMapSize;
 		p.fboHeight = kShadowMapSize;
 		p.fboFormat = "Depth24 Array";
-		p.details  = std::to_string(m_shadowCount) + " cascade(s), "
+		p.details  = std::to_string(m_shadow.count) + " cascade(s), "
 				   + std::to_string(m_shadowCasterList.size()) + " caster(s)";
 		passes.push_back(std::move(p));
 	}
@@ -762,11 +762,11 @@ std::vector<Renderer::RenderPassInfo> OpenGLRenderer::getRenderPassInfo() const
 		RenderPassInfo p;
 		p.name     = "Shadow Map (Point Lights)";
 		p.category = "Shadow";
-		p.enabled  = m_shadowEnabled && (m_pointShadowCount > 0);
+		p.enabled  = m_shadow.enabled && (m_pointShadow.count > 0);
 		p.fboWidth = kPointShadowMapSize;
 		p.fboHeight = kPointShadowMapSize;
 		p.fboFormat = "DepthCube Array";
-		p.details  = std::to_string(m_pointShadowCount) + " point shadow(s)";
+		p.details  = std::to_string(m_pointShadow.count) + " point shadow(s)";
 		passes.push_back(std::move(p));
 	}
 
@@ -775,9 +775,9 @@ std::vector<Renderer::RenderPassInfo> OpenGLRenderer::getRenderPassInfo() const
 		RenderPassInfo p;
 		p.name     = "Skybox";
 		p.category = "Geometry";
-		p.enabled  = (m_skyboxCubemap != 0);
+		p.enabled  = (m_skybox.cubemap != 0);
 		p.fboFormat = "RGBA16F (HDR)";
-		p.details  = m_skyboxLoadedPath.empty() ? "no skybox" : m_skyboxLoadedPath;
+		p.details  = m_skybox.loadedPath.empty() ? "no skybox" : m_skybox.loadedPath;
 		passes.push_back(std::move(p));
 	}
 
@@ -813,7 +813,7 @@ std::vector<Renderer::RenderPassInfo> OpenGLRenderer::getRenderPassInfo() const
 		RenderPassInfo p;
 		p.name     = "OIT Transparent";
 		p.category = "Geometry";
-		p.enabled  = m_oitEnabled;
+		p.enabled  = m_oit.enabled;
 		p.fboFormat = "RGBA16F (Accum) + R8 (Revealage)";
 		p.details  = std::to_string(m_transparentDrawList.size()) + " transparent object(s)";
 		passes.push_back(std::move(p));
@@ -824,7 +824,7 @@ std::vector<Renderer::RenderPassInfo> OpenGLRenderer::getRenderPassInfo() const
 		RenderPassInfo p;
 		p.name     = "HeightField Debug";
 		p.category = "Overlay";
-		p.enabled  = m_hfDebugEnabled;
+		p.enabled  = m_hfDebug.enabled;
 		p.fboFormat = "—";
 		p.details  = "wireframe overlay";
 		passes.push_back(std::move(p));
@@ -848,7 +848,7 @@ std::vector<Renderer::RenderPassInfo> OpenGLRenderer::getRenderPassInfo() const
 		RenderPassInfo p;
 		p.name     = "Pick Buffer";
 		p.category = "Utility";
-		p.enabled  = (m_pickFbo != 0);
+		p.enabled  = (m_pick.fbo != 0);
 		p.fboFormat = "RGBA8 (Entity ID)";
 		p.details  = "entity selection";
 		passes.push_back(std::move(p));
@@ -1517,7 +1517,7 @@ void OpenGLRenderer::renderWorld()
 		m_textRenderer.reset();
 		m_restoreCameraOnPrepare = true;
 		// Reset cached skybox path so setSkyboxPath re-loads for the new level
-		m_skyboxLoadedPath.clear();
+		m_skybox.loadedPath.clear();
 		setSkyboxPath(level->getSkyboxPath());
 	}
 
@@ -1530,9 +1530,9 @@ void OpenGLRenderer::renderWorld()
 
 		// (Re-)load skybox if the level has one but it is not loaded yet
 		const std::string& levelSkybox = level->getSkyboxPath();
-		if (!levelSkybox.empty() && (m_skyboxCubemap == 0 || m_skyboxLoadedPath != levelSkybox))
+		if (!levelSkybox.empty() && (m_skybox.cubemap == 0 || m_skybox.loadedPath != levelSkybox))
 		{
-			m_skyboxLoadedPath.clear();
+			m_skybox.loadedPath.clear();
 			setSkyboxPath(levelSkybox);
 		}
 
@@ -1665,7 +1665,7 @@ void OpenGLRenderer::renderWorld()
 		{
 			refreshEntity(static_cast<ECS::Entity>(entityId));
 		}
-		m_pickDirty = true;
+		m_pick.dirty = true;
 	}
 
 	glm::mat4 view(1.0f);
@@ -2151,7 +2151,7 @@ void OpenGLRenderer::renderWorld()
 
 	// Partition draw list into opaque and transparent for OIT
 	m_transparentDrawList.clear();
-	if (m_oitEnabled)
+	if (m_oit.enabled)
 	{
 		// Mark transparent objects based on material flag
 		for (auto& cmd : m_drawList)
@@ -2177,17 +2177,17 @@ void OpenGLRenderer::renderWorld()
 	// ---- Shadow map pass (multi-light) ----
 	const int debugMode = static_cast<int>(m_debugRenderMode);
 	const bool debugNeedsShadows = (debugMode == 0 || debugMode == 3 || debugMode == 4); // Lit, ShadowMap, ShadowCascades
-	m_shadowCount = 0;
-	m_csmEnabled = false;
-	m_csmLightIndex = -1;
-	if (m_shadowEnabled && debugNeedsShadows && ensureShadowResources())
+	m_shadow.count = 0;
+	m_csm.enabled = false;
+	m_csm.lightIndex = -1;
+	if (m_shadow.enabled && debugNeedsShadows && ensureShadowResources())
 	{
 		findShadowLightIndices();
-		for (int s = 0; s < m_shadowCount; ++s)
+		for (int s = 0; s < m_shadow.count; ++s)
 		{
-			m_shadowLightSpaceMatrices[s] = computeLightSpaceMatrix(m_sceneLights[m_shadowLightIndices[s]]);
+			m_shadow.lightSpaceMatrices[s] = computeLightSpaceMatrix(m_sceneLights[m_shadow.lightIndices[s]]);
 		}
-		if (m_shadowCount > 0)
+		if (m_shadow.count > 0)
 		{
 			renderShadowMap(m_shadowCasterList);
 
@@ -2197,22 +2197,22 @@ void OpenGLRenderer::renderWorld()
 	}
 
 	// ---- Cascaded Shadow Maps (first directional light) ----
-	if (m_shadowEnabled && debugNeedsShadows && m_csmUserEnabled && m_csmLightIndex >= 0 && ensureCsmResources())
+	if (m_shadow.enabled && debugNeedsShadows && m_csm.userEnabled && m_csm.lightIndex >= 0 && ensureCsmResources())
 	{
-		computeCsmMatrices(m_sceneLights[m_csmLightIndex], view, m_projectionMatrix, activeNear, activeFar);
+		computeCsmMatrices(m_sceneLights[m_csm.lightIndex], view, m_projectionMatrix, activeNear, activeFar);
 		renderCsmShadowMaps(m_shadowCasterList);
-		m_csmEnabled = true;
+		m_csm.enabled = true;
 
 		// Restore main viewport
 		glViewport(vpX, viewportY, width, height);
 	}
 
 	// ---- Point light shadow map pass (cube maps) ----
-	m_pointShadowCount = 0;
-	if (m_shadowEnabled && debugNeedsShadows && ensurePointShadowResources())
+	m_pointShadow.count = 0;
+	if (m_shadow.enabled && debugNeedsShadows && ensurePointShadowResources())
 	{
 		findPointShadowLightIndices();
-		if (m_pointShadowCount > 0)
+		if (m_pointShadow.count > 0)
 		{
 			renderPointShadowMaps(m_shadowCasterList);
 
@@ -2298,10 +2298,10 @@ void OpenGLRenderer::renderWorld()
 		if (first.hasEmission)
 		{
 			first.obj->setMatrices(first.modelMatrix, view, m_projectionMatrix);
-			first.obj->setShadowData(m_shadowDepthArray, m_shadowLightSpaceMatrices, m_shadowLightIndices, m_shadowCount);
-			first.obj->setPointShadowData(m_pointShadowCubeArray, m_pointShadowPositions, m_pointShadowFarPlanes, m_pointShadowLightIndices, m_pointShadowCount);
+			first.obj->setShadowData(m_shadow.depthArray, m_shadow.lightSpaceMatrices, m_shadow.lightIndices, m_shadow.count);
+			first.obj->setPointShadowData(m_pointShadow.cubeArray, m_pointShadow.positions, m_pointShadow.farPlanes, m_pointShadow.lightIndices, m_pointShadow.count);
 			first.obj->setFogData(m_fogEnabled, fogColor, m_fogParams.z);
-			first.obj->setCsmData(m_csmDepthArray, m_csmMatrices, m_csmSplits, m_csmLightIndex, m_csmEnabled, view);
+			first.obj->setCsmData(m_csm.depthArray, m_csm.matrices, m_csm.splits, m_csm.lightIndex, m_csm.enabled, view);
 			first.obj->setLightData(lightPosition, first.emissionColor, lightIntensity);
 			first.obj->setLights(m_sceneLights);
 			first.obj->setDebugMode(debugMode);
@@ -2319,7 +2319,7 @@ void OpenGLRenderer::renderWorld()
 				}
 			}
 			first.obj->render();
-			if (m_boundsDebugEnabled && first.hasBounds)
+			if (m_boundsDebug.enabled && first.hasBounds)
 			{
 				const glm::vec3 center = (first.boundsMin + first.boundsMax) * 0.5f;
 				const glm::vec3 extent = (first.boundsMax - first.boundsMin) * 0.5f;
@@ -2334,10 +2334,10 @@ void OpenGLRenderer::renderWorld()
 		if (first.isSkinned)
 		{
 			first.obj->setMatrices(first.modelMatrix, view, m_projectionMatrix);
-			first.obj->setShadowData(m_shadowDepthArray, m_shadowLightSpaceMatrices, m_shadowLightIndices, m_shadowCount);
-			first.obj->setPointShadowData(m_pointShadowCubeArray, m_pointShadowPositions, m_pointShadowFarPlanes, m_pointShadowLightIndices, m_pointShadowCount);
+			first.obj->setShadowData(m_shadow.depthArray, m_shadow.lightSpaceMatrices, m_shadow.lightIndices, m_shadow.count);
+			first.obj->setPointShadowData(m_pointShadow.cubeArray, m_pointShadow.positions, m_pointShadow.farPlanes, m_pointShadow.lightIndices, m_pointShadow.count);
 			first.obj->setFogData(m_fogEnabled, fogColor, m_fogParams.z);
-			first.obj->setCsmData(m_csmDepthArray, m_csmMatrices, m_csmSplits, m_csmLightIndex, m_csmEnabled, view);
+			first.obj->setCsmData(m_csm.depthArray, m_csm.matrices, m_csm.splits, m_csm.lightIndex, m_csm.enabled, view);
 			first.obj->setLightData(lightPosition, lightColor, lightIntensity);
 			first.obj->setLights(m_sceneLights);
 			first.obj->setDebugMode(debugMode);
@@ -2370,7 +2370,7 @@ void OpenGLRenderer::renderWorld()
 			{
 				first.material->setColorTint(glm::vec3(1.0f));
 			}
-			if (m_boundsDebugEnabled && first.hasBounds)
+			if (m_boundsDebug.enabled && first.hasBounds)
 			{
 				const glm::vec3 center = (first.boundsMin + first.boundsMax) * 0.5f;
 				const glm::vec3 extent = (first.boundsMax - first.boundsMin) * 0.5f;
@@ -2385,10 +2385,10 @@ void OpenGLRenderer::renderWorld()
 		if (first.overrides.hasAnyOverride())
 		{
 			first.obj->setMatrices(first.modelMatrix, view, m_projectionMatrix);
-			first.obj->setShadowData(m_shadowDepthArray, m_shadowLightSpaceMatrices, m_shadowLightIndices, m_shadowCount);
-			first.obj->setPointShadowData(m_pointShadowCubeArray, m_pointShadowPositions, m_pointShadowFarPlanes, m_pointShadowLightIndices, m_pointShadowCount);
+			first.obj->setShadowData(m_shadow.depthArray, m_shadow.lightSpaceMatrices, m_shadow.lightIndices, m_shadow.count);
+			first.obj->setPointShadowData(m_pointShadow.cubeArray, m_pointShadow.positions, m_pointShadow.farPlanes, m_pointShadow.lightIndices, m_pointShadow.count);
 			first.obj->setFogData(m_fogEnabled, fogColor, m_fogParams.z);
-			first.obj->setCsmData(m_csmDepthArray, m_csmMatrices, m_csmSplits, m_csmLightIndex, m_csmEnabled, view);
+			first.obj->setCsmData(m_csm.depthArray, m_csm.matrices, m_csm.splits, m_csm.lightIndex, m_csm.enabled, view);
 			first.obj->setLightData(lightPosition, lightColor, lightIntensity);
 			first.obj->setLights(m_sceneLights);
 			first.obj->setDebugMode(debugMode);
@@ -2413,7 +2413,7 @@ void OpenGLRenderer::renderWorld()
 			{
 				first.material->setColorTint(glm::vec3(1.0f));
 			}
-			if (m_boundsDebugEnabled && first.hasBounds)
+			if (m_boundsDebug.enabled && first.hasBounds)
 			{
 				const glm::vec3 center = (first.boundsMin + first.boundsMax) * 0.5f;
 				const glm::vec3 extent = (first.boundsMax - first.boundsMin) * 0.5f;
@@ -2439,10 +2439,10 @@ void OpenGLRenderer::renderWorld()
 
 		// Set scene-level uniforms via first object in batch
 		first.obj->setMatrices(first.modelMatrix, view, m_projectionMatrix);
-		first.obj->setShadowData(m_shadowDepthArray, m_shadowLightSpaceMatrices, m_shadowLightIndices, m_shadowCount);
-		first.obj->setPointShadowData(m_pointShadowCubeArray, m_pointShadowPositions, m_pointShadowFarPlanes, m_pointShadowLightIndices, m_pointShadowCount);
+		first.obj->setShadowData(m_shadow.depthArray, m_shadow.lightSpaceMatrices, m_shadow.lightIndices, m_shadow.count);
+		first.obj->setPointShadowData(m_pointShadow.cubeArray, m_pointShadow.positions, m_pointShadow.farPlanes, m_pointShadow.lightIndices, m_pointShadow.count);
 		first.obj->setFogData(m_fogEnabled, fogColor, m_fogParams.z);
-		first.obj->setCsmData(m_csmDepthArray, m_csmMatrices, m_csmSplits, m_csmLightIndex, m_csmEnabled, view);
+		first.obj->setCsmData(m_csm.depthArray, m_csm.matrices, m_csm.splits, m_csm.lightIndex, m_csm.enabled, view);
 		first.obj->setLightData(lightPosition, lightColor, lightIntensity);
 		first.obj->setLights(m_sceneLights);
 		first.obj->setDebugMode(debugMode);
@@ -2464,7 +2464,7 @@ void OpenGLRenderer::renderWorld()
 		}
 
 		// Debug bounds for all objects in the batch
-		if (m_boundsDebugEnabled)
+		if (m_boundsDebug.enabled)
 		{
 			for (size_t j = di; j < batchEnd; ++j)
 			{
@@ -2529,7 +2529,7 @@ void OpenGLRenderer::renderWorld()
 	}
 
 	// ---- OIT Transparent Pass ----
-	if (m_oitEnabled && !m_transparentDrawList.empty() && ensureOitResources(fullWidth, fullHeight))
+	if (m_oit.enabled && !m_transparentDrawList.empty() && ensureOitResources(fullWidth, fullHeight))
 	{
 		// Blit depth from the current render target (HDR or tab FBO) into the OIT FBO
 		// so transparent objects are correctly depth-tested against opaque geometry.
@@ -2542,7 +2542,7 @@ void OpenGLRenderer::renderWorld()
 #endif
 
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, srcFbo);
-		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_oitFbo);
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_oit.fbo);
 		glBlitFramebuffer(0, 0, fullWidth, fullHeight, 0, 0, fullWidth, fullHeight,
 			GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 
@@ -2612,10 +2612,10 @@ void OpenGLRenderer::renderWorld()
 		}
 
 		// Update gizmo hover highlight
-		if (!m_gizmoDragging)
+		if (!m_gizmo.dragging)
 		{
 			const Vec2 mousePos = m_uiManager.getMousePosition();
-			m_gizmoHoveredAxis = pickGizmoAxis(view, m_projectionMatrix,
+			m_gizmo.hoveredAxis = pickGizmoAxis(view, m_projectionMatrix,
 				static_cast<int>(mousePos.x), static_cast<int>(mousePos.y));
 		}
 	}
@@ -2720,11 +2720,11 @@ void OpenGLRenderer::renderWorld()
 			if (lineVerts.size() >= 2)
 			{
 				glm::mat4 mvp = m_projectionMatrix * view;
-				if (m_gizmoProgram != 0)
+				if (m_gizmo.program != 0)
 				{
-					glUseProgram(m_gizmoProgram);
-					if (m_gizmoLocMVP >= 0) glUniformMatrix4fv(m_gizmoLocMVP, 1, GL_FALSE, &mvp[0][0]);
-					if (m_gizmoLocColor >= 0) glUniform4f(m_gizmoLocColor, 1.0f, 0.6f, 0.1f, 1.0f); // orange spline
+					glUseProgram(m_gizmo.program);
+					if (m_gizmo.locMVP >= 0) glUniformMatrix4fv(m_gizmo.locMVP, 1, GL_FALSE, &mvp[0][0]);
+					if (m_gizmo.locColor >= 0) glUniform4f(m_gizmo.locColor, 1.0f, 0.6f, 0.1f, 1.0f); // orange spline
 
 					GLuint vao, vbo;
 					glGenVertexArrays(1, &vao);
@@ -2747,7 +2747,7 @@ void OpenGLRenderer::renderWorld()
 					}
 					if (!cpVerts.empty())
 					{
-						if (m_gizmoLocColor >= 0) glUniform4f(m_gizmoLocColor, 1.0f, 1.0f, 0.2f, 1.0f); // yellow points
+						if (m_gizmo.locColor >= 0) glUniform4f(m_gizmo.locColor, 1.0f, 1.0f, 0.2f, 1.0f); // yellow points
 						glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(cpVerts.size() * sizeof(glm::vec3)), cpVerts.data(), GL_STREAM_DRAW);
 						glPointSize(8.0f);
 						glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(cpVerts.size()));
@@ -2769,7 +2769,7 @@ void OpenGLRenderer::renderWorld()
 	// Draw selection outline + gizmo AFTER post-process resolve so they are not overwritten
 	if (!m_selectedEntities.empty() && !diagnostics.isPIEActive() && isActiveSubViewport)
 	{
-		if (m_pickColorTex != 0)
+		if (m_pick.colorTex != 0)
 		{
 			drawSelectionOutline();
 		}
@@ -7308,7 +7308,7 @@ void OpenGLRenderer::releaseHzbResources()
 
 bool OpenGLRenderer::ensureBoundsDebugResources()
 {
-	if (m_boundsDebugProgram != 0 && m_boundsDebugVao != 0 && m_boundsDebugVbo != 0)
+	if (m_boundsDebug.program != 0 && m_boundsDebug.vao != 0 && m_boundsDebug.vbo != 0)
 	{
 		return true;
 	}
@@ -7380,39 +7380,39 @@ bool OpenGLRenderer::ensureBoundsDebugResources()
 		vertices.push_back(p.z);
 	}
 
-	glGenVertexArrays(1, &m_boundsDebugVao);
-	glGenBuffers(1, &m_boundsDebugVbo);
-	glBindVertexArray(m_boundsDebugVao);
-	glBindBuffer(GL_ARRAY_BUFFER, m_boundsDebugVbo);
+	glGenVertexArrays(1, &m_boundsDebug.vao);
+	glGenBuffers(1, &m_boundsDebug.vbo);
+	glBindVertexArray(m_boundsDebug.vao);
+	glBindBuffer(GL_ARRAY_BUFFER, m_boundsDebug.vbo);
 	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), reinterpret_cast<void*>(0));
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindVertexArray(0);
 
-	m_boundsDebugProgram = program;
-	m_boundsDebugVertexCount = static_cast<GLsizei>(vertices.size() / 3);
+	m_boundsDebug.program = program;
+	m_boundsDebug.vertexCount = static_cast<GLsizei>(vertices.size() / 3);
 	return true;
 }
 
 void OpenGLRenderer::releaseBoundsDebugResources()
 {
-	if (m_boundsDebugProgram)
+	if (m_boundsDebug.program)
 	{
-		glDeleteProgram(m_boundsDebugProgram);
-		m_boundsDebugProgram = 0;
+		glDeleteProgram(m_boundsDebug.program);
+		m_boundsDebug.program = 0;
 	}
-	if (m_boundsDebugVbo)
+	if (m_boundsDebug.vbo)
 	{
-		glDeleteBuffers(1, &m_boundsDebugVbo);
-		m_boundsDebugVbo = 0;
+		glDeleteBuffers(1, &m_boundsDebug.vbo);
+		m_boundsDebug.vbo = 0;
 	}
-	if (m_boundsDebugVao)
+	if (m_boundsDebug.vao)
 	{
-		glDeleteVertexArrays(1, &m_boundsDebugVao);
-		m_boundsDebugVao = 0;
+		glDeleteVertexArrays(1, &m_boundsDebug.vao);
+		m_boundsDebug.vao = 0;
 	}
-	m_boundsDebugVertexCount = 0;
+	m_boundsDebug.vertexCount = 0;
 }
 
 // ---- HeightField Debug Wireframe ----
@@ -7500,42 +7500,42 @@ void OpenGLRenderer::rebuildHeightFieldDebugMesh()
 		return;
 	}
 
-	glGenVertexArrays(1, &m_hfDebugVao);
-	glGenBuffers(1, &m_hfDebugVbo);
-	glGenBuffers(1, &m_hfDebugIbo);
+	glGenVertexArrays(1, &m_hfDebug.vao);
+	glGenBuffers(1, &m_hfDebug.vbo);
+	glGenBuffers(1, &m_hfDebug.ibo);
 
-	glBindVertexArray(m_hfDebugVao);
+	glBindVertexArray(m_hfDebug.vao);
 
-	glBindBuffer(GL_ARRAY_BUFFER, m_hfDebugVbo);
+	glBindBuffer(GL_ARRAY_BUFFER, m_hfDebug.vbo);
 	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), reinterpret_cast<void*>(0));
 
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_hfDebugIbo);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_hfDebug.ibo);
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(GLuint), indices.data(), GL_STATIC_DRAW);
 
 	glBindVertexArray(0);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-	m_hfDebugIndexCount = static_cast<GLsizei>(indices.size());
-	m_hfDebugVersion = ecs.getComponentVersion();
+	m_hfDebug.indexCount = static_cast<GLsizei>(indices.size());
+	m_hfDebug.version = ecs.getComponentVersion();
 }
 
 void OpenGLRenderer::renderHeightFieldDebug(const glm::mat4& viewProj)
 {
-	if (!m_hfDebugEnabled)
+	if (!m_hfDebug.enabled)
 	{
 		return;
 	}
 
 	// Rebuild mesh when ECS data changes
 	auto& ecs = ECS::ECSManager::Instance();
-	if (m_hfDebugVao == 0 || ecs.getComponentVersion() != m_hfDebugVersion)
+	if (m_hfDebug.vao == 0 || ecs.getComponentVersion() != m_hfDebug.version)
 	{
 		rebuildHeightFieldDebugMesh();
 	}
 
-	if (m_hfDebugVao == 0 || m_hfDebugIndexCount == 0)
+	if (m_hfDebug.vao == 0 || m_hfDebug.indexCount == 0)
 	{
 		return;
 	}
@@ -7549,29 +7549,29 @@ void OpenGLRenderer::renderHeightFieldDebug(const glm::mat4& viewProj)
 	const GLboolean cullWasEnabled = glIsEnabled(GL_CULL_FACE);
 	glDisable(GL_CULL_FACE);
 
-	glUseProgram(m_boundsDebugProgram);
-	glBindVertexArray(m_hfDebugVao);
+	glUseProgram(m_boundsDebug.program);
+	glBindVertexArray(m_hfDebug.vao);
 
 	// Identity model matrix – vertices are already in world space
 	const glm::mat4 identity(1.0f);
 
-	const GLint viewProjLoc = glGetUniformLocation(m_boundsDebugProgram, "uViewProj");
+	const GLint viewProjLoc = glGetUniformLocation(m_boundsDebug.program, "uViewProj");
 	if (viewProjLoc >= 0)
 	{
 		glUniformMatrix4fv(viewProjLoc, 1, GL_FALSE, &viewProj[0][0]);
 	}
-	const GLint modelLoc = glGetUniformLocation(m_boundsDebugProgram, "uModel");
+	const GLint modelLoc = glGetUniformLocation(m_boundsDebug.program, "uModel");
 	if (modelLoc >= 0)
 	{
 		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, &identity[0][0]);
 	}
-	const GLint colorLoc = glGetUniformLocation(m_boundsDebugProgram, "uColor");
+	const GLint colorLoc = glGetUniformLocation(m_boundsDebug.program, "uColor");
 	if (colorLoc >= 0)
 	{
 		glUniform4f(colorLoc, 0.1f, 0.85f, 0.3f, 1.0f); // green wireframe
 	}
 
-	glDrawElements(GL_LINES, m_hfDebugIndexCount, GL_UNSIGNED_INT, nullptr);
+	glDrawElements(GL_LINES, m_hfDebug.indexCount, GL_UNSIGNED_INT, nullptr);
 
 	glBindVertexArray(0);
 	glUseProgram(0);
@@ -7583,22 +7583,22 @@ void OpenGLRenderer::renderHeightFieldDebug(const glm::mat4& viewProj)
 
 void OpenGLRenderer::releaseHeightFieldDebugResources()
 {
-	if (m_hfDebugIbo)
+	if (m_hfDebug.ibo)
 	{
-		glDeleteBuffers(1, &m_hfDebugIbo);
-		m_hfDebugIbo = 0;
+		glDeleteBuffers(1, &m_hfDebug.ibo);
+		m_hfDebug.ibo = 0;
 	}
-	if (m_hfDebugVbo)
+	if (m_hfDebug.vbo)
 	{
-		glDeleteBuffers(1, &m_hfDebugVbo);
-		m_hfDebugVbo = 0;
+		glDeleteBuffers(1, &m_hfDebug.vbo);
+		m_hfDebug.vbo = 0;
 	}
-	if (m_hfDebugVao)
+	if (m_hfDebug.vao)
 	{
-		glDeleteVertexArrays(1, &m_hfDebugVao);
-		m_hfDebugVao = 0;
+		glDeleteVertexArrays(1, &m_hfDebug.vao);
+		m_hfDebug.vao = 0;
 	}
-	m_hfDebugIndexCount = 0;
+	m_hfDebug.indexCount = 0;
 }
 
 // ---- Displacement Mapping (Tessellation) ----
@@ -7687,7 +7687,7 @@ static const float kSkyboxVertices[] = {
 
 bool OpenGLRenderer::ensureSkyboxResources()
 {
-	if (m_skyboxProgram != 0)
+	if (m_skybox.program != 0)
 		return true;
 
 	const char* vs = R"(
@@ -7716,21 +7716,21 @@ void main(){
 	GLuint fsh = glCreateShader(GL_FRAGMENT_SHADER);
 	glShaderSource(fsh, 1, &fs, nullptr);
 	glCompileShader(fsh);
-	m_skyboxProgram = glCreateProgram();
-	glAttachShader(m_skyboxProgram, vsh);
-	glAttachShader(m_skyboxProgram, fsh);
-	glLinkProgram(m_skyboxProgram);
+	m_skybox.program = glCreateProgram();
+	glAttachShader(m_skybox.program, vsh);
+	glAttachShader(m_skybox.program, fsh);
+	glLinkProgram(m_skybox.program);
 	glDeleteShader(vsh);
 	glDeleteShader(fsh);
 
-	m_skyboxLocProjection = glGetUniformLocation(m_skyboxProgram, "uProjection");
-	m_skyboxLocView = glGetUniformLocation(m_skyboxProgram, "uView");
-	m_skyboxLocSampler = glGetUniformLocation(m_skyboxProgram, "uSkybox");
+	m_skybox.locProjection = glGetUniformLocation(m_skybox.program, "uProjection");
+	m_skybox.locView = glGetUniformLocation(m_skybox.program, "uView");
+	m_skybox.locSampler = glGetUniformLocation(m_skybox.program, "uSkybox");
 
-	glGenVertexArrays(1, &m_skyboxVao);
-	glGenBuffers(1, &m_skyboxVbo);
-	glBindVertexArray(m_skyboxVao);
-	glBindBuffer(GL_ARRAY_BUFFER, m_skyboxVbo);
+	glGenVertexArrays(1, &m_skybox.vao);
+	glGenBuffers(1, &m_skybox.vbo);
+	glBindVertexArray(m_skybox.vao);
+	glBindBuffer(GL_ARRAY_BUFFER, m_skybox.vbo);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(kSkyboxVertices), kSkyboxVertices, GL_STATIC_DRAW);
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
@@ -7741,22 +7741,22 @@ void main(){
 
 void OpenGLRenderer::releaseSkyboxResources()
 {
-	if (m_skyboxProgram) { glDeleteProgram(m_skyboxProgram); m_skyboxProgram = 0; }
-	if (m_skyboxVbo)     { glDeleteBuffers(1, &m_skyboxVbo); m_skyboxVbo = 0; }
-	if (m_skyboxVao)     { glDeleteVertexArrays(1, &m_skyboxVao); m_skyboxVao = 0; }
-	if (m_skyboxCubemap) { glDeleteTextures(1, &m_skyboxCubemap); m_skyboxCubemap = 0; }
-	m_skyboxLoadedPath.clear();
+	if (m_skybox.program) { glDeleteProgram(m_skybox.program); m_skybox.program = 0; }
+	if (m_skybox.vbo)     { glDeleteBuffers(1, &m_skybox.vbo); m_skybox.vbo = 0; }
+	if (m_skybox.vao)     { glDeleteVertexArrays(1, &m_skybox.vao); m_skybox.vao = 0; }
+	if (m_skybox.cubemap) { glDeleteTextures(1, &m_skybox.cubemap); m_skybox.cubemap = 0; }
+	m_skybox.loadedPath.clear();
 }
 
 bool OpenGLRenderer::loadSkyboxCubemap(const std::string& folderPath)
 {
 	if (folderPath.empty())
 	{
-		if (m_skyboxCubemap) { glDeleteTextures(1, &m_skyboxCubemap); m_skyboxCubemap = 0; }
-		m_skyboxLoadedPath.clear();
+		if (m_skybox.cubemap) { glDeleteTextures(1, &m_skybox.cubemap); m_skybox.cubemap = 0; }
+		m_skybox.loadedPath.clear();
 		return false;
 	}
-	if (folderPath == m_skyboxLoadedPath && m_skyboxCubemap != 0)
+	if (folderPath == m_skybox.loadedPath && m_skybox.cubemap != 0)
 		return true;
 
 	// Each face slot has a list of alternative file names (e.g. top/up, bottom/down)
@@ -7772,10 +7772,10 @@ bool OpenGLRenderer::loadSkyboxCubemap(const std::string& folderPath)
 	};
 	const std::string extensions[3] = { ".jpg", ".png", ".bmp" };
 
-	if (m_skyboxCubemap) { glDeleteTextures(1, &m_skyboxCubemap); m_skyboxCubemap = 0; }
+	if (m_skybox.cubemap) { glDeleteTextures(1, &m_skybox.cubemap); m_skybox.cubemap = 0; }
 
-	glGenTextures(1, &m_skyboxCubemap);
-	glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyboxCubemap);
+	glGenTextures(1, &m_skybox.cubemap);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, m_skybox.cubemap);
 
 	auto& assetMgr = AssetManager::Instance();
 	bool allLoaded = true;
@@ -7821,8 +7821,8 @@ bool OpenGLRenderer::loadSkyboxCubemap(const std::string& folderPath)
 
 	if (!allLoaded)
 	{
-		glDeleteTextures(1, &m_skyboxCubemap);
-		m_skyboxCubemap = 0;
+		glDeleteTextures(1, &m_skybox.cubemap);
+		m_skybox.cubemap = 0;
 		return false;
 	}
 
@@ -7834,11 +7834,11 @@ void OpenGLRenderer::setSkyboxPath(const std::string& pathOrFolder)
 	if (pathOrFolder.empty())
 	{
 		loadSkyboxCubemap("");
-		m_skyboxLoadedPath.clear();
+		m_skybox.loadedPath.clear();
 		return;
 	}
 
-	if (pathOrFolder == m_skyboxLoadedPath && m_skyboxCubemap != 0)
+	if (pathOrFolder == m_skybox.loadedPath && m_skybox.cubemap != 0)
 		return;
 
 	// If the path ends with .asset, resolve to the folder path from the asset data
@@ -7851,7 +7851,7 @@ void OpenGLRenderer::setSkyboxPath(const std::string& pathOrFolder)
 			Logger::Instance().log(Logger::Category::Rendering,
 				"Skybox: failed to resolve asset path '" + pathOrFolder + "'", Logger::LogLevel::WARNING);
 			loadSkyboxCubemap("");
-			m_skyboxLoadedPath.clear();
+			m_skybox.loadedPath.clear();
 			return;
 		}
 
@@ -7861,18 +7861,18 @@ void OpenGLRenderer::setSkyboxPath(const std::string& pathOrFolder)
 			Logger::Instance().log(Logger::Category::Rendering,
 				"Skybox: cannot open asset file '" + absPath + "'", Logger::LogLevel::WARNING);
 			loadSkyboxCubemap("");
-			m_skyboxLoadedPath.clear();
+			m_skybox.loadedPath.clear();
 			return;
 		}
 
 		json fileJson;
-		try { fileJson = json::parse(in); } catch (...) { loadSkyboxCubemap(""); m_skyboxLoadedPath.clear(); return; }
+		try { fileJson = json::parse(in); } catch (...) { loadSkyboxCubemap(""); m_skybox.loadedPath.clear(); return; }
 		in.close();
 
 		if (!fileJson.is_object() || !fileJson.contains("data"))
 		{
 			loadSkyboxCubemap("");
-			m_skyboxLoadedPath.clear();
+			m_skybox.loadedPath.clear();
 			return;
 		}
 		const auto& data = fileJson.at("data");
@@ -7885,13 +7885,13 @@ void OpenGLRenderer::setSkyboxPath(const std::string& pathOrFolder)
 			const std::string absFolder = (std::filesystem::path(diagnostics.getProjectInfo().projectPath) / folder).lexically_normal().string();
 			if (loadSkyboxCubemap(absFolder))
 			{
-				m_skyboxLoadedPath = pathOrFolder;
+				m_skybox.loadedPath = pathOrFolder;
 			}
 			else
 			{
 				Logger::Instance().log(Logger::Category::Rendering,
 					"Skybox: failed to load cubemap from '" + absFolder + "'", Logger::LogLevel::WARNING);
-				m_skyboxLoadedPath.clear();
+				m_skybox.loadedPath.clear();
 			}
 			return;
 		}
@@ -7912,11 +7912,11 @@ void OpenGLRenderer::setSkyboxPath(const std::string& pathOrFolder)
 						absFolder = std::filesystem::path(absFolder).lexically_normal().string();
 						if (loadSkyboxCubemap(absFolder))
 						{
-							m_skyboxLoadedPath = pathOrFolder;
+							m_skybox.loadedPath = pathOrFolder;
 						}
 						else
 						{
-							m_skyboxLoadedPath.clear();
+							m_skybox.loadedPath.clear();
 						}
 						return;
 					}
@@ -7925,7 +7925,7 @@ void OpenGLRenderer::setSkyboxPath(const std::string& pathOrFolder)
 		}
 
 		loadSkyboxCubemap("");
-		m_skyboxLoadedPath.clear();
+		m_skybox.loadedPath.clear();
 		return;
 	}
 
@@ -7933,7 +7933,7 @@ void OpenGLRenderer::setSkyboxPath(const std::string& pathOrFolder)
 	std::string resolvedFolder = std::filesystem::path(pathOrFolder).lexically_normal().string();
 	if (loadSkyboxCubemap(resolvedFolder))
 	{
-		m_skyboxLoadedPath = pathOrFolder;
+		m_skybox.loadedPath = pathOrFolder;
 		return;
 	}
 
@@ -7941,35 +7941,35 @@ void OpenGLRenderer::setSkyboxPath(const std::string& pathOrFolder)
 	const std::string contentResolved = AssetManager::Instance().getAbsoluteContentPath(pathOrFolder);
 	if (!contentResolved.empty() && loadSkyboxCubemap(std::filesystem::path(contentResolved).lexically_normal().string()))
 	{
-		m_skyboxLoadedPath = pathOrFolder;
+		m_skybox.loadedPath = pathOrFolder;
 	}
 	else
 	{
 		Logger::Instance().log(Logger::Category::Rendering,
 			"Skybox: failed to load from folder '" + pathOrFolder + "'", Logger::LogLevel::WARNING);
-		m_skyboxLoadedPath.clear();
+		m_skybox.loadedPath.clear();
 	}
 }
 
 void OpenGLRenderer::renderSkybox(const glm::mat4& view, const glm::mat4& projection)
 {
-	if (m_skyboxCubemap == 0 || !ensureSkyboxResources())
+	if (m_skybox.cubemap == 0 || !ensureSkyboxResources())
 		return;
 
 	glDepthFunc(GL_LEQUAL);
 	glDepthMask(GL_FALSE);
 
-	glUseProgram(m_skyboxProgram);
+	glUseProgram(m_skybox.program);
 	// Strip translation from view matrix
 	glm::mat4 skyView = glm::mat4(glm::mat3(view));
-	glUniformMatrix4fv(m_skyboxLocProjection, 1, GL_FALSE, &projection[0][0]);
-	glUniformMatrix4fv(m_skyboxLocView, 1, GL_FALSE, &skyView[0][0]);
-	glUniform1i(m_skyboxLocSampler, 0);
+	glUniformMatrix4fv(m_skybox.locProjection, 1, GL_FALSE, &projection[0][0]);
+	glUniformMatrix4fv(m_skybox.locView, 1, GL_FALSE, &skyView[0][0]);
+	glUniform1i(m_skybox.locSampler, 0);
 
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_CUBE_MAP, m_skyboxCubemap);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, m_skybox.cubemap);
 
-	glBindVertexArray(m_skyboxVao);
+	glBindVertexArray(m_skybox.vao);
 	glDrawArrays(GL_TRIANGLES, 0, 36);
 	glBindVertexArray(0);
 
@@ -8021,41 +8021,41 @@ bool OpenGLRenderer::ensureOitResources(int width, int height)
 		return false;
 
 	// Resize existing FBO if dimensions changed
-	if (m_oitFbo != 0 && (m_oitWidth != width || m_oitHeight != height))
+	if (m_oit.fbo != 0 && (m_oit.width != width || m_oit.height != height))
 	{
 		releaseOitResources();
 	}
 
-	if (m_oitFbo != 0)
+	if (m_oit.fbo != 0)
 		return true;
 
-	m_oitWidth = width;
-	m_oitHeight = height;
+	m_oit.width = width;
+	m_oit.height = height;
 
 	// Accumulation texture (RGBA16F) – additive blend of premultiplied colour * weight
-	glGenTextures(1, &m_oitAccumTex);
-	glBindTexture(GL_TEXTURE_2D, m_oitAccumTex);
+	glGenTextures(1, &m_oit.accumTex);
+	glBindTexture(GL_TEXTURE_2D, m_oit.accumTex);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
 	// Revealage texture (R8) – product of (1 – alpha)
-	glGenTextures(1, &m_oitRevealageTex);
-	glBindTexture(GL_TEXTURE_2D, m_oitRevealageTex);
+	glGenTextures(1, &m_oit.revealageTex);
+	glBindTexture(GL_TEXTURE_2D, m_oit.revealageTex);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
 	// Depth RBO (shared with opaque pass via blit)
-	glGenRenderbuffers(1, &m_oitDepthRbo);
-	glBindRenderbuffer(GL_RENDERBUFFER, m_oitDepthRbo);
+	glGenRenderbuffers(1, &m_oit.depthRbo);
+	glBindRenderbuffer(GL_RENDERBUFFER, m_oit.depthRbo);
 	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, width, height);
 
-	glGenFramebuffers(1, &m_oitFbo);
-	glBindFramebuffer(GL_FRAMEBUFFER, m_oitFbo);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_oitAccumTex, 0);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, m_oitRevealageTex, 0);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_oitDepthRbo);
+	glGenFramebuffers(1, &m_oit.fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, m_oit.fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_oit.accumTex, 0);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, m_oit.revealageTex, 0);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_oit.depthRbo);
 
 	GLenum drawBuffers[] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
 	glDrawBuffers(2, drawBuffers);
@@ -8071,7 +8071,7 @@ bool OpenGLRenderer::ensureOitResources(int width, int height)
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
 	// Compile composite program (uses resolve_vertex.glsl for fullscreen triangle)
-	if (m_oitCompositeProgram == 0)
+	if (m_oit.compositeProgram == 0)
 	{
 		const std::filesystem::path shadersDir = std::filesystem::current_path() / "shaders";
 		const std::string vertPath = (shadersDir / "resolve_vertex.glsl").string();
@@ -8087,24 +8087,24 @@ bool OpenGLRenderer::ensureOitResources(int width, int height)
 			return false;
 		}
 
-		m_oitCompositeProgram = glCreateProgram();
-		glAttachShader(m_oitCompositeProgram, vertShader.id());
-		glAttachShader(m_oitCompositeProgram, fragShader.id());
-		glLinkProgram(m_oitCompositeProgram);
+		m_oit.compositeProgram = glCreateProgram();
+		glAttachShader(m_oit.compositeProgram, vertShader.id());
+		glAttachShader(m_oit.compositeProgram, fragShader.id());
+		glLinkProgram(m_oit.compositeProgram);
 
 		GLint linked = 0;
-		glGetProgramiv(m_oitCompositeProgram, GL_LINK_STATUS, &linked);
+		glGetProgramiv(m_oit.compositeProgram, GL_LINK_STATUS, &linked);
 		if (!linked)
 		{
 			Logger::Instance().log(Logger::Category::Rendering,
 				"OIT: composite program link failed", Logger::LogLevel::ERROR);
-			glDeleteProgram(m_oitCompositeProgram);
-			m_oitCompositeProgram = 0;
+			glDeleteProgram(m_oit.compositeProgram);
+			m_oit.compositeProgram = 0;
 			return false;
 		}
 
-		m_oitCompLocAccum = glGetUniformLocation(m_oitCompositeProgram, "uAccumTexture");
-		m_oitCompLocRevealage = glGetUniformLocation(m_oitCompositeProgram, "uRevealageTexture");
+		m_oit.compLocAccum = glGetUniformLocation(m_oit.compositeProgram, "uAccumTexture");
+		m_oit.compLocRevealage = glGetUniformLocation(m_oit.compositeProgram, "uRevealageTexture");
 	}
 
 	return true;
@@ -8112,14 +8112,14 @@ bool OpenGLRenderer::ensureOitResources(int width, int height)
 
 void OpenGLRenderer::releaseOitResources()
 {
-	if (m_oitFbo)           { glDeleteFramebuffers(1, &m_oitFbo);       m_oitFbo = 0; }
-	if (m_oitAccumTex)      { glDeleteTextures(1, &m_oitAccumTex);      m_oitAccumTex = 0; }
-	if (m_oitRevealageTex)  { glDeleteTextures(1, &m_oitRevealageTex);  m_oitRevealageTex = 0; }
-	if (m_oitDepthRbo)      { glDeleteRenderbuffers(1, &m_oitDepthRbo); m_oitDepthRbo = 0; }
-	if (m_oitCompositeProgram) { glDeleteProgram(m_oitCompositeProgram); m_oitCompositeProgram = 0; }
-	if (m_oitCompositeVao)  { glDeleteVertexArrays(1, &m_oitCompositeVao); m_oitCompositeVao = 0; }
-	m_oitWidth = 0;
-	m_oitHeight = 0;
+	if (m_oit.fbo)           { glDeleteFramebuffers(1, &m_oit.fbo);       m_oit.fbo = 0; }
+	if (m_oit.accumTex)      { glDeleteTextures(1, &m_oit.accumTex);      m_oit.accumTex = 0; }
+	if (m_oit.revealageTex)  { glDeleteTextures(1, &m_oit.revealageTex);  m_oit.revealageTex = 0; }
+	if (m_oit.depthRbo)      { glDeleteRenderbuffers(1, &m_oit.depthRbo); m_oit.depthRbo = 0; }
+	if (m_oit.compositeProgram) { glDeleteProgram(m_oit.compositeProgram); m_oit.compositeProgram = 0; }
+	if (m_oit.compositeVao)  { glDeleteVertexArrays(1, &m_oit.compositeVao); m_oit.compositeVao = 0; }
+	m_oit.width = 0;
+	m_oit.height = 0;
 }
 
 void OpenGLRenderer::renderOitTransparentPass(const glm::mat4& view,
@@ -8129,7 +8129,7 @@ void OpenGLRenderer::renderOitTransparentPass(const glm::mat4& view,
 	if (m_transparentDrawList.empty())
 		return;
 
-	glBindFramebuffer(GL_FRAMEBUFFER, m_oitFbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, m_oit.fbo);
 
 	// Clear accumulation to (0,0,0,0) and revealage to 1.0
 	const GLfloat clearAccum[] = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -8155,10 +8155,10 @@ void OpenGLRenderer::renderOitTransparentPass(const glm::mat4& view,
 		const auto& first = m_transparentDrawList[di];
 
 		first.obj->setMatrices(first.modelMatrix, view, m_projectionMatrix);
-		first.obj->setShadowData(m_shadowDepthArray, m_shadowLightSpaceMatrices, m_shadowLightIndices, m_shadowCount);
-		first.obj->setPointShadowData(m_pointShadowCubeArray, m_pointShadowPositions, m_pointShadowFarPlanes, m_pointShadowLightIndices, m_pointShadowCount);
+		first.obj->setShadowData(m_shadow.depthArray, m_shadow.lightSpaceMatrices, m_shadow.lightIndices, m_shadow.count);
+		first.obj->setPointShadowData(m_pointShadow.cubeArray, m_pointShadow.positions, m_pointShadow.farPlanes, m_pointShadow.lightIndices, m_pointShadow.count);
 		first.obj->setFogData(m_fogEnabled, fogColor, m_fogParams.z);
-		first.obj->setCsmData(m_csmDepthArray, m_csmMatrices, m_csmSplits, m_csmLightIndex, m_csmEnabled, view);
+		first.obj->setCsmData(m_csm.depthArray, m_csm.matrices, m_csm.splits, m_csm.lightIndex, m_csm.enabled, view);
 		first.obj->setLightData(lightPosition, lightColor, lightIntensity);
 		first.obj->setLights(m_sceneLights);
 		first.obj->setDebugMode(debugMode);
@@ -8205,7 +8205,7 @@ void OpenGLRenderer::renderOitTransparentPass(const glm::mat4& view,
 
 void OpenGLRenderer::compositeOit(GLuint dstFbo, int vpX, int vpY, int vpW, int vpH)
 {
-	if (m_transparentDrawList.empty() || m_oitCompositeProgram == 0)
+	if (m_transparentDrawList.empty() || m_oit.compositeProgram == 0)
 		return;
 
 	glBindFramebuffer(GL_FRAMEBUFFER, dstFbo);
@@ -8215,20 +8215,20 @@ void OpenGLRenderer::compositeOit(GLuint dstFbo, int vpX, int vpY, int vpW, int 
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glDisable(GL_DEPTH_TEST);
 
-	glUseProgram(m_oitCompositeProgram);
+	glUseProgram(m_oit.compositeProgram);
 
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, m_oitAccumTex);
-	if (m_oitCompLocAccum >= 0) glUniform1i(m_oitCompLocAccum, 0);
+	glBindTexture(GL_TEXTURE_2D, m_oit.accumTex);
+	if (m_oit.compLocAccum >= 0) glUniform1i(m_oit.compLocAccum, 0);
 
 	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, m_oitRevealageTex);
-	if (m_oitCompLocRevealage >= 0) glUniform1i(m_oitCompLocRevealage, 1);
+	glBindTexture(GL_TEXTURE_2D, m_oit.revealageTex);
+	if (m_oit.compLocRevealage >= 0) glUniform1i(m_oit.compLocRevealage, 1);
 
 	// Fullscreen triangle – vertex positions generated from gl_VertexID in resolve_vertex.glsl
-	if (m_oitCompositeVao == 0)
-		glGenVertexArrays(1, &m_oitCompositeVao);
-	glBindVertexArray(m_oitCompositeVao);
+	if (m_oit.compositeVao == 0)
+		glGenVertexArrays(1, &m_oit.compositeVao);
+	glBindVertexArray(m_oit.compositeVao);
 	glDrawArrays(GL_TRIANGLES, 0, 3);
 	glBindVertexArray(0);
 
@@ -8242,7 +8242,7 @@ void OpenGLRenderer::compositeOit(GLuint dstFbo, int vpX, int vpY, int vpW, int 
 
 bool OpenGLRenderer::ensureShadowResources()
 {
-	if (m_shadowProgram != 0)
+	if (m_shadow.program != 0)
 		return true;
 
 	// Compile shadow depth shader (supports optional skeletal skinning)
@@ -8294,22 +8294,22 @@ void main() {}
 	GLuint fsh = glCreateShader(GL_FRAGMENT_SHADER);
 	glShaderSource(fsh, 1, &fs, nullptr);
 	glCompileShader(fsh);
-	m_shadowProgram = glCreateProgram();
-	glAttachShader(m_shadowProgram, vsh);
-	glAttachShader(m_shadowProgram, fsh);
-	glLinkProgram(m_shadowProgram);
+	m_shadow.program = glCreateProgram();
+	glAttachShader(m_shadow.program, vsh);
+	glAttachShader(m_shadow.program, fsh);
+	glLinkProgram(m_shadow.program);
 	glDeleteShader(vsh);
 	glDeleteShader(fsh);
 
-	m_shadowLocModel = glGetUniformLocation(m_shadowProgram, "uModel");
-	m_shadowLocLightSpace = glGetUniformLocation(m_shadowProgram, "uLightSpaceMatrix");
-	m_shadowLocInstanced = glGetUniformLocation(m_shadowProgram, "uInstanced");
-	m_shadowLocSkinned = glGetUniformLocation(m_shadowProgram, "uSkinned");
-	m_shadowLocBoneMatrices = glGetUniformLocation(m_shadowProgram, "uBoneMatrices[0]");
+	m_shadow.locModel = glGetUniformLocation(m_shadow.program, "uModel");
+	m_shadow.locLightSpace = glGetUniformLocation(m_shadow.program, "uLightSpaceMatrix");
+	m_shadow.locInstanced = glGetUniformLocation(m_shadow.program, "uInstanced");
+	m_shadow.locSkinned = glGetUniformLocation(m_shadow.program, "uSkinned");
+	m_shadow.locBoneMatrices = glGetUniformLocation(m_shadow.program, "uBoneMatrices[0]");
 
 	// Create shadow FBO + depth texture array (one layer per shadow-casting light)
-	glGenTextures(1, &m_shadowDepthArray);
-	glBindTexture(GL_TEXTURE_2D_ARRAY, m_shadowDepthArray);
+	glGenTextures(1, &m_shadow.depthArray);
+	glBindTexture(GL_TEXTURE_2D_ARRAY, m_shadow.depthArray);
 	glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24,
 				 kShadowMapSize, kShadowMapSize, kMaxShadowLights,
 				 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
@@ -8321,9 +8321,9 @@ void main() {}
 	glTexParameterfv(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BORDER_COLOR, borderColor);
 	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_NONE);
 
-	glGenFramebuffers(1, &m_shadowFbo);
-	glBindFramebuffer(GL_FRAMEBUFFER, m_shadowFbo);
-	glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_shadowDepthArray, 0, 0);
+	glGenFramebuffers(1, &m_shadow.fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, m_shadow.fbo);
+	glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_shadow.depthArray, 0, 0);
 	glDrawBuffer(GL_NONE);
 	glReadBuffer(GL_NONE);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -8333,20 +8333,20 @@ void main() {}
 
 void OpenGLRenderer::releaseShadowResources()
 {
-	if (m_shadowProgram)    { glDeleteProgram(m_shadowProgram); m_shadowProgram = 0; }
-	if (m_shadowDepthArray) { glDeleteTextures(1, &m_shadowDepthArray); m_shadowDepthArray = 0; }
-	if (m_shadowFbo)        { glDeleteFramebuffers(1, &m_shadowFbo); m_shadowFbo = 0; }
+	if (m_shadow.program)    { glDeleteProgram(m_shadow.program); m_shadow.program = 0; }
+	if (m_shadow.depthArray) { glDeleteTextures(1, &m_shadow.depthArray); m_shadow.depthArray = 0; }
+	if (m_shadow.fbo)        { glDeleteFramebuffers(1, &m_shadow.fbo); m_shadow.fbo = 0; }
 }
 
 // ---- Cascaded Shadow Maps ----
 
 bool OpenGLRenderer::ensureCsmResources()
 {
-	if (m_csmFbo != 0)
+	if (m_csm.fbo != 0)
 		return true;
 
-	glGenTextures(1, &m_csmDepthArray);
-	glBindTexture(GL_TEXTURE_2D_ARRAY, m_csmDepthArray);
+	glGenTextures(1, &m_csm.depthArray);
+	glBindTexture(GL_TEXTURE_2D_ARRAY, m_csm.depthArray);
 	glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24,
 				 kCsmMapSize, kCsmMapSize, kNumCsmCascades,
 				 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
@@ -8358,9 +8358,9 @@ bool OpenGLRenderer::ensureCsmResources()
 	glTexParameterfv(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BORDER_COLOR, borderColor);
 	glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_NONE);
 
-	glGenFramebuffers(1, &m_csmFbo);
-	glBindFramebuffer(GL_FRAMEBUFFER, m_csmFbo);
-	glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_csmDepthArray, 0, 0);
+	glGenFramebuffers(1, &m_csm.fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, m_csm.fbo);
+	glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_csm.depthArray, 0, 0);
 	glDrawBuffer(GL_NONE);
 	glReadBuffer(GL_NONE);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -8370,8 +8370,8 @@ bool OpenGLRenderer::ensureCsmResources()
 
 void OpenGLRenderer::releaseCsmResources()
 {
-	if (m_csmDepthArray) { glDeleteTextures(1, &m_csmDepthArray); m_csmDepthArray = 0; }
-	if (m_csmFbo)        { glDeleteFramebuffers(1, &m_csmFbo); m_csmFbo = 0; }
+	if (m_csm.depthArray) { glDeleteTextures(1, &m_csm.depthArray); m_csm.depthArray = 0; }
+	if (m_csm.fbo)        { glDeleteFramebuffers(1, &m_csm.fbo); m_csm.fbo = 0; }
 }
 
 void OpenGLRenderer::computeCsmMatrices(const OpenGLMaterial::LightData& light,
@@ -8394,7 +8394,7 @@ void OpenGLRenderer::computeCsmMatrices(const OpenGLMaterial::LightData& light,
 		float logSplit = nearPlane * std::pow(farPlane / nearPlane, p);
 		float uniSplit = nearPlane + (farPlane - nearPlane) * p;
 		splits[i] = lambda * logSplit + (1.0f - lambda) * uniSplit;
-		m_csmSplits[i] = splits[i];
+		m_csm.splits[i] = splits[i];
 	}
 
 	// Inverse view-projection to go from NDC back to world space
@@ -8478,7 +8478,7 @@ void OpenGLRenderer::computeCsmMatrices(const OpenGLMaterial::LightData& light,
 			minZ /= zMult;
 
 		const glm::mat4 lightProj = glm::ortho(minX, maxX, minY, maxY, minZ, maxZ);
-		m_csmMatrices[c] = lightProj * lightView;
+		m_csm.matrices[c] = lightProj * lightView;
 	}
 }
 
@@ -8490,16 +8490,16 @@ void OpenGLRenderer::renderCsmShadowMaps(const std::vector<DrawCmd>& drawList)
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
 	glCullFace(GL_FRONT);
-	glUseProgram(m_shadowProgram);
+	glUseProgram(m_shadow.program);
 
 	for (int c = 0; c < kNumCsmCascades; ++c)
 	{
-		glBindFramebuffer(GL_FRAMEBUFFER, m_csmFbo);
-		glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_csmDepthArray, 0, c);
+		glBindFramebuffer(GL_FRAMEBUFFER, m_csm.fbo);
+		glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_csm.depthArray, 0, c);
 		glViewport(0, 0, kCsmMapSize, kCsmMapSize);
 		glClear(GL_DEPTH_BUFFER_BIT);
 
-		glUniformMatrix4fv(m_shadowLocLightSpace, 1, GL_FALSE, &m_csmMatrices[c][0][0]);
+		glUniformMatrix4fv(m_shadow.locLightSpace, 1, GL_FALSE, &m_csm.matrices[c][0][0]);
 
 		// Instanced CSM rendering: draw list is already sorted by (material, obj)
 		size_t i = 0;
@@ -8514,24 +8514,24 @@ void OpenGLRenderer::renderCsmShadowMaps(const std::vector<DrawCmd>& drawList)
 			if (drawList[i].isSkinned)
 			{
 				glBindVertexArray(mat->getVao());
-				glUniform1i(m_shadowLocInstanced, 0);
-				glUniformMatrix4fv(m_shadowLocModel, 1, GL_FALSE, &drawList[i].modelMatrix[0][0]);
+				glUniform1i(m_shadow.locInstanced, 0);
+				glUniformMatrix4fv(m_shadow.locModel, 1, GL_FALSE, &drawList[i].modelMatrix[0][0]);
 				auto ait = m_entityAnimators.find(drawList[i].entityId);
 				if (ait != m_entityAnimators.end() && !ait->second->getBoneMatrices().empty())
 				{
-					glUniform1i(m_shadowLocSkinned, 1);
+					glUniform1i(m_shadow.locSkinned, 1);
 					const auto& bones = ait->second->getBoneMatrices();
-					glUniformMatrix4fv(m_shadowLocBoneMatrices, static_cast<GLsizei>(bones.size()), GL_TRUE, bones[0].m);
+					glUniformMatrix4fv(m_shadow.locBoneMatrices, static_cast<GLsizei>(bones.size()), GL_TRUE, bones[0].m);
 				}
 				else
 				{
-					glUniform1i(m_shadowLocSkinned, 0);
+					glUniform1i(m_shadow.locSkinned, 0);
 				}
 				if (mat->getIndexCount() > 0)
 					glDrawElements(GL_TRIANGLES, mat->getIndexCount(), GL_UNSIGNED_INT, nullptr);
 				else
 					glDrawArrays(GL_TRIANGLES, 0, mat->getVertexCount());
-				glUniform1i(m_shadowLocSkinned, 0);
+				glUniform1i(m_shadow.locSkinned, 0);
 				++i;
 				continue;
 			}
@@ -8542,7 +8542,7 @@ void OpenGLRenderer::renderCsmShadowMaps(const std::vector<DrawCmd>& drawList)
 			const size_t batchSize = batchEnd - i;
 
 			glBindVertexArray(mat->getVao());
-			glUniform1i(m_shadowLocSkinned, 0);
+			glUniform1i(m_shadow.locSkinned, 0);
 
 			if (batchSize > 1)
 			{
@@ -8550,18 +8550,18 @@ void OpenGLRenderer::renderCsmShadowMaps(const std::vector<DrawCmd>& drawList)
 				for (size_t j = i; j < batchEnd; ++j)
 					m_instanceMatrixBuffer.push_back(drawList[j].modelMatrix);
 				uploadInstanceData(m_instanceMatrixBuffer.data(), batchSize);
-				glUniform1i(m_shadowLocInstanced, 1);
+				glUniform1i(m_shadow.locInstanced, 1);
 				if (mat->getIndexCount() > 0)
 					glDrawElementsInstanced(GL_TRIANGLES, mat->getIndexCount(), GL_UNSIGNED_INT, nullptr, static_cast<GLsizei>(batchSize));
 				else
 					glDrawArraysInstanced(GL_TRIANGLES, 0, mat->getVertexCount(), static_cast<GLsizei>(batchSize));
-				glUniform1i(m_shadowLocInstanced, 0);
+				glUniform1i(m_shadow.locInstanced, 0);
 				glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
 			}
 			else
 			{
-				glUniform1i(m_shadowLocInstanced, 0);
-				glUniformMatrix4fv(m_shadowLocModel, 1, GL_FALSE, &drawList[i].modelMatrix[0][0]);
+				glUniform1i(m_shadow.locInstanced, 0);
+				glUniformMatrix4fv(m_shadow.locModel, 1, GL_FALSE, &drawList[i].modelMatrix[0][0]);
 				if (mat->getIndexCount() > 0)
 					glDrawElements(GL_TRIANGLES, mat->getIndexCount(), GL_UNSIGNED_INT, nullptr);
 				else
@@ -8579,23 +8579,23 @@ void OpenGLRenderer::renderCsmShadowMaps(const std::vector<DrawCmd>& drawList)
 
 void OpenGLRenderer::findShadowLightIndices()
 {
-	m_shadowCount = 0;
-	m_csmLightIndex = -1;
-	for (int i = 0; i < static_cast<int>(m_sceneLights.size()) && m_shadowCount < kMaxShadowLights; ++i)
+	m_shadow.count = 0;
+	m_csm.lightIndex = -1;
+	for (int i = 0; i < static_cast<int>(m_sceneLights.size()) && m_shadow.count < kMaxShadowLights; ++i)
 	{
 		const int type = m_sceneLights[i].type;
 		if (type == 1) // directional — use CSM for the first one
 		{
-			if (m_csmLightIndex < 0)
+			if (m_csm.lightIndex < 0)
 			{
-				m_csmLightIndex = i; // handled by CSM, skip regular shadow map
+				m_csm.lightIndex = i; // handled by CSM, skip regular shadow map
 				continue;
 			}
 		}
 		if (type == 1 || type == 2) // directional or spot
 		{
-			m_shadowLightIndices[m_shadowCount] = i;
-			++m_shadowCount;
+			m_shadow.lightIndices[m_shadow.count] = i;
+			++m_shadow.count;
 		}
 	}
 }
@@ -8648,16 +8648,16 @@ void OpenGLRenderer::renderShadowMap(const std::vector<DrawCmd>& drawList)
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
 	glCullFace(GL_FRONT);
-	glUseProgram(m_shadowProgram);
+	glUseProgram(m_shadow.program);
 
-	for (int s = 0; s < m_shadowCount; ++s)
+	for (int s = 0; s < m_shadow.count; ++s)
 	{
-		glBindFramebuffer(GL_FRAMEBUFFER, m_shadowFbo);
-		glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_shadowDepthArray, 0, s);
+		glBindFramebuffer(GL_FRAMEBUFFER, m_shadow.fbo);
+		glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_shadow.depthArray, 0, s);
 		glViewport(0, 0, kShadowMapSize, kShadowMapSize);
 		glClear(GL_DEPTH_BUFFER_BIT);
 
-		glUniformMatrix4fv(m_shadowLocLightSpace, 1, GL_FALSE, &m_shadowLightSpaceMatrices[s][0][0]);
+		glUniformMatrix4fv(m_shadow.locLightSpace, 1, GL_FALSE, &m_shadow.lightSpaceMatrices[s][0][0]);
 
 		// Instanced shadow rendering: draw list is already sorted by (material, obj)
 		size_t i = 0;
@@ -8672,25 +8672,25 @@ void OpenGLRenderer::renderShadowMap(const std::vector<DrawCmd>& drawList)
 			if (drawList[i].isSkinned)
 			{
 				glBindVertexArray(mat->getVao());
-				glUniform1i(m_shadowLocInstanced, 0);
-				glUniformMatrix4fv(m_shadowLocModel, 1, GL_FALSE, &drawList[i].modelMatrix[0][0]);
+				glUniform1i(m_shadow.locInstanced, 0);
+				glUniformMatrix4fv(m_shadow.locModel, 1, GL_FALSE, &drawList[i].modelMatrix[0][0]);
 				// Upload bone matrices for shadow pass
 				auto ait = m_entityAnimators.find(drawList[i].entityId);
 				if (ait != m_entityAnimators.end() && !ait->second->getBoneMatrices().empty())
 				{
-					glUniform1i(m_shadowLocSkinned, 1);
+					glUniform1i(m_shadow.locSkinned, 1);
 					const auto& bones = ait->second->getBoneMatrices();
-					glUniformMatrix4fv(m_shadowLocBoneMatrices, static_cast<GLsizei>(bones.size()), GL_TRUE, bones[0].m);
+					glUniformMatrix4fv(m_shadow.locBoneMatrices, static_cast<GLsizei>(bones.size()), GL_TRUE, bones[0].m);
 				}
 				else
 				{
-					glUniform1i(m_shadowLocSkinned, 0);
+					glUniform1i(m_shadow.locSkinned, 0);
 				}
 				if (mat->getIndexCount() > 0)
 					glDrawElements(GL_TRIANGLES, mat->getIndexCount(), GL_UNSIGNED_INT, nullptr);
 				else
 					glDrawArrays(GL_TRIANGLES, 0, mat->getVertexCount());
-				glUniform1i(m_shadowLocSkinned, 0);
+				glUniform1i(m_shadow.locSkinned, 0);
 				++i;
 				continue;
 			}
@@ -8701,7 +8701,7 @@ void OpenGLRenderer::renderShadowMap(const std::vector<DrawCmd>& drawList)
 			const size_t batchSize = batchEnd - i;
 
 			glBindVertexArray(mat->getVao());
-			glUniform1i(m_shadowLocSkinned, 0);
+			glUniform1i(m_shadow.locSkinned, 0);
 
 			if (batchSize > 1)
 			{
@@ -8709,18 +8709,18 @@ void OpenGLRenderer::renderShadowMap(const std::vector<DrawCmd>& drawList)
 				for (size_t j = i; j < batchEnd; ++j)
 					m_instanceMatrixBuffer.push_back(drawList[j].modelMatrix);
 				uploadInstanceData(m_instanceMatrixBuffer.data(), batchSize);
-				glUniform1i(m_shadowLocInstanced, 1);
+				glUniform1i(m_shadow.locInstanced, 1);
 				if (mat->getIndexCount() > 0)
 					glDrawElementsInstanced(GL_TRIANGLES, mat->getIndexCount(), GL_UNSIGNED_INT, nullptr, static_cast<GLsizei>(batchSize));
 				else
 					glDrawArraysInstanced(GL_TRIANGLES, 0, mat->getVertexCount(), static_cast<GLsizei>(batchSize));
-				glUniform1i(m_shadowLocInstanced, 0);
+				glUniform1i(m_shadow.locInstanced, 0);
 				glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
 			}
 			else
 			{
-				glUniform1i(m_shadowLocInstanced, 0);
-				glUniformMatrix4fv(m_shadowLocModel, 1, GL_FALSE, &drawList[i].modelMatrix[0][0]);
+				glUniform1i(m_shadow.locInstanced, 0);
+				glUniformMatrix4fv(m_shadow.locModel, 1, GL_FALSE, &drawList[i].modelMatrix[0][0]);
 				if (mat->getIndexCount() > 0)
 					glDrawElements(GL_TRIANGLES, mat->getIndexCount(), GL_UNSIGNED_INT, nullptr);
 				else
@@ -8740,7 +8740,7 @@ void OpenGLRenderer::renderShadowMap(const std::vector<DrawCmd>& drawList)
 
 bool OpenGLRenderer::ensurePointShadowResources()
 {
-	if (m_pointShadowProgram != 0)
+	if (m_pointShadow.program != 0)
 		return true;
 
 	// Vertex shader: transform to world space
@@ -8799,23 +8799,23 @@ void main() {
 	glShaderSource(fsh, 1, &fs, nullptr);
 	glCompileShader(fsh);
 
-	m_pointShadowProgram = glCreateProgram();
-	glAttachShader(m_pointShadowProgram, vsh);
-	glAttachShader(m_pointShadowProgram, gsh);
-	glAttachShader(m_pointShadowProgram, fsh);
-	glLinkProgram(m_pointShadowProgram);
+	m_pointShadow.program = glCreateProgram();
+	glAttachShader(m_pointShadow.program, vsh);
+	glAttachShader(m_pointShadow.program, gsh);
+	glAttachShader(m_pointShadow.program, fsh);
+	glLinkProgram(m_pointShadow.program);
 	glDeleteShader(vsh);
 	glDeleteShader(gsh);
 	glDeleteShader(fsh);
 
-	m_pointShadowLocModel = glGetUniformLocation(m_pointShadowProgram, "uModel");
-	m_pointShadowLocLightPos = glGetUniformLocation(m_pointShadowProgram, "uLightPos");
-	m_pointShadowLocFarPlane = glGetUniformLocation(m_pointShadowProgram, "uFarPlane");
-	m_pointShadowLocShadowMatrices = glGetUniformLocation(m_pointShadowProgram, "uShadowMatrices[0]");
+	m_pointShadow.locModel = glGetUniformLocation(m_pointShadow.program, "uModel");
+	m_pointShadow.locLightPos = glGetUniformLocation(m_pointShadow.program, "uLightPos");
+	m_pointShadow.locFarPlane = glGetUniformLocation(m_pointShadow.program, "uFarPlane");
+	m_pointShadow.locShadowMatrices = glGetUniformLocation(m_pointShadow.program, "uShadowMatrices[0]");
 
 	// Create cube map array texture
-	glGenTextures(1, &m_pointShadowCubeArray);
-	glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, m_pointShadowCubeArray);
+	glGenTextures(1, &m_pointShadow.cubeArray);
+	glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, m_pointShadow.cubeArray);
 	glTexImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, 0, GL_DEPTH_COMPONENT24,
 				 kPointShadowMapSize, kPointShadowMapSize, kMaxPointShadowLights * 6,
 				 0, GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
@@ -8827,9 +8827,9 @@ void main() {
 	glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_NONE);
 
 	// Create FBO (layered attachment – geometry shader selects the layer)
-	glGenFramebuffers(1, &m_pointShadowFbo);
-	glBindFramebuffer(GL_FRAMEBUFFER, m_pointShadowFbo);
-	glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_pointShadowCubeArray, 0);
+	glGenFramebuffers(1, &m_pointShadow.fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, m_pointShadow.fbo);
+	glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_pointShadow.cubeArray, 0);
 	glDrawBuffer(GL_NONE);
 	glReadBuffer(GL_NONE);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -8839,22 +8839,22 @@ void main() {
 
 void OpenGLRenderer::releasePointShadowResources()
 {
-	if (m_pointShadowProgram)   { glDeleteProgram(m_pointShadowProgram); m_pointShadowProgram = 0; }
-	if (m_pointShadowCubeArray) { glDeleteTextures(1, &m_pointShadowCubeArray); m_pointShadowCubeArray = 0; }
-	if (m_pointShadowFbo)       { glDeleteFramebuffers(1, &m_pointShadowFbo); m_pointShadowFbo = 0; }
+	if (m_pointShadow.program)   { glDeleteProgram(m_pointShadow.program); m_pointShadow.program = 0; }
+	if (m_pointShadow.cubeArray) { glDeleteTextures(1, &m_pointShadow.cubeArray); m_pointShadow.cubeArray = 0; }
+	if (m_pointShadow.fbo)       { glDeleteFramebuffers(1, &m_pointShadow.fbo); m_pointShadow.fbo = 0; }
 }
 
 void OpenGLRenderer::findPointShadowLightIndices()
 {
-	m_pointShadowCount = 0;
-	for (int i = 0; i < static_cast<int>(m_sceneLights.size()) && m_pointShadowCount < kMaxPointShadowLights; ++i)
+	m_pointShadow.count = 0;
+	for (int i = 0; i < static_cast<int>(m_sceneLights.size()) && m_pointShadow.count < kMaxPointShadowLights; ++i)
 	{
 		if (m_sceneLights[i].type == 0) // point light
 		{
-			m_pointShadowLightIndices[m_pointShadowCount] = i;
-			m_pointShadowPositions[m_pointShadowCount] = m_sceneLights[i].position;
-			m_pointShadowFarPlanes[m_pointShadowCount] = m_sceneLights[i].range > 0.0f ? m_sceneLights[i].range : 25.0f;
-			++m_pointShadowCount;
+			m_pointShadow.lightIndices[m_pointShadow.count] = i;
+			m_pointShadow.positions[m_pointShadow.count] = m_sceneLights[i].position;
+			m_pointShadow.farPlanes[m_pointShadow.count] = m_sceneLights[i].range > 0.0f ? m_sceneLights[i].range : 25.0f;
+			++m_pointShadow.count;
 		}
 	}
 }
@@ -8867,20 +8867,20 @@ void OpenGLRenderer::renderPointShadowMaps(const std::vector<DrawCmd>& drawList)
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
 	glCullFace(GL_FRONT);
-	glUseProgram(m_pointShadowProgram);
+	glUseProgram(m_pointShadow.program);
 
-	glBindFramebuffer(GL_FRAMEBUFFER, m_pointShadowFbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, m_pointShadow.fbo);
 	glViewport(0, 0, kPointShadowMapSize, kPointShadowMapSize);
 
 	// Clear all layers once
 	glClear(GL_DEPTH_BUFFER_BIT);
 
-	const GLint locLayerOffset = glGetUniformLocation(m_pointShadowProgram, "uLayerOffset");
+	const GLint locLayerOffset = glGetUniformLocation(m_pointShadow.program, "uLayerOffset");
 
-	for (int s = 0; s < m_pointShadowCount; ++s)
+	for (int s = 0; s < m_pointShadow.count; ++s)
 	{
-		const glm::vec3& lightPos = m_pointShadowPositions[s];
-		const float farPlane = m_pointShadowFarPlanes[s];
+		const glm::vec3& lightPos = m_pointShadow.positions[s];
+		const float farPlane = m_pointShadow.farPlanes[s];
 		const float nearPlane = 0.1f;
 
 		const glm::mat4 shadowProj = glm::perspective(glm::radians(90.0f), 1.0f, nearPlane, farPlane);
@@ -8894,19 +8894,19 @@ void OpenGLRenderer::renderPointShadowMaps(const std::vector<DrawCmd>& drawList)
 		};
 
 		// Upload per-light uniforms
-		if (m_pointShadowLocLightPos >= 0)
-			glUniform3fv(m_pointShadowLocLightPos, 1, &lightPos[0]);
-		if (m_pointShadowLocFarPlane >= 0)
-			glUniform1f(m_pointShadowLocFarPlane, farPlane);
-		if (m_pointShadowLocShadowMatrices >= 0)
-			glUniformMatrix4fv(m_pointShadowLocShadowMatrices, 6, GL_FALSE, &shadowViews[0][0][0]);
+		if (m_pointShadow.locLightPos >= 0)
+			glUniform3fv(m_pointShadow.locLightPos, 1, &lightPos[0]);
+		if (m_pointShadow.locFarPlane >= 0)
+			glUniform1f(m_pointShadow.locFarPlane, farPlane);
+		if (m_pointShadow.locShadowMatrices >= 0)
+			glUniformMatrix4fv(m_pointShadow.locShadowMatrices, 6, GL_FALSE, &shadowViews[0][0][0]);
 		if (locLayerOffset >= 0)
 			glUniform1i(locLayerOffset, s * 6);
 
 		for (const auto& cmd : drawList)
 		{
-			if (m_pointShadowLocModel >= 0)
-				glUniformMatrix4fv(m_pointShadowLocModel, 1, GL_FALSE, &cmd.modelMatrix[0][0]);
+			if (m_pointShadow.locModel >= 0)
+				glUniformMatrix4fv(m_pointShadow.locModel, 1, GL_FALSE, &cmd.modelMatrix[0][0]);
 
 			auto* mat = cmd.obj->getMaterial();
 			if (!mat)
@@ -8926,11 +8926,11 @@ void OpenGLRenderer::renderPointShadowMaps(const std::vector<DrawCmd>& drawList)
 
 void OpenGLRenderer::drawBoundsDebugBox(const glm::vec3& center, const glm::vec3& extent, const glm::mat4& viewProj)
 {
-	if (!m_boundsDebugEnabled)
+	if (!m_boundsDebug.enabled)
 	{
 		return;
 	}
-	if (!ensureBoundsDebugResources() || m_boundsDebugVertexCount == 0)
+	if (!ensureBoundsDebugResources() || m_boundsDebug.vertexCount == 0)
 	{
 		return;
 	}
@@ -8938,30 +8938,30 @@ void OpenGLRenderer::drawBoundsDebugBox(const glm::vec3& center, const glm::vec3
 	const GLboolean cullWasEnabled = glIsEnabled(GL_CULL_FACE);
 	glDisable(GL_CULL_FACE);
 
-	glUseProgram(m_boundsDebugProgram);
-	glBindVertexArray(m_boundsDebugVao);
+	glUseProgram(m_boundsDebug.program);
+	glBindVertexArray(m_boundsDebug.vao);
 
 	glm::mat4 model(1.0f);
 	model = glm::translate(model, center);
 	model = glm::scale(model, extent);
 
-	const GLint viewProjLoc = glGetUniformLocation(m_boundsDebugProgram, "uViewProj");
+	const GLint viewProjLoc = glGetUniformLocation(m_boundsDebug.program, "uViewProj");
 	if (viewProjLoc >= 0)
 	{
 		glUniformMatrix4fv(viewProjLoc, 1, GL_FALSE, &viewProj[0][0]);
 	}
-	const GLint modelLoc = glGetUniformLocation(m_boundsDebugProgram, "uModel");
+	const GLint modelLoc = glGetUniformLocation(m_boundsDebug.program, "uModel");
 	if (modelLoc >= 0)
 	{
 		glUniformMatrix4fv(modelLoc, 1, GL_FALSE, &model[0][0]);
 	}
-	const GLint colorLoc = glGetUniformLocation(m_boundsDebugProgram, "uColor");
+	const GLint colorLoc = glGetUniformLocation(m_boundsDebug.program, "uColor");
 	if (colorLoc >= 0)
 	{
 		glUniform4f(colorLoc, 0.95f, 0.4f, 0.2f, 1.0f);
 	}
 
-	glDrawArrays(GL_LINES, 0, m_boundsDebugVertexCount);
+	glDrawArrays(GL_LINES, 0, m_boundsDebug.vertexCount);
 
 	glBindVertexArray(0);
 	glUseProgram(0);
@@ -9512,25 +9512,25 @@ unsigned int OpenGLRenderer::preloadUITexture(const std::string& path)
 // ---------------------------------------------------------------------------
 bool OpenGLRenderer::ensureThumbnailFbo(int size)
 {
-	if (m_thumbFbo != 0 && m_thumbSize == size)
+	if (m_thumb.fbo != 0 && m_thumb.size == size)
 		return true;
 
 	releaseThumbnailFbo();
 
-	glGenFramebuffers(1, &m_thumbFbo);
-	glBindFramebuffer(GL_FRAMEBUFFER, m_thumbFbo);
+	glGenFramebuffers(1, &m_thumb.fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, m_thumb.fbo);
 
-	glGenTextures(1, &m_thumbColorTex);
-	glBindTexture(GL_TEXTURE_2D, m_thumbColorTex);
+	glGenTextures(1, &m_thumb.colorTex);
+	glBindTexture(GL_TEXTURE_2D, m_thumb.colorTex);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, size, size, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_thumbColorTex, 0);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_thumb.colorTex, 0);
 
-	glGenRenderbuffers(1, &m_thumbDepthRbo);
-	glBindRenderbuffer(GL_RENDERBUFFER, m_thumbDepthRbo);
+	glGenRenderbuffers(1, &m_thumb.depthRbo);
+	glBindRenderbuffer(GL_RENDERBUFFER, m_thumb.depthRbo);
 	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, size, size);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_thumbDepthRbo);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_thumb.depthRbo);
 
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
 	{
@@ -9540,16 +9540,16 @@ bool OpenGLRenderer::ensureThumbnailFbo(int size)
 	}
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	m_thumbSize = size;
+	m_thumb.size = size;
 	return true;
 }
 
 void OpenGLRenderer::releaseThumbnailFbo()
 {
-	if (m_thumbFbo) { glDeleteFramebuffers(1, &m_thumbFbo); m_thumbFbo = 0; }
-	if (m_thumbColorTex) { glDeleteTextures(1, &m_thumbColorTex); m_thumbColorTex = 0; }
-	if (m_thumbDepthRbo) { glDeleteRenderbuffers(1, &m_thumbDepthRbo); m_thumbDepthRbo = 0; }
-	m_thumbSize = 0;
+	if (m_thumb.fbo) { glDeleteFramebuffers(1, &m_thumb.fbo); m_thumb.fbo = 0; }
+	if (m_thumb.colorTex) { glDeleteTextures(1, &m_thumb.colorTex); m_thumb.colorTex = 0; }
+	if (m_thumb.depthRbo) { glDeleteRenderbuffers(1, &m_thumb.depthRbo); m_thumb.depthRbo = 0; }
+	m_thumb.size = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -9770,7 +9770,7 @@ unsigned int OpenGLRenderer::generateAssetThumbnail(const std::string& assetPath
 	glGetIntegerv(GL_VIEWPORT, prevViewport);
 
 	// ── Render into thumbnail FBO ──
-	glBindFramebuffer(GL_FRAMEBUFFER, m_thumbFbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, m_thumb.fbo);
 	glViewport(0, 0, kThumbSize, kThumbSize);
 	glClearColor(0.18f, 0.18f, 0.20f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -9794,7 +9794,7 @@ unsigned int OpenGLRenderer::generateAssetThumbnail(const std::string& assetPath
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, m_thumbFbo);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, m_thumb.fbo);
 	glBindTexture(GL_TEXTURE_2D, thumbTex);
 	glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, kThumbSize, kThumbSize);
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
@@ -10515,28 +10515,28 @@ SDL_Window* OpenGLRenderer::window() const
 // â”€â”€â”€ Entity pick FBO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 bool OpenGLRenderer::ensurePickFbo(int width, int height)
 {
-	if (m_pickFbo != 0 && m_pickWidth == width && m_pickHeight == height)
+	if (m_pick.fbo != 0 && m_pick.width == width && m_pick.height == height)
 	{
 		return true;
 	}
 	releasePickFbo();
-	m_pickWidth = width;
-	m_pickHeight = height;
+	m_pick.width = width;
+	m_pick.height = height;
 
-	glGenFramebuffers(1, &m_pickFbo);
-	glBindFramebuffer(GL_FRAMEBUFFER, m_pickFbo);
+	glGenFramebuffers(1, &m_pick.fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, m_pick.fbo);
 
-	glGenTextures(1, &m_pickColorTex);
-	glBindTexture(GL_TEXTURE_2D, m_pickColorTex);
+	glGenTextures(1, &m_pick.colorTex);
+	glBindTexture(GL_TEXTURE_2D, m_pick.colorTex);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, width, height, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, nullptr);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_pickColorTex, 0);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_pick.colorTex, 0);
 
-	glGenRenderbuffers(1, &m_pickDepthRbo);
-	glBindRenderbuffer(GL_RENDERBUFFER, m_pickDepthRbo);
+	glGenRenderbuffers(1, &m_pick.depthRbo);
+	glBindRenderbuffer(GL_RENDERBUFFER, m_pick.depthRbo);
 	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, m_pickDepthRbo);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, m_pick.depthRbo);
 
 	const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -10547,7 +10547,7 @@ bool OpenGLRenderer::ensurePickFbo(int width, int height)
 	}
 
 	// Build pick shader if needed
-	if (m_pickProgram == 0)
+	if (m_pick.program == 0)
 	{
 		const std::string vs =
 			"#version 460 core\n"
@@ -10586,32 +10586,32 @@ bool OpenGLRenderer::ensurePickFbo(int width, int height)
 			glDeleteProgram(prog);
 			return false;
 		}
-		m_pickProgram = prog;
-		m_pickLocModel = glGetUniformLocation(prog, "uModel");
-		m_pickLocView = glGetUniformLocation(prog, "uView");
-		m_pickLocProjection = glGetUniformLocation(prog, "uProjection");
-		m_pickLocEntityId = glGetUniformLocation(prog, "uEntityId");
+		m_pick.program = prog;
+		m_pick.locModel = glGetUniformLocation(prog, "uModel");
+		m_pick.locView = glGetUniformLocation(prog, "uView");
+		m_pick.locProjection = glGetUniformLocation(prog, "uProjection");
+		m_pick.locEntityId = glGetUniformLocation(prog, "uEntityId");
 	}
 	return true;
 }
 
 void OpenGLRenderer::releasePickFbo()
 {
-	if (m_pickColorTex) { glDeleteTextures(1, &m_pickColorTex); m_pickColorTex = 0; }
-	if (m_pickDepthRbo) { glDeleteRenderbuffers(1, &m_pickDepthRbo); m_pickDepthRbo = 0; }
-	if (m_pickFbo) { glDeleteFramebuffers(1, &m_pickFbo); m_pickFbo = 0; }
-	if (m_pickProgram) { glDeleteProgram(m_pickProgram); m_pickProgram = 0; }
-	m_pickWidth = 0;
-	m_pickHeight = 0;
+	if (m_pick.colorTex) { glDeleteTextures(1, &m_pick.colorTex); m_pick.colorTex = 0; }
+	if (m_pick.depthRbo) { glDeleteRenderbuffers(1, &m_pick.depthRbo); m_pick.depthRbo = 0; }
+	if (m_pick.fbo) { glDeleteFramebuffers(1, &m_pick.fbo); m_pick.fbo = 0; }
+	if (m_pick.program) { glDeleteProgram(m_pick.program); m_pick.program = 0; }
+	m_pick.width = 0;
+	m_pick.height = 0;
 }
 
 void OpenGLRenderer::renderPickBuffer(const glm::mat4& view, const glm::mat4& projection)
 {
-	if (m_pickFbo == 0 || m_pickProgram == 0)
+	if (m_pick.fbo == 0 || m_pick.program == 0)
 		return;
 
-	glBindFramebuffer(GL_FRAMEBUFFER, m_pickFbo);
-	glViewport(0, 0, m_pickWidth, m_pickHeight);
+	glBindFramebuffer(GL_FRAMEBUFFER, m_pick.fbo);
+	glViewport(0, 0, m_pick.width, m_pick.height);
 	const GLuint clearId = 0;
 	glClearBufferuiv(GL_COLOR, 0, &clearId);
 	glClear(GL_DEPTH_BUFFER_BIT);
@@ -10621,25 +10621,25 @@ void OpenGLRenderer::renderPickBuffer(const glm::mat4& view, const glm::mat4& pr
 	if (vpRect.z > 0.0f && vpRect.w > 0.0f)
 	{
 		glViewport(static_cast<int>(vpRect.x),
-				   m_pickHeight - static_cast<int>(vpRect.y) - static_cast<int>(vpRect.w),
+				   m_pick.height - static_cast<int>(vpRect.y) - static_cast<int>(vpRect.w),
 				   static_cast<int>(vpRect.z), static_cast<int>(vpRect.w));
 	}
 
-	glUseProgram(m_pickProgram);
-	if (m_pickLocView >= 0)
-		glUniformMatrix4fv(m_pickLocView, 1, GL_FALSE, &view[0][0]);
-	if (m_pickLocProjection >= 0)
-		glUniformMatrix4fv(m_pickLocProjection, 1, GL_FALSE, &projection[0][0]);
+	glUseProgram(m_pick.program);
+	if (m_pick.locView >= 0)
+		glUniformMatrix4fv(m_pick.locView, 1, GL_FALSE, &view[0][0]);
+	if (m_pick.locProjection >= 0)
+		glUniformMatrix4fv(m_pick.locProjection, 1, GL_FALSE, &projection[0][0]);
 
 	for (const auto& cmd : m_drawList)
 	{
 		if (cmd.entityId == 0 || !cmd.obj)
 			continue;
 
-		if (m_pickLocModel >= 0)
-			glUniformMatrix4fv(m_pickLocModel, 1, GL_FALSE, &cmd.modelMatrix[0][0]);
-		if (m_pickLocEntityId >= 0)
-			glUniform1ui(m_pickLocEntityId, cmd.entityId);
+		if (m_pick.locModel >= 0)
+			glUniformMatrix4fv(m_pick.locModel, 1, GL_FALSE, &cmd.modelMatrix[0][0]);
+		if (m_pick.locEntityId >= 0)
+			glUniform1ui(m_pick.locEntityId, cmd.entityId);
 
 		const GLuint vao = cmd.obj->getVao();
 		const GLsizei indexCount = cmd.obj->getIndexCount();
@@ -10679,11 +10679,11 @@ void OpenGLRenderer::renderPickBuffer(const glm::mat4& view, const glm::mat4& pr
 
 void OpenGLRenderer::renderPickBufferSelectedEntities(const glm::mat4& view, const glm::mat4& projection, const std::unordered_set<unsigned int>& entityIds)
 {
-	if (m_pickFbo == 0 || m_pickProgram == 0 || entityIds.empty())
+	if (m_pick.fbo == 0 || m_pick.program == 0 || entityIds.empty())
 		return;
 
-	glBindFramebuffer(GL_FRAMEBUFFER, m_pickFbo);
-	glViewport(0, 0, m_pickWidth, m_pickHeight);
+	glBindFramebuffer(GL_FRAMEBUFFER, m_pick.fbo);
+	glViewport(0, 0, m_pick.width, m_pick.height);
 	const GLuint clearId = 0;
 	glClearBufferuiv(GL_COLOR, 0, &clearId);
 	glClear(GL_DEPTH_BUFFER_BIT);
@@ -10693,25 +10693,25 @@ void OpenGLRenderer::renderPickBufferSelectedEntities(const glm::mat4& view, con
 	if (vpRect.z > 0.0f && vpRect.w > 0.0f)
 	{
 		glViewport(static_cast<int>(vpRect.x),
-				   m_pickHeight - static_cast<int>(vpRect.y) - static_cast<int>(vpRect.w),
+				   m_pick.height - static_cast<int>(vpRect.y) - static_cast<int>(vpRect.w),
 				   static_cast<int>(vpRect.z), static_cast<int>(vpRect.w));
 	}
 
-	glUseProgram(m_pickProgram);
-	if (m_pickLocView >= 0)
-		glUniformMatrix4fv(m_pickLocView, 1, GL_FALSE, &view[0][0]);
-	if (m_pickLocProjection >= 0)
-		glUniformMatrix4fv(m_pickLocProjection, 1, GL_FALSE, &projection[0][0]);
+	glUseProgram(m_pick.program);
+	if (m_pick.locView >= 0)
+		glUniformMatrix4fv(m_pick.locView, 1, GL_FALSE, &view[0][0]);
+	if (m_pick.locProjection >= 0)
+		glUniformMatrix4fv(m_pick.locProjection, 1, GL_FALSE, &projection[0][0]);
 
 	for (const auto& cmd : m_drawList)
 	{
 		if (!cmd.obj || entityIds.count(cmd.entityId) == 0)
 			continue;
 
-		if (m_pickLocModel >= 0)
-			glUniformMatrix4fv(m_pickLocModel, 1, GL_FALSE, &cmd.modelMatrix[0][0]);
-		if (m_pickLocEntityId >= 0)
-			glUniform1ui(m_pickLocEntityId, cmd.entityId);
+		if (m_pick.locModel >= 0)
+			glUniformMatrix4fv(m_pick.locModel, 1, GL_FALSE, &cmd.modelMatrix[0][0]);
+		if (m_pick.locEntityId >= 0)
+			glUniform1ui(m_pick.locEntityId, cmd.entityId);
 
 		const GLuint vao = cmd.obj->getVao();
 		const GLsizei indexCount = cmd.obj->getIndexCount();
@@ -10750,15 +10750,15 @@ void OpenGLRenderer::renderPickBufferSelectedEntities(const glm::mat4& view, con
 
 unsigned int OpenGLRenderer::pickEntityAt(int x, int y)
 {
-	if (m_pickFbo == 0)
+	if (m_pick.fbo == 0)
 		return 0;
 
 	// Flip Y (SDL top-left â†’ GL bottom-left)
-	const int glY = m_pickHeight - 1 - y;
-	if (x < 0 || x >= m_pickWidth || glY < 0 || glY >= m_pickHeight)
+	const int glY = m_pick.height - 1 - y;
+	if (x < 0 || x >= m_pick.width || glY < 0 || glY >= m_pick.height)
 		return 0;
 
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, m_pickFbo);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, m_pick.fbo);
 	unsigned int entityId = 0;
 	glReadPixels(x, glY, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, &entityId);
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
@@ -10856,7 +10856,7 @@ bool OpenGLRenderer::screenToWorldPos(int screenX, int screenY, Vec3& outWorldPo
 // â”€â”€â”€ Selection outline (post-process edge detection on pick buffer) â”€â”€â”€â”€â”€â”€â”€â”€â”€
 bool OpenGLRenderer::ensureOutlineResources()
 {
-	if (m_outlineProgram != 0)
+	if (m_outline.program != 0)
 		return true;
 
 	const std::string vs =
@@ -10912,42 +10912,42 @@ bool OpenGLRenderer::ensureOutlineResources()
 	glGetProgramiv(prog, GL_LINK_STATUS, &linked);
 	if (!linked) { glDeleteProgram(prog); return false; }
 
-	m_outlineProgram = prog;
-	m_outlineLocPickTex = glGetUniformLocation(prog, "uPickTex");
-	m_outlineLocOutlineColor = glGetUniformLocation(prog, "uOutlineColor");
-	m_outlineLocThickness = glGetUniformLocation(prog, "uThickness");
+	m_outline.program = prog;
+	m_outline.locPickTex = glGetUniformLocation(prog, "uPickTex");
+	m_outline.locOutlineColor = glGetUniformLocation(prog, "uOutlineColor");
+	m_outline.locThickness = glGetUniformLocation(prog, "uThickness");
 
-	glGenVertexArrays(1, &m_outlineVao);
+	glGenVertexArrays(1, &m_outline.vao);
 
 	return true;
 }
 
 void OpenGLRenderer::releaseOutlineResources()
 {
-	if (m_outlineProgram) { glDeleteProgram(m_outlineProgram); m_outlineProgram = 0; }
-	if (m_outlineVao) { glDeleteVertexArrays(1, &m_outlineVao); m_outlineVao = 0; }
+	if (m_outline.program) { glDeleteProgram(m_outline.program); m_outline.program = 0; }
+	if (m_outline.vao) { glDeleteVertexArrays(1, &m_outline.vao); m_outline.vao = 0; }
 }
 
 void OpenGLRenderer::drawSelectionOutline()
 {
-	if (!ensureOutlineResources() || m_pickColorTex == 0 || m_selectedEntities.empty())
+	if (!ensureOutlineResources() || m_pick.colorTex == 0 || m_selectedEntities.empty())
 		return;
 
 	glDisable(GL_DEPTH_TEST);
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-	glUseProgram(m_outlineProgram);
+	glUseProgram(m_outline.program);
 	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, m_pickColorTex);
-	if (m_outlineLocPickTex >= 0)
-		glUniform1i(m_outlineLocPickTex, 0);
-	if (m_outlineLocOutlineColor >= 0)
-		glUniform4f(m_outlineLocOutlineColor, 1.0f, 0.6f, 0.0f, 1.0f);
-	if (m_outlineLocThickness >= 0)
-		glUniform1f(m_outlineLocThickness, 2.0f);
+	glBindTexture(GL_TEXTURE_2D, m_pick.colorTex);
+	if (m_outline.locPickTex >= 0)
+		glUniform1i(m_outline.locPickTex, 0);
+	if (m_outline.locOutlineColor >= 0)
+		glUniform4f(m_outline.locOutlineColor, 1.0f, 0.6f, 0.0f, 1.0f);
+	if (m_outline.locThickness >= 0)
+		glUniform1f(m_outline.locThickness, 2.0f);
 
-	glBindVertexArray(m_outlineVao);
+	glBindVertexArray(m_outline.vao);
 	glDrawArrays(GL_TRIANGLES, 0, 3);
 	glBindVertexArray(0);
 
@@ -11248,7 +11248,7 @@ void OpenGLRenderer::releaseAllTabFbos()
 
 bool OpenGLRenderer::ensureGizmoResources()
 {
-	if (m_gizmoProgram != 0)
+	if (m_gizmo.program != 0)
 		return true;
 
 	const char* vs = R"(
@@ -11274,20 +11274,20 @@ void main() {
 	GLuint fsh = glCreateShader(GL_FRAGMENT_SHADER);
 	glShaderSource(fsh, 1, &fs, nullptr);
 	glCompileShader(fsh);
-	m_gizmoProgram = glCreateProgram();
-	glAttachShader(m_gizmoProgram, vsh);
-	glAttachShader(m_gizmoProgram, fsh);
-	glLinkProgram(m_gizmoProgram);
+	m_gizmo.program = glCreateProgram();
+	glAttachShader(m_gizmo.program, vsh);
+	glAttachShader(m_gizmo.program, fsh);
+	glLinkProgram(m_gizmo.program);
 	glDeleteShader(vsh);
 	glDeleteShader(fsh);
 
-	m_gizmoLocMVP = glGetUniformLocation(m_gizmoProgram, "uMVP");
-	m_gizmoLocColor = glGetUniformLocation(m_gizmoProgram, "uColor");
+	m_gizmo.locMVP = glGetUniformLocation(m_gizmo.program, "uMVP");
+	m_gizmo.locColor = glGetUniformLocation(m_gizmo.program, "uColor");
 
-	glGenVertexArrays(1, &m_gizmoVao);
-	glGenBuffers(1, &m_gizmoVbo);
-	glBindVertexArray(m_gizmoVao);
-	glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+	glGenVertexArrays(1, &m_gizmo.vao);
+	glGenBuffers(1, &m_gizmo.vbo);
+	glBindVertexArray(m_gizmo.vao);
+	glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 	glBufferData(GL_ARRAY_BUFFER, 4096 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
@@ -11298,9 +11298,9 @@ void main() {
 
 void OpenGLRenderer::releaseGizmoResources()
 {
-	if (m_gizmoProgram) { glDeleteProgram(m_gizmoProgram); m_gizmoProgram = 0; }
-	if (m_gizmoVbo) { glDeleteBuffers(1, &m_gizmoVbo); m_gizmoVbo = 0; }
-	if (m_gizmoVao) { glDeleteVertexArrays(1, &m_gizmoVao); m_gizmoVao = 0; }
+	if (m_gizmo.program) { glDeleteProgram(m_gizmo.program); m_gizmo.program = 0; }
+	if (m_gizmo.vbo) { glDeleteBuffers(1, &m_gizmo.vbo); m_gizmo.vbo = 0; }
+	if (m_gizmo.vao) { glDeleteVertexArrays(1, &m_gizmo.vao); m_gizmo.vao = 0; }
 }
 
 // ============================================================================
@@ -11309,7 +11309,7 @@ void OpenGLRenderer::releaseGizmoResources()
 
 bool OpenGLRenderer::ensureGridResources()
 {
-	if (m_gridProgram != 0)
+	if (m_grid.program != 0)
 		return true;
 
 	const char* vs = R"(
@@ -11373,18 +11373,18 @@ void main() {
 	GLuint fsh = glCreateShader(GL_FRAGMENT_SHADER);
 	glShaderSource(fsh, 1, &fs, nullptr);
 	glCompileShader(fsh);
-	m_gridProgram = glCreateProgram();
-	glAttachShader(m_gridProgram, vsh);
-	glAttachShader(m_gridProgram, fsh);
-	glLinkProgram(m_gridProgram);
+	m_grid.program = glCreateProgram();
+	glAttachShader(m_grid.program, vsh);
+	glAttachShader(m_grid.program, fsh);
+	glLinkProgram(m_grid.program);
 	glDeleteShader(vsh);
 	glDeleteShader(fsh);
 
-	m_gridLocViewProj  = glGetUniformLocation(m_gridProgram, "uViewProj");
-	m_gridLocCameraPos = glGetUniformLocation(m_gridProgram, "uCameraPos");
-	m_gridLocGridSize  = glGetUniformLocation(m_gridProgram, "uGridSize");
-	m_gridLocColor     = glGetUniformLocation(m_gridProgram, "uColor");
-	m_gridLocFadeRadius = glGetUniformLocation(m_gridProgram, "uFadeRadius");
+	m_grid.locViewProj  = glGetUniformLocation(m_grid.program, "uViewProj");
+	m_grid.locCameraPos = glGetUniformLocation(m_grid.program, "uCameraPos");
+	m_grid.locGridSize  = glGetUniformLocation(m_grid.program, "uGridSize");
+	m_grid.locColor     = glGetUniformLocation(m_grid.program, "uColor");
+	m_grid.locFadeRadius = glGetUniformLocation(m_grid.program, "uFadeRadius");
 
 	// Large quad on XZ plane (Y=0)
 	const float S = 500.0f;
@@ -11397,10 +11397,10 @@ void main() {
 		-S, 0.0f,  S,
 	};
 
-	glGenVertexArrays(1, &m_gridVao);
-	glGenBuffers(1, &m_gridVbo);
-	glBindVertexArray(m_gridVao);
-	glBindBuffer(GL_ARRAY_BUFFER, m_gridVbo);
+	glGenVertexArrays(1, &m_grid.vao);
+	glGenBuffers(1, &m_grid.vbo);
+	glBindVertexArray(m_grid.vao);
+	glBindBuffer(GL_ARRAY_BUFFER, m_grid.vbo);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(verts), verts, GL_STATIC_DRAW);
 	glEnableVertexAttribArray(0);
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
@@ -11411,9 +11411,9 @@ void main() {
 
 void OpenGLRenderer::releaseGridResources()
 {
-	if (m_gridProgram) { glDeleteProgram(m_gridProgram); m_gridProgram = 0; }
-	if (m_gridVbo) { glDeleteBuffers(1, &m_gridVbo); m_gridVbo = 0; }
-	if (m_gridVao) { glDeleteVertexArrays(1, &m_gridVao); m_gridVao = 0; }
+	if (m_grid.program) { glDeleteProgram(m_grid.program); m_grid.program = 0; }
+	if (m_grid.vbo) { glDeleteBuffers(1, &m_grid.vbo); m_grid.vbo = 0; }
+	if (m_grid.vao) { glDeleteVertexArrays(1, &m_grid.vao); m_grid.vao = 0; }
 }
 
 void OpenGLRenderer::drawViewportGrid(const glm::mat4& view, const glm::mat4& projection)
@@ -11428,18 +11428,18 @@ void OpenGLRenderer::drawViewportGrid(const glm::mat4& view, const glm::mat4& pr
 	glDepthMask(GL_FALSE);
 	glEnable(GL_DEPTH_TEST);
 
-	glUseProgram(m_gridProgram);
-	glUniformMatrix4fv(m_gridLocViewProj, 1, GL_FALSE, glm::value_ptr(vp));
+	glUseProgram(m_grid.program);
+	glUniformMatrix4fv(m_grid.locViewProj, 1, GL_FALSE, glm::value_ptr(vp));
 
 	const glm::vec3 camPos = m_camera ? glm::vec3{
 		m_camera->getPosition().x, m_camera->getPosition().y, m_camera->getPosition().z
 	} : glm::vec3(0.0f);
-	glUniform3fv(m_gridLocCameraPos, 1, glm::value_ptr(camPos));
-	glUniform1f(m_gridLocGridSize, m_gridSize);
-	glUniform4f(m_gridLocColor, 0.5f, 0.5f, 0.5f, 0.6f);
-	glUniform1f(m_gridLocFadeRadius, 200.0f);
+	glUniform3fv(m_grid.locCameraPos, 1, glm::value_ptr(camPos));
+	glUniform1f(m_grid.locGridSize, m_gridSize);
+	glUniform4f(m_grid.locColor, 0.5f, 0.5f, 0.5f, 0.6f);
+	glUniform1f(m_grid.locFadeRadius, 200.0f);
 
-	glBindVertexArray(m_gridVao);
+	glBindVertexArray(m_grid.vao);
 	glDrawArrays(GL_TRIANGLES, 0, 6);
 	glBindVertexArray(0);
 
@@ -11484,7 +11484,7 @@ glm::vec3 OpenGLRenderer::getGizmoWorldAxis(const ECS::TransformComponent& tc, i
 
 void OpenGLRenderer::renderGizmo(const glm::mat4& view, const glm::mat4& projection)
 {
-	if (m_selectedEntities.empty() || m_gizmoMode == GizmoMode::None)
+	if (m_selectedEntities.empty() || m_gizmo.mode == GizmoMode::None)
 		return;
 
 	const unsigned int primaryEntity = *m_selectedEntities.begin();
@@ -11509,9 +11509,9 @@ void OpenGLRenderer::renderGizmo(const glm::mat4& view, const glm::mat4& project
 	model = model * glm::scale(glm::mat4(1.0f), glm::vec3(gizmoScale));
 	const glm::mat4 mvp = projection * view * model;
 
-	glUseProgram(m_gizmoProgram);
-	glUniformMatrix4fv(m_gizmoLocMVP, 1, GL_FALSE, &mvp[0][0]);
-	glBindVertexArray(m_gizmoVao);
+	glUseProgram(m_gizmo.program);
+	glUniformMatrix4fv(m_gizmo.locMVP, 1, GL_FALSE, &mvp[0][0]);
+	glBindVertexArray(m_gizmo.vao);
 
 	glDisable(GL_DEPTH_TEST);
 	glLineWidth(4.0f);
@@ -11522,14 +11522,14 @@ void OpenGLRenderer::renderGizmo(const glm::mat4& view, const glm::mat4& project
 		{ 0.3f, 0.3f, 1.0f }
 	};
 
-	if (m_gizmoMode == GizmoMode::Translate)
+	if (m_gizmo.mode == GizmoMode::Translate)
 	{
 		for (int a = 0; a < 3; ++a)
 		{
-			const bool hovered = (static_cast<int>(m_gizmoHoveredAxis) - 1 == a) ||
-								 (static_cast<int>(m_gizmoActiveAxis) - 1 == a);
+			const bool hovered = (static_cast<int>(m_gizmo.hoveredAxis) - 1 == a) ||
+								 (static_cast<int>(m_gizmo.activeAxis) - 1 == a);
 			glm::vec3 col = hovered ? glm::vec3(1.0f, 1.0f, 0.3f) : axisColors[a];
-			glUniform3fv(m_gizmoLocColor, 1, &col[0]);
+			glUniform3fv(m_gizmo.locColor, 1, &col[0]);
 
 			// In local space, axes are simply (1,0,0), (0,1,0), (0,0,1)
 			glm::vec3 dir(0.0f); dir[a] = 1.0f;
@@ -11544,45 +11544,45 @@ void OpenGLRenderer::renderGizmo(const glm::mat4& view, const glm::mat4& project
 				tip.x, tip.y, tip.z, back.x - up.x * arrowLen * 0.3f, back.y - up.y * arrowLen * 0.3f, back.z - up.z * arrowLen * 0.3f
 			};
 
-			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
 			glDrawArrays(GL_LINES, 0, 6);
 		}
 	}
-	else if (m_gizmoMode == GizmoMode::Rotate)
+	else if (m_gizmo.mode == GizmoMode::Rotate)
 	{
 		constexpr int segments = 48;
 		for (int a = 0; a < 3; ++a)
 		{
-			const bool hovered = (static_cast<int>(m_gizmoHoveredAxis) - 1 == a) ||
-								 (static_cast<int>(m_gizmoActiveAxis) - 1 == a);
+			const bool hovered = (static_cast<int>(m_gizmo.hoveredAxis) - 1 == a) ||
+								 (static_cast<int>(m_gizmo.activeAxis) - 1 == a);
 			glm::vec3 col = hovered ? glm::vec3(1.0f, 1.0f, 0.3f) : axisColors[a];
-			glUniform3fv(m_gizmoLocColor, 1, &col[0]);
+			glUniform3fv(m_gizmo.locColor, 1, &col[0]);
 
 			std::vector<float> circleVerts;
 			circleVerts.reserve((segments + 1) * 3);
 			buildCircleVerts(circleVerts, segments, 1.0f, a);
 
-			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 			glBufferSubData(GL_ARRAY_BUFFER, 0, circleVerts.size() * sizeof(float), circleVerts.data());
 			glDrawArrays(GL_LINE_STRIP, 0, segments + 1);
 		}
 	}
-	else if (m_gizmoMode == GizmoMode::Scale)
+	else if (m_gizmo.mode == GizmoMode::Scale)
 	{
 		for (int a = 0; a < 3; ++a)
 		{
-			const bool hovered = (static_cast<int>(m_gizmoHoveredAxis) - 1 == a) ||
-								 (static_cast<int>(m_gizmoActiveAxis) - 1 == a);
+			const bool hovered = (static_cast<int>(m_gizmo.hoveredAxis) - 1 == a) ||
+								 (static_cast<int>(m_gizmo.activeAxis) - 1 == a);
 			glm::vec3 col = hovered ? glm::vec3(1.0f, 1.0f, 0.3f) : axisColors[a];
-			glUniform3fv(m_gizmoLocColor, 1, &col[0]);
+			glUniform3fv(m_gizmo.locColor, 1, &col[0]);
 
 			glm::vec3 dir(0.0f); dir[a] = 1.0f;
 			const float cubeSize = 0.06f;
 			const glm::vec3 tip = dir;
 
 			float shaft[] = { 0.0f, 0.0f, 0.0f, tip.x, tip.y, tip.z };
-			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(shaft), shaft);
 			glDrawArrays(GL_LINES, 0, 2);
 
@@ -11619,8 +11619,8 @@ void OpenGLRenderer::renderColliderDebug(const glm::mat4& view, const glm::mat4&
 	if (entities.empty())
 		return;
 
-	glUseProgram(m_gizmoProgram);
-	glBindVertexArray(m_gizmoVao);
+	glUseProgram(m_gizmo.program);
+	glBindVertexArray(m_gizmo.vao);
 	glDisable(GL_DEPTH_TEST);
 	glLineWidth(2.0f);
 
@@ -11652,7 +11652,7 @@ void OpenGLRenderer::renderColliderDebug(const glm::mat4& view, const glm::mat4&
 				}
 			}
 		}
-		glUniform3fv(m_gizmoLocColor, 1, &color[0]);
+		glUniform3fv(m_gizmo.locColor, 1, &color[0]);
 
 		// Build model matrix: entity position + rotation + collider offset
 		const glm::vec3 entityPos(tc->position[0], tc->position[1], tc->position[2]);
@@ -11664,7 +11664,7 @@ void OpenGLRenderer::renderColliderDebug(const glm::mat4& view, const glm::mat4&
 		model = glm::translate(model, offset);
 
 		const glm::mat4 mvp = projection * view * model;
-		glUniformMatrix4fv(m_gizmoLocMVP, 1, GL_FALSE, &mvp[0][0]);
+		glUniformMatrix4fv(m_gizmo.locMVP, 1, GL_FALSE, &mvp[0][0]);
 
 		constexpr float PI = 3.14159265f;
 		constexpr int segments = 32;
@@ -11694,7 +11694,7 @@ void OpenGLRenderer::renderColliderDebug(const glm::mat4& view, const glm::mat4&
 				 hx,-hy, hz,  hx, hy, hz,
 				-hx,-hy, hz, -hx, hy, hz,
 			};
-			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(boxVerts), boxVerts);
 			glDrawArrays(GL_LINES, 0, 24);
 			break;
@@ -11706,7 +11706,7 @@ void OpenGLRenderer::renderColliderDebug(const glm::mat4& view, const glm::mat4&
 			{
 				verts.clear();
 				buildCircleVerts(verts, segments, r, axis);
-				glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+				glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 				glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(float), verts.data());
 				glDrawArrays(GL_LINE_STRIP, 0, segments + 1);
 			}
@@ -11727,7 +11727,7 @@ void OpenGLRenderer::renderColliderDebug(const glm::mat4& view, const glm::mat4&
 				verts.push_back(hh);
 				verts.push_back(std::sin(angle) * r);
 			}
-			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 			glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(float), verts.data());
 			glDrawArrays(GL_LINE_STRIP, 0, segments + 1);
 
@@ -11740,7 +11740,7 @@ void OpenGLRenderer::renderColliderDebug(const glm::mat4& view, const glm::mat4&
 				verts.push_back(-hh);
 				verts.push_back(std::sin(angle) * r);
 			}
-			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 			glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(float), verts.data());
 			glDrawArrays(GL_LINE_STRIP, 0, segments + 1);
 
@@ -11753,7 +11753,7 @@ void OpenGLRenderer::renderColliderDebug(const glm::mat4& view, const glm::mat4&
 				verts.push_back(hh + std::sin(angle) * r);
 				verts.push_back(0.0f);
 			}
-			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 			glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(float), verts.data());
 			glDrawArrays(GL_LINE_STRIP, 0, halfSeg + 1);
 
@@ -11766,7 +11766,7 @@ void OpenGLRenderer::renderColliderDebug(const glm::mat4& view, const glm::mat4&
 				verts.push_back(-hh + std::sin(angle) * r);
 				verts.push_back(0.0f);
 			}
-			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 			glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(float), verts.data());
 			glDrawArrays(GL_LINE_STRIP, 0, halfSeg + 1);
 
@@ -11779,7 +11779,7 @@ void OpenGLRenderer::renderColliderDebug(const glm::mat4& view, const glm::mat4&
 				verts.push_back(hh + std::sin(angle) * r);
 				verts.push_back(std::cos(angle) * r);
 			}
-			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 			glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(float), verts.data());
 			glDrawArrays(GL_LINE_STRIP, 0, halfSeg + 1);
 
@@ -11792,7 +11792,7 @@ void OpenGLRenderer::renderColliderDebug(const glm::mat4& view, const glm::mat4&
 				verts.push_back(-hh + std::sin(angle) * r);
 				verts.push_back(std::cos(angle) * r);
 			}
-			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 			glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(float), verts.data());
 			glDrawArrays(GL_LINE_STRIP, 0, halfSeg + 1);
 
@@ -11803,7 +11803,7 @@ void OpenGLRenderer::renderColliderDebug(const glm::mat4& view, const glm::mat4&
 				0.0f, -hh,  r,  0.0f,  hh,  r,
 				0.0f, -hh, -r,  0.0f,  hh, -r,
 			};
-			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(capsuleLines), capsuleLines);
 			glDrawArrays(GL_LINES, 0, 8);
 			break;
@@ -11822,7 +11822,7 @@ void OpenGLRenderer::renderColliderDebug(const glm::mat4& view, const glm::mat4&
 				verts.push_back(hh);
 				verts.push_back(std::sin(angle) * r);
 			}
-			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 			glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(float), verts.data());
 			glDrawArrays(GL_LINE_STRIP, 0, segments + 1);
 
@@ -11835,7 +11835,7 @@ void OpenGLRenderer::renderColliderDebug(const glm::mat4& view, const glm::mat4&
 				verts.push_back(-hh);
 				verts.push_back(std::sin(angle) * r);
 			}
-			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 			glBufferSubData(GL_ARRAY_BUFFER, 0, verts.size() * sizeof(float), verts.data());
 			glDrawArrays(GL_LINE_STRIP, 0, segments + 1);
 
@@ -11846,7 +11846,7 @@ void OpenGLRenderer::renderColliderDebug(const glm::mat4& view, const glm::mat4&
 				0.0f, -hh,  r,  0.0f,  hh,  r,
 				0.0f, -hh, -r,  0.0f,  hh, -r,
 			};
-			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(cylLines), cylLines);
 			glDrawArrays(GL_LINES, 0, 8);
 			break;
@@ -11871,8 +11871,8 @@ void OpenGLRenderer::renderStreamingVolumeDebug(const glm::mat4& view, const glm
 	if (!ensureGizmoResources())
 		return;
 
-	glUseProgram(m_gizmoProgram);
-	glBindVertexArray(m_gizmoVao);
+	glUseProgram(m_gizmo.program);
+	glBindVertexArray(m_gizmo.vao);
 	glDisable(GL_DEPTH_TEST);
 	glLineWidth(2.0f);
 
@@ -11885,12 +11885,12 @@ void OpenGLRenderer::renderStreamingVolumeDebug(const glm::mat4& view, const glm
 			const auto& c = subLevels[vol.subLevelIndex].color;
 			color = glm::vec3(c.x, c.y, c.z);
 		}
-		glUniform3fv(m_gizmoLocColor, 1, &color[0]);
+		glUniform3fv(m_gizmo.locColor, 1, &color[0]);
 
 		const glm::vec3 center(vol.center.x, vol.center.y, vol.center.z);
 		const glm::mat4 model = glm::translate(glm::mat4(1.0f), center);
 		const glm::mat4 mvp = projection * view * model;
-		glUniformMatrix4fv(m_gizmoLocMVP, 1, GL_FALSE, &mvp[0][0]);
+		glUniformMatrix4fv(m_gizmo.locMVP, 1, GL_FALSE, &mvp[0][0]);
 
 		const float hx = vol.halfExtents.x;
 		const float hy = vol.halfExtents.y;
@@ -11913,7 +11913,7 @@ void OpenGLRenderer::renderStreamingVolumeDebug(const glm::mat4& view, const glm
 			 hx,-hy, hz,  hx, hy, hz,
 			-hx,-hy, hz, -hx, hy, hz,
 		};
-		glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+		glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 		glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(boxVerts), boxVerts);
 		glDrawArrays(GL_LINES, 0, 24);
 	}
@@ -11936,8 +11936,8 @@ void OpenGLRenderer::renderBoneDebug(const glm::mat4& view, const glm::mat4& pro
 
 	auto& ecs = ECS::ECSManager::Instance();
 
-	glUseProgram(m_gizmoProgram);
-	glBindVertexArray(m_gizmoVao);
+	glUseProgram(m_gizmo.program);
+	glBindVertexArray(m_gizmo.vao);
 	glDisable(GL_DEPTH_TEST);
 
 	for (const unsigned int entity : m_selectedEntities)
@@ -11993,7 +11993,7 @@ void OpenGLRenderer::renderBoneDebug(const glm::mat4& view, const glm::mat4& pro
 		// Draw bone lines (from each bone to its parent)
 		// Use identity MVP since positions are already in world space — use VP only
 		const glm::mat4 identity(1.0f);
-		glUniformMatrix4fv(m_gizmoLocMVP, 1, GL_FALSE, &vp[0][0]);
+		glUniformMatrix4fv(m_gizmo.locMVP, 1, GL_FALSE, &vp[0][0]);
 
 		glLineWidth(2.0f);
 
@@ -12005,7 +12005,7 @@ void OpenGLRenderer::renderBoneDebug(const glm::mat4& view, const glm::mat4& pro
 
 			// Bone color: cyan for normal bones
 			const glm::vec3 boneColor(0.0f, 0.9f, 0.9f);
-			glUniform3fv(m_gizmoLocColor, 1, &boneColor[0]);
+			glUniform3fv(m_gizmo.locColor, 1, &boneColor[0]);
 
 			const glm::vec3& from = boneWorldPositions[parentIdx];
 			const glm::vec3& to = boneWorldPositions[b];
@@ -12015,7 +12015,7 @@ void OpenGLRenderer::renderBoneDebug(const glm::mat4& view, const glm::mat4& pro
 				to.x, to.y, to.z
 			};
 
-			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(lineVerts), lineVerts);
 			glDrawArrays(GL_LINES, 0, 2);
 		}
@@ -12029,7 +12029,7 @@ void OpenGLRenderer::renderBoneDebug(const glm::mat4& view, const glm::mat4& pro
 			const glm::vec3 pointColor = isRoot
 				? glm::vec3(1.0f, 1.0f, 0.0f)   // yellow for root
 				: glm::vec3(0.0f, 0.9f, 0.9f);   // cyan for others
-			glUniform3fv(m_gizmoLocColor, 1, &pointColor[0]);
+			glUniform3fv(m_gizmo.locColor, 1, &pointColor[0]);
 
 			const glm::vec3& p = boneWorldPositions[b];
 
@@ -12041,7 +12041,7 @@ void OpenGLRenderer::renderBoneDebug(const glm::mat4& view, const glm::mat4& pro
 			};
 
 			glLineWidth(isRoot ? 3.0f : 2.0f);
-			glBindBuffer(GL_ARRAY_BUFFER, m_gizmoVbo);
+			glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
 			glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(crossVerts), crossVerts);
 			glDrawArrays(GL_LINES, 0, 6);
 		}
@@ -12055,7 +12055,7 @@ void OpenGLRenderer::renderBoneDebug(const glm::mat4& view, const glm::mat4& pro
 // Pick gizmo axis using rotated (local-space) axes projected to screen
 OpenGLRenderer::GizmoAxis OpenGLRenderer::pickGizmoAxis(const glm::mat4& view, const glm::mat4& projection, int screenX, int screenY) const
 {
-	if (m_selectedEntities.empty() || m_gizmoMode == GizmoMode::None)
+	if (m_selectedEntities.empty() || m_gizmo.mode == GizmoMode::None)
 		return GizmoAxis::None;
 
 	const unsigned int primaryEntity = *m_selectedEntities.begin();
@@ -12111,7 +12111,7 @@ OpenGLRenderer::GizmoAxis OpenGLRenderer::pickGizmoAxis(const glm::mat4& view, c
 	constexpr float kPickThreshold = 22.0f; // pixel threshold
 	float bestDist = kPickThreshold;
 
-	if (m_gizmoMode == GizmoMode::Rotate)
+	if (m_gizmo.mode == GizmoMode::Rotate)
 	{
 		// For rotation gizmos, test distance to the projected circle (ring)
 		const glm::mat3 rotMat = getEntityRotationMatrix(*tc);
@@ -12211,7 +12211,7 @@ static float closestTOnAxis(const glm::vec3& rayOrigin, const glm::vec3& rayDir,
 
 bool OpenGLRenderer::beginGizmoDrag(int screenX, int screenY)
 {
-	if (m_selectedEntities.empty() || m_gizmoMode == GizmoMode::None || !m_camera)
+	if (m_selectedEntities.empty() || m_gizmo.mode == GizmoMode::None || !m_camera)
 		return false;
 
 	const unsigned int primaryEntity = *m_selectedEntities.begin();
@@ -12231,22 +12231,22 @@ bool OpenGLRenderer::beginGizmoDrag(int screenX, int screenY)
 	const glm::vec3 entityPos{ tc->position[0], tc->position[1], tc->position[2] };
 	const glm::vec3 worldAxis = getGizmoWorldAxis(*tc, axisIdx);
 
-	m_gizmoActiveAxis = axis;
-	m_gizmoDragging = true;
-	m_gizmoDragEntityStart = entityPos;
-	m_gizmoDragWorldAxis = worldAxis;
-	m_gizmoDragRotStart = tc->rotation[axisIdx];
-	m_gizmoDragScaleStart = tc->scale[axisIdx];
-	m_gizmoDragStartScreen = glm::vec2{ static_cast<float>(screenX), static_cast<float>(screenY) };
-	m_gizmoDragOldTransform = *tc;
+	m_gizmo.activeAxis = axis;
+	m_gizmo.dragging = true;
+	m_gizmo.dragEntityStart = entityPos;
+	m_gizmo.dragWorldAxis = worldAxis;
+	m_gizmo.dragRotStart = tc->rotation[axisIdx];
+	m_gizmo.dragScaleStart = tc->scale[axisIdx];
+	m_gizmo.dragStartScreen = glm::vec2{ static_cast<float>(screenX), static_cast<float>(screenY) };
+	m_gizmo.dragOldTransform = *tc;
 
 	// Store old transforms for ALL selected entities (group undo)
-	m_gizmoDragOldTransforms.clear();
+	m_gizmo.dragOldTransforms.clear();
 	for (unsigned int eid : m_selectedEntities)
 	{
 		const auto* etc = ecs.getComponent<ECS::TransformComponent>(eid);
 		if (etc)
-			m_gizmoDragOldTransforms[eid] = *etc;
+			m_gizmo.dragOldTransforms[eid] = *etc;
 	}
 
 	// Compute the initial parameter along the axis ray
@@ -12258,14 +12258,14 @@ bool OpenGLRenderer::beginGizmoDrag(int screenX, int screenY)
 	const glm::mat4 invVP = glm::inverse(m_projectionMatrix * view);
 	glm::vec3 rayO, rayD;
 	screenToRay(bsx, bsy, bw, bh, invVP, rayO, rayD);
-	m_gizmoDragStartT = closestTOnAxis(rayO, rayD, entityPos, worldAxis);
+	m_gizmo.dragStartT = closestTOnAxis(rayO, rayD, entityPos, worldAxis);
 
 	return true;
 }
 
 void OpenGLRenderer::updateGizmoDrag(int screenX, int screenY)
 {
-	if (!m_gizmoDragging || m_gizmoActiveAxis == GizmoAxis::None || m_selectedEntities.empty() || !m_camera)
+	if (!m_gizmo.dragging || m_gizmo.activeAxis == GizmoAxis::None || m_selectedEntities.empty() || !m_camera)
 		return;
 
 	const unsigned int primaryEntity = *m_selectedEntities.begin();
@@ -12274,7 +12274,7 @@ void OpenGLRenderer::updateGizmoDrag(int screenX, int screenY)
 	if (!tc)
 		return;
 
-	const int axisIdx = static_cast<int>(m_gizmoActiveAxis) - 1;
+	const int axisIdx = static_cast<int>(m_gizmo.activeAxis) - 1;
 	const Mat4 engineView = m_camera->getViewMatrixColumnMajor();
 	const glm::mat4 view = glm::make_mat4(engineView.m);
 
@@ -12284,18 +12284,18 @@ void OpenGLRenderer::updateGizmoDrag(int screenX, int screenY)
 	const int localScreenX = screenX - static_cast<int>((ugvp.z > 0.0f) ? ugvp.x : 0.0f);
 	const int localScreenY = screenY - static_cast<int>((ugvp.w > 0.0f) ? ugvp.y : 0.0f);
 
-	if (m_gizmoMode == GizmoMode::Translate)
+	if (m_gizmo.mode == GizmoMode::Translate)
 	{
 		// Ray-plane intersection for 1:1 movement
 		const glm::mat4 invVP = glm::inverse(m_projectionMatrix * view);
 		glm::vec3 rayO, rayD;
 		screenToRay(localScreenX, localScreenY, w, h, invVP, rayO, rayD);
 
-		const float currentT = closestTOnAxis(rayO, rayD, m_gizmoDragEntityStart, m_gizmoDragWorldAxis);
-		const float deltaT = currentT - m_gizmoDragStartT;
+		const float currentT = closestTOnAxis(rayO, rayD, m_gizmo.dragEntityStart, m_gizmo.dragWorldAxis);
+		const float deltaT = currentT - m_gizmo.dragStartT;
 
 		// Move entity along the world-space axis
-		glm::vec3 newPos = m_gizmoDragEntityStart + m_gizmoDragWorldAxis * deltaT;
+		glm::vec3 newPos = m_gizmo.dragEntityStart + m_gizmo.dragWorldAxis * deltaT;
 
 		// Snap to grid when enabled
 		if (m_snapEnabled && m_gridSize > 0.0f)
@@ -12309,7 +12309,7 @@ void OpenGLRenderer::updateGizmoDrag(int screenX, int screenY)
 		tc->position[1] = newPos.y;
 		tc->position[2] = newPos.z;
 	}
-	else if (m_gizmoMode == GizmoMode::Rotate)
+	else if (m_gizmo.mode == GizmoMode::Rotate)
 	{
 		// Compute screen-space delta angle from mouse movement perpendicular
 		// to the projected rotation axis.
@@ -12326,22 +12326,22 @@ void OpenGLRenderer::updateGizmoDrag(int screenX, int screenY)
 			};
 		};
 
-		const glm::vec2 originScreen = project(m_gizmoDragEntityStart);
-		const glm::vec2 axisTipScreen = project(m_gizmoDragEntityStart + m_gizmoDragWorldAxis);
+		const glm::vec2 originScreen = project(m_gizmo.dragEntityStart);
+		const glm::vec2 axisTipScreen = project(m_gizmo.dragEntityStart + m_gizmo.dragWorldAxis);
 		glm::vec2 axisScreenDir = axisTipScreen - originScreen;
 		const float axisScreenLen = glm::length(axisScreenDir);
 		if (axisScreenLen < 1.0f) return;
 
 		const glm::vec2 axisPerp{ -axisScreenDir.y / axisScreenLen, axisScreenDir.x / axisScreenLen };
 		const glm::vec2 mouseDelta{
-			static_cast<float>(screenX) - m_gizmoDragStartScreen.x,
-			static_cast<float>(screenY) - m_gizmoDragStartScreen.y
+			static_cast<float>(screenX) - m_gizmo.dragStartScreen.x,
+			static_cast<float>(screenY) - m_gizmo.dragStartScreen.y
 		};
 		const float projectedPixels = glm::dot(mouseDelta, axisPerp);
 		const float deltaAngleRad = glm::radians(projectedPixels * 0.5f);
 
 		// Build the old rotation matrix from the drag-start snapshot
-		const glm::mat3 oldRot = getEntityRotationMatrix(m_gizmoDragOldTransform);
+		const glm::mat3 oldRot = getEntityRotationMatrix(m_gizmo.dragOldTransform);
 
 		// Apply incremental rotation in local space around the selected unit axis
 		glm::vec3 localAxis(0.0f);
@@ -12382,7 +12382,7 @@ void OpenGLRenderer::updateGizmoDrag(int screenX, int screenY)
 		tc->rotation[1] = degY;
 		tc->rotation[2] = degZ;
 	}
-	else if (m_gizmoMode == GizmoMode::Scale)
+	else if (m_gizmo.mode == GizmoMode::Scale)
 	{
 		// Use screen-space pixel delta projected onto the screen-space axis direction
 		const float spX = (ugvp.z > 0.0f) ? ugvp.x : 0.0f;
@@ -12398,19 +12398,19 @@ void OpenGLRenderer::updateGizmoDrag(int screenX, int screenY)
 			};
 		};
 
-		const glm::vec2 originScreen = project(m_gizmoDragEntityStart);
-		const glm::vec2 axisTipScreen = project(m_gizmoDragEntityStart + m_gizmoDragWorldAxis);
+		const glm::vec2 originScreen = project(m_gizmo.dragEntityStart);
+		const glm::vec2 axisTipScreen = project(m_gizmo.dragEntityStart + m_gizmo.dragWorldAxis);
 		const glm::vec2 axisScreenDir = axisTipScreen - originScreen;
 		const float axisScreenLen = glm::length(axisScreenDir);
 		if (axisScreenLen < 1.0f) return;
 
 		const glm::vec2 axisNorm = axisScreenDir / axisScreenLen;
 		const glm::vec2 mouseDelta{
-			static_cast<float>(screenX) - m_gizmoDragStartScreen.x,
-			static_cast<float>(screenY) - m_gizmoDragStartScreen.y
+			static_cast<float>(screenX) - m_gizmo.dragStartScreen.x,
+			static_cast<float>(screenY) - m_gizmo.dragStartScreen.y
 		};
 		const float projectedPixels = glm::dot(mouseDelta, axisNorm);
-		float newScale = std::max(0.01f, m_gizmoDragScaleStart + projectedPixels * 0.01f);
+		float newScale = std::max(0.01f, m_gizmo.dragScaleStart + projectedPixels * 0.01f);
 
 		// Snap scale to fixed step increments when enabled
 		if (m_snapEnabled && m_scaleSnapStep > 0.0f)
@@ -12425,17 +12425,17 @@ void OpenGLRenderer::updateGizmoDrag(int screenX, int screenY)
 	ecs.setComponent<ECS::TransformComponent>(primaryEntity, *tc);
 
 	// For translate: apply position delta to all other selected entities
-	if (m_gizmoMode == GizmoMode::Translate && m_selectedEntities.size() > 1)
+	if (m_gizmo.mode == GizmoMode::Translate && m_selectedEntities.size() > 1)
 	{
-		const auto& oldPrimary = m_gizmoDragOldTransforms[primaryEntity];
+		const auto& oldPrimary = m_gizmo.dragOldTransforms[primaryEntity];
 		const float dx = tc->position[0] - oldPrimary.position[0];
 		const float dy = tc->position[1] - oldPrimary.position[1];
 		const float dz = tc->position[2] - oldPrimary.position[2];
 		for (unsigned int eid : m_selectedEntities)
 		{
 			if (eid == primaryEntity) continue;
-			auto itOld = m_gizmoDragOldTransforms.find(eid);
-			if (itOld == m_gizmoDragOldTransforms.end()) continue;
+			auto itOld = m_gizmo.dragOldTransforms.find(eid);
+			if (itOld == m_gizmo.dragOldTransforms.end()) continue;
 			auto* otc = ecs.getComponent<ECS::TransformComponent>(eid);
 			if (!otc) continue;
 			otc->position[0] = itOld->second.position[0] + dx;
@@ -12445,17 +12445,17 @@ void OpenGLRenderer::updateGizmoDrag(int screenX, int screenY)
 		}
 	}
 	// For rotate: apply rotation delta to all other selected entities
-	else if (m_gizmoMode == GizmoMode::Rotate && m_selectedEntities.size() > 1)
+	else if (m_gizmo.mode == GizmoMode::Rotate && m_selectedEntities.size() > 1)
 	{
-		const auto& oldPrimary = m_gizmoDragOldTransforms[primaryEntity];
+		const auto& oldPrimary = m_gizmo.dragOldTransforms[primaryEntity];
 		const float drx = tc->rotation[0] - oldPrimary.rotation[0];
 		const float dry = tc->rotation[1] - oldPrimary.rotation[1];
 		const float drz = tc->rotation[2] - oldPrimary.rotation[2];
 		for (unsigned int eid : m_selectedEntities)
 		{
 			if (eid == primaryEntity) continue;
-			auto itOld = m_gizmoDragOldTransforms.find(eid);
-			if (itOld == m_gizmoDragOldTransforms.end()) continue;
+			auto itOld = m_gizmo.dragOldTransforms.find(eid);
+			if (itOld == m_gizmo.dragOldTransforms.end()) continue;
 			auto* otc = ecs.getComponent<ECS::TransformComponent>(eid);
 			if (!otc) continue;
 			otc->rotation[0] = itOld->second.rotation[0] + drx;
@@ -12465,15 +12465,15 @@ void OpenGLRenderer::updateGizmoDrag(int screenX, int screenY)
 		}
 	}
 	// For scale: apply scale delta to all other selected entities
-	else if (m_gizmoMode == GizmoMode::Scale && m_selectedEntities.size() > 1)
+	else if (m_gizmo.mode == GizmoMode::Scale && m_selectedEntities.size() > 1)
 	{
-		const auto& oldPrimary = m_gizmoDragOldTransforms[primaryEntity];
+		const auto& oldPrimary = m_gizmo.dragOldTransforms[primaryEntity];
 		const float ds = tc->scale[axisIdx] - oldPrimary.scale[axisIdx];
 		for (unsigned int eid : m_selectedEntities)
 		{
 			if (eid == primaryEntity) continue;
-			auto itOld = m_gizmoDragOldTransforms.find(eid);
-			if (itOld == m_gizmoDragOldTransforms.end()) continue;
+			auto itOld = m_gizmo.dragOldTransforms.find(eid);
+			if (itOld == m_gizmo.dragOldTransforms.end()) continue;
 			auto* otc = ecs.getComponent<ECS::TransformComponent>(eid);
 			if (!otc) continue;
 			otc->scale[axisIdx] = std::max(0.01f, itOld->second.scale[axisIdx] + ds);
@@ -12498,12 +12498,12 @@ void OpenGLRenderer::endGizmoDrag()
 		}
 
 		// Capture old transforms from the drag-start snapshot
-		auto oldTransforms = m_gizmoDragOldTransforms;
+		auto oldTransforms = m_gizmo.dragOldTransforms;
 
 		if (!newTransforms.empty())
 		{
 			std::string modeLabel = "Transform";
-			switch (m_gizmoMode)
+			switch (m_gizmo.mode)
 			{
 			case GizmoMode::Translate: modeLabel = "Move"; break;
 			case GizmoMode::Rotate:    modeLabel = "Rotate"; break;
@@ -12527,8 +12527,8 @@ void OpenGLRenderer::endGizmoDrag()
 		}
 	}
 
-	m_gizmoDragging = false;
-	m_gizmoActiveAxis = GizmoAxis::None;
+	m_gizmo.dragging = false;
+	m_gizmo.activeAxis = GizmoAxis::None;
 }
 
 // ── Rubber-Band (Marquee) Selection ─────────────────────────────────────────
@@ -12593,10 +12593,10 @@ void OpenGLRenderer::resolveRubberBandSelection()
 		return;
 
 	// Clamp to pick-buffer dimensions
-	const int rx0 = std::max(0, std::min(x0, m_pickWidth - 1));
-	const int ry0 = std::max(0, std::min(y0, m_pickHeight - 1));
-	const int rx1 = std::max(0, std::min(x1, m_pickWidth));
-	const int ry1 = std::max(0, std::min(y1, m_pickHeight));
+	const int rx0 = std::max(0, std::min(x0, m_pick.width - 1));
+	const int ry0 = std::max(0, std::min(y0, m_pick.height - 1));
+	const int rx1 = std::max(0, std::min(x1, m_pick.width));
+	const int ry1 = std::max(0, std::min(y1, m_pick.height));
 
 	const int clampedW = rx1 - rx0;
 	const int clampedH = ry1 - ry0;
@@ -12604,10 +12604,10 @@ void OpenGLRenderer::resolveRubberBandSelection()
 		return;
 
 	// Read a block of entity IDs from the pick buffer (GL Y is flipped)
-	const int glY = m_pickHeight - ry1; // bottom-left in GL coords
+	const int glY = m_pick.height - ry1; // bottom-left in GL coords
 	std::vector<unsigned int> pixels(static_cast<size_t>(clampedW) * clampedH, 0u);
 
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, m_pickFbo);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, m_pick.fbo);
 	glReadPixels(rx0, glY, clampedW, clampedH, GL_RED_INTEGER, GL_UNSIGNED_INT, pixels.data());
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 
@@ -12646,24 +12646,24 @@ void OpenGLRenderer::drawRubberBand(const glm::mat4& ortho)
 	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
 
 	// Use the gizmo shader (simple MVP + uniform colour) if available
-	if (m_gizmoProgram != 0)
+	if (m_gizmo.program != 0)
 	{
-		glUseProgram(m_gizmoProgram);
-		if (m_gizmoLocMVP >= 0)
-			glUniformMatrix4fv(m_gizmoLocMVP, 1, GL_FALSE, glm::value_ptr(ortho));
+		glUseProgram(m_gizmo.program);
+		if (m_gizmo.locMVP >= 0)
+			glUniformMatrix4fv(m_gizmo.locMVP, 1, GL_FALSE, glm::value_ptr(ortho));
 
 		glDisable(GL_DEPTH_TEST);
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 		// Filled rectangle (semi-transparent blue)
-		if (m_gizmoLocColor >= 0)
-			glUniform4f(m_gizmoLocColor, 0.25f, 0.56f, 1.0f, 0.18f);
+		if (m_gizmo.locColor >= 0)
+			glUniform4f(m_gizmo.locColor, 0.25f, 0.56f, 1.0f, 0.18f);
 		glDrawArrays(GL_TRIANGLES, 0, 6);
 
 		// Border (opaque blue, 1.5 px)
-		if (m_gizmoLocColor >= 0)
-			glUniform4f(m_gizmoLocColor, 0.25f, 0.56f, 1.0f, 0.85f);
+		if (m_gizmo.locColor >= 0)
+			glUniform4f(m_gizmo.locColor, 0.25f, 0.56f, 1.0f, 0.85f);
 		glLineWidth(1.5f);
 
 		// Build a line-loop for the border

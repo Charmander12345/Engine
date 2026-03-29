@@ -2,6 +2,9 @@
 set(SCRIPTING_SOURCES
     PythonScripting.cpp
     PythonScripting.h
+    ScriptingInternal.h
+    MathModule.cpp
+    PhysicsModule.cpp
     ScriptHotReload.cpp
     ScriptHotReload.h
 )

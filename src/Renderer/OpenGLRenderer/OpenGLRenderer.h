@@ -308,10 +308,14 @@ private:
     UIGradientUniforms m_uiGradientUniforms{};
     std::unordered_map<std::string, GLuint> m_uiTextureCache;
     std::unordered_map<std::string, GLuint> m_thumbnailCache;
-    GLuint m_thumbFbo{0};
-    GLuint m_thumbColorTex{0};
-    GLuint m_thumbDepthRbo{0};
-    int m_thumbSize{0};
+    struct ThumbnailResources
+    {
+        GLuint fbo{0};
+        GLuint colorTex{0};
+        GLuint depthRbo{0};
+        int    size{0};
+    };
+    ThumbnailResources m_thumb;
     ECS::Schema m_lightSchema{};
     bool m_lightSchemaInitialized{false};
     std::vector<OpenGLMaterial::LightData> m_sceneLights;
@@ -371,19 +375,27 @@ private:
     uint32_t m_lastHiddenCount{0};
     uint32_t m_lastTotalCount{0};
 
-    GLuint m_boundsDebugVao{0};
-    GLuint m_boundsDebugVbo{0};
-    GLuint m_boundsDebugProgram{0};
-    GLsizei m_boundsDebugVertexCount{0};
-    bool m_boundsDebugEnabled{false};
+    struct BoundsDebugResources
+    {
+        GLuint  vao{0};
+        GLuint  vbo{0};
+        GLuint  program{0};
+        GLsizei vertexCount{0};
+        bool    enabled{false};
+    };
+    BoundsDebugResources m_boundsDebug;
 
     // HeightField debug wireframe
-    GLuint m_hfDebugVao{0};
-    GLuint m_hfDebugVbo{0};
-    GLuint m_hfDebugIbo{0};
-    GLsizei m_hfDebugIndexCount{0};
-    bool m_hfDebugEnabled{false};
-    unsigned int m_hfDebugVersion{0};
+    struct HeightFieldDebugResources
+    {
+        GLuint  vao{0};
+        GLuint  vbo{0};
+        GLuint  ibo{0};
+        GLsizei indexCount{0};
+        bool    enabled{false};
+        unsigned int version{0};
+    };
+    HeightFieldDebugResources m_hfDebug;
 
     bool m_wireframeEnabled{false};
     bool m_vsyncEnabled{false};
@@ -420,14 +432,18 @@ private:
     bool ensurePostProcessResources();
 
     // Skybox
-    GLuint m_skyboxVao{0};
-    GLuint m_skyboxVbo{0};
-    GLuint m_skyboxProgram{0};
-    GLint  m_skyboxLocProjection{-1};
-    GLint  m_skyboxLocView{-1};
-    GLint  m_skyboxLocSampler{-1};
-    GLuint m_skyboxCubemap{0};
-    std::string m_skyboxLoadedPath;
+    struct SkyboxResources
+    {
+        GLuint vao{0};
+        GLuint vbo{0};
+        GLuint program{0};
+        GLint  locProjection{-1};
+        GLint  locView{-1};
+        GLint  locSampler{-1};
+        GLuint cubemap{0};
+        std::string loadedPath;
+    };
+    SkyboxResources m_skybox;
     bool ensureSkyboxResources();
     void releaseSkyboxResources();
     bool loadSkyboxCubemap(const std::string& folderPath);
@@ -478,17 +494,21 @@ private:
                                   const glm::vec3& lightColor, float lightIntensity,
                                   const glm::vec3& fogColor, int debugMode, float activeNear, float activeFar);
     void compositeOit(GLuint dstFbo, int vpX, int vpY, int vpW, int vpH);
-    GLuint m_oitFbo{0};
-    GLuint m_oitAccumTex{0};
-    GLuint m_oitRevealageTex{0};
-    GLuint m_oitDepthRbo{0};
-    int m_oitWidth{0};
-    int m_oitHeight{0};
-    GLuint m_oitCompositeProgram{0};
-    GLuint m_oitCompositeVao{0};
-    GLint m_oitCompLocAccum{-1};
-    GLint m_oitCompLocRevealage{-1};
-    bool m_oitEnabled{true};
+    struct OitResources
+    {
+        GLuint fbo{0};
+        GLuint accumTex{0};
+        GLuint revealageTex{0};
+        GLuint depthRbo{0};
+        int    width{0};
+        int    height{0};
+        GLuint compositeProgram{0};
+        GLuint compositeVao{0};
+        GLint  compLocAccum{-1};
+        GLint  compLocRevealage{-1};
+        bool   enabled{true};
+    };
+    OitResources m_oit;
     bool m_textureCompressionEnabled{false};
     bool m_textureStreamingEnabled{false};
     bool m_renderFrozen{false};
@@ -506,18 +526,22 @@ private:
 
     static constexpr int kShadowMapSize = 4096;
     static constexpr int kMaxShadowLights = OpenGLMaterial::kMaxShadowLights;
-    GLuint m_shadowFbo{0};
-    GLuint m_shadowDepthArray{0};
-    GLuint m_shadowProgram{0};
-    GLint m_shadowLocModel{-1};
-    GLint m_shadowLocLightSpace{-1};
-    GLint m_shadowLocInstanced{-1};
-    GLint m_shadowLocSkinned{-1};
-    GLint m_shadowLocBoneMatrices{-1};
-    glm::mat4 m_shadowLightSpaceMatrices[kMaxShadowLights]{};
-    int m_shadowLightIndices[kMaxShadowLights]{};
-    int m_shadowCount{0};
-    bool m_shadowEnabled{true};
+    struct ShadowResources
+    {
+        GLuint    fbo{0};
+        GLuint    depthArray{0};
+        GLuint    program{0};
+        GLint     locModel{-1};
+        GLint     locLightSpace{-1};
+        GLint     locInstanced{-1};
+        GLint     locSkinned{-1};
+        GLint     locBoneMatrices{-1};
+        glm::mat4 lightSpaceMatrices[kMaxShadowLights]{};
+        int       lightIndices[kMaxShadowLights]{};
+        int       count{0};
+        bool      enabled{true};
+    };
+    ShadowResources m_shadow;
 
     // Point light shadow mapping (cube maps)
     bool ensurePointShadowResources();
@@ -527,17 +551,21 @@ private:
 
     static constexpr int kMaxPointShadowLights = OpenGLMaterial::kMaxPointShadowLights;
     static constexpr int kPointShadowMapSize = 1024;
-    GLuint m_pointShadowFbo{0};
-    GLuint m_pointShadowCubeArray{0};
-    GLuint m_pointShadowProgram{0};
-    GLint m_pointShadowLocModel{-1};
-    GLint m_pointShadowLocLightPos{-1};
-    GLint m_pointShadowLocFarPlane{-1};
-    GLint m_pointShadowLocShadowMatrices{-1};
-    glm::vec3 m_pointShadowPositions[kMaxPointShadowLights]{};
-    float m_pointShadowFarPlanes[kMaxPointShadowLights]{};
-    int m_pointShadowLightIndices[kMaxPointShadowLights]{};
-    int m_pointShadowCount{0};
+    struct PointShadowResources
+    {
+        GLuint    fbo{0};
+        GLuint    cubeArray{0};
+        GLuint    program{0};
+        GLint     locModel{-1};
+        GLint     locLightPos{-1};
+        GLint     locFarPlane{-1};
+        GLint     locShadowMatrices{-1};
+        glm::vec3 positions[kMaxPointShadowLights]{};
+        float     farPlanes[kMaxPointShadowLights]{};
+        int       lightIndices[kMaxPointShadowLights]{};
+        int       count{0};
+    };
+    PointShadowResources m_pointShadow;
 
     // Cascaded Shadow Maps (directional light)
     bool ensureCsmResources();
@@ -548,33 +576,45 @@ private:
 
     static constexpr int kNumCsmCascades = OpenGLMaterial::kMaxCsmCascades;
     static constexpr int kCsmMapSize = 2048;
-    GLuint m_csmFbo{0};
-    GLuint m_csmDepthArray{0};
-    glm::mat4 m_csmMatrices[kNumCsmCascades]{};
-    float m_csmSplits[kNumCsmCascades]{};
-    int m_csmLightIndex{-1};
-    bool m_csmEnabled{false};
-    bool m_csmUserEnabled{true};
+    struct CsmResources
+    {
+        GLuint    fbo{0};
+        GLuint    depthArray{0};
+        glm::mat4 matrices[kNumCsmCascades]{};
+        float     splits[kNumCsmCascades]{};
+        int       lightIndex{-1};
+        bool      enabled{false};
+        bool      userEnabled{true};
+    };
+    CsmResources m_csm;
 
     // Entity picking FBO
-    GLuint m_pickFbo{0};
-    GLuint m_pickColorTex{0};
-    GLuint m_pickDepthRbo{0};
-    GLuint m_pickProgram{0};
-    GLint m_pickLocModel{-1};
-    GLint m_pickLocView{-1};
-    GLint m_pickLocProjection{-1};
-    GLint m_pickLocEntityId{-1};
-    int m_pickWidth{0};
-    int m_pickHeight{0};
-    bool m_pickDirty{true};
+    struct PickingResources
+    {
+        GLuint fbo{0};
+        GLuint colorTex{0};
+        GLuint depthRbo{0};
+        GLuint program{0};
+        GLint  locModel{-1};
+        GLint  locView{-1};
+        GLint  locProjection{-1};
+        GLint  locEntityId{-1};
+        int    width{0};
+        int    height{0};
+        bool   dirty{true};
+    };
+    PickingResources m_pick;
 
     // Selection outline (post-process edge detection on pick buffer)
-    GLuint m_outlineProgram{0};
-    GLuint m_outlineVao{0};
-    GLint m_outlineLocPickTex{-1};
-    GLint m_outlineLocOutlineColor{-1};
-    GLint m_outlineLocThickness{-1};
+    struct OutlineResources
+    {
+        GLuint program{0};
+        GLuint vao{0};
+        GLint  locPickTex{-1};
+        GLint  locOutlineColor{-1};
+        GLint  locThickness{-1};
+    };
+    OutlineResources m_outline;
     std::unordered_set<unsigned int> m_selectedEntities;
     bool m_pickRequested{false};
     bool m_pickCtrlHeld{false};
@@ -599,23 +639,27 @@ private:
     glm::mat3 getEntityRotationMatrix(const ECS::TransformComponent& tc) const;
     glm::vec3 getGizmoWorldAxis(const ECS::TransformComponent& tc, int axisIdx) const;
 
-    GLuint m_gizmoProgram{ 0 };
-    GLuint m_gizmoVao{ 0 };
-    GLuint m_gizmoVbo{ 0 };
-    GLint m_gizmoLocMVP{ -1 };
-    GLint m_gizmoLocColor{ -1 };
-    GizmoMode m_gizmoMode{ GizmoMode::Translate };
-    GizmoAxis m_gizmoActiveAxis{ GizmoAxis::None };
-    GizmoAxis m_gizmoHoveredAxis{ GizmoAxis::None };
-    bool m_gizmoDragging{ false };
-    glm::vec3 m_gizmoDragEntityStart{ 0.0f };  // entity position at drag start
-    glm::vec3 m_gizmoDragWorldAxis{ 0.0f };     // world-space axis direction during drag
-    float m_gizmoDragStartT{ 0.0f };            // initial projection of mouse onto axis ray
-    float m_gizmoDragRotStart{ 0.0f };
-    float m_gizmoDragScaleStart{ 1.0f };
-    glm::vec2 m_gizmoDragStartScreen{ 0.0f };   // screen position at drag start
-    ECS::TransformComponent m_gizmoDragOldTransform{};  // primary entity transform snapshot for undo
-    std::unordered_map<unsigned int, ECS::TransformComponent> m_gizmoDragOldTransforms;  // all selected entities for group undo
+    struct GizmoResources
+    {
+        GLuint program{0};
+        GLuint vao{0};
+        GLuint vbo{0};
+        GLint  locMVP{-1};
+        GLint  locColor{-1};
+        GizmoMode  mode{GizmoMode::Translate};
+        GizmoAxis  activeAxis{GizmoAxis::None};
+        GizmoAxis  hoveredAxis{GizmoAxis::None};
+        bool       dragging{false};
+        glm::vec3  dragEntityStart{0.0f};
+        glm::vec3  dragWorldAxis{0.0f};
+        float      dragStartT{0.0f};
+        float      dragRotStart{0.0f};
+        float      dragScaleStart{1.0f};
+        glm::vec2  dragStartScreen{0.0f};
+        ECS::TransformComponent dragOldTransform{};
+        std::unordered_map<unsigned int, ECS::TransformComponent> dragOldTransforms;
+    };
+    GizmoResources m_gizmo;
 
     // ---- Collider Debug Visualization ----
     void renderColliderDebug(const glm::mat4& view, const glm::mat4& projection);
@@ -631,14 +675,18 @@ private:
     void releaseGridResources();
     void drawViewportGrid(const glm::mat4& view, const glm::mat4& projection);
 
-    GLuint m_gridProgram{ 0 };
-    GLuint m_gridVao{ 0 };
-    GLuint m_gridVbo{ 0 };
-    GLint m_gridLocViewProj{ -1 };
-    GLint m_gridLocCameraPos{ -1 };
-    GLint m_gridLocGridSize{ -1 };
-    GLint m_gridLocColor{ -1 };
-    GLint m_gridLocFadeRadius{ -1 };
+    struct GridResources
+    {
+        GLuint program{0};
+        GLuint vao{0};
+        GLuint vbo{0};
+        GLint  locViewProj{-1};
+        GLint  locCameraPos{-1};
+        GLint  locGridSize{-1};
+        GLint  locColor{-1};
+        GLint  locFadeRadius{-1};
+    };
+    GridResources m_grid;
 
     #if ENGINE_EDITOR
     // Editor tab system
@@ -701,13 +749,13 @@ public:
     uint32_t getLastHiddenCount() const override { return m_lastHiddenCount; }
     uint32_t getLastTotalCount() const override { return m_lastTotalCount; }
     std::vector<RenderPassInfo> getRenderPassInfo() const override;
-    void toggleBoundsDebug() override { m_boundsDebugEnabled = !m_boundsDebugEnabled; }
-    bool isBoundsDebugEnabled() const override { return m_boundsDebugEnabled; }
-    void setHeightFieldDebugEnabled(bool enabled) override { m_hfDebugEnabled = enabled; }
-    bool isHeightFieldDebugEnabled() const override { return m_hfDebugEnabled; }
+    void toggleBoundsDebug() override { m_boundsDebug.enabled = !m_boundsDebug.enabled; }
+    bool isBoundsDebugEnabled() const override { return m_boundsDebug.enabled; }
+    void setHeightFieldDebugEnabled(bool enabled) override { m_hfDebug.enabled = enabled; }
+    bool isHeightFieldDebugEnabled() const override { return m_hfDebug.enabled; }
 
-    void setShadowsEnabled(bool enabled) override { m_shadowEnabled = enabled; }
-    bool isShadowsEnabled() const override { return m_shadowEnabled; }
+    void setShadowsEnabled(bool enabled) override { m_shadow.enabled = enabled; }
+    bool isShadowsEnabled() const override { return m_shadow.enabled; }
     void setOcclusionCullingEnabled(bool enabled) override { m_occlusionEnabled = enabled; }
     bool isOcclusionCullingEnabled() const override { return m_occlusionEnabled; }
     void setWireframeEnabled(bool enabled) override { m_wireframeEnabled = enabled; }
@@ -738,10 +786,10 @@ public:
     float getBloomIntensity() const override { return m_bloomIntensity; }
     void setSsaoEnabled(bool enabled) override { m_ssaoEnabled = enabled; }
     bool isSsaoEnabled() const override { return m_ssaoEnabled; }
-    void setCsmEnabled(bool enabled) override { m_csmUserEnabled = enabled; }
-    bool isCsmEnabled() const override { return m_csmUserEnabled; }
-    void setOitEnabled(bool enabled) override { m_oitEnabled = enabled; }
-    bool isOitEnabled() const override { return m_oitEnabled; }
+    void setCsmEnabled(bool enabled) override { m_csm.userEnabled = enabled; }
+    bool isCsmEnabled() const override { return m_csm.userEnabled; }
+    void setOitEnabled(bool enabled) override { m_oit.enabled = enabled; }
+    bool isOitEnabled() const override { return m_oit.enabled; }
     void setTextureCompressionEnabled(bool enabled) override { m_textureCompressionEnabled = enabled; }
     bool isTextureCompressionEnabled() const override { return m_textureCompressionEnabled; }
     void setTextureStreamingEnabled(bool enabled) override { m_textureStreamingEnabled = enabled; }
@@ -757,7 +805,7 @@ public:
     void setDebugRenderMode(DebugRenderMode mode) override { m_debugRenderMode = mode; }
     DebugRenderMode getDebugRenderMode() const override { return m_debugRenderMode; }
     void setSkyboxPath(const std::string& pathOrFolder) override;
-    std::string getSkyboxPath() const override { return m_skyboxLoadedPath; }
+    std::string getSkyboxPath() const override { return m_skybox.loadedPath; }
     void requestPick(int screenX, int screenY, bool ctrlHeld = false) override { m_pickRequested = true; m_pickX = screenX; m_pickY = screenY; m_pickCtrlHeld = ctrlHeld; }
     unsigned int getSelectedEntity() const override { return m_selectedEntities.empty() ? 0u : *m_selectedEntities.begin(); }
     void setSelectedEntity(unsigned int entity) override { m_selectedEntities.clear(); if (entity != 0) m_selectedEntities.insert(entity); }
@@ -777,12 +825,12 @@ public:
     Vec2 getRubberBandStart() const override { return m_rubberBandStart; }
 
     // Gizmo public API
-    void setGizmoMode(GizmoMode mode) override { m_gizmoMode = mode; }
-    GizmoMode getGizmoMode() const override { return m_gizmoMode; }
+    void setGizmoMode(GizmoMode mode) override { m_gizmo.mode = mode; }
+    GizmoMode getGizmoMode() const override { return m_gizmo.mode; }
     bool beginGizmoDrag(int screenX, int screenY) override;
     void updateGizmoDrag(int screenX, int screenY) override;
     void endGizmoDrag() override;
-    bool isGizmoDragging() const override { return m_gizmoDragging; }
+    bool isGizmoDragging() const override { return m_gizmo.dragging; }
 
 #if ENGINE_EDITOR
     // Multi-window / popup management

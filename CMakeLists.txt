@@ -278,6 +278,7 @@ set(ENGINE_RUNTIME_LIBS
 # ── Editor target (ENGINE_EDITOR=1) ─────────────────────────────────────
 add_executable(HorizonEngine
     src/main.cpp
+    src/BuildPipeline.cpp
     )
 
 # Engine is a console executable (WIN32_EXECUTABLE is Windows-only).

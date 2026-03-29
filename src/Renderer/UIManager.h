@@ -114,6 +114,11 @@ public:
 	// Notification levels for priority-based styling (alias from DiagnosticsManager)
 	using NotificationLevel = DiagnosticsManager::NotificationLevel;
 
+	// Standard toast durations (seconds)
+	static constexpr float kToastShort  = 1.5f;  // brief confirmations (e.g. "Copied", "Keyframe removed")
+	static constexpr float kToastMedium = 3.0f;  // normal info/success messages
+	static constexpr float kToastLong   = 5.0f;  // warnings/errors that need attention
+
 	void showToastMessage(const std::string& message, float durationSeconds);
 	void showToastMessage(const std::string& message, float durationSeconds, NotificationLevel level);
 	void updateNotifications(float deltaSeconds);
