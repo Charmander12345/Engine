@@ -19,15 +19,15 @@ bool TextureStreamingManager::initialize()
 
     // Create 1×1 magenta placeholder texture
     {
-        auto placeholderCpu = std::make_shared<Texture>();
-        placeholderCpu->setWidth(1);
-        placeholderCpu->setHeight(1);
-        placeholderCpu->setChannels(4);
+        Texture placeholderCpu;
+        placeholderCpu.setWidth(1);
+        placeholderCpu.setHeight(1);
+        placeholderCpu.setChannels(4);
         std::vector<unsigned char> magenta = { 255, 0, 255, 255 };
-        placeholderCpu->setData(std::move(magenta));
+        placeholderCpu.setData(std::move(magenta));
 
         m_placeholder = std::make_shared<OpenGLTexture>();
-        if (!m_placeholder->initialize(*placeholderCpu))
+        if (!m_placeholder->initialize(placeholderCpu))
         {
             Logger::Instance().log(Logger::Category::Rendering,
                 "TextureStreamingManager: failed to create placeholder texture",

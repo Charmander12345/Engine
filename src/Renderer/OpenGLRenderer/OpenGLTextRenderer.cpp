@@ -106,17 +106,17 @@ void OpenGLTextRenderer::drawTextWithShader(const std::string& text, const Vec2&
 
 bool OpenGLTextRenderer::buildShaderProgram(const std::string& vertexShaderPath, const std::string& fragmentShaderPath, GLuint& outProgram)
 {
-    auto vertex = std::make_shared<OpenGLShader>();
-    auto fragment = std::make_shared<OpenGLShader>();
+    OpenGLShader vertex;
+    OpenGLShader fragment;
 
-    if (!vertex->loadFromFile(Shader::Type::Vertex, vertexShaderPath) || !fragment->loadFromFile(Shader::Type::Fragment, fragmentShaderPath))
+    if (!vertex.loadFromFile(Shader::Type::Vertex, vertexShaderPath) || !fragment.loadFromFile(Shader::Type::Fragment, fragmentShaderPath))
     {
         return false;
     }
 
     outProgram = glCreateProgram();
-    glAttachShader(outProgram, vertex->id());
-    glAttachShader(outProgram, fragment->id());
+    glAttachShader(outProgram, vertex.id());
+    glAttachShader(outProgram, fragment.id());
     glLinkProgram(outProgram);
 
     GLint linked = 0;

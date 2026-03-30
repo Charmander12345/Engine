@@ -317,11 +317,19 @@ private:
     mutable bool m_hasPointerQueryPos{ false };
     mutable bool m_lastPointerOverUI{ false };
     mutable bool m_pointerCacheDirty{ true };
-    WidgetElement* m_focusedEntry{ nullptr };
+	WidgetElement* m_focusedEntry{ nullptr };
 	bool m_renderDirty{ true };
 	bool m_themeDirty{ false };
 	bool m_uiRenderingPaused{ false };
 	std::string m_activeTabId{ "Viewport" };
+
+	// Reusable scratch vectors for updateLayouts (avoid heap allocation every layout pass)
+	std::vector<WidgetEntry*> m_layoutOrderedScratch;
+	std::vector<WidgetEntry*> m_layoutTopScratch;
+	std::vector<WidgetEntry*> m_layoutBottomScratch;
+	std::vector<WidgetEntry*> m_layoutLeftScratch;
+	std::vector<WidgetEntry*> m_layoutRightScratch;
+	std::vector<WidgetEntry*> m_layoutOtherScratch;
 
 	float m_notificationPollTimer{ 0.0f };
 	struct ToastNotification

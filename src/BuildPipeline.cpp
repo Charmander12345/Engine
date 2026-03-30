@@ -33,7 +33,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
 
     if (uiMgr.isBuildRunning())
     {
-        uiMgr.showToastMessage("A build is already in progress.", 3.0f,
+        uiMgr.showToastMessage("A build is already in progress.", UIManager::kToastMedium,
             UIManager::NotificationLevel::Warning);
         return;
     }
@@ -41,13 +41,13 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
     // Verify CMake and toolchain are available
     if (!uiMgr.isCMakeAvailable())
     {
-        uiMgr.showToastMessage("CMake is required to build the game.\nPlease install CMake and restart the editor.", 5.0f,
+        uiMgr.showToastMessage("CMake is required to build the game.\nPlease install CMake and restart the editor.", UIManager::kToastLong,
             UIManager::NotificationLevel::Error);
         return;
     }
     if (!uiMgr.isBuildToolchainAvailable())
     {
-        uiMgr.showToastMessage("C++ toolchain is required to build the game.\nPlease install Visual Studio with C++ workload.", 5.0f,
+        uiMgr.showToastMessage("C++ toolchain is required to build the game.\nPlease install Visual Studio with C++ workload.", UIManager::kToastLong,
             UIManager::NotificationLevel::Error);
         return;
     }

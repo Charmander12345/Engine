@@ -5,6 +5,64 @@
 
 ---
 
+## Letzte Änderung (Editor-Separation Phase 11: UIManager aufteilen)
+
+- ✅ `Phase 11 – UIManager.cpp Split`: `UIManager.cpp` (~8490 Zeilen) aufgeteilt in `UIManager.cpp` (Core, ~3350 Zeilen, immer kompiliert) + `UIManagerEditor.cpp` (Editor, ~4340 Zeilen, nur Editor-Build). 10 eigenständige `#if ENGINE_EDITOR`-Blöcke verschoben: Outliner, Content Browser, Entity-Ops, Popup-Builder, Tab-Management, Build-System, Progress Bars, StatusBar, DPI/Theme, Toast-Widgets. `RENDERER_CORE_EDITOR_SOURCES` in CMakeLists.txt erweitert.
+- ✅ Build erfolgreich für beide Targets.
+- **Fortschritt**: Phase 1-11 abgeschlossen. Alle Phasen des Editor-Separation-Plans sind vollständig implementiert.
+
+## Letzte Änderung (Editor-Separation Phase 10: Renderer.h bereinigen – IEditorRenderer Interface)
+
+- ✅ `Phase 10 – IEditorRenderer Interface extrahiert`: ~65 editor-only virtuelle Methoden aus `Renderer.h` in `src/Renderer/IEditorRenderer.h` (pure virtual interface, ~128 Zeilen, 12 Kategorien) extrahiert. Zirkuläre Abhängigkeit durch neues `src/Renderer/RendererEnums.h` gelöst (7 Enum-Klassen + SubViewportCamera auf Namespace-Scope). `Renderer` erbt conditional von `IEditorRenderer` (`#if ENGINE_EDITOR`). `using`-Aliases für Backward-Kompatibilität. Alle editor-only Methoden auf `override` umgestellt.
+- ✅ Build erfolgreich für beide Targets.
+- **Fortschritt**: Phase 1-10 abgeschlossen. Verbleibend: Phase 11 (UIManager Split).
+
+## Letzte Änderung (Editor-Separation Phase 9: Projekt-Selektion extrahiert)
+
+- ✅ `Phase 9 – Projekt-Selektion nach ProjectSelector`: ~185 Zeilen aus main.cpp in `src/Editor/ProjectSelector.h/cpp` extrahiert. Freie Funktion `showProjectSelection(RendererBackend)` kapselt Default-Projekt-Check, temporären Renderer + modale Event-Loop, SampleProject-Fallback. Rückgabe als `ProjectSelection`-Struct. main.cpp-Block durch einzigen Funktionsaufruf (~18 Zeilen) ersetzt. `startupSelectionCancelled`-Variable entfernt. CMakeLists.txt um neue Dateien erweitert.
+- ✅ Build erfolgreich für beide Targets.
+- **Fortschritt**: Phase 1-9 abgeschlossen. Verbleibend: Phase 10 (Renderer.h IEditorRenderer), Phase 11 (UIManager Split).
+
+## Letzte Änderung (Editor-Separation Phase 5+7: Shortcuts & Context Menus extrahiert)
+
+- ✅ `Phase 5 – Shortcuts nach EditorApp::registerShortcuts()`: 19 Editor-only Shortcuts aus main.cpp entfernt (~370 Zeilen). Ctrl+Z/Y/S/F/C/V/D, F11/F8 Debug, Escape/Shift+F1 PIE, W/E/R Gizmo, F Focus, End Drop-to-Surface, F1 Help, F2 Import, Delete (Asset+Entity mit Undo/Redo). 3 shared Shortcuts (F10/F9/F12) verbleiben in main.cpp mit bidirektionaler Sync.
+- ✅ `Phase 7 – Kontextmenüs nach EditorApp::handleContentBrowserContextMenu()`: ~700 Zeilen Content-Browser-Rechtsklick-Menü aus main.cpp entfernt. 8 Menüpunkte: New Folder/Script/Level/Widget/Material, Save as Prefab, Find References, Show Dependencies. Ersetzt durch einzigen Funktionsaufruf.
+- ✅ `State-Sync main.cpp ↔ EditorApp`: PIE-State, rightMouseDown, cameraSpeedMultiplier, showMetrics, showOcclusionStats. Frame-Start-Sync von EditorApp → main.cpp Locals + Rückschreib-Sync bei direkten Änderungen.
+- ✅ `Unused Includes bereinigt`: AssetCooker.h, PopupWindow.h, UndoRedoManager.h, BuildPipeline.h aus main.cpp entfernt.
+- ✅ `Build erfolgreich`: Beide Targets kompilieren fehlerfrei.
+- **Fortschritt**: Phase 1-8 abgeschlossen. Phase 9 ebenfalls abgeschlossen (siehe oben).
+
+## Letzte Änderung (Editor-Separation Phase 3: EditorApp Lifecycle verdrahtet)
+
+- ✅ `EditorApp instanziiert + Lifecycle verdrahtet`: EditorBridgeImpl + EditorApp in main.cpp erzeugt. 4 Call-Sites: initialize() (DPI + Build Pipeline), tick() (Build/Toolchain Polling), processEvent() (Popup-Routing), shutdown() (Camera/Level Save). Duplikat-Code in main.cpp entfernt.
+- ✅ `CMake-Fix: ENGINE_EDITOR=1 für Editor-Target`: Fehlende Compile-Definition hinzugefügt — ohne sie kompilierten Editor-Dateien zu leeren .obj-Dateien (Linker-Fehler LNK2019).
+- ✅ `EditorBridgeImpl von Core nach Editor-Target verschoben`: Core enthält nur noch IEditorBridge.h (Interface). EditorBridgeImpl.h/cpp werden vom Editor-OBJECT-Library kompiliert.
+- ✅ Beide Targets (HorizonEngine + HorizonEngineRuntime) kompilieren fehlerfrei.
+
+## Letzte Änderung (Editor-Separation Phase 2: IEditorBridge API & EditorApp Skeleton)
+
+- ✅ `IEditorBridge – Abstrakte Editor-API (src/Core/IEditorBridge.h)`: Neues Interface (~234 Zeilen, ~50 pure virtual Methoden) als zentrale API-Grenze zwischen Engine und Editor. Der Editor kennt nur dieses Interface — nie Engine-Interna direkt. 10 Kategorien: Renderer/Window, Camera, Entity, Assets, Level, PIE, Physics, Diagnostics, Scripting, Undo/Redo, Audio. Nur Forward-Declarations + MathTypes.h als Dependency.
+- ✅ `EditorBridgeImpl – Konkrete Implementierung (src/Core/EditorBridgeImpl.h/cpp)`: Delegiert alle ~50 Methoden an Engine-Singletons (ECSManager, AssetManager, DiagnosticsManager, PhysicsWorld, Scripting, UndoRedoManager, AudioManager). Vollständig `#if ENGINE_EDITOR`-guardiert. In Core-Library integriert.
+- ✅ `EditorApp – Editor-Lifecycle-Klasse (src/Editor/EditorApp.h/cpp)`: Neues OBJECT-Library-Target `Editor`. Lifecycle: initialize(), processEvent(), tick(), shutdown(), stopPIE(). Empfängt IEditorBridge-Referenz. Build-Pipeline, DPI-Rebuild, Texture-Preload. Placeholder für Phase 3+ Widget/Event-Migration.
+- ✅ `EDITOR_SEPARATION_PLAN.md`: Umfassender 11-Phasen-Migrationsplan. Ziel: main.cpp von ~2.800 auf ~300 Zeilen.
+- ✅ `CMake-Integration`: src/Editor/CMakeLists.txt (OBJECT lib), Root CMakeLists.txt (add_subdirectory + link), src/Core/CMakeLists.txt (neue Dateien + Include-Dirs). Beide Targets kompilieren fehlerfrei.
+
+## Letzte Änderung (Memory-Management & Performance-Optimierung: Rendering Hot Path)
+
+- ✅ `UIManager Layout Scratch-Vektoren`: 5 temporäre Heap-Allokationen in `updateLayouts()` durch 6 persistente Member-Scratch-Vektoren mit `clear()`+Reuse ersetzt. Keine Heap-Allokation mehr pro Layout-Pass. **UIManager.h** (6 Member), **UIManager.cpp** (`updateLayouts()` rewritten).
+- ✅ `GarbageCollector O(1) Duplikat-Check`: `registerResource()` O(n) Linear-Scan → O(1) via `std::unordered_set<const EngineObject*>`. `collect()` rebuildet Set nach Pruning. **GarbageCollector.h/cpp** aktualisiert.
+- ✅ `DrawCmd MaterialOverrides Pointer`: Inline-Kopie (~60 Bytes) → `const ECS::MaterialOverrides*` (8 Bytes). Reduziert Cache-Footprint bei Sort/Batch. **OpenGLRenderer.h** (DrawCmd), **OpenGLRenderer.cpp** (Zuweisung + 3 Verbrauchsstellen).
+- ✅ `shared_ptr Refcount in renderWorld() eliminiert`: `static_pointer_cast<OpenGLObject3D/2D>` Kopien in World-Objects- und Groups-Schleife durch `const auto&` + Raw-Pointer-`static_cast` ersetzt. Eliminiert atomare Refcount-Operationen pro Objekt im Rendering Hot Path. **OpenGLRenderer.cpp** (beide Schleifen).
+- ✅ `measureElementSize Heap-Allokation eliminiert`: `std::vector<Vec2> childSizes` pro Rekursion → `ChildSizeStats`-Struct mit 7 Skalar-Akkumulatoren. Eliminiert Heap-Allokation bei jedem rekursiven Aufruf im Widget-Baum + 12 redundante Post-Loop-Iterationen. **UIManager.cpp** (`ChildSizeStats`-Struct + alle Verbrauchsstellen).
+
+## Letzte Änderung (Codebase-Cleanup Quick Win: Toast-Konstanten standardisiert)
+
+- ✅ `Toast-Konstanten standardisiert (Quick Win 10.3)`:
+
+## Letzte Änderung (Codebase-Cleanup Punkt 7: Renderer.h Interface-Guards)
+
+- ✅ `Renderer.h Interface-Guards (Punkt 7)`: ~70 editor-only virtuelle Methoden mit `#if ENGINE_EDITOR`-Guards versehen (minimaler Ansatz). **Renderer.h:** 2 Guard-Blöcke – (1) Debug-Render-Mode, Debug-Viz-Toggles, Entity-Picking, Multi-Select, Rubber-Band, Gizmo, Snap/Grid, Editor-Tabs; (2) Multi-Viewport-Methoden (getSubViewportCount, subViewportHitTest, setActiveSubViewport, etc.). Enums, Structs und Protected Members bewusst unguarded gelassen. **OpenGLRenderer.h:** ~6 korrespondierende Guard-Blöcke um Override-Deklarationen. **OpenGLRenderer.cpp:** Method-Implementierungen guardiert + 4 interne Call-Sites (Pick-Handling in renderWorld, Sub-Viewport-Labels, Multi-Viewport-Routing in moveCamera/rotateCamera). **OpenGLRendererGizmo.cpp:** beginGizmoDrag/updateGizmoDrag/endGizmoDrag guardiert. **main.cpp:** 5 Regionen guardiert: BoundsDebug/HeightFieldDebug-Restore, Runtime-Defaults HeightFieldDebug, Mouse-Motion Gizmo-Drag+Rubber-Band-Update, Mouse-Down Sub-Viewport+Gizmo+Rubber-Band, Mouse-Up Rubber-Band-Cancel/End+Pick+Gizmo-End. Build erfolgreich für beide Targets.
+
 ## Letzte Änderung (Codebase-Cleanup 2.3+2.4+2.5: Gizmo, Grid & Tab-System extrahiert)
 
 - ✅ `OpenGLRendererGizmo.cpp – Gizmo+Grid Split`: 14 Gizmo-/Grid-Methoden aus `OpenGLRenderer.cpp` in `OpenGLRendererGizmo.cpp` (846 Zeilen) verschoben: `ensureGizmoResources`, `releaseGizmoResources`, `ensureGridResources`, `releaseGridResources`, `drawViewportGrid`, `getGizmoWorldAxis`, `renderGizmo`, `pickGizmoAxis`, `beginGizmoDrag`, `updateGizmoDrag`, `endGizmoDrag` + statische Helper `buildCircleVerts`, `screenToRay`, `closestTOnAxis`.
@@ -1831,6 +1889,7 @@ Große Feature-Blöcke, die noch nicht existieren:
 - ✅ **PhysX-Backend-Untersuchung** – Korrekt optionales Backend (CMake-Flag `ENGINE_PHYSX_BACKEND`, Preprocessor-Guard `ENGINE_PHYSX_BACKEND_AVAILABLE`). Kein toter Code, wird beibehalten.
 - ✅ **`#if ENGINE_EDITOR`-Konsolidierung** – Preprocessor-Guards in `main.cpp` von 21 auf 19 reduziert. 3 Shutdown-Blöcke zusammengeführt, Shortcut-Registrierung konsolidiert, Startup-Init-Blöcke umgeordnet und verschmolzen.
 - ✅ **Build-Pipeline extrahiert** – ~750-Zeilen Build-Lambda aus `main.cpp` in `BuildPipeline.h/.cpp` ausgelagert (8 Schritte: Verzeichnis, CMake configure/build, Deploy, Asset-Cooking, HPK-Packaging, game.ini, Launch). `main.cpp` von ~5.425 auf ~4.678 Zeilen reduziert.
+- ✅ **AssetManager.cpp aufgeteilt** – 3 Split-Implementation-Dateien erstellt: `AssetManagerImport.cpp` (Import-Dialog + Assimp-Pipeline, 955 Zeilen), `AssetManagerFileOps.cpp` (Delete/Move/Rename/Validate/Repair/Referenz-Tracking, 967 Zeilen), `AssetManagerEditorWidgets.cpp` (Editor-Widget-Generierung + Default-Assets, 1.900 Zeilen). `AssetManager.cpp` von 7.452 auf 3.724 Zeilen reduziert (-50%). Gleicher Split-Implementation-Pattern wie OpenGLRenderer (mehrere .cpp implementieren dieselbe Klasse, kein neuer Header nötig).
 - ✅ **Editor-Tab-Extraktion (Section 1.1 komplett)** – 11 Editor-Tabs aus `UIManager.cpp` in eigenständige Klassen unter `src/Renderer/EditorTabs/` extrahiert: `IEditorTab`-Interface, `ConsoleTab` (-478 Zeilen), `ProfilerTab` (-548), `AudioPreviewTab` (-630), `ParticleEditorTab` (-570), `ShaderViewerTab` (-631), `RenderDebuggerTab` (-527), `SequencerTab` (-586), `LevelCompositionTab` (-538), `AnimationEditorTab` (-475), `UIDesignerTab` (-983), `WidgetEditorTab` (-2843, Multi-Instanz mit State-Map). `UIManager.cpp` von ~22.100 auf ~14.450 Zeilen reduziert (~35% Reduktion). Jeder Tab hat eigene .h/.cpp, hält `UIManager*`+`Renderer*`, UIManager delegiert via Thin Wrappers.
 - ✅ **Content-Browser-Extraktion (Section 1.2 komplett)** – Content Browser aus `UIManager.cpp` in `ContentBrowserPanel.h/.cpp` (~1.400 Zeilen) extrahiert. 6 Methoden (`populateWidget`, `refresh`, `focusSearch`, `buildReferencedAssetSet`, `navigateByArrow`, `isOverGrid`), 9 Member-Variablen und 6 statische Helfer verschoben. `UIManager.cpp` von ~14.450 auf ~13.100 Zeilen reduziert (~1.350 Zeilen, ~9% weitere Reduktion). Neue UIManager-APIs: `getRegisteredWidgetsMutable()`, `requestLevelLoad()`, Getter-Delegationen. Cross-References in `handleKeyDown` und `updateNotifications` aktualisiert.
 - ✅ **Outliner/Entity-Details-Extraktion (Section 1.3 komplett)** – World Outliner und Entity Details aus `UIManager.cpp` in `OutlinerPanel.h/.cpp` (~1.808 Zeilen) extrahiert. 9 Methoden (`populateWidget`, `populateDetails`, `refresh`, `selectEntity`, `navigateByArrow`, `copySelectedEntity`, `pasteEntity`, `duplicateEntity`, `applyAssetToEntity`), 5 Member-Variablen (`m_outlinerLevel`, `m_outlinerSelectedEntity`, `EntityClipboard`, `m_lastEcsComponentVersion`, `m_lastRegistryVersion`) und statische Helfer (`iconForEntity`, `iconTintForEntity`, `FindFirstStackPanel`, `setCompFieldWithUndo`) verschoben. `UIManager.cpp` von ~13.100 auf ~11.560 Zeilen reduziert (~1.545 Zeilen, ~12% weitere Reduktion). Neue UIManager-APIs: `getSelectedEntity()`, `invalidateHoveredElement()`. ~50 Cross-References aktualisiert.

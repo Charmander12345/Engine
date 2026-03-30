@@ -185,7 +185,7 @@ void SequencerTab::open()
         auto pts = m_renderer->getCameraPathPoints();
         if (pts.size() < 2)
         {
-            m_uiManager->showToastMessage("Need at least 2 keyframes", 2.0f);
+            m_uiManager->showToastMessage("Need at least 2 keyframes", UIManager::kToastShort);
             return;
         }
         if (m_renderer->isCameraPathPlaying())

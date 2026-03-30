@@ -157,7 +157,7 @@ void ParticleEditorTab::open(ECS::Entity entity)
             }
         });
         refresh();
-        m_ui->showToastMessage("Particle emitter reset to defaults", 2.0f);
+        m_ui->showToastMessage("Particle emitter reset to defaults", UIManager::kToastShort);
     });
 
     // Initial population
@@ -586,7 +586,7 @@ void ParticleEditorTab::applyPreset(int presetIndex)
     refresh();
 
     static const char* presetToasts[] = { "Fire", "Smoke", "Sparks", "Rain", "Snow", "Magic" };
-    m_ui->showToastMessage(std::string("Applied preset: ") + presetToasts[presetIndex], 2.0f);
+    m_ui->showToastMessage(std::string("Applied preset: ") + presetToasts[presetIndex], UIManager::kToastShort);
 }
 
 // ───────────────────────────────────────────────────────────────────────────

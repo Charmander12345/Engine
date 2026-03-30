@@ -614,7 +614,7 @@ void EditorDialogs::closeSaveProgressModal(bool success)
     }
     else
     {
-        m_uiManager->showToastMessage("Some assets failed to save.", 4.0f, NotificationLevel::Error);
+        m_uiManager->showToastMessage("Some assets failed to save.", UIManager::kToastLong, NotificationLevel::Error);
     }
 
     m_uiManager->refreshStatusBar();
@@ -1410,7 +1410,7 @@ void EditorDialogs::openProjectScreen(std::function<void(const std::string& proj
                                     }
                                     else
                                     {
-                                        screenMgr->showToastMessage("Deleted project folder.", 2.5f);
+                                        screenMgr->showToastMessage("Deleted project folder.", UIManager::kToastMedium);
                                     }
                                 }
                             }

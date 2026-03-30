@@ -523,6 +523,7 @@ static float closestTOnAxis(const glm::vec3& rayOrigin, const glm::vec3& rayDir,
 	return (b * e - c * d) / denom;
 }
 
+#if ENGINE_EDITOR
 bool OpenGLRenderer::beginGizmoDrag(int screenX, int screenY)
 {
 	if (m_selectedEntities.empty() || m_gizmo.mode == GizmoMode::None || !m_camera)
@@ -844,3 +845,4 @@ void OpenGLRenderer::endGizmoDrag()
 	m_gizmo.dragging = false;
 	m_gizmo.activeAxis = GizmoAxis::None;
 }
+#endif // ENGINE_EDITOR — beginGizmoDrag / updateGizmoDrag / endGizmoDrag

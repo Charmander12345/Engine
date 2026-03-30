@@ -1,6 +1,9 @@
 # ── Common source & include lists ─────────────────────────────────────────
 set(ASSET_MANAGER_SOURCES
     AssetManager.cpp
+    AssetManagerImport.cpp
+    AssetManagerFileOps.cpp
+    AssetManagerEditorWidgets.cpp
     AssetManager.h
     GarbageCollector.cpp
     GarbageCollector.h

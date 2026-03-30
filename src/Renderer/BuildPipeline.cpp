@@ -1660,8 +1660,8 @@ void OpenGLRenderer::renderWorld()
 	// Per-entity refresh for dirty entities (avoids full scene rebuild)
 	if (diagnostics.hasDirtyEntities())
 	{
-		diagnostics.consumeDirtyEntities(m_dirtyEntitiesScratch);
-		for (unsigned int entityId : m_dirtyEntitiesScratch)
+		auto dirtyEntities = diagnostics.consumeDirtyEntities();
+		for (unsigned int entityId : dirtyEntities)
 		{
 			refreshEntity(static_cast<ECS::Entity>(entityId));
 		}
@@ -1757,8 +1757,8 @@ void OpenGLRenderer::renderWorld()
 	}
 
 	m_sceneLights.clear();
-	ecs.getEntitiesMatchingSchema(m_lightSchema, m_lightEntitiesScratch);
-	for (const auto lightEntity : m_lightEntitiesScratch)
+	const auto lightEntities = ecs.getEntitiesMatchingSchema(m_lightSchema);
+	for (const auto lightEntity : lightEntities)
 	{
 		const auto* transform = ecs.getComponent<ECS::TransformComponent>(lightEntity);
 		const auto* light = ecs.getComponent<ECS::LightComponent>(lightEntity);
@@ -1900,12 +1900,12 @@ void OpenGLRenderer::renderWorld()
 					cmd.modelMatrix = entry.cachedModelMatrix;
 					cmd.entityId = static_cast<unsigned int>(entry.entity);
 					cmd.isSkinned = selectedObj->isSkinned();
-					// Read per-entity material overrides from ECS (pointer, no copy)
+					// Read per-entity material overrides from ECS
 					if (entry.entity != 0)
 					{
 						if (const auto* matComp = ecs.getComponent<ECS::MaterialComponent>(entry.entity))
 						{
-							cmd.overrides = &matComp->overrides;
+							cmd.overrides = matComp->overrides;
 						}
 					}
 					bool isLight = false;
@@ -1962,16 +1962,15 @@ void OpenGLRenderer::renderWorld()
 
 		if (objType == AssetType::Model3D || objType == AssetType::PointLight)
 		{
-			const auto& glObj3D = m_resourceManager.getOrCreateObject3D(asset, {});
-			if (!glObj3D)
+			auto glObj = std::static_pointer_cast<OpenGLObject3D>(m_resourceManager.getOrCreateObject3D(asset, {}));
+			if (!glObj)
 				continue;
-			auto* glObj = static_cast<OpenGLObject3D*>(glObj3D.get());
 
 			++m_lastTotalCount;
 			const bool skipOcclusion = (objType == AssetType::PointLight);
 
 			DrawCmd cmd;
-			cmd.obj = glObj;
+			cmd.obj = glObj.get();
 			cmd.material = glObj->getMaterial();
 			Mat4 engineMat = entry->transform.getMatrix4ColumnMajor();
 			cmd.modelMatrix = glm::make_mat4(engineMat.m);
@@ -2005,10 +2004,9 @@ void OpenGLRenderer::renderWorld()
 			}
 			else if (objType == AssetType::Model2D)
 			{
-				const auto& glObj2D = m_resourceManager.getOrCreateObject2D(asset, {});
-				if (!glObj2D)
+				auto glObj = std::static_pointer_cast<OpenGLObject2D>(m_resourceManager.getOrCreateObject2D(asset, {}));
+				if (!glObj)
 					continue;
-				auto* glObj = static_cast<OpenGLObject2D*>(glObj2D.get());
 
 				Mat4 engineMat = entry->transform.getMatrix4ColumnMajor();
 			glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
@@ -2035,15 +2033,14 @@ void OpenGLRenderer::renderWorld()
 
 			if (groupObjType == AssetType::Model3D)
 			{
-				const auto& glObj3D = m_resourceManager.getOrCreateObject3D(asset, {});
-				if (!glObj3D || !t)
+				auto glObj = std::static_pointer_cast<OpenGLObject3D>(m_resourceManager.getOrCreateObject3D(asset, {}));
+				if (!glObj || !t)
 					continue;
-				auto* glObj = static_cast<OpenGLObject3D*>(glObj3D.get());
 
 				++m_lastTotalCount;
 
 				DrawCmd cmd;
-				cmd.obj = glObj;
+				cmd.obj = glObj.get();
 				cmd.material = glObj->getMaterial();
 				Mat4 engineMat = t->getMatrix4ColumnMajor();
 				cmd.modelMatrix = glm::make_mat4(engineMat.m);
@@ -2072,10 +2069,9 @@ void OpenGLRenderer::renderWorld()
 			}
 			else if (groupObjType == AssetType::Model2D)
 			{
-				const auto& glObj2D = m_resourceManager.getOrCreateObject2D(asset, {});
-				if (!glObj2D || !t)
+				auto glObj = std::static_pointer_cast<OpenGLObject2D>(m_resourceManager.getOrCreateObject2D(asset, {}));
+				if (!glObj || !t)
 					continue;
-				auto* glObj = static_cast<OpenGLObject2D*>(glObj2D.get());
 
 				Mat4 engineMat = t->getMatrix4ColumnMajor();
 				glm::mat4 modelMatrix = glm::make_mat4(engineMat.m);
@@ -2355,22 +2351,22 @@ void OpenGLRenderer::renderWorld()
 				first.obj->setSkinned(true);
 				first.obj->setBoneMatrices(bones.empty() ? nullptr : bones[0].m, static_cast<int>(bones.size()));
 			}
-			if (first.overrides && first.overrides->hasAnyOverride() && first.material)
+			if (first.overrides.hasAnyOverride() && first.material)
 			{
-				if (first.overrides->hasColorTint)
-					first.material->setColorTint(glm::vec3(first.overrides->colorTint[0], first.overrides->colorTint[1], first.overrides->colorTint[2]));
-				if (first.overrides->hasMetallic)
-					first.material->setOverrideMetallic(first.overrides->metallic);
-				if (first.overrides->hasRoughness)
-					first.material->setOverrideRoughness(first.overrides->roughness);
-				if (first.overrides->hasShininess)
-					first.material->setOverrideShininess(first.overrides->shininess);
-				if (first.overrides->hasSpecularMultiplier)
-					first.material->setOverrideSpecularMultiplier(first.overrides->specularMultiplier);
+				if (first.overrides.hasColorTint)
+					first.material->setColorTint(glm::vec3(first.overrides.colorTint[0], first.overrides.colorTint[1], first.overrides.colorTint[2]));
+				if (first.overrides.hasMetallic)
+					first.material->setOverrideMetallic(first.overrides.metallic);
+				if (first.overrides.hasRoughness)
+					first.material->setOverrideRoughness(first.overrides.roughness);
+				if (first.overrides.hasShininess)
+					first.material->setOverrideShininess(first.overrides.shininess);
+				if (first.overrides.hasSpecularMultiplier)
+					first.material->setOverrideSpecularMultiplier(first.overrides.specularMultiplier);
 			}
 			first.obj->render();
 			// Restore defaults after override draw
-			if (first.overrides && first.overrides->hasAnyOverride() && first.material)
+			if (first.overrides.hasAnyOverride() && first.material)
 			{
 				first.material->setColorTint(glm::vec3(1.0f));
 			}
@@ -2386,7 +2382,7 @@ void OpenGLRenderer::renderWorld()
 		}
 
 		// Material override objects: draw individually (per-entity uniforms)
-		if (first.overrides && first.overrides->hasAnyOverride())
+		if (first.overrides.hasAnyOverride())
 		{
 			first.obj->setMatrices(first.modelMatrix, view, m_projectionMatrix);
 			first.obj->setShadowData(m_shadow.depthArray, m_shadow.lightSpaceMatrices, m_shadow.lightIndices, m_shadow.count);
@@ -2400,16 +2396,16 @@ void OpenGLRenderer::renderWorld()
 			first.obj->setNearFarPlanes(activeNear, activeFar);
 			if (first.material)
 			{
-				if (first.overrides->hasColorTint)
-					first.material->setColorTint(glm::vec3(first.overrides->colorTint[0], first.overrides->colorTint[1], first.overrides->colorTint[2]));
-				if (first.overrides->hasMetallic)
-					first.material->setOverrideMetallic(first.overrides->metallic);
-				if (first.overrides->hasRoughness)
-					first.material->setOverrideRoughness(first.overrides->roughness);
-				if (first.overrides->hasShininess)
-					first.material->setOverrideShininess(first.overrides->shininess);
-				if (first.overrides->hasSpecularMultiplier)
-					first.material->setOverrideSpecularMultiplier(first.overrides->specularMultiplier);
+				if (first.overrides.hasColorTint)
+					first.material->setColorTint(glm::vec3(first.overrides.colorTint[0], first.overrides.colorTint[1], first.overrides.colorTint[2]));
+				if (first.overrides.hasMetallic)
+					first.material->setOverrideMetallic(first.overrides.metallic);
+				if (first.overrides.hasRoughness)
+					first.material->setOverrideRoughness(first.overrides.roughness);
+				if (first.overrides.hasShininess)
+					first.material->setOverrideShininess(first.overrides.shininess);
+				if (first.overrides.hasSpecularMultiplier)
+					first.material->setOverrideSpecularMultiplier(first.overrides.specularMultiplier);
 			}
 			first.obj->render();
 			// Restore defaults
@@ -2435,7 +2431,7 @@ void OpenGLRenderer::renderWorld()
 			   m_drawList[batchEnd].material == first.material &&
 			   !m_drawList[batchEnd].hasEmission &&
 			   !m_drawList[batchEnd].isSkinned &&
-			   !(m_drawList[batchEnd].overrides && m_drawList[batchEnd].overrides->hasAnyOverride()))
+			   !m_drawList[batchEnd].overrides.hasAnyOverride())
 		{
 			++batchEnd;
 		}
@@ -3234,10 +3230,8 @@ void OpenGLRenderer::renderWidgetElement(
 		};
 		if (element.wrapText && cw > 0.0f)
 		{
-			m_textWrapLinesScratch.clear();
-			m_textWrapParagraphsScratch.clear();
-			auto& lines = m_textWrapLinesScratch;
-			auto& paragraphs = m_textWrapParagraphsScratch;
+			std::vector<std::string> lines;
+			std::vector<std::string> paragraphs;
 			std::string para;
 			for (char c : element.text) { if (c=='\n'){paragraphs.push_back(para);para.clear();}else para.push_back(c); }
 			paragraphs.push_back(para);
@@ -3793,12 +3787,12 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
 	glm::mat4 uiProjection = glm::ortho(0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f);
 
 
-	m_deferredDropDownsScratch.clear();
+	std::vector<UIRenderContext::DeferredDropDown> deferredDropDowns;
 	UIRenderContext ctx;
 	ctx.projection = uiProjection;
 	ctx.screenHeight = height;
 	ctx.debugEnabled = m_uiDebugEnabled;
-	ctx.deferredDropdowns = &m_deferredDropDownsScratch;
+	ctx.deferredDropdowns = &deferredDropDowns;
 
 	const auto& ordered = mgr.getWidgetsOrderedByZ();
 #if ENGINE_EDITOR
@@ -3843,7 +3837,7 @@ void OpenGLRenderer::drawUIWidgetsToFramebuffer(UIManager& mgr, int width, int h
 	}
 
 	// Deferred pass: draw expanded DropDown items on top of everything
-	for (const auto& dd : m_deferredDropDownsScratch)
+	for (const auto& dd : deferredDropDowns)
 	{
 		const std::string& vp = resolveUIShaderPath("", m_defaultPanelVertex);
 		const std::string& fp = resolveUIShaderPath("", m_defaultPanelFragment);
@@ -5504,12 +5498,12 @@ void OpenGLRenderer::renderUI()
 		glm::mat4 uiProjection = glm::ortho(0.0f, static_cast<float>(width), static_cast<float>(height), 0.0f);
 
 
-		m_deferredDropDownsScratch.clear();
+		std::vector<UIRenderContext::DeferredDropDown> deferredDropDowns;
 		UIRenderContext ctx;
 		ctx.projection = uiProjection;
 		ctx.screenHeight = height;
 		ctx.debugEnabled = m_uiDebugEnabled;
-		ctx.deferredDropdowns = &m_deferredDropDownsScratch;
+		ctx.deferredDropdowns = &deferredDropDowns;
 
 		for (const auto* entry : ordered)
 		{
@@ -5545,7 +5539,7 @@ void OpenGLRenderer::renderUI()
 		}
 
 		// Deferred pass: draw expanded DropDown items on top of everything
-		for (const auto& dd : m_deferredDropDownsScratch)
+		for (const auto& dd : deferredDropDowns)
 		{
 			const std::string& vp = resolveUIShaderPath("", m_defaultPanelVertex);
 			const std::string& fp = resolveUIShaderPath("", m_defaultPanelFragment);
@@ -5956,17 +5950,15 @@ bool OpenGLRenderer::ensureHzbResources(int width, int height)
 		"    FragColor = max(max(d0, d1), max(d2, d3));\n"
 		"}\n";
 
-	OpenGLShader vertShader;
-	OpenGLShader copyFragShader;
-	OpenGLShader downsampleFragShader;
-
-	if (!vertShader.loadFromSource(Shader::Type::Vertex, fullscreenVert) ||
-		!copyFragShader.loadFromSource(Shader::Type::Fragment, copyFrag) ||
-		!downsampleFragShader.loadFromSource(Shader::Type::Fragment, downsampleFrag))
+	auto compileShader = [](const std::string& source, Shader::Type type) -> std::shared_ptr<OpenGLShader>
 	{
-		releaseHzbResources();
-		return false;
-	}
+		auto s = std::make_shared<OpenGLShader>();
+		if (!s->loadFromSource(type, source))
+		{
+			return nullptr;
+		}
+		return s;
+	};
 
 	auto linkProgram = [](GLuint vs, GLuint fs) -> GLuint
 	{
@@ -5984,8 +5976,18 @@ bool OpenGLRenderer::ensureHzbResources(int width, int height)
 		return prog;
 	};
 
-	m_hzbCopyProgram = linkProgram(vertShader.id(), copyFragShader.id());
-	m_hzbDownsampleProgram = linkProgram(vertShader.id(), downsampleFragShader.id());
+	auto vertShader = compileShader(fullscreenVert, Shader::Type::Vertex);
+	auto copyFragShader = compileShader(copyFrag, Shader::Type::Fragment);
+	auto downsampleFragShader = compileShader(downsampleFrag, Shader::Type::Fragment);
+
+	if (!vertShader || !copyFragShader || !downsampleFragShader)
+	{
+		releaseHzbResources();
+		return false;
+	}
+
+	m_hzbCopyProgram = linkProgram(vertShader->id(), copyFragShader->id());
+	m_hzbDownsampleProgram = linkProgram(vertShader->id(), downsampleFragShader->id());
 	if (!m_hzbCopyProgram || !m_hzbDownsampleProgram)
 	{
 		releaseHzbResources();
@@ -6093,8 +6095,8 @@ bool OpenGLRenderer::ensureBoundsDebugResources()
 		return true;
 	}
 
-	OpenGLShader vertex;
-	OpenGLShader fragment;
+	auto vertex = std::make_shared<OpenGLShader>();
+	auto fragment = std::make_shared<OpenGLShader>();
 
 	const std::string vertexSource =
 		"#version 460 core\n"
@@ -6113,15 +6115,15 @@ bool OpenGLRenderer::ensureBoundsDebugResources()
 		"    FragColor = uColor;\n"
 		"}\n";
 
-	if (!vertex.loadFromSource(Shader::Type::Vertex, vertexSource) ||
-		!fragment.loadFromSource(Shader::Type::Fragment, fragmentSource))
+	if (!vertex->loadFromSource(Shader::Type::Vertex, vertexSource) ||
+		!fragment->loadFromSource(Shader::Type::Fragment, fragmentSource))
 	{
 		return false;
 	}
 
 	GLuint program = glCreateProgram();
-	glAttachShader(program, vertex.id());
-	glAttachShader(program, fragment.id());
+	glAttachShader(program, vertex->id());
+	glAttachShader(program, fragment->id());
 	glLinkProgram(program);
 
 	GLint linked = 0;
@@ -6391,37 +6393,37 @@ bool OpenGLRenderer::ensureDisplacementResources()
 	auto& logger = Logger::Instance();
 	const auto shaderDir = std::filesystem::current_path() / "shaders";
 
-	OpenGLShader vertShader;
-	OpenGLShader tescShader;
-	OpenGLShader teseShader;
-	OpenGLShader fragShader;
+	auto vertShader = std::make_shared<OpenGLShader>();
+	auto tescShader = std::make_shared<OpenGLShader>();
+	auto teseShader = std::make_shared<OpenGLShader>();
+	auto fragShader = std::make_shared<OpenGLShader>();
 
-	if (!vertShader.loadFromFile(Shader::Type::Vertex, (shaderDir / "vertex.glsl").string()))
+	if (!vertShader->loadFromFile(Shader::Type::Vertex, (shaderDir / "vertex.glsl").string()))
 	{
 		logger.log(Logger::Category::Rendering, "Displacement: failed to load vertex.glsl", Logger::LogLevel::ERROR);
 		return false;
 	}
-	if (!tescShader.loadFromFile(Shader::Type::Hull, (shaderDir / "displacement_tesc.glsl").string()))
+	if (!tescShader->loadFromFile(Shader::Type::Hull, (shaderDir / "displacement_tesc.glsl").string()))
 	{
 		logger.log(Logger::Category::Rendering, "Displacement: failed to load displacement_tesc.glsl", Logger::LogLevel::ERROR);
 		return false;
 	}
-	if (!teseShader.loadFromFile(Shader::Type::Domain, (shaderDir / "displacement_tese.glsl").string()))
+	if (!teseShader->loadFromFile(Shader::Type::Domain, (shaderDir / "displacement_tese.glsl").string()))
 	{
 		logger.log(Logger::Category::Rendering, "Displacement: failed to load displacement_tese.glsl", Logger::LogLevel::ERROR);
 		return false;
 	}
-	if (!fragShader.loadFromFile(Shader::Type::Fragment, (shaderDir / "fragment.glsl").string()))
+	if (!fragShader->loadFromFile(Shader::Type::Fragment, (shaderDir / "fragment.glsl").string()))
 	{
 		logger.log(Logger::Category::Rendering, "Displacement: failed to load fragment.glsl", Logger::LogLevel::ERROR);
 		return false;
 	}
 
 	GLuint prog = glCreateProgram();
-	glAttachShader(prog, vertShader.id());
-	glAttachShader(prog, tescShader.id());
-	glAttachShader(prog, teseShader.id());
-	glAttachShader(prog, fragShader.id());
+	glAttachShader(prog, vertShader->id());
+	glAttachShader(prog, tescShader->id());
+	glAttachShader(prog, teseShader->id());
+	glAttachShader(prog, fragShader->id());
 	glLinkProgram(prog);
 
 	GLint linked = 0;
@@ -6435,10 +6437,10 @@ bool OpenGLRenderer::ensureDisplacementResources()
 		return false;
 	}
 
-	glDetachShader(prog, vertShader.id());
-	glDetachShader(prog, tescShader.id());
-	glDetachShader(prog, teseShader.id());
-	glDetachShader(prog, fragShader.id());
+	glDetachShader(prog, vertShader->id());
+	glDetachShader(prog, tescShader->id());
+	glDetachShader(prog, teseShader->id());
+	glDetachShader(prog, fragShader->id());
 
 	m_displacementProgram = prog;
 	logger.log(Logger::Category::Rendering, "Displacement mapping: tessellation program built successfully.", Logger::LogLevel::INFO);
@@ -8060,18 +8062,18 @@ GLuint OpenGLRenderer::getUIQuadProgram(const std::string& vertexShaderPath, con
 		return it->second;
 	}
 
-	OpenGLShader vertex;
-	OpenGLShader fragment;
+	auto vertex = std::make_shared<OpenGLShader>();
+	auto fragment = std::make_shared<OpenGLShader>();
 
-	if (!vertex.loadFromFile(Shader::Type::Vertex, vertexShaderPath) ||
-		!fragment.loadFromFile(Shader::Type::Fragment, fragmentShaderPath))
+	if (!vertex->loadFromFile(Shader::Type::Vertex, vertexShaderPath) ||
+		!fragment->loadFromFile(Shader::Type::Fragment, fragmentShaderPath))
 	{
 		return 0;
 	}
 
 	GLuint program = glCreateProgram();
-	glAttachShader(program, vertex.id());
-	glAttachShader(program, fragment.id());
+	glAttachShader(program, vertex->id());
+	glAttachShader(program, fragment->id());
 	glLinkProgram(program);
 
 	GLint linked = 0;
@@ -9354,16 +9356,16 @@ bool OpenGLRenderer::ensurePickFbo(int width, int height)
 			"    oEntityId = uEntityId;\n"
 			"}\n";
 
-		OpenGLShader vShader;
-		OpenGLShader fShader;
-		if (!vShader.loadFromSource(Shader::Type::Vertex, vs) ||
-			!fShader.loadFromSource(Shader::Type::Fragment, fs))
+		auto vShader = std::make_shared<OpenGLShader>();
+		auto fShader = std::make_shared<OpenGLShader>();
+		if (!vShader->loadFromSource(Shader::Type::Vertex, vs) ||
+			!fShader->loadFromSource(Shader::Type::Fragment, fs))
 		{
 			return false;
 		}
 		GLuint prog = glCreateProgram();
-		glAttachShader(prog, vShader.id());
-		glAttachShader(prog, fShader.id());
+		glAttachShader(prog, vShader->id());
+		glAttachShader(prog, fShader->id());
 		glLinkProgram(prog);
 		GLint linked = 0;
 		glGetProgramiv(prog, GL_LINK_STATUS, &linked);
@@ -9686,15 +9688,15 @@ bool OpenGLRenderer::ensureOutlineResources()
 		"    }\n"
 		"}\n";
 
-	OpenGLShader vShader;
-	OpenGLShader fShader;
-	if (!vShader.loadFromSource(Shader::Type::Vertex, vs) ||
-		!fShader.loadFromSource(Shader::Type::Fragment, fs))
+	auto vShader = std::make_shared<OpenGLShader>();
+	auto fShader = std::make_shared<OpenGLShader>();
+	if (!vShader->loadFromSource(Shader::Type::Vertex, vs) ||
+		!fShader->loadFromSource(Shader::Type::Fragment, fs))
 		return false;
 
 	GLuint prog = glCreateProgram();
-	glAttachShader(prog, vShader.id());
-	glAttachShader(prog, fShader.id());
+	glAttachShader(prog, vShader->id());
+	glAttachShader(prog, fShader->id());
 	glLinkProgram(prog);
 	GLint linked = 0;
 	glGetProgramiv(prog, GL_LINK_STATUS, &linked);

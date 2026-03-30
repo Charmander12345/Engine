@@ -619,10 +619,9 @@ void AudioPreviewTab::buildMetadata(WidgetElement& root)
         int minutes = totalSec / 60;
         int seconds = totalSec % 60;
         int millis = static_cast<int>((st.durationSeconds - totalSec) * 1000);
-        std::ostringstream oss;
-        oss << minutes << ":" << std::setfill('0') << std::setw(2) << seconds
-            << "." << std::setfill('0') << std::setw(3) << millis;
-        addInfoRow("Duration", oss.str());
+        char durBuf[32];
+        std::snprintf(durBuf, sizeof(durBuf), "%d:%02d.%03d", minutes, seconds, millis);
+        addInfoRow("Duration", durBuf);
     }
 
     // Data size

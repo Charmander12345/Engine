@@ -52,6 +52,7 @@ set(RENDERER_CORE_COMMON_SOURCES
 
 # Editor-only sources – not compiled into the runtime build.
 set(RENDERER_CORE_EDITOR_SOURCES
+    UIManagerEditor.cpp
     EditorUIBuilder.h
     EditorUIBuilder.cpp
     WidgetDetailSchema.h

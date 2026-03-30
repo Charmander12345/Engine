@@ -896,11 +896,11 @@ void OutlinerPanel::populateDetails(unsigned int entity)
                         DiagnosticsManager::Instance().invalidateEntity(entity);
                         if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
                         populateDetails(entity);
-                        m_uiManager->showToastMessage("Auto-fitted collider from mesh AABB.", 2.0f);
+                        m_uiManager->showToastMessage("Auto-fitted collider from mesh AABB.", UIManager::kToastShort);
                     }
                     else
                     {
-                        m_uiManager->showToastMessage("No mesh data available for auto-fit.", 2.5f);
+                        m_uiManager->showToastMessage("No mesh data available for auto-fit.", UIManager::kToastMedium);
                     }
                 },
                 Vec2{ 0.0f, 22.0f * EditorTheme::Get().dpiScale });
@@ -1385,7 +1385,7 @@ void OutlinerPanel::populateDetails(unsigned int entity)
                     {
                         refresh();
                     }
-                    m_uiManager->showToastMessage("Added " + label + " component.", 2.0f);
+                    m_uiManager->showToastMessage("Added " + label + " component.", UIManager::kToastShort);
                     UndoRedoManager::Instance().pushCommand({
                         "Add " + label,
                         [addFn, entity]() {
@@ -1505,7 +1505,7 @@ void OutlinerPanel::applyAssetToEntity(AssetType type, const std::string& assetP
         Logger::Instance().log(Logger::Category::UI,
             "Applied mesh '" + assetPath + "' to entity " + std::to_string(entity),
             Logger::LogLevel::INFO);
-        m_uiManager->showToastMessage("Mesh assigned: " + assetPath, 2.5f);
+        m_uiManager->showToastMessage("Mesh assigned: " + assetPath, UIManager::kToastMedium);
         break;
     }
     case AssetType::Material:
@@ -1542,7 +1542,7 @@ void OutlinerPanel::applyAssetToEntity(AssetType type, const std::string& assetP
         Logger::Instance().log(Logger::Category::UI,
             "Applied material '" + assetPath + "' to entity " + std::to_string(entity),
             Logger::LogLevel::INFO);
-        m_uiManager->showToastMessage("Material assigned: " + assetPath, 2.5f);
+        m_uiManager->showToastMessage("Material assigned: " + assetPath, UIManager::kToastMedium);
         break;
     }
     case AssetType::Script:
@@ -1579,7 +1579,7 @@ void OutlinerPanel::applyAssetToEntity(AssetType type, const std::string& assetP
         Logger::Instance().log(Logger::Category::UI,
             "Applied script '" + assetPath + "' to entity " + std::to_string(entity),
             Logger::LogLevel::INFO);
-        m_uiManager->showToastMessage("Script assigned: " + assetPath, 2.5f);
+        m_uiManager->showToastMessage("Script assigned: " + assetPath, UIManager::kToastMedium);
         break;
     }
     default:
@@ -1637,7 +1637,7 @@ void OutlinerPanel::copySelectedEntity()
     std::string entityName = "Entity " + std::to_string(entity);
     if (m_entityClipboard.name)
         entityName = m_entityClipboard.name->displayName;
-    m_uiManager->showToastMessage("Copied: " + entityName, 2.0f);
+    m_uiManager->showToastMessage("Copied: " + entityName, UIManager::kToastShort);
 }
 
 
@@ -1696,7 +1696,7 @@ bool OutlinerPanel::pasteEntity()
     std::string entityName = "Entity " + std::to_string(newEntity);
     if (m_entityClipboard.name)
         entityName = m_entityClipboard.name->displayName + " (Copy)";
-    m_uiManager->showToastMessage("Pasted: " + entityName, 2.0f);
+    m_uiManager->showToastMessage("Pasted: " + entityName, UIManager::kToastShort);
 
     Logger::Instance().log(Logger::Category::Engine,
         "Pasted entity " + std::to_string(newEntity) + " (" + entityName + ")",

@@ -212,7 +212,7 @@ DiagnosticsManager::RHIType DiagnosticsManager::getRHIType() const
     return m_rhiType;
 }
 
-std::string DiagnosticsManager::rhiTypeToString(RHIType type)
+const char* DiagnosticsManager::rhiTypeToString(RHIType type)
 {
     switch (type)
     {
@@ -224,7 +224,7 @@ std::string DiagnosticsManager::rhiTypeToString(RHIType type)
     }
 }
 
-std::string DiagnosticsManager::windowStateToString(WindowState state)
+const char* DiagnosticsManager::windowStateToString(WindowState state)
 {
     switch (state)
     {
@@ -596,6 +596,15 @@ std::vector<unsigned int> DiagnosticsManager::consumeDirtyEntities()
     std::vector<unsigned int> result(m_dirtyEntities.begin(), m_dirtyEntities.end());
     m_dirtyEntities.clear();
     return result;
+}
+
+void DiagnosticsManager::consumeDirtyEntities(std::vector<unsigned int>& out)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    out.clear();
+    out.reserve(m_dirtyEntities.size());
+    out.assign(m_dirtyEntities.begin(), m_dirtyEntities.end());
+    m_dirtyEntities.clear();
 }
 
 bool DiagnosticsManager::hasDirtyEntities() const

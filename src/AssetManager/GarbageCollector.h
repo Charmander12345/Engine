@@ -1,5 +1,6 @@
 #pragma once
 #include <vector>
+#include <unordered_set>
 #include <memory>
 #include <mutex>
 #include "../Core/EngineObject.h"
@@ -20,4 +21,5 @@ public:
 private:
     mutable std::mutex m_mutex;
     std::vector<std::weak_ptr<EngineObject>> m_trackedResources;
+    std::unordered_set<const EngineObject*> m_registeredPtrs;
 };

@@ -217,6 +217,7 @@ add_subdirectory(src/Renderer)
 add_subdirectory(src/Scripting)
 add_subdirectory(src/Landscape)
 add_subdirectory(src/Physics)
+add_subdirectory(src/Editor)
 
 # ── Tests (GTest)
 option(ENGINE_BUILD_TESTS "Build engine GTest suite" ON)
@@ -286,8 +287,8 @@ if(WIN32)
     set_target_properties(HorizonEngine PROPERTIES WIN32_EXECUTABLE OFF)
 endif()
 
-target_include_directories(HorizonEngine PRIVATE ${ENGINE_COMMON_INCLUDES})
-target_link_libraries(HorizonEngine PRIVATE ${ENGINE_EDITOR_LIBS} Renderer)
+target_include_directories(HorizonEngine PRIVATE ${ENGINE_COMMON_INCLUDES} ${CMAKE_SOURCE_DIR}/src/Editor)
+target_link_libraries(HorizonEngine PRIVATE ${ENGINE_EDITOR_LIBS} Renderer Editor)
 target_compile_definitions(HorizonEngine PRIVATE ENGINE_EDITOR=1
     ENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
     CMAKE_GENERATOR="${CMAKE_GENERATOR}"

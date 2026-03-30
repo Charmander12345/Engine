@@ -164,7 +164,9 @@ public:
 	bool removeEntity(Entity entity);
 
 	std::vector<Entity> getEntitiesMatchingSchema(const Schema& schema) const;
+	void getEntitiesMatchingSchema(const Schema& schema, std::vector<Entity>& out) const;
 	std::vector<SchemaAssetMatch> getAssetsMatchingSchema(const Schema& schema) const;
+	void getAssetsMatchingSchema(const Schema& schema, std::vector<SchemaAssetMatch>& out) const;
 	const Schema& getRenderSchema() const;
 
 	template<typename T>

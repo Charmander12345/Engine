@@ -5,17 +5,36 @@ void GarbageCollector::collect()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    // remove expired entries
+    // remove expired entries and keep the pointer set in sync
     m_trackedResources.erase(
         std::remove_if(m_trackedResources.begin(), m_trackedResources.end(),
-            [](const std::weak_ptr<EngineObject>& p) { return p.expired(); }),
+            [this](const std::weak_ptr<EngineObject>& p)
+            {
+                if (p.expired())
+                {
+                    // Cannot recover the raw pointer from an expired weak_ptr,
+                    // so rebuild the set after erasure.
+                    return true;
+                }
+                return false;
+            }),
         m_trackedResources.end());
+
+    // Rebuild the fast-lookup set from the surviving entries
+    m_registeredPtrs.clear();
+    m_registeredPtrs.reserve(m_trackedResources.size());
+    for (const auto& w : m_trackedResources)
+    {
+        if (auto sp = w.lock())
+            m_registeredPtrs.insert(sp.get());
+    }
 }
 
 void GarbageCollector::clear()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_trackedResources.clear();
+    m_registeredPtrs.clear();
 }
 
 bool GarbageCollector::registerResource(const std::shared_ptr<EngineObject>& resource)
@@ -27,14 +46,8 @@ bool GarbageCollector::registerResource(const std::shared_ptr<EngineObject>& res
 
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    auto it = std::find_if(m_trackedResources.begin(), m_trackedResources.end(),
-        [&](const std::weak_ptr<EngineObject>& p)
-        {
-            auto sp = p.lock();
-            return sp && sp.get() == resource.get();
-        });
-
-    if (it != m_trackedResources.end())
+    // O(1) duplicate check instead of O(n) linear scan
+    if (!m_registeredPtrs.insert(resource.get()).second)
     {
         return false;
     }

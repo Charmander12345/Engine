@@ -275,54 +275,35 @@ Eine einzige Datei definiert **13 Python-Module** mit insgesamt ~200 C-Funktione
 
 ---
 
-## 7. Renderer.h – Interface zu groß (195 Virtual Methods)
+## 7. Renderer.h – Interface zu groß (195 Virtual Methods) ✅ ERLEDIGT
 
-### Problem
-`Renderer.h` hat **195 virtuelle Methoden**. Viele davon sind Editor-only oder Debug-Features:
-- ~30 Gizmo-Methoden
-- ~15 Tab-Management-Methoden
-- ~15 Popup/MeshViewer-Methoden
-- ~10 Debug-Overlay-Methoden
-- ~20 Skeletal-Animation-Methoden
-- ~15 Viewport-Layout-Methoden
+### Ergebnis (Minimaler Ansatz: `#if ENGINE_EDITOR` Guards)
 
-### Konkrete Verbesserung
-Aufspaltung in **Interfaces/Mixins**:
-```cpp
-class IRendererCore { ... };           // ~20 Methoden (init, render, camera, clear)
-class IRendererScene { ... };          // ~20 Methoden (entities, materials, lighting)
-class IRendererEditor { ... };         // ~50 Methoden (gizmo, picking, tabs, popups)
-class IRendererDebug { ... };          // ~15 Methoden (colliders, bones, grid, wireframe)
-class IRendererAnimation { ... };      // ~20 Methoden (skeletal, clips, bones)
-```
+Editor-only Methoden (~70 virtuelle Methoden) mit `#if ENGINE_EDITOR`-Präprozessor-Guards versehen. Das Runtime-Interface ist dadurch deutlich kleiner.
 
-Alternativ minimaler Ansatz: Editor-Methoden mit `#if ENGINE_EDITOR` guard versehen, sodass das Runtime-Interface kleiner ist.
+| Datei | Änderung |
+|---|---|
+| `Renderer.h` | 2 Guard-Blöcke: (1) Debug-Rendering, Picking, Gizmo, Snap/Grid, Editor-Tabs (~70 Methoden), (2) Multi-Viewport-Methoden (~10 Methoden). Enums/Structs/Protected Members unguarded. |
+| `OpenGLRenderer.h` | Entsprechende Override-Deklarationen in ~6 Guard-Blöcke eingeschlossen |
+| `OpenGLRenderer.cpp` | Implementierungen + 4 interne Call-Sites (Pick-Handling, Sub-Viewport-Labels, moveCamera/rotateCamera Multi-Viewport-Routing) |
+| `OpenGLRendererGizmo.cpp` | `beginGizmoDrag`/`updateGizmoDrag`/`endGizmoDrag` guardiert |
+| `main.cpp` | 5 Call-Site-Regionen guardiert: Debug-Viz-Settings, Runtime-Defaults, Mouse-Motion Gizmo/Rubber-Band, Mouse-Down Viewport/Gizmo/Rubber-Band, Mouse-Up Rubber-Band/Pick/Gizmo |
 
 ---
 
-## 8. AssetManager.cpp – Verantwortlichkeiten trennen (~6.600 Zeilen)
+## 8. AssetManager.cpp – Verantwortlichkeiten trennen ✅ ERLEDIGT
 
-### Problem
-`AssetManager` kombiniert:
-- Asset-Registry & Laden/Speichern
-- Assimp-Import (FBX, glTF, OBJ, etc.)
-- Worker-Thread-Pool
-- Garbage Collection
-- Audio-Asset-Management (OpenAL-Puffer)
-- Editor-Widget-Asset-Generierung (`ensureDefaultAssetsCreated`, ~500 Zeilen JSON-Generierung)
-- Asset-Referenz-Tracking
-- Datei-Operationen (move, rename, delete)
+### Ergebnis (Split-Implementation-Dateien)
 
-### Konkrete Verbesserung
-
-| Neue Datei | Inhalt | Zeilen ca. |
+| Neue Datei | Inhalt | Zeilen |
 |---|---|---|
-| `AssetImporter.h/.cpp` | Assimp-Import, `importAssetFromPath`, `OpenImportDialog` | ~900 |
-| `EditorWidgetAssets.h/.cpp` | `ensureDefaultAssetsCreated` (JSON-Widget-Generierung) | ~500 |
-| `AssetFileOps.h/.cpp` | `moveAsset`, `renameAsset`, `deleteAsset`, `updateAssetFileReferences` | ~500 |
-| `AssetReferenceTracker.h/.cpp` | `findReferencesTo`, `getAssetDependencies` | ~300 |
+| `AssetManagerImport.cpp` | Assimp-Import, `OpenImportDialog`, `importAssetFromPath`, anonyme Namespace-Helpers | 955 |
+| `AssetManagerEditorWidgets.cpp` | `ensureEditorWidgetsCreated`, `createWorldSettingsWidgetAsset`, `ensureDefaultAssetsCreated` | 1.900 |
+| `AssetManagerFileOps.cpp` | `deleteAsset`, `validateRegistry`, `validateEntityReferences`, `repairEntityReferences`, `moveAsset`, `renameAsset`, `findReferencesTo`, `getAssetDependencies`, `updateAssetFileReferences` + Static-Helpers | 967 |
 
-**Erwartete Reduktion: AssetManager.cpp von ~6.600 auf ~4.000 Zeilen**
+**Reduktion: AssetManager.cpp von 7.452 auf 3.724 Zeilen (-50%)**
+
+Ansatz: Split-Implementation-Dateien (wie bei OpenGLRenderer). Keine neuen Headers nötig — alle .cpp-Dateien inkludieren `AssetManager.h` und implementieren Methoden der gleichen Klasse.
 
 ---
 
@@ -470,20 +451,20 @@ struct WidgetElement {
 | 🟡 Mittel | ~~6 – PythonScripting Module aufteilen~~ | ~~Gering~~ | ✅ Erledigt (Phase 1+2: 11 Module extrahiert, PythonScripting.cpp -63%) |
 | 🟡 Mittel | ~~4 – Dupliziertes ECS konsolidieren~~ | ~~Gering~~ | ✅ Erledigt (Legacy-ECS `src/ECS/` entfernt) |
 | 🟡 Mittel | ~~5 – Leere .cpp-Dateien entfernen~~ | ~~Trivial~~ | ✅ Erledigt (12 UIWidget .cpp-Stubs entfernt) |
-| 🟢 Niedrig | 8 – AssetManager aufteilen | Mittel | ~2.600 Zeilen weniger |
+| 🟢 Niedrig | ~~8 – AssetManager aufteilen~~ | ~~Mittel~~ | ✅ Erledigt (3 Split-Dateien, AssetManager.cpp -50% von 7.452 auf 3.724) |
 | 🟢 Niedrig | ~~9 – OpenGLRenderer Member-Structs~~ | ~~Gering~~ | ✅ Erledigt (12 Sub-Structs, ~108 Member gruppiert) |
-| 🟢 Niedrig | 7 – Renderer.h Interfaces | Hoch | Sauberes API-Design |
+| 🟢 Niedrig | ~~7 – Renderer.h Interfaces~~ | ~~Hoch~~ | ✅ Erledigt (~70 Editor-only Methoden mit `#if ENGINE_EDITOR` guardiert) |
 | 🟢 Niedrig | 10.7 – WidgetElement Typ-Daten | Hoch | Speicherersparnis, sauberes Design |
 
 ---
 
 ## 12. Quick Wins (sofort umsetzbar, minimales Risiko)
 
-1. **Leere `.cpp`-Dateien entfernen** (12 Dateien in `UIWidgets/`) → Punkt 5
-2. **Toast-Konstanten einführen** (`kToastShort`, `kToastMedium`, `kToastLong`) → Punkt 10.3
-3. **`markAllWidgetsDirty()` in `refresh*`-Methoden integrieren** → Punkt 10.2
+1. ✅ **Leere `.cpp`-Dateien entfernen** (12 Dateien in `UIWidgets/`) → Punkt 5
+2. ✅ **Toast-Konstanten einführen** (`kToastShort`, `kToastMedium`, `kToastLong`) → Punkt 10.3 — Konstanten in `UIManager.h` definiert, alle ~55 hardcoded `showToastMessage`-Aufrufe in 13 Dateien (main.cpp, UIManager.cpp, OpenGLRenderer.cpp, BuildPipeline.cpp, 9 EditorTabs) auf `kToastShort/kToastMedium/kToastLong` standardisiert. Nur 2 Spezialfälle (8.0f für kritische Installationshinweise) beibehalten.
+3. **`markAllWidgetsDirty()` in `refresh*`-Methoden integrieren** → Punkt 10.2 — Zurückgestellt: 119 Call-Sites, viele ohne `refresh*`-Bezug (direkte Widget-Modifikation). Risiko subtiler UI-Bugs überwiegt den Nutzen.
 4. **`#if ENGINE_EDITOR`-Blöcke in main.cpp zu Funktionen konsolidieren** → Punkt 10.4
-5. **Dupliziertes ECS prüfen und ggf. entfernen** (`src/ECS/` vs. `src/Core/ECS/`) → Punkt 4
+5. ✅ **Dupliziertes ECS prüfen und ggf. entfernen** (`src/ECS/` vs. `src/Core/ECS/`) → Punkt 4
 
 ---
 
@@ -512,9 +493,10 @@ Engine/
 │   │   ├── PythonScripting.cpp     (~500 Zeilen)
 │   │   └── ScriptModules/          (10 Modul-Dateien)
 │   └── AssetManager/
-│       ├── AssetManager.cpp        (~4.000 Zeilen)
-│       ├── AssetImporter.cpp
-│       └── EditorWidgetAssets.cpp
+│       ├── AssetManager.cpp        (~3.700 Zeilen)
+│       ├── AssetManagerImport.cpp  (~950 Zeilen)
+│       ├── AssetManagerFileOps.cpp (~970 Zeilen)
+│       └── AssetManagerEditorWidgets.cpp (~1.900 Zeilen)
 ```
 
 **Gesamtreduktion der 5 größten Dateien:**
@@ -522,7 +504,7 @@ Engine/
 - OpenGLRenderer.cpp: 11.400 → ~6.000 (-47%)
 - main.cpp: 4.900 → ~800 (-84%)
 - PythonScripting.cpp: 3.900 → ~500 (-87%)
-- AssetManager.cpp: 6.600 → ~4.000 (-39%)
+- AssetManager.cpp: 7.452 → 3.724 (-50%)
 
 **Gesamt: ~47.600 Zeilen in den Top-5 → ~16.300 Zeilen (-66%)**
 

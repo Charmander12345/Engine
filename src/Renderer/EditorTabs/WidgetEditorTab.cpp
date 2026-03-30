@@ -665,7 +665,7 @@ void WidgetEditorTab::saveAsset(const std::string& tabId)
     {
         state.isDirty = false;
         refreshToolbar(tabId);
-        m_uiManager->showToastMessage("Widget saved.", 2.0f, UIManager::NotificationLevel::Success);
+        m_uiManager->showToastMessage("Widget saved.", UIManager::kToastShort, UIManager::NotificationLevel::Success);
     }
     else
     {

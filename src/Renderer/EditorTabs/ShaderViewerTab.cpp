@@ -208,7 +208,7 @@ void ShaderViewerTab::open(const std::string& initialFile)
         if (m_renderer)
         {
             m_renderer->requestShaderReload();
-            m_uiManager->showToastMessage("Shaders reloaded", 2.0f);
+            m_uiManager->showToastMessage("Shaders reloaded", UIManager::kToastShort);
         }
     });
 

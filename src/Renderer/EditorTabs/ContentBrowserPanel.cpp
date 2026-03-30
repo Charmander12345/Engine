@@ -520,7 +520,7 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
 
                 row.onClicked = [uiMgr = self->m_uiManager, relPath, itemType]()
                 {
-                    uiMgr->showToastMessage("Asset: " + relPath, 2.5f);
+                    uiMgr->showToastMessage("Asset: " + relPath, UIManager::kToastMedium);
                 };
                 treePanel->children.push_back(std::move(row));
                 }
@@ -1327,7 +1327,7 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
                     {
                         if (AssetManager::Instance().renameAsset(relPath, newName))
                         {
-                            m_uiManager->showToastMessage("Renamed to: " + newName, 2.5f);
+                            m_uiManager->showToastMessage("Renamed to: " + newName, UIManager::kToastMedium);
                             m_selectedGridAsset.clear();
                         }
                         else
@@ -1396,7 +1396,7 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
                 Logger::Instance().log(Logger::Category::UI,
                     "Content Browser: open asset '" + relPath + "'",
                     Logger::LogLevel::INFO);
-                m_uiManager->showToastMessage("Open: " + relPath, 2.5f);
+                m_uiManager->showToastMessage("Open: " + relPath, UIManager::kToastMedium);
             };
 
             gridPanel->children.push_back(std::move(tile));

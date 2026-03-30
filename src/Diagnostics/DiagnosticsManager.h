@@ -81,8 +81,8 @@ public:
     // RHI selection
     void setRHIType(RHIType type);
     RHIType getRHIType() const;
-    static std::string rhiTypeToString(RHIType type);
-    static std::string windowStateToString(WindowState state);
+    static const char* rhiTypeToString(RHIType type);
+    static const char* windowStateToString(WindowState state);
     static WindowState windowStateFromString(const std::string& value);
 
     // Persist/load simple key=value pairs to/from config/config.ini in the engine directory
@@ -123,6 +123,7 @@ public:
 
     void invalidateEntity(unsigned int entityId);
     std::vector<unsigned int> consumeDirtyEntities();
+    void consumeDirtyEntities(std::vector<unsigned int>& out);
     bool hasDirtyEntities() const;
 
     void setAssetRegistryReady(bool ready);

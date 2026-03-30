@@ -1,4 +1,4 @@
-﻿#include "BuildSystemUI.h"
+#include "BuildSystemUI.h"
 #include "../UIManager.h"
 #include "../Renderer.h"
 #include "../EditorTheme.h"
@@ -602,7 +602,7 @@ void BuildSystemUI::showBuildProgress()
     if (!m_buildPopup)
     {
         // Fallback: just log a warning and bail
-        m_uiManager->showToastMessage("Failed to open build output window.", 4.0f, NotificationLevel::Error);
+        m_uiManager->showToastMessage("Failed to open build output window.", UIManager::kToastLong, NotificationLevel::Error);
         return;
     }
 

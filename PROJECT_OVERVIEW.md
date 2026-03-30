@@ -5,6 +5,63 @@
 
 ---
 
+## Aktuelle Änderung (Editor-Separation Phase 11: UIManager aufteilen)
+
+- `Phase 11 – UIManager.cpp Split`: `UIManager.cpp` (~8490 Zeilen) in `UIManager.cpp` (Core, ~3350 Zeilen) + `UIManagerEditor.cpp` (Editor, ~4340 Zeilen) aufgeteilt. 10 eigenständige `#if ENGINE_EDITOR`-Blöcke (~4845 Zeilen) nach `UIManagerEditor.cpp` verschoben: World Outliner, Content Browser, Entity-Operationen (Copy/Paste/Duplicate, Prefabs, Templates, Auto-Collider, Surface-Snap), Popup-Builder (Landscape Manager, Engine/Editor Settings, Shortcut Help, Notification History, Asset References), Tab-Management (Console, Profiler, Audio Preview, Particle Editor, Shader Viewer, Render Debugger, Sequencer, Level Composition, Animation Editor, UI Designer, Widget Editor), Build-System-Delegates, Progress Bars, StatusBar-Refresh, Save/Level-Load Progress, DPI-Rebuild, Theme-Update, Toast-Widget-Erstellung. `UIManagerEditor.cpp` in `RENDERER_CORE_EDITOR_SOURCES` (nur Editor-Build). Core-Funktionen (Layout, Input, Hit-Testing, Hover, Drag&Drop) verbleiben in `UIManager.cpp` mit kleinen internen `#if ENGINE_EDITOR`-Guards.
+
+## Aktuelle Änderung (Editor-Separation Phase 10: Renderer.h bereinigen – IEditorRenderer Interface)
+
+- `Phase 10 – IEditorRenderer Interface extrahiert`:
+
+## Aktuelle Änderung (Editor-Separation Phase 9: Projekt-Selektion extrahiert)
+
+- `Phase 9 – Projekt-Selektion nach ProjectSelector`:
+
+## Aktuelle Änderung (Editor-Separation Phase 5+7: Shortcuts & Context Menus extrahiert)
+
+- `Phase 5 – Shortcuts nach EditorApp`: Alle 19 Editor-only `ShortcutManager::registerAction()`-Aufrufe aus main.cpp nach `EditorApp::registerShortcuts()` verschoben (~370 Zeilen entfernt). Beinhaltet: Ctrl+Z/Y (Undo/Redo), Ctrl+S (Save), Ctrl+F (Search), Ctrl+C/V/D (Copy/Paste/Duplicate), F11/F8 (UI/Bounds Debug), Escape/Shift+F1 (PIE Stop/Pause), W/E/R (Gizmo), F (Focus), End (Drop-to-Surface), F1 (Help), F2 (Import), Delete (Asset/Entity Delete mit Undo/Redo). In main.cpp verbleiben nur 3 shared Debug-Shortcuts (F10 ToggleMetrics, F9 ToggleOcclusionStats, F12 ToggleFPSCap) mit bidirektionaler Sync zu EditorApp.
+- `Phase 7 – Kontextmenüs nach EditorApp`: Content-Browser-Rechtsklick-Menü (~700 Zeilen) aus main.cpp nach `EditorApp::handleContentBrowserContextMenu()` verschoben. Alle Items: New Folder, New Script, New Level (PopupWindow), New Widget, New Material (PopupWindow mit Formular), Save as Prefab, Find References, Show Dependencies. In main.cpp ersetzt durch einen einzigen `editorApp->handleContentBrowserContextMenu(mousePos)` Aufruf.
+- `State-Sync zwischen main.cpp und EditorApp`: Bidirektionale Synchronisation für PIE-State (pieMouseCaptured, pieInputPaused, preCaptureMousePos), rightMouseDown, cameraSpeedMultiplier, showMetrics, showOcclusionStats. EditorApp ist Source-of-Truth; main.cpp synchronisiert am Frame-Start und aktualisiert EditorApp bei direkten Änderungen (Scroll-Wheel, Right-Click).
+- `Unused Includes entfernt`: `AssetCooker.h`, `PopupWindow.h`, `UndoRedoManager.h`, `BuildPipeline.h` aus main.cpp entfernt (Code in EditorApp verschoben).
+- `EditorApp.h aktualisiert`: `handleContentBrowserContextMenu(const Vec2&)` public, `handleDelete()` als `bool` return, `setRightMouseDown()`, `MathTypes.h` Include hinzugefügt.
+
+## Aktuelle Änderung (Editor-Separation Phase 3: EditorApp Lifecycle verdrahtet)
+
+- `EditorApp in main.cpp instanziiert`: `EditorBridgeImpl` + `EditorApp` werden nach Renderer-Init via `std::make_unique` erzeugt (innerhalb `#if ENGINE_EDITOR`, nur wenn `!isRuntimeMode`). 4 Lifecycle-Calls verdrahtet:
+  - `editorApp->initialize()`: Ersetzt DPI-Rebuild, markAllWidgetsDirty(), "Engine ready!"-Toast und Build-Pipeline-Registration (startAsyncToolchainDetection + setOnBuildGame) — diese Duplikate wurden aus main.cpp Phase 3 entfernt.
+  - `editorApp->tick(dt)`: Ersetzt pollBuildThread() + pollToolchainDetection() im Main Loop.
+  - `editorApp->processEvent(event)`: Ersetzt direkten routeEventToPopup()-Aufruf im Event-Loop.
+  - `editorApp->shutdown()`: Ersetzt Editor-Camera-Capture + saveActiveLevel bei Shutdown. Shortcut-Saves und DiagnosticsManager-Config-Saves bleiben vorerst in main.cpp.
+- `CMake-Fix: ENGINE_EDITOR=1 für Editor-Target`: `target_compile_definitions(Editor PRIVATE ENGINE_EDITOR=1)` zu `src/Editor/CMakeLists.txt` hinzugefügt. Ohne dieses Define wurden alle `#if ENGINE_EDITOR`-guardierte Dateien (EditorApp.cpp, EditorBridgeImpl.cpp) zu leeren Translation Units kompiliert.
+- `EditorBridgeImpl von Core nach Editor verschoben`: `EditorBridgeImpl.h/cpp` aus `src/Core/CMakeLists.txt` entfernt und zu `src/Editor/CMakeLists.txt` hinzugefügt (physisch weiterhin in `src/Core/`). Core enthält nur noch das Interface `IEditorBridge.h`. Das Editor-OBJECT-Library kompiliert die Implementierung mit ENGINE_EDITOR=1.
+
+## Aktuelle Änderung (Editor-Separation Phase 2: IEditorBridge API & EditorApp Skeleton)
+
+- `IEditorBridge – Abstrakte Editor-API (src/Core/IEditorBridge.h)`: Neues Interface (~234 Zeilen) als saubere API-Grenze zwischen Engine und Editor. ~50 rein virtuelle Methoden in 10 Kategorien: Renderer/Window (getRenderer, getUIManager, getWindow, preloadUITexture, createWidgetFromAsset), Camera (get/set Position/Rotation, move/rotate), Entity (create/remove/select/invalidate), Assets (load/save/import/delete/move, getProjectPath, findReferencesTo, getAssetDependencies), Level (loadLevel, saveActiveLevel, captureEditorCameraToLevel, restoreEditorCameraFromLevel), PIE (start/stop, initializePhysicsForPIE, snapshotEcsState, findActiveCameraEntity), Physics (raycastDown), Diagnostics (get/setState, requestShutdown), Scripting (reloadScripts, loadEditorPlugins), Undo/Redo (push/undo/redo/clear), Audio (stopAllAudio). Nested Structs: RaycastResult, AssetReference, UndoCommand. Nur Forward-Declarations + MathTypes.h als Dependency.
+- `EditorBridgeImpl – Konkrete Implementierung (src/Core/EditorBridgeImpl.h/cpp)`: Konkrete Implementierung (~450 Zeilen) delegiert alle IEditorBridge-Methoden an Engine-Singletons (ECS::ECSManager, AssetManager, DiagnosticsManager, PhysicsWorld, Scripting, UndoRedoManager, AudioManager). Vollständig `#if ENGINE_EDITOR`-guardiert. Konstruktor nimmt `Renderer*`. In `src/Core/CMakeLists.txt` integriert.
+- `EditorApp – Editor-Lifecycle-Klasse (src/Editor/EditorApp.h/cpp)`: Neues Editor-Modul (~170 Zeilen) mit Lifecycle: `initialize()`, `processEvent()`, `tick()`, `shutdown()`, `stopPIE()`. Empfängt `IEditorBridge&` und kapselt Editor-spezifische Logik. Registriert Build-Pipeline-Callback, preloaded Editor-Textures, DPI-Rebuild. Placeholder-Methoden für Widget-/ClickEvent-/DragDrop-Migration (Phase 3+).
+- `src/Editor/CMakeLists.txt`: Neues OBJECT-Library-Target `Editor` mit ENGINE_EDITOR=1. Verlinkt mit SDL3, Logger, Core.
+- `CMakeLists.txt (Root)`: `add_subdirectory(src/Editor)` hinzugefügt. `Editor` OBJECT-Library mit `HorizonEngine` verlinkt. Editor-Include-Directory zu HorizonEngine-Target hinzugefügt.
+- `src/Core/CMakeLists.txt`: `IEditorBridge.h`, `EditorBridgeImpl.h`, `EditorBridgeImpl.cpp` zu Core-Library hinzugefügt. Include-Directories erweitert um Diagnostics, Physics, Scripting, Python.
+- `main.cpp`: Includes für `IEditorBridge.h`, `EditorBridgeImpl.h`, `EditorApp.h` hinzugefügt (innerhalb `#if ENGINE_EDITOR`-Block).
+- `EDITOR_SEPARATION_PLAN.md`: Umfassender 11-Phasen-Migrationsplan erstellt. Ziel: main.cpp von ~2.800 auf ~300 Zeilen mit nur 3 `#if ENGINE_EDITOR`-Guards.
+
+## Aktuelle Änderung (Memory-Management & Performance-Optimierung: Rendering Hot Path)
+
+- `UIManager Layout Scratch-Vektoren`: 5 temporäre `std::vector`-Allokationen pro `updateLayouts()`-Aufruf (Top/Bottom/Left/Right/Other + orderedEntries) durch 6 Member-Scratch-Vektoren (`m_layoutOrderedScratch`, `m_layoutTopScratch` etc.) mit `clear()`+Reuse-Pattern ersetzt. Eliminiert Heap-Churn bei jedem Layout-Pass. **UIManager.h:** 6 neue Member-Vektoren. **UIManager.cpp:** `updateLayouts()` nutzt `clear()` statt lokaler Deklarationen.
+- `GarbageCollector O(1) Duplikat-Check`: `registerResource()` scannte linear alle `m_trackedResources` mit `weak_ptr::lock()` auf jedes Element — O(n) pro Registrierung. **Fix:** `std::unordered_set<const EngineObject*> m_registeredPtrs` als Hilfsindex. Insert prüft O(1) ob Pointer bereits registriert. `collect()` baut Set nach Pruning neu auf. **GarbageCollector.h:** `#include <unordered_set>` + neuer Member. **GarbageCollector.cpp:** `registerResource()`, `collect()`, `clear()` aktualisiert.
+- `DrawCmd MaterialOverrides Pointer statt Kopie`: `DrawCmd::overrides` war `ECS::MaterialOverrides` by-value (~60+ Bytes inline). Bei jedem Sort/Move wurde das gesamte Struct kopiert — Cache-Pollution. **Fix:** Zu `const ECS::MaterialOverrides* overrides{nullptr}` geändert (8 Bytes). Zeigt auf ECS-owned Daten. **OpenGLRenderer.h:** DrawCmd-Struct geändert. **OpenGLRenderer.cpp:** Zuweisung (`&matComp->overrides`) + 3 Verbrauchsstellen auf Pointer-Dereferenzierung mit Null-Check umgestellt.
+- `shared_ptr Refcount-Vermeidung in renderWorld()`: `std::static_pointer_cast<OpenGLObject3D/2D>(...)` in World-Objects- und Groups-Schleife erzeugte pro Objekt temporäre `shared_ptr`-Kopien (atomarer Refcount-Increment/Decrement). **Fix:** `getOrCreateObject3D/2D()`-Rückgabewert per `const auto&` gebunden + `static_cast<OpenGLObject3D*>(ptr.get())` für Raw-Pointer-Zugriff. `static_pointer_cast<AssetData>` bleibt (unterschiedliche shared_ptr-Typen erfordern echten Cast). **OpenGLRenderer.cpp:** Beide Schleifen (World Objects + Groups) optimiert.
+- `measureElementSize Heap-Allokation eliminiert`: `std::vector<Vec2> childSizes` wurde bei jedem rekursiven Aufruf neu alloziert — massiver Heap-Churn im gesamten Widget-Baum. **Fix:** `ChildSizeStats`-Struct mit 7 Skalar-Akkumulatoren (count, widthSum, heightSum, maxW, maxH, firstW, firstH) + `add()`-Methode. Ersetzt Vektor + 12 Post-Loop-Iterationen durch direkte Feld-Zugriffe. 3 Kind-Mess-Schleifen (ColorPicker, TreeView/TabView, StackPanel/Grid/…) akkumulieren inline. **UIManager.cpp:** `ChildSizeStats`-Struct in anonymem Namespace, alle `childSizes`-Referenzen ersetzt.
+
+## Aktuelle Änderung (Codebase-Cleanup Quick Win: Toast-Konstanten standardisiert)
+
+- `Toast-Konstanten standardisiert (Quick Win 10.3)`:
+
+## Aktuelle Änderung (Codebase-Cleanup Punkt 7: Renderer.h Interface-Guards)
+
+- `Renderer.h Interface-Guards (Punkt 7)`: ~70 editor-only virtuelle Methoden in `Renderer.h` mit `#if ENGINE_EDITOR`-Präprozessor-Guards versehen. Minimaler Ansatz statt Interface-Aufspaltung – Runtime-Interface deutlich kleiner. **Renderer.h:** 2 Guard-Blöcke (Debug-Rendering/Picking/Gizmo/Snap/Grid/Tabs + Multi-Viewport). **OpenGLRenderer.h:** ~6 Guard-Blöcke für Override-Deklarationen. **OpenGLRenderer.cpp:** Implementierungen + 4 interne Call-Sites guardiert. **OpenGLRendererGizmo.cpp:** Gizmo-Drag-Methoden guardiert. **main.cpp:** 5 Editor-only Input-Handling-Regionen guardiert (Debug-Viz, Gizmo-Drag, Rubber-Band, Picking, Multi-Viewport).
+
 ## Aktuelle Änderung (Codebase-Cleanup 2.3+2.4+2.5: Gizmo, Grid & Tab-System extrahiert)
 
 - `OpenGLRendererGizmo.cpp – Gizmo+Grid Split`: 14 Gizmo-/Grid-Methoden aus `OpenGLRenderer.cpp` in `OpenGLRendererGizmo.cpp` (846 Zeilen) verschoben: `ensureGizmoResources`, `releaseGizmoResources`, `ensureGridResources`, `releaseGridResources`, `drawViewportGrid`, `getGizmoWorldAxis`, `renderGizmo`, `pickGizmoAxis`, `beginGizmoDrag`, `updateGizmoDrag`, `endGizmoDrag` + statische Helper `buildCircleVerts`, `screenToRay`, `closestTOnAxis`.
@@ -390,7 +447,10 @@ Engine/
 ├── src/
 │   ├── main.cpp                    # Einstiegspunkt der Anwendung
 │   ├── AssetManager/               # Asset-Verwaltung, GC, JSON, stb_image
-│   │   ├── AssetManager.h/.cpp
+│   │   ├── AssetManager.h/.cpp     # Kern (Registry, Laden/Speichern, Worker-Pool)
+│   │   ├── AssetManagerImport.cpp  # Import-Dialog & Assimp-Pipeline (Editor)
+│   │   ├── AssetManagerFileOps.cpp # Delete, Move, Rename, Referenz-Tracking (Editor)
+│   │   ├── AssetManagerEditorWidgets.cpp # Editor-Widget-Asset-Generierung (Editor)
 │   │   ├── AssetTypes.h
 │   │   ├── GarbageCollector.h/.cpp
 │   │   ├── json.hpp                # nlohmann/json (Header-only)
@@ -721,7 +781,7 @@ struct ProjectInfo {
 
 ## 7. Asset Manager
 
-**Dateien:** `src/AssetManager/AssetManager.h`, `src/AssetManager/AssetManager.cpp`
+**Dateien:** `src/AssetManager/AssetManager.h`, `src/AssetManager/AssetManager.cpp` (Kern), `AssetManagerImport.cpp` (Import-Pipeline), `AssetManagerFileOps.cpp` (Dateioperationen & Referenz-Tracking), `AssetManagerEditorWidgets.cpp` (Editor-Widget-Generierung)
 
 ### 7.1 Übersicht
 Zentrales Asset-Management (Singleton). Verwaltet das Laden, Speichern, Erstellen, Importieren und Entladen aller Asset-Typen.

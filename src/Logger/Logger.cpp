@@ -3,8 +3,7 @@
 #include <filesystem>
 #include <chrono>
 #include <ctime>
-#include <iomanip>
-#include <sstream>
+#include <string_view>
 #include <algorithm>
 #include <vector>
 #include <deque>
@@ -38,9 +37,9 @@ namespace
         std::time_t t = std::chrono::system_clock::to_time_t(now);
         const std::tm tm = localTime(t);
 
-        std::ostringstream oss;
-        oss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
-        return oss.str();
+        char buf[32];
+        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm);
+        return std::string(buf);
     }
 }
 
@@ -105,9 +104,9 @@ void Logger::initialize()
     std::time_t t = std::chrono::system_clock::to_time_t(now);
     const std::tm tm = localTime(t);
 
-    std::ostringstream oss;
-    oss << "log_" << std::put_time(&tm, "%Y-%m-%d_%H-%M-%S") << ".log";
-    filename = (logDir / oss.str()).string();
+    char nameBuf[64];
+    std::strftime(nameBuf, sizeof(nameBuf), "log_%Y-%m-%d_%H-%M-%S.log", &tm);
+    filename = (logDir / nameBuf).string();
 
     logFile.open(filename, std::ios::out | std::ios::trunc);
     if (!logFile.is_open())
@@ -199,9 +198,15 @@ void Logger::log(Category category, const std::string& message, LogLevel level)
     // Forward to CrashHandler pipe (non-blocking best-effort)
     if (m_crashHandlerRunning)
     {
-        std::string logData = std::string(levelStr) + "|" + catStr + "|[" + ts + "] " + message;
-        std::string msg = CrashProtocol::buildMessage(CrashProtocol::Tag::LogEntry, logData);
-        writePipe(msg.data(), msg.size());
+        char logBuf[1024];
+        const int logLen = std::snprintf(logBuf, sizeof(logBuf), "%s|%s|[%s] %s",
+            levelStr, catStr, ts.c_str(), message.c_str());
+        if (logLen > 0)
+        {
+            const std::string_view logData(logBuf, static_cast<size_t>(std::min(logLen, static_cast<int>(sizeof(logBuf) - 1))));
+            std::string msg = CrashProtocol::buildMessage(CrashProtocol::Tag::LogEntry, std::string(logData));
+            writePipe(msg.data(), msg.size());
+        }
     }
 
     // Append to console ring-buffer

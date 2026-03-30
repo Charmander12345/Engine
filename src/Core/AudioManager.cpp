@@ -189,7 +189,7 @@ void AudioManager::update()
     if (!m_sources.empty() && ++m_sourceCleanupCounter >= 10)
     {
         m_sourceCleanupCounter = 0;
-        std::vector<unsigned int> finishedSources;
+        m_finishedSources.clear();
         for (const auto sourceId : m_sources)
         {
             ALuint source = static_cast<ALuint>(sourceId);
@@ -197,10 +197,10 @@ void AudioManager::update()
             alGetSourcei(source, AL_SOURCE_STATE, &state);
             if (state == AL_STOPPED)
             {
-                finishedSources.push_back(sourceId);
+                m_finishedSources.push_back(sourceId);
             }
         }
-        for (const auto sourceId : finishedSources)
+        for (const auto sourceId : m_finishedSources)
         {
             invalidateHandle(sourceId);
         }

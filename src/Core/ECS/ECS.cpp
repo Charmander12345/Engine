@@ -103,6 +103,18 @@ namespace ECS
 		return matches;
 	}
 
+	void ECSManager::getEntitiesMatchingSchema(const Schema& schema, std::vector<Entity>& out) const
+	{
+		out.clear();
+		for (const auto entity : m_entities)
+		{
+			if (schema.matches(m_entityMasks[entity]))
+			{
+				out.push_back(entity);
+			}
+		}
+	}
+
 	std::vector<SchemaAssetMatch> ECSManager::getAssetsMatchingSchema(const Schema& schema) const
 	{
 		std::vector<SchemaAssetMatch> matches;
@@ -130,6 +142,34 @@ namespace ECS
 			matches.push_back(match);
 		}
 		return matches;
+	}
+
+	void ECSManager::getAssetsMatchingSchema(const Schema& schema, std::vector<SchemaAssetMatch>& out) const
+	{
+		out.clear();
+		for (const auto entity : m_entities)
+		{
+			if (!schema.matches(m_entityMasks[entity]))
+			{
+				continue;
+			}
+			SchemaAssetMatch match;
+			match.entity = entity;
+			if (const auto* mesh = getComponent<MeshComponent>(entity))
+			{
+				match.mesh = *mesh;
+			}
+			if (const auto* material = getComponent<MaterialComponent>(entity))
+			{
+				match.material = *material;
+			}
+			if (const auto* transform = getComponent<TransformComponent>(entity))
+			{
+				match.transform = *transform;
+				match.hasTransform = true;
+			}
+			out.push_back(match);
+		}
 	}
 
 	const Schema& ECSManager::getRenderSchema() const

@@ -132,7 +132,7 @@ void LevelCompositionTab::open()
         int sel = m_state.selectedSubLevel;
         if (sel < 0)
         {
-            m_uiManager->showToastMessage("Select a Sub-Level first", 2.0f);
+            m_uiManager->showToastMessage("Select a Sub-Level first", UIManager::kToastShort);
             return;
         }
         m_renderer->addStreamingVolume(Vec3{ 0.0f, 0.0f, 0.0f }, Vec3{ 10.0f, 10.0f, 10.0f }, sel);

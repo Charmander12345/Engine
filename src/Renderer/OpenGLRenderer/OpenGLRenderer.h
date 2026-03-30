@@ -152,10 +152,12 @@ public:
     void cleanupWidgetEditorPreview(const std::string& tabId) override;
 #endif
 
+#if ENGINE_EDITOR
     unsigned int pickEntityAt(int x, int y) override;
 
     // Re-renders the pick buffer with the latest view/projection, then picks.
     unsigned int pickEntityAtImmediate(int x, int y) override;
+#endif
 
     // Unproject a screen pixel to world space using the depth buffer.
     // Returns false if the depth at that pixel is at the far plane (no geometry hit).
@@ -164,10 +166,12 @@ public:
     // Refresh a single entity's render data without rebuilding the entire scene.
     void refreshEntity(ECS::Entity entity) override;
 
+    #if ENGINE_EDITOR
     // Multi-Viewport overrides (Phase 11.1)
     SubViewportCamera getSubViewportCamera(int index) const override;
     void setSubViewportCamera(int index, const SubViewportCamera& cam) override;
     int subViewportHitTest(int screenX, int screenY) const override;
+#endif
 
 private:
     void renderWorld();
@@ -396,6 +400,13 @@ private:
     uint32_t m_lastHiddenCount{0};
     uint32_t m_lastTotalCount{0};
 
+    // Reusable per-frame scratch vectors (avoid heap allocation every frame)
+    std::vector<unsigned int> m_dirtyEntitiesScratch;
+    std::vector<UIRenderContext::DeferredDropDown> m_deferredDropDownsScratch;
+    std::vector<std::string> m_textWrapLinesScratch;
+    std::vector<std::string> m_textWrapParagraphsScratch;
+    std::vector<ECS::Entity> m_lightEntitiesScratch;
+
     struct BoundsDebugResources
     {
         GLuint  vao{0};
@@ -495,7 +506,7 @@ private:
         bool hasEmission{false};
         bool isTransparent{false};
         bool isSkinned{false};
-        ECS::MaterialOverrides overrides{};
+        const ECS::MaterialOverrides* overrides{nullptr};
     };
     std::vector<DrawCmd> m_drawList;
     std::vector<DrawCmd> m_transparentDrawList;
@@ -764,16 +775,20 @@ private:
 #endif
 
 public:
+#if ENGINE_EDITOR
     void toggleUIDebug() override { m_uiDebugEnabled = !m_uiDebugEnabled; }
     bool isUIDebugEnabled() const override { return m_uiDebugEnabled; }
+#endif
     uint32_t getLastVisibleCount() const override { return m_lastVisibleCount; }
     uint32_t getLastHiddenCount() const override { return m_lastHiddenCount; }
     uint32_t getLastTotalCount() const override { return m_lastTotalCount; }
     std::vector<RenderPassInfo> getRenderPassInfo() const override;
+#if ENGINE_EDITOR
     void toggleBoundsDebug() override { m_boundsDebug.enabled = !m_boundsDebug.enabled; }
     bool isBoundsDebugEnabled() const override { return m_boundsDebug.enabled; }
     void setHeightFieldDebugEnabled(bool enabled) override { m_hfDebug.enabled = enabled; }
     bool isHeightFieldDebugEnabled() const override { return m_hfDebug.enabled; }
+#endif
 
     void setShadowsEnabled(bool enabled) override { m_shadow.enabled = enabled; }
     bool isShadowsEnabled() const override { return m_shadow.enabled; }
@@ -823,10 +838,13 @@ public:
     float getTessellationLevel() const override { return m_tessLevel; }
     void setRenderFrozen(bool frozen) override { m_renderFrozen = frozen; }
     bool isRenderFrozen() const override { return m_renderFrozen; }
+#if ENGINE_EDITOR
     void setDebugRenderMode(DebugRenderMode mode) override { m_debugRenderMode = mode; }
     DebugRenderMode getDebugRenderMode() const override { return m_debugRenderMode; }
+#endif
     void setSkyboxPath(const std::string& pathOrFolder) override;
     std::string getSkyboxPath() const override { return m_skybox.loadedPath; }
+#if ENGINE_EDITOR
     void requestPick(int screenX, int screenY, bool ctrlHeld = false) override { m_pickRequested = true; m_pickX = screenX; m_pickY = screenY; m_pickCtrlHeld = ctrlHeld; }
     unsigned int getSelectedEntity() const override { return m_selectedEntities.empty() ? 0u : *m_selectedEntities.begin(); }
     void setSelectedEntity(unsigned int entity) override { m_selectedEntities.clear(); if (entity != 0) m_selectedEntities.insert(entity); }
@@ -852,6 +870,7 @@ public:
     void updateGizmoDrag(int screenX, int screenY) override;
     void endGizmoDrag() override;
     bool isGizmoDragging() const override { return m_gizmo.dragging; }
+#endif // ENGINE_EDITOR — Debug/Picking/Selection/Gizmo
 
 #if ENGINE_EDITOR
     // Multi-window / popup management

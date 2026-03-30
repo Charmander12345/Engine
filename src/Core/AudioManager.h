@@ -108,5 +108,6 @@ private:
     std::atomic<bool> m_loadThreadRunning{ false };
     unsigned int m_nextPendingHandle{ 0xF0000000 };
     std::unordered_set<unsigned int> m_pendingHandles;
+    std::vector<unsigned int> m_finishedSources;
     uint32_t m_sourceCleanupCounter{ 0 };
 };

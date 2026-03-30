@@ -8,6 +8,10 @@
 #include "../Core/MathTypes.h"
 #include "RendererCapabilities.h"
 #include "CameraPath.h"
+#include "RendererEnums.h"
+#if ENGINE_EDITOR
+#include "IEditorRenderer.h"
+#endif
 
 class UIManager;
 class ViewportUIManager;
@@ -59,22 +63,19 @@ class AssetData;
 ///   | Scene         | *may* override      | entity refresh after ECS changes     |
 ///   | Metrics       | *may* override      | per-frame GPU/CPU timing counters    |
 class Renderer
+#if ENGINE_EDITOR
+    : public IEditorRenderer
+#endif
 {
 public:
-    enum class GizmoMode { None, Translate, Rotate, Scale };
-    enum class GizmoAxis { None, X, Y, Z };
-    enum class AntiAliasingMode { None = 0, FXAA = 1, MSAA_2x = 2, MSAA_4x = 3 };
-    enum class DebugRenderMode {
-        Lit = 0,          // Normal PBR/Blinn-Phong shading (default)
-        Unlit,            // Diffuse texture only, no lighting
-        Wireframe,        // Wireframe overlay
-        ShadowMap,        // Visualise shadow map depth
-        ShadowCascades,   // Colour-code CSM cascade splits
-        InstanceGroups,   // Colour-code instanced batches
-        Normals,          // World-space normals as colour
-        Depth,            // Linearised depth buffer visualisation
-        Overdraw          // Additive overdraw heat-map
-    };
+    // Type aliases (definitions in RendererEnums.h; kept here for backward compatibility)
+    using GizmoMode = ::GizmoMode;
+    using GizmoAxis = ::GizmoAxis;
+    using AntiAliasingMode = ::AntiAliasingMode;
+    using DebugRenderMode = ::DebugRenderMode;
+    using ViewportLayout = ::ViewportLayout;
+    using SubViewportPreset = ::SubViewportPreset;
+    using SubViewportCamera = ::SubViewportCamera;
 
     virtual ~Renderer() = default;
 
@@ -219,75 +220,78 @@ public:
     virtual float getTessellationLevel() const { return 16.0f; }
     virtual void setTessellationLevel(float /*level*/) {}
 
-    // --- Debug render mode ---
-    virtual DebugRenderMode getDebugRenderMode() const { return DebugRenderMode::Lit; }
-    virtual void setDebugRenderMode(DebugRenderMode /*mode*/) {}
+    #if ENGINE_EDITOR
+    // --- Debug render mode (IEditorRenderer overrides with defaults) ---
+    DebugRenderMode getDebugRenderMode() const override { return DebugRenderMode::Lit; }
+    void setDebugRenderMode(DebugRenderMode /*mode*/) override {}
 
     // --- Debug visualizations ---
-    virtual bool isUIDebugEnabled() const { return false; }
-    virtual void toggleUIDebug() {}
-    virtual bool isBoundsDebugEnabled() const { return false; }
-    virtual void toggleBoundsDebug() {}
-    virtual bool isHeightFieldDebugEnabled() const { return false; }
-    virtual void setHeightFieldDebugEnabled(bool /*enabled*/) {}
-    virtual void setCollidersVisible(bool visible) { m_collidersVisible = visible; }
-    virtual bool isCollidersVisible() const { return m_collidersVisible; }
-    virtual void setBonesVisible(bool visible) { m_bonesVisible = visible; }
-    virtual bool isBonesVisible() const { return m_bonesVisible; }
+    bool isUIDebugEnabled() const override { return false; }
+    void toggleUIDebug() override {}
+    bool isBoundsDebugEnabled() const override { return false; }
+    void toggleBoundsDebug() override {}
+    bool isHeightFieldDebugEnabled() const override { return false; }
+    void setHeightFieldDebugEnabled(bool /*enabled*/) override {}
+    void setCollidersVisible(bool visible) override { m_collidersVisible = visible; }
+    bool isCollidersVisible() const override { return m_collidersVisible; }
+    void setBonesVisible(bool visible) override { m_bonesVisible = visible; }
+    bool isBonesVisible() const override { return m_bonesVisible; }
 
     // --- Entity picking ---
-    virtual unsigned int pickEntityAt(int /*x*/, int /*y*/) { return 0; }
-    virtual unsigned int pickEntityAtImmediate(int /*x*/, int /*y*/) { return 0; }
-    virtual void requestPick(int /*screenX*/, int /*screenY*/, bool /*ctrlHeld*/ = false) {}
-    virtual unsigned int getSelectedEntity() const { return 0; }
-    virtual void setSelectedEntity(unsigned int /*entity*/) {}
+
+    unsigned int pickEntityAt(int /*x*/, int /*y*/) override { return 0; }
+    unsigned int pickEntityAtImmediate(int /*x*/, int /*y*/) override { return 0; }
+    void requestPick(int /*screenX*/, int /*screenY*/, bool /*ctrlHeld*/ = false) override {}
+    unsigned int getSelectedEntity() const override { return 0; }
+    void setSelectedEntity(unsigned int /*entity*/) override {}
 
     // --- Multi-select ---
-    virtual const std::unordered_set<unsigned int>& getSelectedEntities() const { static const std::unordered_set<unsigned int> empty; return empty; }
-    virtual void addSelectedEntity(unsigned int /*entity*/) {}
-    virtual void removeSelectedEntity(unsigned int /*entity*/) {}
-    virtual void clearSelection() {}
-    virtual bool isEntitySelected(unsigned int /*entity*/) const { return false; }
+    const std::unordered_set<unsigned int>& getSelectedEntities() const override { static const std::unordered_set<unsigned int> empty; return empty; }
+    void addSelectedEntity(unsigned int /*entity*/) override {}
+    void removeSelectedEntity(unsigned int /*entity*/) override {}
+    void clearSelection() override {}
+    bool isEntitySelected(unsigned int /*entity*/) const override { return false; }
 
     /// Focus camera on the currently selected entity (smooth transition to AABB center).
-    virtual void focusOnSelectedEntity() {}
+    void focusOnSelectedEntity() override {}
 
     // --- Rubber-band (marquee) selection ---
-    virtual void beginRubberBand(int /*screenX*/, int /*screenY*/) {}
-    virtual void updateRubberBand(int /*screenX*/, int /*screenY*/) {}
-    virtual void endRubberBand(bool /*ctrlHeld*/ = false) {}
-    virtual void cancelRubberBand() {}
-    virtual bool isRubberBandActive() const { return false; }
-    virtual Vec2 getRubberBandStart() const { return Vec2{}; }
+    void beginRubberBand(int /*screenX*/, int /*screenY*/) override {}
+    void updateRubberBand(int /*screenX*/, int /*screenY*/) override {}
+    void endRubberBand(bool /*ctrlHeld*/ = false) override {}
+    void cancelRubberBand() override {}
+    bool isRubberBandActive() const override { return false; }
+    Vec2 getRubberBandStart() const override { return Vec2{}; }
 
     // --- Gizmo ---
-    virtual void setGizmoMode(GizmoMode /*mode*/) {}
-    virtual GizmoMode getGizmoMode() const { return GizmoMode::None; }
-    virtual bool beginGizmoDrag(int /*screenX*/, int /*screenY*/) { return false; }
-    virtual void updateGizmoDrag(int /*screenX*/, int /*screenY*/) {}
-    virtual void endGizmoDrag() {}
-    virtual bool isGizmoDragging() const { return false; }
+    void setGizmoMode(GizmoMode /*mode*/) override {}
+    GizmoMode getGizmoMode() const override { return GizmoMode::None; }
+    bool beginGizmoDrag(int /*screenX*/, int /*screenY*/) override { return false; }
+    void updateGizmoDrag(int /*screenX*/, int /*screenY*/) override {}
+    void endGizmoDrag() override {}
+    bool isGizmoDragging() const override { return false; }
 
     // --- Snap & Grid ---
-    virtual void setSnapEnabled(bool enabled) { m_snapEnabled = enabled; }
-    virtual bool isSnapEnabled() const { return m_snapEnabled; }
-    virtual void setGridVisible(bool visible) { m_gridVisible = visible; }
-    virtual bool isGridVisible() const { return m_gridVisible; }
-    virtual void setGridSize(float size) { m_gridSize = size; }
-    virtual float getGridSize() const { return m_gridSize; }
-    virtual void setRotationSnapDeg(float deg) { m_rotationSnapDeg = deg; }
-    virtual float getRotationSnapDeg() const { return m_rotationSnapDeg; }
-    virtual void setScaleSnapStep(float step) { m_scaleSnapStep = step; }
-    virtual float getScaleSnapStep() const { return m_scaleSnapStep; }
+    void setSnapEnabled(bool enabled) override { m_snapEnabled = enabled; }
+    bool isSnapEnabled() const override { return m_snapEnabled; }
+    void setGridVisible(bool visible) override { m_gridVisible = visible; }
+    bool isGridVisible() const override { return m_gridVisible; }
+    void setGridSize(float size) override { m_gridSize = size; }
+    float getGridSize() const override { return m_gridSize; }
+    void setRotationSnapDeg(float deg) override { m_rotationSnapDeg = deg; }
+    float getRotationSnapDeg() const override { return m_rotationSnapDeg; }
+    void setScaleSnapStep(float step) override { m_scaleSnapStep = step; }
+    float getScaleSnapStep() const override { return m_scaleSnapStep; }
 
     // --- Editor tabs ---
-    virtual void addTab(const std::string& /*id*/, const std::string& /*name*/, bool /*closable*/) {}
-    virtual void removeTab(const std::string& /*id*/) {}
-    virtual void setActiveTab(const std::string& /*id*/) {}
-    virtual const std::string& getActiveTabId() const { static const std::string s; return s; }
-    virtual void cleanupWidgetEditorPreview(const std::string& /*tabId*/) {}
+    void addTab(const std::string& /*id*/, const std::string& /*name*/, bool /*closable*/) override {}
+    void removeTab(const std::string& /*id*/) override {}
+    void setActiveTab(const std::string& /*id*/) override {}
+    const std::string& getActiveTabId() const override { static const std::string s; return s; }
+    void cleanupWidgetEditorPreview(const std::string& /*tabId*/) override {}
+#endif // ENGINE_EDITOR — Debug, Picking, Gizmo, Snap/Grid, Editor Tabs
 
-    // --- Skeletal animation queries (for Animation Editor) ---
+    // --- Skeletal animation queries
     struct AnimationClipInfo
     {
         std::string name;
@@ -308,27 +312,27 @@ public:
     virtual std::string getEntityBoneName(unsigned int /*entity*/, int /*boneIndex*/) const { return {}; }
     virtual int   getEntityBoneParent(unsigned int /*entity*/, int /*boneIndex*/) const { return -1; }
 
-    // --- Popup windows ---
+    // --- Popup windows (IEditorRenderer overrides) ---
 #if ENGINE_EDITOR
-    virtual PopupWindow* openPopupWindow(const std::string& /*id*/, const std::string& /*title*/, int /*width*/, int /*height*/) { return nullptr; }
-    virtual void closePopupWindow(const std::string& /*id*/) {}
-    virtual PopupWindow* getPopupWindow(const std::string& /*id*/) { return nullptr; }
-    virtual bool routeEventToPopup(SDL_Event& /*event*/) { return false; }
+    PopupWindow* openPopupWindow(const std::string& /*id*/, const std::string& /*title*/, int /*width*/, int /*height*/) override { return nullptr; }
+    void closePopupWindow(const std::string& /*id*/) override {}
+    PopupWindow* getPopupWindow(const std::string& /*id*/) override { return nullptr; }
+    bool routeEventToPopup(SDL_Event& /*event*/) override { return false; }
 
     // --- Mesh viewer ---
-    virtual MeshViewerWindow* openMeshViewer(const std::string& /*assetPath*/) { return nullptr; }
-    virtual void closeMeshViewer(const std::string& /*assetPath*/) {}
-    virtual MeshViewerWindow* getMeshViewer(const std::string& /*assetPath*/) { return nullptr; }
+    MeshViewerWindow* openMeshViewer(const std::string& /*assetPath*/) override { return nullptr; }
+    void closeMeshViewer(const std::string& /*assetPath*/) override {}
+    MeshViewerWindow* getMeshViewer(const std::string& /*assetPath*/) override { return nullptr; }
 
     // --- Texture viewer ---
-    virtual TextureViewerWindow* openTextureViewer(const std::string& /*assetPath*/) { return nullptr; }
-    virtual void closeTextureViewer(const std::string& /*assetPath*/) {}
-    virtual TextureViewerWindow* getTextureViewer(const std::string& /*assetPath*/) { return nullptr; }
+    TextureViewerWindow* openTextureViewer(const std::string& /*assetPath*/) override { return nullptr; }
+    void closeTextureViewer(const std::string& /*assetPath*/) override {}
+    TextureViewerWindow* getTextureViewer(const std::string& /*assetPath*/) override { return nullptr; }
 
     // --- Material editor tab ---
-    virtual MaterialEditorWindow* openMaterialEditorTab(const std::string& /*assetPath*/) { return nullptr; }
-    virtual void closeMaterialEditorTab(const std::string& /*assetPath*/) {}
-    virtual MaterialEditorWindow* getMaterialEditor(const std::string& /*assetPath*/) { return nullptr; }
+    MaterialEditorWindow* openMaterialEditorTab(const std::string& /*assetPath*/) override { return nullptr; }
+    void closeMaterialEditorTab(const std::string& /*assetPath*/) override {}
+    MaterialEditorWindow* getMaterialEditor(const std::string& /*assetPath*/) override { return nullptr; }
 #endif // ENGINE_EDITOR
 
     // --- Viewport & visuals ---
@@ -381,22 +385,14 @@ public:
     virtual std::vector<RenderPassInfo> getRenderPassInfo() const { return {}; }
 
     // --- Multi-Viewport Layout (Phase 11.1) ---
-    enum class ViewportLayout { Single, TwoHorizontal, TwoVertical, Quad };
-    enum class SubViewportPreset { Perspective, Top, Front, Right };
+    // Enum/struct definitions moved to RendererEnums.h; using-aliases at class top.
 
-    struct SubViewportCamera
-    {
-        Vec3  position{ 0.0f, 5.0f, 10.0f };
-        float yawDeg{ -90.0f };
-        float pitchDeg{ -15.0f };
-        SubViewportPreset preset{ SubViewportPreset::Perspective };
-    };
-
-    virtual void setViewportLayout(ViewportLayout layout) { m_viewportLayout = layout; }
-    virtual ViewportLayout getViewportLayout() const { return m_viewportLayout; }
-    virtual int  getActiveSubViewport() const { return m_activeSubViewport; }
-    virtual void setActiveSubViewport(int index) { m_activeSubViewport = index; }
-    virtual int  getSubViewportCount() const
+#if ENGINE_EDITOR
+    void setViewportLayout(ViewportLayout layout) override { m_viewportLayout = layout; }
+    ViewportLayout getViewportLayout() const override { return m_viewportLayout; }
+    int  getActiveSubViewport() const override { return m_activeSubViewport; }
+    void setActiveSubViewport(int index) override { m_activeSubViewport = index; }
+    int  getSubViewportCount() const override
     {
         switch (m_viewportLayout)
         {
@@ -406,10 +402,10 @@ public:
         default:                             return 1;
         }
     }
-    virtual SubViewportCamera getSubViewportCamera(int /*index*/) const { return {}; }
-    virtual void setSubViewportCamera(int /*index*/, const SubViewportCamera& /*cam*/) {}
+    SubViewportCamera getSubViewportCamera(int /*index*/) const override { return {}; }
+    void setSubViewportCamera(int /*index*/, const SubViewportCamera& /*cam*/) override {}
     /// Returns which sub-viewport (0-based) contains the given screen position, or -1.
-    virtual int subViewportHitTest(int /*screenX*/, int /*screenY*/) const { return 0; }
+    int subViewportHitTest(int /*screenX*/, int /*screenY*/) const override { return 0; }
 
     static const char* viewportLayoutToString(ViewportLayout l)
     {
@@ -432,6 +428,7 @@ public:
         default:                       return "Perspective";
         }
     }
+#endif // ENGINE_EDITOR — Multi-Viewport Layout
 
     // --- Level-Streaming (Phase 11.4) ---
     struct SubLevelEntry

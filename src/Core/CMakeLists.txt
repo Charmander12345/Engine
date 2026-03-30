@@ -13,6 +13,7 @@ add_library(Core SHARED
     "../Renderer/Texture.h"
     "../Renderer/Material.h"
     "MathTypes.h"
+    "IEditorBridge.h"
     "ECS/DataStructs/SparseSet.h"
     "ECS/ECS.h"
     "ECS/Components.h"
@@ -29,9 +30,13 @@ target_include_directories(Core
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/src/AssetManager
         ${CMAKE_SOURCE_DIR}/src/Renderer
+        ${CMAKE_SOURCE_DIR}/src/Diagnostics
+        ${CMAKE_SOURCE_DIR}/src/Physics
+        ${CMAKE_SOURCE_DIR}/src/Scripting
         ${CMAKE_SOURCE_DIR}/external
         ${CMAKE_SOURCE_DIR}/external/SDL3/include
         ${CMAKE_SOURCE_DIR}/ECS
+        ${Python3_INCLUDE_DIRS}
 )
 
 target_link_libraries(Core PRIVATE
