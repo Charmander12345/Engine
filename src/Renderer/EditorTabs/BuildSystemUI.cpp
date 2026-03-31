@@ -58,6 +58,8 @@ BuildSystemUI::~BuildSystemUI()
 {
     if (m_buildThread.joinable())
         m_buildThread.join();
+    if (m_toolInstallThread.joinable())
+        m_toolInstallThread.join();
 }
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Build Profiles (Phase 10.3) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -1128,32 +1130,11 @@ bool BuildSystemUI::detectCMake()
 // ---------------------------------------------------------------------------
 void BuildSystemUI::showCMakeInstallPrompt()
 {
-    m_uiManager->showConfirmDialog(
-        "CMake wird zum Bauen des Spiels benoetigt, "
-        "wurde aber nicht gefunden.\n\n"
-        "Soll die CMake-Downloadseite geoeffnet werden?",
-        [this]()
-        {
-            // Open the CMake download page in the default browser
-#if defined(_WIN32)
-            ShellExecuteA(nullptr, "open",
-                "https://cmake.org/download/", nullptr, nullptr, SW_SHOWNORMAL);
-#else
-            std::system("xdg-open https://cmake.org/download/ &");
-#endif
-            m_uiManager->showToastMessage("Bitte CMake installieren und den Editor neu starten.", 8.0f,
-                NotificationLevel::Warning);
-        },
-        [this]()
-        {
-            m_uiManager->showToastMessage("CMake nicht verfuegbar ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ Build Game deaktiviert.", UIManager::kToastLong,
-                NotificationLevel::Warning);
-        }
-    );
+    promptAndInstallTools();
 }
 
 // ---------------------------------------------------------------------------
-// detectBuildToolchain ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ check for MSVC / Clang / GCC
+// detectBuildToolchain
 // ---------------------------------------------------------------------------
 bool BuildSystemUI::detectBuildToolchain()
 {
@@ -1275,33 +1256,11 @@ bool BuildSystemUI::detectBuildToolchain()
 // ---------------------------------------------------------------------------
 void BuildSystemUI::showToolchainInstallPrompt()
 {
-    m_uiManager->showConfirmDialog(
-        "Keine C++ Build-Toolchain (MSVC / Clang) gefunden.\n\n"
-        "Zum Bauen des Spiels wird ein C++ Compiler benoetigt.\n"
-        "Bitte installiere Visual Studio mit der Workload\n"
-        "\"Desktopentwicklung mit C++\".\n\n"
-        "Soll die Visual Studio-Downloadseite geoeffnet werden?",
-        [this]()
-        {
-#if defined(_WIN32)
-            ShellExecuteA(nullptr, "open",
-                "https://visualstudio.microsoft.com/downloads/", nullptr, nullptr, SW_SHOWNORMAL);
-#else
-            std::system("xdg-open https://visualstudio.microsoft.com/downloads/ &");
-#endif
-            m_uiManager->showToastMessage("Bitte C++ Toolchain installieren und den Editor neu starten.", 8.0f,
-                NotificationLevel::Warning);
-        },
-        [this]()
-        {
-            m_uiManager->showToastMessage("Keine Build-Toolchain ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ Build Game deaktiviert.", UIManager::kToastLong,
-                NotificationLevel::Warning);
-        }
-    );
+    promptAndInstallTools();
 }
 
 // ---------------------------------------------------------------------------
-// startAsyncToolchainDetection ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ run CMake + toolchain detection on a
+// startAsyncToolchainDetection
 //                                 background thread (non-blocking)
 // ---------------------------------------------------------------------------
 void BuildSystemUI::startAsyncToolchainDetection()
@@ -1324,38 +1283,313 @@ void BuildSystemUI::startAsyncToolchainDetection()
 // ---------------------------------------------------------------------------
 void BuildSystemUI::pollToolchainDetection()
 {
+    // Also poll ongoing tool installation
+    pollToolInstall();
+
     if (m_toolDetectPolled || !m_toolDetectDone.load())
         return;
     m_toolDetectPolled = true;
 
     auto& logger = Logger::Instance();
 
-    if (!m_cmakeAvailable)
-    {
-        logger.log(Logger::Category::Engine,
-            "CMake not found \xe2\x80\x93 Build Game will not be available.",
-            Logger::LogLevel::WARNING);
-        showCMakeInstallPrompt();
-    }
-    else
+    if (m_cmakeAvailable)
     {
         logger.log(Logger::Category::Engine,
             "CMake found: " + m_cmakePath,
             Logger::LogLevel::INFO);
     }
-
-    if (!m_toolchainAvailable)
+    else
     {
         logger.log(Logger::Category::Engine,
-            "C++ toolchain not found \xe2\x80\x93 Build Game will not be available.",
+            "CMake not found \xe2\x80\x93 Build Game will not be available.",
             Logger::LogLevel::WARNING);
-        showToolchainInstallPrompt();
     }
-    else
+
+    if (m_toolchainAvailable)
     {
         logger.log(Logger::Category::Engine,
             "Toolchain: " + m_toolchainInfo.name + " " + m_toolchainInfo.version,
             Logger::LogLevel::INFO);
+    }
+    else
+    {
+        logger.log(Logger::Category::Engine,
+            "C++ toolchain not found \xe2\x80\x93 Build Game will not be available.",
+            Logger::LogLevel::WARNING);
+    }
+
+    // Show a single combined auto-install prompt if anything is missing
+    if (!m_cmakeAvailable || !m_toolchainAvailable)
+        promptAndInstallTools();
+}
+
+// ---------------------------------------------------------------------------
+// runBootstrapInstall -- execute tools/bootstrap.ps1 on a background thread.
+//                        Sets m_toolInstallDone + m_toolInstallSuccess when
+//                        finished.
+// ---------------------------------------------------------------------------
+void BuildSystemUI::runBootstrapInstall()
+{
+    m_toolInstallRunning.store(true);
+    m_toolInstallDone.store(false);
+    m_toolInstallSuccess.store(false);
+    m_toolInstallPolled = false;
+    m_toolInstallError.clear();
+
+    if (m_toolInstallThread.joinable())
+        m_toolInstallThread.join();
+
+    m_toolInstallThread = std::thread([this]()
+    {
+        auto& logger = Logger::Instance();
+        logger.log(Logger::Category::Engine,
+            "Build-Tools Bootstrap: starting installation...",
+            Logger::LogLevel::INFO);
+
+        // Locate the bootstrap script relative to the running executable.
+        const char* bp = SDL_GetBasePath();
+        std::string basePath = bp ? bp : "";
+
+        // ENGINE_SOURCE_DIR is baked into the editor at compile time.
+        std::filesystem::path scriptPath;
+#if defined(ENGINE_SOURCE_DIR)
+        scriptPath = std::filesystem::path(ENGINE_SOURCE_DIR) / "tools" / "bootstrap.ps1";
+#endif
+        // Fallback: try relative to exe
+        if (scriptPath.empty() || !std::filesystem::exists(scriptPath))
+            scriptPath = std::filesystem::path(basePath) / "tools" / "bootstrap.ps1";
+        if (!std::filesystem::exists(scriptPath))
+            scriptPath = std::filesystem::path(basePath) / ".." / "tools" / "bootstrap.ps1";
+
+        if (!std::filesystem::exists(scriptPath))
+        {
+            m_toolInstallError = "Bootstrap script not found (tools/bootstrap.ps1).";
+            logger.log(Logger::Category::Engine, m_toolInstallError, Logger::LogLevel::WARNING);
+            m_toolInstallSuccess.store(false);
+            m_toolInstallDone.store(true);
+            m_toolInstallRunning.store(false);
+            return;
+        }
+
+        logger.log(Logger::Category::Engine,
+            "Bootstrap script: " + scriptPath.string(), Logger::LogLevel::INFO);
+
+#if defined(_WIN32)
+        // Build the PowerShell command line.
+        // -ExecutionPolicy Bypass: allow unsigned scripts
+        // -Compiler auto: use MSVC if present, else install Clang
+        std::string cmd = "powershell.exe -ExecutionPolicy Bypass -NoProfile -File \""
+            + scriptPath.string() + "\" -Compiler auto";
+
+        SECURITY_ATTRIBUTES sa{};
+        sa.nLength = sizeof(sa);
+        sa.bInheritHandle = TRUE;
+
+        HANDLE hReadPipe = nullptr, hWritePipe = nullptr;
+        if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0))
+        {
+            m_toolInstallError = "Failed to create pipe for bootstrap process.";
+            m_toolInstallDone.store(true);
+            m_toolInstallRunning.store(false);
+            return;
+        }
+        SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
+
+        STARTUPINFOA si{};
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+        si.hStdOutput = hWritePipe;
+        si.hStdError = hWritePipe;
+
+        PROCESS_INFORMATION pi{};
+        std::string cmdLine = cmd;
+        BOOL created = CreateProcessA(
+            nullptr, cmdLine.data(), nullptr, nullptr, TRUE,
+            CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+        CloseHandle(hWritePipe);
+
+        if (!created)
+        {
+            CloseHandle(hReadPipe);
+            m_toolInstallError = "Failed to launch bootstrap process.";
+            logger.log(Logger::Category::Engine, m_toolInstallError, Logger::LogLevel::WARNING);
+            m_toolInstallDone.store(true);
+            m_toolInstallRunning.store(false);
+            return;
+        }
+
+        // Read output and log it
+        char buf[4096];
+        DWORD bytesRead = 0;
+        std::string lineBuffer;
+        while (ReadFile(hReadPipe, buf, sizeof(buf) - 1, &bytesRead, nullptr) && bytesRead > 0)
+        {
+            buf[bytesRead] = '\0';
+            lineBuffer += buf;
+            size_t pos;
+            while ((pos = lineBuffer.find('\n')) != std::string::npos)
+            {
+                std::string line = lineBuffer.substr(0, pos);
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+                if (!line.empty())
+                    logger.log(Logger::Category::Engine, "[Bootstrap] " + line, Logger::LogLevel::INFO);
+                lineBuffer.erase(0, pos + 1);
+            }
+        }
+        if (!lineBuffer.empty())
+            logger.log(Logger::Category::Engine, "[Bootstrap] " + lineBuffer, Logger::LogLevel::INFO);
+
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        DWORD exitCode = 1;
+        GetExitCodeProcess(pi.hProcess, &exitCode);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        CloseHandle(hReadPipe);
+
+        if (exitCode == 0)
+        {
+            logger.log(Logger::Category::Engine,
+                "Build-Tools Bootstrap: installation completed successfully.",
+                Logger::LogLevel::INFO);
+            m_toolInstallSuccess.store(true);
+        }
+        else
+        {
+            m_toolInstallError = "Bootstrap exited with code " + std::to_string(exitCode) + ".";
+            logger.log(Logger::Category::Engine,
+                "Build-Tools Bootstrap: " + m_toolInstallError,
+                Logger::LogLevel::WARNING);
+            m_toolInstallSuccess.store(false);
+        }
+#else
+        // Linux / macOS: run the shell script
+        std::filesystem::path shScript;
+#if defined(ENGINE_SOURCE_DIR)
+        shScript = std::filesystem::path(ENGINE_SOURCE_DIR) / "tools" / "bootstrap.sh";
+#endif
+        if (shScript.empty() || !std::filesystem::exists(shScript))
+            shScript = std::filesystem::path(basePath) / "tools" / "bootstrap.sh";
+
+        if (!std::filesystem::exists(shScript))
+        {
+            m_toolInstallError = "Bootstrap script not found (tools/bootstrap.sh).";
+            logger.log(Logger::Category::Engine, m_toolInstallError, Logger::LogLevel::WARNING);
+            m_toolInstallSuccess.store(false);
+            m_toolInstallDone.store(true);
+            m_toolInstallRunning.store(false);
+            return;
+        }
+
+        std::string cmd = "bash \"" + shScript.string() + "\" --compiler auto 2>&1";
+        FILE* pipe = popen(cmd.c_str(), "r");
+        if (!pipe)
+        {
+            m_toolInstallError = "Failed to launch bootstrap process.";
+            m_toolInstallDone.store(true);
+            m_toolInstallRunning.store(false);
+            return;
+        }
+
+        char buf[4096];
+        while (fgets(buf, sizeof(buf), pipe))
+        {
+            std::string line = buf;
+            while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+                line.pop_back();
+            if (!line.empty())
+                logger.log(Logger::Category::Engine, "[Bootstrap] " + line, Logger::LogLevel::INFO);
+        }
+
+        int ret = pclose(pipe);
+        m_toolInstallSuccess.store(ret == 0);
+        if (ret != 0)
+            m_toolInstallError = "Bootstrap exited with code " + std::to_string(ret) + ".";
+#endif
+
+        // Re-detect tools after installation
+        if (m_toolInstallSuccess.load())
+        {
+            detectCMake();
+            detectBuildToolchain();
+        }
+
+        m_toolInstallDone.store(true);
+        m_toolInstallRunning.store(false);
+    });
+}
+
+// ---------------------------------------------------------------------------
+// promptAndInstallTools -- show a single dialog asking the user whether to
+//                          auto-install missing build tools.  If accepted,
+//                          runs runBootstrapInstall() on a background thread.
+// ---------------------------------------------------------------------------
+void BuildSystemUI::promptAndInstallTools()
+{
+    // Build a description of what is missing
+    std::string missingList;
+    if (!m_cmakeAvailable.load())
+        missingList += "  \xe2\x80\xa2 CMake (Build-System)\n";
+    if (!m_toolchainAvailable.load())
+        missingList += "  \xe2\x80\xa2 C++ Compiler (MSVC / Clang)\n";
+
+    std::string msg =
+        "Zum Bauen des Spiels werden Build-Tools benoetigt,\n"
+        "die aktuell nicht gefunden wurden:\n\n"
+        + missingList +
+        "\nSollen die fehlenden Tools automatisch\n"
+        "heruntergeladen und installiert werden?\n\n"
+        "(Dies kann einige Minuten dauern)";
+
+    m_uiManager->showConfirmDialog(
+        msg,
+        [this]()
+        {
+            m_uiManager->showToastMessage(
+                "Build-Tools werden installiert...\n"
+                "Bitte warten (Details im Log).",
+                12.0f, NotificationLevel::Info);
+            runBootstrapInstall();
+        },
+        [this]()
+        {
+            m_uiManager->showToastMessage(
+                "Build-Tools nicht installiert \xe2\x80\x93 Build Game deaktiviert.",
+                UIManager::kToastLong, NotificationLevel::Warning);
+        }
+    );
+}
+
+// ---------------------------------------------------------------------------
+// pollToolInstall -- called once per frame.  When the background install
+//                    thread finishes, shows a result toast and re-checks
+//                    tool availability.
+// ---------------------------------------------------------------------------
+void BuildSystemUI::pollToolInstall()
+{
+    if (m_toolInstallPolled || !m_toolInstallDone.load())
+        return;
+    m_toolInstallPolled = true;
+
+    if (m_toolInstallSuccess.load())
+    {
+        m_uiManager->showToastMessage(
+            "Build-Tools erfolgreich installiert!\n"
+            "Build Game ist jetzt verfuegbar.",
+            UIManager::kToastLong, NotificationLevel::Info);
+
+        Logger::Instance().log(Logger::Category::Engine,
+            "Build-Tools bootstrap completed successfully. CMake: "
+            + std::string(m_cmakeAvailable.load() ? "yes" : "no")
+            + ", Toolchain: "
+            + std::string(m_toolchainAvailable.load() ? m_toolchainInfo.name : "none"),
+            Logger::LogLevel::INFO);
+    }
+    else
+    {
+        m_uiManager->showToastMessage(
+            "Build-Tools Installation fehlgeschlagen.\n" + m_toolInstallError,
+            UIManager::kToastLong, NotificationLevel::Error);
     }
 }
 

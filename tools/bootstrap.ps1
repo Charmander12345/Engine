@@ -1,0 +1,591 @@
+<#
+.SYNOPSIS
+    HorizonEngine Build Environment Bootstrap (Windows)
+    Downloads and configures CMake, LLVM/Clang, Ninja, and Python
+    into a portable Tools/ directory so the engine can be built
+    without a full Visual Studio installation.
+
+.DESCRIPTION
+    This script checks for required build tools and downloads missing ones:
+      - CMake (portable ZIP)
+      - LLVM/Clang (installer, silent)
+      - Ninja (portable ZIP)
+      - Python (embeddable ZIP + dev headers)
+    
+    On Windows, if Visual Studio with C++ workload is already installed,
+    MSVC will be preferred. Otherwise Clang + Ninja is used.
+
+.PARAMETER Compiler
+    Preferred compiler: 'clang' (default), 'msvc', or 'auto'.
+    'auto' uses MSVC if found, otherwise installs Clang.
+
+.PARAMETER ToolsDir
+    Directory to install portable tools into.
+    Default: <script_dir>/../Tools
+
+.PARAMETER SkipPython
+    Skip Python installation (if already installed system-wide).
+
+.PARAMETER Force
+    Re-download all tools even if already present.
+
+.EXAMPLE
+    .\bootstrap.ps1
+    .\bootstrap.ps1 -Compiler msvc
+    .\bootstrap.ps1 -Compiler clang -Force
+#>
+
+[CmdletBinding()]
+param(
+    [ValidateSet('clang', 'msvc', 'auto')]
+    [string]$Compiler = 'auto',
+
+    [string]$ToolsDir = '',
+
+    [switch]$SkipPython,
+
+    [switch]$Force
+)
+
+$ErrorActionPreference = 'Stop'
+
+# ── Version Configuration ─────────────────────────────────────────────────
+# Update these when newer versions are released.
+$CMakeVersion       = '3.31.4'
+$LLVMVersion        = '19.1.6'
+$NinjaVersion       = '1.12.1'
+$PythonVersion      = '3.13.1'
+
+# ── Download URLs ─────────────────────────────────────────────────────────
+$CMakeZipUrl        = "https://github.com/Kitware/CMake/releases/download/v${CMakeVersion}/cmake-${CMakeVersion}-windows-x86_64.zip"
+$LLVMInstallerUrl   = "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVMVersion}/LLVM-${LLVMVersion}-win64.exe"
+$NinjaZipUrl        = "https://github.com/ninja-build/ninja/releases/download/v${NinjaVersion}/ninja-win.zip"
+$PythonEmbedUrl     = "https://www.python.org/ftp/python/${PythonVersion}/python-${PythonVersion}-embed-amd64.zip"
+$PythonDevUrl       = "https://www.python.org/ftp/python/${PythonVersion}/python-${PythonVersion}-amd64.exe"
+
+# VS Build Tools (fallback for MSVC)
+$VSBuildToolsUrl    = 'https://aka.ms/vs/17/release/vs_BuildTools.exe'
+
+# Windows SDK standalone installer (needed for Clang without VS)
+$WinSdkUrl          = 'https://go.microsoft.com/fwlink/?linkid=2272610'  # Win 11 SDK 10.0.26100
+
+# ── Paths ─────────────────────────────────────────────────────────────────
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$EngineRoot = (Resolve-Path (Join-Path $ScriptDir '..')).Path
+
+if ([string]::IsNullOrEmpty($ToolsDir)) {
+    $ToolsDir = Join-Path $EngineRoot 'Tools'
+}
+
+$TempDir    = Join-Path $ToolsDir '_temp'
+$CMakeDir   = Join-Path $ToolsDir 'cmake'
+$LLVMDir    = Join-Path $ToolsDir 'llvm'
+$NinjaDir   = Join-Path $ToolsDir 'ninja'
+$PythonDir  = Join-Path $ToolsDir 'python'
+
+# ── Helper Functions ──────────────────────────────────────────────────────
+
+function Write-Step([string]$msg) {
+    Write-Host ""
+    Write-Host "==> $msg" -ForegroundColor Cyan
+}
+
+function Write-OK([string]$msg) {
+    Write-Host "    [OK] $msg" -ForegroundColor Green
+}
+
+function Write-Skip([string]$msg) {
+    Write-Host "    [SKIP] $msg" -ForegroundColor Yellow
+}
+
+function Write-Err([string]$msg) {
+    Write-Host "    [ERROR] $msg" -ForegroundColor Red
+}
+
+function Ensure-Dir([string]$path) {
+    if (-not (Test-Path $path)) {
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+    }
+}
+
+function Download-File([string]$url, [string]$dest) {
+    Write-Host "    Downloading: $url"
+    Write-Host "    To: $dest"
+    
+    # Use BITS for large files, WebClient for small ones
+    $fileSize = 0
+    try {
+        $req = [System.Net.WebRequest]::Create($url)
+        $req.Method = 'HEAD'
+        $req.AllowAutoRedirect = $true
+        $resp = $req.GetResponse()
+        $fileSize = $resp.ContentLength
+        $resp.Close()
+    } catch {}
+
+    if ($fileSize -gt 10MB) {
+        Write-Host "    (Large file: $([math]::Round($fileSize / 1MB, 1)) MB - using background download)"
+        Start-BitsTransfer -Source $url -Destination $dest -DisplayName "Downloading..."
+    } else {
+        $wc = New-Object System.Net.WebClient
+        $wc.Headers.Add('User-Agent', 'HorizonEngine-Bootstrap/1.0')
+        $wc.DownloadFile($url, $dest)
+    }
+}
+
+function Test-CommandExists([string]$cmd) {
+    $null = Get-Command $cmd -ErrorAction SilentlyContinue
+    return $?
+}
+
+function Find-MSVC {
+    $vswhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
+    if (-not (Test-Path $vswhere)) { return $null }
+    
+    $vsPath = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+    if ([string]::IsNullOrEmpty($vsPath)) { return $null }
+    
+    $vcToolsDir = Join-Path $vsPath 'VC\Tools\MSVC'
+    if (-not (Test-Path $vcToolsDir)) { return $null }
+    
+    $latest = Get-ChildItem $vcToolsDir -Directory | Sort-Object Name -Descending | Select-Object -First 1
+    if (-not $latest) { return $null }
+    
+    $cl = Join-Path $latest.FullName 'bin\Hostx64\x64\cl.exe'
+    if (Test-Path $cl) {
+        $version = & $vswhere -latest -property catalog.productDisplayVersion 2>$null
+        return @{
+            Path    = $vsPath
+            Compiler = $cl
+            Version = $version
+        }
+    }
+    return $null
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────
+
+Write-Host ""
+Write-Host "=============================================" -ForegroundColor White
+Write-Host "  HorizonEngine Build Environment Bootstrap" -ForegroundColor White
+Write-Host "=============================================" -ForegroundColor White
+Write-Host "  Engine Root : $EngineRoot"
+Write-Host "  Tools Dir   : $ToolsDir"
+Write-Host "  Compiler    : $Compiler"
+Write-Host ""
+
+Ensure-Dir $ToolsDir
+Ensure-Dir $TempDir
+
+# ── 1. Detect / Install CMake ─────────────────────────────────────────────
+Write-Step "Checking CMake..."
+
+$cmakeExe = Join-Path $CMakeDir 'bin\cmake.exe'
+$cmakeFound = $false
+
+if (-not $Force -and (Test-Path $cmakeExe)) {
+    $ver = & $cmakeExe --version 2>$null | Select-Object -First 1
+    Write-OK "Bundled CMake found: $ver"
+    $cmakeFound = $true
+}
+elseif (-not $Force -and (Test-CommandExists 'cmake')) {
+    $ver = cmake --version 2>$null | Select-Object -First 1
+    $cmakeExe = (Get-Command cmake).Source
+    Write-OK "System CMake found: $ver ($cmakeExe)"
+    $cmakeFound = $true
+}
+
+if (-not $cmakeFound -or $Force) {
+    Write-Host "    Installing CMake ${CMakeVersion} (portable)..."
+    $zipFile = Join-Path $TempDir "cmake-${CMakeVersion}.zip"
+    Download-File $CMakeZipUrl $zipFile
+    
+    if (Test-Path $CMakeDir) { Remove-Item $CMakeDir -Recurse -Force }
+    Ensure-Dir $CMakeDir
+    
+    Write-Host "    Extracting..."
+    Expand-Archive -Path $zipFile -DestinationPath $TempDir -Force
+    $extracted = Get-ChildItem (Join-Path $TempDir "cmake-${CMakeVersion}*") -Directory | Select-Object -First 1
+    
+    # Move contents up one level
+    Get-ChildItem $extracted.FullName | Move-Item -Destination $CMakeDir -Force
+    
+    $cmakeExe = Join-Path $CMakeDir 'bin\cmake.exe'
+    if (Test-Path $cmakeExe) {
+        $ver = & $cmakeExe --version 2>$null | Select-Object -First 1
+        Write-OK "CMake installed: $ver"
+    } else {
+        Write-Err "CMake installation failed!"
+        exit 1
+    }
+}
+
+# ── 2. Detect / Install Ninja ─────────────────────────────────────────────
+Write-Step "Checking Ninja..."
+
+$ninjaExe = Join-Path $NinjaDir 'ninja.exe'
+$ninjaFound = $false
+
+if (-not $Force -and (Test-Path $ninjaExe)) {
+    $ver = & $ninjaExe --version 2>$null
+    Write-OK "Bundled Ninja found: $ver"
+    $ninjaFound = $true
+}
+elseif (-not $Force -and (Test-CommandExists 'ninja')) {
+    Write-OK "System Ninja found: $(ninja --version 2>$null)"
+    $ninjaExe = (Get-Command ninja).Source
+    $ninjaFound = $true
+}
+
+if (-not $ninjaFound -or $Force) {
+    Write-Host "    Installing Ninja ${NinjaVersion}..."
+    $zipFile = Join-Path $TempDir "ninja-${NinjaVersion}.zip"
+    Download-File $NinjaZipUrl $zipFile
+    
+    if (Test-Path $NinjaDir) { Remove-Item $NinjaDir -Recurse -Force }
+    Ensure-Dir $NinjaDir
+    
+    Expand-Archive -Path $zipFile -DestinationPath $NinjaDir -Force
+    
+    if (Test-Path $ninjaExe) {
+        Write-OK "Ninja installed: $(& $ninjaExe --version 2>$null)"
+    } else {
+        Write-Err "Ninja installation failed!"
+        exit 1
+    }
+}
+
+# ── 3. Detect / Install Compiler ──────────────────────────────────────────
+Write-Step "Checking C++ Compiler..."
+
+$msvcInfo = Find-MSVC
+$useClang = $false
+$useMSVC = $false
+
+if ($Compiler -eq 'auto') {
+    if ($msvcInfo) {
+        Write-OK "MSVC found: Visual Studio $($msvcInfo.Version) at $($msvcInfo.Path)"
+        $useMSVC = $true
+    } else {
+        Write-Host "    MSVC not found, will install Clang."
+        $useClang = $true
+    }
+}
+elseif ($Compiler -eq 'msvc') {
+    if ($msvcInfo) {
+        Write-OK "MSVC found: Visual Studio $($msvcInfo.Version)"
+        $useMSVC = $true
+    } else {
+        Write-Host "    MSVC not found. Installing Visual Studio Build Tools..."
+        
+        $installerPath = Join-Path $TempDir 'vs_BuildTools.exe'
+        Download-File $VSBuildToolsUrl $installerPath
+        
+        Write-Host "    Running silent install (this may take 10-30 minutes)..."
+        Write-Host "    Installing: MSVC C++ tools, Windows SDK, CMake tools"
+        
+        $installArgs = @(
+            '--quiet',
+            '--wait',
+            '--norestart',
+            '--nocache',
+            '--add', 'Microsoft.VisualStudio.Workload.VCTools',
+            '--add', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+            '--add', 'Microsoft.VisualStudio.Component.Windows11SDK.22621',
+            '--includeRecommended'
+        )
+        
+        $proc = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru
+        
+        if ($proc.ExitCode -eq 0 -or $proc.ExitCode -eq 3010) {
+            # Recheck
+            $msvcInfo = Find-MSVC
+            if ($msvcInfo) {
+                Write-OK "MSVC Build Tools installed: $($msvcInfo.Version)"
+                $useMSVC = $true
+            } else {
+                Write-Err "MSVC installation completed but compiler not found!"
+                Write-Host "    A reboot may be required (exit code: $($proc.ExitCode))."
+                exit 1
+            }
+        } else {
+            Write-Err "MSVC Build Tools installation failed (exit code: $($proc.ExitCode))."
+            exit 1
+        }
+    }
+}
+elseif ($Compiler -eq 'clang') {
+    $useClang = $true
+}
+
+if ($useClang) {
+    $clangExe = Join-Path $LLVMDir 'bin\clang++.exe'
+    $clangFound = $false
+    
+    if (-not $Force -and (Test-Path $clangExe)) {
+        $ver = & $clangExe --version 2>$null | Select-Object -First 1
+        Write-OK "Bundled Clang found: $ver"
+        $clangFound = $true
+    }
+    elseif (-not $Force -and (Test-CommandExists 'clang++')) {
+        $ver = clang++ --version 2>$null | Select-Object -First 1
+        Write-OK "System Clang found: $ver"
+        $clangExe = (Get-Command clang++).Source
+        $clangFound = $true
+    }
+    
+    if (-not $clangFound -or $Force) {
+        Write-Host "    Installing LLVM/Clang ${LLVMVersion} (silent installer)..."
+        $installerPath = Join-Path $TempDir "LLVM-${LLVMVersion}.exe"
+        Download-File $LLVMInstallerUrl $installerPath
+        
+        $installDir = $LLVMDir
+        Write-Host "    Target: $installDir"
+        
+        # LLVM NSIS installer supports /S (silent) and /D=<path> (directory)
+        $proc = Start-Process -FilePath $installerPath -ArgumentList "/S /D=$installDir" -Wait -PassThru
+        
+        if ($proc.ExitCode -eq 0 -and (Test-Path (Join-Path $installDir 'bin\clang++.exe'))) {
+            $clangExe = Join-Path $installDir 'bin\clang++.exe'
+            $ver = & $clangExe --version 2>$null | Select-Object -First 1
+            Write-OK "LLVM/Clang installed: $ver"
+        } else {
+            Write-Err "LLVM/Clang installation failed (exit code: $($proc.ExitCode))."
+            exit 1
+        }
+    }
+    
+    # Clang on Windows needs Windows SDK headers + MSVC CRT headers.
+    # Check if available, auto-install if missing.
+    $winSdkInclude = $null
+    $sdkRoot = "${env:ProgramFiles(x86)}\Windows Kits\10\Include"
+    if (Test-Path $sdkRoot) {
+        $latestSdk = Get-ChildItem $sdkRoot -Directory | Where-Object { $_.Name -match '^\d+\.' } | Sort-Object Name -Descending | Select-Object -First 1
+        if ($latestSdk) {
+            $winSdkInclude = $latestSdk.FullName
+        }
+    }
+
+    if (-not $winSdkInclude) {
+        Write-Host "    Windows SDK not found. Installing..." -ForegroundColor Yellow
+
+        $sdkInstalled = $false
+
+        # Method 1: winget (fastest, no temp download)
+        if (-not $sdkInstalled -and (Test-CommandExists 'winget')) {
+            Write-Host "    Trying winget..."
+            $wgResult = Start-Process -FilePath 'winget' -ArgumentList 'install','--id','Microsoft.WindowsSDK.10.0.26100','--silent','--accept-package-agreements','--accept-source-agreements' -Wait -PassThru -NoNewWindow 2>$null
+            if ($wgResult -and ($wgResult.ExitCode -eq 0)) {
+                Write-OK "Windows SDK installed via winget."
+                $sdkInstalled = $true
+            }
+        }
+
+        # Method 2: Standalone SDK installer (silent)
+        if (-not $sdkInstalled) {
+            Write-Host "    Downloading Windows SDK installer..."
+            $sdkInstallerPath = Join-Path $TempDir 'winsdksetup.exe'
+            try {
+                Download-File $WinSdkUrl $sdkInstallerPath
+
+                Write-Host "    Running silent Windows SDK install (this may take 5-10 minutes)..."
+                $sdkArgs = @(
+                    '/quiet',
+                    '/norestart',
+                    '/features', 'OptionId.DesktopCPPx64'
+                )
+                $sdkProc = Start-Process -FilePath $sdkInstallerPath -ArgumentList $sdkArgs -Wait -PassThru
+
+                if ($sdkProc.ExitCode -eq 0) {
+                    Write-OK "Windows SDK installed."
+                    $sdkInstalled = $true
+                } else {
+                    Write-Host "    SDK installer exit code: $($sdkProc.ExitCode)" -ForegroundColor Yellow
+                }
+            } catch {
+                Write-Host "    SDK download/install failed: $_" -ForegroundColor Yellow
+            }
+        }
+
+        if (-not $sdkInstalled) {
+            Write-Host ""
+            Write-Host "    [WARNING] Windows SDK could not be installed automatically." -ForegroundColor Yellow
+            Write-Host "    Please install manually:" -ForegroundColor Yellow
+            Write-Host "      Option A: https://developer.microsoft.com/windows/downloads/windows-sdk/" -ForegroundColor Yellow
+            Write-Host "      Option B: winget install Microsoft.WindowsSDK.10.0.26100" -ForegroundColor Yellow
+            Write-Host "      Option C: .\bootstrap.ps1 -Compiler msvc  (installs VS Build Tools with SDK)" -ForegroundColor Yellow
+            Write-Host ""
+        }
+    } else {
+        Write-OK "Windows SDK found: $($latestSdk.Name)"
+    }
+}
+
+# ── 4. Detect / Install Python ────────────────────────────────────────────
+if (-not $SkipPython) {
+    Write-Step "Checking Python..."
+    
+    $pythonExe = Join-Path $PythonDir 'python.exe'
+    $pythonFound = $false
+    
+    if (-not $Force -and (Test-Path $pythonExe)) {
+        $ver = & $pythonExe --version 2>$null
+        Write-OK "Bundled Python found: $ver"
+        $pythonFound = $true
+    }
+    elseif (-not $Force -and (Test-CommandExists 'python')) {
+        $ver = python --version 2>$null
+        Write-OK "System Python found: $ver"
+        $pythonFound = $true
+    }
+    
+    if (-not $pythonFound -or $Force) {
+        Write-Host "    Installing Python ${PythonVersion}..."
+        Write-Host "    Note: The engine needs Python with development headers."
+        Write-Host "    Using the full installer for include/ and libs/ directories."
+        
+        $installerPath = Join-Path $TempDir "python-${PythonVersion}.exe"
+        Download-File $PythonDevUrl $installerPath
+        
+        # Python installer supports /quiet and TargetDir
+        $installArgs = @(
+            '/quiet',
+            'InstallAllUsers=0',
+            "TargetDir=$PythonDir",
+            'Include_pip=0',
+            'Include_doc=0',
+            'Include_test=0',
+            'Include_tcltk=0',
+            'Include_launcher=0',
+            'Include_dev=1',
+            'Include_lib=1',
+            'Shortcuts=0',
+            'AssociateFiles=0'
+        )
+        
+        $proc = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru
+        
+        if ($proc.ExitCode -eq 0 -and (Test-Path (Join-Path $PythonDir 'python.exe'))) {
+            $ver = & (Join-Path $PythonDir 'python.exe') --version 2>$null
+            Write-OK "Python installed: $ver"
+        } else {
+            Write-Err "Python installation failed (exit code: $($proc.ExitCode))."
+            Write-Host "    You can install Python manually from https://python.org/downloads/"
+            Write-Host "    Make sure to include development headers (include/ and libs/)."
+        }
+    }
+} else {
+    Write-Skip "Python (--SkipPython)"
+}
+
+# ── 5. Clean up temp files ────────────────────────────────────────────────
+Write-Step "Cleaning up..."
+if (Test-Path $TempDir) {
+    Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+    Write-OK "Temp files removed."
+}
+
+# ── 6. Generate environment script ────────────────────────────────────────
+Write-Step "Generating environment setup..."
+
+$envScript = Join-Path $ToolsDir 'env.ps1'
+$envBatch  = Join-Path $ToolsDir 'env.bat'
+
+# PowerShell env script
+$psContent = @"
+# HorizonEngine Build Environment
+# Source this script: . .\Tools\env.ps1
+
+`$ToolsRoot = Split-Path -Parent `$MyInvocation.MyCommand.Definition
+`$EngineRoot = Split-Path -Parent `$ToolsRoot
+
+# CMake
+`$cmakeBin = Join-Path `$ToolsRoot 'cmake\bin'
+if (Test-Path `$cmakeBin) { `$env:PATH = "`$cmakeBin;`$env:PATH" }
+
+# Ninja
+`$ninjaBin = Join-Path `$ToolsRoot 'ninja'
+if (Test-Path `$ninjaBin) { `$env:PATH = "`$ninjaBin;`$env:PATH" }
+
+# LLVM/Clang
+`$llvmBin = Join-Path `$ToolsRoot 'llvm\bin'
+if (Test-Path `$llvmBin) { `$env:PATH = "`$llvmBin;`$env:PATH" }
+
+# Python
+`$pythonDir = Join-Path `$ToolsRoot 'python'
+if (Test-Path `$pythonDir) { `$env:PATH = "`$pythonDir;`$env:PATH" }
+
+Write-Host "HorizonEngine build environment loaded." -ForegroundColor Green
+"@
+Set-Content -Path $envScript -Value $psContent -Encoding UTF8
+
+# CMD/Batch env script
+$batContent = @"
+@echo off
+REM HorizonEngine Build Environment
+REM Call this script: call Tools\env.bat
+
+set "TOOLS_ROOT=%~dp0"
+set "ENGINE_ROOT=%TOOLS_ROOT%.."
+
+if exist "%TOOLS_ROOT%cmake\bin" set "PATH=%TOOLS_ROOT%cmake\bin;%PATH%"
+if exist "%TOOLS_ROOT%ninja" set "PATH=%TOOLS_ROOT%ninja;%PATH%"
+if exist "%TOOLS_ROOT%llvm\bin" set "PATH=%TOOLS_ROOT%llvm\bin;%PATH%"
+if exist "%TOOLS_ROOT%python" set "PATH=%TOOLS_ROOT%python;%PATH%"
+
+echo HorizonEngine build environment loaded.
+"@
+Set-Content -Path $envBatch -Value $batContent -Encoding ASCII
+
+Write-OK "Generated Tools\env.ps1 and Tools\env.bat"
+
+# ── 7. Summary ────────────────────────────────────────────────────────────
+Write-Host ""
+Write-Host "=============================================" -ForegroundColor Green
+Write-Host "  Bootstrap Complete!" -ForegroundColor Green
+Write-Host "=============================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "  Tools directory: $ToolsDir" -ForegroundColor White
+
+$cmakeVer = ''
+if (Test-Path (Join-Path $CMakeDir 'bin\cmake.exe')) {
+    $cmakeVer = & (Join-Path $CMakeDir 'bin\cmake.exe') --version 2>$null | Select-Object -First 1
+    Write-Host "  CMake:    $cmakeVer" -ForegroundColor White
+}
+
+$ninjaVer = ''
+if (Test-Path (Join-Path $NinjaDir 'ninja.exe')) {
+    $ninjaVer = & (Join-Path $NinjaDir 'ninja.exe') --version 2>$null
+    Write-Host "  Ninja:    $ninjaVer" -ForegroundColor White
+}
+
+if ($useMSVC -and $msvcInfo) {
+    Write-Host "  Compiler: MSVC $($msvcInfo.Version)" -ForegroundColor White
+}
+if ($useClang) {
+    $clangBin = Join-Path $LLVMDir 'bin\clang++.exe'
+    if (Test-Path $clangBin) {
+        $cv = & $clangBin --version 2>$null | Select-Object -First 1
+        Write-Host "  Compiler: $cv" -ForegroundColor White
+    }
+}
+
+if (-not $SkipPython -and (Test-Path (Join-Path $PythonDir 'python.exe'))) {
+    $pv = & (Join-Path $PythonDir 'python.exe') --version 2>$null
+    Write-Host "  Python:   $pv" -ForegroundColor White
+}
+
+Write-Host ""
+Write-Host "  To build the engine:" -ForegroundColor Yellow
+Write-Host "    .\build.bat              (uses detected/installed tools)" -ForegroundColor White
+Write-Host ""
+Write-Host "  Or manually:" -ForegroundColor Yellow
+Write-Host "    . .\Tools\env.ps1        (load environment)" -ForegroundColor White
+
+if ($useClang) {
+    Write-Host "    cmake -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -B build -S ." -ForegroundColor White
+} else {
+    Write-Host "    cmake -G Ninja -B build -S ." -ForegroundColor White
+}
+Write-Host "    cmake --build build --config Release" -ForegroundColor White
+Write-Host ""

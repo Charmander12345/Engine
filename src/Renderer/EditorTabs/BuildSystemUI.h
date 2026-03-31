@@ -93,6 +93,11 @@ public:
     void startAsyncToolchainDetection();
     void pollToolchainDetection();
 
+    // ── Auto-Install (runs tools/bootstrap.ps1 on a background thread) ──
+    void promptAndInstallTools();
+    bool isToolInstallRunning() const { return m_toolInstallRunning.load(); }
+    void pollToolInstall();
+
     // Public build thread state (accessed from build lambda in main.cpp)
     std::thread m_buildThread;
     std::atomic<bool> m_buildRunning{ false };
@@ -129,6 +134,16 @@ private:
     // Async detection state
     std::atomic<bool> m_toolDetectDone{ false };
     bool m_toolDetectPolled{ false };
+
+    // Auto-install state
+    std::atomic<bool> m_toolInstallRunning{ false };
+    std::atomic<bool> m_toolInstallDone{ false };
+    std::atomic<bool> m_toolInstallSuccess{ false };
+    std::string       m_toolInstallError;
+    std::thread       m_toolInstallThread;
+    bool              m_toolInstallPolled{ false };
+
+    void runBootstrapInstall();
 };
 
 #endif // ENGINE_EDITOR

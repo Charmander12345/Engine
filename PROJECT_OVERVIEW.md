@@ -5,6 +5,25 @@
 
 ---
 
+## Aktuelle Änderung (In-Engine Auto-Install: Build-Tools beim Start prüfen und installieren)
+
+- `BuildSystemUI Auto-Install Integration (BuildSystemUI.h/cpp)`: Der Editor prüft beim Start automatisch ob CMake und ein C++ Compiler (MSVC/Clang) vorhanden sind. Falls Build-Tools fehlen, wird dem User ein einzelner kombinierter Dialog angezeigt, der alle fehlenden Tools auflistet (CMake, C++ Compiler). Bei Zustimmung wird `tools/bootstrap.ps1` (Windows) bzw. `tools/bootstrap.sh` (Linux/macOS) auf einem Hintergrund-Thread ausgeführt, der die Tools silent installiert. Fortschritt wird im Engine-Log protokolliert. Nach Abschluss wird eine Erfolgs- oder Fehler-Toast-Nachricht angezeigt und die Tool-Erkennung automatisch wiederholt.
+- `Neue Methoden in BuildSystemUI`: `promptAndInstallTools()` (zeigt kombinierten Bestätigungsdialog mit fehlenden Tools), `runBootstrapInstall()` (führt Bootstrap-Skript auf Background-Thread aus mit Pipe-basierter Log-Ausgabe), `pollToolInstall()` (prüft Install-Status pro Frame, zeigt Result-Toast). `isToolInstallRunning()` für externen Status-Check.
+- `Prozess-Ausführung`: Windows: `CreateProcessA` mit `CREATE_NO_WINDOW` + anonyme Pipe für stdout/stderr-Capture. Linux/macOS: `popen()` mit zeilenweiser Log-Ausgabe. Bootstrap-Skript wird via `ENGINE_SOURCE_DIR` (compile-time) oder `SDL_GetBasePath()` (runtime) lokalisiert.
+- `showCMakeInstallPrompt() / showToolchainInstallPrompt() refactored`: Beide Methoden delegieren jetzt an `promptAndInstallTools()` statt Browser-Seiten zu öffnen. Alte ShellExecute/xdg-open-Aufrufe entfernt.
+- `pollToolchainDetection() erweitert`: Ruft jetzt `pollToolInstall()` am Anfang jedes Frames auf. Zeigt nach Erkennung einen einzelnen kombinierten Auto-Install-Dialog wenn CMake ODER Toolchain fehlen (statt zwei separate Dialoge). Log-Ausgabe für erkannte/fehlende Tools bleibt.
+- `Workflow`: EditorApp::initialize() → startAsyncToolchainDetection() (Background-Thread: detectCMake + detectBuildToolchain) → EditorApp::tick() → pollToolchainDetection() (Main-Thread: Ergebnis auswerten, bei Bedarf Dialog zeigen) → User bestätigt → runBootstrapInstall() (Background-Thread: bootstrap.ps1 ausführen) → pollToolInstall() (Main-Thread: Ergebnis prüfen, Toast zeigen, Tools re-detecten).
+
+## Aktuelle Änderung (Build-Bootstrapping: Automatische Tool-Installation)
+
+- `tools/bootstrap.ps1 (Windows PowerShell)`: Bootstrap-Skript das fehlende Build-Tools automatisch erkennt und installiert. Unterstützt 3 Compiler-Modi (`-Compiler auto|clang|msvc`): (1) Auto: MSVC wenn Visual Studio vorhanden, sonst LLVM/Clang silent install. (2) Clang: LLVM/Clang NSIS-Installer silent nach `Tools/llvm/` (`/S /D=<path>`). (3) MSVC: VS Build Tools silent install (`vs_BuildTools.exe --quiet --wait --add VCTools`). Installiert außerdem CMake (portables ZIP nach `Tools/cmake/`), Ninja (portables ZIP nach `Tools/ninja/`) und Python mit Dev-Headers (Installer nach `Tools/python/`). Erkennt vorhandene Tools in `Tools/`-Verzeichnis, Visual Studio (via vswhere), und System-PATH. Generiert `Tools/env.ps1` und `Tools/env.bat` für Umgebungsvariablen-Setup. Parameter `-SkipPython` und `-Force` für Anpassung.
+- `Windows SDK Auto-Installation (bootstrap.ps1)`: Wenn Clang als Compiler gewählt wird und kein Windows SDK vorhanden ist, wird es automatisch installiert: Methode 1 via `winget install Microsoft.WindowsSDK.10.0.26100 --silent`, Methode 2 via `winsdksetup.exe /quiet /features OptionId.DesktopCPPx64` (Standalone-Installer von go.microsoft.com). Bei MSVC-Wahl (`-Compiler msvc`) wird das SDK über die VS Build Tools mitinstalliert (`Microsoft.VisualStudio.Component.Windows11SDK.22621`).
+- `tools/bootstrap.sh (Linux/macOS)`: Äquivalentes Bootstrap-Skript für Unix. Installiert CMake und Ninja als portable Downloads in `Tools/`. Compiler (Clang/GCC) müssen über System-Paketmanager installiert sein — Skript prüft Verfügbarkeit und zeigt Installationsanweisungen. Prüft Python3 Dev-Headers (`Python.h`), OpenGL-Headers und X11-Headers (Linux). Generiert `Tools/env.sh`.
+- `build.bat (Windows)`: Zentrales Build-Entry-Point. Auto-Erkennung von CMake (Tools/ → VS-bundled → PATH), Compiler (MSVC → Clang+Ninja → Ninja), und Generator-Wahl. Unterstützt `release|debug|runtime|configure|clean|bootstrap` als Argumente. Kein manuelles Umgebungs-Setup nötig.
+- `build.sh (Linux/macOS)`: Äquivalentes Build-Entry-Point für Unix. Gleiche Argument-Syntax wie build.bat. Bevorzugt Clang über GCC, Ninja als Generator wenn verfügbar.
+- `tools/README.md`: Vollständige Dokumentation des Bootstrap-Systems: Schnellstart, Parameter-Referenz, Verzeichnisstruktur nach Bootstrap, Abhängigkeitstabelle, Download-Größen, 3 Setup-Szenarien (VS vorhanden / Clang / MSVC neu), Compiler-Empfehlungen pro Szenario.
+- `Tools/-Verzeichniskonvention`: Portable Tools werden in `Tools/cmake/`, `Tools/ninja/`, `Tools/llvm/`, `Tools/python/` installiert. `BuildSystemUI::detectCMake()` sucht bereits nach `Tools/cmake/bin/cmake.exe` als erste Priorität.
+
 ## Aktuelle Änderung (Game Build Output Reorganization: Saubere Verzeichnisstruktur)
 
 - `Neue Output-Struktur für Game Build`:

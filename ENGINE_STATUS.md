@@ -5,6 +5,25 @@
 
 ---
 
+## Letzte Änderung (In-Engine Auto-Install: Build-Tools beim Start prüfen und installieren)
+
+- ✅ `BuildSystemUI Auto-Install (BuildSystemUI.h/cpp)`: Editor prüft beim Start automatisch ob CMake und C++ Compiler vorhanden sind. Bei fehlenden Tools wird ein kombinierter Dialog angezeigt. Bei Zustimmung wird `tools/bootstrap.ps1` (Windows) / `tools/bootstrap.sh` (Linux) auf einem Hintergrund-Thread ausgeführt. Silent Installation mit Log-Ausgabe im Engine-Log. Erfolgs-/Fehler-Toast nach Abschluss. Automatische Re-Detection der Tools nach Installation.
+- ✅ `Neue Methoden`: `promptAndInstallTools()` (kombinierter Dialog), `runBootstrapInstall()` (Background-Thread mit Pipe-Capture), `pollToolInstall()` (Frame-basierter Status-Check + Toast), `isToolInstallRunning()` (Status-Query).
+- ✅ `showCMakeInstallPrompt() / showToolchainInstallPrompt() refactored`: Delegieren an `promptAndInstallTools()` statt Browser zu öffnen.
+- ✅ `pollToolchainDetection() erweitert`: Einzelner kombinierter Dialog statt zwei separate. Integriert `pollToolInstall()`.
+- ✅ Build erfolgreich (Editor-Target).
+- **Workflow**: Start → Async-Detection (Background) → Poll (Main-Thread) → Dialog bei fehlenden Tools → Bootstrap auf Background-Thread → Re-Detection → Toast.
+
+## Letzte Änderung (Build-Bootstrapping: Automatische Tool-Installation)
+
+- ✅ `tools/bootstrap.ps1 (Windows)`: PowerShell-Skript das CMake (portable ZIP), Ninja (portable ZIP), LLVM/Clang (silent NSIS-Installer) oder MSVC Build Tools (silent VS-Installer), und Python (mit Dev-Headers) automatisch erkennt und installiert. 3 Compiler-Modi: auto (MSVC bevorzugt), clang (LLVM silent install), msvc (VS Build Tools silent install). Generiert `Tools/env.ps1` + `Tools/env.bat`.
+- ✅ `Windows SDK Auto-Installation`: Wenn Clang ohne VS gewählt wird, installiert bootstrap.ps1 das Windows SDK automatisch: Methode 1 via `winget install Microsoft.WindowsSDK.10.0.26100 --silent`, Methode 2 via `winsdksetup.exe /quiet /features OptionId.DesktopCPPx64`. Bei `-Compiler msvc` wird das SDK über VS Build Tools mitinstalliert.
+- ✅ `tools/bootstrap.sh (Linux/macOS)`: Bash-Skript das CMake und Ninja portabel installiert. Prüft System-Compiler (Clang/GCC), Python3 Dev-Headers, OpenGL-Headers. Generiert `Tools/env.sh`.
+- ✅ `build.bat (Windows)`: Zentrales Build-Entry-Point mit Auto-Erkennung aller Tools (Tools/ → VS → PATH). Argumente: `release|debug|runtime|configure|clean|bootstrap`.
+- ✅ `build.sh (Linux/macOS)`: Äquivalentes Unix Build-Entry-Point.
+- ✅ `tools/README.md`: Vollständige Dokumentation mit Download-Größen, 3 Setup-Szenarien, Compiler-Empfehlungen.
+- **Kompatibilität**: `BuildSystemUI::detectCMake()` sucht bereits nach `Tools/cmake/bin/cmake.exe` als erste Priorität — Bootstrap-installiertes CMake wird automatisch vom Editor erkannt.
+
 ## Letzte Änderung (Game Build: Editor-DLL-Filter in Deploy-Pipeline)
 
 - ✅ `Editor-DLL-Filter (BuildPipeline.cpp)`: Editor-only DLLs (`AssetManager.dll`, `Scripting.dll`, `Renderer.dll`) werden beim Deploy-Schritt (Step 4) übersprungen. Die Runtime linkt gegen die `*Runtime`-Varianten (`AssetManagerRuntime.dll`, `ScriptingRuntime.dll`, `RendererRuntime.dll`). Case-insensitive Blacklist-Lambda `isEditorOnlyDll()` filtert Editor-DLLs aus dem Binary-Cache-Verzeichnis heraus, bevor sie ins `Engine/`-Verzeichnis des Game-Builds kopiert werden. Übersprungene DLLs werden im Build-Log protokolliert (`Skipped editor DLL: ...`).
