@@ -1845,8 +1845,9 @@ bool AssetManager::loadProject(const std::string& projectPath, SyncState syncSta
             // No .project file on disk â€” check if this is a packaged build
             // (content.hpk exists). Runtime builds don't need a .project file;
             // all essential info comes from game.ini / compile-time defines.
-            const fs::path hpkCandidate = root / "content.hpk";
-            if (fs::exists(hpkCandidate))
+            const fs::path hpkCandidateNew = root / "Content" / "content.hpk";
+            const fs::path hpkCandidateLegacy = root / "content.hpk";
+            if (fs::exists(hpkCandidateNew) || fs::exists(hpkCandidateLegacy))
             {
                 isPackagedBuild = true;
                 logger.log(Logger::Category::Project,
@@ -1974,8 +1975,11 @@ bool AssetManager::loadProject(const std::string& projectPath, SyncState syncSta
 #endif
 
 	// Try to mount an HPK content archive (packaged builds).
+	// New layout: Content/content.hpk; legacy fallback: content.hpk in root.
 	{
-		const fs::path hpkPath = fs::path(info.projectPath) / "content.hpk";
+		fs::path hpkPath = fs::path(info.projectPath) / "Content" / "content.hpk";
+		if (!fs::exists(hpkPath))
+			hpkPath = fs::path(info.projectPath) / "content.hpk";
 		if (fs::exists(hpkPath))
 		{
 			if (mountContentArchive(hpkPath.string()))

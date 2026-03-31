@@ -336,6 +336,27 @@ if(ENGINE_BUILD_RUNTIME)
     else()
         target_compile_definitions(HorizonEngineRuntime PRIVATE ENGINE_BUILD_SHIPPING=1)
     endif()
+
+    # ── Delay-load engine DLLs for clean output layout ───────────────────
+    # The game build places the exe in root and all DLLs in Engine/.
+    # /DELAYLOAD defers DLL loading until first use so that SetDllDirectory()
+    # in main() can redirect the loader to Engine/ before any DLL is needed.
+    if(MSVC)
+        set(_delay_targets SDL3::SDL3 Logger Diagnostics Core Physics
+            AssetManagerRuntime ScriptingRuntime RendererRuntime)
+        foreach(_t ${_delay_targets})
+            if(TARGET ${_t})
+                target_link_options(HorizonEngineRuntime PRIVATE
+                    "/DELAYLOAD:$<TARGET_FILE_NAME:${_t}>")
+            endif()
+        endforeach()
+        # Python DLL (name varies by version)
+        if(Python3_RUNTIME_LIBRARY_RELEASE)
+            get_filename_component(_py_dll_name "${Python3_RUNTIME_LIBRARY_RELEASE}" NAME)
+            target_link_options(HorizonEngineRuntime PRIVATE "/DELAYLOAD:${_py_dll_name}")
+        endif()
+        target_link_libraries(HorizonEngineRuntime PRIVATE delayimp)
+    endif()
 endif()
 
 if(WIN32 AND Python3_LIBRARY_RELEASE)
@@ -367,6 +388,12 @@ endif()
 # Build outputs (exe + DLLs) should go directly to the deploy directory.
 # This is more reliable than post-build copying, especially with Ninja.
 # For multi-config generators, flatten per-config subdirectories.
+# NOTE: This only affects targets created AFTER this point.  All engine
+# targets are created earlier via add_subdirectory / add_executable, so
+# they inherit the per-config output dirs from lines 61-72.  For the
+# editor, POST_BUILD commands copy everything to ENGINE_DEPLOY_DIR.
+# For game builds, BuildPipeline.cpp handles deployment and filters out
+# editor-only DLLs (AssetManager.dll, Scripting.dll, Renderer.dll).
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}")
 set(CMAKE_PDB_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}")

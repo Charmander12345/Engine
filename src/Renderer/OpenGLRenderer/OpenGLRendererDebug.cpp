@@ -8,6 +8,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
+#if ENGINE_EDITOR
+
 namespace
 {
 	static void buildCircleVerts(std::vector<float>& verts, int segments, float radius, int axis)
@@ -581,3 +583,4 @@ void OpenGLRenderer::drawRubberBand(const glm::mat4& ortho)
 	glDeleteBuffers(1, &vbo);
 	glDeleteVertexArrays(1, &vao);
 }
+#endif // ENGINE_EDITOR — Debug-rendering editor-only code

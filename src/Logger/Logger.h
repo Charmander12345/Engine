@@ -53,6 +53,11 @@ public:
 	static Logger& Instance();
 	void initialize();
 
+	/// Set a custom log directory (must be called before initialize()).
+	void setLogDirectory(const std::string& dir);
+	/// Set a custom tools directory for CrashHandler lookup.
+	void setToolsDirectory(const std::string& dir);
+
 	void setMinimumLogLevel(LogLevel level);
 	void setSuppressStdout(bool suppress);
 
@@ -132,4 +137,8 @@ private:
 #endif
 	std::mutex m_pipeMutex;
 	bool m_crashHandlerRunning{ false };
+
+	// Custom directory overrides (set before initialize()/startCrashHandler())
+	std::string m_customLogDir;
+	std::string m_customToolsDir;
 };

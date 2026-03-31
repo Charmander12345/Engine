@@ -350,8 +350,10 @@ private:
     int m_currentSubViewportIndex{ -1 };
     struct SubViewportRect { int x, y, w, h; };
     SubViewportRect m_currentSubViewportRect{};
+#if ENGINE_EDITOR
     void computeSubViewportRects(int vpX, int vpY, int vpW, int vpH,
                                  SubViewportRect* outRects, int count) const;
+#endif
     int m_cachedWindowWidth{0};
     int m_cachedWindowHeight{0};
     uint64_t m_lastUiAnimationTickCounter{0};
@@ -620,6 +622,7 @@ private:
     };
     CsmResources m_csm;
 
+#if ENGINE_EDITOR
     // Entity picking FBO
     struct PickingResources
     {
@@ -719,6 +722,7 @@ private:
         GLint  locFadeRadius{-1};
     };
     GridResources m_grid;
+#endif // ENGINE_EDITOR — Debug/Picking/Selection/Gizmo/Grid
 
     #if ENGINE_EDITOR
     // Editor tab system

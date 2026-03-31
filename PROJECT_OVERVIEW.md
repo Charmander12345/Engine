@@ -5,6 +5,46 @@
 
 ---
 
+## Aktuelle Änderung (Game Build Output Reorganization: Saubere Verzeichnisstruktur)
+
+- `Neue Output-Struktur für Game Build`:
+  ```
+  GameBuild/
+    <GameName>.exe          (Root – umbenannte Runtime-Exe)
+    game.ini                (Root – Start-Level, Window-Title, Build-Profil)
+    config/
+      config.ini            (Root – Renderer-/Engine-Einstellungen)
+    Engine/                 (Engine-Runtime)
+      *.dll                 (Alle Engine-DLLs: Logger, Core, Diagnostics, Physics, SDL3, AssetManagerRuntime, ScriptingRuntime, RendererRuntime, Python)
+      Tools/
+        CrashHandler.exe    (+ PDB)
+      Logs/                 (Wird zur Laufzeit vom Logger erstellt)
+    Content/
+      content.hpk           (Gepacktes Spielinhalt-Archiv)
+  ```
+- `MSVC /DELAYLOAD für DLL-Subdirectory-Loading (CMakeLists.txt)`: Alle 8 Engine-SHARED-DLLs + Python-DLL werden mit `/DELAYLOAD:<dll>` gelinkt (`delayimp.lib`). Delay-loaded DLLs werden erst beim ersten Funktionsaufruf geladen, nicht beim Prozessstart — dadurch kann `SetDllDirectory()` in `main()` den Suchpfad auf `Engine/` umleiten, bevor irgendeine DLL benötigt wird. `LandscapeRuntime` ist STATIC und benötigt kein Delay-Loading.
+- `SetDllDirectoryW in main.cpp`: Neuer `#if defined(_WIN32) && !ENGINE_EDITOR`-Block am Anfang von `main()`. Berechnet absoluten Pfad zu `Engine/` via `GetModuleFileNameW()` (Exe-Verzeichnis) und ruft `SetDllDirectoryW()` auf. Windows-DLL-Loader durchsucht dann auch `Engine/` bei jedem DLL-Load.
+- `Logger: Konfigurierbares Log- und Tools-Verzeichnis (Logger.h/cpp)`: Neue Methoden `setLogDirectory(const std::string&)` und `setToolsDirectory(const std::string&)` mit zugehörigen Members `m_customLogDir`/`m_customToolsDir`. `initialize()` nutzt `m_customLogDir` falls gesetzt, sonst Fallback auf `current_path()/Logs`. `launchCrashHandlerProcess()` nutzt `m_customToolsDir` für CrashHandler-Pfad (Windows + Linux). Logger ist SHARED-Library und kann kein compile-time `ENGINE_EDITOR` nutzen — daher Runtime-Konfiguration.
+- `main.cpp Logger-Konfiguration`: Im Runtime-Build (`!ENGINE_EDITOR`) werden `setLogDirectory("Engine/Logs")` und `setToolsDirectory("Engine/Tools")` vor `Logger::initialize()` aufgerufen.
+- `BuildPipeline.cpp Output-Reorganisation`: (1) `engineDir = dstDir / "Engine"` wird früh erstellt. (2) Isoliertes Deploy-Verzeichnis: CMake-Configure erhält `-DENGINE_DEPLOY_DIR=<binaryDir>/deploy`, sodass nur Runtime-Artefakte (HorizonEngineRuntime.exe + benötigte DLLs) dort landen — keine Editor-DLLs (Renderer.dll, Scripting.dll, AssetManager.dll) oder Debug-Artefakte (OpenAL32d.dll). Deploy-Verzeichnis wird vor jedem Build bereinigt um Altlasten aus vorherigen Konfigurationen zu vermeiden. (3) DLLs aus dem Deploy-Dir nach `engineDir` kopiert. (4) Python-DLLs/Zips separat aus Editor-Verzeichnis (externe Abhängigkeit, nicht von CMake gebaut). (5) CrashHandler.exe + PDB nach `engineDir / "Tools"`. (6) HPK wird temporär als `dstDir/content.hpk` gepackt, dann nach `dstDir/Content/content.hpk` verschoben. (7) **Editor-DLL-Filter:** `isEditorOnlyDll()`-Lambda filtert `AssetManager.dll`, `Scripting.dll` und `Renderer.dll` (case-insensitive) beim DLL-Deploy heraus — die Runtime linkt gegen die `*Runtime`-Varianten (`AssetManagerRuntime.dll`, `ScriptingRuntime.dll`, `RendererRuntime.dll`). Übersprungene DLLs werden im Build-Log protokolliert.
+- `AssetManager.cpp HPK-Mount-Fallback`: `loadProject()` versucht zuerst `Content/content.hpk`, fällt auf `content.hpk` im Root zurück (Backward-Kompatibilität mit älteren Builds).
+- `AssetManager.cpp Packaged-Build-Erkennung`: `loadProject()` prüft bei fehlendem `.project`-File sowohl `Content/content.hpk` als auch `content.hpk` (Legacy) um Packaged Builds korrekt zu erkennen.
+- `main.cpp HPK-Early-Mount-Fallback`: HPK-Pfad auf `Content/content.hpk` aktualisiert mit Legacy-Fallback auf `content.hpk`.
+- `HPKReader::mount() baseDir Auto-Detection (HPKArchive.cpp)`: Nach dem Lesen der TOC wird geprüft, ob der Elternordner-Name des HPK-Archivs als Pfad-Präfix in TOC-Einträgen vorkommt (z.B. HPK in `Content/content.hpk` mit TOC-Einträgen `Content/Fonts/...`). Falls ja, wird `m_baseDir` auf den Großeltern-Ordner korrigiert (Exe-Verzeichnis statt `Content/`), damit `makeVirtualPath()` korrekte virtuelle Pfade berechnet.
+
+## Aktuelle Änderung (Shipping Build Hardening: Editor-Code aus Runtime entfernen)
+
+- `OpenGLRendererGizmo.cpp`: Gesamte Datei (Gizmo + Grid Rendering) in `#if ENGINE_EDITOR` gewrappt. Eliminiert Grid-Rendering, Gizmo-Achsen, Drag-Handling aus dem Runtime-Build.
+- `OpenGLRendererDebug.cpp`: Gesamte Datei (Selection Outline, Collider/Streaming-Volume/Bone Debug, Rubber Band) in `#if ENGINE_EDITOR` gewrappt.
+- `OpenGLRenderer.cpp renderWorld()`: 3 Editor-Visualisierungsblöcke mit `#if ENGINE_EDITOR` geschützt: (1) Pick-Buffer für selektierte Entities + Gizmo-Hover-Update, (2) Viewport-Grid + Collider/Streaming-Volume/Bone-Debug, (3) Selection-Outline + Gizmo + Rubber-Band + Sub-Viewport-Border.
+- `OpenGLRenderer.cpp shutdown()`: `releasePickFbo()` + `releaseOutlineResources()` Aufrufe mit `#if ENGINE_EDITOR` geschützt.
+- `OpenGLRenderer.cpp Funktionsdefinitionen`: `ensurePickFbo`, `releasePickFbo`, `renderPickBuffer`, `renderPickBufferSelectedEntities`, `pickEntityAt`, `pickEntityAtImmediate` in einem `#if ENGINE_EDITOR`-Block zusammengefasst. `ensureOutlineResources`, `releaseOutlineResources`, `getEntityRotationMatrix` in separatem `#if ENGINE_EDITOR`-Block. `computeSubViewportRects` mit `#if ENGINE_EDITOR` geschützt.
+- `OpenGLRenderer.cpp Diagnostics`: Editor-only Render-Pass-Info (Pick Buffer, Grid Overlay, Collider/Bone Debug, Selection Outline, Gizmo) mit `#if ENGINE_EDITOR` geschützt. Core-Passes (Post-Process, Bloom, SSAO) bleiben ungeschützt.
+- `OpenGLRenderer.cpp m_pick.dirty`: Referenz nach Entity-Refresh mit `#if ENGINE_EDITOR` geschützt.
+- `Renderer.h`: Protected Editor-Members (`m_snapEnabled`, `m_gridVisible`, `m_gridSize`, `m_rotationSnapDeg`, `m_scaleSnapStep`, `m_collidersVisible`, `m_bonesVisible`, `m_viewportLayout`, `m_activeSubViewport`) mit `#if ENGINE_EDITOR` geschützt.
+- `OpenGLRenderer.h`: Private Editor-Members (PickingResources, OutlineResources, GizmoResources, GridResources, m_selectedEntities, Rubber-Band-State, Pick-State) mit `#if ENGINE_EDITOR` geschützt. `computeSubViewportRects` Deklaration mit `#if ENGINE_EDITOR` geschützt.
+- `main.cpp Shipping Hardening`: Metrics-Text-Variablen + Timer mit `#if !defined(ENGINE_BUILD_SHIPPING)` geschützt. Log-Datei-Öffnung bei Fehlern mit `#if !defined(ENGINE_BUILD_SHIPPING)` geschützt.
+
 ## Aktuelle Änderung (Editor-Separation Phase 11: UIManager aufteilen)
 
 - `Phase 11 – UIManager.cpp Split`: `UIManager.cpp` (~8490 Zeilen) in `UIManager.cpp` (Core, ~3350 Zeilen) + `UIManagerEditor.cpp` (Editor, ~4340 Zeilen) aufgeteilt. 10 eigenständige `#if ENGINE_EDITOR`-Blöcke (~4845 Zeilen) nach `UIManagerEditor.cpp` verschoben: World Outliner, Content Browser, Entity-Operationen (Copy/Paste/Duplicate, Prefabs, Templates, Auto-Collider, Surface-Snap), Popup-Builder (Landscape Manager, Engine/Editor Settings, Shortcut Help, Notification History, Asset References), Tab-Management (Console, Profiler, Audio Preview, Particle Editor, Shader Viewer, Render Debugger, Sequencer, Level Composition, Animation Editor, UI Designer, Widget Editor), Build-System-Delegates, Progress Bars, StatusBar-Refresh, Save/Level-Load Progress, DPI-Rebuild, Theme-Update, Toast-Widget-Erstellung. `UIManagerEditor.cpp` in `RENDERER_CORE_EDITOR_SOURCES` (nur Editor-Build). Core-Funktionen (Layout, Input, Hit-Testing, Hover, Drag&Drop) verbleiben in `UIManager.cpp` mit kleinen internen `#if ENGINE_EDITOR`-Guards.
@@ -370,7 +410,7 @@
 - `Collider & Physics Visualisierung` (Editor Roadmap 9.2): Wireframe-Debug-Overlays für alle Collider-Typen im Viewport. `renderColliderDebug()` in `OpenGLRenderer` zeichnet Box (12 Kanten), Sphere (3 Kreise×32 Segmente), Capsule (2 Kreise + 4 Hemisphären-Bögen + 4 Linien), Cylinder (2 Kreise + 4 Linien) mittels Gizmo-Shader (GL_LINES). Farb-Codierung: Grün=Static, Orange=Kinematic, Blau=Dynamic, Rot=Sensor/Trigger. Entity-Transform + Collider-Offset berücksichtigt. „Col"-Toggle-Button in ViewportOverlay-Toolbar. `m_collidersVisible` in `Renderer`-Basisklasse. Nur im Editor-Modus (nicht in PIE).
 - `Bone / Skeleton Debug-Overlay` (Editor Roadmap 9.3): Wireframe-Overlay für Bone-Hierarchien selektierter Skinned-Mesh-Entities. `renderBoneDebug()` in `OpenGLRenderer` extrahiert Bone-Positionen aus `finalBoneMatrices * inverse(offsetMatrix)`, transformiert mit Entity-Model-Matrix in Weltkoordinaten. Linien (Cyan) von jedem Bone zu seinem Parent. 3D-Kreuz-Marker an Joint-Positionen: Cyan für normale Bones, Gelb+größer für Root-Bones. „Bone"-Toggle-Button in ViewportOverlay-Toolbar. `m_bonesVisible` in `Renderer`-Basisklasse. Aktualisiert sich per-Frame bei laufender Animation. Nur für selektierte Entities, nur im Editor-Modus.
 - `Render-Pass-Debugger` (Editor Roadmap 9.4): Dedizierter Editor-Tab zur Echtzeit-Inspektion der Render-Pipeline. `RenderPassInfo`-Struct in `Renderer.h` (name, category, enabled, fboWidth/Height, fboFormat, details). `getRenderPassInfo()` virtuell, Override in `OpenGLRenderer` liefert 19 Passes (Shadow CSM, Point Shadow, Skybox, Geometry Opaque, Particles, OIT, HeightField, HZB, Pick, PostProcess Resolve, Bloom, SSAO, Grid, Collider Debug, Bone Debug, Selection Outline, Gizmo, FXAA, UI). Tab zeigt Frame-Timing (FPS, CPU/GPU), Object-Counts, kategorie-gruppierte Pass-Liste mit Status-Dots (●/○), FBO-Info, Pipeline-Flow-Diagramm. Farbcodierte Kategorien: Shadow=Lila, Geometry=Blau, Post-Process=Orange, Overlay=Grün, Utility=Grau, UI=Rot. Auto-Refresh (0.5s). `RenderDebuggerState` in `UIManager.h`. Settings-Dropdown-Eintrag.
-- ✅ `Standalone Game Build` (Editor Roadmap 10.1): Neu implementiert – Build-Dialog mit PopupWindow (Profil-DropDown, Start Level-DropDown, Window Title), 7-Schritt-Pipeline (OutputDir/CMake-Configure/CMake-Build/Deploy-EXE+DLLs/Cook-Assets/game.ini/Done), modale Fortschrittsanzeige. Binary-Cache in `<Projekt>/Binary` für inkrementelle Builds. Profil-abhängiger CMake-BuildType. Runtime erkennt automatisch native Display-Auflösung und startet immer im Fullscreen. Basiert auf Phase 12.1 Editor-Separation (HorizonEngineRuntime.exe). Editor-DLL-Filter: Editor-only DLLs (AssetManager.dll, Scripting.dll, Renderer.dll) werden per Blocklist aus dem Deploy ausgeschlossen.
+- ✅ `Standalone Game Build` (Editor Roadmap 10.1): Neu implementiert – Build-Dialog mit PopupWindow (Profil-DropDown, Start Level-DropDown, Window Title), 8-Schritt-Pipeline (OutputDir/CMake-Configure/CMake-Build/Deploy-EXE+DLLs/Cook-Assets/HPK-Pack/game.ini/Done), modale Fortschrittsanzeige. Binary-Cache in `<Projekt>/Binary` für inkrementelle Builds. Profil-abhängiger CMake-BuildType. Runtime erkennt automatisch native Display-Auflösung und startet immer im Fullscreen. Basiert auf Phase 12.1 Editor-Separation (HorizonEngineRuntime.exe). Isoliertes Deploy-Verzeichnis (`-DENGINE_DEPLOY_DIR=<binaryDir>/deploy`) stellt sicher, dass nur Runtime-DLLs deployed werden — keine Editor-only DLLs oder Debug-Artefakte.
 - ✅ `Asset-Cooking-Pipeline` (Editor Roadmap 10.2): Neu implementiert. CMSH-Binärformat (magic 0x434D5348, 80-Byte Header + GPU-ready Vertex-Stream + JSON-Metadaten-Blob). `AssetCooker`-Klasse mit inkrementellem Hashing (FNV-1a + manifest.json). Typ-basiertes Cooking: Model3D→CMSH (pre-computed normals/tangents, Skeleton/Animationen als Blob), Material/Level/Widget/Skybox/Prefab→**Binärformat Version 3** (binärer Header + MessagePack-Body via `json::to_msgpack()`), Audio→Binärformat V3 + WAV-Kopie, Script/Shader/Texture→1:1 Kopie. Runtime-Loader in OpenGLObject3D::prepare() (CMSH Fast-Path vor JSON-Fallback). Build-Pipeline Step 5 nutzt cookAll() mit Progress-Callback und Cancel-Support.
 **Cooked-Asset-Binärformat:** Gecooked-te Assets (Level, Material, Widget, Skybox, Prefab, Audio) nutzen binären Header (Magic ASTS, **Version 3**, Type, NameLen, Name) + **MessagePack**-Body (`json::to_msgpack()`). Version 3 vs Version 2 (JSON-Text-Body) wird automatisch erkannt. `readAssetHeaderFromMemory()` gibt `outIsMsgPack`-Flag aus, `readAssetJsonFromMemory()` nutzt `json::from_msgpack()` für Version 3. Editor-Assets (JSON-Wrapper) bleiben abwärtskompatibel.
 - ✅ `Build-Konfigurationsprofile` (Editor Roadmap 10.3): 3 Standard-Profile (Debug: CMake Debug/verbose/Validation, Development: RelWithDebInfo/info/HotReload, Shipping: Release/error/Compression). Profile als JSON in `<Projekt>/Config/BuildProfiles/`. Profil-Dropdown im Build-Dialog. game.ini enthält Profil-Settings (LogLevel, HotReload, Validation, Profiler). Output standardisiert auf `<Projekt>/Build`, Binary-Cache auf `<Projekt>/Binary`.
@@ -603,6 +643,7 @@ set(CMAKE_CXX_STANDARD 20)
 - MSVC-Runtime: `MultiThreaded$<$<CONFIG:Debug>:Debug>DLL` (konsistente CRT über alle Targets)
 - Plattform: `x64` erzwungen
 - Debug/RelWithDebInfo: `/PROFILE`-Linker-Flag aktiv
+- `HorizonEngineRuntime`: `/DELAYLOAD` für alle 8 Engine-SHARED-DLLs + Python-DLL (`delayimp.lib`). Ermöglicht `SetDllDirectory("Engine")` in `main()` vor erstem DLL-Zugriff
 
 ### 2.3 Bibliotheks-Targets (alle als SHARED/DLL gebaut)
 
@@ -625,6 +666,7 @@ set(CMAKE_CXX_STANDARD 20)
 1. CMake konfigurieren: `cmake -B build -G "Visual Studio 18 2026" -A x64`
 2. Bauen: `cmake --build build --config RelWithDebInfo`
 3. Ausgabe: Alle DLLs + `Engine.exe` landen in `CMAKE_RUNTIME_OUTPUT_DIRECTORY` (kein Debug-Postfix)
+4. Game Build Output: Exe in Root, `Engine/` (DLLs + Tools/ + Logs/), `Content/` (content.hpk), `config/` (config.ini) — via `BuildPipeline.cpp`, DLLs per `/DELAYLOAD` + `SetDllDirectory("Engine")` aufgelöst. Isoliertes Deploy-Verzeichnis (`-DENGINE_DEPLOY_DIR`) verhindert Editor-DLL-Kontamination.
 
 ### 2.5 Python-Debug-Workaround
 - Im Debug-Modus wird die Release-Python-Lib als `_d.lib` kopiert (vermeidet Debug-Python-Abhängigkeit)

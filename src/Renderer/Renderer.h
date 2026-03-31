@@ -527,6 +527,7 @@ public:
     bool m_streamingVolumesVisible{ true };
 
 protected:
+#if ENGINE_EDITOR
     // Snap & Grid state
     bool  m_snapEnabled{ false };
     bool  m_gridVisible{ true };
@@ -539,6 +540,7 @@ protected:
     // Multi-Viewport state
     ViewportLayout m_viewportLayout{ ViewportLayout::Single };
     int m_activeSubViewport{ 0 };
+#endif // ENGINE_EDITOR
 
     // Level-Streaming state (Phase 11.4)
     std::vector<SubLevelEntry>   m_subLevels;

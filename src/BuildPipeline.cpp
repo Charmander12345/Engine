@@ -1,14 +1,15 @@
 #include "BuildPipeline.h"
 #if ENGINE_EDITOR
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <thread>
 #include <mutex>
 #include <atomic>
-#include <array>
 #include <string>
 #include <cstdio>
+#include <cctype>
 
 #include <SDL3/SDL.h>
 
@@ -269,12 +270,16 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
           };
 #endif
 
+          // Compute the deploy directory once – used by Step 2 (configure)
+          // and Step 4 (deploy).  Isolates game build outputs so that
+          // editor DLLs from previous builds don't contaminate the output.
+          const std::string buildDir = config.binaryDir;
+          const std::string deployDir = (std::filesystem::path(buildDir) / "deploy").string();
+
           // Step 2: CMake configure
           if (ok && !checkCancelled())
           {
               advanceStep("CMake configure...");
-
-              const std::string buildDir = config.binaryDir;
 
               // Optionally clean the binary cache
               if (config.cleanBuild)
@@ -300,6 +305,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
               configureCmd += " -DGAME_START_LEVEL=\"" + config.startLevel + "\"";
               configureCmd += " -DGAME_WINDOW_TITLE=\"" + config.windowTitle + "\"";
               configureCmd += " -DENGINE_BUILD_PROFILE=" + config.profile.name;
+              configureCmd += " -DENGINE_DEPLOY_DIR=\"" + deployDir + "\"";
 
               int ret = runCmdWithOutput(configureCmd);
               if (ret != 0)
@@ -313,6 +319,14 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
           if (ok && !checkCancelled())
           {
               advanceStep("CMake build...");
+
+              // Clean the deploy directory before building so that stale
+              // DLLs from a previous build configuration (e.g. OpenAL32d.dll
+              // left over from a Debug build) don't contaminate the output.
+              {
+                  std::error_code ec;
+                  std::filesystem::remove_all(deployDir, ec);
+              }
 
               std::string buildCmd = "\"" + cmakePath + "\"";
               buildCmd += " --build \"" + config.binaryDir + "\"";
@@ -335,19 +349,26 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
               const std::filesystem::path editorDir = editorBaseDir;
               const std::filesystem::path dstDir = config.outputDir;
 
-              // Find the built runtime exe in the binary cache
-              // Multi-config generators put it under <config>/ subdir
+              // Find the built runtime exe in the deploy directory.
+              // ENGINE_DEPLOY_DIR flattens all configs into one folder.
               std::filesystem::path builtExe;
               {
-                  auto tryPath = std::filesystem::path(config.binaryDir) / config.profile.cmakeBuildType / "HorizonEngineRuntime.exe";
+                  auto tryPath = std::filesystem::path(deployDir) / "HorizonEngineRuntime.exe";
                   if (std::filesystem::exists(tryPath))
                       builtExe = tryPath;
                   else
                   {
-                      // Single-config generators put it directly in the build dir
-                      tryPath = std::filesystem::path(config.binaryDir) / "HorizonEngineRuntime.exe";
+                      // Fallback: multi-config subdir in binary cache
+                      tryPath = std::filesystem::path(config.binaryDir) / config.profile.cmakeBuildType / "HorizonEngineRuntime.exe";
                       if (std::filesystem::exists(tryPath))
                           builtExe = tryPath;
+                      else
+                      {
+                          // Single-config generators
+                          tryPath = std::filesystem::path(config.binaryDir) / "HorizonEngineRuntime.exe";
+                          if (std::filesystem::exists(tryPath))
+                              builtExe = tryPath;
+                      }
                   }
               }
 
@@ -394,20 +415,49 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                   }
               }
 
-              // Copy DLLs from the binary cache (Runtime DLLs built alongside the exe)
+              // Copy DLLs from the binary cache into Engine/ subdirectory.
+              // The binary cache may contain editor-only DLLs from previous
+              // builds (e.g. AssetManager.dll, Scripting.dll, Renderer.dll).
+              // The runtime links against the *Runtime variants instead, so
+              // we skip the editor-only DLLs to keep the game build clean.
+              const std::filesystem::path engineDir = dstDir / "Engine";
               if (ok)
               {
+                  std::error_code mkEc;
+                  std::filesystem::create_directories(engineDir, mkEc);
                   const std::filesystem::path builtDir = builtExe.parent_path();
+
+                  // Editor-only shared libraries that must NOT be deployed.
+                  // The runtime target links *Runtime variants instead.
+                  auto isEditorOnlyDll = [](const std::string& filename) -> bool
+                  {
+                      std::string lower = filename;
+                      std::transform(lower.begin(), lower.end(), lower.begin(),
+                          [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                      return lower == "assetmanager.dll"
+                          || lower == "scripting.dll"
+                          || lower == "renderer.dll";
+                  };
+
                   for (const auto& entry : std::filesystem::directory_iterator(builtDir))
                   {
                       if (!entry.is_regular_file()) continue;
                       const auto ext = entry.path().extension().string();
                       if (ext != ".dll" && ext != ".DLL") continue;
 
+                      const auto fname = entry.path().filename().string();
+                      if (isEditorOnlyDll(fname))
+                      {
+                          buildPtr->appendBuildOutput("  Skipped editor DLL: " + fname);
+                          continue;
+                      }
+
                       std::error_code copyEc;
                       std::filesystem::copy_file(entry.path(),
-                          dstDir / entry.path().filename(),
+                          engineDir / entry.path().filename(),
                           std::filesystem::copy_options::overwrite_existing, copyEc);
+                      if (!copyEc)
+                          buildPtr->appendBuildOutput("  Deployed DLL: " + fname);
                   }
 
                   // Copy PDBs from binary cache into Symbols/ for non-Shipping
@@ -428,42 +478,9 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                   }
               }
 
-              // Copy remaining DLLs from editor directory (e.g. Python, plugins)
-              if (ok)
-              {
-                  // DLLs already present in the output (from binary cache) are skipped
-                  for (const auto& entry : std::filesystem::directory_iterator(editorDir))
-                  {
-                      if (!entry.is_regular_file()) continue;
-                      const auto ext = entry.path().extension().string();
-                      if (ext != ".dll" && ext != ".DLL") continue;
-
-                      const auto dst = dstDir / entry.path().filename();
-                      if (std::filesystem::exists(dst)) continue; // already deployed from binary cache
-
-                      // Skip editor-only DLLs that the runtime does not need
-                      const std::string fname = entry.path().filename().string();
-                      static const std::array<std::string, 4> editorOnlyDlls = {
-                          "AssetManager.dll", "Scripting.dll", "Renderer.dll", "Landscape.dll"
-                      };
-                      bool isEditorOnly = false;
-                      for (const auto& edDll : editorOnlyDlls)
-                      {
-                          if (_stricmp(fname.c_str(), edDll.c_str()) == 0)
-                          {
-                              isEditorOnly = true;
-                              break;
-                          }
-                      }
-                      if (isEditorOnly) continue;
-
-                      std::error_code copyEc;
-                      std::filesystem::copy_file(entry.path(), dst,
-                          std::filesystem::copy_options::overwrite_existing, copyEc);
-                  }
-              }
-
-              // Copy Python runtime (DLL + zip) from editor directory
+              // Copy Python runtime (DLL + zip) from editor directory into Engine/
+              // Python is an external dependency (not built by CMake) so it won't
+              // be in the deploy dir — copy from the editor's directory.
               if (ok)
               {
                   for (const auto& entry : std::filesystem::directory_iterator(editorDir))
@@ -473,7 +490,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                       const auto fext = entry.path().extension().string();
                       if ((fext == ".dll" || fext == ".zip") && fname.size() >= 8 && fname.substr(0, 6) == "python")
                       {
-                          const auto dst = dstDir / entry.path().filename();
+                          const auto dst = engineDir / entry.path().filename();
                           if (!std::filesystem::exists(dst))
                           {
                               std::error_code copyEc;
@@ -486,13 +503,13 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                   }
               }
 
-              // Copy CrashHandler from editor's Tools/ directory
+              // Copy CrashHandler from editor's Tools/ directory into Engine/Tools/
               if (ok)
               {
                   const auto srcCrashHandler = editorDir / "Tools" / "CrashHandler.exe";
                   if (std::filesystem::exists(srcCrashHandler))
                   {
-                      const auto dstTools = dstDir / "Tools";
+                      const auto dstTools = engineDir / "Tools";
                       std::error_code ec;
                       std::filesystem::create_directories(dstTools, ec);
                       std::filesystem::copy_file(srcCrashHandler, dstTools / "CrashHandler.exe",
@@ -507,7 +524,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                           if (std::filesystem::exists(srcPdb))
                           {
                               std::error_code ec2;
-                              std::filesystem::copy_file(srcPdb, dstTools / "CrashHandler.pdb",
+                              std::filesystem::copy_file(srcPdb, engineDir / "Tools" / "CrashHandler.pdb",
                                   std::filesystem::copy_options::overwrite_existing, ec2);
                           }
                       }
@@ -614,13 +631,14 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                 advanceStep("Packaging content into HPK...");
 
             const std::filesystem::path dstDir = config.outputDir;
-            const std::filesystem::path hpkPath = dstDir / "content.hpk";
+            // Write HPK to a temporary location in root, then move to Content/
+            const std::filesystem::path hpkPathTemp = dstDir / "content.hpk";
 
             HPKWriter writer;
-            if (!writer.begin(hpkPath.string()))
+            if (!writer.begin(hpkPathTemp.string()))
             {
                 ok = false;
-                errorMsg = "Failed to create HPK archive: " + hpkPath.string();
+                errorMsg = "Failed to create HPK archive: " + hpkPathTemp.string();
             }
 
             // Collect all files from Content/, shaders/, Config/
@@ -654,7 +672,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                 }
                 else
                 {
-                    buildPtr->appendBuildOutput("  HPK archive: " + hpkPath.string()
+                    buildPtr->appendBuildOutput("  HPK archive: " + hpkPathTemp.string()
                         + " (" + std::to_string(writer.getFileCount()) + " files)");
 
                     // Remove loose directories now that they're packed
@@ -662,6 +680,19 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                     std::filesystem::remove_all(dstDir / "Content", ec);
                     std::filesystem::remove_all(dstDir / "shaders", ec);
                     std::filesystem::remove_all(dstDir / "Config", ec);
+
+                    // Move HPK into Content/ subdirectory for clean layout
+                    const std::filesystem::path contentDir = dstDir / "Content";
+                    std::filesystem::create_directories(contentDir, ec);
+                    const std::filesystem::path hpkFinal = contentDir / "content.hpk";
+                    std::filesystem::rename(hpkPathTemp, hpkFinal, ec);
+                    if (ec)
+                    {
+                        // Fallback: try copy + delete if rename fails (cross-device)
+                        std::filesystem::copy_file(hpkPathTemp, hpkFinal,
+                            std::filesystem::copy_options::overwrite_existing, ec);
+                        std::filesystem::remove(hpkPathTemp, ec);
+                    }
                 }
             }
 

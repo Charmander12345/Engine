@@ -5,6 +5,35 @@
 
 ---
 
+## Letzte Änderung (Game Build: Editor-DLL-Filter in Deploy-Pipeline)
+
+- ✅ `Editor-DLL-Filter (BuildPipeline.cpp)`: Editor-only DLLs (`AssetManager.dll`, `Scripting.dll`, `Renderer.dll`) werden beim Deploy-Schritt (Step 4) übersprungen. Die Runtime linkt gegen die `*Runtime`-Varianten (`AssetManagerRuntime.dll`, `ScriptingRuntime.dll`, `RendererRuntime.dll`). Case-insensitive Blacklist-Lambda `isEditorOnlyDll()` filtert Editor-DLLs aus dem Binary-Cache-Verzeichnis heraus, bevor sie ins `Engine/`-Verzeichnis des Game-Builds kopiert werden. Übersprungene DLLs werden im Build-Log protokolliert (`Skipped editor DLL: ...`).
+- ✅ `Root Cause dokumentiert (CMakeLists.txt)`: Kommentar ergänzt, der erklärt, warum die globale `CMAKE_RUNTIME_OUTPUT_DIRECTORY`-Überschreibung (Zeile 391+) keine Wirkung hat — sie wird NACH allen `add_subdirectory`/`add_executable`-Aufrufen gesetzt und initialisiert daher keine Target-Properties. Die tatsächliche DLL-Filterung erfolgt in `BuildPipeline.cpp`.
+- ✅ Build erfolgreich (Editor-Target).
+
+## Letzte Änderung (Game Build Output Reorganization: Saubere Verzeichnisstruktur)
+
+- ✅ `Neue Output-Struktur`: Exe in Root, `Engine/` für DLLs + Tools/ + Logs/, `Content/` für content.hpk, `config/` für config.ini. Saubere Trennung von Engine-Runtime, Spielinhalt und Konfiguration.
+- ✅ `MSVC /DELAYLOAD (CMakeLists.txt)`: 8 Engine-SHARED-DLLs + Python-DLL werden delay-loaded (`delayimp.lib`). Ermöglicht DLLs in `Engine/`-Subdirectory statt neben der Exe.
+- ✅ `SetDllDirectoryW (main.cpp)`: Runtime-Build setzt `Engine/` als DLL-Suchpfad via `SetDllDirectoryW()` am Anfang von `main()`, bevor delay-loaded DLLs geladen werden.
+- ✅ `Logger Runtime-Konfiguration (Logger.h/cpp)`: `setLogDirectory()` + `setToolsDirectory()` für Runtime-Pfade (`Engine/Logs`, `Engine/Tools`). Logger ist SHARED-Library — Runtime-Konfiguration statt compile-time Guards.
+- ✅ `BuildPipeline.cpp reorganisiert`: DLLs → `Engine/`, CrashHandler → `Engine/Tools/`, HPK → `Content/content.hpk` (temporärer Pack in Root, dann Move). Isoliertes Deploy-Verzeichnis (`-DENGINE_DEPLOY_DIR=<binaryDir>/deploy`) stellt sicher, dass nur Runtime-Artefakte deployed werden — keine Editor-DLLs (Renderer.dll, Scripting.dll, AssetManager.dll) oder Debug-Artefakte (OpenAL32d.dll). Deploy-Dir wird vor jedem Build bereinigt.
+- ✅ `HPK-Fallback (AssetManager.cpp + main.cpp)`: `Content/content.hpk` mit Legacy-Fallback auf `content.hpk` für Backward-Kompatibilität.
+- ✅ `Packaged-Build-Erkennung (AssetManager.cpp)`: `loadProject()` prüft sowohl `Content/content.hpk` als auch `content.hpk` (Legacy) bei fehlendem `.project`-File — verhindert Crash beim Laden des Game Builds.
+- ✅ Build erfolgreich (Editor-Target).
+
+## Letzte Änderung (Shipping Build Hardening: Editor-Code aus Runtime entfernen)
+
+- ✅ `OpenGLRendererGizmo.cpp`: Gesamte Datei in `#if ENGINE_EDITOR` — Grid + Gizmo komplett aus Runtime eliminiert.
+- ✅ `OpenGLRendererDebug.cpp`: Gesamte Datei in `#if ENGINE_EDITOR` — Selection Outline, Collider/Streaming/Bone Debug, Rubber Band aus Runtime eliminiert.
+- ✅ `OpenGLRenderer.cpp renderWorld()`: 3 Editor-Visualisierungsblöcke geschützt (Pick-Buffer, Grid+Debug-Overlays, Outline+Gizmo+Rubber-Band).
+- ✅ `OpenGLRenderer.cpp`: Editor-only Funktionsdefinitionen geschützt (Pick FBO, Outline, Rotation Matrix, computeSubViewportRects). Diagnostics-Passinfo für Editor-Passes geschützt. `m_pick.dirty` Referenz geschützt.
+- ✅ `Renderer.h + OpenGLRenderer.h`: Alle editor-only Protected/Private Members mit `#if ENGINE_EDITOR` geschützt — eliminiert unnötigen Speicherverbrauch im Runtime-Build.
+- ✅ `main.cpp`: Metrics-Variablen/Timer + Log-Datei-Öffnung mit `#if !defined(ENGINE_BUILD_SHIPPING)` geschützt.
+- ✅ Build erfolgreich (Editor-Target).
+- **Kritische Bugs behoben**: Viewport-Grid wurde im Shipping-Build gerendert (`m_gridVisible` default `true`), Streaming-Volume-Debug-Wireframes waren im Shipping sichtbar, ~1400 Zeilen Editor-Code (Gizmo+Debug) wurden unnötig in Runtime kompiliert.
+- **Fortschritt**: Alle 11 Phasen des Editor-Separation-Plans + Shipping Build Hardening abgeschlossen.
+
 ## Letzte Änderung (Editor-Separation Phase 11: UIManager aufteilen)
 
 - ✅ `Phase 11 – UIManager.cpp Split`: `UIManager.cpp` (~8490 Zeilen) aufgeteilt in `UIManager.cpp` (Core, ~3350 Zeilen, immer kompiliert) + `UIManagerEditor.cpp` (Editor, ~4340 Zeilen, nur Editor-Build). 10 eigenständige `#if ENGINE_EDITOR`-Blöcke verschoben: Outliner, Content Browser, Entity-Ops, Popup-Builder, Tab-Management, Build-System, Progress Bars, StatusBar, DPI/Theme, Toast-Widgets. `RENDERER_CORE_EDITOR_SOURCES` in CMakeLists.txt erweitert.
@@ -126,7 +155,7 @@
 
 ## Letzte Änderung (Build-Flow Audit: Shipping-Optimierungen & Profil-Korrekturen)
 
-- ✅ `Landscape.dll in Editor-Only-DLL-Ausschlussliste`: Die Build-Deploy-Step kopierte `Landscape.dll` (Editor-Variante) in den Build-Output, obwohl die Runtime `LandscapeRuntime.dll` verwendet. **Fix (main.cpp, Deploy Step 4):** `Landscape.dll` zur `editorOnlyDlls`-Ausschlussliste hinzugefügt (3→4 Einträge). Shipping-Builds enthalten keine unnötige Editor-DLL mehr.
+- ✅ `Editor-DLLs nicht mehr im Build-Output`: Durch das isolierte Deploy-Verzeichnis (`-DENGINE_DEPLOY_DIR`) enthält der Game-Build nur noch tatsächlich benötigte Runtime-DLLs. Editor-only DLLs (AssetManager.dll, Scripting.dll, Renderer.dll, Landscape.dll) und Debug-Artefakte (OpenAL32d.dll) landen nicht mehr im Output. Ersetzt den vorherigen Blocklist-Ansatz durch CMake-Ebene-Isolation.
 
 - ✅ `ScriptHotReload in Shipping deaktiviert`: `Scripting::InitScriptHotReload()` und `Scripting::PollScriptHotReload()` liefen auch in Shipping-Builds — unnötiger Filesystem-Scan nach .py-Änderungen alle 500ms. **Fix (main.cpp):** Beide Aufrufe hinter `#if !defined(ENGINE_BUILD_SHIPPING)` Guard. Kein Hot-Reload-Overhead im Shipping-Build.
 
@@ -161,7 +190,7 @@
 
 - ✅ `CrashHandler.exe im Build-Output`: CrashHandler.exe fehlte im Build-Game-Output → "CrashHandler.exe not found". **Fix (main.cpp, Deploy Step 4):** `Tools/CrashHandler.exe` (+ PDB für nicht-Shipping-Profile) wird aus dem Editor-Verzeichnis in den Build-Output kopiert.
 
-- ✅ `Runtime-DLLs im Build-Output (Binary-Cache-Deploy)`: Runtime-DLLs (`RendererRuntime.dll`, `AssetManagerRuntime.dll`, `ScriptingRuntime.dll`, `LandscapeRuntime.dll`) fehlten im Build-Output. **Root Cause:** Der Deploy-Step kopierte DLLs nur aus dem Editor-Verzeichnis. Die Runtime-DLLs werden aber vom CMake-Build im Binary-Cache erzeugt (gleicher Ordner wie `HorizonEngineRuntime.exe`), nicht im Editor-Verzeichnis, da der Editor sie nicht benötigt. **Fix (main.cpp, Deploy Step 4):** DLLs (+ PDBs für non-Shipping) werden jetzt zuerst aus dem Binary-Cache-Output kopiert. Danach werden verbleibende DLLs (z.B. Python, SDL3) aus dem Editor-Verzeichnis nachgezogen, wobei bereits vorhandene DLLs übersprungen und Editor-Only-DLLs (`AssetManager.dll`, `Scripting.dll`, `Renderer.dll`) weiterhin ausgeschlossen werden.
+- ✅ `Runtime-DLLs im Build-Output (Isoliertes Deploy-Verzeichnis)`: CMake-Configure erhält `-DENGINE_DEPLOY_DIR=<binaryDir>/deploy` — alle Runtime-Artefakte (HorizonEngineRuntime.exe + alle verknüpften DLLs) landen in einem dedizierten Verzeichnis, getrennt vom Editor-Build. Deploy-Dir wird vor jedem Build bereinigt um Altlasten aus vorherigen Konfigurationen zu vermeiden. Python-DLL/ZIP werden separat aus dem Editor-Verzeichnis kopiert (externe Abhängigkeit, nicht von CMake gebaut). Kein Editor-DLL-Filter/Blocklist mehr nötig — die Isolation erfolgt auf CMake-Ebene.
 
 ## Letzte Änderung (CMake-Build-Pipeline wiederhergestellt, VSync-Tearing-Fix & Build-Profil-Overlay)
 
@@ -1746,6 +1775,7 @@ Gameplay-UI wird ausschließlich über Widget-Assets gesteuert. Widgets werden i
 | Profiling-Flag (/PROFILE)           | ✅     |
 | **Renderer als Renderer.dll** (RendererCore OBJECT + OpenGL SHARED) | ✅ |
 | **Factory-Pattern** (Backend über `config.ini` wählbar) | ✅ |
+| **Game Build Output Structure** (Exe Root, Engine/ DLLs, Content/ HPK, /DELAYLOAD, isoliertes Deploy-Dir) | ✅ |
 | GCC/Clang-Unterstützung             | ❌     |
 | Linux/macOS-Build                   | ❌     |
 | CI/CD-Pipeline                      | ❌     |

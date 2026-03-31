@@ -1,4 +1,4 @@
-#include <iostream>
+﻿#include <iostream>
 #include <filesystem>
 #include <fstream>
 #include <cstdlib>
@@ -52,7 +52,25 @@ using namespace std;
 
 int main()
 {
+#if defined(_WIN32) && !ENGINE_EDITOR
+    // Game build: DLLs live in Engine/ next to the exe's directory.
+    // SetDllDirectory must be called before any delay-loaded DLL is used.
+    {
+        wchar_t exeDir[MAX_PATH]{};
+        GetModuleFileNameW(NULL, exeDir, MAX_PATH);
+        wchar_t* lastSlash = wcsrchr(exeDir, L'\\');
+        if (lastSlash) *(lastSlash + 1) = L'\0';
+        std::wstring engineDir = std::wstring(exeDir) + L"Engine";
+        SetDllDirectoryW(engineDir.c_str());
+    }
+#endif
+
     auto& logger = Logger::Instance();
+#if !ENGINE_EDITOR
+    // Game build: place logs and tools under Engine/ subdirectory
+    logger.setLogDirectory((std::filesystem::current_path() / "Engine" / "Logs").string());
+    logger.setToolsDirectory((std::filesystem::current_path() / "Engine" / "Tools").string());
+#endif
     logger.initialize();
     Logger::installCrashHandler();
     logger.startCrashHandler();
@@ -285,7 +303,10 @@ int main()
     std::unique_ptr<HPKReader> earlyHpkReader;
     if (isRuntimeMode && !chosenPath.empty())
     {
-        const auto hpkPath = std::filesystem::path(chosenPath) / "content.hpk";
+        // New layout: Content/content.hpk; legacy fallback: content.hpk in root
+        auto hpkPath = std::filesystem::path(chosenPath) / "Content" / "content.hpk";
+        if (!std::filesystem::exists(hpkPath))
+            hpkPath = std::filesystem::path(chosenPath) / "content.hpk";
         if (std::filesystem::exists(hpkPath))
         {
             earlyHpkReader = std::make_unique<HPKReader>();
@@ -857,6 +878,7 @@ int main()
     uint32_t fpsFrames = 0;
     double fpsValue = 0.0;
 
+    #if !defined(ENGINE_BUILD_SHIPPING)
     double metricsUpdateTimer = 0.0;
     constexpr double kMetricsUpdateIntervalSec = 0.25;
     bool metricsUpdatePending = true;
@@ -871,6 +893,7 @@ int main()
     std::string ecsText;
     std::string frameText;
     std::string occlusionText;
+#endif
 
     uint64_t lastGcCounter = lastCounter;
     constexpr double kGcIntervalSec = 60.0;
@@ -976,6 +999,7 @@ int main()
             fpsTimer = 0.0;
         }
 
+#if !defined(ENGINE_BUILD_SHIPPING)
         metricsUpdateTimer += dt;
         if (metricsUpdateTimer >= kMetricsUpdateIntervalSec)
         {
@@ -983,6 +1007,7 @@ int main()
             metricsUpdatePending = true;
         }
 
+#endif
         // ── CrashHandler heartbeat + state sync (every ~2s) ─────────────
         crashHandlerTimer += dt;
         if (crashHandlerTimer >= kCrashHandlerIntervalSec)
@@ -1838,10 +1863,12 @@ int main()
 #endif // !ENGINE_BUILD_SHIPPING
         }
 
+#if !defined(ENGINE_BUILD_SHIPPING)
         if (metricsUpdatePending)
         {
             metricsUpdatePending = false;
         }
+#endif
 
         if (fpscap)
         {
@@ -1923,6 +1950,7 @@ int main()
     logTimed(Logger::Category::Engine, "SDL_Quit()", Logger::LogLevel::INFO);
     SDL_Quit();
 
+#if !defined(ENGINE_BUILD_SHIPPING)
     if (logger.hasErrorsOrFatal())
     {
         const auto& logFile = logger.getLogFilename();
@@ -1939,6 +1967,7 @@ int main()
 #endif
         }
     }
+#endif // !ENGINE_BUILD_SHIPPING
 
     logTimed(Logger::Category::Engine, "Engine shutdown complete.", Logger::LogLevel::INFO);
     Scripting::Shutdown();

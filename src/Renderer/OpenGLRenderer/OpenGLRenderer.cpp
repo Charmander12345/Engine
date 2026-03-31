@@ -1,4 +1,4 @@
-#include "OpenGLRenderer.h"
+﻿#include "OpenGLRenderer.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <array>
@@ -298,8 +298,10 @@ void OpenGLRenderer::shutdown()
 	releaseShadowResources();
 	releasePointShadowResources();
 	releaseCsmResources();
+#if ENGINE_EDITOR
 	releasePickFbo();
 	releaseOutlineResources();
+#endif
 	releaseInstanceResources();
 	releaseOitResources();
 	releaseUiFbo();
@@ -843,6 +845,7 @@ std::vector<Renderer::RenderPassInfo> OpenGLRenderer::getRenderPassInfo() const
 		passes.push_back(std::move(p));
 	}
 
+	#if ENGINE_EDITOR
 	// 9. Pick Pass
 	{
 		RenderPassInfo p;
@@ -853,6 +856,7 @@ std::vector<Renderer::RenderPassInfo> OpenGLRenderer::getRenderPassInfo() const
 		p.details  = "entity selection";
 		passes.push_back(std::move(p));
 	}
+#endif // ENGINE_EDITOR — pick pass
 
 	// 10. Post-Process Resolve (Bloom + SSAO + Tone Mapping + Gamma)
 	{
@@ -894,6 +898,7 @@ std::vector<Renderer::RenderPassInfo> OpenGLRenderer::getRenderPassInfo() const
 		passes.push_back(std::move(p));
 	}
 
+#if ENGINE_EDITOR
 	// 13. Grid Overlay
 	{
 		RenderPassInfo p;
@@ -948,6 +953,7 @@ std::vector<Renderer::RenderPassInfo> OpenGLRenderer::getRenderPassInfo() const
 		p.details  = "translate/rotate/scale";
 		passes.push_back(std::move(p));
 	}
+#endif // ENGINE_EDITOR
 
 	// 18. FXAA Pass (deferred)
 	{
@@ -1665,7 +1671,9 @@ void OpenGLRenderer::renderWorld()
 		{
 			refreshEntity(static_cast<ECS::Entity>(entityId));
 		}
+#if ENGINE_EDITOR
 		m_pick.dirty = true;
+#endif
 	}
 
 	glm::mat4 view(1.0f);
@@ -2609,6 +2617,7 @@ void OpenGLRenderer::renderWorld()
 				}
 			#endif // ENGINE_EDITOR — pick handling
 
+#if ENGINE_EDITOR
 				// Render selected entity into pick buffer (needed for outline + picking before resolve)
 	if (!m_selectedEntities.empty() && !diagnostics.isPIEActive())
 	{
@@ -2625,6 +2634,7 @@ void OpenGLRenderer::renderWorld()
 				static_cast<int>(mousePos.x), static_cast<int>(mousePos.y));
 		}
 	}
+#endif // ENGINE_EDITOR
 
 	// Resolve HDR FBO → tab FBO via post-process resolve pass.
 	// Use the full FBO dimensions so the fullscreen triangle's 0..1 UV maps
@@ -2673,6 +2683,7 @@ void OpenGLRenderer::renderWorld()
 	}
 
 	// Draw viewport grid overlay (XZ plane) when not in PIE
+#if ENGINE_EDITOR
 	if (!diagnostics.isPIEActive())
 	{
 		drawViewportGrid(view, m_projectionMatrix);
@@ -2695,6 +2706,7 @@ void OpenGLRenderer::renderWorld()
 	{
 		renderBoneDebug(view, m_projectionMatrix);
 	}
+#endif // ENGINE_EDITOR
 
 	#if ENGINE_EDITOR
 		// Draw camera path spline in viewport when Sequencer is open and spline visible
@@ -2770,6 +2782,7 @@ void OpenGLRenderer::renderWorld()
 #endif // ENGINE_EDITOR
 
 	// Gizmo, selection outline, and rubber-band only in the active sub-viewport
+#if ENGINE_EDITOR
 	const bool isActiveSubViewport = (m_currentSubViewportIndex < 0 || m_currentSubViewportIndex == m_activeSubViewport);
 
 	// Draw selection outline + gizmo AFTER post-process resolve so they are not overwritten
@@ -2812,6 +2825,7 @@ void OpenGLRenderer::renderWorld()
 		}
 		glViewport(vpX, viewportY, width, height);
 	}
+#endif // ENGINE_EDITOR
 
 	// Draw sub-viewport preset label (Top/Front/Right/Perspective) in corner
 #if ENGINE_EDITOR
@@ -9233,6 +9247,7 @@ int OpenGLRenderer::subViewportHitTest(int screenX, int screenY) const
 }
 #endif // ENGINE_EDITOR — Multi-Viewport overrides
 
+#if ENGINE_EDITOR
 void OpenGLRenderer::computeSubViewportRects(int vpX, int vpY, int vpW, int vpH,
 											  SubViewportRect* outRects, int count) const
 {
@@ -9268,6 +9283,7 @@ void OpenGLRenderer::computeSubViewportRects(int vpX, int vpY, int vpW, int vpH,
 		break;
 	}
 }
+#endif // ENGINE_EDITOR — computeSubViewportRects
 
 const std::string& OpenGLRenderer::name() const
 {
@@ -9298,6 +9314,7 @@ SDL_Window* OpenGLRenderer::window() const
 	return m_window;
 }
 
+#if ENGINE_EDITOR
 // â”€â”€â”€ Entity pick FBO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 bool OpenGLRenderer::ensurePickFbo(int width, int height)
 {
@@ -9534,7 +9551,6 @@ void OpenGLRenderer::renderPickBufferSelectedEntities(const glm::mat4& view, con
 	}
 }
 
-#if ENGINE_EDITOR
 unsigned int OpenGLRenderer::pickEntityAt(int x, int y)
 {
 	if (m_pick.fbo == 0)
@@ -9566,7 +9582,7 @@ unsigned int OpenGLRenderer::pickEntityAtImmediate(int x, int y)
 	renderPickBuffer(m_lastViewMatrix, m_projectionMatrix);
 	return pickEntityAt(x, y);
 }
-#endif // ENGINE_EDITOR — pickEntityAt / pickEntityAtImmediate
+#endif // ENGINE_EDITOR — pick FBO / pick entity
 
 bool OpenGLRenderer::screenToWorldPos(int screenX, int screenY, Vec3& outWorldPos) const
 {
@@ -9641,6 +9657,7 @@ bool OpenGLRenderer::screenToWorldPos(int screenX, int screenY, Vec3& outWorldPo
 	return true;
 }
 
+#if ENGINE_EDITOR
 // â”€â”€â”€ Selection outline (post-process edge detection on pick buffer) â”€â”€â”€â”€â”€â”€â”€â”€â”€
 bool OpenGLRenderer::ensureOutlineResources()
 {
@@ -9729,6 +9746,7 @@ glm::mat3 OpenGLRenderer::getEntityRotationMatrix(const ECS::TransformComponent&
 	return glm::mat3(rotMat);
 }
 
+#endif // ENGINE_EDITOR
 // ── Rubber-Band (Marquee) Selection ─────────────────────────────────────────
 
 #if ENGINE_EDITOR

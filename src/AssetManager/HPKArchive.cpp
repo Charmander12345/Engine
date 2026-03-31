@@ -48,9 +48,33 @@ bool HPKReader::mount(const std::string& hpkFilePath)
         return false;
     }
 
+    // Auto-detect correct base directory: if the HPK's parent directory name
+    // appears as a leading path component in TOC entries (e.g. HPK is in
+    // "Content/content.hpk" and TOC has "Content/Fonts/..."), then virtual
+    // paths were packed relative to the grandparent — adjust m_baseDir up.
+    {
+        std::string parentName = fs::path(hpkFilePath).parent_path().filename().string();
+        if (!parentName.empty())
+        {
+            std::string prefix = parentName + "/";
+            for (const auto& [p, _] : m_toc)
+            {
+                if (p.size() >= prefix.size() && p.compare(0, prefix.size(), prefix) == 0)
+                {
+                    m_baseDir = fs::path(hpkFilePath).parent_path().parent_path().string();
+                    if (!m_baseDir.empty() && m_baseDir.back() != '/' && m_baseDir.back() != '\\')
+                        m_baseDir += '/';
+                    Logger::Instance().log("HPK: Adjusted baseDir to grandparent: " + m_baseDir,
+                        Logger::LogLevel::INFO);
+                    break;
+                }
+            }
+        }
+    }
+
     m_mounted = true;
     Logger::Instance().log("HPK: Mounted archive: " + hpkFilePath +
-        " (" + std::to_string(m_toc.size()) + " files)", Logger::LogLevel::INFO);
+        " (" + std::to_string(m_toc.size()) + " files, baseDir=" + m_baseDir + ")", Logger::LogLevel::INFO);
     return true;
 }
 

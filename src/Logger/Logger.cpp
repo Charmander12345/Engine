@@ -59,6 +59,16 @@ void Logger::setSuppressStdout(bool suppress)
     suppressStdout = suppress;
 }
 
+void Logger::setLogDirectory(const std::string& dir)
+{
+    m_customLogDir = dir;
+}
+
+void Logger::setToolsDirectory(const std::string& dir)
+{
+    m_customToolsDir = dir;
+}
+
 const char* Logger::toString(LogLevel level)
 {
     switch (level)
@@ -96,7 +106,11 @@ void Logger::initialize()
         return;
     }
 
-    std::filesystem::path logDir = std::filesystem::current_path() / "Logs";
+    std::filesystem::path logDir;
+    if (!m_customLogDir.empty())
+        logDir = m_customLogDir;
+    else
+        logDir = std::filesystem::current_path() / "Logs";
     std::error_code ec;
     std::filesystem::create_directories(logDir, ec);
 
@@ -425,7 +439,11 @@ void Logger::launchCrashHandlerProcess()
 {
     char exePath[MAX_PATH]{};
     GetModuleFileNameA(nullptr, exePath, MAX_PATH);
-    std::filesystem::path crashExe = std::filesystem::path(exePath).parent_path() / "Tools" / "CrashHandler.exe";
+    std::filesystem::path crashExe;
+    if (!m_customToolsDir.empty())
+        crashExe = std::filesystem::path(m_customToolsDir) / "CrashHandler.exe";
+    else
+        crashExe = std::filesystem::path(exePath).parent_path() / "Tools" / "CrashHandler.exe";
     if (!std::filesystem::exists(crashExe))
     {
         log(Category::Engine, "CrashHandler.exe not found at: " + crashExe.string(), LogLevel::WARNING);
@@ -638,7 +656,11 @@ void Logger::launchCrashHandlerProcess()
     std::error_code ec;
     fs::path self = fs::read_symlink("/proc/self/exe", ec);
     if (ec) return;
-    fs::path crashExe = self.parent_path() / "Tools" / "CrashHandler";
+    fs::path crashExe;
+    if (!m_customToolsDir.empty())
+        crashExe = fs::path(m_customToolsDir) / "CrashHandler";
+    else
+        crashExe = self.parent_path() / "Tools" / "CrashHandler";
     if (!fs::exists(crashExe))
     {
         log(Category::Engine, "CrashHandler not found at: " + crashExe.string(), LogLevel::WARNING);
