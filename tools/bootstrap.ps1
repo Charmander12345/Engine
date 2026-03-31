@@ -66,6 +66,9 @@ $PythonDevUrl       = "https://www.python.org/ftp/python/${PythonVersion}/python
 # VS Build Tools (fallback for MSVC)
 $VSBuildToolsUrl    = 'https://aka.ms/vs/17/release/vs_BuildTools.exe'
 
+# VC++ Redistributable (bundled with game builds for end-user machines)
+$VCRedistUrl        = 'https://aka.ms/vs/17/release/vc_redist.x64.exe'
+
 # Windows SDK standalone installer (needed for Clang without VS)
 $WinSdkUrl          = 'https://go.microsoft.com/fwlink/?linkid=2272610'  # Win 11 SDK 10.0.26100
 
@@ -478,14 +481,31 @@ if (-not $SkipPython) {
     Write-Skip "Python (--SkipPython)"
 }
 
-# ── 5. Clean up temp files ────────────────────────────────────────────────
+# ── 5. Download VC++ Redistributable (for game distribution) ──────────────
+Write-Step "Checking VC++ Redistributable for game distribution..."
+
+$VCRedistPath = Join-Path $ToolsDir 'vc_redist.x64.exe'
+if ((Test-Path $VCRedistPath) -and -not $Force) {
+    Write-Skip "vc_redist.x64.exe already present."
+} else {
+    Write-Host "    Downloading VC++ Redistributable (~24 MB)..."
+    Download-File $VCRedistUrl $VCRedistPath
+    if (Test-Path $VCRedistPath) {
+        Write-OK "vc_redist.x64.exe downloaded (for bundling with game builds)."
+    } else {
+        Write-Host "    [WARN] Download failed. Game builds can still download it automatically." -ForegroundColor Yellow
+        Write-Host "    [WARN] Manual download: https://aka.ms/vs/17/release/vc_redist.x64.exe" -ForegroundColor Yellow
+    }
+}
+
+# ── 6. Clean up temp files ────────────────────────────────────────────────
 Write-Step "Cleaning up..."
 if (Test-Path $TempDir) {
     Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
     Write-OK "Temp files removed."
 }
 
-# ── 6. Generate environment script ────────────────────────────────────────
+# ── 7. Generate environment script ────────────────────────────────────────
 Write-Step "Generating environment setup..."
 
 $envScript = Join-Path $ToolsDir 'env.ps1'
@@ -539,7 +559,7 @@ Set-Content -Path $envBatch -Value $batContent -Encoding ASCII
 
 Write-OK "Generated Tools\env.ps1 and Tools\env.bat"
 
-# ── 7. Summary ────────────────────────────────────────────────────────────
+# ── 8. Summary ────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "=============================================" -ForegroundColor Green
 Write-Host "  Bootstrap Complete!" -ForegroundColor Green

@@ -16,5 +16,6 @@ enum class AssetType
     Level,
     Widget,
     Skybox,
-    Prefab
+    Prefab,
+    Entity
 };

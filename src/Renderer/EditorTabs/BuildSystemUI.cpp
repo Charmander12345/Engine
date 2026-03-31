@@ -1346,30 +1346,36 @@ void BuildSystemUI::runBootstrapInstall()
             "Build-Tools Bootstrap: starting installation...",
             Logger::LogLevel::INFO);
 
-        // Locate the bootstrap script relative to the running executable.
+        // Locate the bootstrap script next to the running editor executable.
+        // The CMake POST_BUILD step copies tools/ into the deploy directory.
         const char* bp = SDL_GetBasePath();
         std::string basePath = bp ? bp : "";
 
-        // ENGINE_SOURCE_DIR is baked into the editor at compile time.
         std::filesystem::path scriptPath;
-#if defined(ENGINE_SOURCE_DIR)
-        scriptPath = std::filesystem::path(ENGINE_SOURCE_DIR) / "tools" / "bootstrap.ps1";
+#if defined(_WIN32)
+        const char* scriptName = "bootstrap.ps1";
+#else
+        const char* scriptName = "bootstrap.sh";
 #endif
-        // Fallback: try relative to exe
-        if (scriptPath.empty() || !std::filesystem::exists(scriptPath))
-            scriptPath = std::filesystem::path(basePath) / "tools" / "bootstrap.ps1";
+        // Primary: <exe>/tools/<script>  (deployed by CMake POST_BUILD)
+        scriptPath = std::filesystem::path(basePath) / "tools" / scriptName;
+
+        // Fallback: <exe>/../tools/<script>  (multi-config generators put exe in a subfolder)
         if (!std::filesystem::exists(scriptPath))
-            scriptPath = std::filesystem::path(basePath) / ".." / "tools" / "bootstrap.ps1";
+            scriptPath = std::filesystem::path(basePath) / ".." / "tools" / scriptName;
 
         if (!std::filesystem::exists(scriptPath))
         {
-            m_toolInstallError = "Bootstrap script not found (tools/bootstrap.ps1).";
+            m_toolInstallError = std::string("Bootstrap script not found (tools/") + scriptName + ").";
             logger.log(Logger::Category::Engine, m_toolInstallError, Logger::LogLevel::WARNING);
             m_toolInstallSuccess.store(false);
             m_toolInstallDone.store(true);
             m_toolInstallRunning.store(false);
             return;
         }
+
+        // Canonicalize so logs show a clean absolute path
+        scriptPath = std::filesystem::canonical(scriptPath);
 
         logger.log(Logger::Category::Engine,
             "Bootstrap script: " + scriptPath.string(), Logger::LogLevel::INFO);
@@ -1463,25 +1469,8 @@ void BuildSystemUI::runBootstrapInstall()
             m_toolInstallSuccess.store(false);
         }
 #else
-        // Linux / macOS: run the shell script
-        std::filesystem::path shScript;
-#if defined(ENGINE_SOURCE_DIR)
-        shScript = std::filesystem::path(ENGINE_SOURCE_DIR) / "tools" / "bootstrap.sh";
-#endif
-        if (shScript.empty() || !std::filesystem::exists(shScript))
-            shScript = std::filesystem::path(basePath) / "tools" / "bootstrap.sh";
-
-        if (!std::filesystem::exists(shScript))
-        {
-            m_toolInstallError = "Bootstrap script not found (tools/bootstrap.sh).";
-            logger.log(Logger::Category::Engine, m_toolInstallError, Logger::LogLevel::WARNING);
-            m_toolInstallSuccess.store(false);
-            m_toolInstallDone.store(true);
-            m_toolInstallRunning.store(false);
-            return;
-        }
-
-        std::string cmd = "bash \"" + shScript.string() + "\" --compiler auto 2>&1";
+        // Linux / macOS: run the shell script (scriptPath already resolved above)
+        std::string cmd = "bash \"" + scriptPath.string() + "\" --compiler auto 2>&1";
         FILE* pipe = popen(cmd.c_str(), "r");
         if (!pipe)
         {

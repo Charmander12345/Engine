@@ -47,6 +47,7 @@
 #include "EditorTabs/SequencerTab.h"
 #include "EditorTabs/LevelCompositionTab.h"
 #include "EditorTabs/AnimationEditorTab.h"
+#include "EditorTabs/EntityEditorTab.h"
 #include "EditorTabs/UIDesignerTab.h"
 #include "EditorTabs/WidgetEditorTab.h"
 #include "EditorTabs/ContentBrowserPanel.h"

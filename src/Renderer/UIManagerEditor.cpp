@@ -49,6 +49,7 @@
 #include "EditorTabs/SequencerTab.h"
 #include "EditorTabs/LevelCompositionTab.h"
 #include "EditorTabs/AnimationEditorTab.h"
+#include "EditorTabs/EntityEditorTab.h"
 #include "EditorTabs/UIDesignerTab.h"
 #include "EditorTabs/WidgetEditorTab.h"
 #include "EditorTabs/ContentBrowserPanel.h"
@@ -4933,6 +4934,27 @@ void UIManager::closeAnimationEditorTab()
 {
     if (m_animationEditorTab)
         m_animationEditorTab->close();
+}
+
+// ===========================================================================
+// Entity Editor Tab (extracted to EditorTabs/EntityEditorTab.h)
+// ===========================================================================
+bool UIManager::isEntityEditorOpen() const
+{
+    return m_entityEditorTab && m_entityEditorTab->isOpen();
+}
+
+void UIManager::openEntityEditorTab(const std::string& assetPath)
+{
+    if (!m_entityEditorTab)
+        m_entityEditorTab = std::make_unique<EntityEditorTab>(this, m_renderer);
+    m_entityEditorTab->open(assetPath);
+}
+
+void UIManager::closeEntityEditorTab()
+{
+    if (m_entityEditorTab)
+        m_entityEditorTab->close();
 }
 
 #endif // ENGINE_EDITOR

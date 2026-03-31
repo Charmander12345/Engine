@@ -5,6 +5,31 @@
 
 ---
 
+## Letzte Änderung (VC++ Redistributable Auto-Bundling im Game Build)
+
+- ✅ `BuildPipeline.cpp – Step 5 (VC++ Redist)`: Automatische Suche in 4 Verzeichnissen, Download via PowerShell falls nicht vorhanden, Kopie ins Game-Build-Root.
+- ✅ `Launcher-Script generiert`: `<GameName>.bat` prüft ob `vcruntime140.dll` vorhanden ist, installiert VC++ Redist silent falls nötig, startet dann die Exe.
+- ✅ `bootstrap.ps1 erweitert`: Neuer Abschnitt 5 lädt `vc_redist.x64.exe` in Tools/ herunter.
+- ✅ `Build-Pipeline renummeriert`: 8 → 9 Schritte.
+- ✅ Build erfolgreich (Editor-Target).
+- **Download-URL**: `https://aka.ms/vs/17/release/vc_redist.x64.exe` (~24 MB, immer aktuellste VS 2015-2022+ Version).
+
+## Letzte Änderung (Entity Asset Type: Neuer Asset-Typ mit dediziertem Editor-Tab)
+
+- ✅ `AssetType::Entity (AssetTypes.h)`: Neuer Enum-Wert nach `Prefab` für wiederverwendbare Entity-Vorlagen.
+- ✅ `EntityEditorTab (EntityEditorTab.h/cpp)`: ~600 Zeilen. Editor-Tab zum Bearbeiten von Entity-Assets: Laden/Speichern als JSON-Asset, 11 Komponenten-Sektionen (Name, Transform, Mesh, Material, Light, Camera, Physics, Collision, Script, Animation, ParticleEmitter) mit editierbaren Properties, Add/Remove-Buttons, Dirty-Tracking, Save-Button im Toolbar.
+- ✅ `UIManager-Integration`: `openEntityEditorTab()`, `closeEntityEditorTab()`, `isEntityEditorOpen()`. Lazy-Init via `std::unique_ptr<EntityEditorTab>`.
+- ✅ `Content Browser: New Entity (EditorApp.cpp)`: Kontextmenü-Eintrag erzeugt .asset mit Name+Transform Defaults, registriert in AssetRegistry, öffnet Editor-Tab.
+- ✅ `Content Browser: Doppelklick (ContentBrowserPanel.cpp)`: Entity-Assets öffnen im EntityEditorTab. Icon: `entity.png`, Tint: Lila.
+- ✅ `CMakeLists.txt`: EntityEditorTab.h/.cpp in RENDERER_CORE_EDITOR_SOURCES.
+- ✅ Build erfolgreich (Editor-Target).
+
+## Letzte Änderung (Tools-Deploy: Bootstrap-Skripte neben Editor-Exe)
+
+- ✅ `CMakeLists.txt POST_BUILD Copy`: `tools/bootstrap.ps1`, `tools/bootstrap.sh`, `tools/README.md` werden beim Build nach `ENGINE_DEPLOY_DIR/tools/` kopiert. Skripte liegen zur Laufzeit neben der Editor-Exe.
+- ✅ `BuildSystemUI::runBootstrapInstall() refactored`: `ENGINE_SOURCE_DIR`-Abhängigkeit komplett entfernt. Skript-Lokalisierung rein exe-relativ: `<exe>/tools/` (Primary) → `<exe>/../tools/` (Fallback Multi-Config). Plattformunabhängige Skriptname-Auswahl einmalig am Funktionsanfang. Linux-Pfad-Lookup vereinfacht. `canonical()` für saubere Log-Pfade.
+- ✅ Build erfolgreich (Editor-Target).
+
 ## Letzte Änderung (In-Engine Auto-Install: Build-Tools beim Start prüfen und installieren)
 
 - ✅ `BuildSystemUI Auto-Install (BuildSystemUI.h/cpp)`: Editor prüft beim Start automatisch ob CMake und C++ Compiler vorhanden sind. Bei fehlenden Tools wird ein kombinierter Dialog angezeigt. Bei Zustimmung wird `tools/bootstrap.ps1` (Windows) / `tools/bootstrap.sh` (Linux) auf einem Hintergrund-Thread ausgeführt. Silent Installation mit Log-Ausgabe im Engine-Log. Erfolgs-/Fehler-Toast nach Abschluss. Automatische Re-Detection der Tools nach Installation.

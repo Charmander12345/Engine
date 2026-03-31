@@ -5,11 +5,42 @@
 
 ---
 
+## Aktuelle Änderung (VC++ Redistributable Auto-Bundling im Game Build)
+
+- `BuildPipeline.cpp – Neuer Step 5 (VC++ Redistributable bundeln)`: Die Build-Pipeline sucht `vc_redist.x64.exe` in 4 Verzeichnissen (`<Editor>/Tools/`, `<Editor>/tools/`, `<EngineSource>/tools/`, `<EngineSource>/Tools/`). Falls nicht gefunden, wird der Installer automatisch via PowerShell von `https://aka.ms/vs/17/release/vc_redist.x64.exe` (~24 MB) heruntergeladen und in `<Editor>/Tools/` gespeichert. Die Datei wird ins Game-Build-Root kopiert. Zusätzlich wird ein Launcher-Batch-Script (`<GameName>.bat`) generiert, das beim Start prüft ob `vcruntime140.dll` vorhanden ist (via `where` + `%SystemRoot%\System32`-Check). Falls nicht, wird `vc_redist.x64.exe` silent installiert (`/install /quiet /norestart`). Bei Fehler oder fehlender Redist-Datei wird eine Fehlermeldung mit Download-URL angezeigt. Danach startet das Script die Game-Exe.
+- `Build-Pipeline Schrittfolge aktualisiert`: 8 → 9 Schritte. Neue Reihenfolge: (1) Prepare, (2) CMake Configure, (3) CMake Build, (4) Deploy Runtime, (5) Bundle VC++ Redist, (6) Cook Assets, (7) Package HPK, (8) Generate game.ini, (9) Done/Launch.
+- `bootstrap.ps1 – VC++ Redistributable Download`: Neuer Abschnitt 5 im Bootstrap-Script lädt `vc_redist.x64.exe` in `Tools/` herunter (überspringt wenn vorhanden, `-Force` erzwingt Re-Download). Nachfolgende Abschnitte renummeriert (5→6 Cleanup, 6→7 Env-Scripts, 7→8 Summary).
+- `Game-Build Output-Struktur erweitert`:
+  ```
+  GameBuild/
+    <GameName>.exe          (Game-Binary)
+    <GameName>.bat          (Launcher mit VC++ Runtime-Check)
+    vc_redist.x64.exe       (Microsoft VC++ Redistributable Installer)
+    game.ini
+    config/
+    Engine/
+    Content/
+  ```
+
+## Aktuelle Änderung (Entity Asset Type: Neuer Asset-Typ mit dediziertem Editor-Tab)
+
+- `Neuer Asset-Typ AssetType::Entity (AssetTypes.h)`: Neuer Enum-Wert `Entity` nach `Prefab` — repräsentiert eine wiederverwendbare Entity-Vorlage als .asset-Datei mit JSON-serialisierten Komponenten.
+- `EntityEditorTab (EditorTabs/EntityEditorTab.h/cpp)`: Neuer Editor-Tab (~600 Zeilen) zum Bearbeiten von Entity-Assets. Funktionen: (1) Öffnen/Laden einer Entity-Asset-Datei (.asset mit type=Entity), (2) Anzeige aller Komponenten mit editierbaren Properties (Name, Transform, Mesh, Material, Light, Camera, Physics, Collision, Script, Animation, ParticleEmitter), (3) Hinzufügen neuer Komponenten via „+ Component"-Buttons mit sinnvollen Defaults, (4) Entfernen von Komponenten via „X"-Button im Section-Header, (5) Speichern als JSON-Asset. Nutzt `EditorUIBuilder`-Helper für konsistentes Look&Feel (makeStringRow, makeFloatRow, makeVec3Row, makeDropDownRow, makeCheckBox, makeIntRow, makeDivider, makePrimaryButton, makeDangerButton). State als `nlohmann::json`-Objekt — keine ECS-Entity nötig.
+- `UIManager-Integration (UIManager.h/UIManager.cpp/UIManagerEditor.cpp)`: Forward-Declaration `class EntityEditorTab;`, `std::unique_ptr<EntityEditorTab> m_entityEditorTab` Member. Public API: `openEntityEditorTab(const std::string& assetPath)`, `closeEntityEditorTab()`, `isEntityEditorOpen()`. Lazy-Erstellung des Tabs bei erstem Aufruf.
+- `Content Browser: New Entity (EditorApp.cpp)`: Neuer Menüpunkt „New Entity" im Rechtsklick-Kontextmenü. Erzeugt eine .asset-Datei mit `AssetType::Entity`, Name+Transform als Standard-Komponenten, registriert im AssetRegistry und öffnet sofort den EntityEditorTab.
+- `Content Browser: Doppelklick (ContentBrowserPanel.cpp)`: Doppelklick auf Entity-Assets öffnet den EntityEditorTab. Icon: `entity.png`, Tint: Lila `{0.85, 0.55, 1.0}`.
+- `CMakeLists.txt`: `EntityEditorTab.h` und `EntityEditorTab.cpp` zu `RENDERER_CORE_EDITOR_SOURCES` hinzugefügt.
+
+## Aktuelle Änderung (Tools-Deploy: Bootstrap-Skripte neben Editor-Exe)
+
+- `CMakeLists.txt POST_BUILD Copy`: Bootstrap-Skripte (`tools/bootstrap.ps1`, `tools/bootstrap.sh`, `tools/README.md`) werden beim Build automatisch aus dem Source-Tree nach `ENGINE_DEPLOY_DIR/tools/` kopiert (via `copy_if_different`). Damit liegen die Skripte zur Laufzeit neben der Editor-Exe und sind nicht mehr vom Source-Verzeichnis abhängig.
+- `BuildSystemUI::runBootstrapInstall() refactored`: `ENGINE_SOURCE_DIR`-Abhängigkeit komplett entfernt. Skript-Lokalisierung ist jetzt rein exe-relativ: (1) `<exe>/tools/bootstrap.ps1|.sh` (Primary, deployed by CMake), (2) `<exe>/../tools/...` (Fallback für Multi-Config-Generatoren). Plattformunabhängige Skriptname-Auswahl (`bootstrap.ps1` auf Windows, `bootstrap.sh` auf Linux/macOS) erfolgt einmalig am Anfang der Funktion. Linux-Pfad-Lookup vereinfacht (wiederverwendet `scriptPath` statt separater `shScript`-Variable). `std::filesystem::canonical()` für saubere Log-Ausgabe.
+
 ## Aktuelle Änderung (In-Engine Auto-Install: Build-Tools beim Start prüfen und installieren)
 
 - `BuildSystemUI Auto-Install Integration (BuildSystemUI.h/cpp)`: Der Editor prüft beim Start automatisch ob CMake und ein C++ Compiler (MSVC/Clang) vorhanden sind. Falls Build-Tools fehlen, wird dem User ein einzelner kombinierter Dialog angezeigt, der alle fehlenden Tools auflistet (CMake, C++ Compiler). Bei Zustimmung wird `tools/bootstrap.ps1` (Windows) bzw. `tools/bootstrap.sh` (Linux/macOS) auf einem Hintergrund-Thread ausgeführt, der die Tools silent installiert. Fortschritt wird im Engine-Log protokolliert. Nach Abschluss wird eine Erfolgs- oder Fehler-Toast-Nachricht angezeigt und die Tool-Erkennung automatisch wiederholt.
 - `Neue Methoden in BuildSystemUI`: `promptAndInstallTools()` (zeigt kombinierten Bestätigungsdialog mit fehlenden Tools), `runBootstrapInstall()` (führt Bootstrap-Skript auf Background-Thread aus mit Pipe-basierter Log-Ausgabe), `pollToolInstall()` (prüft Install-Status pro Frame, zeigt Result-Toast). `isToolInstallRunning()` für externen Status-Check.
-- `Prozess-Ausführung`: Windows: `CreateProcessA` mit `CREATE_NO_WINDOW` + anonyme Pipe für stdout/stderr-Capture. Linux/macOS: `popen()` mit zeilenweiser Log-Ausgabe. Bootstrap-Skript wird via `ENGINE_SOURCE_DIR` (compile-time) oder `SDL_GetBasePath()` (runtime) lokalisiert.
+- `Prozess-Ausführung`: Windows: `CreateProcessA` mit `CREATE_NO_WINDOW` + anonyme Pipe für stdout/stderr-Capture. Linux/macOS: `popen()` mit zeilenweiser Log-Ausgabe. Bootstrap-Skript wird relativ zur Exe lokalisiert (`SDL_GetBasePath()/tools/`).
 - `showCMakeInstallPrompt() / showToolchainInstallPrompt() refactored`: Beide Methoden delegieren jetzt an `promptAndInstallTools()` statt Browser-Seiten zu öffnen. Alte ShellExecute/xdg-open-Aufrufe entfernt.
 - `pollToolchainDetection() erweitert`: Ruft jetzt `pollToolInstall()` am Anfang jedes Frames auf. Zeigt nach Erkennung einen einzelnen kombinierten Auto-Install-Dialog wenn CMake ODER Toolchain fehlen (statt zwei separate Dialoge). Log-Ausgabe für erkannte/fehlende Tools bleibt.
 - `Workflow`: EditorApp::initialize() → startAsyncToolchainDetection() (Background-Thread: detectCMake + detectBuildToolchain) → EditorApp::tick() → pollToolchainDetection() (Main-Thread: Ergebnis auswerten, bei Bedarf Dialog zeigen) → User bestätigt → runBootstrapInstall() (Background-Thread: bootstrap.ps1 ausführen) → pollToolInstall() (Main-Thread: Ergebnis prüfen, Toast zeigen, Tools re-detecten).

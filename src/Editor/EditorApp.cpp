@@ -1511,6 +1511,63 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             popup->uiManager().registerWidget("NewMaterial", widget);
         }});
 
+    items.push_back({ "New Entity", [renderer]()
+        {
+            auto& uiMgr = renderer->getUIManager();
+            const auto& folder = uiMgr.getSelectedBrowserFolder();
+            if (folder == "__Shaders__") return;
+
+            auto& diagnostics = DiagnosticsManager::Instance();
+            auto& assetMgr = AssetManager::Instance();
+            const std::filesystem::path contentDir =
+                std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content";
+            const std::filesystem::path targetDir = folder.empty() ? contentDir : contentDir / folder;
+            std::error_code ec;
+            std::filesystem::create_directories(targetDir, ec);
+
+            std::string baseName = "NewEntity";
+            std::string fileName = baseName + ".asset";
+            int counter = 1;
+            while (std::filesystem::exists(targetDir / fileName))
+                fileName = baseName + std::to_string(counter++) + ".asset";
+
+            const std::filesystem::path absPath = targetDir / fileName;
+            const std::string displayName = std::filesystem::path(fileName).stem().string();
+            const std::string relPath = std::filesystem::relative(absPath, contentDir).generic_string();
+
+            // Build a minimal entity asset with a Name and Transform
+            nlohmann::json fileJson;
+            fileJson["magic"]   = 0x41535453;
+            fileJson["version"] = 2;
+            fileJson["type"]    = static_cast<int>(AssetType::Entity);
+            fileJson["name"]    = displayName;
+            fileJson["data"]    = nlohmann::json{
+                {"components", nlohmann::json{
+                    {"Name", {{"displayName", displayName}}},
+                    {"Transform", {{"position", {0.0f, 0.0f, 0.0f}}, {"rotation", {0.0f, 0.0f, 0.0f}}, {"scale", {1.0f, 1.0f, 1.0f}}}}
+                }}
+            };
+
+            std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+            if (!out.is_open())
+            {
+                uiMgr.showToastMessage("Failed to create entity file.", UIManager::kToastMedium);
+                return;
+            }
+            out << fileJson.dump(4);
+            out.close();
+
+            AssetRegistryEntry entry;
+            entry.name = displayName;
+            entry.path = relPath;
+            entry.type = AssetType::Entity;
+            assetMgr.registerAssetInRegistry(entry);
+
+            uiMgr.refreshContentBrowser();
+            uiMgr.showToastMessage("Created: " + fileName, UIManager::kToastMedium);
+            uiMgr.openEntityEditorTab(relPath);
+        }});
+
     // ?? Save selected entity as Prefab ??
     {
         const auto& selectedEntities = renderer->getSelectedEntities();

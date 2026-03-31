@@ -107,7 +107,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
 
     buildUI.m_buildThread = std::thread([buildPtr, config, cmakePath, engineSourceDir, toolchainName, toolchainVersion, editorBaseDir, projectPath]()
     {
-        constexpr int kTotalSteps = 8;
+        constexpr int kTotalSteps = 9;
         int step = 0;
         bool ok = true;
         std::string errorMsg;
@@ -536,7 +536,144 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
               }
           }
 
-        // Step 5: Cook assets + copy shaders + asset registry
+        // Step 5: Bundle VC++ Redistributable
+        if (ok && !checkCancelled())
+        {
+            advanceStep("Bundling VC++ Redistributable...");
+
+            const std::filesystem::path dstDir = config.outputDir;
+
+            // Search for vc_redist.x64.exe in several locations
+            std::filesystem::path vcRedistSrc;
+            {
+                // 1. Tools/ next to editor exe
+                auto tryPath = std::filesystem::path(editorBaseDir) / "Tools" / "vc_redist.x64.exe";
+                if (std::filesystem::exists(tryPath))
+                    vcRedistSrc = tryPath;
+
+                // 2. tools/ next to editor exe (lowercase)
+                if (vcRedistSrc.empty())
+                {
+                    tryPath = std::filesystem::path(editorBaseDir) / "tools" / "vc_redist.x64.exe";
+                    if (std::filesystem::exists(tryPath))
+                        vcRedistSrc = tryPath;
+                }
+
+                // 3. Engine source tools/ directory
+                if (vcRedistSrc.empty())
+                {
+                    tryPath = std::filesystem::path(engineSourceDir) / "tools" / "vc_redist.x64.exe";
+                    if (std::filesystem::exists(tryPath))
+                        vcRedistSrc = tryPath;
+                }
+
+                // 4. Engine source Tools/ directory
+                if (vcRedistSrc.empty())
+                {
+                    tryPath = std::filesystem::path(engineSourceDir) / "Tools" / "vc_redist.x64.exe";
+                    if (std::filesystem::exists(tryPath))
+                        vcRedistSrc = tryPath;
+                }
+            }
+
+            // If not found locally, try to download it
+            if (vcRedistSrc.empty())
+            {
+                buildPtr->appendBuildOutput("  vc_redist.x64.exe not found locally, downloading...");
+
+                const std::filesystem::path toolsDir = std::filesystem::path(editorBaseDir) / "Tools";
+                {
+                    std::error_code ec;
+                    std::filesystem::create_directories(toolsDir, ec);
+                }
+                const std::filesystem::path downloadDst = toolsDir / "vc_redist.x64.exe";
+
+#if defined(_WIN32)
+                // Use PowerShell to download (same pattern as bootstrap.ps1)
+                std::string dlCmd = "powershell -NoProfile -ExecutionPolicy Bypass -Command \"";
+                dlCmd += "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; ";
+                dlCmd += "Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x64.exe' ";
+                dlCmd += "-OutFile '";
+                dlCmd += downloadDst.string();
+                dlCmd += "' -UseBasicParsing\"";
+
+                int dlRet = runCmdWithOutput(dlCmd);
+                if (dlRet == 0 && std::filesystem::exists(downloadDst))
+                {
+                    vcRedistSrc = downloadDst;
+                    buildPtr->appendBuildOutput("  Downloaded vc_redist.x64.exe successfully.");
+                }
+                else
+                {
+                    buildPtr->appendBuildOutput("  [WARN] Failed to download vc_redist.x64.exe.");
+                    buildPtr->appendBuildOutput("  [WARN] Users may need to install the VC++ Redistributable manually.");
+                    buildPtr->appendBuildOutput("  [WARN] Download: https://aka.ms/vs/17/release/vc_redist.x64.exe");
+                }
+#else
+                buildPtr->appendBuildOutput("  [INFO] VC++ Redistributable is Windows-only, skipping.");
+#endif
+            }
+
+            // Copy to game output
+            if (!vcRedistSrc.empty())
+            {
+                const auto dstRedist = dstDir / "vc_redist.x64.exe";
+                std::error_code ec;
+                std::filesystem::copy_file(vcRedistSrc, dstRedist,
+                    std::filesystem::copy_options::overwrite_existing, ec);
+                if (!ec)
+                    buildPtr->appendBuildOutput("  Bundled: vc_redist.x64.exe");
+                else
+                    buildPtr->appendBuildOutput("  [WARN] Failed to copy vc_redist.x64.exe: " + ec.message());
+            }
+
+            // Generate launcher batch script that checks for VC runtime
+            // and installs it silently if missing before starting the game.
+            {
+                const std::filesystem::path batPath = dstDir / (config.windowTitle + ".bat");
+                std::ofstream bat(batPath);
+                if (bat.is_open())
+                {
+                    bat << "@echo off\r\n";
+                    bat << ":: Auto-generated by HorizonEngine Build\r\n";
+                    bat << ":: Checks for VC++ Runtime and installs if missing, then launches the game.\r\n";
+                    bat << "\r\n";
+                    bat << ":: Check if vcruntime140.dll is loadable\r\n";
+                    bat << "where /Q vcruntime140.dll >nul 2>&1\r\n";
+                    bat << "if %ERRORLEVEL% EQU 0 goto :launch\r\n";
+                    bat << "\r\n";
+                    bat << ":: Check System32 directly\r\n";
+                    bat << "if exist \"%SystemRoot%\\System32\\vcruntime140.dll\" goto :launch\r\n";
+                    bat << "\r\n";
+                    bat << ":: VC++ Runtime not found - install it\r\n";
+                    bat << "echo Installing Microsoft Visual C++ Runtime...\r\n";
+                    bat << "if exist \"%~dp0vc_redist.x64.exe\" (\r\n";
+                    bat << "    \"%~dp0vc_redist.x64.exe\" /install /quiet /norestart\r\n";
+                    bat << "    if %ERRORLEVEL% NEQ 0 (\r\n";
+                    bat << "        echo.\r\n";
+                    bat << "        echo VC++ Runtime installation failed. Please install manually:\r\n";
+                    bat << "        echo https://aka.ms/vs/17/release/vc_redist.x64.exe\r\n";
+                    bat << "        pause\r\n";
+                    bat << "        exit /b 1\r\n";
+                    bat << "    )\r\n";
+                    bat << ") else (\r\n";
+                    bat << "    echo.\r\n";
+                    bat << "    echo Missing: vc_redist.x64.exe\r\n";
+                    bat << "    echo Please download and install the VC++ Redistributable:\r\n";
+                    bat << "    echo https://aka.ms/vs/17/release/vc_redist.x64.exe\r\n";
+                    bat << "    pause\r\n";
+                    bat << "    exit /b 1\r\n";
+                    bat << ")\r\n";
+                    bat << "\r\n";
+                    bat << ":launch\r\n";
+                    bat << "start \"\" \"%~dp0" << config.windowTitle << ".exe\"\r\n";
+                    bat.close();
+                    buildPtr->appendBuildOutput("  Generated launcher: " + batPath.filename().string());
+                }
+            }
+        }
+
+        // Step 6: Cook assets + copy shaders + asset registry
         if (ok && !checkCancelled())
         {
             advanceStep("Cooking assets...");
@@ -625,7 +762,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
 
             }
 
-            // Step 6: Package content into HPK archive
+            // Step 7: Package content into HPK archive
             if (ok && !checkCancelled())
             {
                 advanceStep("Packaging content into HPK...");
@@ -717,7 +854,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
             }
         }
 
-        // Step 7: Generate game.ini with profile settings
+        // Step 8: Generate game.ini with profile settings
         if (ok && !checkCancelled())
         {
             advanceStep("Generating game.ini...");
@@ -759,7 +896,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
             }
         }
 
-        // Step 8: Done
+        // Step 9: Done
         advanceStep(ok ? "Build complete!" : "Build failed.");
 
         if (ok)

@@ -452,6 +452,13 @@ add_custom_command(TARGET HorizonEngine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/Content/Scripting"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/src/Scripting/engine.pyi" "${ENGINE_DEPLOY_DIR}/Content/Scripting/engine.pyi"
 
+    # Copy tools/ bootstrap scripts to deploy directory so the editor can
+    # locate and execute them at runtime (next to the exe, no ENGINE_SOURCE_DIR needed).
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/tools"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/tools/bootstrap.ps1" "${ENGINE_DEPLOY_DIR}/tools/bootstrap.ps1"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/tools/bootstrap.sh"  "${ENGINE_DEPLOY_DIR}/tools/bootstrap.sh"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/tools/README.md"     "${ENGINE_DEPLOY_DIR}/tools/README.md"
+
     COMMAND_EXPAND_LISTS
 )
 

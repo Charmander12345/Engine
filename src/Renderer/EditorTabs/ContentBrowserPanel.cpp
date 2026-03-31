@@ -56,6 +56,7 @@ static const char* iconForAssetType(AssetType type)
     case AssetType::Skybox:   return "skybox.png";
     case AssetType::Level:    return "level.png";
     case AssetType::Prefab:   return "entity.png";
+    case AssetType::Entity:   return "entity.png";
     default:                  return "entity.png";
     }
 }
@@ -75,6 +76,7 @@ static Vec4 iconTintForAssetType(AssetType type)
     case AssetType::Widget:   return Vec4{ 0.70f, 0.70f, 0.90f, 1.0f };
     case AssetType::Skybox:   return Vec4{ 0.40f, 0.75f, 0.95f, 1.0f };
     case AssetType::Prefab:   return Vec4{ 0.30f, 0.90f, 0.70f, 1.0f };
+    case AssetType::Entity:   return Vec4{ 0.85f, 0.55f, 1.00f, 1.0f };
     default:                  return Vec4{ 0.85f, 0.85f, 0.85f, 1.0f };
     }
 }
@@ -1381,6 +1383,11 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
                 if (assetType == AssetType::Prefab)
                 {
                     m_uiManager->spawnPrefabAtPosition(relPath, Vec3{ 0.0f, 0.0f, 0.0f });
+                    return;
+                }
+                if (assetType == AssetType::Entity)
+                {
+                    m_uiManager->openEntityEditorTab(relPath);
                     return;
                 }
                 if (assetType == AssetType::Audio)

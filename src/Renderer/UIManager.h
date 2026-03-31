@@ -35,6 +35,7 @@ class LevelCompositionTab;
 class AnimationEditorTab;
 class UIDesignerTab;
 class WidgetEditorTab;
+class EntityEditorTab;
 class ContentBrowserPanel;
 class OutlinerPanel;
 #include "EditorTabs/BuildSystemUI.h"
@@ -243,6 +244,11 @@ public:
 	void openAnimationEditorTab(ECS::Entity entity);
 	void closeAnimationEditorTab();
 	bool isAnimationEditorOpen() const;
+
+	// Entity Editor tab (entity asset editing)
+	void openEntityEditorTab(const std::string& assetPath);
+	void closeEntityEditorTab();
+	bool isEntityEditorOpen() const;
 
 	// Entity clipboard (Copy/Paste/Duplicate)
 	void copySelectedEntity();
@@ -454,6 +460,9 @@ private:
 
 	// Animation Editor tab (extracted to EditorTabs/AnimationEditorTab.h)
 	std::unique_ptr<AnimationEditorTab> m_animationEditorTab;
+
+	// Entity Editor tab (extracted to EditorTabs/EntityEditorTab.h)
+	std::unique_ptr<EntityEditorTab> m_entityEditorTab;
 
 public:
 	bool getWidgetEditorCanvasRect(Vec4& outRect) const;
