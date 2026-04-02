@@ -1,4 +1,4 @@
-﻿#include <iostream>
+#include <iostream>
 #include <filesystem>
 #include <fstream>
 #include <cstdlib>
@@ -28,8 +28,9 @@
 #include "Core/MathTypes.h"
 #include "Core/AudioManager.h"
 #include "Core/EngineLevel.h"
-#include "Scripting/PythonScripting.h"
+#include "Scripting/Python/PythonScripting.h"
 #include "Physics/PhysicsWorld.h"
+#include "NativeScripting/NativeScriptManager.h"
 #include "CrashProtocol.h"
 
 #include "Renderer/ViewportUIManager.h"
@@ -496,7 +497,7 @@ int main()
         const auto& hw = diagnostics.getHardwareInfo();
         char hwBuf[512];
         std::snprintf(hwBuf, sizeof(hwBuf),
-            "CPU=%s (%uC/%uT)\nGPU=%s\nGPU Vendor=%s\nGPU Driver=%s\nVRAM=%u MB (free: %u MB)\nRAM=%u MB (available: %u MB)\n",
+            "CPU=%s (%uC/%uT)\nGPU=%s\nGPU Vendor=%s\nGPU Driver=%s\nVRAM=%lld MB (free: %lld MB)\nRAM=%lld MB (available: %lld MB)\n",
             hw.cpu.brand.c_str(), hw.cpu.physicalCores, hw.cpu.logicalCores,
             hw.gpu.renderer.c_str(), hw.gpu.vendor.c_str(), hw.gpu.driverVersion.c_str(),
             hw.gpu.vramTotalMB, hw.gpu.vramFreeMB,
@@ -800,6 +801,23 @@ int main()
                 SDL_HideCursor();
 
                 logTimed(Logger::Category::Engine, "Runtime mode: level loaded successfully.", Logger::LogLevel::INFO);
+
+                // Load C++ gameplay scripts DLL (GameScripts.dll in Engine/)
+                {
+                    auto dllPath = std::filesystem::path(chosenPath) / "Engine" / "GameScripts.dll";
+                    if (std::filesystem::exists(dllPath))
+                    {
+                        if (NativeScriptManager::Instance().loadGameplayDLL(dllPath.string()))
+                        {
+                            NativeScriptManager::Instance().initializeScripts();
+                            logTimed(Logger::Category::Engine, "Loaded C++ gameplay DLL: " + dllPath.string(), Logger::LogLevel::INFO);
+                        }
+                        else
+                        {
+                            logTimed(Logger::Category::Engine, "Failed to load C++ gameplay DLL: " + dllPath.string(), Logger::LogLevel::ERROR);
+                        }
+                    }
+                }
             }
             else
             {
@@ -1682,6 +1700,7 @@ int main()
 
         if (isRuntimeMode || diagnostics.isPIEActive())
         {
+            NativeScriptManager::Instance().updateScripts(static_cast<float>(dt));
             PhysicsWorld::Instance().step(static_cast<float>(dt));
             Scripting::UpdateScripts(static_cast<float>(dt));
         }
@@ -1898,7 +1917,7 @@ int main()
         SDL_GetWindowSize(w, &windowW, &windowH);
         diagnostics.setWindowSize(Vec2{ static_cast<float>(windowW), static_cast<float>(windowH) });
 
-        const Uint32 flags = SDL_GetWindowFlags(w);
+        const SDL_WindowFlags flags = SDL_GetWindowFlags(w);
         DiagnosticsManager::WindowState state = DiagnosticsManager::WindowState::Normal;
         if ((flags & SDL_WINDOW_FULLSCREEN) != 0)
         {
@@ -1969,6 +1988,8 @@ int main()
     }
 #endif // !ENGINE_BUILD_SHIPPING
 
+    NativeScriptManager::Instance().shutdownScripts();
+    NativeScriptManager::Instance().unloadGameplayDLL();
     logTimed(Logger::Category::Engine, "Engine shutdown complete.", Logger::LogLevel::INFO);
     Scripting::Shutdown();
     logger.stopCrashHandler();

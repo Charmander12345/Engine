@@ -1,9 +1,34 @@
 # Engine – Projektübersicht
 
 > Umfassende Dokumentation der gesamten Engine-Architektur, aller Komponenten und des Zusammenspiels.
-> Branch: `Json_and_ecs` | Build-System: CMake 3.12+ | Sprache: C++20 | Plattform: Windows (x64), Linux, macOS
+> Branch: `C++-Scripting` | Build-System: CMake 3.12+ | Sprache: C++20 | Plattform: Windows (x64), Linux, macOS
 
 ---
+
+## Aktuelle Änderung (C++ Native Scripting System: DLL-basiertes Gameplay-Scripting)
+
+- `NativeScripting-Modul (src/NativeScripting/)`: Neues Engine-Modul für C++-basiertes Gameplay-Scripting als DLL-Plugin-System. Spieleentwickler schreiben C++-Klassen die von `INativeScript` erben, kompilieren sie als `GameScripts.dll`, und die Engine lädt sie zur Laufzeit via `LoadLibrary`/`dlopen`. Automatische Klassenregistrierung über statische Initialisierer (`REGISTER_NATIVE_SCRIPT`-Makro).
+- `INativeScript.h (Basisklasse)`: Abstrakte Basisklasse mit 5 Lifecycle-Events: `onLoaded()` (nach Zuweisung), `tick(float dt)` (jeden Frame), `onBeginOverlap(Entity)` / `onEndOverlap(Entity)` (Physik-Overlap), `onDestroy()` (vor Entfernung). Entity-ID über `getEntity()` zugänglich.
+- `NativeScriptRegistry.h/cpp (Automatische Registrierung)`: Singleton-Registry mit Factory-Pattern. `REGISTER_NATIVE_SCRIPT(ClassName)`-Makro erzeugt statisches Objekt das bei DLL-Load die Klasse registriert. API: `registerClass()`, `createInstance()`, `hasClass()`, `getRegisteredClassNames()`, `unregisterAll()`.
+- `NativeScriptManager.h/cpp (Kern-Singleton)`: DLL-Management (`loadGameplayDLL`/`unloadGameplayDLL`), Script-Lifecycle (`initializeScripts`/`updateScripts`/`shutdownScripts`), Instanz-Verwaltung (`createInstance`/`destroyInstance`), Overlap-Dispatch, Hot-Reload (`ENGINE_EDITOR`-only). Speichert `m_lastDeltaTime` für `GameplayAPI::getDeltaTime()`.
+- `GameplayAPI.h/cpp (Öffentliche Spieler-API)`: Zentral-Include für Spieler-Code. Wrapper-Funktionen für Engine-Subsysteme: Transform (get/setPosition/Rotation/Scale), Entity (findEntityByName), Physics (set/getVelocity, addForce/Impulse), Logging (logInfo/Warning/Error), Time (getDeltaTime/getTotalTime).
+- `GameplayAPIExport.h (DLL-Export-Macros)`: `GAMEPLAY_API`-Macro für `__declspec(dllexport/dllimport)` (Windows) bzw. `__attribute__((visibility("default")))` (Unix).
+- `ECS-Integration`: Neuer `NativeScriptComponent` (className + instance-Pointer) in `Components.h`. `ComponentKind::NativeScript = 13`, `MaxComponentTypes = 14` in `ECS.h`. Serialisierung in `EngineLevel.cpp`.
+- `CMakeLists.txt (Zusammengeführt in Scripting-DLL)`: C++ NativeScripting-Quellen sind in `Scripting.dll` / `ScriptingRuntime.dll` integriert (kein separates NativeScripting-Target mehr). `GAMEPLAY_DLL_EXPORT=1` + `WINDOWS_EXPORT_ALL_SYMBOLS=ON`. Quelldateien liegen weiterhin in `src/NativeScripting/`, werden aber vom Scripting-CMakeLists kompiliert.
+- `main.cpp Integration (Phase 3)`: (1) Runtime-Modus: `GameScripts.dll` aus `Engine/`-Verzeichnis laden + `initializeScripts()` nach Level-Load. (2) Game-Loop: `NativeScriptManager::updateScripts(dt)` vor Physics und Python-Scripts (C++ → Physics → Python Lifecycle-Reihenfolge). (3) Shutdown: `shutdownScripts()` + `unloadGameplayDLL()` vor `Scripting::Shutdown()`.
+- `Python-Integration`: `engine.pyi` erweitert um `Component_NativeScript`-Konstante. `EntityModule.cpp` mit Switch-Cases für NativeScript-Komponentenzugriff. `PythonScripting.cpp` mit `Component_NativeScript`-Integer-Konstante.
+- **Lifecycle-Reihenfolge pro Frame**: C++ Scripts (`tick()`) → Physics (`step()`) → Python Scripts (`tick()`) → Overlap-Dispatch.
+- **Architektur**: Engine exportiert `GameplayAPI`-Funktionen aus `Scripting.dll` (Python + C++ vereint). Spieler-DLL (`GameScripts.dll`) linkt dagegen. Statische Initialisierer in der Spieler-DLL registrieren Klassen beim `LoadLibrary()`-Aufruf automatisch.
+
+## Aktuelle Änderung (Global State Module: Daten zwischen Python-Entities austauschen)
+
+- `ScriptingGlobalState.h (Singleton Fix + Erweiterung)`: `instance()` → `static Instance()` (Singleton war nicht aufrufbar ohne Instanz). Neue Methoden: `setVariable()` (überschreibt existierende), `removeVariable()`, `getAllVariables()`, `clear()`. Unterstützt Typen: `Number`, `String`, `Boolean`, `None`, `Object`, `Function`.
+- `GlobalStateModule.cpp (Neues Python-Submodul)`: Neues `engine.globalstate`-Submodul mit 5 Funktionen: `set_global(name, value)` (setzt globale Variable — float/int/str/bool/None), `get_global(name)` (liest Variable, None wenn nicht vorhanden), `remove_global(name)` (löscht Variable), `get_all()` (alle Variablen als Python-Dict), `clear()` (alle löschen). String-Werte werden als Heap-Kopie gespeichert und bei Überschreiben/Löschen korrekt freigegeben.
+- `ScriptingInternal.h`: `CreateGlobalStateModule()` Factory-Deklaration hinzugefügt.
+- `PythonScripting.cpp (CreateEngineModule)`: `globalStateModule` erstellt, Null-Check integriert, `AddSubmodule(module, globalStateModule, "globalstate")` registriert.
+- `engine.pyi`: `globalstate`-Klasse mit Stubs für `set_global`, `get_global`, `remove_global`, `get_all`, `clear`.
+- `CMakeLists.txt`: `Python/GlobalStateModule.cpp` zu `SCRIPTING_SOURCES` hinzugefügt.
+- **Verwendung in Python-Skripten**: Entity A setzt `engine.globalstate.set_global("health", 100)`, Entity B liest `engine.globalstate.get_global("health")`. Ermöglicht Datenaustausch zwischen beliebigen Entity-Skripten ohne direkte Referenzen.
 
 ## Aktuelle Änderung (VC++ Redistributable Auto-Bundling im Game Build)
 

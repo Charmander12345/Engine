@@ -17,6 +17,7 @@ Component_Name: int
 Component_Collision: int
 Component_Animation: int
 Component_ParticleEmitter: int
+Component_NativeScript: int
 
 Asset_Texture: int
 Asset_Material: int
@@ -1180,6 +1181,44 @@ class math:
     @staticmethod
     def clamp(value: float, min_val: float, max_val: float) -> float:
         """Clamp value between min and max."""
+        ...
+
+# ---------------------------------------------------------------------------
+# engine.globalstate – Shared global state for data exchange between entities
+# ---------------------------------------------------------------------------
+
+class globalstate:
+    @staticmethod
+    def set_global(name: str, value: object) -> bool:
+        """Set a global variable (number, string, bool, or None).
+
+        This value is shared across all Python scripts and can be used
+        to exchange data between different entities.
+
+        Args:
+            name: Variable name (string key).
+            value: Value to store (float, int, str, bool, or None).
+        """
+        ...
+
+    @staticmethod
+    def get_global(name: str) -> object:
+        """Get a global variable by name. Returns None if not found."""
+        ...
+
+    @staticmethod
+    def remove_global(name: str) -> bool:
+        """Remove a global variable by name. Returns True if removed."""
+        ...
+
+    @staticmethod
+    def get_all() -> Dict[str, object]:
+        """Get all global variables as a dict."""
+        ...
+
+    @staticmethod
+    def clear() -> bool:
+        """Clear all global variables."""
         ...
 
 # ---------------------------------------------------------------------------

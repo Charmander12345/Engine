@@ -720,6 +720,7 @@ namespace
         PyModule_AddIntConstant(module, "Component_Collision", static_cast<int>(ECS::ComponentKind::Collision));
         PyModule_AddIntConstant(module, "Component_Animation", static_cast<int>(ECS::ComponentKind::Animation));
         PyModule_AddIntConstant(module, "Component_ParticleEmitter", static_cast<int>(ECS::ComponentKind::ParticleEmitter));
+        PyModule_AddIntConstant(module, "Component_NativeScript", static_cast<int>(ECS::ComponentKind::NativeScript));
 
         PyModule_AddIntConstant(module, "Asset_Texture", static_cast<int>(AssetType::Texture));
         PyModule_AddIntConstant(module, "Asset_Material", static_cast<int>(AssetType::Material));
@@ -747,11 +748,12 @@ namespace
         PyObject* physicsModule = CreatePhysicsModule();
         PyObject* mathModule = CreateMathModule();
         PyObject* particleModule = CreateParticleModule();
+        PyObject* globalStateModule = CreateGlobalStateModule();
 #if ENGINE_EDITOR
         PyObject* editorModule = CreateEditorModule();
 #endif
 
-        if (!entityModule || !assetModule || !audioModule || !inputModule || !uiModule || !cameraModule || !diagnosticsModule || !loggingModule || !physicsModule || !mathModule || !particleModule
+        if (!entityModule || !assetModule || !audioModule || !inputModule || !uiModule || !cameraModule || !diagnosticsModule || !loggingModule || !physicsModule || !mathModule || !particleModule || !globalStateModule
 #if ENGINE_EDITOR
             || !editorModule
 #endif
@@ -768,6 +770,7 @@ namespace
             Py_XDECREF(physicsModule);
             Py_XDECREF(mathModule);
             Py_XDECREF(particleModule);
+            Py_XDECREF(globalStateModule);
 #if ENGINE_EDITOR
             Py_XDECREF(editorModule);
 #endif
@@ -797,7 +800,8 @@ namespace
             !AddSubmodule(module, loggingModule, "logging") ||
             !AddSubmodule(module, physicsModule, "physics") ||
             !AddSubmodule(module, mathModule, "math") ||
-            !AddSubmodule(module, particleModule, "particle")
+            !AddSubmodule(module, particleModule, "particle") ||
+            !AddSubmodule(module, globalStateModule, "globalstate")
 #if ENGINE_EDITOR
             || !AddSubmodule(module, editorModule, "editor")
 #endif

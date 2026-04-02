@@ -1,9 +1,34 @@
 # Engine – Status & Roadmap
 
 > Übersicht über den aktuellen Implementierungsstand und offene Punkte – pro Modul gegliedert.
-> Branch: `Json_and_ecs` | Stand: aktuell
+> Branch: `C++-Scripting` | Stand: aktuell
 
 ---
+
+## Letzte Änderung (C++ Native Scripting System: DLL-basiertes Gameplay-Scripting)
+
+- ✅ `INativeScript.h`: Basisklasse mit 5 Lifecycle-Events (onLoaded, tick, onBeginOverlap, onEndOverlap, onDestroy). Entity-ID über `getEntity()`.
+- ✅ `NativeScriptRegistry.h/cpp`: Singleton-Registry mit Factory-Pattern + `REGISTER_NATIVE_SCRIPT`-Makro für automatische Klassenregistrierung bei DLL-Load.
+- ✅ `NativeScriptManager.h/cpp`: Kern-Singleton — DLL-Management (LoadLibrary/FreeLibrary), Script-Lifecycle (init/update/shutdown), Instanz-Verwaltung, Overlap-Dispatch, Hot-Reload (ENGINE_EDITOR-only).
+- ✅ `GameplayAPI.h/cpp`: Öffentliche Spieler-API — Transform, Entity, Physics, Logging, Time Wrapper-Funktionen. Zentral-Include für Spieler-Code.
+- ✅ `GameplayAPIExport.h`: DLL-Export-Macros (GAMEPLAY_API).
+- ✅ `ECS-Integration (Components.h, ECS.h, EngineLevel.cpp)`: NativeScriptComponent (className + instance*), ComponentKind::NativeScript = 13, MaxComponentTypes = 14, Serialisierung.
+- ✅ `CMakeLists.txt (Scripting)`: C++ NativeScripting-Quellen in Scripting.dll/ScriptingRuntime.dll zusammengeführt (kein separates NativeScripting-Target mehr). GAMEPLAY_DLL_EXPORT=1, WINDOWS_EXPORT_ALL_SYMBOLS=ON.
+- ✅ `Root CMakeLists.txt`: Scripting enthält Python + C++ NativeScripting vereint. ENGINE_EDITOR_LIBS/ENGINE_RUNTIME_LIBS bereinigt.
+- ✅ `main.cpp Phase 3 Integration`: (1) Include NativeScriptManager.h. (2) Runtime: GameScripts.dll aus Engine/ laden + initializeScripts nach Level-Load. (3) Game-Loop: updateScripts(dt) vor Physics/Python. (4) Shutdown: shutdownScripts + unloadGameplayDLL.
+- ✅ `Python-Integration`: engine.pyi (Component_NativeScript), EntityModule.cpp (Switch-Cases), PythonScripting.cpp (Konstante).
+- ✅ Build erfolgreich für alle Targets (Scripting.dll mit Python+C++, ScriptingRuntime.dll, HorizonEngine.exe, HorizonEngineRuntime.exe).
+- **Lifecycle-Reihenfolge**: C++ Scripts → Physics → Python Scripts → Overlap-Dispatch.
+- **Nächste Schritte**: Phase 5 (Spieler-Projekt-Template + Editor UI), Phase 6 (Hot-Reload FileWatcher), Phase 7 (Python↔C++ Brücke), Phase 8 (Build-Pipeline-Erweiterung).
+
+## Letzte Änderung (Global State Module: Daten zwischen Python-Entities austauschen)
+
+- ✅ `ScriptingGlobalState.h`: Singleton-Fix (`static Instance()`), neue Methoden (`setVariable`, `removeVariable`, `getAllVariables`, `clear`).
+- ✅ `GlobalStateModule.cpp`: Neues `engine.globalstate`-Submodul mit `set_global`, `get_global`, `remove_global`, `get_all`, `clear`. String-Heap-Management korrekt.
+- ✅ `ScriptingInternal.h`: `CreateGlobalStateModule()` Factory-Deklaration.
+- ✅ `PythonScripting.cpp`: `globalStateModule` in `CreateEngineModule()` registriert.
+- ✅ `engine.pyi`: `globalstate`-Klasse mit IntelliSense-Stubs.
+- ✅ `CMakeLists.txt`: `Python/GlobalStateModule.cpp` in `SCRIPTING_SOURCES`.
 
 ## Letzte Änderung (VC++ Redistributable Auto-Bundling im Game Build)
 

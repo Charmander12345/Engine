@@ -183,4 +183,10 @@ namespace ECS
 		bool  enabled{ true };
 		bool  loop{ true };                ///< Restart emission when all particles dead
 	};
+
+	/// C++ native script – references a registered class name from a gameplay DLL.
+	struct NativeScriptComponent
+	{
+		std::string className;
+	};
 }

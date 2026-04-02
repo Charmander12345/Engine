@@ -383,6 +383,19 @@ static void deserializeScriptComponent(const json& value, ECS::ScriptComponent& 
 	}
 }
 
+static json serializeNativeScriptComponent(const ECS::NativeScriptComponent& component)
+{
+	return json{ {"className", component.className} };
+}
+
+static void deserializeNativeScriptComponent(const json& value, ECS::NativeScriptComponent& component)
+{
+	if (value.is_object() && value.contains("className"))
+	{
+		component.className = value.at("className").get<std::string>();
+	}
+}
+
 static json serializeHeightFieldComponent(const ECS::HeightFieldComponent& component)
 {
 	return json{
@@ -691,6 +704,12 @@ if (componentsJson.contains("ParticleEmitter"))
 	deserializeParticleEmitterComponent(componentsJson.at("ParticleEmitter"), component);
 	m_ecs->addComponent<ECS::ParticleEmitterComponent>(entity, component);
 }
+if (componentsJson.contains("NativeScript"))
+{
+	ECS::NativeScriptComponent component;
+	deserializeNativeScriptComponent(componentsJson.at("NativeScript"), component);
+	m_ecs->addComponent<ECS::NativeScriptComponent>(entity, component);
+}
 			}
 		}
 
@@ -911,6 +930,10 @@ json EngineLevel::serializeEcsEntities() const
 if (const auto* component = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
 {
 	componentsJson["ParticleEmitter"] = serializeParticleEmitterComponent(*component);
+}
+if (const auto* component = ecs.getComponent<ECS::NativeScriptComponent>(entity))
+{
+	componentsJson["NativeScript"] = serializeNativeScriptComponent(*component);
 }
 
 		entityJson["components"] = componentsJson;

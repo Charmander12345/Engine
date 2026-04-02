@@ -52,6 +52,7 @@ PyObject* CreateParticleModule();
 PyObject* CreateDiagnosticsModule();
 PyObject* CreateLoggingModule();
 PyObject* CreateUIModule();
+PyObject* CreateGlobalStateModule();
 #if ENGINE_EDITOR
 PyObject* CreateEditorModule();
 #endif

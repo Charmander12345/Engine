@@ -78,5 +78,9 @@ if(WIN32)
 endif()
 
 # Register with CTest so `ctest` discovers the tests.
+# Use PRE_TEST discovery so the test executable is only run at ctest time
+# (not at build time, where missing DLLs cause a timeout).
 include(GoogleTest)
-gtest_discover_tests(EngineTests)
+gtest_discover_tests(EngineTests
+    DISCOVERY_MODE PRE_TEST
+)

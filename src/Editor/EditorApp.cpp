@@ -20,7 +20,7 @@
 #include "../Core/EngineLevel.h"
 #include "../Core/ShortcutManager.h"
 #include "../Physics/PhysicsWorld.h"
-#include "../Scripting/PythonScripting.h"
+#include "../Scripting/Python/PythonScripting.h"
 #include <filesystem>
 #include <algorithm>
 #include <cmath>

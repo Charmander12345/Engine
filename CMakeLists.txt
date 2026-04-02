@@ -44,8 +44,8 @@ if (MSVC)
     set(CMAKE_VS_PLATFORM_NAME "x64" CACHE STRING "" FORCE)
 
     if (CMAKE_CONFIGURATION_TYPES)
-        set(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO} /PROFILE")
-        set(CMAKE_EXE_LINKER_FLAGS_DEBUG "${CMAKE_EXE_LINKER_FLAGS_DEBUG} /PROFILE")
+        set(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO} /PROFILE /INCREMENTAL:NO")
+        set(CMAKE_EXE_LINKER_FLAGS_DEBUG "${CMAKE_EXE_LINKER_FLAGS_DEBUG} /PROFILE /INCREMENTAL:NO")
     endif()
 endif()
 
@@ -350,11 +350,8 @@ if(ENGINE_BUILD_RUNTIME)
                     "/DELAYLOAD:$<TARGET_FILE_NAME:${_t}>")
             endif()
         endforeach()
-        # Python DLL (name varies by version)
-        if(Python3_RUNTIME_LIBRARY_RELEASE)
-            get_filename_component(_py_dll_name "${Python3_RUNTIME_LIBRARY_RELEASE}" NAME)
-            target_link_options(HorizonEngineRuntime PRIVATE "/DELAYLOAD:${_py_dll_name}")
-        endif()
+        # NOTE: Python DELAYLOAD intentionally omitted – HorizonEngineRuntime
+        # has no direct python imports; Python is loaded by ScriptingRuntime.dll.
         target_link_libraries(HorizonEngineRuntime PRIVATE delayimp)
     endif()
 endif()
@@ -450,7 +447,7 @@ add_custom_command(TARGET HorizonEngine POST_BUILD
 
     # Copy static engine.pyi type stub to deploy directory for project distribution
     COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/Content/Scripting"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/src/Scripting/engine.pyi" "${ENGINE_DEPLOY_DIR}/Content/Scripting/engine.pyi"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/src/Scripting/Python/engine.pyi" "${ENGINE_DEPLOY_DIR}/Content/Scripting/engine.pyi"
 
     # Copy tools/ bootstrap scripts to deploy directory so the editor can
     # locate and execute them at runtime (next to the exe, no ENGINE_SOURCE_DIR needed).

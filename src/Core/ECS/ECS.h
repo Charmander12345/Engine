@@ -16,7 +16,7 @@ struct ECSConfig
 };
 
 using Entity = unsigned int;
-static constexpr size_t MaxComponentTypes = 13;
+static constexpr size_t MaxComponentTypes = 14;
 
 enum class ComponentKind : size_t
 {
@@ -32,7 +32,8 @@ enum class ComponentKind : size_t
 	HeightField,
 	Lod,
 	Animation,
-	ParticleEmitter
+	ParticleEmitter,
+	NativeScript
 };
 
 template<typename T>
@@ -114,6 +115,12 @@ template<>
 struct ComponentTraits<ParticleEmitterComponent>
 {
 	static constexpr ComponentKind kind = ComponentKind::ParticleEmitter;
+};
+
+template<>
+struct ComponentTraits<NativeScriptComponent>
+{
+	static constexpr ComponentKind kind = ComponentKind::NativeScript;
 };
 
 class Schema
@@ -220,6 +227,7 @@ public:
 	SparseSet<LodComponent, MaxEntities> m_lodComponents;
 	SparseSet<AnimationComponent, MaxEntities> m_animationComponents;
 	SparseSet<ParticleEmitterComponent, MaxEntities> m_particleEmitterComponents;
+	SparseSet<NativeScriptComponent, MaxEntities> m_nativeScriptComponents;
 
 	template<typename T>
 	SparseSet<T, MaxEntities>& getStorage();
@@ -341,10 +349,14 @@ inline SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage()
 	{
 		return m_animationComponents;
 	}
+	else if constexpr (std::is_same_v<T, ParticleEmitterComponent>)
+	{
+		return m_particleEmitterComponents;
+	}
 	else
 	{
-		static_assert(std::is_same_v<T, ParticleEmitterComponent>, "Unsupported component type");
-		return m_particleEmitterComponents;
+		static_assert(std::is_same_v<T, NativeScriptComponent>, "Unsupported component type");
+		return m_nativeScriptComponents;
 	}
 }
 
@@ -399,10 +411,14 @@ inline const SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage() con
 	{
 		return m_animationComponents;
 	}
+	else if constexpr (std::is_same_v<T, ParticleEmitterComponent>)
+	{
+		return m_particleEmitterComponents;
+	}
 	else
 	{
-		static_assert(std::is_same_v<T, ParticleEmitterComponent>, "Unsupported component type");
-		return m_particleEmitterComponents;
+		static_assert(std::is_same_v<T, NativeScriptComponent>, "Unsupported component type");
+		return m_nativeScriptComponents;
 	}
 }
 

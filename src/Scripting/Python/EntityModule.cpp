@@ -50,6 +50,8 @@ namespace
             return ECS::addComponent<ECS::NameComponent>(entity);
         case ECS::ComponentKind::ParticleEmitter:
             return ECS::addComponent<ECS::ParticleEmitterComponent>(entity);
+        case ECS::ComponentKind::NativeScript:
+            return ECS::addComponent<ECS::NativeScriptComponent>(entity);
         default:
             return false;
         }
@@ -79,6 +81,8 @@ namespace
             return ECS::removeComponent<ECS::NameComponent>(entity);
         case ECS::ComponentKind::ParticleEmitter:
             return ECS::removeComponent<ECS::ParticleEmitterComponent>(entity);
+        case ECS::ComponentKind::NativeScript:
+            return ECS::removeComponent<ECS::NativeScriptComponent>(entity);
         default:
             return false;
         }
@@ -117,6 +121,9 @@ namespace
             return true;
         case ECS::ComponentKind::ParticleEmitter:
             schema.require<ECS::ParticleEmitterComponent>();
+            return true;
+        case ECS::ComponentKind::NativeScript:
+            schema.require<ECS::NativeScriptComponent>();
             return true;
         default:
             return false;
