@@ -224,6 +224,25 @@ const char* DiagnosticsManager::rhiTypeToString(RHIType type)
     }
 }
 
+const char* DiagnosticsManager::scriptingModeToString(ScriptingMode mode)
+{
+    switch (mode)
+    {
+    case ScriptingMode::PythonOnly: return "PythonOnly";
+    case ScriptingMode::CppOnly:    return "CppOnly";
+    case ScriptingMode::Both:       return "Both";
+    default:                        return "Both";
+    }
+}
+
+DiagnosticsManager::ScriptingMode DiagnosticsManager::scriptingModeFromString(const std::string& value)
+{
+    if (value == "PythonOnly") return ScriptingMode::PythonOnly;
+    if (value == "CppOnly")    return ScriptingMode::CppOnly;
+    if (value == "Both")       return ScriptingMode::Both;
+    return ScriptingMode::Both;
+}
+
 const char* DiagnosticsManager::windowStateToString(WindowState state)
 {
     switch (state)

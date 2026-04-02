@@ -91,7 +91,7 @@ public:
 		ECS::CameraComponent camera{};
 		ECS::PhysicsComponent physics{};
 		ECS::CollisionComponent collision{};
-		ECS::ScriptComponent script{};
+		ECS::LogicComponent logic{};
 		ECS::NameComponent name{};
 		ECS::HeightFieldComponent heightField{};
 		ECS::AnimationComponent animation{};

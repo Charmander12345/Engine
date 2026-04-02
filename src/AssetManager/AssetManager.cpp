@@ -1917,6 +1917,10 @@ bool AssetManager::loadProject(const std::string& projectPath, SyncState syncSta
                 else if (value == "DirectX12") info.selectedRHI = DiagnosticsManager::RHIType::DirectX12;
                 else info.selectedRHI = DiagnosticsManager::RHIType::Unknown;
             }
+            else if (key == "ScriptingMode")
+            {
+                info.scriptingMode = DiagnosticsManager::scriptingModeFromString(value);
+            }
             else if (key == "Level")
             {
                 LevelPath = value;
@@ -2129,6 +2133,7 @@ bool AssetManager::saveProject(const std::string& projectPath, SyncState syncSta
     out << "EngineVersion=" << info.engineVersion << "\n";
     out << "Path=" << info.projectPath << "\n";
     out << "RHI=" << DiagnosticsManager::rhiTypeToString(info.selectedRHI) << "\n";
+    out << "ScriptingMode=" << DiagnosticsManager::scriptingModeToString(info.scriptingMode) << "\n";
     out << "Level=" << levelPathToSave << "\n";
 
     diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingProject, false);

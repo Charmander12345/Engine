@@ -26,14 +26,13 @@ enum class ComponentKind : size_t
 	Light,
 	Camera,
 	Physics,
-	Script,
+	Logic,
 	Name,
 	Collision,
 	HeightField,
 	Lod,
 	Animation,
-	ParticleEmitter,
-	NativeScript
+	ParticleEmitter
 };
 
 template<typename T>
@@ -76,9 +75,9 @@ struct ComponentTraits<PhysicsComponent>
 };
 
 template<>
-struct ComponentTraits<ScriptComponent>
+struct ComponentTraits<LogicComponent>
 {
-	static constexpr ComponentKind kind = ComponentKind::Script;
+	static constexpr ComponentKind kind = ComponentKind::Logic;
 };
 
 template<>
@@ -115,12 +114,6 @@ template<>
 struct ComponentTraits<ParticleEmitterComponent>
 {
 	static constexpr ComponentKind kind = ComponentKind::ParticleEmitter;
-};
-
-template<>
-struct ComponentTraits<NativeScriptComponent>
-{
-	static constexpr ComponentKind kind = ComponentKind::NativeScript;
 };
 
 class Schema
@@ -220,14 +213,13 @@ public:
 	SparseSet<LightComponent, MaxEntities> m_lightComponents;
 	SparseSet<CameraComponent, MaxEntities> m_cameraComponents;
 	SparseSet<PhysicsComponent, MaxEntities> m_physicsComponents;
-	SparseSet<ScriptComponent, MaxEntities> m_scriptComponents;
+	SparseSet<LogicComponent, MaxEntities> m_logicComponents;
 	SparseSet<NameComponent, MaxEntities> m_nameComponents;
 	SparseSet<CollisionComponent, MaxEntities> m_collisionComponents;
 	SparseSet<HeightFieldComponent, MaxEntities> m_heightFieldComponents;
 	SparseSet<LodComponent, MaxEntities> m_lodComponents;
 	SparseSet<AnimationComponent, MaxEntities> m_animationComponents;
 	SparseSet<ParticleEmitterComponent, MaxEntities> m_particleEmitterComponents;
-	SparseSet<NativeScriptComponent, MaxEntities> m_nativeScriptComponents;
 
 	template<typename T>
 	SparseSet<T, MaxEntities>& getStorage();
@@ -333,9 +325,9 @@ inline SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage()
 	{
 		return m_collisionComponents;
 	}
-	else if constexpr (std::is_same_v<T, ScriptComponent>)
+	else if constexpr (std::is_same_v<T, LogicComponent>)
 	{
-		return m_scriptComponents;
+		return m_logicComponents;
 	}
 	else if constexpr (std::is_same_v<T, HeightFieldComponent>)
 	{
@@ -355,8 +347,8 @@ inline SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage()
 	}
 	else
 	{
-		static_assert(std::is_same_v<T, NativeScriptComponent>, "Unsupported component type");
-		return m_nativeScriptComponents;
+		static_assert(std::is_same_v<T, ParticleEmitterComponent>, "Unsupported component type");
+		return m_particleEmitterComponents;
 	}
 }
 
@@ -395,9 +387,9 @@ inline const SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage() con
 	{
 		return m_collisionComponents;
 	}
-	else if constexpr (std::is_same_v<T, ScriptComponent>)
+	else if constexpr (std::is_same_v<T, LogicComponent>)
 	{
-		return m_scriptComponents;
+		return m_logicComponents;
 	}
 	else if constexpr (std::is_same_v<T, HeightFieldComponent>)
 	{
@@ -411,14 +403,10 @@ inline const SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage() con
 	{
 		return m_animationComponents;
 	}
-	else if constexpr (std::is_same_v<T, ParticleEmitterComponent>)
-	{
-		return m_particleEmitterComponents;
-	}
 	else
 	{
-		static_assert(std::is_same_v<T, NativeScriptComponent>, "Unsupported component type");
-		return m_nativeScriptComponents;
+		static_assert(std::is_same_v<T, ParticleEmitterComponent>, "Unsupported component type");
+		return m_particleEmitterComponents;
 	}
 }
 
@@ -494,9 +482,9 @@ inline bool ECSManager::setComponentAsset(Entity entity, const std::shared_ptr<A
 		component.materialAssetId = asset->getId();
 		return setComponent(entity, component);
 	}
-	else if constexpr (std::is_same_v<T, ScriptComponent>)
+	else if constexpr (std::is_same_v<T, LogicComponent>)
 	{
-		ScriptComponent component;
+		LogicComponent component;
 		component.scriptPath = asset->getPath();
 		component.scriptAssetId = asset->getId();
 		return setComponent(entity, component);

@@ -21,12 +21,27 @@
 #include "../Core/ShortcutManager.h"
 #include "../Physics/PhysicsWorld.h"
 #include "../Scripting/Python/PythonScripting.h"
+#include "../NativeScripting/NativeScriptManager.h"
 #include <filesystem>
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
 #include <fstream>
+#include <sstream>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <Windows.h>
+#ifdef ERROR
+#undef ERROR
+#endif
+#endif
 
 // Construction / Destruction
 EditorApp::EditorApp(IEditorBridge& bridge) : m_bridge(bridge) {}
@@ -105,6 +120,24 @@ void EditorApp::stopPIE()
 void EditorApp::startPIE()
 {
     if (m_bridge.isPIEActive()) return;
+
+    // Auto-build C++ game scripts before PIE when C++ scripting is enabled
+    {
+        const auto mode = DiagnosticsManager::Instance().getProjectInfo().scriptingMode;
+        if (mode == DiagnosticsManager::ScriptingMode::CppOnly ||
+            mode == DiagnosticsManager::ScriptingMode::Both)
+        {
+            if (!buildGameScriptsForPIE())
+            {
+                auto& uiMgr = m_bridge.getUIManager();
+                uiMgr.showToastMessage("C++ game scripts build failed.\nCheck the output log for details.", UIManager::kToastLong,
+                    UIManager::NotificationLevel::Error);
+                Logger::Instance().log(Logger::Category::Engine, "PIE: aborted – C++ game scripts build failed.", Logger::LogLevel::WARNING);
+                return;
+            }
+        }
+    }
+
     Renderer* renderer = m_bridge.getRenderer();
     m_bridge.snapshotEcsState();
     m_bridge.initializePhysicsForPIE();
@@ -128,6 +161,256 @@ void EditorApp::startPIE()
     if (auto* el = uiMgr.findElementById("ViewportOverlay.PIE")) el->textureId = m_stopTexId;
     uiMgr.markAllWidgetsDirty();
     Logger::Instance().log(Logger::Category::Engine, "PIE: started.", Logger::LogLevel::INFO);
+}
+
+// ── Pre-PIE C++ Game Scripts Build ─────────────────────────────────────
+bool EditorApp::buildGameScriptsForPIE()
+{
+    namespace fs = std::filesystem;
+    auto& logger = Logger::Instance();
+    auto& uiMgr = m_bridge.getUIManager();
+
+    // Verify CMake + toolchain
+    if (!uiMgr.isCMakeAvailable())
+    {
+        logger.log(Logger::Category::Engine,
+            "PIE build: CMake not available – skipping C++ game scripts build.", Logger::LogLevel::WARNING);
+        return true; // non-fatal: allow PIE without C++ scripts
+    }
+    if (!uiMgr.isBuildToolchainAvailable())
+    {
+        logger.log(Logger::Category::Engine,
+            "PIE build: C++ toolchain not available – skipping C++ game scripts build.", Logger::LogLevel::WARNING);
+        return true;
+    }
+
+    const std::string projectPath = DiagnosticsManager::Instance().getProjectInfo().projectPath;
+    if (projectPath.empty()) return true;
+
+    const fs::path nativeDir = fs::path(projectPath) / "Content" / "Scripts" / "Native";
+    if (!fs::exists(nativeDir) || !fs::is_directory(nativeDir)) return true;
+
+    // Check if there are any .cpp source files to compile
+    bool hasCppFiles = false;
+    for (const auto& entry : fs::directory_iterator(nativeDir))
+    {
+        if (entry.is_regular_file() && entry.path().extension() == ".cpp")
+        {
+            hasCppFiles = true;
+            break;
+        }
+    }
+    if (!hasCppFiles) return true;
+
+    logger.log(Logger::Category::Engine, "PIE build: compiling C++ game scripts...", Logger::LogLevel::INFO);
+    uiMgr.showToastMessage("Building C++ game scripts...", UIManager::kToastShort);
+
+    const std::string cmakePath    = uiMgr.getCMakePath();
+    const std::string engineSrcDir = ENGINE_SOURCE_DIR;
+    const fs::path buildDir  = fs::path(projectPath) / "Binary" / "GameScripts";
+    const fs::path outputDir = fs::path(projectPath) / "Engine";
+
+    // Ensure directories exist
+    {
+        std::error_code ec;
+        fs::create_directories(buildDir, ec);
+        fs::create_directories(outputDir, ec);
+    }
+
+    // ── Generate CMakeLists.txt if missing or out-of-date ──────────────
+    {
+        const fs::path cmakeListsPath = nativeDir / "CMakeLists.txt";
+
+        // Find the editor's Scripting import library path.
+        // The editor binary (and its DLLs) live next to the exe.
+        const char* bp = SDL_GetBasePath();
+        const std::string editorBinDir = bp ? std::string(bp) : fs::current_path().string();
+
+        std::ostringstream cmake;
+        cmake << "cmake_minimum_required(VERSION 3.12)\n";
+        cmake << "project(GameScripts LANGUAGES CXX)\n\n";
+        cmake << "set(CMAKE_CXX_STANDARD 20)\n";
+        cmake << "set(CMAKE_CXX_STANDARD_REQUIRED ON)\n";
+        cmake << "set(CMAKE_CXX_EXTENSIONS OFF)\n\n";
+        cmake << "if(MSVC)\n";
+        cmake << "    set(CMAKE_MSVC_RUNTIME_LIBRARY \"MultiThreaded$<$<CONFIG:Debug>:Debug>DLL\")\n";
+        cmake << "endif()\n\n";
+        cmake << "file(GLOB GAME_SOURCES \"${CMAKE_CURRENT_SOURCE_DIR}/*.cpp\")\n";
+        cmake << "file(GLOB GAME_HEADERS \"${CMAKE_CURRENT_SOURCE_DIR}/*.h\")\n\n";
+        cmake << "add_library(GameScripts SHARED ${GAME_SOURCES} ${GAME_HEADERS})\n\n";
+        cmake << "# Engine NativeScripting API headers (deployed alongside editor)\n";
+        cmake << "target_include_directories(GameScripts PRIVATE\n";
+        cmake << "    \"" << (fs::path(editorBinDir) / "Tools" / "include" / "NativeScripting").generic_string() << "\"\n";
+        cmake << ")\n\n";
+        cmake << "# Link against the editor's Scripting import library for GameplayAPI / NativeScriptRegistry\n";
+        cmake << "target_link_directories(GameScripts PRIVATE\n";
+        cmake << "    \"" << (fs::path(editorBinDir) / "Tools" / "lib").generic_string() << "\"\n";
+        cmake << ")\n";
+        cmake << "target_link_libraries(GameScripts PRIVATE Scripting)\n\n";
+        cmake << "# Copy DLL to project Engine/ directory after build\n";
+        cmake << "add_custom_command(TARGET GameScripts POST_BUILD\n";
+        cmake << "    COMMAND ${CMAKE_COMMAND} -E copy_if_different\n";
+        cmake << "        $<TARGET_FILE:GameScripts>\n";
+        cmake << "        \"" << outputDir.generic_string() << "/GameScripts.dll\"\n";
+        cmake << ")\n";
+
+        // Always overwrite – the template references engine paths that may change
+        std::ofstream out(cmakeListsPath, std::ios::out | std::ios::trunc);
+        if (out.is_open())
+        {
+            out << cmake.str();
+        }
+    }
+
+    // ── Helper: run a command synchronously and capture output ──────────
+#if defined(_WIN32)
+    auto runCmd = [&](const std::string& cmd) -> int
+    {
+        logger.log(Logger::Category::Engine, "PIE build > " + cmd, Logger::LogLevel::INFO);
+
+        SECURITY_ATTRIBUTES sa{};
+        sa.nLength = sizeof(sa);
+        sa.bInheritHandle = TRUE;
+
+        HANDLE hReadPipe = nullptr, hWritePipe = nullptr;
+        if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0))
+            return -1;
+        SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
+
+        STARTUPINFOA si{};
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESTDHANDLES;
+        si.hStdOutput = hWritePipe;
+        si.hStdError  = hWritePipe;
+
+        PROCESS_INFORMATION pi{};
+        std::string cmdLine = cmd;
+        BOOL created = CreateProcessA(
+            nullptr, cmdLine.data(), nullptr, nullptr, TRUE,
+            CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+        CloseHandle(hWritePipe);
+
+        if (!created)
+        {
+            CloseHandle(hReadPipe);
+            logger.log(Logger::Category::Engine, "PIE build: failed to launch process.", Logger::LogLevel::WARNING);
+            return -1;
+        }
+
+        char buf[4096];
+        DWORD bytesRead = 0;
+        std::string lineBuffer;
+        while (ReadFile(hReadPipe, buf, sizeof(buf) - 1, &bytesRead, nullptr) && bytesRead > 0)
+        {
+            buf[bytesRead] = '\0';
+            lineBuffer += buf;
+            size_t pos;
+            while ((pos = lineBuffer.find('\n')) != std::string::npos)
+            {
+                std::string line = lineBuffer.substr(0, pos);
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+                logger.log(Logger::Category::Engine, "  " + line, Logger::LogLevel::INFO);
+                lineBuffer.erase(0, pos + 1);
+            }
+        }
+        if (!lineBuffer.empty())
+            logger.log(Logger::Category::Engine, "  " + lineBuffer, Logger::LogLevel::INFO);
+
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        DWORD exitCode = 0;
+        GetExitCodeProcess(pi.hProcess, &exitCode);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        CloseHandle(hReadPipe);
+        return static_cast<int>(exitCode);
+    };
+#else
+    auto runCmd = [&](const std::string& cmd) -> int
+    {
+        logger.log(Logger::Category::Engine, "PIE build > " + cmd, Logger::LogLevel::INFO);
+        std::string fullCmd = cmd + " 2>&1";
+        FILE* pipe = popen(fullCmd.c_str(), "r");
+        if (!pipe) return -1;
+        char buf[4096];
+        while (fgets(buf, sizeof(buf), pipe))
+        {
+            std::string line = buf;
+            while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+                line.pop_back();
+            logger.log(Logger::Category::Engine, "  " + line, Logger::LogLevel::INFO);
+        }
+        return pclose(pipe);
+    };
+#endif
+
+    // ── CMake configure ────────────────────────────────────────────────
+    {
+        std::string configureCmd = "\"" + cmakePath + "\"";
+        configureCmd += " -S \"" + nativeDir.string() + "\"";
+        configureCmd += " -B \"" + buildDir.string() + "\"";
+        // Do not pass -G: let cmake auto-detect the appropriate generator
+        // for whatever toolchain is available on the system.
+
+        int ret = runCmd(configureCmd);
+        if (ret != 0)
+        {
+            logger.log(Logger::Category::Engine,
+                "PIE build: CMake configure failed (exit code " + std::to_string(ret) + ").",
+                Logger::LogLevel::WARNING);
+            return false;
+        }
+    }
+
+    // ── CMake build (only GameScripts target, not the engine) ──────────
+    {
+        std::string buildCmd = "\"" + cmakePath + "\"";
+        buildCmd += " --build \"" + buildDir.string() + "\"";
+        buildCmd += " --target GameScripts";
+        buildCmd += " --config RelWithDebInfo";
+
+        int ret = runCmd(buildCmd);
+        if (ret != 0)
+        {
+            logger.log(Logger::Category::Engine,
+                "PIE build: CMake build failed (exit code " + std::to_string(ret) + ").",
+                Logger::LogLevel::WARNING);
+            return false;
+        }
+    }
+
+    // ── Load / reload the built DLL ────────────────────────────────────
+    const fs::path dllPath = outputDir / "GameScripts.dll";
+    if (fs::exists(dllPath))
+    {
+        auto& nsm = NativeScriptManager::Instance();
+        if (nsm.isDLLLoaded())
+        {
+            nsm.shutdownScripts();
+            nsm.unloadGameplayDLL();
+        }
+        if (nsm.loadGameplayDLL(dllPath.string()))
+        {
+            nsm.initializeScripts();
+            logger.log(Logger::Category::Engine,
+                "PIE build: GameScripts.dll loaded successfully.", Logger::LogLevel::INFO);
+        }
+        else
+        {
+            logger.log(Logger::Category::Engine,
+                "PIE build: failed to load GameScripts.dll.", Logger::LogLevel::WARNING);
+            return false;
+        }
+    }
+    else
+    {
+        logger.log(Logger::Category::Engine,
+            "PIE build: GameScripts.dll not found after build.", Logger::LogLevel::WARNING);
+        return false;
+    }
+
+    uiMgr.showToastMessage("C++ game scripts built successfully.", UIManager::kToastShort,
+        UIManager::NotificationLevel::Success);
+    return true;
 }
 
 // Widget Registration
@@ -512,11 +795,15 @@ void EditorApp::registerDragDropHandlers()
             Vec3 sp{0,0,0}; if (!renderer->screenToWorldPos((int)screenPos.x,(int)screenPos.y,sp)){const Vec3 cp=renderer->getCameraPosition();const Vec2 cr=renderer->getCameraRotationDegrees();float y=cr.x*3.14159265f/180.f,p=cr.y*3.14159265f/180.f;sp.x=cp.x+cosf(y)*cosf(p)*5.f;sp.y=cp.y+sinf(p)*5.f;sp.z=cp.z+sinf(y)*cosf(p)*5.f;}
             renderer->getUIManager().spawnPrefabAtPosition(relPath,sp); return; }
 
+        if (assetType == AssetType::Entity) {
+            Vec3 sp{0,0,0}; if (!renderer->screenToWorldPos((int)screenPos.x,(int)screenPos.y,sp)){const Vec3 cp=renderer->getCameraPosition();const Vec2 cr=renderer->getCameraRotationDegrees();float y=cr.x*3.14159265f/180.f,p=cr.y*3.14159265f/180.f;sp.x=cp.x+cosf(y)*cosf(p)*5.f;sp.y=cp.y+sinf(p)*5.f;sp.z=cp.z+sinf(y)*cosf(p)*5.f;}
+            renderer->getUIManager().spawnEntityAssetAtPosition(relPath,sp); return; }
+
         if (assetType != AssetType::Model3D) {
             if (targetEntity!=0) {
                 switch(assetType){
                 case AssetType::Material: case AssetType::Texture: {ECS::MaterialComponent mc{};mc.materialAssetPath=relPath;if(ecs.hasComponent<ECS::MaterialComponent>(target))ecs.setComponent<ECS::MaterialComponent>(target,mc);else ecs.addComponent<ECS::MaterialComponent>(target,mc);break;}
-                case AssetType::Script: {ECS::ScriptComponent sc{};sc.scriptPath=relPath;if(ecs.hasComponent<ECS::ScriptComponent>(target))ecs.setComponent<ECS::ScriptComponent>(target,sc);else ecs.addComponent<ECS::ScriptComponent>(target,sc);break;}
+                case AssetType::Script: {ECS::LogicComponent sc{};sc.scriptPath=relPath;if(ecs.hasComponent<ECS::LogicComponent>(target))ecs.setComponent<ECS::LogicComponent>(target,sc);else ecs.addComponent<ECS::LogicComponent>(target,sc);break;}
                 default:break;}
                 diagnostics.invalidateEntity(targetEntity);auto*level=diagnostics.getActiveLevelSoft();if(level)level->setIsSaved(false);
                 renderer->getUIManager().selectEntity(targetEntity);renderer->getUIManager().showToastMessage("Applied "+assetName+" \xe2\x86\x92 Entity "+std::to_string(targetEntity),UIManager::kToastMedium);
@@ -543,7 +830,7 @@ void EditorApp::registerDragDropHandlers()
         auto spL=ecs.hasComponent<ECS::LightComponent>(entity)?std::make_optional(*ecs.getComponent<ECS::LightComponent>(entity)):std::nullopt;
         auto spC=ecs.hasComponent<ECS::CameraComponent>(entity)?std::make_optional(*ecs.getComponent<ECS::CameraComponent>(entity)):std::nullopt;
         auto spP=ecs.hasComponent<ECS::PhysicsComponent>(entity)?std::make_optional(*ecs.getComponent<ECS::PhysicsComponent>(entity)):std::nullopt;
-        auto spS=ecs.hasComponent<ECS::ScriptComponent>(entity)?std::make_optional(*ecs.getComponent<ECS::ScriptComponent>(entity)):std::nullopt;
+        auto spS=ecs.hasComponent<ECS::LogicComponent>(entity)?std::make_optional(*ecs.getComponent<ECS::LogicComponent>(entity)):std::nullopt;
         auto spCo=ecs.hasComponent<ECS::CollisionComponent>(entity)?std::make_optional(*ecs.getComponent<ECS::CollisionComponent>(entity)):std::nullopt;
         auto spH=ecs.hasComponent<ECS::HeightFieldComponent>(entity)?std::make_optional(*ecs.getComponent<ECS::HeightFieldComponent>(entity)):std::nullopt;
 
@@ -552,7 +839,7 @@ void EditorApp::registerDragDropHandlers()
             if(spT)e.addComponent<ECS::TransformComponent>(entity,*spT);if(spN)e.addComponent<ECS::NameComponent>(entity,*spN);
             if(spM)e.addComponent<ECS::MeshComponent>(entity,*spM);if(spMa)e.addComponent<ECS::MaterialComponent>(entity,*spMa);
             if(spL)e.addComponent<ECS::LightComponent>(entity,*spL);if(spC)e.addComponent<ECS::CameraComponent>(entity,*spC);
-            if(spP)e.addComponent<ECS::PhysicsComponent>(entity,*spP);if(spS)e.addComponent<ECS::ScriptComponent>(entity,*spS);
+            if(spP)e.addComponent<ECS::PhysicsComponent>(entity,*spP);if(spS)e.addComponent<ECS::LogicComponent>(entity,*spS);
             if(spCo)e.addComponent<ECS::CollisionComponent>(entity,*spCo);if(spH)e.addComponent<ECS::HeightFieldComponent>(entity,*spH);
             auto*lvl=DiagnosticsManager::Instance().getActiveLevelSoft();if(lvl)lvl->onEntityAdded(entity);};
         spawnCmd.undo=[entity](){auto&e=ECS::ECSManager::Instance();auto*lvl=DiagnosticsManager::Instance().getActiveLevelSoft();if(lvl)lvl->onEntityRemoved(entity);e.removeEntity(entity);};
@@ -579,7 +866,7 @@ void EditorApp::registerDragDropHandlers()
             {auto meshAsset=AssetManager::Instance().getLoadedAssetByPath(relPath);if(!meshAsset){int id=AssetManager::Instance().loadAsset(relPath,AssetType::Model3D);if(id>0)meshAsset=AssetManager::Instance().getLoadedAssetByID((unsigned int)id);}
              if(meshAsset){auto&ad=meshAsset->getData();if(ad.contains("m_materialAssetPaths")&&ad["m_materialAssetPaths"].is_array()&&!ad["m_materialAssetPaths"].empty()){std::string mp=ad["m_materialAssetPaths"][0].get<std::string>();if(!mp.empty()){ECS::MaterialComponent mc{};mc.materialAssetPath=mp;if(ecs.hasComponent<ECS::MaterialComponent>(entity))ecs.setComponent<ECS::MaterialComponent>(entity,mc);else ecs.addComponent<ECS::MaterialComponent>(entity,mc);}}}}
             break;}
-        case AssetType::Script:{ECS::ScriptComponent sc{};sc.scriptPath=relPath;if(ecs.hasComponent<ECS::ScriptComponent>(entity))ecs.setComponent<ECS::ScriptComponent>(entity,sc);else ecs.addComponent<ECS::ScriptComponent>(entity,sc);break;}
+        case AssetType::Script:{ECS::LogicComponent sc{};sc.scriptPath=relPath;if(ecs.hasComponent<ECS::LogicComponent>(entity))ecs.setComponent<ECS::LogicComponent>(entity,sc);else ecs.addComponent<ECS::LogicComponent>(entity,sc);break;}
         default:break;}
         DiagnosticsManager::Instance().invalidateEntity(entityId);auto*level=DiagnosticsManager::Instance().getActiveLevelSoft();if(level)level->setIsSaved(false);
         renderer->getUIManager().showToastMessage("Applied "+assetName+" \xe2\x86\x92 Entity "+std::to_string(entityId),UIManager::kToastMedium);
@@ -862,7 +1149,7 @@ bool EditorApp::handleDelete()
         std::optional<ECS::LightComponent>           light;
         std::optional<ECS::CameraComponent>          camera;
         std::optional<ECS::PhysicsComponent>         physics;
-        std::optional<ECS::ScriptComponent>          script;
+        std::optional<ECS::LogicComponent>           logic;
         std::optional<ECS::CollisionComponent>       collision;
         std::optional<ECS::HeightFieldComponent>     heightField;
     };
@@ -888,7 +1175,7 @@ bool EditorApp::handleDelete()
         snap.light       = ecs.hasComponent<ECS::LightComponent>(entity)       ? std::make_optional(*ecs.getComponent<ECS::LightComponent>(entity))       : std::nullopt;
         snap.camera      = ecs.hasComponent<ECS::CameraComponent>(entity)      ? std::make_optional(*ecs.getComponent<ECS::CameraComponent>(entity))      : std::nullopt;
         snap.physics     = ecs.hasComponent<ECS::PhysicsComponent>(entity)     ? std::make_optional(*ecs.getComponent<ECS::PhysicsComponent>(entity))     : std::nullopt;
-        snap.script      = ecs.hasComponent<ECS::ScriptComponent>(entity)      ? std::make_optional(*ecs.getComponent<ECS::ScriptComponent>(entity))      : std::nullopt;
+        snap.logic       = ecs.hasComponent<ECS::LogicComponent>(entity)       ? std::make_optional(*ecs.getComponent<ECS::LogicComponent>(entity))       : std::nullopt;
         snap.collision   = ecs.hasComponent<ECS::CollisionComponent>(entity)   ? std::make_optional(*ecs.getComponent<ECS::CollisionComponent>(entity))   : std::nullopt;
         snap.heightField = ecs.hasComponent<ECS::HeightFieldComponent>(entity) ? std::make_optional(*ecs.getComponent<ECS::HeightFieldComponent>(entity)) : std::nullopt;
         snapshots.push_back(std::move(snap));
@@ -943,7 +1230,7 @@ bool EditorApp::handleDelete()
                 if (snap.light)       e.addComponent<ECS::LightComponent>(snap.entity, *snap.light);
                 if (snap.camera)      e.addComponent<ECS::CameraComponent>(snap.entity, *snap.camera);
                 if (snap.physics)     e.addComponent<ECS::PhysicsComponent>(snap.entity, *snap.physics);
-                if (snap.script)      e.addComponent<ECS::ScriptComponent>(snap.entity, *snap.script);
+                if (snap.logic)       e.addComponent<ECS::LogicComponent>(snap.entity, *snap.logic);
                 if (snap.collision)   e.addComponent<ECS::CollisionComponent>(snap.entity, *snap.collision);
                 if (snap.heightField) e.addComponent<ECS::HeightFieldComponent>(snap.entity, *snap.heightField);
                 if (lvl) lvl->onEntityAdded(snap.entity);

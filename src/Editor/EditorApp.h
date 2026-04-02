@@ -95,6 +95,7 @@ private:
     void registerDragDropHandlers();
     void registerBuildPipeline();
     void startPIE();
+    bool buildGameScriptsForPIE();
     bool handleDelete();
 
     IEditorBridge& m_bridge;

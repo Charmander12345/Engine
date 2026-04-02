@@ -24,7 +24,7 @@ namespace ECS
 		m_lightComponents.clear();
 		m_cameraComponents.clear();
 		m_physicsComponents.clear();
-		m_scriptComponents.clear();
+		m_logicComponents.clear();
 		m_nameComponents.clear();
 		m_collisionComponents.clear();
 		m_heightFieldComponents.clear();
@@ -79,7 +79,7 @@ namespace ECS
 		removeComponent<LightComponent>(entity);
 		removeComponent<CameraComponent>(entity);
 		removeComponent<PhysicsComponent>(entity);
-		removeComponent<ScriptComponent>(entity);
+		removeComponent<LogicComponent>(entity);
 		removeComponent<NameComponent>(entity);
 		removeComponent<CollisionComponent>(entity);
 		removeComponent<HeightFieldComponent>(entity);

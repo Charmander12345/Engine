@@ -113,9 +113,10 @@ namespace ECS
 		float angularVelocity[3]{ 0.0f, 0.0f, 0.0f };
 	};
 
-	struct ScriptComponent
+	struct LogicComponent
 	{
-		std::string scriptPath; // Path to the script file
+		std::string scriptPath;      // Python script path (empty if not used)
+		std::string nativeClassName; // C++ native script class name (empty if not used)
 		unsigned int scriptAssetId{ 0 };
 	};
 
@@ -184,9 +185,4 @@ namespace ECS
 		bool  loop{ true };                ///< Restart emission when all particles dead
 	};
 
-	/// C++ native script – references a registered class name from a gameplay DLL.
-	struct NativeScriptComponent
-	{
-		std::string className;
-	};
-}
+	}

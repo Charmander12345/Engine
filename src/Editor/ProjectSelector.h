@@ -21,6 +21,7 @@ struct ProjectSelection
     bool        setAsDefault{ false };
     bool        includeDefaultContent{ true };
     DiagnosticsManager::RHIType rhi{ DiagnosticsManager::RHIType::OpenGL };
+    DiagnosticsManager::ScriptingMode scriptingMode{ DiagnosticsManager::ScriptingMode::Both };
     bool        chosen{ false };
     bool        cancelled{ false };
 };

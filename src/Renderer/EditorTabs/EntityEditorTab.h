@@ -3,6 +3,7 @@
 #include "IEditorTab.h"
 #include <string>
 #include <memory>
+#include <vector>
 #include "../../AssetManager/json.hpp"
 
 class UIManager;
@@ -11,9 +12,9 @@ struct WidgetElement;
 class AssetData;
 
 /// Editor tab: Entity Asset Editor.
-/// Allows editing an entity template asset — adding/removing components,
-/// editing properties (transform, mesh, material, physics, script, etc.),
-/// and saving the result as a reusable .asset file.
+/// Split layout: component list on the left, detail properties on the right.
+/// Asset-referencing properties (mesh, material, script, texture) use dropdowns
+/// populated from the project's asset registry.
 class EntityEditorTab final : public IEditorTab
 {
 public:
@@ -27,6 +28,7 @@ public:
         bool        isOpen{ false };
         bool        isDirty{ false };
         float       refreshTimer{ 0.0f };
+        std::string selectedComponent;  // currently selected component key (e.g. "Transform")
     };
 
     explicit EntityEditorTab(UIManager* uiManager, Renderer* renderer);
@@ -41,7 +43,7 @@ public:
     /// Open for a specific entity asset path (content-relative).
     void open(const std::string& assetPath);
 
-    /// Rebuild the component list UI.
+    /// Rebuild both panels.
     void refresh();
 
     /// Save the entity asset to disk.
@@ -51,24 +53,32 @@ public:
     const State& getState() const { return m_state; }
 
 private:
+    // ── Layout builders ──────────────────────────────────────────────
     void buildToolbar(WidgetElement& root);
-    void buildComponentList(WidgetElement& root);
-    void buildAddComponentMenu(WidgetElement& root);
+    void buildComponentListPanel(WidgetElement& parent);
+    void buildDetailsPanel(WidgetElement& parent);
+    void buildAddComponentMenu(WidgetElement& parent);
 
-    void buildTransformSection(WidgetElement& parent);
-    void buildMeshSection(WidgetElement& parent);
-    void buildMaterialSection(WidgetElement& parent);
-    void buildLightSection(WidgetElement& parent);
-    void buildCameraSection(WidgetElement& parent);
-    void buildPhysicsSection(WidgetElement& parent);
-    void buildCollisionSection(WidgetElement& parent);
-    void buildScriptSection(WidgetElement& parent);
-    void buildNameSection(WidgetElement& parent);
-    void buildAnimationSection(WidgetElement& parent);
-    void buildParticleEmitterSection(WidgetElement& parent);
+    // ── Per-component detail builders ────────────────────────────────
+    void buildTransformDetails(WidgetElement& parent);
+    void buildMeshDetails(WidgetElement& parent);
+    void buildMaterialDetails(WidgetElement& parent);
+    void buildLightDetails(WidgetElement& parent);
+    void buildCameraDetails(WidgetElement& parent);
+    void buildPhysicsDetails(WidgetElement& parent);
+    void buildCollisionDetails(WidgetElement& parent);
+    void buildScriptDetails(WidgetElement& parent);
+    void buildNameDetails(WidgetElement& parent);
+    void buildAnimationDetails(WidgetElement& parent);
+    void buildParticleEmitterDetails(WidgetElement& parent);
 
+    // ── Helpers ──────────────────────────────────────────────────────
     void addComponent(const std::string& componentName);
     void removeComponent(const std::string& componentName);
+    void selectComponent(const std::string& componentName);
+
+    /// Collect asset paths of a given type from the registry for dropdown use.
+    std::vector<std::string> getAssetPathsByType(int assetType) const;
 
     UIManager* m_ui{ nullptr };
     Renderer*  m_renderer{ nullptr };

@@ -199,6 +199,7 @@ int main()
     bool chosenSetDefault = false;
     bool chosenIncludeDefaultContent = true;
     DiagnosticsManager::RHIType chosenRHI = DiagnosticsManager::RHIType::OpenGL;
+    DiagnosticsManager::ScriptingMode chosenScriptingMode = DiagnosticsManager::ScriptingMode::Both;
     bool projectChosen = false;
 
     // Runtime mode: use the executable directory as the project path
@@ -271,6 +272,7 @@ int main()
         chosenSetDefault            = selection.setAsDefault;
         chosenIncludeDefaultContent = selection.includeDefaultContent;
         chosenRHI                   = selection.rhi;
+        chosenScriptingMode         = selection.scriptingMode;
         projectChosen               = selection.chosen;
     }
 #endif // ENGINE_EDITOR
@@ -625,7 +627,7 @@ int main()
         const std::string parentDir = std::filesystem::path(chosenPath).parent_path().string();
         const std::string projName = std::filesystem::path(chosenPath).filename().string();
         logTimed(Logger::Category::Engine, "Creating new project: " + projName + " at " + parentDir, Logger::LogLevel::INFO);
-        if (assetManager.createProject(parentDir, projName, { projName, "1.0", "1.0", "", chosenRHI }, AssetManager::Sync, chosenIncludeDefaultContent))
+        if (assetManager.createProject(parentDir, projName, { projName, "1.0", "1.0", "", chosenRHI, chosenScriptingMode }, AssetManager::Sync, chosenIncludeDefaultContent))
         {
             projectLoaded = true;
         }

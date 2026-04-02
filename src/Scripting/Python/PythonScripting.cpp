@@ -715,12 +715,11 @@ namespace
         PyModule_AddIntConstant(module, "Component_Light", static_cast<int>(ECS::ComponentKind::Light));
         PyModule_AddIntConstant(module, "Component_Camera", static_cast<int>(ECS::ComponentKind::Camera));
         PyModule_AddIntConstant(module, "Component_Physics", static_cast<int>(ECS::ComponentKind::Physics));
-        PyModule_AddIntConstant(module, "Component_Script", static_cast<int>(ECS::ComponentKind::Script));
+        PyModule_AddIntConstant(module, "Component_Logic", static_cast<int>(ECS::ComponentKind::Logic));
         PyModule_AddIntConstant(module, "Component_Name", static_cast<int>(ECS::ComponentKind::Name));
         PyModule_AddIntConstant(module, "Component_Collision", static_cast<int>(ECS::ComponentKind::Collision));
         PyModule_AddIntConstant(module, "Component_Animation", static_cast<int>(ECS::ComponentKind::Animation));
         PyModule_AddIntConstant(module, "Component_ParticleEmitter", static_cast<int>(ECS::ComponentKind::ParticleEmitter));
-        PyModule_AddIntConstant(module, "Component_NativeScript", static_cast<int>(ECS::ComponentKind::NativeScript));
 
         PyModule_AddIntConstant(module, "Asset_Texture", static_cast<int>(AssetType::Texture));
         PyModule_AddIntConstant(module, "Asset_Material", static_cast<int>(AssetType::Material));
@@ -1102,7 +1101,7 @@ namespace Scripting
 
         for (const auto entity : entities)
         {
-            const auto* component = ECS::ECSManager::Instance().getComponent<ECS::ScriptComponent>(entity);
+            const auto* component = ECS::ECSManager::Instance().getComponent<ECS::LogicComponent>(entity);
             if (!component || component->scriptPath.empty())
             {
                 continue;
@@ -1156,7 +1155,7 @@ namespace Scripting
 
             auto dispatchOverlap = [&](ECS::Entity entity, ECS::Entity otherEntity, bool isBegin)
             {
-                const auto* sc = ECS::ECSManager::Instance().getComponent<ECS::ScriptComponent>(entity);
+                const auto* sc = ECS::ECSManager::Instance().getComponent<ECS::LogicComponent>(entity);
                 if (!sc || sc->scriptPath.empty()) return;
                 auto it = s_scripts.find(sc->scriptPath);
                 if (it == s_scripts.end() || !it->second.module) return;

@@ -5,6 +5,75 @@
 
 ---
 
+## Letzte Änderung (Engine-Lib-Deployment + Leichtgewichtiger Game Build)
+
+- ✅ `CMakeLists.txt (POST_BUILD)`: .lib-Import-Libraries aller Shared/Static-Targets nach `Tools/lib/` deployed (Scripting, Renderer, AssetManager, Core, Logger, Diagnostics, Physics, SDL3 + Runtime-Varianten + Landscape).
+- ✅ `CMakeLists.txt (Runtime-DLL-Deploy)`: Runtime-Varianten-DLLs (ScriptingRuntime.dll, RendererRuntime.dll, AssetManagerRuntime.dll) werden nach `Tools/lib/` deployed. `add_dependencies(HorizonEngine ...)` stellt sicher, dass Runtime-Targets beim Editor-Build mitgebaut werden.
+- ✅ `CMakeLists.txt (Header-Deploy)`: NativeScripting-Headers nach `Tools/include/NativeScripting/`, SDL3-Headers nach `Tools/include/SDL3/`.
+- ✅ `CMakeLists.txt (EngineConfig.cmake)`: Generierte Config-Datei mit Python/Engine-Pfaden in `Tools/`.
+- ✅ `EditorApp.cpp (GameScripts Fix)`: Link-Verzeichnis auf `Tools/lib/`, Include-Verzeichnis auf `Tools/include/NativeScripting/`. Behebt "kann Scripting.lib nicht öffnen" Fehler.
+- ✅ `BuildPipeline.cpp (Leichtgewichtiger Build)`: Erkennt vorgebaute Libs → generiert minimales CMakeLists.txt (nur main.cpp kompilieren + pre-built libs linken). Engine wird nicht neu kompiliert. Fallback auf vollständigen Build wenn Libs fehlen.
+- ✅ `BuildPipeline.cpp (DLL-Deploy)`: Leichtgewichtiger Modus kopiert (1) Shared-DLLs aus Editor-Root (Core.dll, SDL3.dll etc.) und (2) Runtime-Varianten-DLLs aus `Tools/lib/` (ScriptingRuntime.dll etc.) in das Game-Ausgabe-Verzeichnis.
+- ✅ Build erfolgreich.
+- **Geschwindigkeitsverbesserung**: Game Build überspringt cmake configure/build aller externen Dependencies (SDL, assimp, jolt, PhysX, freetype, OpenAL) und kompiliert nur main.cpp (~Sekunden statt Minuten).
+- **Fix**: Game-Exe stürzte sofort ab weil Runtime-DLLs (ScriptingRuntime.dll etc.) nicht im Deploy-Verzeichnis vorhanden waren — jetzt werden sie mit `add_dependencies` mitgebaut und nach `Tools/lib/` deployed.
+
+## Letzte Änderung (Auto-Build GameScripts.dll vor PIE)
+
+- ✅ `EditorApp::buildGameScriptsForPIE()`: Neue Methode (~180 Zeilen) kompiliert C++-Game-Scripts automatisch vor jedem PIE-Start.
+- ✅ `startPIE() Integration`: Prüft `ScriptingMode` (CppOnly/Both) und ruft `buildGameScriptsForPIE()` synchron auf. PIE wird bei Build-Fehlschlag mit Toast-Fehlermeldung abgebrochen.
+- ✅ `CMakeLists.txt-Generierung`: Automatisch generiert in `Content/Scripts/Native/` (C++20, SHARED GameScripts, linkt gegen Scripting-Import-Lib, POST_BUILD kopiert nach Engine/GameScripts.dll).
+- ✅ `CMake Auto-Detection`: Kein hardcoded `-G`-Generator — cmake erkennt automatisch den passenden Generator anhand der installierten Toolchain (behebt "could not create named generator" Fehler).
+- ✅ `Synchroner CMake-Build`: Configure + Build (`--target GameScripts --config RelWithDebInfo`) via CreateProcessA/CREATE_NO_WINDOW mit Pipe-Output ins Logger-System.
+- ✅ `DLL-Reload`: Lädt/reloaded GameScripts.dll via NativeScriptManager::loadGameplayDLL() + initializeScripts().
+- ✅ `Build-Cache`: Inkrementelle Builds in `<projectPath>/Binary/GameScripts/`.
+- ✅ `CMAKE_GENERATOR entfernt`: Compile-Define aus Editor/CMakeLists.txt und Root-CMakeLists.txt (HorizonEngine) entfernt. BuildPipeline ebenfalls auf Auto-Detection umgestellt.
+- ✅ Build erfolgreich.
+- **Nicht-fatal**: Wenn CMake/Toolchain nicht verfügbar, läuft PIE ohne C++-Scripts weiter.
+- **Engine wird nicht gebaut**: Nur Spieler-Code in Content/Scripts/Native/ wird kompiliert.
+- ✅ Build erfolgreich.
+- **Nicht-fatal**: Wenn CMake/Toolchain nicht verfügbar, läuft PIE ohne C++-Scripts weiter.
+- **Engine wird nicht gebaut**: Nur Spieler-Code in Content/Scripts/Native/ wird kompiliert.
+
+## Letzte Änderung (Default-Content ScriptingMode-Awareness + DefaultCubeScript entfernt)
+
+- ✅ `DefaultCubeScript.py entfernt`: Überflüssige Script-Generierung aus Beispielprojekt-Erstellung entfernt.
+- ✅ `DefaultCube1-5 ScriptingMode-aware`: Python-Skripte nur bei PythonOnly/Both, C++-Klassen (Scripts/Native/) nur bei CppOnly/Both generiert.
+- ✅ `Default-Level nutzt "Logic"-Key`: Entity-JSON mit `scriptPath`/`nativeClassName` statt altem `"Script"`-Key.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (Unified LogicComponent: Script + NativeScript zusammengeführt)
+
+- ✅ `LogicComponent (Components.h)`: `ScriptComponent` + `NativeScriptComponent` zu `LogicComponent` zusammengeführt (Felder: `scriptPath`, `nativeClassName`, `scriptAssetId`).
+- ✅ `ComponentKind::Logic (ECS.h)`: Ersetzt `Script` + `NativeScript`. Storage, getStorage (const/non-const), setComponentAsset, ComponentTraits aktualisiert.
+- ✅ `ECS.cpp`: initialize() und removeEntity() nutzen LogicComponent.
+- ✅ `EngineLevel.cpp/h`: Serialisierung/Deserialisierung mit Backward-Kompatibilität für alte "Script"/"NativeScript" JSON-Keys. EntitySnapshot aktualisiert.
+- ✅ `OutlinerPanel.cpp/h`: Logic-Sektion in Entity-Details. Auto-Erzeugung von Python-/C++-Template-Dateien beim Hinzufügen basierend auf ScriptingMode. Copy/Paste/Duplicate aktualisiert.
+- ✅ `EntityModule.cpp`: Alle 3 ComponentKind-Switches (Add/Remove/Require) nutzen LogicComponent.
+- ✅ `PythonScripting.cpp`: Entity-Loop, Overlap-Dispatch, Python-Konstante `Component_Logic` (ersetzt `Component_Script` + `Component_NativeScript`).
+- ✅ `NativeScriptManager.cpp`: Schema-Query und Komponentenzugriff über LogicComponent.nativeClassName.
+- ✅ `UIManagerEditor.cpp`: Prefab-Serialisierung/Deserialisierung mit Backward-Compat. Icon/Tint aktualisiert.
+- ✅ `AssetManagerFileOps.cpp`: Integrität, moveAsset, renameAsset, findAssetReferences aktualisiert.
+- ✅ `EditorApp.cpp`: Viewport-Drop, Spawn, Delete-Snapshots, Undo/Redo aktualisiert.
+- ✅ `ContentBrowserPanel.cpp`: Asset-Referenz-Sammlung aktualisiert.
+- ✅ `engine.pyi`: `Component_Logic` IntelliSense-Stub.
+- ✅ Build erfolgreich (Editor-Target).
+- **Backward-Kompatibilität**: Bestehende Level- und Prefab-Dateien mit alten "Script"/"NativeScript"-Keys werden automatisch migriert.
+
+## Letzte Änderung (ScriptingMode-Persistenz in Projektdatei)
+
+- ✅ `DiagnosticsManager.h/cpp`: `scriptingModeToString()` / `scriptingModeFromString()` Hilfsfunktionen.
+- ✅ `AssetManager.cpp`: `ScriptingMode=` wird in `.project`-Datei gespeichert und geladen.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (Editor-UI-Verbesserungen: Hover-Effekte, IDE-Empfehlung, Dialog-Buttons)
+
+- ✅ `Popup-Hover-Effekte`: `style.transitionDuration = 0.15f` an 4 Dialog-Stellen hinzugefügt.
+- ✅ `VS IDE-Empfehlungs-Popup`: Dialog bei C++/Both-Scripting mit Download-Link und "Do not show again"-Checkbox.
+- ✅ `Optionale Button-Labels`: `showConfirmDialog` / `showConfirmDialogWithCheckbox` mit optionalen `confirmLabel`/`cancelLabel`. Primary/Danger-Button-Styling.
+- ✅ `Cancel-Button-Fix`: IDE-Dialog Cancel erstellt Projekt nicht mehr.
+- ✅ Build erfolgreich.
+
 ## Letzte Änderung (C++ Native Scripting System: DLL-basiertes Gameplay-Scripting)
 
 - ✅ `INativeScript.h`: Basisklasse mit 5 Lifecycle-Events (onLoaded, tick, onBeginOverlap, onEndOverlap, onDestroy). Entity-ID über `getEntity()`.
@@ -38,6 +107,17 @@
 - ✅ `Build-Pipeline renummeriert`: 8 → 9 Schritte.
 - ✅ Build erfolgreich (Editor-Target).
 - **Download-URL**: `https://aka.ms/vs/17/release/vc_redist.x64.exe` (~24 MB, immer aktuellste VS 2015-2022+ Version).
+
+## Letzte Änderung (Entity Asset Drag & Drop: Spawn in Szene)
+
+- ✅ `Entity-Asset Viewport-Spawn (EditorApp.cpp)`: Entity-Assets werden beim Drag & Drop auf den Viewport als neue Entity in die Szene gespawnt (statt Anwenden auf bestehende Entities). Oberflächenerkennung via `screenToWorldPos()`, Fallback 5 Einheiten vor Kamera.
+- ✅ `UIManager::spawnEntityAssetAtPosition() (UIManagerEditor.cpp)`: Neue Methode — lädt Entity-Asset-JSON, nutzt `prefabDeserializeEntity()` für Komponenten-Deserialisierung mit Position-Override, Undo/Redo-fähig.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (Entity Editor Rework: Split-Layout + Asset-Dropdowns)
+
+- ✅ `EntityEditorTab Rework (EntityEditorTab.h/cpp)`: Komplette Überarbeitung — Split-Layout mit Komponentenliste links und Detail-Panel rechts. Klickbare Komponenten-Einträge mit Selektion-Highlighting. „+ Add Component" als kompakter `DropdownButtonWidget`. Asset-Properties (Mesh, Material, Script) nutzen jetzt Dropdowns aus dem AssetRegistry statt String-Eingabe. Neuer `selectedComponent`-State. Neue Hilfsmethode `getAssetPathsByType()`.
+- ✅ Build erfolgreich (Editor-Target).
 
 ## Letzte Änderung (Entity Asset Type: Neuer Asset-Typ mit dediziertem Editor-Tab)
 

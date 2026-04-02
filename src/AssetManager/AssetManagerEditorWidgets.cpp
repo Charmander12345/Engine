@@ -1449,41 +1449,92 @@ void AssetManager::ensureDefaultAssetsCreated()
 		ensureOnDisk(containerMatRel, AssetType::Material, mat);
 	}
 
-	const std::string defaultCubeScripts[] =
-    {
-        (fs::path("Scripts") / "DefaultCube1.py").generic_string(),
-        (fs::path("Scripts") / "DefaultCube2.py").generic_string(),
-        (fs::path("Scripts") / "DefaultCube3.py").generic_string(),
-        (fs::path("Scripts") / "DefaultCube4.py").generic_string(),
-        (fs::path("Scripts") / "DefaultCube5.py").generic_string()
-    };
-    for (const auto& scriptRel : defaultCubeScripts)
-    {
-        const fs::path absScript = contentRoot / fs::path(scriptRel);
-        if (fs::exists(absScript))
-        {
-            continue;
-        }
-        std::error_code ec;
-        fs::create_directories(absScript.parent_path(), ec);
-        std::ofstream out(absScript, std::ios::out | std::ios::trunc);
-        if (out.is_open())
-        {
-            out << "import engine\n\n";
-            out << "def onloaded(entity):\n";
-            out << "    pass\n\n";
-            out << "def tick(entity, dt):\n";
-            out << "    pass\n";
-            if (!out.good())
-            {
-                logger.log(Logger::Category::AssetManagement, "Failed to write default cube script.", Logger::LogLevel::ERROR);
-            }
-        }
-        else
-        {
-            logger.log(Logger::Category::AssetManagement, "Failed to open default cube script for writing.", Logger::LogLevel::ERROR);
-        }
-    }
+	const auto scriptingMode = diagnostics.getProjectInfo().scriptingMode;
+	const bool wantPython = (scriptingMode == DiagnosticsManager::ScriptingMode::PythonOnly || scriptingMode == DiagnosticsManager::ScriptingMode::Both);
+	const bool wantCpp    = (scriptingMode == DiagnosticsManager::ScriptingMode::CppOnly    || scriptingMode == DiagnosticsManager::ScriptingMode::Both);
+
+	const std::string defaultCubeNames[] = { "DefaultCube1", "DefaultCube2", "DefaultCube3", "DefaultCube4", "DefaultCube5" };
+	const std::string defaultCubeScripts[5] = {
+		(fs::path("Scripts") / "DefaultCube1.py").generic_string(),
+		(fs::path("Scripts") / "DefaultCube2.py").generic_string(),
+		(fs::path("Scripts") / "DefaultCube3.py").generic_string(),
+		(fs::path("Scripts") / "DefaultCube4.py").generic_string(),
+		(fs::path("Scripts") / "DefaultCube5.py").generic_string()
+	};
+
+	// Auto-create Python scripts
+	if (wantPython)
+	{
+		for (const auto& scriptRel : defaultCubeScripts)
+		{
+			const fs::path absScript = contentRoot / fs::path(scriptRel);
+			if (fs::exists(absScript)) continue;
+			std::error_code ec;
+			fs::create_directories(absScript.parent_path(), ec);
+			std::ofstream out(absScript, std::ios::out | std::ios::trunc);
+			if (out.is_open())
+			{
+				out << "import engine\n\n";
+				out << "def on_loaded(entity):\n";
+				out << "    pass\n\n";
+				out << "def tick(entity, dt):\n";
+				out << "    pass\n\n";
+				out << "def on_begin_overlap(entity, other):\n";
+				out << "    pass\n\n";
+				out << "def on_end_overlap(entity, other):\n";
+				out << "    pass\n";
+			}
+		}
+	}
+
+	// Auto-create C++ class files
+	if (wantCpp)
+	{
+		const fs::path nativeDir = contentRoot / "Scripts" / "Native";
+		std::error_code ec;
+		fs::create_directories(nativeDir, ec);
+		for (const auto& name : defaultCubeNames)
+		{
+			const fs::path headerFile = nativeDir / (name + ".h");
+			if (!fs::exists(headerFile))
+			{
+				std::ofstream out(headerFile);
+				if (out.is_open())
+				{
+					out << "#pragma once\n";
+					out << "#include \"INativeScript.h\"\n\n";
+					out << "class " << name << " : public INativeScript\n";
+					out << "{\n";
+					out << "public:\n";
+					out << "    void onLoaded() override;\n";
+					out << "    void tick(float deltaTime) override;\n";
+					out << "    void onBeginOverlap(ECS::Entity other) override;\n";
+					out << "    void onEndOverlap(ECS::Entity other) override;\n";
+					out << "    void onDestroy() override;\n";
+					out << "};\n";
+				}
+			}
+			const fs::path cppFile = nativeDir / (name + ".cpp");
+			if (!fs::exists(cppFile))
+			{
+				std::ofstream out(cppFile);
+				if (out.is_open())
+				{
+					out << "#include \"" << name << ".h\"\n\n";
+					out << "void " << name << "::onLoaded()\n";
+					out << "{\n}\n\n";
+					out << "void " << name << "::tick(float deltaTime)\n";
+					out << "{\n}\n\n";
+					out << "void " << name << "::onBeginOverlap(ECS::Entity other)\n";
+					out << "{\n}\n\n";
+					out << "void " << name << "::onEndOverlap(ECS::Entity other)\n";
+					out << "{\n}\n\n";
+					out << "void " << name << "::onDestroy()\n";
+					out << "{\n}\n";
+				}
+			}
+		}
+	}
 
     // 3) default 3D quad model
 
@@ -1588,18 +1639,6 @@ void AssetManager::ensureDefaultAssetsCreated()
         std::error_code ec;
         const fs::path scriptsRoot = contentRoot / "Scripts";
         fs::create_directories(scriptsRoot, ec);
-        const fs::path defaultScriptAbs = scriptsRoot / "DefaultCubeScript.py";
-        if (!fs::exists(defaultScriptAbs))
-        {
-            std::ofstream scriptOut(defaultScriptAbs, std::ios::out | std::ios::trunc);
-            if (scriptOut.is_open())
-            {
-                scriptOut << "def onloaded(entity):\n";
-                scriptOut << "    print('Default script loaded for', entity)\n\n";
-                scriptOut << "def tick(entity, dt):\n";
-                scriptOut << "    pass\n";
-            }
-        }
 
         const std::string defaultLevelScriptRel = (fs::path("Scripts") / "LevelScript.py").generic_string();
         const fs::path defaultLevelScriptAbs = scriptsRoot / "LevelScript.py";
@@ -1632,7 +1671,12 @@ void AssetManager::ensureDefaultAssetsCreated()
         components["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
         components["Material"] = json{ {"materialAssetPath", wallMatRel} };
         components["Name"] = json{ {"displayName", "Cube A"} };
-        components["Script"] = json{ {"scriptPath", defaultCubeScripts[0]}};
+        {
+            json logicJson;
+            if (wantPython) logicJson["scriptPath"] = defaultCubeScripts[0];
+            if (wantCpp)    logicJson["nativeClassName"] = defaultCubeNames[0];
+            components["Logic"] = logicJson;
+        }
         entity["components"] = components;
         entities.push_back(entity);
 
@@ -1647,7 +1691,12 @@ void AssetManager::ensureDefaultAssetsCreated()
         };
         components2["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
         components2["Material"] = json{ {"materialAssetPath", wallMatRel} };
-        components2["Script"] = json{ {"scriptPath", defaultCubeScripts[1]} };
+        {
+            json logicJson;
+            if (wantPython) logicJson["scriptPath"] = defaultCubeScripts[1];
+            if (wantCpp)    logicJson["nativeClassName"] = defaultCubeNames[1];
+            components2["Logic"] = logicJson;
+        }
         components2["Name"] = json{ {"displayName", "Cube B"} };
         entity2["components"] = components2;
         entities.push_back(entity2);
@@ -1663,7 +1712,12 @@ void AssetManager::ensureDefaultAssetsCreated()
         };
         components3["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
         components3["Material"] = json{ {"materialAssetPath", wallMatRel} };
-        components3["Script"] = json{ {"scriptPath", defaultCubeScripts[2]} };
+        {
+            json logicJson;
+            if (wantPython) logicJson["scriptPath"] = defaultCubeScripts[2];
+            if (wantCpp)    logicJson["nativeClassName"] = defaultCubeNames[2];
+            components3["Logic"] = logicJson;
+        }
         components3["Name"] = json{ {"displayName", "Cube C"} };
         entity3["components"] = components3;
         entities.push_back(entity3);
@@ -1679,7 +1733,12 @@ void AssetManager::ensureDefaultAssetsCreated()
         };
         components4["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
         components4["Material"] = json{ {"materialAssetPath", containerMatRel} };
-        components4["Script"] = json{ {"scriptPath", defaultCubeScripts[3]} };
+        {
+            json logicJson;
+            if (wantPython) logicJson["scriptPath"] = defaultCubeScripts[3];
+            if (wantCpp)    logicJson["nativeClassName"] = defaultCubeNames[3];
+            components4["Logic"] = logicJson;
+        }
         components4["Name"] = json{ {"displayName", "Cube D"} };
         entity4["components"] = components4;
         entities.push_back(entity4);
@@ -1695,7 +1754,12 @@ void AssetManager::ensureDefaultAssetsCreated()
         };
         components5["Mesh"] = json{ {"meshAssetPath", quad3dRel} };
         components5["Material"] = json{ {"materialAssetPath", containerMatRel} };
-        components5["Script"] = json{ {"scriptPath", defaultCubeScripts[4]} };
+        {
+            json logicJson;
+            if (wantPython) logicJson["scriptPath"] = defaultCubeScripts[4];
+            if (wantCpp)    logicJson["nativeClassName"] = defaultCubeNames[4];
+            components5["Logic"] = logicJson;
+        }
         components5["Name"] = json{ {"displayName", "Cube E"} };
         entity5["components"] = components5;
         entities.push_back(entity5);

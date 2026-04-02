@@ -12,12 +12,11 @@ Component_Material: int
 Component_Light: int
 Component_Camera: int
 Component_Physics: int
-Component_Script: int
+Component_Logic: int
 Component_Name: int
 Component_Collision: int
 Component_Animation: int
 Component_ParticleEmitter: int
-Component_NativeScript: int
 
 Asset_Texture: int
 Asset_Material: int

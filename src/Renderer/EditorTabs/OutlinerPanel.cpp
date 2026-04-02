@@ -13,6 +13,8 @@
 #include "../UIWidgets/DropDownWidget.h"
 #include "../UIWidgets/ColorPickerWidget.h"
 #include "../../Core/UndoRedoManager.h"
+#include <fstream>
+#include <filesystem>
 
 #if ENGINE_EDITOR
 
@@ -132,7 +134,7 @@ static const char* iconForEntity(ECS::Entity entity)
     if (ecs.hasComponent<ECS::LightComponent>(entity))       return "light.png";
     if (ecs.hasComponent<ECS::CameraComponent>(entity))      return "camera.png";
     if (ecs.hasComponent<ECS::MeshComponent>(entity))        return "model3d.png";
-    if (ecs.hasComponent<ECS::ScriptComponent>(entity))      return "script.png";
+    if (ecs.hasComponent<ECS::LogicComponent>(entity))       return "script.png";
     if (ecs.hasComponent<ECS::HeightFieldComponent>(entity)) return "level.png";
     if (ecs.hasComponent<ECS::PhysicsComponent>(entity))     return "entity.png";
     return "entity.png";
@@ -144,7 +146,7 @@ static Vec4 iconTintForEntity(ECS::Entity entity)
     if (ecs.hasComponent<ECS::LightComponent>(entity))       return Vec4{ 1.00f, 0.90f, 0.30f, 1.0f };
     if (ecs.hasComponent<ECS::CameraComponent>(entity))      return Vec4{ 0.40f, 0.85f, 0.40f, 1.0f };
     if (ecs.hasComponent<ECS::MeshComponent>(entity))        return Vec4{ 0.50f, 0.80f, 0.90f, 1.0f };
-    if (ecs.hasComponent<ECS::ScriptComponent>(entity))      return Vec4{ 0.40f, 0.90f, 0.40f, 1.0f };
+    if (ecs.hasComponent<ECS::LogicComponent>(entity))       return Vec4{ 0.40f, 0.90f, 0.40f, 1.0f };
     if (ecs.hasComponent<ECS::HeightFieldComponent>(entity)) return Vec4{ 0.65f, 0.85f, 0.45f, 1.0f };
     if (ecs.hasComponent<ECS::PhysicsComponent>(entity))     return Vec4{ 0.75f, 0.50f, 1.00f, 1.0f };
     return Vec4{ 0.85f, 0.85f, 0.85f, 1.0f };
@@ -1066,16 +1068,20 @@ void OutlinerPanel::populateDetails(unsigned int entity)
         });
     }
 
-    if (const auto* script = ecs.getComponent<ECS::ScriptComponent>(entity))
+    if (const auto* logic = ecs.getComponent<ECS::LogicComponent>(entity))
     {
         std::vector<WidgetElement> lines;
-        lines.push_back(makeTextLine("Script Path: " + script->scriptPath));
-        lines.push_back(makeTextLine("Asset Id: " + std::to_string(script->scriptAssetId)));
+        if (!logic->scriptPath.empty())
+            lines.push_back(makeTextLine("Python Script: " + logic->scriptPath));
+        if (!logic->nativeClassName.empty())
+            lines.push_back(makeTextLine("C++ Class: " + logic->nativeClassName));
+        if (logic->scriptPath.empty() && logic->nativeClassName.empty())
+            lines.push_back(makeTextLine("No script or class assigned."));
 
         // Dropdown to select a different script asset
         {
             DropdownButtonWidget dropdown;
-            dropdown.setText(script->scriptPath.empty() ? "Select Script..." : script->scriptPath);
+            dropdown.setText(logic->scriptPath.empty() ? "Select Script..." : logic->scriptPath);
             dropdown.setFont(EditorTheme::Get().fontDefault);
             dropdown.setFontSize(EditorTheme::Get().fontSizeSmall);
             dropdown.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
@@ -1097,20 +1103,20 @@ void OutlinerPanel::populateDetails(unsigned int entity)
                 }
             }
             WidgetElement dropdownEl = dropdown.toElement();
-            dropdownEl.id = "Details.Script.Dropdown";
+            dropdownEl.id = "Details.Logic.ScriptDropdown";
             dropdownEl.fillX = true;
             dropdownEl.runtimeOnly = true;
             lines.push_back(std::move(dropdownEl));
         }
 
-        addSeparator("Script", lines, [this, entity, saved = *script]() {
-            ECS::ECSManager::Instance().removeComponent<ECS::ScriptComponent>(entity);
+        addSeparator("Logic", lines, [this, entity, saved = *logic]() {
+            ECS::ECSManager::Instance().removeComponent<ECS::LogicComponent>(entity);
             if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
             populateDetails(entity);
             UndoRedoManager::Instance().pushCommand({
-                "Remove Script",
-                [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::ScriptComponent>(entity); },
-                [entity, saved]() { ECS::ECSManager::Instance().setComponent<ECS::ScriptComponent>(entity, saved); }
+                "Remove Logic",
+                [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::LogicComponent>(entity); },
+                [entity, saved]() { ECS::ECSManager::Instance().setComponent<ECS::LogicComponent>(entity, saved); }
             });
         });
     }
@@ -1356,9 +1362,112 @@ void OutlinerPanel::populateDetails(unsigned int entity)
               [entity]() {
                   ECS::ECSManager::Instance().removeComponent<ECS::PhysicsComponent>(entity);
               } },
-            { "Script", ecs.hasComponent<ECS::ScriptComponent>(entity),
-              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::ScriptComponent>(entity); },
-              [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::ScriptComponent>(entity); } },
+            { "Logic", ecs.hasComponent<ECS::LogicComponent>(entity),
+              [this, entity]() {
+                  auto& e = ECS::ECSManager::Instance();
+                  ECS::LogicComponent comp{};
+                  const auto& info = DiagnosticsManager::Instance().getProjectInfo();
+                  const auto mode = info.scriptingMode;
+                  const std::string projectPath = info.projectPath;
+
+                  // Determine entity name for file naming
+                  std::string baseName = "Entity" + std::to_string(entity);
+                  if (const auto* nc = e.getComponent<ECS::NameComponent>(entity))
+                  {
+                      if (!nc->displayName.empty())
+                      {
+                          std::string safe = nc->displayName;
+                          for (auto& ch : safe) { if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_') ch = '_'; }
+                          baseName = safe;
+                      }
+                  }
+
+                  namespace fs = std::filesystem;
+                  const fs::path scriptsDir = fs::path(projectPath) / "Content" / "Scripts";
+                  std::error_code ec;
+                  fs::create_directories(scriptsDir, ec);
+
+                  // Auto-create Python script
+                  if (mode == DiagnosticsManager::ScriptingMode::PythonOnly || mode == DiagnosticsManager::ScriptingMode::Both)
+                  {
+                      const fs::path pyFile = scriptsDir / (baseName + ".py");
+                      if (!fs::exists(pyFile))
+                      {
+                          std::ofstream out(pyFile);
+                          if (out.is_open())
+                          {
+                              out << "import engine\n\n";
+                              out << "def on_loaded(entity):\n";
+                              out << "    pass\n\n";
+                              out << "def tick(entity, dt):\n";
+                              out << "    pass\n\n";
+                              out << "def on_begin_overlap(entity, other):\n";
+                              out << "    pass\n\n";
+                              out << "def on_end_overlap(entity, other):\n";
+                              out << "    pass\n";
+                              out.close();
+                              Logger::Instance().log(Logger::Category::Engine,
+                                  "Auto-created Python script: " + pyFile.string(), Logger::LogLevel::INFO);
+                          }
+                      }
+                      comp.scriptPath = (fs::path("Scripts") / (baseName + ".py")).generic_string();
+                  }
+
+                  // Auto-create C++ class header
+                  if (mode == DiagnosticsManager::ScriptingMode::CppOnly || mode == DiagnosticsManager::ScriptingMode::Both)
+                  {
+                      const fs::path cppDir = scriptsDir / "Native";
+                      fs::create_directories(cppDir, ec);
+
+                      const fs::path headerFile = cppDir / (baseName + ".h");
+                      if (!fs::exists(headerFile))
+                      {
+                          std::ofstream out(headerFile);
+                          if (out.is_open())
+                          {
+                              out << "#pragma once\n";
+                              out << "#include \"INativeScript.h\"\n\n";
+                              out << "class " << baseName << " : public INativeScript\n";
+                              out << "{\n";
+                              out << "public:\n";
+                              out << "    void onLoaded() override;\n";
+                              out << "    void tick(float deltaTime) override;\n";
+                              out << "    void onBeginOverlap(ECS::Entity other) override;\n";
+                              out << "    void onEndOverlap(ECS::Entity other) override;\n";
+                              out << "    void onDestroy() override;\n";
+                              out << "};\n";
+                              out.close();
+                          }
+                      }
+
+                      const fs::path cppFile = cppDir / (baseName + ".cpp");
+                      if (!fs::exists(cppFile))
+                      {
+                          std::ofstream out(cppFile);
+                          if (out.is_open())
+                          {
+                              out << "#include \"" << baseName << ".h\"\n\n";
+                              out << "void " << baseName << "::onLoaded()\n";
+                              out << "{\n}\n\n";
+                              out << "void " << baseName << "::tick(float deltaTime)\n";
+                              out << "{\n}\n\n";
+                              out << "void " << baseName << "::onBeginOverlap(ECS::Entity other)\n";
+                              out << "{\n}\n\n";
+                              out << "void " << baseName << "::onEndOverlap(ECS::Entity other)\n";
+                              out << "{\n}\n\n";
+                              out << "void " << baseName << "::onDestroy()\n";
+                              out << "{\n}\n";
+                              out.close();
+                              Logger::Instance().log(Logger::Category::Engine,
+                                  "Auto-created C++ class: " + cppFile.string(), Logger::LogLevel::INFO);
+                          }
+                      }
+                      comp.nativeClassName = baseName;
+                  }
+
+                  e.addComponent<ECS::LogicComponent>(entity, comp);
+              },
+              [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::LogicComponent>(entity); } },
             { "Name", ecs.hasComponent<ECS::NameComponent>(entity),
               [entity]() { ECS::ECSManager::Instance().addComponent<ECS::NameComponent>(entity); },
               [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::NameComponent>(entity); } },
@@ -1547,31 +1656,33 @@ void OutlinerPanel::applyAssetToEntity(AssetType type, const std::string& assetP
     }
     case AssetType::Script:
     {
-        std::optional<ECS::ScriptComponent> oldScript;
-        if (auto* s = ecs.getComponent<ECS::ScriptComponent>(entity)) oldScript = *s;
+        std::optional<ECS::LogicComponent> oldLogic;
+        if (auto* s = ecs.getComponent<ECS::LogicComponent>(entity)) oldLogic = *s;
 
-        ECS::ScriptComponent comp{};
+        ECS::LogicComponent comp{};
+        if (oldLogic)
+            comp = *oldLogic;
         comp.scriptPath = assetPath;
-        if (!ecs.hasComponent<ECS::ScriptComponent>(entity))
+        if (!ecs.hasComponent<ECS::LogicComponent>(entity))
         {
-            ecs.addComponent<ECS::ScriptComponent>(entity, comp);
+            ecs.addComponent<ECS::LogicComponent>(entity, comp);
         }
         else
         {
-            ecs.setComponent<ECS::ScriptComponent>(entity, comp);
+            ecs.setComponent<ECS::LogicComponent>(entity, comp);
         }
 
         UndoRedoManager::Instance().pushCommand({
             "Assign Script",
             [entity, comp]() {
                 auto& e = ECS::ECSManager::Instance();
-                if (e.hasComponent<ECS::ScriptComponent>(entity)) e.setComponent(entity, comp); else e.addComponent(entity, comp);
+                if (e.hasComponent<ECS::LogicComponent>(entity)) e.setComponent(entity, comp); else e.addComponent(entity, comp);
                 DiagnosticsManager::Instance().invalidateEntity(entity);
             },
-            [entity, oldScript]() {
+            [entity, oldLogic]() {
                 auto& e = ECS::ECSManager::Instance();
-                if (oldScript) { if (e.hasComponent<ECS::ScriptComponent>(entity)) e.setComponent(entity, *oldScript); else e.addComponent(entity, *oldScript); }
-                else { e.removeComponent<ECS::ScriptComponent>(entity); }
+                if (oldLogic) { if (e.hasComponent<ECS::LogicComponent>(entity)) e.setComponent(entity, *oldLogic); else e.addComponent(entity, *oldLogic); }
+                else { e.removeComponent<ECS::LogicComponent>(entity); }
                 DiagnosticsManager::Instance().invalidateEntity(entity);
             }
         });
@@ -1619,8 +1730,8 @@ void OutlinerPanel::copySelectedEntity()
         m_entityClipboard.camera = *ecs.getComponent<ECS::CameraComponent>(entity);
     if (ecs.hasComponent<ECS::PhysicsComponent>(entity))
         m_entityClipboard.physics = *ecs.getComponent<ECS::PhysicsComponent>(entity);
-    if (ecs.hasComponent<ECS::ScriptComponent>(entity))
-        m_entityClipboard.script = *ecs.getComponent<ECS::ScriptComponent>(entity);
+    if (ecs.hasComponent<ECS::LogicComponent>(entity))
+        m_entityClipboard.logic = *ecs.getComponent<ECS::LogicComponent>(entity);
     if (ecs.hasComponent<ECS::NameComponent>(entity))
         m_entityClipboard.name = *ecs.getComponent<ECS::NameComponent>(entity);
     if (ecs.hasComponent<ECS::CollisionComponent>(entity))
@@ -1671,8 +1782,8 @@ bool OutlinerPanel::pasteEntity()
         ecs.addComponent<ECS::CameraComponent>(newEntity, *m_entityClipboard.camera);
     if (m_entityClipboard.physics)
         ecs.addComponent<ECS::PhysicsComponent>(newEntity, *m_entityClipboard.physics);
-    if (m_entityClipboard.script)
-        ecs.addComponent<ECS::ScriptComponent>(newEntity, *m_entityClipboard.script);
+    if (m_entityClipboard.logic)
+        ecs.addComponent<ECS::LogicComponent>(newEntity, *m_entityClipboard.logic);
     if (m_entityClipboard.collision)
         ecs.addComponent<ECS::CollisionComponent>(newEntity, *m_entityClipboard.collision);
     if (m_entityClipboard.heightField)
@@ -1716,7 +1827,7 @@ bool OutlinerPanel::pasteEntity()
         if (cb.light)            e.addComponent<ECS::LightComponent>(newEntity, *cb.light);
         if (cb.camera)           e.addComponent<ECS::CameraComponent>(newEntity, *cb.camera);
         if (cb.physics)          e.addComponent<ECS::PhysicsComponent>(newEntity, *cb.physics);
-        if (cb.script)           e.addComponent<ECS::ScriptComponent>(newEntity, *cb.script);
+        if (cb.logic)            e.addComponent<ECS::LogicComponent>(newEntity, *cb.logic);
         if (cb.collision)        e.addComponent<ECS::CollisionComponent>(newEntity, *cb.collision);
         if (cb.heightField)      e.addComponent<ECS::HeightFieldComponent>(newEntity, *cb.heightField);
         if (cb.lod)              e.addComponent<ECS::LodComponent>(newEntity, *cb.lod);
@@ -1753,7 +1864,7 @@ bool OutlinerPanel::duplicateEntity()
     if (ecs.hasComponent<ECS::LightComponent>(entity))           snapshot.light           = *ecs.getComponent<ECS::LightComponent>(entity);
     if (ecs.hasComponent<ECS::CameraComponent>(entity))          snapshot.camera          = *ecs.getComponent<ECS::CameraComponent>(entity);
     if (ecs.hasComponent<ECS::PhysicsComponent>(entity))         snapshot.physics         = *ecs.getComponent<ECS::PhysicsComponent>(entity);
-    if (ecs.hasComponent<ECS::ScriptComponent>(entity))          snapshot.script          = *ecs.getComponent<ECS::ScriptComponent>(entity);
+    if (ecs.hasComponent<ECS::LogicComponent>(entity))          snapshot.logic           = *ecs.getComponent<ECS::LogicComponent>(entity);
     if (ecs.hasComponent<ECS::NameComponent>(entity))            snapshot.name            = *ecs.getComponent<ECS::NameComponent>(entity);
     if (ecs.hasComponent<ECS::CollisionComponent>(entity))       snapshot.collision       = *ecs.getComponent<ECS::CollisionComponent>(entity);
     if (ecs.hasComponent<ECS::HeightFieldComponent>(entity))     snapshot.heightField     = *ecs.getComponent<ECS::HeightFieldComponent>(entity);

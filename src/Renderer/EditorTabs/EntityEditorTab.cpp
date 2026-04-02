@@ -4,6 +4,7 @@
 #include "../EditorTheme.h"
 #include "../EditorUIBuilder.h"
 #include "../EditorUI/EditorWidget.h"
+#include "../UIWidgets/DropdownButtonWidget.h"
 #include "../../Diagnostics/DiagnosticsManager.h"
 #include "../../AssetManager/AssetManager.h"
 #include "../../Logger/Logger.h"
@@ -11,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <algorithm>
 
 using json = nlohmann::json;
 
@@ -99,6 +101,10 @@ void EntityEditorTab::open(const std::string& assetPath)
     else
         m_state.entityData = json::object();
 
+    // Auto-select the first component if any exist
+    if (!m_state.entityData.empty())
+        m_state.selectedComponent = m_state.entityData.begin().key();
+
     // Build the main widget
     {
         auto widget = std::make_shared<EditorWidget>();
@@ -136,19 +142,60 @@ void EntityEditorTab::open(const std::string& assetPath)
             root.children.push_back(std::move(sep));
         }
 
-        // Scrollable component area
+        // Horizontal split: component list (left) | details panel (right)
         {
-            WidgetElement paramsArea{};
-            paramsArea.id          = "EntityEditor.ParamsArea";
-            paramsArea.type        = WidgetElementType::StackPanel;
-            paramsArea.fillX       = true;
-            paramsArea.fillY       = true;
-            paramsArea.scrollable  = true;
-            paramsArea.orientation = StackOrientation::Vertical;
-            paramsArea.padding     = EditorTheme::Scaled(Vec2{ 10.0f, 8.0f });
-            paramsArea.style.color = Vec4{ 0.08f, 0.09f, 0.11f, 1.0f };
-            paramsArea.runtimeOnly = true;
-            root.children.push_back(std::move(paramsArea));
+            WidgetElement splitRow{};
+            splitRow.id          = "EntityEditor.SplitRow";
+            splitRow.type        = WidgetElementType::StackPanel;
+            splitRow.fillX       = true;
+            splitRow.fillY       = true;
+            splitRow.orientation = StackOrientation::Horizontal;
+            splitRow.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            splitRow.runtimeOnly = true;
+
+            // Left panel — component list
+            {
+                WidgetElement leftPanel{};
+                leftPanel.id          = "EntityEditor.LeftPanel";
+                leftPanel.type        = WidgetElementType::StackPanel;
+                leftPanel.fillY       = true;
+                leftPanel.scrollable  = true;
+                leftPanel.orientation = StackOrientation::Vertical;
+                leftPanel.minSize     = EditorTheme::Scaled(Vec2{ 200.0f, 0.0f });
+                leftPanel.maxSize     = EditorTheme::Scaled(Vec2{ 220.0f, 0.0f });
+                leftPanel.padding     = EditorTheme::Scaled(Vec2{ 6.0f, 6.0f });
+                leftPanel.style.color = Vec4{ 0.06f, 0.06f, 0.08f, 1.0f };
+                leftPanel.runtimeOnly = true;
+                splitRow.children.push_back(std::move(leftPanel));
+            }
+
+            // Vertical separator
+            {
+                WidgetElement sep{};
+                sep.type        = WidgetElementType::Panel;
+                sep.fillY       = true;
+                sep.minSize     = EditorTheme::Scaled(Vec2{ 1.0f, 0.0f });
+                sep.style.color = theme.panelBorder;
+                sep.runtimeOnly = true;
+                splitRow.children.push_back(std::move(sep));
+            }
+
+            // Right panel — details
+            {
+                WidgetElement rightPanel{};
+                rightPanel.id          = "EntityEditor.RightPanel";
+                rightPanel.type        = WidgetElementType::StackPanel;
+                rightPanel.fillX       = true;
+                rightPanel.fillY       = true;
+                rightPanel.scrollable  = true;
+                rightPanel.orientation = StackOrientation::Vertical;
+                rightPanel.padding     = EditorTheme::Scaled(Vec2{ 10.0f, 8.0f });
+                rightPanel.style.color = Vec4{ 0.08f, 0.09f, 0.11f, 1.0f };
+                rightPanel.runtimeOnly = true;
+                splitRow.children.push_back(std::move(rightPanel));
+            }
+
+            root.children.push_back(std::move(splitRow));
         }
 
         widget->setElements({ std::move(root) });
@@ -288,6 +335,18 @@ void EntityEditorTab::buildToolbar(WidgetElement& root)
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// Helper to find an element by id in a tree
+static WidgetElement* findElementById(std::vector<WidgetElement>& elems, const std::string& id)
+{
+    for (auto& el : elems)
+    {
+        if (el.id == id) return &el;
+        if (auto* found = findElementById(el.children, id)) return found;
+    }
+    return nullptr;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 void EntityEditorTab::refresh()
 {
     if (!m_state.isOpen || !m_ui)
@@ -298,75 +357,120 @@ void EntityEditorTab::refresh()
         return;
 
     auto& elements = entry->widget->getElementsMutable();
-    WidgetElement* paramsArea = nullptr;
-
-    // Find the ParamsArea
-    std::function<WidgetElement*(std::vector<WidgetElement>&)> findById =
-        [&](std::vector<WidgetElement>& elems) -> WidgetElement*
-        {
-            for (auto& el : elems)
-            {
-                if (el.id == "EntityEditor.ParamsArea") return &el;
-                if (auto* found = findById(el.children)) return found;
-            }
-            return nullptr;
-        };
-    paramsArea = findById(elements);
-    if (!paramsArea)
-        return;
-
-    paramsArea->children.clear();
 
     // Update title
-    WidgetElement* title = nullptr;
-    std::function<WidgetElement*(std::vector<WidgetElement>&)> findTitle =
-        [&](std::vector<WidgetElement>& elems) -> WidgetElement*
-        {
-            for (auto& el : elems)
-            {
-                if (el.id == "EntityEditor.Title") return &el;
-                if (auto* found = findTitle(el.children)) return found;
-            }
-            return nullptr;
-        };
-    title = findTitle(elements);
-    if (title)
+    if (auto* title = findElementById(elements, "EntityEditor.Title"))
         title->text = m_state.assetName + (m_state.isDirty ? " *" : "");
 
-    // Build component sections
-    buildComponentList(*paramsArea);
+    // Populate left panel
+    if (auto* leftPanel = findElementById(elements, "EntityEditor.LeftPanel"))
+    {
+        leftPanel->children.clear();
+        buildComponentListPanel(*leftPanel);
+        buildAddComponentMenu(*leftPanel);
+    }
 
-    // Add "Add Component" button area
-    buildAddComponentMenu(*paramsArea);
+    // Populate right panel
+    if (auto* rightPanel = findElementById(elements, "EntityEditor.RightPanel"))
+    {
+        rightPanel->children.clear();
+        buildDetailsPanel(*rightPanel);
+    }
 
     entry->widget->markLayoutDirty();
     m_ui->markRenderDirty();
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-void EntityEditorTab::buildComponentList(WidgetElement& root)
+void EntityEditorTab::selectComponent(const std::string& componentName)
 {
-    auto& data = m_state.entityData;
-
-    if (data.contains("Name"))        buildNameSection(root);
-    if (data.contains("Transform"))   buildTransformSection(root);
-    if (data.contains("Mesh"))        buildMeshSection(root);
-    if (data.contains("Material"))    buildMaterialSection(root);
-    if (data.contains("Light"))       buildLightSection(root);
-    if (data.contains("Camera"))      buildCameraSection(root);
-    if (data.contains("Physics"))     buildPhysicsSection(root);
-    if (data.contains("Collision"))   buildCollisionSection(root);
-    if (data.contains("Script"))      buildScriptSection(root);
-    if (data.contains("Animation"))   buildAnimationSection(root);
-    if (data.contains("ParticleEmitter")) buildParticleEmitterSection(root);
+    m_state.selectedComponent = componentName;
+    refresh();
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-void EntityEditorTab::buildAddComponentMenu(WidgetElement& root)
+void EntityEditorTab::buildComponentListPanel(WidgetElement& parent)
 {
-    root.children.push_back(EditorUIBuilder::makeDivider());
+    const auto& theme = EditorTheme::Get();
+    auto& data = m_state.entityData;
 
-    // List of all possible components and whether they already exist
+    // Section heading
+    {
+        WidgetElement heading{};
+        heading.type           = WidgetElementType::Text;
+        heading.text           = "Components";
+        heading.fontSize       = theme.fontSizeSubheading;
+        heading.style.textColor = theme.textSecondary;
+        heading.fillX          = true;
+        heading.minSize        = EditorTheme::Scaled(Vec2{ 0.0f, 22.0f });
+        heading.padding        = EditorTheme::Scaled(Vec2{ 2.0f, 2.0f });
+        heading.runtimeOnly    = true;
+        parent.children.push_back(std::move(heading));
+    }
+
+    parent.children.push_back(EditorUIBuilder::makeDivider());
+
+    // Display-friendly names for component keys
+    static const std::vector<std::pair<std::string, std::string>> componentNames = {
+        {"Name",             "Name"},
+        {"Transform",        "Transform"},
+        {"Mesh",             "Mesh"},
+        {"Material",         "Material"},
+        {"Light",            "Light"},
+        {"Camera",           "Camera"},
+        {"Physics",          "Physics"},
+        {"Collision",        "Collision"},
+        {"Script",           "Script"},
+        {"Animation",        "Animation"},
+        {"ParticleEmitter",  "Particle Emitter"}
+    };
+
+    for (const auto& [key, displayName] : componentNames)
+    {
+        if (!data.contains(key))
+            continue;
+
+        const bool isSelected = (m_state.selectedComponent == key);
+
+        WidgetElement row{};
+        row.id          = "EntityEditor.CompItem." + key;
+        row.type        = WidgetElementType::Button;
+        row.text        = displayName;
+        row.fillX       = true;
+        row.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 26.0f });
+        row.padding     = EditorTheme::Scaled(Vec2{ 8.0f, 2.0f });
+        row.fontSize    = theme.fontSizeBody;
+        row.textAlignH  = TextAlignH::Left;
+        row.textAlignV  = TextAlignV::Center;
+        row.hitTestMode = HitTestMode::Enabled;
+        row.runtimeOnly = true;
+
+        if (isSelected)
+        {
+            row.style.color      = theme.selectionHighlight;
+            row.style.hoverColor = theme.selectionHighlightHover;
+            row.style.textColor  = Vec4{ 1.0f, 1.0f, 1.0f, 1.0f };
+        }
+        else
+        {
+            row.style.color      = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+            row.style.hoverColor = theme.treeRowHover;
+            row.style.textColor  = theme.textPrimary;
+        }
+
+        row.onClicked = [this, k = key]() { selectComponent(k); };
+        parent.children.push_back(std::move(row));
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+void EntityEditorTab::buildAddComponentMenu(WidgetElement& parent)
+{
+    const auto& theme = EditorTheme::Get();
+    auto& data = m_state.entityData;
+
+    parent.children.push_back(EditorUIBuilder::makeDivider());
+
     struct CompEntry { std::string name; std::string key; };
     std::vector<CompEntry> allComps = {
         {"Name",             "Name"},
@@ -382,20 +486,38 @@ void EntityEditorTab::buildAddComponentMenu(WidgetElement& root)
         {"Particle Emitter", "ParticleEmitter"}
     };
 
-    auto& data = m_state.entityData;
-
+    // Collect components not yet added
+    std::vector<CompEntry> missing;
     for (const auto& comp : allComps)
     {
-        if (data.contains(comp.key))
-            continue;
-
-        auto btn = EditorUIBuilder::makeButton(
-            "EntityEditor.Add." + comp.key,
-            "+ " + comp.name,
-            [this, key = comp.key]() { addComponent(key); },
-            EditorTheme::Scaled(Vec2{ 200.0f, 26.0f }));
-        root.children.push_back(std::move(btn));
+        if (!data.contains(comp.key))
+            missing.push_back(comp);
     }
+
+    if (missing.empty())
+        return;
+
+    // Build a DropdownButton with all addable components
+    DropdownButtonWidget dropdown;
+    dropdown.setText("+ Add Component");
+    dropdown.setFont(theme.fontDefault);
+    dropdown.setFontSize(theme.fontSizeBody);
+    dropdown.setMinSize(EditorTheme::Scaled(Vec2{ 0.0f, 28.0f }));
+    dropdown.setPadding(EditorTheme::Scaled(Vec2{ 8.0f, 4.0f }));
+    dropdown.setBackgroundColor(Vec4{ 0.12f, 0.18f, 0.12f, 1.0f });
+    dropdown.setHoverColor(theme.accentGreen);
+    dropdown.setTextColor(Vec4{ 0.8f, 1.0f, 0.8f, 1.0f });
+
+    for (const auto& comp : missing)
+    {
+        dropdown.addItem(comp.name, [this, key = comp.key]() { addComponent(key); });
+    }
+
+    WidgetElement dropEl = dropdown.toElement();
+    dropEl.id          = "EntityEditor.AddComponent";
+    dropEl.fillX       = true;
+    dropEl.runtimeOnly = true;
+    parent.children.push_back(std::move(dropEl));
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -439,6 +561,7 @@ void EntityEditorTab::addComponent(const std::string& componentName)
         data[componentName] = json::object();
 
     m_state.isDirty = true;
+    m_state.selectedComponent = componentName;
     refresh();
 }
 
@@ -447,78 +570,138 @@ void EntityEditorTab::removeComponent(const std::string& componentName)
 {
     m_state.entityData.erase(componentName);
     m_state.isDirty = true;
+
+    // If the removed component was selected, select the first remaining one
+    if (m_state.selectedComponent == componentName)
+    {
+        if (!m_state.entityData.empty())
+            m_state.selectedComponent = m_state.entityData.begin().key();
+        else
+            m_state.selectedComponent.clear();
+    }
     refresh();
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Component Section Builders
-// ═══════════════════════════════════════════════════════════════════════════
-
-static WidgetElement makeSectionHeader(const std::string& id, const std::string& title,
-    std::function<void()> onRemove)
+// ───────────────────────────────────────────────────────────────────────────
+std::vector<std::string> EntityEditorTab::getAssetPathsByType(int assetType) const
 {
-    const auto& theme = EditorTheme::Get();
-
-    WidgetElement row{};
-    row.id          = id + ".Header";
-    row.type        = WidgetElementType::StackPanel;
-    row.fillX       = true;
-    row.orientation = StackOrientation::Horizontal;
-    row.padding     = EditorTheme::Scaled(Vec2{ 4.0f, 4.0f });
-    row.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 28.0f });
-    row.style.color = Vec4{ 0.12f, 0.13f, 0.17f, 1.0f };
-    row.runtimeOnly = true;
-
-    // Section title
+    std::vector<std::string> result;
+    const auto& registry = AssetManager::Instance().getAssetRegistry();
+    for (const auto& entry : registry)
     {
-        WidgetElement lbl{};
-        lbl.type           = WidgetElementType::Text;
-        lbl.text           = title;
-        lbl.fontSize       = theme.fontSizeSubheading;
-        lbl.style.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
-        lbl.textAlignV     = TextAlignV::Center;
-        lbl.fillX          = true;
-        lbl.minSize        = EditorTheme::Scaled(Vec2{ 0.0f, 24.0f });
-        lbl.runtimeOnly    = true;
-        row.children.push_back(std::move(lbl));
+        if (static_cast<int>(entry.type) == assetType)
+            result.push_back(entry.path);
     }
-
-    // Remove button
-    {
-        auto removeBtn = EditorUIBuilder::makeDangerButton(
-            id + ".Remove", "X", std::move(onRemove),
-            EditorTheme::Scaled(Vec2{ 26.0f, 22.0f }));
-        row.children.push_back(std::move(removeBtn));
-    }
-
-    return row;
+    std::sort(result.begin(), result.end());
+    return result;
 }
 
-// ───────────────────────────────────────────────────────────────────────────
-void EntityEditorTab::buildNameSection(WidgetElement& parent)
-{
-    const std::string secId = "EntityEditor.Sec.Name";
-    parent.children.push_back(makeSectionHeader(secId, "Name",
-        [this]() { removeComponent("Name"); }));
+// ═══════════════════════════════════════════════════════════════════════════
+// Details Panel — dispatches to the right builder based on selection
+// ═══════════════════════════════════════════════════════════════════════════
 
+void EntityEditorTab::buildDetailsPanel(WidgetElement& parent)
+{
+    const auto& theme = EditorTheme::Get();
+    const auto& sel = m_state.selectedComponent;
+
+    if (sel.empty() || !m_state.entityData.contains(sel))
+    {
+        // Show hint when nothing is selected
+        WidgetElement hint{};
+        hint.type           = WidgetElementType::Text;
+        hint.text           = "Select a component on the left to edit its properties.";
+        hint.fontSize       = theme.fontSizeBody;
+        hint.style.textColor = theme.textMuted;
+        hint.fillX          = true;
+        hint.wrapText       = true;
+        hint.padding        = EditorTheme::Scaled(Vec2{ 8.0f, 16.0f });
+        hint.runtimeOnly    = true;
+        parent.children.push_back(std::move(hint));
+        return;
+    }
+
+    // Header with component name + remove button
+    {
+        static const std::vector<std::pair<std::string, std::string>> displayNames = {
+            {"Name", "Name"}, {"Transform", "Transform"}, {"Mesh", "Mesh"},
+            {"Material", "Material"}, {"Light", "Light"}, {"Camera", "Camera"},
+            {"Physics", "Physics"}, {"Collision", "Collision"}, {"Script", "Script"},
+            {"Animation", "Animation"}, {"ParticleEmitter", "Particle Emitter"}
+        };
+        std::string displayName = sel;
+        for (const auto& [k, v] : displayNames)
+            if (k == sel) { displayName = v; break; }
+
+        WidgetElement headerRow{};
+        headerRow.id          = "EntityEditor.Detail.Header";
+        headerRow.type        = WidgetElementType::StackPanel;
+        headerRow.fillX       = true;
+        headerRow.orientation = StackOrientation::Horizontal;
+        headerRow.padding     = EditorTheme::Scaled(Vec2{ 4.0f, 4.0f });
+        headerRow.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 30.0f });
+        headerRow.style.color = Vec4{ 0.12f, 0.13f, 0.17f, 1.0f };
+        headerRow.runtimeOnly = true;
+
+        {
+            WidgetElement lbl{};
+            lbl.type           = WidgetElementType::Text;
+            lbl.text           = displayName;
+            lbl.fontSize       = theme.fontSizeSubheading;
+            lbl.style.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
+            lbl.textAlignV     = TextAlignV::Center;
+            lbl.fillX          = true;
+            lbl.minSize        = EditorTheme::Scaled(Vec2{ 0.0f, 26.0f });
+            lbl.runtimeOnly    = true;
+            headerRow.children.push_back(std::move(lbl));
+        }
+
+        {
+            auto removeBtn = EditorUIBuilder::makeDangerButton(
+                "EntityEditor.Remove." + sel, "Remove",
+                [this, key = sel]() { removeComponent(key); },
+                EditorTheme::Scaled(Vec2{ 60.0f, 24.0f }));
+            headerRow.children.push_back(std::move(removeBtn));
+        }
+
+        parent.children.push_back(std::move(headerRow));
+        parent.children.push_back(EditorUIBuilder::makeDivider());
+    }
+
+    // Dispatch to per-component detail builder
+    if (sel == "Name")             buildNameDetails(parent);
+    else if (sel == "Transform")   buildTransformDetails(parent);
+    else if (sel == "Mesh")        buildMeshDetails(parent);
+    else if (sel == "Material")    buildMaterialDetails(parent);
+    else if (sel == "Light")       buildLightDetails(parent);
+    else if (sel == "Camera")      buildCameraDetails(parent);
+    else if (sel == "Physics")     buildPhysicsDetails(parent);
+    else if (sel == "Collision")   buildCollisionDetails(parent);
+    else if (sel == "Script")      buildScriptDetails(parent);
+    else if (sel == "Animation")   buildAnimationDetails(parent);
+    else if (sel == "ParticleEmitter") buildParticleEmitterDetails(parent);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Per-Component Detail Builders
+// ═══════════════════════════════════════════════════════════════════════════
+
+void EntityEditorTab::buildNameDetails(WidgetElement& parent)
+{
+    const std::string id = "EntityEditor.Det.Name";
     std::string displayName = m_state.entityData["Name"].value("displayName", "");
     parent.children.push_back(EditorUIBuilder::makeStringRow(
-        secId + ".displayName", "Display Name", displayName,
+        id + ".displayName", "Display Name", displayName,
         [this](const std::string& v) {
             m_state.entityData["Name"]["displayName"] = v;
             m_state.isDirty = true;
         }));
-
-    parent.children.push_back(EditorUIBuilder::makeDivider());
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-void EntityEditorTab::buildTransformSection(WidgetElement& parent)
+void EntityEditorTab::buildTransformDetails(WidgetElement& parent)
 {
-    const std::string secId = "EntityEditor.Sec.Transform";
-    parent.children.push_back(makeSectionHeader(secId, "Transform",
-        [this]() { removeComponent("Transform"); }));
-
+    const std::string id = "EntityEditor.Det.Transform";
     auto& t = m_state.entityData["Transform"];
 
     float pos[3] = { 0, 0, 0 };
@@ -532,77 +715,149 @@ void EntityEditorTab::buildTransformSection(WidgetElement& parent)
         for (int i = 0; i < 3; ++i) scl[i] = t["scale"][i].get<float>();
 
     parent.children.push_back(EditorUIBuilder::makeVec3Row(
-        secId + ".Pos", "Position", pos,
+        id + ".Pos", "Position", pos,
         [this](int axis, float v) {
             m_state.entityData["Transform"]["position"][axis] = v;
             m_state.isDirty = true;
         }));
 
     parent.children.push_back(EditorUIBuilder::makeVec3Row(
-        secId + ".Rot", "Rotation", rot,
+        id + ".Rot", "Rotation", rot,
         [this](int axis, float v) {
             m_state.entityData["Transform"]["rotation"][axis] = v;
             m_state.isDirty = true;
         }));
 
     parent.children.push_back(EditorUIBuilder::makeVec3Row(
-        secId + ".Scl", "Scale", scl,
+        id + ".Scl", "Scale", scl,
         [this](int axis, float v) {
             m_state.entityData["Transform"]["scale"][axis] = v;
             m_state.isDirty = true;
         }));
-
-    parent.children.push_back(EditorUIBuilder::makeDivider());
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-void EntityEditorTab::buildMeshSection(WidgetElement& parent)
+void EntityEditorTab::buildMeshDetails(WidgetElement& parent)
 {
-    const std::string secId = "EntityEditor.Sec.Mesh";
-    parent.children.push_back(makeSectionHeader(secId, "Mesh",
-        [this]() { removeComponent("Mesh"); }));
-
+    const std::string id = "EntityEditor.Det.Mesh";
+    const auto& theme = EditorTheme::Get();
     std::string meshPath = m_state.entityData["Mesh"].value("meshAssetPath", "");
-    parent.children.push_back(EditorUIBuilder::makeStringRow(
-        secId + ".meshAssetPath", "Mesh Asset", meshPath,
-        [this](const std::string& v) {
-            m_state.entityData["Mesh"]["meshAssetPath"] = v;
-            m_state.isDirty = true;
-        }));
 
-    parent.children.push_back(EditorUIBuilder::makeDivider());
+    // Label
+    {
+        WidgetElement lbl{};
+        lbl.type           = WidgetElementType::Text;
+        lbl.text           = "Mesh Asset";
+        lbl.fontSize       = theme.fontSizeBody;
+        lbl.style.textColor = theme.textSecondary;
+        lbl.minSize        = EditorTheme::Scaled(Vec2{ 0.0f, 20.0f });
+        lbl.padding        = EditorTheme::Scaled(Vec2{ 0.0f, 2.0f });
+        lbl.runtimeOnly    = true;
+        parent.children.push_back(std::move(lbl));
+    }
+
+    // Dropdown for mesh asset selection
+    {
+        DropdownButtonWidget dropdown;
+        dropdown.setText(meshPath.empty() ? "Select Mesh..." : meshPath);
+        dropdown.setFont(theme.fontDefault);
+        dropdown.setFontSize(theme.fontSizeBody);
+        dropdown.setMinSize(EditorTheme::Scaled(Vec2{ 0.0f, 28.0f }));
+        dropdown.setPadding(EditorTheme::Scaled(Vec2{ 8.0f, 4.0f }));
+        dropdown.setBackgroundColor(theme.dropdownBackground);
+        dropdown.setHoverColor(theme.dropdownHover);
+        dropdown.setTextColor(theme.dropdownText);
+
+        // "None" option
+        dropdown.addItem("(None)", [this]() {
+            m_state.entityData["Mesh"]["meshAssetPath"] = "";
+            m_state.isDirty = true;
+            refresh();
+        });
+
+        auto meshAssets = getAssetPathsByType(static_cast<int>(AssetType::Model3D));
+        for (const auto& path : meshAssets)
+        {
+            dropdown.addItem(path, [this, p = path]() {
+                m_state.entityData["Mesh"]["meshAssetPath"] = p;
+                m_state.isDirty = true;
+                refresh();
+            });
+        }
+
+        WidgetElement dropEl = dropdown.toElement();
+        dropEl.id          = id + ".Dropdown";
+        dropEl.fillX       = true;
+        dropEl.runtimeOnly = true;
+        parent.children.push_back(std::move(dropEl));
+    }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-void EntityEditorTab::buildMaterialSection(WidgetElement& parent)
+void EntityEditorTab::buildMaterialDetails(WidgetElement& parent)
 {
-    const std::string secId = "EntityEditor.Sec.Material";
-    parent.children.push_back(makeSectionHeader(secId, "Material",
-        [this]() { removeComponent("Material"); }));
-
+    const std::string id = "EntityEditor.Det.Material";
+    const auto& theme = EditorTheme::Get();
     std::string matPath = m_state.entityData["Material"].value("materialAssetPath", "");
-    parent.children.push_back(EditorUIBuilder::makeStringRow(
-        secId + ".materialAssetPath", "Material Asset", matPath,
-        [this](const std::string& v) {
-            m_state.entityData["Material"]["materialAssetPath"] = v;
-            m_state.isDirty = true;
-        }));
 
-    parent.children.push_back(EditorUIBuilder::makeDivider());
+    // Label
+    {
+        WidgetElement lbl{};
+        lbl.type           = WidgetElementType::Text;
+        lbl.text           = "Material Asset";
+        lbl.fontSize       = theme.fontSizeBody;
+        lbl.style.textColor = theme.textSecondary;
+        lbl.minSize        = EditorTheme::Scaled(Vec2{ 0.0f, 20.0f });
+        lbl.padding        = EditorTheme::Scaled(Vec2{ 0.0f, 2.0f });
+        lbl.runtimeOnly    = true;
+        parent.children.push_back(std::move(lbl));
+    }
+
+    // Dropdown for material asset selection
+    {
+        DropdownButtonWidget dropdown;
+        dropdown.setText(matPath.empty() ? "Select Material..." : matPath);
+        dropdown.setFont(theme.fontDefault);
+        dropdown.setFontSize(theme.fontSizeBody);
+        dropdown.setMinSize(EditorTheme::Scaled(Vec2{ 0.0f, 28.0f }));
+        dropdown.setPadding(EditorTheme::Scaled(Vec2{ 8.0f, 4.0f }));
+        dropdown.setBackgroundColor(theme.dropdownBackground);
+        dropdown.setHoverColor(theme.dropdownHover);
+        dropdown.setTextColor(theme.dropdownText);
+
+        dropdown.addItem("(None)", [this]() {
+            m_state.entityData["Material"]["materialAssetPath"] = "";
+            m_state.isDirty = true;
+            refresh();
+        });
+
+        auto matAssets = getAssetPathsByType(static_cast<int>(AssetType::Material));
+        for (const auto& path : matAssets)
+        {
+            dropdown.addItem(path, [this, p = path]() {
+                m_state.entityData["Material"]["materialAssetPath"] = p;
+                m_state.isDirty = true;
+                refresh();
+            });
+        }
+
+        WidgetElement dropEl = dropdown.toElement();
+        dropEl.id          = id + ".Dropdown";
+        dropEl.fillX       = true;
+        dropEl.runtimeOnly = true;
+        parent.children.push_back(std::move(dropEl));
+    }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-void EntityEditorTab::buildLightSection(WidgetElement& parent)
+void EntityEditorTab::buildLightDetails(WidgetElement& parent)
 {
-    const std::string secId = "EntityEditor.Sec.Light";
-    parent.children.push_back(makeSectionHeader(secId, "Light",
-        [this]() { removeComponent("Light"); }));
-
+    const std::string id = "EntityEditor.Det.Light";
     auto& l = m_state.entityData["Light"];
 
     int lightType = l.value("type", 0);
     parent.children.push_back(EditorUIBuilder::makeDropDownRow(
-        secId + ".type", "Type", {"Point", "Directional", "Spot"}, lightType,
+        id + ".type", "Type", {"Point", "Directional", "Spot"}, lightType,
         [this](int v) {
             m_state.entityData["Light"]["type"] = v;
             m_state.isDirty = true;
@@ -612,96 +867,81 @@ void EntityEditorTab::buildLightSection(WidgetElement& parent)
     if (l.contains("color") && l["color"].is_array() && l["color"].size() >= 3)
         for (int i = 0; i < 3; ++i) color[i] = l["color"][i].get<float>();
     parent.children.push_back(EditorUIBuilder::makeVec3Row(
-        secId + ".Color", "Color", color,
+        id + ".Color", "Color", color,
         [this](int axis, float v) {
             m_state.entityData["Light"]["color"][axis] = v;
             m_state.isDirty = true;
         }));
 
     parent.children.push_back(EditorUIBuilder::makeFloatRow(
-        secId + ".intensity", "Intensity", l.value("intensity", 1.0f),
+        id + ".intensity", "Intensity", l.value("intensity", 1.0f),
         [this](float v) { m_state.entityData["Light"]["intensity"] = v; m_state.isDirty = true; }));
 
     parent.children.push_back(EditorUIBuilder::makeFloatRow(
-        secId + ".range", "Range", l.value("range", 10.0f),
+        id + ".range", "Range", l.value("range", 10.0f),
         [this](float v) { m_state.entityData["Light"]["range"] = v; m_state.isDirty = true; }));
 
     parent.children.push_back(EditorUIBuilder::makeFloatRow(
-        secId + ".spotAngle", "Spot Angle", l.value("spotAngle", 30.0f),
+        id + ".spotAngle", "Spot Angle", l.value("spotAngle", 30.0f),
         [this](float v) { m_state.entityData["Light"]["spotAngle"] = v; m_state.isDirty = true; }));
-
-    parent.children.push_back(EditorUIBuilder::makeDivider());
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-void EntityEditorTab::buildCameraSection(WidgetElement& parent)
+void EntityEditorTab::buildCameraDetails(WidgetElement& parent)
 {
-    const std::string secId = "EntityEditor.Sec.Camera";
-    parent.children.push_back(makeSectionHeader(secId, "Camera",
-        [this]() { removeComponent("Camera"); }));
-
+    const std::string id = "EntityEditor.Det.Camera";
     auto& cm = m_state.entityData["Camera"];
 
     parent.children.push_back(EditorUIBuilder::makeFloatRow(
-        secId + ".fov", "FOV", cm.value("fov", 60.0f),
+        id + ".fov", "FOV", cm.value("fov", 60.0f),
         [this](float v) { m_state.entityData["Camera"]["fov"] = v; m_state.isDirty = true; }));
 
     parent.children.push_back(EditorUIBuilder::makeFloatRow(
-        secId + ".nearClip", "Near Clip", cm.value("nearClip", 0.1f),
+        id + ".nearClip", "Near Clip", cm.value("nearClip", 0.1f),
         [this](float v) { m_state.entityData["Camera"]["nearClip"] = v; m_state.isDirty = true; }));
 
     parent.children.push_back(EditorUIBuilder::makeFloatRow(
-        secId + ".farClip", "Far Clip", cm.value("farClip", 1000.0f),
+        id + ".farClip", "Far Clip", cm.value("farClip", 1000.0f),
         [this](float v) { m_state.entityData["Camera"]["farClip"] = v; m_state.isDirty = true; }));
-
-    parent.children.push_back(EditorUIBuilder::makeDivider());
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-void EntityEditorTab::buildPhysicsSection(WidgetElement& parent)
+void EntityEditorTab::buildPhysicsDetails(WidgetElement& parent)
 {
-    const std::string secId = "EntityEditor.Sec.Physics";
-    parent.children.push_back(makeSectionHeader(secId, "Physics",
-        [this]() { removeComponent("Physics"); }));
-
+    const std::string id = "EntityEditor.Det.Physics";
     auto& p = m_state.entityData["Physics"];
 
     int motionType = p.value("motionType", 2);
     parent.children.push_back(EditorUIBuilder::makeDropDownRow(
-        secId + ".motionType", "Motion Type", {"Static", "Kinematic", "Dynamic"}, motionType,
+        id + ".motionType", "Motion Type", {"Static", "Kinematic", "Dynamic"}, motionType,
         [this](int v) { m_state.entityData["Physics"]["motionType"] = v; m_state.isDirty = true; }));
 
     parent.children.push_back(EditorUIBuilder::makeFloatRow(
-        secId + ".mass", "Mass", p.value("mass", 1.0f),
+        id + ".mass", "Mass", p.value("mass", 1.0f),
         [this](float v) { m_state.entityData["Physics"]["mass"] = v; m_state.isDirty = true; }));
 
     parent.children.push_back(EditorUIBuilder::makeFloatRow(
-        secId + ".gravityFactor", "Gravity Factor", p.value("gravityFactor", 1.0f),
+        id + ".gravityFactor", "Gravity Factor", p.value("gravityFactor", 1.0f),
         [this](float v) { m_state.entityData["Physics"]["gravityFactor"] = v; m_state.isDirty = true; }));
 
     parent.children.push_back(EditorUIBuilder::makeFloatRow(
-        secId + ".linearDamping", "Linear Damping", p.value("linearDamping", 0.05f),
+        id + ".linearDamping", "Linear Damping", p.value("linearDamping", 0.05f),
         [this](float v) { m_state.entityData["Physics"]["linearDamping"] = v; m_state.isDirty = true; }));
 
     parent.children.push_back(EditorUIBuilder::makeFloatRow(
-        secId + ".angularDamping", "Angular Damping", p.value("angularDamping", 0.05f),
+        id + ".angularDamping", "Angular Damping", p.value("angularDamping", 0.05f),
         [this](float v) { m_state.entityData["Physics"]["angularDamping"] = v; m_state.isDirty = true; }));
-
-    parent.children.push_back(EditorUIBuilder::makeDivider());
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-void EntityEditorTab::buildCollisionSection(WidgetElement& parent)
+void EntityEditorTab::buildCollisionDetails(WidgetElement& parent)
 {
-    const std::string secId = "EntityEditor.Sec.Collision";
-    parent.children.push_back(makeSectionHeader(secId, "Collision",
-        [this]() { removeComponent("Collision"); }));
-
+    const std::string id = "EntityEditor.Det.Collision";
     auto& cl = m_state.entityData["Collision"];
 
     int colliderType = cl.value("colliderType", 0);
     parent.children.push_back(EditorUIBuilder::makeDropDownRow(
-        secId + ".colliderType", "Collider Type",
+        id + ".colliderType", "Collider Type",
         {"Box", "Sphere", "Capsule", "Cylinder", "Mesh", "HeightField"}, colliderType,
         [this](int v) { m_state.entityData["Collision"]["colliderType"] = v; m_state.isDirty = true; }));
 
@@ -709,7 +949,7 @@ void EntityEditorTab::buildCollisionSection(WidgetElement& parent)
     if (cl.contains("colliderSize") && cl["colliderSize"].is_array() && cl["colliderSize"].size() >= 3)
         for (int i = 0; i < 3; ++i) size[i] = cl["colliderSize"][i].get<float>();
     parent.children.push_back(EditorUIBuilder::makeVec3Row(
-        secId + ".Size", "Size", size,
+        id + ".Size", "Size", size,
         [this](int axis, float v) {
             m_state.entityData["Collision"]["colliderSize"][axis] = v;
             m_state.isDirty = true;
@@ -719,118 +959,144 @@ void EntityEditorTab::buildCollisionSection(WidgetElement& parent)
     if (cl.contains("colliderOffset") && cl["colliderOffset"].is_array() && cl["colliderOffset"].size() >= 3)
         for (int i = 0; i < 3; ++i) offset[i] = cl["colliderOffset"][i].get<float>();
     parent.children.push_back(EditorUIBuilder::makeVec3Row(
-        secId + ".Offset", "Offset", offset,
+        id + ".Offset", "Offset", offset,
         [this](int axis, float v) {
             m_state.entityData["Collision"]["colliderOffset"][axis] = v;
             m_state.isDirty = true;
         }));
 
     parent.children.push_back(EditorUIBuilder::makeFloatRow(
-        secId + ".restitution", "Restitution", cl.value("restitution", 0.3f),
+        id + ".restitution", "Restitution", cl.value("restitution", 0.3f),
         [this](float v) { m_state.entityData["Collision"]["restitution"] = v; m_state.isDirty = true; }));
 
     parent.children.push_back(EditorUIBuilder::makeFloatRow(
-        secId + ".friction", "Friction", cl.value("friction", 0.5f),
+        id + ".friction", "Friction", cl.value("friction", 0.5f),
         [this](float v) { m_state.entityData["Collision"]["friction"] = v; m_state.isDirty = true; }));
 
     bool isSensor = cl.value("isSensor", false);
     parent.children.push_back(EditorUIBuilder::makeCheckBox(
-        secId + ".isSensor", "Is Sensor", isSensor,
+        id + ".isSensor", "Is Sensor", isSensor,
         [this](bool v) { m_state.entityData["Collision"]["isSensor"] = v; m_state.isDirty = true; }));
-
-    parent.children.push_back(EditorUIBuilder::makeDivider());
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-void EntityEditorTab::buildScriptSection(WidgetElement& parent)
+void EntityEditorTab::buildScriptDetails(WidgetElement& parent)
 {
-    const std::string secId = "EntityEditor.Sec.Script";
-    parent.children.push_back(makeSectionHeader(secId, "Script",
-        [this]() { removeComponent("Script"); }));
-
+    const std::string id = "EntityEditor.Det.Script";
+    const auto& theme = EditorTheme::Get();
     std::string scriptPath = m_state.entityData["Script"].value("scriptPath", "");
-    parent.children.push_back(EditorUIBuilder::makeStringRow(
-        secId + ".scriptPath", "Script Path", scriptPath,
-        [this](const std::string& v) {
-            m_state.entityData["Script"]["scriptPath"] = v;
-            m_state.isDirty = true;
-        }));
 
-    parent.children.push_back(EditorUIBuilder::makeDivider());
+    // Label
+    {
+        WidgetElement lbl{};
+        lbl.type           = WidgetElementType::Text;
+        lbl.text           = "Script Asset";
+        lbl.fontSize       = theme.fontSizeBody;
+        lbl.style.textColor = theme.textSecondary;
+        lbl.minSize        = EditorTheme::Scaled(Vec2{ 0.0f, 20.0f });
+        lbl.padding        = EditorTheme::Scaled(Vec2{ 0.0f, 2.0f });
+        lbl.runtimeOnly    = true;
+        parent.children.push_back(std::move(lbl));
+    }
+
+    // Dropdown for script asset selection
+    {
+        DropdownButtonWidget dropdown;
+        dropdown.setText(scriptPath.empty() ? "Select Script..." : scriptPath);
+        dropdown.setFont(theme.fontDefault);
+        dropdown.setFontSize(theme.fontSizeBody);
+        dropdown.setMinSize(EditorTheme::Scaled(Vec2{ 0.0f, 28.0f }));
+        dropdown.setPadding(EditorTheme::Scaled(Vec2{ 8.0f, 4.0f }));
+        dropdown.setBackgroundColor(theme.dropdownBackground);
+        dropdown.setHoverColor(theme.dropdownHover);
+        dropdown.setTextColor(theme.dropdownText);
+
+        dropdown.addItem("(None)", [this]() {
+            m_state.entityData["Script"]["scriptPath"] = "";
+            m_state.isDirty = true;
+            refresh();
+        });
+
+        auto scriptAssets = getAssetPathsByType(static_cast<int>(AssetType::Script));
+        for (const auto& path : scriptAssets)
+        {
+            dropdown.addItem(path, [this, p = path]() {
+                m_state.entityData["Script"]["scriptPath"] = p;
+                m_state.isDirty = true;
+                refresh();
+            });
+        }
+
+        WidgetElement dropEl = dropdown.toElement();
+        dropEl.id          = id + ".Dropdown";
+        dropEl.fillX       = true;
+        dropEl.runtimeOnly = true;
+        parent.children.push_back(std::move(dropEl));
+    }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-void EntityEditorTab::buildAnimationSection(WidgetElement& parent)
+void EntityEditorTab::buildAnimationDetails(WidgetElement& parent)
 {
-    const std::string secId = "EntityEditor.Sec.Animation";
-    parent.children.push_back(makeSectionHeader(secId, "Animation",
-        [this]() { removeComponent("Animation"); }));
-
+    const std::string id = "EntityEditor.Det.Animation";
     auto& a = m_state.entityData["Animation"];
 
     parent.children.push_back(EditorUIBuilder::makeIntRow(
-        secId + ".clipIndex", "Clip Index", a.value("currentClipIndex", -1),
+        id + ".clipIndex", "Clip Index", a.value("currentClipIndex", -1),
         [this](int v) { m_state.entityData["Animation"]["currentClipIndex"] = v; m_state.isDirty = true; }));
 
     parent.children.push_back(EditorUIBuilder::makeFloatRow(
-        secId + ".speed", "Speed", a.value("speed", 1.0f),
+        id + ".speed", "Speed", a.value("speed", 1.0f),
         [this](float v) { m_state.entityData["Animation"]["speed"] = v; m_state.isDirty = true; }));
 
     bool playing = a.value("playing", false);
     parent.children.push_back(EditorUIBuilder::makeCheckBox(
-        secId + ".playing", "Playing", playing,
+        id + ".playing", "Playing", playing,
         [this](bool v) { m_state.entityData["Animation"]["playing"] = v; m_state.isDirty = true; }));
 
     bool loop = a.value("loop", true);
     parent.children.push_back(EditorUIBuilder::makeCheckBox(
-        secId + ".loop", "Loop", loop,
+        id + ".loop", "Loop", loop,
         [this](bool v) { m_state.entityData["Animation"]["loop"] = v; m_state.isDirty = true; }));
-
-    parent.children.push_back(EditorUIBuilder::makeDivider());
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-void EntityEditorTab::buildParticleEmitterSection(WidgetElement& parent)
+void EntityEditorTab::buildParticleEmitterDetails(WidgetElement& parent)
 {
-    const std::string secId = "EntityEditor.Sec.Particle";
-    parent.children.push_back(makeSectionHeader(secId, "Particle Emitter",
-        [this]() { removeComponent("ParticleEmitter"); }));
-
+    const std::string id = "EntityEditor.Det.Particle";
     auto& pe = m_state.entityData["ParticleEmitter"];
 
     parent.children.push_back(EditorUIBuilder::makeIntRow(
-        secId + ".maxParticles", "Max Particles", pe.value("maxParticles", 100),
+        id + ".maxParticles", "Max Particles", pe.value("maxParticles", 100),
         [this](int v) { m_state.entityData["ParticleEmitter"]["maxParticles"] = v; m_state.isDirty = true; }));
 
     parent.children.push_back(EditorUIBuilder::makeFloatRow(
-        secId + ".emissionRate", "Emission Rate", pe.value("emissionRate", 20.0f),
+        id + ".emissionRate", "Emission Rate", pe.value("emissionRate", 20.0f),
         [this](float v) { m_state.entityData["ParticleEmitter"]["emissionRate"] = v; m_state.isDirty = true; }));
 
     parent.children.push_back(EditorUIBuilder::makeFloatRow(
-        secId + ".lifetime", "Lifetime", pe.value("lifetime", 2.0f),
+        id + ".lifetime", "Lifetime", pe.value("lifetime", 2.0f),
         [this](float v) { m_state.entityData["ParticleEmitter"]["lifetime"] = v; m_state.isDirty = true; }));
 
     parent.children.push_back(EditorUIBuilder::makeFloatRow(
-        secId + ".speed", "Speed", pe.value("speed", 2.0f),
+        id + ".speed", "Speed", pe.value("speed", 2.0f),
         [this](float v) { m_state.entityData["ParticleEmitter"]["speed"] = v; m_state.isDirty = true; }));
 
     parent.children.push_back(EditorUIBuilder::makeFloatRow(
-        secId + ".size", "Size", pe.value("size", 0.2f),
+        id + ".size", "Size", pe.value("size", 0.2f),
         [this](float v) { m_state.entityData["ParticleEmitter"]["size"] = v; m_state.isDirty = true; }));
 
     parent.children.push_back(EditorUIBuilder::makeFloatRow(
-        secId + ".gravity", "Gravity", pe.value("gravity", -9.81f),
+        id + ".gravity", "Gravity", pe.value("gravity", -9.81f),
         [this](float v) { m_state.entityData["ParticleEmitter"]["gravity"] = v; m_state.isDirty = true; }));
 
     bool enabled = pe.value("enabled", true);
     parent.children.push_back(EditorUIBuilder::makeCheckBox(
-        secId + ".enabled", "Enabled", enabled,
+        id + ".enabled", "Enabled", enabled,
         [this](bool v) { m_state.entityData["ParticleEmitter"]["enabled"] = v; m_state.isDirty = true; }));
 
     bool loop = pe.value("loop", true);
     parent.children.push_back(EditorUIBuilder::makeCheckBox(
-        secId + ".loop", "Loop", loop,
+        id + ".loop", "Loop", loop,
         [this](bool v) { m_state.entityData["ParticleEmitter"]["loop"] = v; m_state.isDirty = true; }));
-
-    parent.children.push_back(EditorUIBuilder::makeDivider());
 }

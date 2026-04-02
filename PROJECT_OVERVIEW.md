@@ -5,6 +5,51 @@
 
 ---
 
+## Aktuelle Änderung (Engine-Lib-Deployment + Leichtgewichtiger Game Build)
+
+- `CMakeLists.txt (POST_BUILD .lib-Deployment)`: Alle Engine-Import-Libraries (.lib) werden nach `${ENGINE_DEPLOY_DIR}/Tools/lib/` kopiert. Umfasst: Shared-Lib-Import-Libs (Scripting, Renderer, AssetManager, Core, Logger, Diagnostics, Physics, SDL3) und Runtime-Varianten (ScriptingRuntime, RendererRuntime, AssetManagerRuntime) sowie statische Libs (Landscape, LandscapeRuntime). Ermöglicht GameScripts-PIE-Build und Game-Build ohne Zugriff auf den cmake-Build-Ordner.
+- `CMakeLists.txt (Runtime-DLL-Deployment)`: Runtime-Varianten-DLLs (ScriptingRuntime.dll, RendererRuntime.dll, AssetManagerRuntime.dll) werden ebenfalls nach `Tools/lib/` deployed. `add_dependencies(HorizonEngine ScriptingRuntime RendererRuntime AssetManagerRuntime LandscapeRuntime)` stellt sicher, dass Runtime-Targets automatisch beim Editor-Build mitgebaut werden.
+- `CMakeLists.txt (NativeScripting-Header-Deployment)`: Header-Dateien aus `src/NativeScripting/` werden nach `Tools/include/NativeScripting/` deployed (GameplayAPIExport.h, INativeScript.h, NativeScriptRegistry.h, GameplayAPI.h, NativeScriptManager.h). GameScripts-Projekte kompilieren gegen deployed Headers statt Engine-Source-Tree.
+- `CMakeLists.txt (SDL3-Header-Deployment)`: SDL3-Header (`external/SDL3/include/SDL3/`) werden nach `Tools/include/SDL3/` kopiert für den leichtgewichtigen Game Build.
+- `CMakeLists.txt (EngineConfig.cmake)`: Generierte Config-Datei in `Tools/EngineConfig.cmake` mit ENGINE_SOURCE_DIR, ENGINE_DEPLOY_DIR, Python3_INCLUDE_DIRS, ENGINE_PYTHON_LIB. Wird vom leichtgewichtigen Game Build verwendet.
+- `EditorApp.cpp (GameScripts Link-Pfad Fix)`: `target_link_directories` im generierten GameScripts-CMakeLists zeigt jetzt auf `Tools/lib/` (statt direkt auf Editor-Binary-Verzeichnis). `target_include_directories` nutzt `Tools/include/NativeScripting/` (deployed Headers statt Engine-Source-Pfad).
+- `BuildPipeline.cpp (Leichtgewichtiger Game Build)`: Erkennt automatisch ob vorgebaute Engine-Libraries in `Tools/lib/` vorhanden sind (prüft ScriptingRuntime.lib, RendererRuntime.lib, AssetManagerRuntime.lib, Core.lib, SDL3.lib). **Wenn vorhanden**: Generiert minimales CMakeLists.txt das nur `main.cpp` kompiliert und gegen vorgebaute .lib-Dateien linkt — Engine wird NICHT neu kompiliert. **Wenn nicht vorhanden**: Fallback auf vollständigen Engine-Build. DLL-Deploy im leichtgewichtigen Modus kopiert (1) Shared-DLLs aus Editor-Root und (2) Runtime-DLLs aus `Tools/lib/`.
+- **Architektur**: Editor-Build → deployed .lib/.dll/headers → Game Build linkt dagegen. Kein cmake add_subdirectory für SDL/assimp/jolt/PhysX/freetype/OpenAL nötig.
+
+## Aktuelle Änderung (Default-Content ScriptingMode-Awareness + DefaultCubeScript entfernt)
+
+- `DefaultCubeScript.py entfernt (AssetManagerEditorWidgets.cpp)`: Die einzelne `DefaultCubeScript.py`-Datei wird beim Erstellen des Beispielprojekts nicht mehr generiert — sie war keiner Entity zugewiesen und somit überflüssig.
+- `DefaultCube1-5 ScriptingMode-aware (AssetManagerEditorWidgets.cpp)`: Die 5 Standard-Cube-Skripte werden jetzt basierend auf der Projekt-ScriptingMode generiert. **PythonOnly/Both**: Python `.py`-Dateien mit `on_loaded`, `tick`, `on_begin_overlap`, `on_end_overlap`. **CppOnly/Both**: C++ `.h`/`.cpp`-Dateien in `Scripts/Native/` als INativeScript-Subklassen mit allen Lifecycle-Methoden (`onLoaded`, `tick`, `onBeginOverlap`, `onEndOverlap`, `onDestroy`).
+- `Default-Level JSON nutzt "Logic"-Key`: Entity-Komponenten im generierten Default-Level verwenden den neuen `"Logic"`-JSON-Key mit `scriptPath` und/oder `nativeClassName` abhängig vom ScriptingMode (statt altem `"Script"`-Key).
+
+## Aktuelle Änderung (Unified LogicComponent: Script + NativeScript zusammengeführt)
+
+- `LogicComponent ersetzt ScriptComponent + NativeScriptComponent (Components.h)`: Die zwei separaten Komponenten `ScriptComponent` (Python-Skripting) und `NativeScriptComponent` (C++-Skripting) wurden zu einer einzigen `LogicComponent` zusammengeführt. Felder: `scriptPath` (Python-Skript-Pfad), `nativeClassName` (C++-Klassenname), `scriptAssetId` (Asset-ID). Ermöglicht Entities gleichzeitig Python- und C++-Logik zu haben.
+- `ComponentKind::Logic (ECS.h)`: `ComponentKind::Script` und `ComponentKind::NativeScript` durch `ComponentKind::Logic` ersetzt. `ComponentTraits<LogicComponent>` Spezialisierung. `m_logicComponents` Storage. Beide `getStorage()`-Überladungen (const/non-const) und `setComponentAsset<>` aktualisiert. `MaxComponentTypes = 14` bleibt.
+- `ECS.cpp (initialize + removeEntity)`: Initialisierung und Entity-Entfernung nutzen `LogicComponent` statt der zwei getrennten Typen.
+- `EngineLevel.cpp/h (Serialisierung + Backward-Compat)`: `serializeLogicComponent`/`deserializeLogicComponent` ersetzen die alten Funktionen. **Backward-Kompatibilität**: Level-Deserialisierung erkennt alte `"Script"` und `"NativeScript"` JSON-Keys und migriert sie automatisch in die neue `LogicComponent`-Struktur. `EntitySnapshot` nutzt `LogicComponent`.
+- `OutlinerPanel.cpp/h (Logic-UI + Auto-File-Generation)`: Entity-Details zeigen eine "Logic"-Sektion mit Python-Script-Pfad und C++-Klassen-Anzeige. **Auto-File-Erzeugung beim Hinzufügen**: Je nach `DiagnosticsManager::ScriptingMode` werden automatisch Python-`.py`-Dateien (mit `on_loaded`, `tick`, `on_begin_overlap`, `on_end_overlap`) und/oder C++-`.h`/`.cpp`-Dateien (INativeScript-Subklasse mit allen Lifecycle-Methoden) erstellt. Entity-Name wird zu Dateinamen sanitisiert (Nicht-Alphanumerische → Underscore). `EntityClipboard` nutzt `LogicComponent`.
+- `EntityModule.cpp (Python-API)`: Alle drei Switch-Statements (`AddComponentByKind`, `RemoveComponentByKind`, `RequireComponentByKind`) verwenden `ComponentKind::Logic` mit `LogicComponent`.
+- `PythonScripting.cpp (Script-Loop + Konstanten)`: Entity-Script-Loop und Overlap-Dispatch nutzen `LogicComponent`. Python-Konstante `Component_Logic` ersetzt `Component_Script` und `Component_NativeScript`.
+- `NativeScriptManager.cpp`: Schema-Query und Komponentenzugriff nutzen `LogicComponent.nativeClassName`.
+- `UIManagerEditor.cpp (Prefab-Serialisierung)`: Prefab-Serialisierung/Deserialisierung nutzt `LogicComponent`. Backward-Kompatibilität für alte `"Script"`-JSON-Keys. Icon/Tint-Helper aktualisiert.
+- `AssetManagerFileOps.cpp`: Integritätsvalidierung, `moveAsset`, `renameAsset`, `findAssetReferences` nutzen `LogicComponent.scriptPath`.
+- `EditorApp.cpp`: Viewport-Drop, Spawn-Snapshot, Drop-on-Entity, Delete-Entity-Snapshots, Undo/Redo nutzen `LogicComponent`.
+- `ContentBrowserPanel.cpp`: Asset-Referenz-Sammlung nutzt `LogicComponent`.
+- `engine.pyi`: `Component_Logic` ersetzt `Component_Script` und `Component_NativeScript` für Python-IntelliSense.
+
+## Aktuelle Änderung (ScriptingMode-Persistenz in Projektdatei)
+
+- `DiagnosticsManager.h/cpp (String-Konvertierung)`: Neue Hilfsfunktionen `scriptingModeToString()` und `scriptingModeFromString()` für die Konvertierung von `ScriptingMode`-Enum zu/von String (`"PythonOnly"`, `"CppOnly"`, `"Both"`).
+- `AssetManager.cpp (Projekt-Datei Save/Load)`: `ScriptingMode=`-Zeile wird in die `.project`-Datei geschrieben (nach `RHI=`). Beim Laden wird das Feld geparst und in `DiagnosticsManager::ProjectInfo::scriptingMode` gesetzt.
+
+## Aktuelle Änderung (Editor-UI-Verbesserungen: Hover-Effekte, IDE-Empfehlung, Dialog-Buttons)
+
+- `Popup-Hover-Effekte (EditorDialogs.cpp, UIManagerEditor.cpp)`: `style.transitionDuration = 0.15f` an 4 Stellen hinzugefügt, damit Hover-Effekte in Popup-Dialogen korrekt funktionieren (Projekt-Erstellungs-Dialog, IDE-Empfehlungs-Dialog, Bestätigungs-Dialog, Checkbox-Bestätigungs-Dialog).
+- `VS IDE-Empfehlungs-Popup (EditorDialogs.cpp)`: Wenn C++/Both-Scripting gewählt wird, erscheint ein `showConfirmDialogWithCheckbox`-Dialog mit Visual Studio Download-Empfehlung. "Download"-Button öffnet `https://visualstudio.microsoft.com/` via `SDL_OpenURL`. "Skip"-Button überspringt. Checkbox "Do not show again" mit `DiagnosticsManager::setState("HideVSRecommendation", "1")`.
+- `Optionale Button-Labels (EditorDialogs.h/cpp)`: `showConfirmDialog` und `showConfirmDialogWithCheckbox` akzeptieren jetzt optionale `confirmLabel`/`cancelLabel`-Parameter. Primär-Button wird als Primary-Style gerendert (Accent-Farbe), Cancel als Danger-Style.
+- `Cancel-Button-Fix (EditorDialogs.cpp)`: Cancel-Button im IDE-Empfehlungs-Dialog erstellt das Projekt nicht mehr (leere Lambda statt `doCreateProject()`-Aufruf).
+
 ## Aktuelle Änderung (C++ Native Scripting System: DLL-basiertes Gameplay-Scripting)
 
 - `NativeScripting-Modul (src/NativeScripting/)`: Neues Engine-Modul für C++-basiertes Gameplay-Scripting als DLL-Plugin-System. Spieleentwickler schreiben C++-Klassen die von `INativeScript` erben, kompilieren sie als `GameScripts.dll`, und die Engine lädt sie zur Laufzeit via `LoadLibrary`/`dlopen`. Automatische Klassenregistrierung über statische Initialisierer (`REGISTER_NATIVE_SCRIPT`-Makro).
@@ -46,6 +91,14 @@
     Engine/
     Content/
   ```
+
+## Aktuelle Änderung (Entity Asset Drag & Drop: Spawn in Szene)
+
+- `Entity-Asset Drag & Drop auf Viewport (EditorApp.cpp)`: Entity-Assets (`AssetType::Entity`) werden beim Drag & Drop auf den Viewport nicht mehr als Komponente auf bestehende Entities angewendet, sondern als neue Entity in die Szene gespawnt. Verhalten: `screenToWorldPos()` sucht die nächste Oberfläche unter dem Cursor (Depth-Buffer-Unprojection); falls keine Geometrie getroffen wird (depth==1.0), wird die Entity 5 Einheiten vor der Kamera in Blickrichtung platziert. Neue Methode `UIManager::spawnEntityAssetAtPosition()` in `UIManagerEditor.cpp`: Lädt die Entity-Asset-JSON-Datei, nutzt `prefabDeserializeEntity()` für vollständige Komponenten-Deserialisierung mit Position-Override, Undo/Redo-fähig. Analoges Muster wie `spawnPrefabAtPosition()` für Prefab-Assets.
+
+## Aktuelle Änderung (Entity Editor Rework: Split-Layout + Asset-Dropdowns)
+
+- `EntityEditorTab Rework (EditorTabs/EntityEditorTab.h/cpp)`: Komplette Überarbeitung des Entity-Editor-Tabs. Neues Split-Layout: Komponentenliste links (scrollbar, klickbare Einträge mit Selektion-Highlighting), Detail-Panel rechts (zeigt Properties der ausgewählten Komponente). Neuer State `selectedComponent` in `State`-Struct. „+ Add Component"-Button ersetzt durch kompaktes `DropdownButtonWidget` am Ende der Komponentenliste. Entfernen von Komponenten jetzt über „Remove"-Button im Detail-Header statt „X" im Section-Header. Asset-referenzierende Properties (Mesh, Material, Script) nutzen jetzt `DropdownButtonWidget` mit aus dem `AssetRegistry` befüllten Einträgen (Model3D, Material, Script) statt manueller String-Eingabe — inklusive „(None)"-Option. Neue Hilfsmethode `getAssetPathsByType()` liefert sortierte Asset-Pfade nach Typ. Per-Component Detail-Builder umbenannt zu `build*Details()`. Statische `findElementById()`-Hilfsfunktion für Element-Suche im Widget-Tree.
 
 ## Aktuelle Änderung (Entity Asset Type: Neuer Asset-Typ mit dediziertem Editor-Tab)
 
@@ -499,6 +552,7 @@
 - `Surface-Snap / Drop to Surface (Editor Roadmap 5.4 + 3.6)`: `dropSelectedEntitiesToSurface()` in `UIManager` setzt selektierte Entities per Raycast nach unten (-Y) auf die nächste Oberfläche. `computeEntityBottomOffset()` berechnet Pivot-zu-AABB-Unterseite-Abstand. Callback-Pattern (`RaycastDownFn`) überbrückt DLL-Grenze Renderer↔Physics. End-Taste als Shortcut + Settings-Dropdown „Drop to Surface (End)". Undo/Redo + Multi-Select-fähig.
 - `Python print() → Console Tab (Editor Roadmap 2.1 Ergänzung)`: `PyLogWriter` C++-Typ in `PythonScripting.cpp` mit `write()`/`flush()`. Zeilengepuffert, `sys.stdout` → INFO, `sys.stderr` → ERROR (Category::Scripting). `InstallPythonLogRedirect()` nach `Py_Initialize()`. Python-`print()`-Ausgaben erscheinen im Console-Tab.
 - `Asset Thumbnails` (Editor Roadmap 4.1): FBO-gerenderte Thumbnails für Model3D- und Material-Assets im Content Browser. `Renderer::generateAssetThumbnail(assetPath, assetType)` virtuelles Interface, `OpenGLRenderer`-Implementierung rendert 128×128 FBO mit Auto-Kamera (AABB-Framing), Directional Light, Material/PBR-Support. Material-Preview nutzt prozedural erzeugte UV-Sphere (16×12). Thumbnail-Cache (`m_thumbnailCache`) verhindert redundantes Rendering. `ensureThumbnailFbo()`/`releaseThumbnailFbo()` verwalten GL-Ressourcen. Content-Browser-Grid (`populateContentBrowserWidget`) zeigt Thumbnails für Model3D, Material und Texture-Assets — Texturen via `preloadUITexture()`, 3D-Modelle und Materialien via `generateAssetThumbnail()`.
+- `Auto-Build GameScripts.dll vor PIE`: Automatische Kompilierung von C++-Game-Scripts vor jedem Play-In-Editor-Start. **EditorApp.h:** Neue private Methode `buildGameScriptsForPIE()`. **EditorApp.cpp:** `startPIE()` prüft `DiagnosticsManager::ScriptingMode` — bei `CppOnly` oder `Both` wird `buildGameScriptsForPIE()` synchron aufgerufen. Bei Fehlschlag wird PIE mit Toast-Fehlermeldung abgebrochen. `buildGameScriptsForPIE()` (~180 Zeilen): (1) Prüft CMake- und Toolchain-Verfügbarkeit (nicht-fatal wenn fehlend — PIE läuft ohne C++ Scripts). (2) Prüft ob `.cpp`-Dateien in `Content/Scripts/Native/` existieren. (3) Generiert `CMakeLists.txt` im `Content/Scripts/Native/`-Verzeichnis (C++20, `file(GLOB *.cpp/*.h)`, SHARED-Library `GameScripts`, linkt gegen `Scripting`-Import-Lib aus Editor-Bin-Verzeichnis, `POST_BUILD` kopiert DLL nach `<projectPath>/Engine/GameScripts.dll`). CMakeLists.txt wird bei jedem Aufruf überschrieben um Engine-Pfade aktuell zu halten. (4) CMake configure ohne `-G` — cmake erkennt den passenden Generator automatisch anhand der installierten Toolchain (`-S ... -B <projectPath>/Binary/GameScripts/`). (5) CMake build (`--target GameScripts --config RelWithDebInfo`). (6) Lädt/reloaded DLL via `NativeScriptManager::loadGameplayDLL()` + `initializeScripts()`. Prozesse laufen über `CreateProcessA`/`CREATE_NO_WINDOW` (Windows) bzw. `popen` (Linux) mit Pipe-basierter Output-Erfassung ins Logger-System. Build-Cache in `<projectPath>/Binary/GameScripts/` für inkrementelle Builds. Die Engine selbst wird nicht neu gebaut — nur der Spieler-Code wird kompiliert.
 
 ## Inhaltsverzeichnis
 

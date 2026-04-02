@@ -141,9 +141,11 @@ public:
     void showModalMessage(const std::string& message, std::function<void()> onClosed = {});
     void closeModalMessage();
 	#if ENGINE_EDITOR
-	void showConfirmDialog(const std::string& message, std::function<void()> onConfirm, std::function<void()> onCancel = {});
+	void showConfirmDialog(const std::string& message, std::function<void()> onConfirm, std::function<void()> onCancel = {},
+		   const std::string& confirmLabel = "Delete", const std::string& cancelLabel = "Cancel");
 	void showConfirmDialogWithCheckbox(const std::string& message, const std::string& checkboxLabel, bool checkedByDefault,
-		std::function<void(bool checked)> onConfirm, std::function<void()> onCancel = {});
+		   std::function<void(bool checked)> onConfirm, std::function<void()> onCancel = {},
+		   const std::string& confirmLabel = "Delete", const std::string& cancelLabel = "Cancel");
 #endif
 	// Notification levels for priority-based styling (alias from DiagnosticsManager)
 	using NotificationLevel = DiagnosticsManager::NotificationLevel;
@@ -275,8 +277,9 @@ public:
 	// Prefab / Entity Templates
 	bool savePrefabFromEntity(ECS::Entity entity, const std::string& name, const std::string& folder);
 	bool spawnPrefabAtPosition(const std::string& prefabRelPath, const Vec3& pos);
+	bool spawnEntityAssetAtPosition(const std::string& entityAssetRelPath, const Vec3& pos);
 	bool spawnBuiltinTemplate(const std::string& templateName, const Vec3& pos);
-    void openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)> onProjectChosen);
+	void openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI, DiagnosticsManager::ScriptingMode scriptingMode)> onProjectChosen);
 
 	// Returns true if the active tab is a widget editor and had a selected element to delete
 	bool tryDeleteWidgetEditorElement();

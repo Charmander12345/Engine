@@ -370,29 +370,22 @@ static bool deserializeLegacyPhysics(const json& value, ECS::CollisionComponent&
 	return true;
 }
 
-static json serializeScriptComponent(const ECS::ScriptComponent& component)
+static json serializeLogicComponent(const ECS::LogicComponent& component)
 {
-	return json{ {"scriptPath", component.scriptPath} };
+	return json{
+		{"scriptPath", component.scriptPath},
+		{"nativeClassName", component.nativeClassName}
+	};
 }
 
-static void deserializeScriptComponent(const json& value, ECS::ScriptComponent& component)
+static void deserializeLogicComponent(const json& value, ECS::LogicComponent& component)
 {
-	if (value.is_object() && value.contains("scriptPath"))
+	if (value.is_object())
 	{
-		component.scriptPath = value.at("scriptPath").get<std::string>();
-	}
-}
-
-static json serializeNativeScriptComponent(const ECS::NativeScriptComponent& component)
-{
-	return json{ {"className", component.className} };
-}
-
-static void deserializeNativeScriptComponent(const json& value, ECS::NativeScriptComponent& component)
-{
-	if (value.is_object() && value.contains("className"))
-	{
-		component.className = value.at("className").get<std::string>();
+		if (value.contains("scriptPath"))
+			component.scriptPath = value.at("scriptPath").get<std::string>();
+		if (value.contains("nativeClassName"))
+			component.nativeClassName = value.at("nativeClassName").get<std::string>();
 	}
 }
 
@@ -668,11 +661,36 @@ bool EngineLevel::prepareEcs()
 						deserializeCollisionComponent(componentsJson.at("Collision"), component);
 						m_ecs->addComponent<ECS::CollisionComponent>(entity, component);
 					}
-				if (componentsJson.contains("Script"))
+				if (componentsJson.contains("Logic"))
 				{
-					ECS::ScriptComponent component;
-					deserializeScriptComponent(componentsJson.at("Script"), component);
-					m_ecs->addComponent<ECS::ScriptComponent>(entity, component);
+					ECS::LogicComponent component;
+					deserializeLogicComponent(componentsJson.at("Logic"), component);
+					m_ecs->addComponent<ECS::LogicComponent>(entity, component);
+				}
+				else if (componentsJson.contains("Script"))
+				{
+					// Backward compat: migrate old Script component
+					ECS::LogicComponent component;
+					const auto& sj = componentsJson.at("Script");
+					if (sj.is_object() && sj.contains("scriptPath"))
+						component.scriptPath = sj.at("scriptPath").get<std::string>();
+					// Also check for old NativeScript in same entity
+					if (componentsJson.contains("NativeScript"))
+					{
+						const auto& nj = componentsJson.at("NativeScript");
+						if (nj.is_object() && nj.contains("className"))
+							component.nativeClassName = nj.at("className").get<std::string>();
+					}
+					m_ecs->addComponent<ECS::LogicComponent>(entity, component);
+				}
+				else if (componentsJson.contains("NativeScript"))
+				{
+					// Backward compat: migrate old NativeScript component
+					ECS::LogicComponent component;
+					const auto& nj = componentsJson.at("NativeScript");
+					if (nj.is_object() && nj.contains("className"))
+						component.nativeClassName = nj.at("className").get<std::string>();
+					m_ecs->addComponent<ECS::LogicComponent>(entity, component);
 				}
 				if (componentsJson.contains("HeightField"))
 				{
@@ -703,12 +721,6 @@ if (componentsJson.contains("ParticleEmitter"))
 	ECS::ParticleEmitterComponent component;
 	deserializeParticleEmitterComponent(componentsJson.at("ParticleEmitter"), component);
 	m_ecs->addComponent<ECS::ParticleEmitterComponent>(entity, component);
-}
-if (componentsJson.contains("NativeScript"))
-{
-	ECS::NativeScriptComponent component;
-	deserializeNativeScriptComponent(componentsJson.at("NativeScript"), component);
-	m_ecs->addComponent<ECS::NativeScriptComponent>(entity, component);
 }
 			}
 		}
@@ -756,8 +768,8 @@ void EngineLevel::onEntityAdded(ECS::Entity entity)
 	}
 	if (m_ecs)
 	{
-		const auto* script = m_ecs->getComponent<ECS::ScriptComponent>(entity);
-		if (script && !script->scriptPath.empty())
+		const auto* logic = m_ecs->getComponent<ECS::LogicComponent>(entity);
+		if (logic && !logic->scriptPath.empty())
 		{
 			if (std::find(m_scriptEntities.begin(), m_scriptEntities.end(), entity) == m_scriptEntities.end())
 			{
@@ -844,8 +856,8 @@ void EngineLevel::buildScriptEntityCache()
 
 	for (const auto entity : m_entities)
 	{
-		const auto* script = m_ecs->getComponent<ECS::ScriptComponent>(entity);
-		if (!script || script->scriptPath.empty())
+		const auto* logic = m_ecs->getComponent<ECS::LogicComponent>(entity);
+		if (!logic || logic->scriptPath.empty())
 		{
 			continue;
 		}
@@ -907,9 +919,9 @@ json EngineLevel::serializeEcsEntities() const
 		{
 			componentsJson["Collision"] = serializeCollisionComponent(*component);
 		}
-		if (const auto* component = ecs.getComponent<ECS::ScriptComponent>(entity))
+		if (const auto* component = ecs.getComponent<ECS::LogicComponent>(entity))
 		{
-			componentsJson["Script"] = serializeScriptComponent(*component);
+			componentsJson["Logic"] = serializeLogicComponent(*component);
 		}
 		if (const auto* component = ecs.getComponent<ECS::HeightFieldComponent>(entity))
 		{
@@ -931,12 +943,8 @@ if (const auto* component = ecs.getComponent<ECS::ParticleEmitterComponent>(enti
 {
 	componentsJson["ParticleEmitter"] = serializeParticleEmitterComponent(*component);
 }
-if (const auto* component = ecs.getComponent<ECS::NativeScriptComponent>(entity))
-{
-	componentsJson["NativeScript"] = serializeNativeScriptComponent(*component);
-}
 
-		entityJson["components"] = componentsJson;
+entityJson["components"] = componentsJson;
 		entitiesJson.push_back(entityJson);
 	}
 
@@ -1152,10 +1160,10 @@ void EngineLevel::snapshotEcsState()
 			snap.collision = *c;
 			snap.mask.set(static_cast<size_t>(ECS::ComponentKind::Collision));
 		}
-		if (const auto* c = ecs.getComponent<ECS::ScriptComponent>(entity))
+		if (const auto* c = ecs.getComponent<ECS::LogicComponent>(entity))
 		{
-			snap.script = *c;
-			snap.mask.set(static_cast<size_t>(ECS::ComponentKind::Script));
+			snap.logic = *c;
+			snap.mask.set(static_cast<size_t>(ECS::ComponentKind::Logic));
 		}
 		if (const auto* c = ecs.getComponent<ECS::NameComponent>(entity))
 		{
@@ -1203,8 +1211,8 @@ bool EngineLevel::restoreEcsSnapshot()
 			ecs.setComponent<ECS::PhysicsComponent>(entity, snap.physics);
 		if (snap.mask.test(static_cast<size_t>(ECS::ComponentKind::Collision)))
 			ecs.setComponent<ECS::CollisionComponent>(entity, snap.collision);
-		if (snap.mask.test(static_cast<size_t>(ECS::ComponentKind::Script)))
-			ecs.setComponent<ECS::ScriptComponent>(entity, snap.script);
+		if (snap.mask.test(static_cast<size_t>(ECS::ComponentKind::Logic)))
+			ecs.setComponent<ECS::LogicComponent>(entity, snap.logic);
 		if (snap.mask.test(static_cast<size_t>(ECS::ComponentKind::Name)))
 			ecs.setComponent<ECS::NameComponent>(entity, snap.name);
 		if (snap.mask.test(static_cast<size_t>(ECS::ComponentKind::HeightField)))

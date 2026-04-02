@@ -318,10 +318,10 @@ std::unordered_set<std::string> ContentBrowserPanel::buildReferencedAssetSet() c
     }
     {
         ECS::Schema schema;
-        schema.require<ECS::ScriptComponent>();
+        schema.require<ECS::LogicComponent>();
         for (const auto e : ecs.getEntitiesMatchingSchema(schema))
         {
-            const auto* sc = ecs.getComponent<ECS::ScriptComponent>(e);
+            const auto* sc = ecs.getComponent<ECS::LogicComponent>(e);
             if (sc && !sc->scriptPath.empty())
                 refs.insert(sc->scriptPath);
         }

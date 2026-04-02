@@ -101,13 +101,13 @@ void NativeScriptManager::initializeScripts()
 auto& ecs = ECS::ECSManager::Instance();
 
 ECS::Schema schema;
-schema.require<ECS::NativeScriptComponent>();
+schema.require<ECS::LogicComponent>();
 auto entities = ecs.getEntitiesMatchingSchema(schema);
 
 for (auto entity : entities)
 {
-auto* comp = ecs.getComponent<ECS::NativeScriptComponent>(entity);
-if (!comp || comp->className.empty())
+auto* comp = ecs.getComponent<ECS::LogicComponent>(entity);
+if (!comp || comp->nativeClassName.empty())
 {
 continue;
 }
@@ -117,7 +117,7 @@ if (m_instances.find(entity) != m_instances.end())
 continue;
 }
 
-createInstance(entity, comp->className);
+createInstance(entity, comp->nativeClassName);
 }
 }
 
