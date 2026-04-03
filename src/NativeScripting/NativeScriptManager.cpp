@@ -204,6 +204,30 @@ it->second->onEndOverlap(other);
 }
 }
 
+void NativeScriptManager::setPythonCallHandler(PythonCallHandler handler)
+{
+m_pythonCallHandler = std::move(handler);
+}
+
+ScriptValue NativeScriptManager::callPythonForEntity(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args) const
+{
+if (m_pythonCallHandler)
+{
+return m_pythonCallHandler(entity, funcName, args);
+}
+return ScriptValue{};
+}
+
+INativeScript* NativeScriptManager::getInstance(ECS::Entity entity) const
+{
+auto it = m_instances.find(entity);
+if (it != m_instances.end())
+{
+return it->second;
+}
+return nullptr;
+}
+
 #if ENGINE_EDITOR
 void NativeScriptManager::hotReload()
 {

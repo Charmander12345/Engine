@@ -12,6 +12,7 @@
 #include "../Renderer/Renderer.h"
 #include "../Physics/PhysicsWorld.h"
 #include "../Core/InputActionManager.h"
+#include "../NativeScripting/NativeScriptManager.h"
 
 #include <filesystem>
 #include <fstream>
@@ -244,6 +245,103 @@ namespace
                 Py_DECREF(result);
             }
         }
+    }
+
+    // ── Cross-language: C++ -> Python call handler ──────────────────────
+
+    PyObject* ScriptValueToPyObject(const ScriptValue& val)
+    {
+        switch (val.type)
+        {
+        case ScriptValue::Float:  return PyFloat_FromDouble(val.floatVal);
+        case ScriptValue::Int:    return PyLong_FromLong(val.intVal);
+        case ScriptValue::Bool:   if (val.boolVal) { Py_RETURN_TRUE; } else { Py_RETURN_FALSE; }
+        case ScriptValue::String: return PyUnicode_FromString(val.stringVal.c_str());
+        case ScriptValue::None:
+        default:                  Py_RETURN_NONE;
+        }
+    }
+
+    ScriptValue PyObjectToScriptValue(PyObject* obj)
+    {
+        if (!obj || obj == Py_None)
+        {
+            return ScriptValue{};
+        }
+        if (PyBool_Check(obj))
+        {
+            return ScriptValue::makeBool(obj == Py_True);
+        }
+        if (PyLong_Check(obj))
+        {
+            return ScriptValue::makeInt(static_cast<int>(PyLong_AsLong(obj)));
+        }
+        if (PyFloat_Check(obj))
+        {
+            return ScriptValue::makeFloat(static_cast<float>(PyFloat_AsDouble(obj)));
+        }
+        if (PyUnicode_Check(obj))
+        {
+            const char* str = PyUnicode_AsUTF8(obj);
+            return str ? ScriptValue::makeString(str) : ScriptValue{};
+        }
+        return ScriptValue{};
+    }
+
+    ScriptValue HandleCppCallsPython(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args)
+    {
+        if (!Py_IsInitialized())
+        {
+            return ScriptValue{};
+        }
+
+        // Find the entity's Python script
+        const auto* comp = ECS::ECSManager::Instance().getComponent<ECS::LogicComponent>(entity);
+        if (!comp || comp->scriptPath.empty())
+        {
+            return ScriptValue{};
+        }
+
+        auto it = s_scripts.find(comp->scriptPath);
+        if (it == s_scripts.end() || !it->second.module)
+        {
+            return ScriptValue{};
+        }
+
+        PyGILState_STATE gilState = PyGILState_Ensure();
+
+        PyObject* moduleDict = PyModule_GetDict(it->second.module);
+        PyObject* func = moduleDict ? PyDict_GetItemString(moduleDict, funcName) : nullptr;
+        if (!func || !PyCallable_Check(func))
+        {
+            PyGILState_Release(gilState);
+            return ScriptValue{};
+        }
+
+        // Build args tuple: (entity, arg1, arg2, ...)
+        PyObject* pyArgs = PyTuple_New(1 + static_cast<Py_ssize_t>(args.size()));
+        PyTuple_SetItem(pyArgs, 0, PyLong_FromUnsignedLong(entity));
+        for (size_t i = 0; i < args.size(); ++i)
+        {
+            PyTuple_SetItem(pyArgs, 1 + static_cast<Py_ssize_t>(i), ScriptValueToPyObject(args[i]));
+        }
+
+        PyObject* result = PyObject_CallObject(func, pyArgs);
+        Py_DECREF(pyArgs);
+
+        ScriptValue retVal;
+        if (!result)
+        {
+            LogPythonError("Python: cross-call to " + std::string(funcName) + " failed for " + DescribeEntity(entity));
+        }
+        else
+        {
+            retVal = PyObjectToScriptValue(result);
+            Py_DECREF(result);
+        }
+
+        PyGILState_Release(gilState);
+        return retVal;
     }
 
     std::filesystem::path ResolveScriptPath(const std::string& scriptPath)
@@ -946,6 +1044,10 @@ namespace Scripting
             return false;
         }
         InstallPythonLogRedirect();
+
+        // Register cross-language bridge: C++ scripts can call Python functions
+        NativeScriptManager::Instance().setPythonCallHandler(HandleCppCallsPython);
+
         Logger::Instance().log(Logger::Category::Engine, "Python: initialized", Logger::LogLevel::INFO);
         return Py_IsInitialized();
     }

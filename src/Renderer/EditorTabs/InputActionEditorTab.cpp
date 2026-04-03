@@ -84,6 +84,7 @@ void InputActionEditorTab::open(const std::string& assetPath)
 	m_state.widgetId  = widgetId;
 	m_state.assetPath = assetPath;
 	m_state.assetName = fileJson.value("name", std::filesystem::path(assetPath).stem().string());
+	m_state.originalAssetName = m_state.assetName;
 	m_state.isOpen    = true;
 	m_state.isDirty   = false;
 	m_state.actionData = fileJson["data"];
@@ -184,6 +185,26 @@ void InputActionEditorTab::save()
 	auto& diagnostics = DiagnosticsManager::Instance();
 	if (!diagnostics.isProjectLoaded()) return;
 
+	// Rename asset file if name was changed
+	if (m_state.assetName != m_state.originalAssetName && !m_state.assetName.empty())
+	{
+		if (AssetManager::Instance().renameAsset(m_state.assetPath, m_state.assetName))
+		{
+			const std::filesystem::path oldRel(m_state.assetPath);
+			const std::string ext = oldRel.extension().string();
+			const std::filesystem::path parentDir = oldRel.parent_path();
+			m_state.assetPath = (parentDir / (m_state.assetName + ext)).generic_string();
+			m_state.originalAssetName = m_state.assetName;
+		}
+		else
+		{
+			m_ui->showToastMessage("Failed to rename input action asset.", UIManager::kToastMedium);
+			m_state.assetName = m_state.originalAssetName;
+			refresh();
+			return;
+		}
+	}
+
 	const std::filesystem::path contentDir =
 		std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content";
 	const std::filesystem::path absPath = contentDir / m_state.assetPath;
@@ -232,6 +253,10 @@ void InputActionEditorTab::refresh()
 	if (elements.empty()) return;
 
 	auto& root = elements[0];
+
+	// Update toolbar title
+	if (auto* titleEl = m_ui->findElementById("InputActionEditor.Title"))
+		titleEl->text = "Input Action: " + m_state.assetName;
 
 	// Find details panel and rebuild
 	for (auto it = root.children.begin(); it != root.children.end(); ++it)
@@ -326,18 +351,19 @@ void InputActionEditorTab::buildDetailsPanel(WidgetElement& root)
 	panel.style.color = Vec4{ 0.08f, 0.09f, 0.11f, 1.0f };
 	panel.runtimeOnly = true;
 
-	// Action Name label
+	// Action Name (editable)
 	{
-		WidgetElement lbl{};
-		lbl.type          = WidgetElementType::Text;
-		lbl.text          = "Action Name: " + m_state.assetName;
-		lbl.font          = theme.fontDefault;
-		lbl.fontSize      = theme.fontSizeBody;
-		lbl.style.textColor = theme.textPrimary;
-		lbl.fillX         = true;
-		lbl.minSize       = EditorTheme::Scaled(Vec2{ 0.0f, 24.0f });
-		lbl.runtimeOnly   = true;
-		panel.children.push_back(std::move(lbl));
+		WidgetElement nameRow = EditorUIBuilder::makeStringRow(
+			"InputActionEditor.Name", "Action Name", m_state.assetName,
+			[this](const std::string& newName)
+			{
+				if (!newName.empty() && newName != m_state.assetName)
+				{
+					m_state.assetName = newName;
+					m_state.isDirty = true;
+				}
+			});
+		panel.children.push_back(std::move(nameRow));
 	}
 
 	// Spacer

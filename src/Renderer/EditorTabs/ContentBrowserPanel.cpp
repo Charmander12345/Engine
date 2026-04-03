@@ -8,7 +8,6 @@
 #include "../../Diagnostics/DiagnosticsManager.h"
 #include "../../AssetManager/AssetManager.h"
 #include "../../Core/ECS/ECS.h"
-#include "../UIWidgets/DropdownButtonWidget.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -652,54 +651,6 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
             pathBar->children.push_back(std::move(importBtn));
         }
 
-        // New Level dropdown button
-        {
-            const auto& theme = EditorTheme::Get();
-            DropdownButtonWidget newLevelDropdown;
-            newLevelDropdown.setText("+ Level");
-            newLevelDropdown.setFont(theme.fontDefault);
-            newLevelDropdown.setFontSize(theme.fontSizeSmall);
-            newLevelDropdown.setMinSize(EditorTheme::Scaled(Vec2{ 58.0f, theme.rowHeightSmall }));
-            newLevelDropdown.setPadding(theme.paddingSmall);
-            newLevelDropdown.setBackgroundColor(Vec4{ theme.successColor.x * 0.55f, theme.successColor.y * 0.55f, theme.successColor.z * 0.55f, 0.85f });
-            newLevelDropdown.setHoverColor(Vec4{ theme.successColor.x * 0.75f, theme.successColor.y * 0.75f, theme.successColor.z * 0.75f, 0.95f });
-            newLevelDropdown.setTextColor(theme.textPrimary);
-
-            struct LevelTemplate { std::string label; UIManager::SceneTemplate tmpl; };
-            const LevelTemplate templates[] = {
-                { "Empty",         UIManager::SceneTemplate::Empty },
-                { "Basic Outdoor", UIManager::SceneTemplate::BasicOutdoor },
-                { "Prototype",     UIManager::SceneTemplate::Prototype },
-            };
-            for (const auto& t : templates)
-            {
-                newLevelDropdown.addItem(t.label, [uiMgr = m_uiManager, tmpl = t.tmpl, label = t.label]() {
-                    // Build unique level name
-                    std::string baseName = "NewLevel";
-                    int suffix = 1;
-                    std::string levelName = baseName;
-                    const auto& reg = AssetManager::Instance().getAssetRegistry();
-                    while (true)
-                    {
-                        bool found = false;
-                        for (const auto& e : reg)
-                        {
-                            if (e.type == AssetType::Level && e.name == levelName) { found = true; break; }
-                        }
-                        if (!found) break;
-                        levelName = baseName + std::to_string(suffix++);
-                    }
-                    uiMgr->createNewLevelWithTemplate(tmpl, levelName);
-                });
-            }
-
-            WidgetElement newLevelEl = newLevelDropdown.toElement();
-            newLevelEl.id = "ContentBrowser.PathBar.NewLevel";
-            newLevelEl.fillX = false;
-            newLevelEl.runtimeOnly = false;
-            pathBar->children.push_back(std::move(newLevelEl));
-        }
-
         // Rename button (enabled only when a grid asset is selected)
         {
             const auto& theme = EditorTheme::Get();
@@ -886,66 +837,6 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
             pathBar->children.push_back(std::move(crumbBtn));
         }
 
-        // "+ Entity" template dropdown
-        {
-            const auto& theme = EditorTheme::Get();
-            WidgetElement addBtn{};
-            addBtn.id            = "ContentBrowser.AddEntity";
-            addBtn.type          = WidgetElementType::Button;
-            addBtn.text          = "+ Entity";
-            addBtn.font          = theme.fontDefault;
-            addBtn.fontSize      = theme.fontSizeSmall;
-            addBtn.style.textColor = theme.textPrimary;
-            addBtn.style.color     = Vec4{ theme.accent.x, theme.accent.y, theme.accent.z, 0.25f };
-            addBtn.style.hoverColor = Vec4{ theme.accent.x, theme.accent.y, theme.accent.z, 0.45f };
-            addBtn.style.borderRadius = theme.borderRadius;
-            addBtn.textAlignH    = TextAlignH::Center;
-            addBtn.textAlignV    = TextAlignV::Center;
-            addBtn.minSize       = EditorTheme::Scaled(Vec2{ 58.0f, 20.0f });
-            addBtn.padding       = EditorTheme::Scaled(Vec2{ 6.0f, 2.0f });
-            addBtn.sizeToContent = true;
-            addBtn.hitTestMode   = HitTestMode::Enabled;
-            addBtn.runtimeOnly   = true;
-            addBtn.onClicked = [uiMgr = m_uiManager]()
-            {
-                auto* renderer = uiMgr->getRenderer();
-                if (!renderer) return;
-                Vec3 spawnPos{ 0.0f, 0.0f, 0.0f };
-                const Vec3 camPos = renderer->getCameraPosition();
-                const Vec2 camRot = renderer->getCameraRotationDegrees();
-                const float yaw = camRot.x * 3.14159265f / 180.0f;
-                const float pitch = camRot.y * 3.14159265f / 180.0f;
-                spawnPos.x = camPos.x + cosf(yaw) * cosf(pitch) * 5.0f;
-                spawnPos.y = camPos.y + sinf(pitch) * 5.0f;
-                spawnPos.z = camPos.z + sinf(yaw) * cosf(pitch) * 5.0f;
-
-                std::vector<UIManager::DropdownMenuItem> items;
-                const char* templates[] = {
-                    "Empty Entity", "Point Light", "Directional Light",
-                    "Camera", "Static Mesh", "Physics Object", "Particle Emitter"
-                };
-                for (const char* t : templates)
-                {
-                    const std::string tmplName = t;
-                    const Vec3 pos = spawnPos;
-                    items.push_back({ tmplName, [uiMgr, tmplName, pos]()
-                    {
-                        uiMgr->spawnBuiltinTemplate(tmplName, pos);
-                    }});
-                }
-                // Compute dropdown anchor from the button's layout
-                const auto* elem = uiMgr->findElementById("ContentBrowser.AddEntity");
-                Vec2 anchor = uiMgr->getMousePosition();
-                if (elem)
-                {
-                    anchor.x = elem->computedPositionPixels.x;
-                    anchor.y = elem->computedPositionPixels.y + elem->computedSizePixels.y;
-                }
-                uiMgr->showDropdownMenu(anchor, items, EditorTheme::Scaled(130.0f));
-            };
-            pathBar->children.push_back(std::move(addBtn));
-        }
-
         // Spacer to push search to the right
         {
             WidgetElement spacer{};
@@ -957,52 +848,77 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
             pathBar->children.push_back(std::move(spacer));
         }
 
-        // Type filter buttons
+        // Single "Filter" button that opens a dropdown menu with toggleable asset types
         {
             const auto& theme = EditorTheme::Get();
-            struct FilterDef { const char* label; AssetType type; };
-            const FilterDef filters[] = {
-                { "Mesh",     AssetType::Model3D  },
-                { "Mat",      AssetType::Material },
-                { "Tex",      AssetType::Texture  },
-                { "Script",   AssetType::Script   },
-                { "C++",      AssetType::NativeScript },
-                { "Audio",    AssetType::Audio    },
-                { "Level",    AssetType::Level    },
-                { "Widget",   AssetType::Widget   },
-                { "Prefab",   AssetType::Prefab   },
-                { "Action",   AssetType::InputAction },
-                { "Mapping",  AssetType::InputMapping },
-            };
-            for (const auto& f : filters)
+            const bool allActive = (m_browserTypeFilter == 0xFFFF);
+            WidgetElement filterBtn{};
+            filterBtn.id            = "ContentBrowser.FilterBtn";
+            filterBtn.type          = WidgetElementType::Button;
+            filterBtn.text          = allActive ? "Filter" : "Filter *";
+            filterBtn.font          = theme.fontDefault;
+            filterBtn.fontSize      = theme.fontSizeCaption;
+            filterBtn.style.textColor = allActive ? theme.textSecondary : theme.textPrimary;
+            filterBtn.style.color     = allActive ? theme.buttonSubtle : Vec4{ theme.accent.x, theme.accent.y, theme.accent.z, 0.35f };
+            filterBtn.style.hoverColor = theme.buttonSubtleHover;
+            filterBtn.style.borderRadius = theme.borderRadius;
+            filterBtn.textAlignH    = TextAlignH::Center;
+            filterBtn.textAlignV    = TextAlignV::Center;
+            filterBtn.minSize       = EditorTheme::Scaled(Vec2{ 48.0f, 18.0f });
+            filterBtn.padding       = EditorTheme::Scaled(Vec2{ 6.0f, 1.0f });
+            filterBtn.sizeToContent = true;
+            filterBtn.hitTestMode   = HitTestMode::Enabled;
+            filterBtn.runtimeOnly   = true;
+            filterBtn.onClicked = [this]()
             {
-                const uint16_t bit = static_cast<uint16_t>(1 << static_cast<int>(f.type));
-                const bool active = (m_browserTypeFilter & bit) != 0;
-                WidgetElement btn{};
-                btn.id            = std::string("ContentBrowser.Filter.") + f.label;
-                btn.type          = WidgetElementType::Button;
-                btn.text          = f.label;
-                btn.font          = theme.fontDefault;
-                btn.fontSize      = theme.fontSizeCaption;
-                btn.style.textColor = active ? theme.textPrimary : theme.textMuted;
-                btn.style.color     = active ? Vec4{ theme.accent.x, theme.accent.y, theme.accent.z, 0.35f } : theme.transparent;
-                btn.style.hoverColor = theme.buttonSubtleHover;
-                btn.style.borderRadius = theme.borderRadius;
-                btn.textAlignH    = TextAlignH::Center;
-                btn.textAlignV    = TextAlignV::Center;
-                btn.minSize       = EditorTheme::Scaled(Vec2{ 38.0f, 18.0f });
-                btn.padding       = EditorTheme::Scaled(Vec2{ 4.0f, 1.0f });
-                btn.sizeToContent = true;
-                btn.hitTestMode   = HitTestMode::Enabled;
-                btn.runtimeOnly   = true;
-                const uint16_t filterBit = bit;
-                btn.onClicked = [this, filterBit]()
-                {
-                    m_browserTypeFilter ^= filterBit;
-                    refresh();
+                struct FilterDef { const char* label; AssetType type; };
+                const FilterDef filters[] = {
+                    { "Mesh",          AssetType::Model3D       },
+                    { "Material",      AssetType::Material      },
+                    { "Texture",       AssetType::Texture       },
+                    { "Script",        AssetType::Script        },
+                    { "C++ Script",    AssetType::NativeScript  },
+                    { "Audio",         AssetType::Audio         },
+                    { "Level",         AssetType::Level         },
+                    { "Widget",        AssetType::Widget        },
+                    { "Prefab",        AssetType::Prefab        },
+                    { "Input Action",  AssetType::InputAction   },
+                    { "Input Mapping", AssetType::InputMapping  },
                 };
-                pathBar->children.push_back(std::move(btn));
-            }
+                std::vector<UIManager::DropdownMenuItem> items;
+                for (const auto& f : filters)
+                {
+                    const uint16_t bit = static_cast<uint16_t>(1 << static_cast<int>(f.type));
+                    const bool active = (m_browserTypeFilter & bit) != 0;
+                    const std::string prefix = active ? "[x] " : "[  ] ";
+                    items.push_back({ prefix + f.label, [this, bit]()
+                    {
+                        m_browserTypeFilter ^= bit;
+                        refresh();
+                    }});
+                }
+                items.push_back({ "", {}, true });
+                items.push_back({ "Show All", [this]()
+                {
+                    m_browserTypeFilter = 0xFFFF;
+                    refresh();
+                }});
+                items.push_back({ "Hide All", [this]()
+                {
+                    m_browserTypeFilter = 0;
+                    refresh();
+                }});
+
+                const auto* elem = m_uiManager->findElementById("ContentBrowser.FilterBtn");
+                Vec2 anchor = m_uiManager->getMousePosition();
+                if (elem)
+                {
+                    anchor.x = elem->computedPositionPixels.x;
+                    anchor.y = elem->computedPositionPixels.y + elem->computedSizePixels.y;
+                }
+                m_uiManager->showDropdownMenu(anchor, items, EditorTheme::Scaled(140.0f));
+            };
+            pathBar->children.push_back(std::move(filterBtn));
         }
 
         // Search entry bar

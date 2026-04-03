@@ -109,6 +109,12 @@ class entity:
         ...
 
     @staticmethod
+    def call_native(entity: int, func_name: str, *args) -> object:
+        """Call a named function on the entity's C++ native script.
+        Returns the result from the C++ onScriptCall handler, or None if no native script is attached."""
+        ...
+
+    @staticmethod
     def set_material_override_color_tint(entity: int, r: float, g: float, b: float) -> bool:
         """Set per-entity color tint override (multiplicative RGB, 1,1,1 = no tint).
         Requires MaterialComponent on the entity."""

@@ -19,6 +19,7 @@ public:
 		std::string widgetId;
 		std::string assetPath;
 		std::string assetName;
+		std::string originalAssetName;
 		nlohmann::json actionData;
 		bool isOpen{ false };
 		bool isDirty{ false };

@@ -3,6 +3,7 @@
 #include "../Core/ECS/ECS.h"
 #include "../AssetManager/AssetManager.h"
 #include "../AssetManager/AssetTypes.h"
+#include "../NativeScripting/NativeScriptManager.h"
 
 namespace
 {
@@ -433,6 +434,83 @@ namespace
         Py_RETURN_TRUE;
     }
 
+    // ── Cross-language helpers ──────────────────────────────────────────
+
+    ScriptValue PyObjectToScriptValue(PyObject* obj)
+    {
+        if (!obj || obj == Py_None)
+        {
+            return ScriptValue{};
+        }
+        if (PyBool_Check(obj))
+        {
+            return ScriptValue::makeBool(obj == Py_True);
+        }
+        if (PyLong_Check(obj))
+        {
+            return ScriptValue::makeInt(static_cast<int>(PyLong_AsLong(obj)));
+        }
+        if (PyFloat_Check(obj))
+        {
+            return ScriptValue::makeFloat(static_cast<float>(PyFloat_AsDouble(obj)));
+        }
+        if (PyUnicode_Check(obj))
+        {
+            const char* str = PyUnicode_AsUTF8(obj);
+            return str ? ScriptValue::makeString(str) : ScriptValue{};
+        }
+        return ScriptValue{};
+    }
+
+    PyObject* ScriptValueToPyObject(const ScriptValue& val)
+    {
+        switch (val.type)
+        {
+        case ScriptValue::Float:  return PyFloat_FromDouble(val.floatVal);
+        case ScriptValue::Int:    return PyLong_FromLong(val.intVal);
+        case ScriptValue::Bool:   if (val.boolVal) { Py_RETURN_TRUE; } else { Py_RETURN_FALSE; }
+        case ScriptValue::String: return PyUnicode_FromString(val.stringVal.c_str());
+        case ScriptValue::None:
+        default:                  Py_RETURN_NONE;
+        }
+    }
+
+    // call_native(entity, func_name, *args) -> value
+    PyObject* py_call_native(PyObject*, PyObject* args)
+    {
+        Py_ssize_t argCount = PyTuple_Size(args);
+        if (argCount < 2)
+        {
+            PyErr_SetString(PyExc_TypeError, "call_native requires at least (entity, func_name)");
+            return nullptr;
+        }
+
+        unsigned long entity = 0;
+        const char* funcName = nullptr;
+        if (!PyArg_ParseTuple(args, "ks", &entity, &funcName))
+        {
+            return nullptr;
+        }
+
+        // This gets the rest of the positional args after entity and funcName
+        // We re-parse from the tuple manually
+        std::vector<ScriptValue> scriptArgs;
+        for (Py_ssize_t i = 2; i < argCount; ++i)
+        {
+            scriptArgs.push_back(PyObjectToScriptValue(PyTuple_GetItem(args, i)));
+        }
+
+        INativeScript* script = NativeScriptManager::Instance().getInstance(static_cast<ECS::Entity>(entity));
+        if (!script)
+        {
+            PyErr_SetString(PyExc_ValueError, "Entity has no C++ native script instance.");
+            return nullptr;
+        }
+
+        ScriptValue result = script->onScriptCall(funcName, scriptArgs);
+        return ScriptValueToPyObject(result);
+    }
+
     // ── Method table & module definition ────────────────────────────────
 
     PyMethodDef EntityMethods[] = {
@@ -450,6 +528,7 @@ namespace
         { "get_mesh", py_get_mesh, METH_VARARGS, "Get mesh asset path for an entity." },
         { "get_light_color", py_get_light_color, METH_VARARGS, "Get light color (entity) -> (r, g, b)." },
         { "set_light_color", py_set_light_color, METH_VARARGS, "Set light color (entity, r, g, b)." },
+        { "call_native", py_call_native, METH_VARARGS, "Call a function on the entity's C++ native script." },
         { nullptr, nullptr, 0, nullptr }
     };
 

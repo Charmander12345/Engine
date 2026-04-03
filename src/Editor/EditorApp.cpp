@@ -1341,7 +1341,7 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             if (folder == "__Shaders__") return;
 
             constexpr float kBaseW = 360.0f;
-            constexpr float kBaseH = 180.0f;
+            constexpr float kBaseH = 240.0f;
             const int kPopupW = static_cast<int>(EditorTheme::Scaled(kBaseW));
             const int kPopupH = static_cast<int>(EditorTheme::Scaled(kBaseH));
             PopupWindow* popup = renderer->openPopupWindow(
@@ -1358,6 +1358,7 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             {
                 std::string name = "NewLevel";
                 std::string folder;
+                int templateIndex = 0;
             };
             auto state = std::make_shared<LevelState>();
             state->folder = folder;
@@ -1394,6 +1395,7 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             formStack.from = Vec2{ nx(16.0f), ny(44.0f) };
             formStack.to = Vec2{ nx(W - 16.0f), ny(H - 50.0f) };
             formStack.padding = EditorTheme::Scaled(Vec2{ 4.0f, 4.0f });
+            formStack.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
 
             {
                 WidgetElement lbl;
@@ -1425,6 +1427,38 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
                 formStack.children.push_back(std::move(entry));
             }
 
+            {
+                WidgetElement typeLbl;
+                typeLbl.type = WidgetElementType::Text;
+                typeLbl.id = "NL.TypeLbl";
+                typeLbl.text = "Template";
+                typeLbl.fontSize = EditorTheme::Get().fontSizeBody;
+                typeLbl.style.textColor = Vec4{ 0.7f, 0.75f, 0.85f, 1.0f };
+                typeLbl.fillX = true;
+                typeLbl.minSize = Vec2{ 0.0f, EditorTheme::Scaled(20.0f) };
+                typeLbl.runtimeOnly = true;
+                formStack.children.push_back(std::move(typeLbl));
+            }
+
+            {
+                WidgetElement dropdown;
+                dropdown.type = WidgetElementType::DropdownButton;
+                dropdown.id = "NL.Template";
+                dropdown.text = "Empty";
+                dropdown.items = { "Empty", "Basic Outdoor", "Prototype" };
+                dropdown.fontSize = EditorTheme::Get().fontSizeBody;
+                dropdown.style.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
+                dropdown.style.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.9f };
+                dropdown.style.hoverColor = Vec4{ 0.18f, 0.18f, 0.24f, 0.95f };
+                dropdown.fillX = true;
+                dropdown.minSize = Vec2{ 0.0f, EditorTheme::Scaled(24.0f) };
+                dropdown.padding = EditorTheme::Scaled(Vec2{ 6.0f, 4.0f });
+                dropdown.hitTestMode = HitTestMode::Enabled;
+                dropdown.runtimeOnly = true;
+                dropdown.onSelectionChanged = [state](int index) { state->templateIndex = index; };
+                formStack.children.push_back(std::move(dropdown));
+            }
+
             elements.push_back(std::move(formStack));
 
             {
@@ -1448,7 +1482,13 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
                     auto& ui = renderer->getUIManager();
                     const std::string levelName = state->name.empty() ? "NewLevel" : state->name;
                     const std::string relFolder = state->folder.empty() ? "Levels" : state->folder;
-                    ui.createNewLevelWithTemplate(UIManager::SceneTemplate::Empty, levelName, relFolder);
+                    constexpr UIManager::SceneTemplate templates[] = {
+                        UIManager::SceneTemplate::Empty,
+                        UIManager::SceneTemplate::BasicOutdoor,
+                        UIManager::SceneTemplate::Prototype,
+                    };
+                    const int idx = std::clamp(state->templateIndex, 0, 2);
+                    ui.createNewLevelWithTemplate(templates[idx], levelName, relFolder);
                     popup->close();
                 };
                 elements.push_back(std::move(createBtn));
@@ -1767,6 +1807,7 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             formStack.from = Vec2{ nx(16.0f), ny(44.0f) };
             formStack.to = Vec2{ nx(W - 16.0f), ny(H - 50.0f) };
             formStack.padding = EditorTheme::Scaled(Vec2{ 4.0f, 4.0f });
+            formStack.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             formStack.scrollable = true;
 
             auto makeLabel = [](const std::string& id, const std::string& text) {

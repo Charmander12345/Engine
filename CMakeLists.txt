@@ -430,8 +430,8 @@ add_custom_command(TARGET HorizonEngine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/Content/Textures"
 
-    # Copy Engine executable to deploy directory
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:HorizonEngine>" "${ENGINE_DEPLOY_DIR}/$<TARGET_FILE_NAME:HorizonEngine>"
+    # Copy Engine executable to deploy directory (with retry to survive Defender locks)
+    COMMAND ${CMAKE_COMMAND} -DSRC=$<TARGET_FILE:HorizonEngine> -DDST=${ENGINE_DEPLOY_DIR}/$<TARGET_FILE_NAME:HorizonEngine> -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/retry_copy.cmake
 
     # Clean shaders output dir first so removed/renamed shaders don't stay around
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${ENGINE_DEPLOY_DIR}/shaders"
@@ -534,7 +534,7 @@ add_custom_command(TARGET HorizonEngine POST_BUILD
 if(ENGINE_BUILD_RUNTIME)
     add_custom_command(TARGET HorizonEngineRuntime POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/Tools"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:HorizonEngineRuntime>" "${ENGINE_DEPLOY_DIR}/Tools/$<TARGET_FILE_NAME:HorizonEngineRuntime>"
+        COMMAND ${CMAKE_COMMAND} -DSRC=$<TARGET_FILE:HorizonEngineRuntime> -DDST=${ENGINE_DEPLOY_DIR}/Tools/$<TARGET_FILE_NAME:HorizonEngineRuntime> -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/retry_copy.cmake
         COMMAND_EXPAND_LISTS
     )
 endif()

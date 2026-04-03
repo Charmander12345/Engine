@@ -176,6 +176,10 @@ void InputMappingEditorTab::close()
 	if (!m_state.isOpen || !m_renderer)
 		return;
 
+	// Cancel any active key listening
+	if (m_state.listeningBindingIndex >= 0 && m_ui)
+		m_ui->clearKeyCaptureCallback();
+
 	const std::string tabId = m_state.tabId;
 
 	if (m_renderer->getActiveTabId() == tabId)
@@ -500,18 +504,20 @@ void InputMappingEditorTab::buildBindingsList(WidgetElement& root)
 
 		// Key name label (clickable to rebind via dropdown)
 		{
+			const bool isListening = (m_state.listeningBindingIndex == static_cast<int>(i));
+
 			WidgetElement keyBtn{};
 			keyBtn.id            = rowId + ".Key";
 			keyBtn.type          = WidgetElementType::Button;
-			keyBtn.text          = keyName;
+			keyBtn.text          = isListening ? "Press a key..." : keyName;
 			keyBtn.font          = theme.fontDefault;
 			keyBtn.fontSize      = theme.fontSizeBody;
 			keyBtn.textAlignH    = TextAlignH::Left;
 			keyBtn.textAlignV    = TextAlignV::Center;
-			keyBtn.style.textColor = theme.textPrimary;
+			keyBtn.style.textColor = isListening ? theme.accent : theme.textPrimary;
 			keyBtn.style.color     = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
 			keyBtn.style.hoverColor = theme.buttonSubtleHover;
-			keyBtn.minSize       = EditorTheme::Scaled(Vec2{ 150.0f, 22.0f });
+			keyBtn.minSize       = EditorTheme::Scaled(Vec2{ 120.0f, 22.0f });
 			keyBtn.hitTestMode   = HitTestMode::Enabled;
 			keyBtn.shaderVertex  = "button_vertex.glsl";
 			keyBtn.shaderFragment = "button_fragment.glsl";
@@ -558,6 +564,73 @@ void InputMappingEditorTab::buildBindingsList(WidgetElement& root)
 				m_ui->showDropdownMenu(Vec2{ 0.0f, 0.0f }, items, EditorTheme::Scaled(120.0f));
 			};
 			row.children.push_back(std::move(keyBtn));
+		}
+
+		// Detect button – start listening for a key press
+		{
+			const bool isListening = (m_state.listeningBindingIndex == static_cast<int>(i));
+
+			WidgetElement detectBtn{};
+			detectBtn.id            = rowId + ".Detect";
+			detectBtn.type          = WidgetElementType::Button;
+			detectBtn.text          = isListening ? "..." : "Detect";
+			detectBtn.font          = theme.fontDefault;
+			detectBtn.fontSize      = theme.fontSizeCaption;
+			detectBtn.textAlignH    = TextAlignH::Center;
+			detectBtn.textAlignV    = TextAlignV::Center;
+			detectBtn.style.textColor = isListening ? Vec4{ 1.0f, 0.9f, 0.3f, 1.0f } : theme.textPrimary;
+			detectBtn.style.color     = isListening ? Vec4{ theme.accent.x, theme.accent.y, theme.accent.z, 0.3f } : theme.buttonSubtle;
+			detectBtn.style.hoverColor = theme.buttonSubtleHover;
+			detectBtn.style.borderRadius = theme.borderRadius;
+			detectBtn.minSize       = EditorTheme::Scaled(Vec2{ 50.0f, 22.0f });
+			detectBtn.hitTestMode   = HitTestMode::Enabled;
+			detectBtn.shaderVertex  = "button_vertex.glsl";
+			detectBtn.shaderFragment = "button_fragment.glsl";
+			detectBtn.runtimeOnly   = true;
+
+			const size_t idx = i;
+			detectBtn.onClicked = [this, idx]()
+			{
+				if (m_state.listeningBindingIndex == static_cast<int>(idx))
+				{
+					// Cancel listening
+					m_state.listeningBindingIndex = -1;
+					m_ui->clearKeyCaptureCallback();
+					refresh();
+					return;
+				}
+
+				m_state.listeningBindingIndex = static_cast<int>(idx);
+				refresh();
+
+				m_ui->setKeyCaptureCallback([this](uint32_t sdlKey, uint16_t /*sdlMod*/) -> bool
+				{
+					if (sdlKey == SDLK_ESCAPE)
+					{
+						// Cancel detection on Escape
+						m_state.listeningBindingIndex = -1;
+						m_ui->clearKeyCaptureCallback();
+						refresh();
+						return true;
+					}
+
+					const int bindIdx = m_state.listeningBindingIndex;
+					if (bindIdx < 0) return false;
+
+					auto& bindings = m_state.mappingData["bindings"];
+					if (static_cast<size_t>(bindIdx) < bindings.size())
+					{
+						bindings[bindIdx]["key"] = static_cast<uint32_t>(sdlKey);
+						m_state.isDirty = true;
+					}
+
+					m_state.listeningBindingIndex = -1;
+					m_ui->clearKeyCaptureCallback();
+					refresh();
+					return true;
+				});
+			};
+			row.children.push_back(std::move(detectBtn));
 		}
 
 		// Remove button

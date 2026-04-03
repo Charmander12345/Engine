@@ -1068,9 +1068,23 @@ ECS::Entity INativeScript::findEntityByName(const char* name) { return GameplayA
 ECS::Entity INativeScript::createEntity()                     { return GameplayAPI::createEntity(); }
 bool INativeScript::removeEntity(ECS::Entity entity)          { return GameplayAPI::removeEntity(entity); }
 
+bool        INativeScript::setGlobalNumber(const char* name, double value)  { return GameplayAPI::setGlobalNumber(name, value); }
+bool        INativeScript::setGlobalString(const char* name, const char* value) { return GameplayAPI::setGlobalString(name, value); }
+bool        INativeScript::setGlobalBool(const char* name, bool value)    { return GameplayAPI::setGlobalBool(name, value); }
+double      INativeScript::getGlobalNumber(const char* name)              { return GameplayAPI::getGlobalNumber(name); }
+const char* INativeScript::getGlobalString(const char* name)              { return GameplayAPI::getGlobalString(name); }
+bool        INativeScript::getGlobalBool(const char* name)                { return GameplayAPI::getGlobalBool(name); }
+bool        INativeScript::removeGlobal(const char* name)                 { return GameplayAPI::removeGlobal(name); }
+void        INativeScript::clearGlobals()                                 { GameplayAPI::clearGlobals(); }
+
 void INativeScript::logInfo(const char* msg)    { GameplayAPI::logInfo(msg); }
 void INativeScript::logWarning(const char* msg) { GameplayAPI::logWarning(msg); }
 void INativeScript::logError(const char* msg)   { GameplayAPI::logError(msg); }
 
 float INativeScript::getDeltaTime()  { return GameplayAPI::getDeltaTime(); }
 float INativeScript::getTotalTime()  { return GameplayAPI::getTotalTime(); }
+
+ScriptValue INativeScript::callPythonFunction(const char* funcName, const std::vector<ScriptValue>& args) const
+{
+	return NativeScriptManager::Instance().callPythonForEntity(m_entity, funcName, args);
+}

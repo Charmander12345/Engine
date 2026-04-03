@@ -25,6 +25,7 @@ public:
 		bool isDirty{ false };
 		float refreshTimer{ 0.0f };
 		int  selectedBinding{ -1 };
+		int  listeningBindingIndex{ -1 }; // >= 0 while waiting for a key press
 	};
 
 	explicit InputMappingEditorTab(UIManager* uiManager, Renderer* renderer);

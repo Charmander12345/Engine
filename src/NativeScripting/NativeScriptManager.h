@@ -3,6 +3,7 @@
 #include "GameplayAPIExport.h"
 #include "INativeScript.h"
 
+#include <functional>
 #include <string>
 #include <unordered_map>
 
@@ -34,6 +35,12 @@ public:
 	void dispatchBeginOverlap(ECS::Entity self, ECS::Entity other);
 	void dispatchEndOverlap(ECS::Entity self, ECS::Entity other);
 
+	// ── Cross-language bridge (C++ <-> Python) ───────────────────────
+	using PythonCallHandler = std::function<ScriptValue(ECS::Entity, const char*, const std::vector<ScriptValue>&)>;
+	void setPythonCallHandler(PythonCallHandler handler);
+	ScriptValue callPythonForEntity(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args) const;
+	INativeScript* getInstance(ECS::Entity entity) const;
+
 	// ── Hot-Reload (editor only) ──────────────────────────────────────
 #if ENGINE_EDITOR
 	void hotReload();
@@ -54,6 +61,7 @@ private:
 	std::string m_dllPath;
 	float m_lastDeltaTime{ 0.0f };
 	std::unordered_map<ECS::Entity, INativeScript*> m_instances;
+	PythonCallHandler m_pythonCallHandler;
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif

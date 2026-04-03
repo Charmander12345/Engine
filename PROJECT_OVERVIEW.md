@@ -5,6 +5,25 @@
 
 ---
 
+## Aktuelle Änderung (Content Browser Filter & Toolbar Überarbeitung)
+
+- `ContentBrowserPanel.cpp (Filter-Dropdown)`: Die 11 einzelnen Asset-Typ-Filter-Buttons (Mesh, Mat, Tex, Script, C++, Audio, Level, Widget, Prefab, Action, Mapping) wurden durch einen einzelnen "Filter"-Button ersetzt. Klick öffnet ein Dropdown-Menü mit Toggle-Einträgen pro Asset-Typ (`[x]`/`[ ]` Prefix), plus "Show All" und "Hide All" am Ende. Spart erheblich Platz in der PathBar. Button zeigt "Filter *" wenn nicht alle Typen aktiv sind.
+- `ContentBrowserPanel.cpp (Entfernte Buttons)`: "+ Entity" Template-Dropdown und "+ Level" Dropdown-Button aus der PathBar entfernt. Entity-Erstellung bleibt über Outliner/Viewport verfügbar. Level-Erstellung wurde ins Rechtsklick-Kontextmenü verschoben.
+- `EditorApp.cpp (New Level Popup)`: Das "New Level"-Popup im Content-Browser-Kontextmenü wurde erweitert: Neben dem Namen-Eingabefeld gibt es jetzt ein Template-Dropdown (Empty / Basic Outdoor / Prototype). Das Popup ist größer (240px statt 180px Höhe). Der Create-Button nutzt den ausgewählten Template-Typ statt immer "Empty".
+- `ContentBrowserPanel.cpp (Include bereinigt)`: `DropdownButtonWidget.h` Include entfernt (nicht mehr benötigt nach Entfernung des Level-Dropdown-Buttons).
+
+## Aktuelle Änderung (Bidirektionale C++↔Python Script-Kommunikation)
+
+- `INativeScript.h (ScriptValue Struct)`: Neuer `ScriptValue`-Variantentyp (None/Float/Int/Bool/String) für cross-language Datenübertragung. Statische Factory-Methoden `makeFloat()`, `makeInt()`, `makeBool()`, `makeString()`.
+- `INativeScript.h (onScriptCall)`: Neue virtuelle Methode `onScriptCall(const char* funcName, const std::vector<ScriptValue>& args) -> ScriptValue`. C++-Gameplay-Scripts überschreiben diese Methode um benannte Funktionsaufrufe von Python-Scripts zu empfangen.
+- `INativeScript.h (callPythonFunction)`: Neue GAMEPLAY_API-Methode `callPythonFunction(const char* funcName, const std::vector<ScriptValue>& args) -> ScriptValue`. Ermöglicht C++-Scripts eine benannte Funktion im Python-Script derselben Entity aufzurufen.
+- `NativeScriptManager.h/.cpp (Bridge-Infrastruktur)`: `PythonCallHandler`-Callback-Type (`std::function<ScriptValue(Entity, funcName, args)>`), `setPythonCallHandler()` Setter, `callPythonForEntity()` Delegation, `getInstance()` Accessor für Zugriff auf C++-Script-Instanzen von außen.
+- `GameplayAPI.cpp (callPythonFunction-Impl)`: `INativeScript::callPythonFunction` delegiert an `NativeScriptManager::callPythonForEntity`.
+- `EntityModule.cpp (call_native)`: Neue Python-Funktion `engine.entity.call_native(entity, func_name, *args)` — ruft `onScriptCall()` auf der C++-Script-Instanz der Entity auf. `PyObject↔ScriptValue`-Konvertierungshelfer.
+- `PythonScripting.cpp (HandleCppCallsPython)`: Callback-Funktion registriert in `Scripting::Initialize()` — sucht das Python-ScriptState-Modul der Entity, findet die benannte Funktion und ruft sie auf. Entity-ID wird als erster Parameter übergeben.
+- `engine.pyi (IntelliSense)`: `call_native(entity, func_name, *args) -> object` Stub in `entity`-Klasse.
+- **Architektur**: Entkopplung über Callback-Pattern — NativeScripting hat keine Python-Abhängigkeit, PythonScripting registriert Handler bei Initialisierung. ScriptValue als gemeinsamer Datentyp ohne Python-Header-Dependency.
+
 ## Aktuelle Änderung (Input Action / Input Mapping System)
 
 - `AssetTypes.h (Neue Asset-Typen)`: `AssetType::InputAction = 15` und `AssetType::InputMapping = 16` zum Enum hinzugefügt. InputAction definiert einen benannten Input-Event mit optionalen Modifier-Anforderungen (Shift/Ctrl/Alt). InputMapping ordnet InputActions konkreten Tasten zu.
@@ -385,9 +404,13 @@
 
 - `Build-Konfigurationsprofile (Phase 10.3)`: Build-Profil-System mit 3 Standard-Profilen (Debug/Development/Shipping). **UIManager.h:** `BuildProfile`-Struct (name, cmakeBuildType, logLevel, enableHotReload, enableValidation, enableProfiler, compressAssets). `loadBuildProfiles()`/`saveBuildProfile()`/`deleteBuildProfile()`. `BuildGameConfig` erweitert: `binaryDir` + `profile`. **UIManager.cpp:** Profile als JSON in `<Projekt>/Config/BuildProfiles/`. Build-Dialog: Profil-Dropdown, Profil-Info-Zeile, standardisierte Pfade (`<Projekt>/Build`, `<Projekt>/Binary`). **main.cpp:** 7-Schritt-Pipeline: Binary-Cache in `<Projekt>/Binary` (persistent), profilabhängiger CMake-BuildType, game.ini-Generierung mit Profil-Settings. **Compile-Time Defines (CMakeLists.txt):** `-DENGINE_BUILD_PROFILE=<name>` setzt `ENGINE_BUILD_SHIPPING` (kein Overlay/Metrics/Debug), `ENGINE_BUILD_DEVELOPMENT` (F10 Metrics, FPS-Overlay) oder `ENGINE_BUILD_DEBUG` (alle Dev-Tools: F10/F9/F8/F11). **PDBs:** Non-Shipping-Builds kopieren PDB-Dateien in `<OutputDir>/Symbols/` statt neben die Binaries.
 
+## Aktuelle Änderung (Popup-Fenster Hintergrundfarbe Fix)
+
+- `Popup-Hintergrund-Fix`: Weiße Hintergründe in den „New Level"- und „New Material"-Popup-Fenstern behoben. **Ursache:** Die `WidgetElementStyle::color`-Standardfarbe ist `{1,1,1,1}` (weiß). Die StackPanel-Elemente (`NL.Form`/`NM.Form`) in beiden Popups hatten keine explizite Hintergrundfarbe gesetzt, sodass der StackPanel-Renderer (`element.style.color.w > 0.0f`) einen weißen Hintergrund über die dunkle Hintergrund-Panel (`NL.Bg`/`NM.Bg`) zeichnete. **EditorApp.cpp:** `formStack.style.color = Vec4{0,0,0,0}` (transparent) in beiden Popup-Konstruktionen gesetzt.
+
 ## Aktuelle Änderung (Editor/Engine-Separation – Phase 12.1 Komplett)
 
-- `Editor/Engine-Separation (Phase 12.1 Komplett)`: Vollständige Trennung von Editor- und Runtime-Code über `#if ENGINE_EDITOR`-Präprozessor-Guards in allen Kern-Quelldateien. **CMakeLists.txt (3 Dateien):** Duales OBJECT-Library-System – `RendererCore` (ENGINE_EDITOR=1, alle Quellen) + `RendererCoreRuntime` (ENGINE_EDITOR=0, nur Common-Quellen) → `Renderer` (SHARED) + `RendererRuntime` (SHARED). Getrennte `ENGINE_COMMON_SOURCES`-Listen in Renderer- und OpenGLRenderer-CMakeLists. **UIManager.h:** Monolithischer Guard-Block (319–808) in ~6 gezielte Blöcke aufgespalten. Runtime-benötigte Members herausgelöst: bindClickEvents, Double-Click/Hover/Tooltip-State, Drag-API, Drop-Callbacks (std::function-Typen). **UIManager.cpp:** Inline-Guards für Notification-History, Dropdown, Outliner. handleRightMouseDown/Up mit Editor/Runtime-Stubs. handleMouseMotionForPan in handleMouseMotion inlined. **OpenGLRenderer.cpp:** Guards für Selektion-Sync, Sequencer-Spline, UI-Rendering-Pause, Widget-Editor-Canvas/FBO. **main.cpp:** Guards für Build-Thread, Popup-Routing, Texture-Viewer (4×), Content-Browser-Kontextmenü (~700 Zeilen). Beide Targets kompilieren fehlerfrei. Inkrementelle Builds bleiben möglich.
+- `Editor/Engine-Separation (Phase 12.1 Komplett)`:
 
 ## Aktuelle Änderung (Build-Output-Scroll-Fix & Build-Abbruch-Button)
 

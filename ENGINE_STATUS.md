@@ -5,6 +5,28 @@
 
 ---
 
+## Letzte Änderung (Popup-Fenster Hintergrundfarbe Fix)
+
+- ✅ `EditorApp.cpp`: Weiße Hintergründe in „New Level"- und „New Material"-Popup-Fenstern behoben — StackPanel-Elemente (`NL.Form`/`NM.Form`) erhielten transparente Hintergrundfarbe (`style.color = {0,0,0,0}`), da der `WidgetElementStyle::color`-Default `{1,1,1,1}` (weiß) war.
+
+## Letzte Änderung (Content Browser Filter & Toolbar Überarbeitung)
+
+- ✅ `ContentBrowserPanel.cpp`: 11 einzelne Asset-Typ-Filter-Buttons durch einen "Filter"-Dropdown-Button ersetzt (Toggle-Menü pro Typ + Show/Hide All).
+- ✅ `ContentBrowserPanel.cpp`: "+ Entity" und "+ Level" Buttons aus der PathBar entfernt.
+- ✅ `EditorApp.cpp`: "New Level" Kontextmenü-Popup erweitert mit Template-Dropdown (Empty/Basic Outdoor/Prototype) und Name-Eingabe.
+
+## Letzte Änderung (Bidirektionale C++↔Python Script-Kommunikation)
+
+- ✅ `INativeScript.h`: `ScriptValue`-Variantentyp (None/Float/Int/Bool/String) für cross-language Daten.
+- ✅ `INativeScript.h`: `onScriptCall()` virtuelle Methode — C++-Scripts empfangen benannte Aufrufe von Python.
+- ✅ `INativeScript.h`: `callPythonFunction()` GAMEPLAY_API — C++-Scripts rufen Python-Funktionen der Entity auf.
+- ✅ `NativeScriptManager.h/.cpp`: `PythonCallHandler`, `setPythonCallHandler()`, `callPythonForEntity()`, `getInstance()`.
+- ✅ `GameplayAPI.cpp`: `callPythonFunction` Implementierung via `NativeScriptManager::callPythonForEntity`.
+- ✅ `EntityModule.cpp`: `engine.entity.call_native()` Python-Funktion mit PyObject↔ScriptValue Konvertierung.
+- ✅ `PythonScripting.cpp`: `HandleCppCallsPython` Callback registriert in `Initialize()`.
+- ✅ `engine.pyi`: `call_native` IntelliSense-Stub.
+- **Architektur**: Callback-Pattern entkoppelt NativeScripting (kein Python.h) von PythonScripting. `ScriptValue` als gemeinsamer Datentyp.
+
 ## Letzte Änderung (Input Action / Input Mapping System)
 
 - ✅ `AssetTypes.h`: `InputAction = 15`, `InputMapping = 16` im `AssetType`-Enum.

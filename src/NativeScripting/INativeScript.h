@@ -1,9 +1,27 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include "GameplayAPIExport.h"
 
 namespace ECS { using Entity = unsigned int; }
+
+/// Simple variant for cross-language script communication (C++ <-> Python).
+struct ScriptValue
+{
+	enum Type { None, Float, Int, Bool, String };
+	Type type = None;
+	float floatVal = 0.0f;
+	int intVal = 0;
+	bool boolVal = false;
+	std::string stringVal;
+
+	ScriptValue() = default;
+	static ScriptValue makeFloat(float v)              { ScriptValue s; s.type = Float;  s.floatVal = v;    return s; }
+	static ScriptValue makeInt(int v)                   { ScriptValue s; s.type = Int;    s.intVal = v;      return s; }
+	static ScriptValue makeBool(bool v)                 { ScriptValue s; s.type = Bool;   s.boolVal = v;     return s; }
+	static ScriptValue makeString(const std::string& v) { ScriptValue s; s.type = String; s.stringVal = v;   return s; }
+};
 
 /// Base class for all C++ gameplay scripts.
 /// The game developer inherits from this and overrides the lifecycle methods.
@@ -19,8 +37,17 @@ public:
 	virtual void onEndOverlap(ECS::Entity other)   { (void)other; }
 	virtual void onDestroy() {}
 
+	/// Called when Python (or another script) invokes a named function on this C++ script.
+	/// Override in your gameplay script to handle cross-language calls.
+	virtual ScriptValue onScriptCall(const char* funcName, const std::vector<ScriptValue>& args)
+	{ (void)funcName; (void)args; return ScriptValue{}; }
+
 	// ── Engine-set helpers ────────────────────────────────────────────
 	ECS::Entity getEntity() const { return m_entity; }
+
+	/// Call a Python function defined in this entity's Python script.
+	/// Returns ScriptValue::None if the entity has no Python script or the function is missing.
+	GAMEPLAY_API ScriptValue callPythonFunction(const char* funcName, const std::vector<ScriptValue>& args = {}) const;
 
 	// ── Convenience API (delegates to GameplayAPI for own entity) ────
 
@@ -57,6 +84,16 @@ public:
 	GAMEPLAY_API static ECS::Entity findEntityByName(const char* name);
 	GAMEPLAY_API static ECS::Entity createEntity();
 	GAMEPLAY_API static bool removeEntity(ECS::Entity entity);
+
+	// Global state
+	GAMEPLAY_API static bool        setGlobalNumber(const char* name, double value);
+	GAMEPLAY_API static bool        setGlobalString(const char* name, const char* value);
+	GAMEPLAY_API static bool        setGlobalBool(const char* name, bool value);
+	GAMEPLAY_API static double      getGlobalNumber(const char* name);
+	GAMEPLAY_API static const char* getGlobalString(const char* name);
+	GAMEPLAY_API static bool        getGlobalBool(const char* name);
+	GAMEPLAY_API static bool        removeGlobal(const char* name);
+	GAMEPLAY_API static void        clearGlobals();
 
 	// Logging
 	GAMEPLAY_API static void logInfo(const char* msg);
