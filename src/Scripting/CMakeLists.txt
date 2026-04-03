@@ -28,6 +28,7 @@ set(SCRIPTING_SOURCES
     "${CMAKE_SOURCE_DIR}/src/NativeScripting/NativeScriptManager.cpp"
     "${CMAKE_SOURCE_DIR}/src/NativeScripting/GameplayAPI.h"
     "${CMAKE_SOURCE_DIR}/src/NativeScripting/GameplayAPI.cpp"
+    "${CMAKE_SOURCE_DIR}/src/NativeScripting/GameplayAPIInternal.h"
 )
 
 set(SCRIPTING_INCLUDE_DIRS

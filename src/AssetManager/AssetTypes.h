@@ -17,5 +17,8 @@ enum class AssetType
     Widget,
     Skybox,
     Prefab,
-    Entity
+    Entity,
+    NativeScript,
+    InputAction,
+    InputMapping
 };

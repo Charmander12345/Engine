@@ -154,6 +154,7 @@ class assetmanagement:
     Asset_Shader: int
     Asset_Level: int
     Asset_Widget: int
+    Asset_NativeScript: int
 
     @staticmethod
     def is_asset_loaded(path: str) -> bool:
@@ -404,6 +405,16 @@ class input:
     @staticmethod
     def get_key(name: str) -> int:
         """Resolve a keycode from a key name."""
+        ...
+
+    @staticmethod
+    def register_action_pressed(action_name: str, callback: Callable[[], None]) -> bool:
+        """Register a callback for when an input action is pressed."""
+        ...
+
+    @staticmethod
+    def register_action_released(action_name: str, callback: Callable[[], None]) -> bool:
+        """Register a callback for when an input action is released."""
         ...
 
 # ---------------------------------------------------------------------------

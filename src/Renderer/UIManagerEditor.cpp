@@ -50,6 +50,8 @@
 #include "EditorTabs/LevelCompositionTab.h"
 #include "EditorTabs/AnimationEditorTab.h"
 #include "EditorTabs/EntityEditorTab.h"
+#include "EditorTabs/InputActionEditorTab.h"
+#include "EditorTabs/InputMappingEditorTab.h"
 #include "EditorTabs/UIDesignerTab.h"
 #include "EditorTabs/WidgetEditorTab.h"
 #include "EditorTabs/ContentBrowserPanel.h"
@@ -5065,6 +5067,48 @@ void UIManager::closeEntityEditorTab()
 {
     if (m_entityEditorTab)
         m_entityEditorTab->close();
+}
+
+// ===========================================================================
+// Input Action Editor Tab
+// ===========================================================================
+bool UIManager::isInputActionEditorOpen() const
+{
+    return m_inputActionEditorTab && m_inputActionEditorTab->isOpen();
+}
+
+void UIManager::openInputActionEditorTab(const std::string& assetPath)
+{
+    if (!m_inputActionEditorTab)
+        m_inputActionEditorTab = std::make_unique<InputActionEditorTab>(this, m_renderer);
+    m_inputActionEditorTab->open(assetPath);
+}
+
+void UIManager::closeInputActionEditorTab()
+{
+    if (m_inputActionEditorTab)
+        m_inputActionEditorTab->close();
+}
+
+// ===========================================================================
+// Input Mapping Editor Tab
+// ===========================================================================
+bool UIManager::isInputMappingEditorOpen() const
+{
+    return m_inputMappingEditorTab && m_inputMappingEditorTab->isOpen();
+}
+
+void UIManager::openInputMappingEditorTab(const std::string& assetPath)
+{
+    if (!m_inputMappingEditorTab)
+        m_inputMappingEditorTab = std::make_unique<InputMappingEditorTab>(this, m_renderer);
+    m_inputMappingEditorTab->open(assetPath);
+}
+
+void UIManager::closeInputMappingEditorTab()
+{
+    if (m_inputMappingEditorTab)
+        m_inputMappingEditorTab->close();
 }
 
 #endif // ENGINE_EDITOR

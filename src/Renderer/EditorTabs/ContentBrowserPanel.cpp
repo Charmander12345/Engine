@@ -50,13 +50,16 @@ static const char* iconForAssetType(AssetType type)
     case AssetType::Model2D:  return "model2d.png";
     case AssetType::Model3D:  return "model3d.png";
     case AssetType::Audio:    return "sound.png";
-    case AssetType::Script:   return "script.png";
-    case AssetType::Shader:   return "shader.png";
+    case AssetType::Script:       return "script.png";
+    case AssetType::NativeScript: return "script.png";
+    case AssetType::Shader:       return "shader.png";
     case AssetType::Widget:   return "widget.png";
     case AssetType::Skybox:   return "skybox.png";
     case AssetType::Level:    return "level.png";
     case AssetType::Prefab:   return "entity.png";
     case AssetType::Entity:   return "entity.png";
+    case AssetType::InputAction:  return "entity.png";
+    case AssetType::InputMapping: return "entity.png";
     default:                  return "entity.png";
     }
 }
@@ -68,8 +71,9 @@ static Vec4 iconTintForAssetType(AssetType type)
     case AssetType::Texture:  return Vec4{ 0.45f, 0.65f, 1.00f, 1.0f };
     case AssetType::Material: return Vec4{ 1.00f, 0.60f, 0.25f, 1.0f };
     case AssetType::Audio:    return Vec4{ 1.00f, 0.35f, 0.35f, 1.0f };
-    case AssetType::Script:   return Vec4{ 0.40f, 0.90f, 0.40f, 1.0f };
-    case AssetType::Model2D:  return Vec4{ 0.55f, 0.85f, 0.95f, 1.0f };
+    case AssetType::Script:       return Vec4{ 0.40f, 0.90f, 0.40f, 1.0f };
+    case AssetType::NativeScript: return Vec4{ 0.30f, 0.70f, 1.00f, 1.0f };
+    case AssetType::Model2D:      return Vec4{ 0.55f, 0.85f, 0.95f, 1.0f };
     case AssetType::Model3D:  return Vec4{ 0.50f, 0.80f, 0.90f, 1.0f };
     case AssetType::Shader:   return Vec4{ 0.75f, 0.50f, 1.00f, 1.0f };
     case AssetType::Level:    return Vec4{ 0.95f, 0.85f, 0.40f, 1.0f };
@@ -77,6 +81,8 @@ static Vec4 iconTintForAssetType(AssetType type)
     case AssetType::Skybox:   return Vec4{ 0.40f, 0.75f, 0.95f, 1.0f };
     case AssetType::Prefab:   return Vec4{ 0.30f, 0.90f, 0.70f, 1.0f };
     case AssetType::Entity:   return Vec4{ 0.85f, 0.55f, 1.00f, 1.0f };
+    case AssetType::InputAction:  return Vec4{ 1.00f, 0.80f, 0.30f, 1.0f };
+    case AssetType::InputMapping: return Vec4{ 0.30f, 1.00f, 0.80f, 1.0f };
     default:                  return Vec4{ 0.85f, 0.85f, 0.85f, 1.0f };
     }
 }
@@ -960,10 +966,13 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
                 { "Mat",      AssetType::Material },
                 { "Tex",      AssetType::Texture  },
                 { "Script",   AssetType::Script   },
+                { "C++",      AssetType::NativeScript },
                 { "Audio",    AssetType::Audio    },
                 { "Level",    AssetType::Level    },
                 { "Widget",   AssetType::Widget   },
                 { "Prefab",   AssetType::Prefab   },
+                { "Action",   AssetType::InputAction },
+                { "Mapping",  AssetType::InputMapping },
             };
             for (const auto& f : filters)
             {
@@ -1118,6 +1127,7 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
                 // Unreferenced asset indicator
                 if (referencedAssets.count(relPath) == 0 &&
                     item.type != AssetType::Level && item.type != AssetType::Shader &&
+                    item.type != AssetType::NativeScript &&
                     item.type != AssetType::Unknown)
                 {
                     WidgetElement badge{};
@@ -1285,6 +1295,7 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
             // Unreferenced asset indicator
             if (referencedAssets.count(relPath) == 0 &&
                 item.type != AssetType::Level && item.type != AssetType::Shader &&
+                item.type != AssetType::NativeScript &&
                 item.type != AssetType::Unknown)
             {
                 WidgetElement badge{};
@@ -1302,7 +1313,7 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
                 tile.children.push_back(std::move(badge));
             }
 
-            // Inline rename: replace the label child with an EntryBar
+            // Inline rename:
             if (m_renamingGridAsset && relPath == m_renameOriginalPath && tile.children.size() >= 2)
             {
                 const std::string stem = std::filesystem::path(relPath).stem().string();
@@ -1388,6 +1399,16 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
                 if (assetType == AssetType::Entity)
                 {
                     m_uiManager->openEntityEditorTab(relPath);
+                    return;
+                }
+                if (assetType == AssetType::InputAction)
+                {
+                    m_uiManager->openInputActionEditorTab(relPath);
+                    return;
+                }
+                if (assetType == AssetType::InputMapping)
+                {
+                    m_uiManager->openInputMappingEditorTab(relPath);
                     return;
                 }
                 if (assetType == AssetType::Audio)

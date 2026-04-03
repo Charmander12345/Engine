@@ -11,6 +11,7 @@
 #include <cctype>
 #include "../Renderer/Renderer.h"
 #include "../Physics/PhysicsWorld.h"
+#include "../Core/InputActionManager.h"
 
 #include <filesystem>
 #include <fstream>
@@ -731,6 +732,7 @@ namespace
         PyModule_AddIntConstant(module, "Asset_Shader", static_cast<int>(AssetType::Shader));
         PyModule_AddIntConstant(module, "Asset_Level", static_cast<int>(AssetType::Level));
         PyModule_AddIntConstant(module, "Asset_Widget", static_cast<int>(AssetType::Widget));
+        PyModule_AddIntConstant(module, "Asset_NativeScript", static_cast<int>(AssetType::NativeScript));
 
         PyModule_AddIntConstant(module, "Log_Info", 0);
         PyModule_AddIntConstant(module, "Log_Warning", 1);
@@ -787,6 +789,7 @@ namespace
         PyModule_AddIntConstant(assetModule, "Asset_Shader", static_cast<int>(AssetType::Shader));
         PyModule_AddIntConstant(assetModule, "Asset_Level", static_cast<int>(AssetType::Level));
         PyModule_AddIntConstant(assetModule, "Asset_Widget", static_cast<int>(AssetType::Widget));
+        PyModule_AddIntConstant(assetModule, "Asset_NativeScript", static_cast<int>(AssetType::NativeScript));
 
 
         if (!AddSubmodule(module, entityModule, "entity") ||
@@ -1218,6 +1221,33 @@ namespace Scripting
     void SetRenderer(Renderer* renderer)
     {
         s_renderer = renderer;
+
+        // Set up the InputActionManager dispatch hook for Python action callbacks
+        InputActionManager::Instance().setDispatchHook(
+            [](const std::string& actionName, bool pressed)
+            {
+                if (!Py_IsInitialized()) return;
+                PyGILState_STATE gilState = PyGILState_Ensure();
+
+                auto& map = pressed
+                    ? ScriptDetail::s_actionPressedCallbacks
+                    : ScriptDetail::s_actionReleasedCallbacks;
+                auto it = map.find(actionName);
+                if (it != map.end())
+                {
+                    for (auto* cb : it->second)
+                    {
+                        if (!cb) continue;
+                        PyObject* result = PyObject_CallNoArgs(cb);
+                        if (!result)
+                            ScriptDetail::LogPythonError("Python: input action callback failed");
+                        else
+                            Py_DECREF(result);
+                    }
+                }
+
+                PyGILState_Release(gilState);
+            });
     }
 
     // ── Script Hot-Reload ─────────────────────────────────────────────

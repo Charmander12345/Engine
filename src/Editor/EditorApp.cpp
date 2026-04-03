@@ -1576,6 +1576,130 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             uiMgr.openWidgetEditorPopup(relPath);
         }});
 
+    items.push_back({ "New Input Action", [renderer]()
+        {
+            auto& uiMgr = renderer->getUIManager();
+            const auto& folder = uiMgr.getSelectedBrowserFolder();
+            if (folder == "__Shaders__") return;
+
+            auto& diagnostics = DiagnosticsManager::Instance();
+            auto& assetMgr = AssetManager::Instance();
+            const std::filesystem::path contentDir =
+                std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content";
+            const std::filesystem::path targetDir = folder.empty() ? contentDir : contentDir / folder;
+            std::error_code ec;
+            std::filesystem::create_directories(targetDir, ec);
+
+            std::string baseName = "NewInputAction";
+            std::string fileName = baseName + ".asset";
+            int counter = 1;
+            while (std::filesystem::exists(targetDir / fileName))
+                fileName = baseName + std::to_string(counter++) + ".asset";
+
+            const std::string displayName = std::filesystem::path(fileName).stem().string();
+            const std::string relPath = std::filesystem::relative(targetDir / fileName, contentDir).generic_string();
+
+            auto actionAsset = std::make_shared<AssetData>();
+            actionAsset->setName(displayName);
+            actionAsset->setAssetType(AssetType::InputAction);
+            actionAsset->setType(AssetType::InputAction);
+            actionAsset->setPath(relPath);
+
+            nlohmann::json data = nlohmann::json::object();
+            data["shift"] = false;
+            data["ctrl"]  = false;
+            data["alt"]   = false;
+            actionAsset->setData(data);
+
+            const unsigned int id = assetMgr.registerLoadedAsset(actionAsset);
+            if (id == 0)
+            {
+                uiMgr.showToastMessage("Failed to create input action.", UIManager::kToastMedium);
+                return;
+            }
+
+            actionAsset->setId(id);
+            Asset asset;
+            asset.ID   = id;
+            asset.type = AssetType::InputAction;
+            if (!assetMgr.saveAsset(asset, AssetManager::Sync))
+            {
+                uiMgr.showToastMessage("Failed to save input action.", UIManager::kToastMedium);
+                return;
+            }
+
+            AssetRegistryEntry entry;
+            entry.name = displayName;
+            entry.path = relPath;
+            entry.type = AssetType::InputAction;
+            assetMgr.registerAssetInRegistry(entry);
+
+            uiMgr.refreshContentBrowser();
+            uiMgr.showToastMessage("Created: " + fileName, UIManager::kToastMedium);
+            uiMgr.openInputActionEditorTab(relPath);
+        }});
+
+    items.push_back({ "New Input Mapping", [renderer]()
+        {
+            auto& uiMgr = renderer->getUIManager();
+            const auto& folder = uiMgr.getSelectedBrowserFolder();
+            if (folder == "__Shaders__") return;
+
+            auto& diagnostics = DiagnosticsManager::Instance();
+            auto& assetMgr = AssetManager::Instance();
+            const std::filesystem::path contentDir =
+                std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content";
+            const std::filesystem::path targetDir = folder.empty() ? contentDir : contentDir / folder;
+            std::error_code ec;
+            std::filesystem::create_directories(targetDir, ec);
+
+            std::string baseName = "NewInputMapping";
+            std::string fileName = baseName + ".asset";
+            int counter = 1;
+            while (std::filesystem::exists(targetDir / fileName))
+                fileName = baseName + std::to_string(counter++) + ".asset";
+
+            const std::string displayName = std::filesystem::path(fileName).stem().string();
+            const std::string relPath = std::filesystem::relative(targetDir / fileName, contentDir).generic_string();
+
+            auto mappingAsset = std::make_shared<AssetData>();
+            mappingAsset->setName(displayName);
+            mappingAsset->setAssetType(AssetType::InputMapping);
+            mappingAsset->setType(AssetType::InputMapping);
+            mappingAsset->setPath(relPath);
+
+            nlohmann::json data = nlohmann::json::object();
+            data["bindings"] = nlohmann::json::array();
+            mappingAsset->setData(data);
+
+            const unsigned int id = assetMgr.registerLoadedAsset(mappingAsset);
+            if (id == 0)
+            {
+                uiMgr.showToastMessage("Failed to create input mapping.", UIManager::kToastMedium);
+                return;
+            }
+
+            mappingAsset->setId(id);
+            Asset asset;
+            asset.ID   = id;
+            asset.type = AssetType::InputMapping;
+            if (!assetMgr.saveAsset(asset, AssetManager::Sync))
+            {
+                uiMgr.showToastMessage("Failed to save input mapping.", UIManager::kToastMedium);
+                return;
+            }
+
+            AssetRegistryEntry entry;
+            entry.name = displayName;
+            entry.path = relPath;
+            entry.type = AssetType::InputMapping;
+            assetMgr.registerAssetInRegistry(entry);
+
+            uiMgr.refreshContentBrowser();
+            uiMgr.showToastMessage("Created: " + fileName, UIManager::kToastMedium);
+            uiMgr.openInputMappingEditorTab(relPath);
+        }});
+
     items.push_back({ "New Material", [renderer]()
         {
             auto& uiMgr = renderer->getUIManager();

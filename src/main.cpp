@@ -31,6 +31,7 @@
 #include "Scripting/Python/PythonScripting.h"
 #include "Physics/PhysicsWorld.h"
 #include "NativeScripting/NativeScriptManager.h"
+#include "NativeScripting/GameplayAPIInternal.h"
 #include "CrashProtocol.h"
 
 #include "Renderer/ViewportUIManager.h"
@@ -47,6 +48,7 @@
 #if !defined(ENGINE_BUILD_SHIPPING)
 #include "Core/ShortcutManager.h"
 #endif
+#include "Core/InputActionManager.h"
 
 using namespace std;
 
@@ -562,6 +564,7 @@ int main()
         logTimed(Logger::Category::Engine, "Failed to initialize Python scripting.", Logger::LogLevel::ERROR);
     }
     Scripting::SetRenderer(renderer);
+    GameplayAPI::setRendererInternal(renderer);
 
     // Audio
     showProgress("Initializing audio...");
@@ -1582,6 +1585,7 @@ int main()
                 if (isRuntimeMode || diagnostics.isPIEActive())
                 {
                     Scripting::HandleKeyUp(event.key.key);
+                    InputActionManager::Instance().handleKeyUp(event.key.key, event.key.mod);
                 }
             }
             else if (event.type == SDL_EVENT_KEY_DOWN)
@@ -1612,6 +1616,7 @@ int main()
                 if (isRuntimeMode || diagnostics.isPIEActive())
                 {
                     Scripting::HandleKeyDown(event.key.key);
+                    InputActionManager::Instance().handleKeyDown(event.key.key, event.key.mod);
                 }
             }
 

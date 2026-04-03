@@ -36,6 +36,8 @@ class AnimationEditorTab;
 class UIDesignerTab;
 class WidgetEditorTab;
 class EntityEditorTab;
+class InputActionEditorTab;
+class InputMappingEditorTab;
 class ContentBrowserPanel;
 class OutlinerPanel;
 #include "EditorTabs/BuildSystemUI.h"
@@ -252,6 +254,16 @@ public:
 	void closeEntityEditorTab();
 	bool isEntityEditorOpen() const;
 
+	// Input Action Editor tab
+	void openInputActionEditorTab(const std::string& assetPath);
+	void closeInputActionEditorTab();
+	bool isInputActionEditorOpen() const;
+
+	// Input Mapping Editor tab
+	void openInputMappingEditorTab(const std::string& assetPath);
+	void closeInputMappingEditorTab();
+	bool isInputMappingEditorOpen() const;
+
 	// Entity clipboard (Copy/Paste/Duplicate)
 	void copySelectedEntity();
 	bool pasteEntity();
@@ -466,6 +478,10 @@ private:
 
 	// Entity Editor tab (extracted to EditorTabs/EntityEditorTab.h)
 	std::unique_ptr<EntityEditorTab> m_entityEditorTab;
+
+	// Input Action / Input Mapping Editor tabs
+	std::unique_ptr<InputActionEditorTab> m_inputActionEditorTab;
+	std::unique_ptr<InputMappingEditorTab> m_inputMappingEditorTab;
 
 public:
 	bool getWidgetEditorCanvasRect(Vec4& outRect) const;

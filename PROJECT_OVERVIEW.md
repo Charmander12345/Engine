@@ -5,6 +5,60 @@
 
 ---
 
+## Aktuelle Änderung (Input Action / Input Mapping System)
+
+- `AssetTypes.h (Neue Asset-Typen)`: `AssetType::InputAction = 15` und `AssetType::InputMapping = 16` zum Enum hinzugefügt. InputAction definiert einen benannten Input-Event mit optionalen Modifier-Anforderungen (Shift/Ctrl/Alt). InputMapping ordnet InputActions konkreten Tasten zu.
+- `InputActionManager.h/.cpp (Neuer Core-Singleton)`: Runtime-Manager für das Input-Action-System. Verwaltet `ActionDef` (Name + requiredMods-Bitmask), `KeyBinding` (actionName + SDL_Keycode) und C++ Callbacks. Modifier-Matching: KeyDown prüft ob alle geforderten Modifier gedrückt sind, KeyUp überspringt Modifier-Check (Modifier könnten bereits losgelassen sein). `DispatchHook`-Mechanismus entkoppelt Core von Python — die Scripting-Schicht setzt einen Hook der Python-Callbacks auslöst. Convenience-Overloads: `addAction(name, mods)`, `addBinding(actionName, keycode)`.
+- `InputActionEditorTab.h/.cpp (Neuer Editor-Tab)`: Editor-Tab zum Bearbeiten von InputAction-Assets. Zeigt Modifier-Checkboxen (Shift/Ctrl/Alt) und speichert als JSON-Asset. Beim Speichern wird der InputActionManager automatisch aktualisiert.
+- `InputMappingEditorTab.h/.cpp (Neuer Editor-Tab)`: Editor-Tab zum Bearbeiten von InputMapping-Assets. Zeigt Bindings-Liste mit Action-Name-Cycling (wählt aus vorhandenen InputAction-Assets), Key-Dropdown (A-Z, Space, Return, Pfeiltasten, F1-F8, 0-9), Hinzufügen/Entfernen von Bindings. Beim Speichern werden alle Bindings im InputActionManager aktualisiert.
+- `UIManager.h/.cpp (Tab-Integration)`: Forward-Declarations, `unique_ptr`-Member und `openInputActionEditorTab`/`closeInputActionEditorTab`/`isInputActionEditorOpen` + Äquivalent für InputMapping. Includes in UIManager.cpp für Complete-Type bei unique_ptr-Destruktor.
+- `UIManagerEditor.cpp (Tab-Methoden)`: Implementierung der 6 Tab-Methoden (open/close/isOpen für beide Tabs). Lazy-Creation der Tab-Instanzen beim ersten Öffnen.
+- `ContentBrowserPanel.cpp (Browser-Integration)`: Icons (`entity.png` für beide), Tints (gelb für InputAction, türkis für InputMapping), Filter-Buttons ("Action"/"Mapping"), Doppelklick-Handler öffnen entsprechenden Editor-Tab.
+- `AssetManager.h/.cpp (Speichern + Laden)`: `saveGenericJsonAsset()` als generische JSON-Save-Methode für einfache Asset-Typen (Magic/Version/Type/Name/Data-Pattern). InputAction/InputMapping-Cases im `saveAsset`-Switch. `populateInputActionsFromRegistry()` lädt beim Projektstart alle InputAction/InputMapping-Assets aus dem Registry und befüllt den InputActionManager — sowohl nach Async-Discovery (Editor) als auch nach Registry-Load (Packaged Build).
+- `EditorApp.cpp (Kontextmenü)`: "New Input Action" und "New Input Mapping" Einträge im Content-Browser-Kontextmenü. Erstellt .asset-Datei, registriert im AssetManager, öffnet Editor-Tab.
+- `InputModule.cpp (Python-API)`: `register_action_pressed(action_name, callback)` und `register_action_released(action_name, callback)` zum Registrieren von Python-Callbacks für Input-Actions. Callbacks werden in `ScriptDetail::s_actionPressedCallbacks`/`s_actionReleasedCallbacks`-Maps gespeichert und bei `ClearKeyCallbacks` bereinigt.
+- `ScriptingInternal.h (Shared State)`: Extern-Deklarationen für `s_actionPressedCallbacks` und `s_actionReleasedCallbacks`.
+- `PythonScripting.cpp (Dispatch Hook)`: `SetRenderer()` richtet den InputActionManager-DispatchHook ein — Lambda mit PyGILState das Python-Action-Callbacks aufruft.
+- `GameplayAPI.h/.cpp (C++ API)`: `registerInputActionCallback(actionName, callback)` → gibt Callback-ID zurück. `unregisterInputActionCallback(callbackId)` → entfernt Callback.
+- `engine.pyi (Python IntelliSense)`: `register_action_pressed` und `register_action_released` Stubs in der `input`-Klasse.
+- `main.cpp (Event-Loop)`: `InputActionManager::Instance().handleKeyDown/handleKeyUp` im SDL-Event-Loop nach `Scripting::HandleKeyDown/Up` (nur im Runtime/PIE-Modus).
+- `CMakeLists.txt (Build-Integration)`: `InputActionManager.cpp/.h` zu Core-Library, `InputActionEditorTab.h/.cpp` und `InputMappingEditorTab.h/.cpp` zu `RENDERER_CORE_EDITOR_SOURCES`.
+- **Architektur**: Asset-System → InputActionManager (Core-Singleton) → C++ Callbacks + DispatchHook → Python Callbacks. Entkopplung von Core und Scripting über Hook-Pattern. Modifier-Check nur bei KeyDown, KeyUp feuert immer (Modifier-State kann sich zwischen Down/Up ändern).
+
+## Aktuelle Änderung (GameplayAPI Python-Parität – alle Scripting-APIs für C++)
+
+- `GameplayAPI.h (Vollständige API)`: Massiv erweitert von 18 auf ~90 exportierte Funktionen. Deckt jetzt **alle** Python-Scripting-Module ab (außer `math`):
+  - **Transform** (erweitert): `getTransform()`, `translate()`, `rotate()` — zusätzlich zu bestehenden get/set Position/Rotation/Scale.
+  - **Entity** (erweitert): `attachComponent()`, `detachComponent()`, `getEntities()` — Komponentenverwaltung über `ComponentKind`-Enum.
+  - **Mesh**: `setMesh()`, `getMesh()` — Mesh-Asset-Zuweisung per Content-Pfad.
+  - **Light**: `getLightColor()`, `setLightColor()` — Entity-Light-Farbe lesen/setzen.
+  - **Material Overrides**: `setMaterialOverrideColorTint()`, `getMaterialOverrideColorTint()`, `setMaterialOverrideMetallic()`, `setMaterialOverrideRoughness()`, `setMaterialOverrideShininess()`, `clearMaterialOverrides()` — Per-Entity Material-Parameter-Overrides.
+  - **Physics** (erweitert): `setAngularVelocity()`, `getAngularVelocity()`, `setGravity()`, `getGravity()`, `isBodySleeping()`, `raycast()` (mit `RaycastResult`-Struct) — Rotation, Welt-Gravitation, Ray-Queries.
+  - **Camera**: `getCameraPosition()`, `setCameraPosition()`, `getCameraRotation()`, `setCameraRotation()`, `cameraTransitionTo()`, `isCameraTransitioning()`, `cancelCameraTransition()`, `startCameraPath()`, `isCameraPathPlaying()`, `pauseCameraPath()`, `resumeCameraPath()`, `stopCameraPath()`, `getCameraPathProgress()` — Volle Kamera-Steuerung mit Transition und Path-System.
+  - **Audio**: `createAudio()`, `createAudioFromAsset()`, `playAudio()`, `playAudioHandle()`, `setAudioVolume()`, `getAudioVolume()`, `pauseAudio()`, `isAudioPlaying()`, `isAudioPlayingPath()`, `stopAudio()`, `invalidateAudioHandle()` — Vollständiges Audio-Management.
+  - **Input**: `isKeyPressed()`, `isShiftPressed()`, `isCtrlPressed()`, `isAltPressed()`, `getKey()` — Tastatur-Input-Polling (Callback-basierte Varianten aus Python entfallen, da C++ in `tick()` pollt).
+  - **UI**: `showToastMessage()`, `showModalMessage()`, `closeModalMessage()`, `showCursor()`, `clearAllWidgets()`, `spawnWidget()`, `removeWidget()`, `playAnimation()`, `stopAnimation()`, `setAnimationSpeed()`, `setFocus()`, `clearFocus()`, `setFocusable()`, `setDraggable()`, `setDropTarget()` — Viewport-Widget-System, Cursor-Kontrolle, Animations-Steuerung, Focus/Drag-Drop.
+  - **Particle**: `setEmitterProperty()`, `setEmitterEnabled()`, `setEmitterColor()`, `setEmitterEndColor()` — Partikel-Emitter-Konfiguration.
+  - **Diagnostics**: `setState()`, `getState()` — Engine-State-Strings lesen/schreiben.
+  - **Global State**: `setGlobalNumber()`, `setGlobalString()`, `setGlobalBool()`, `getGlobalNumber()`, `getGlobalString()`, `getGlobalBool()`, `removeGlobal()`, `clearGlobals()` — Typisiertes globales State-System (Number/String/Bool).
+  - **Logging** (erweitert): `log()` — Level-basiertes Logging (0=Info, 1=Warning, 2=Error) zusätzlich zu bestehenden `logInfo/logWarning/logError`.
+- `GameplayAPI.cpp (Implementierungen)`: Alle neuen Funktionen implementiert mit Zugriff auf ECS, PhysicsWorld, AudioManager, AssetManager, Renderer, UIManager, ViewportUIManager, DiagnosticsManager, ScriptingGlobalState, SDL3. Internes `s_renderer`-Pointer wird beim Engine-Start gesetzt.
+- `GameplayAPIInternal.h (Neu)`: Engine-interner Header mit `setRendererInternal()` — ermöglicht Camera/UI-Funktionen ohne den Renderer im öffentlichen GameplayAPI.h zu exponieren.
+- `INativeScript.h (Convenience-Methoden erweitert)`: Neue Entity-gebundene Convenience-Methoden: `getTransform()`, `translate()`, `rotate()`, `setAngularVelocity()`, `getAngularVelocity()`, `getLightColor()`, `setLightColor()`, `setEmitterProperty()`, `setEmitterEnabled()`, `setEmitterColor()`, `setEmitterEndColor()`.
+- `main.cpp (Renderer-Init)`: `GameplayAPI::setRendererInternal(renderer)` nach `Scripting::SetRenderer(renderer)` — C++ GameplayAPI hat Zugriff auf Renderer für Camera/UI-Funktionen.
+- `CMakeLists.txt (Scripting)`: `GameplayAPIInternal.h` zur SCRIPTING_SOURCES-Liste hinzugefügt.
+
+## Aktuelle Änderung (NativeScript Engine-API-Zugriff + Content Browser C++-Klassen-Anzeige)
+
+- `INativeScript.h (Convenience API)`: Basisklasse erweitert um Convenience-Methoden die `GameplayAPI`-Funktionen für die eigene Entity forwarden. Scripts können Engine-Systeme direkt über Member-Methoden nutzen (`getPosition()`, `setPosition()`, `setVelocity()`, `addForce()`, `addImpulse()`, etc.) ohne `GameplayAPI::`-Namespace-Prefix und ohne `getEntity()` manuell zu übergeben. Statische Methoden für Entity-Management (`findEntityByName`, `createEntity`, `removeEntity`), Logging (`logInfo`, `logWarning`, `logError`) und Time (`getDeltaTime`, `getTotalTime`). Include von `GameplayAPIExport.h` für `GAMEPLAY_API`-Export-Macro.
+- `GameplayAPI.cpp (Convenience-Implementierungen)`: Implementierung aller `INativeScript`-Convenience-Methoden als Delegation an die gleichnamigen `GameplayAPI`-Namespace-Funktionen mit `m_entity` als implizitem Entity-Parameter.
+- `AssetTypes.h (NativeScript-Typ)`: Neuer `AssetType::NativeScript` Enum-Wert für C++-Gameplay-Klassen. Separiert Python-Scripts (`Script`) von C++-Scripts (`NativeScript`) im Asset-System.
+- `AssetManager.cpp (Asset-Discovery für .h/.cpp)`: Synchrone und asynchrone Asset-Registry-Discovery erkennt jetzt C++-Dateien: `.h`/`.hpp`-Dateien mit zugehöriger `.cpp`-Datei werden als einzelner `NativeScript`-Eintrag registriert (Header+Source als eine Klasse zusammengefasst). Standalone `.cpp`-Dateien ohne Header werden ebenfalls als `NativeScript` registriert. `.cpp`-Dateien mit zugehörigem Header werden übersprungen (Duplikat-Vermeidung). Save-Switch behandelt `NativeScript` als nicht-speicherbar (wie `Script`).
+- `AssetManagerImport.cpp (Extension-Detection)`: `DetectAssetTypeFromPath()` erkennt `.h`, `.hpp`, `.cpp` als `NativeScript`.
+- `ContentBrowserPanel.cpp (C++-Klassen-Anzeige)`: Icon `script.png` mit blauem Tint (`Vec4{0.30, 0.70, 1.00, 1.0}`) für `NativeScript` — visuell unterscheidbar von grünem Python-Script-Tint. Neuer `"C++"` Type-Filter-Button neben dem `"Script"`-Button. Unreferenced-Asset-Indicator für `NativeScript` deaktiviert (C++-Scripts werden über Klassennamen referenziert, nicht über Asset-Pfade).
+- `PythonScripting.cpp (Python-Binding)`: `Asset_NativeScript`-Konstante auf Modul- und Submodul-Ebene registriert.
+- `engine.pyi (IntelliSense)`: `Asset_NativeScript: int` in `assetmanagement`-Klasse ergänzt.
+
 ## Aktuelle Änderung (Engine-Lib-Deployment + Leichtgewichtiger Game Build)
 
 - `CMakeLists.txt (POST_BUILD .lib-Deployment)`: Alle Engine-Import-Libraries (.lib) werden nach `${ENGINE_DEPLOY_DIR}/Tools/lib/` kopiert. Umfasst: Shared-Lib-Import-Libs (Scripting, Renderer, AssetManager, Core, Logger, Diagnostics, Physics, SDL3) und Runtime-Varianten (ScriptingRuntime, RendererRuntime, AssetManagerRuntime) sowie statische Libs (Landscape, LandscapeRuntime). Ermöglicht GameScripts-PIE-Build und Game-Build ohne Zugriff auf den cmake-Build-Ordner.

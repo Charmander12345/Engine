@@ -31,6 +31,8 @@ namespace ScriptDetail
     extern PyObject* s_onKeyReleased;
     extern std::unordered_map<int, std::vector<PyObject*>> s_keyPressedCallbacks;
     extern std::unordered_map<int, std::vector<PyObject*>> s_keyReleasedCallbacks;
+    extern std::unordered_map<std::string, std::vector<PyObject*>> s_actionPressedCallbacks;
+    extern std::unordered_map<std::string, std::vector<PyObject*>> s_actionReleasedCallbacks;
 
     // Shared helper: log a Python exception with traceback to Logger + modal notification.
     void LogPythonError(const std::string& context);

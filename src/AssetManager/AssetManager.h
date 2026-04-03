@@ -252,6 +252,9 @@ private:
 	bool discoverAssetsAndBuildRegistry(const std::string& projectRoot);
 	void discoverAssetsAndBuildRegistryAsync(const std::string& projectRoot);
 
+	// Populate InputActionManager from discovered InputAction/InputMapping assets.
+	void populateInputActionsFromRegistry(const std::string& projectRoot);
+
 #if ENGINE_EDITOR
 	// Scan all .asset files under contentDir for string references to oldRelPath and replace with newRelPath.
 	void updateAssetFileReferences(const std::filesystem::path& contentDir, const std::string& oldRelPath, const std::string& newRelPath);
@@ -277,6 +280,7 @@ private:
 	SaveResult saveLevelAsset(EngineLevel* level);
 	SaveResult saveWidgetAsset(const std::shared_ptr<AssetData>& widget);
 	SaveResult saveSkyboxAsset(const std::shared_ptr<AssetData>& skybox);
+	SaveResult saveGenericJsonAsset(const std::shared_ptr<AssetData>& asset);
 #endif
 
 	//Loading specific assettypes
