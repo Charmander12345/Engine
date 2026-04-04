@@ -1048,12 +1048,16 @@ bool BuildSystemUI::detectCMake()
     };
 #endif
 
-    // 1. Bundled location: <engine>/Tools/cmake/bin/cmake.exe
+    // 1. Bundled location: <engine>/Tools/cmake/bin/cmake[.exe]
     {
         const char* bp = SDL_GetBasePath();
         if (bp)
         {
+#if defined(_WIN32)
             auto bundled = std::filesystem::path(bp) / "Tools" / "cmake" / "bin" / "cmake.exe";
+#else
+            auto bundled = std::filesystem::path(bp) / "Tools" / "cmake" / "bin" / "cmake";
+#endif
             if (std::filesystem::exists(bundled) && tryExec(bundled.string()))
             {
                 m_cmakePath = bundled.string();

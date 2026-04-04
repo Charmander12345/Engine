@@ -123,6 +123,13 @@ public:
 	/// Callers never need to know which language implements the function.
 	GAMEPLAY_API static ScriptValue callFunction(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args = {});
 
+	/// Call a function on this entity's own scripts (C++ or Python).
+	/// Convenience overload so scripts can use callFunction("func") instead of callFunction(getEntity(), "func").
+	ScriptValue callFunction(const char* funcName, const std::vector<ScriptValue>& args = {})
+	{
+		return callFunction(m_entity, funcName, args);
+	}
+
 	// Global state
 	GAMEPLAY_API static bool        setGlobalNumber(const char* name, double value);
 	GAMEPLAY_API static bool        setGlobalString(const char* name, const char* value);

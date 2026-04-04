@@ -184,21 +184,25 @@ Ensure-Dir $TempDir
 Write-Step "Checking CMake..."
 
 $cmakeExe = Join-Path $CMakeDir 'bin\cmake.exe'
-$cmakeFound = $false
+$cmakeBundled = $false
 
 if (-not $Force -and (Test-Path $cmakeExe)) {
     $ver = & $cmakeExe --version 2>$null | Select-Object -First 1
     Write-OK "Bundled CMake found: $ver"
-    $cmakeFound = $true
-}
-elseif (-not $Force -and (Test-CommandExists 'cmake')) {
-    $ver = cmake --version 2>$null | Select-Object -First 1
-    $cmakeExe = (Get-Command cmake).Source
-    Write-OK "System CMake found: $ver ($cmakeExe)"
-    $cmakeFound = $true
+    $cmakeBundled = $true
 }
 
-if (-not $cmakeFound -or $Force) {
+# Always ensure a local/bundled cmake exists in Tools/cmake/ so the editor
+# can find it reliably.  A system cmake on PATH is not sufficient because
+# the editor process may not inherit the same PATH (e.g. VS Developer Shell
+# adds cmake, but a normal user session does not).
+if (-not $cmakeBundled -or $Force) {
+    if (Test-CommandExists 'cmake') {
+        $sysVer = cmake --version 2>$null | Select-Object -First 1
+        Write-Host "    System CMake detected ($sysVer), but installing portable copy for editor..."
+    } else {
+        Write-Host "    No system CMake found."
+    }
     Write-Host "    Installing CMake ${CMakeVersion} (portable)..."
     $zipFile = Join-Path $TempDir "cmake-${CMakeVersion}.zip"
     Download-File $CMakeZipUrl $zipFile
@@ -217,6 +221,40 @@ if (-not $cmakeFound -or $Force) {
     if (Test-Path $cmakeExe) {
         $ver = & $cmakeExe --version 2>$null | Select-Object -First 1
         Write-OK "CMake installed: $ver"
+
+        # Strip unnecessary files to reduce size (~115 MB -> ~18 MB)
+        Write-Host "    Stripping unnecessary files..."
+        $stripBins = @('cmake-gui.exe', 'ctest.exe', 'cpack.exe', 'cmcldeps.exe')
+        foreach ($bin in $stripBins) {
+            $p = Join-Path $CMakeDir "bin\$bin"
+            if (Test-Path $p) { Remove-Item $p -Force }
+        }
+        $stripDirs = @(
+            (Join-Path $CMakeDir 'doc'),
+            (Join-Path $CMakeDir 'man')
+        )
+        # Remove editor integrations and help from share/
+        $shareDir = Join-Path $CMakeDir 'share'
+        if (Test-Path $shareDir) {
+            $stripDirs += @(
+                (Join-Path $shareDir 'aclocal'),
+                (Join-Path $shareDir 'bash-completion'),
+                (Join-Path $shareDir 'emacs'),
+                (Join-Path $shareDir 'vim')
+            )
+            # Remove Help/ from the cmake-X.Y directory (docs, not needed at runtime)
+            Get-ChildItem $shareDir -Directory -Filter 'cmake-*' | ForEach-Object {
+                $helpDir = Join-Path $_.FullName 'Help'
+                if (Test-Path $helpDir) { $stripDirs += $helpDir }
+            }
+        }
+        foreach ($d in $stripDirs) {
+            if (Test-Path $d) { Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+
+        # Report final size
+        $finalSize = (Get-ChildItem $CMakeDir -Recurse -File | Measure-Object -Property Length -Sum).Sum
+        Write-OK "CMake stripped to $([math]::Round($finalSize / 1MB, 1)) MB"
     } else {
         Write-Err "CMake installation failed!"
         exit 1
@@ -227,20 +265,21 @@ if (-not $cmakeFound -or $Force) {
 Write-Step "Checking Ninja..."
 
 $ninjaExe = Join-Path $NinjaDir 'ninja.exe'
-$ninjaFound = $false
+$ninjaBundled = $false
 
 if (-not $Force -and (Test-Path $ninjaExe)) {
     $ver = & $ninjaExe --version 2>$null
     Write-OK "Bundled Ninja found: $ver"
-    $ninjaFound = $true
-}
-elseif (-not $Force -and (Test-CommandExists 'ninja')) {
-    Write-OK "System Ninja found: $(ninja --version 2>$null)"
-    $ninjaExe = (Get-Command ninja).Source
-    $ninjaFound = $true
+    $ninjaBundled = $true
 }
 
-if (-not $ninjaFound -or $Force) {
+if (-not $ninjaBundled -or $Force) {
+    if (Test-CommandExists 'ninja') {
+        $sysVer = ninja --version 2>$null
+        Write-Host "    System Ninja detected ($sysVer), but installing portable copy for editor..."
+    } else {
+        Write-Host "    No system Ninja found."
+    }
     Write-Host "    Installing Ninja ${NinjaVersion}..."
     $zipFile = Join-Path $TempDir "ninja-${NinjaVersion}.zip"
     Download-File $NinjaZipUrl $zipFile

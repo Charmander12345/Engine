@@ -104,6 +104,7 @@ private:
     void pollPIEBuild();
     void dismissPIEBuildPopup();
     bool handleDelete();
+    void generateVSCodeConfig(const std::string& projectPath);
 
     IEditorBridge& m_bridge;
 

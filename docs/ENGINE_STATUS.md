@@ -5,6 +5,18 @@
 
 ---
 
+## Letzte Änderung (Bootstrap – Bundled Tools immer lokal installieren)
+
+- ✅ `tools/bootstrap.ps1 (CMake)`: System-CMake-Skip entfernt — Bootstrap installiert CMake **immer** lokal nach `Tools/cmake/`, auch wenn ein System-CMake im PATH existiert. Nur bereits vorhandenes gebündeltes CMake (`Tools/cmake/bin/cmake.exe`) überspringt den Download. Löst das Problem, dass der Editor-Prozess den PATH nicht erbt und kein cmake findet.
+- ✅ `tools/bootstrap.ps1 (Ninja)`: Gleicher Fix — System-Ninja auf PATH verhindert nicht mehr den lokalen Download.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (VS Code IntelliSense Config in Content/Scripts + Non-Static callFunction)
+
+- ✅ `EditorApp.cpp`: `generateVSCodeConfig()` generiert `.vscode/c_cpp_properties.json` jetzt im `Content/Scripts/`-Unterverzeichnis statt im Projekt-Root. Include-Pfad geändert auf `${workspaceFolder}/Native/**` (da Workspace-Root nun `Content/Scripts/` ist). Benutzer öffnet `Content/Scripts/` in VS Code → volle IntelliSense.
+- ✅ `INativeScript.h`: Neue nicht-statische `callFunction(funcName, args)` Overload — inline, delegiert an `callFunction(m_entity, funcName, args)`. Ermöglicht `callFunction("doSomething")` statt `callFunction(getEntity(), "doSomething")` für eigene Entity. Statische Version bleibt für Cross-Entity-Aufrufe.
+- ✅ Build erfolgreich.
+
 ## Letzte Änderung (Script Method Auto-Registration – SCRIPT_METHOD Makro)
 
 - ✅ `INativeScript.h`: Template-basiertes Method-Registration-System. Neue Includes: `<functional>`, `<unordered_map>`, `<type_traits>`, `<utility>`. `onScriptCall`-Default dispatcht jetzt aus `m_scriptMethods`-Map (Lookup → Aufruf → ScriptValue). Neue `protected`-Methoden: `registerMethod(name, &T::method)` (non-const + const Overloads) — deduziert Parametertypen via Member-Function-Pointer-Templates. Private Template-Helpers: `extractArg<T>` (if constexpr: float/double/int/bool/string/ScriptValue), `toScriptValue<T>` (Rückkonvertierung), `invokeUnpacked` (std::index_sequence für Parameter-Entpackung, 4 Overloads: void/non-void × const/non-const), `invokeMethod` (Entry-Point, 2 Overloads). `m_scriptMethods`: `unordered_map<string, function<ScriptValue(vector<ScriptValue>)>>`. `SCRIPT_METHOD(method)`-Makro nach Klasse: `this->registerMethod(#method, &std::remove_pointer_t<decltype(this)>::method)`. Void-Methoden geben `ScriptValue::makeBool(true)` zurück um Fall-Through zu Python in `callFunction` zu verhindern.

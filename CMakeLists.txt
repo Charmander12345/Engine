@@ -455,6 +455,15 @@ add_custom_command(TARGET HorizonEngine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/tools/bootstrap.sh"  "${ENGINE_DEPLOY_DIR}/tools/bootstrap.sh"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/tools/README.md"     "${ENGINE_DEPLOY_DIR}/tools/README.md"
 
+    # Deploy a minimal bundled CMake (cmake.exe + Modules + Templates) so the
+    # editor can build C++ game scripts even if CMake is not installed system-wide.
+    # Clean first to remove stale files from previous bootstrap downloads.
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${ENGINE_DEPLOY_DIR}/Tools/cmake"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/Tools/cmake/bin"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_COMMAND}" "${ENGINE_DEPLOY_DIR}/Tools/cmake/bin/"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_ROOT}/Modules"   "${ENGINE_DEPLOY_DIR}/Tools/cmake/share/cmake-${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION}/Modules"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_ROOT}/Templates" "${ENGINE_DEPLOY_DIR}/Tools/cmake/share/cmake-${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION}/Templates"
+
     COMMAND_EXPAND_LISTS
 )
 

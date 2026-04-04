@@ -97,6 +97,8 @@ if (!m_dllHandle)
 return;
 }
 
+NativeScriptRegistry::Instance().unregisterAll();
+
 #ifdef _WIN32
 FreeLibrary(static_cast<HMODULE>(m_dllHandle));
 #else

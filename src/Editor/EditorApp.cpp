@@ -315,7 +315,10 @@ void EditorApp::buildGameScriptsForPIE()
         if (out.is_open()) out << cmake.str();
     }
 
-    // ── Open build progress popup ─────────────────────────────────────
+    // ── Generate VS Code IntelliSense config ─────────────────────────
+    generateVSCodeConfig(projectPath);
+
+    // ── Open build progress popup ───────────────────────────────────
     Renderer* renderer = m_bridge.getRenderer();
     m_pieBuildOutputLines.clear();
     {
@@ -544,6 +547,55 @@ void EditorApp::buildGameScriptsForPIE()
     });
 
     logger.log(Logger::Category::Engine, "PIE build: compiling C++ game scripts (async)...", Logger::LogLevel::INFO);
+}
+
+void EditorApp::generateVSCodeConfig(const std::string& projectPath)
+{
+    namespace fs = std::filesystem;
+
+    const char* bp = SDL_GetBasePath();
+    const std::string editorBinDir = bp ? std::string(bp) : fs::current_path().string();
+    const std::string includePath = (fs::path(editorBinDir) / "Tools" / "include" / "NativeScripting").generic_string();
+
+    const fs::path vscodeDir = fs::path(projectPath) / "Content" / "Scripts" / ".vscode";
+    const fs::path configPath = vscodeDir / "c_cpp_properties.json";
+
+    std::error_code ec;
+    fs::create_directories(vscodeDir, ec);
+
+    std::ostringstream json;
+    json << "{\n";
+    json << "    \"configurations\": [\n";
+    json << "        {\n";
+    json << "            \"name\": \"Horizon Engine\",\n";
+    json << "            \"includePath\": [\n";
+    json << "                \"${workspaceFolder}/Native/**\",\n";
+    json << "                \"" << includePath << "\"\n";
+    json << "            ],\n";
+    json << "            \"defines\": [\n";
+    json << "                \"GAMEPLAY_EXPORTS\"\n";
+    json << "            ],\n";
+    json << "            \"cStandard\": \"c17\",\n";
+    json << "            \"cppStandard\": \"c++20\",\n";
+#ifdef _WIN32
+    json << "            \"intelliSenseMode\": \"windows-msvc-x64\"\n";
+#else
+    json << "            \"intelliSenseMode\": \"linux-gcc-x64\"\n";
+#endif
+    json << "        }\n";
+    json << "    ],\n";
+    json << "    \"version\": 4\n";
+    json << "}\n";
+
+    std::ofstream out(configPath, std::ios::out | std::ios::trunc);
+    if (out.is_open())
+    {
+        out << json.str();
+        out.close();
+        Logger::Instance().log(Logger::Category::Engine,
+            "Generated VS Code IntelliSense config: " + configPath.string(),
+            Logger::LogLevel::INFO);
+    }
 }
 
 void EditorApp::pollPIEBuild()
@@ -1634,13 +1686,14 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             }
         }});
 
-    items.push_back({ "New C++ Script", [renderer]()
+    items.push_back({ "New C++ Script", [this, renderer]()
         {
             auto& uiMgr = renderer->getUIManager();
 
             auto& diagnostics = DiagnosticsManager::Instance();
+            const std::string projectPath = diagnostics.getProjectInfo().projectPath;
             const std::filesystem::path contentDir =
-                std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content";
+                std::filesystem::path(projectPath) / "Content";
             const std::filesystem::path nativeDir = contentDir / "Scripts" / "Native";
             std::error_code ec;
             std::filesystem::create_directories(nativeDir, ec);
@@ -1686,6 +1739,7 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
 
             uiMgr.refreshContentBrowser();
             uiMgr.showToastMessage("Created C++ script: " + className + " (.h + .cpp)", UIManager::kToastMedium);
+            generateVSCodeConfig(projectPath);
             Logger::Instance().log(Logger::Category::Engine,
                 "Created C++ script: " + className + " in Content/Scripts/Native/",
                 Logger::LogLevel::INFO);
