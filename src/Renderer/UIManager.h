@@ -563,6 +563,11 @@ public:
 	using DropOnEntityCallback = std::function<void(const std::string& payload, unsigned int entity)>;
 	void setOnDropOnEntity(DropOnEntityCallback callback) { m_onDropOnEntity = std::move(callback); }
 
+	// Provider callback for available C++ native script class names
+	using NativeClassNamesProvider = std::function<std::vector<std::string>()>;
+	void setNativeClassNamesProvider(NativeClassNamesProvider provider) { m_nativeClassNamesProvider = std::move(provider); }
+	std::vector<std::string> getAvailableNativeClassNames() const { return m_nativeClassNamesProvider ? m_nativeClassNamesProvider() : std::vector<std::string>{}; }
+
 	// ── Build System UI (extracted to EditorTabs/BuildSystemUI) ──────────
 	// Type aliases for external consumers (main.cpp, BuildPipeline)
 	using BuildProfile     = BuildSystemUI::BuildProfile;
@@ -618,6 +623,9 @@ private:
 	std::function<void(const std::string&, const Vec2&)> m_onDropOnViewport;
 	std::function<void(const std::string&, const std::string&)> m_onDropOnFolder;
 	std::function<void(const std::string&, unsigned int)> m_onDropOnEntity;
+#if ENGINE_EDITOR
+	NativeClassNamesProvider m_nativeClassNamesProvider;
+#endif
 
 #if ENGINE_EDITOR
 	// Build System UI (extracted to EditorTabs/BuildSystemUI)

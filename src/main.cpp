@@ -767,33 +767,9 @@ int main()
                     renderer->setSkyboxPath(newLevel->getSkyboxPath());
                 }
 
-                // Find the first active CameraComponent and hand control to it
-                {
-                    ECS::Schema camSchema;
-                    camSchema.require<ECS::CameraComponent>().require<ECS::TransformComponent>();
-                    auto& ecs = ECS::ECSManager::Instance();
-                    const auto camEntities = ecs.getEntitiesMatchingSchema(camSchema);
-                    unsigned int activeCamEntity = 0;
-                    for (const auto e : camEntities)
-                    {
-                        const auto* cam = ecs.getComponent<ECS::CameraComponent>(e);
-                        if (cam && cam->isActive)
-                        {
-                            activeCamEntity = static_cast<unsigned int>(e);
-                            break;
-                        }
-                    }
-                    if (activeCamEntity == 0 && !camEntities.empty())
-                        activeCamEntity = static_cast<unsigned int>(camEntities.front());
-
-                    if (activeCamEntity != 0)
-                    {
-                        renderer->setActiveCameraEntity(activeCamEntity);
-                        logTimed(Logger::Category::Engine,
-                            "Runtime: using entity camera " + std::to_string(activeCamEntity),
-                            Logger::LogLevel::INFO);
-                    }
-                }
+                // Find the first active CameraComponent and hand control to it.
+                // NOTE: ECS entities are created during scene preparation (deferred),
+                // so camera assignment is also deferred to the game loop.
 
                 // Capture mouse for game input
                 pieMouseCaptured = true;
@@ -808,19 +784,24 @@ int main()
                 logTimed(Logger::Category::Engine, "Runtime mode: level loaded successfully.", Logger::LogLevel::INFO);
 
                 // Load C++ gameplay scripts DLL (GameScripts.dll in Engine/)
+                // NOTE: initializeScripts() is deferred until after scene preparation
+                // creates ECS entities from the level JSON (see game loop below).
                 {
                     auto dllPath = std::filesystem::path(chosenPath) / "Engine" / "GameScripts.dll";
                     if (std::filesystem::exists(dllPath))
                     {
                         if (NativeScriptManager::Instance().loadGameplayDLL(dllPath.string()))
                         {
-                            NativeScriptManager::Instance().initializeScripts();
                             logTimed(Logger::Category::Engine, "Loaded C++ gameplay DLL: " + dllPath.string(), Logger::LogLevel::INFO);
                         }
                         else
                         {
                             logTimed(Logger::Category::Engine, "Failed to load C++ gameplay DLL: " + dllPath.string(), Logger::LogLevel::ERROR);
                         }
+                    }
+                    else
+                    {
+                        logTimed(Logger::Category::Engine, "Runtime: no GameScripts.dll found at " + dllPath.string() + " (no C++ scripts to load).", Logger::LogLevel::INFO);
                     }
                 }
             }
@@ -892,6 +873,13 @@ int main()
     Vec2 mousePosPixels{};
     bool hasMousePos = false;
     bool isOverUI = false;
+
+    // Deferred native-script initialization: the DLL is loaded before scene
+    // preparation, but ECS entities don't exist yet.  Once the renderer's
+    // prepareActiveLevel() deserialises the level JSON into ECS, we call
+    // initializeScripts() exactly once.
+    bool rtScriptsNeedInit = isRuntimeMode && NativeScriptManager::Instance().isDLLLoaded();
+    bool rtCameraNeedInit  = isRuntimeMode;
 
     uint64_t lastCounter = SDL_GetPerformanceCounter();
     const double freq = static_cast<double>(SDL_GetPerformanceFrequency());
@@ -1707,6 +1695,44 @@ int main()
 
         if (isRuntimeMode || diagnostics.isPIEActive())
         {
+            // Deferred native-script init: run once after scene preparation
+            // has created ECS entities from the level JSON.
+            if (rtScriptsNeedInit && diagnostics.isScenePrepared())
+            {
+                NativeScriptManager::Instance().initializeScripts();
+                rtScriptsNeedInit = false;
+            }
+
+            // Deferred camera assignment: find the first active CameraComponent
+            // now that ECS entities exist after scene preparation.
+            if (rtCameraNeedInit && diagnostics.isScenePrepared() && renderer)
+            {
+                auto& ecs = ECS::ECSManager::Instance();
+                ECS::Schema camSchema;
+                camSchema.require<ECS::CameraComponent>().require<ECS::TransformComponent>();
+                const auto camEntities = ecs.getEntitiesMatchingSchema(camSchema);
+                unsigned int activeCamEntity = 0;
+                for (const auto e : camEntities)
+                {
+                    const auto* cam = ecs.getComponent<ECS::CameraComponent>(e);
+                    if (cam && cam->isActive)
+                    {
+                        activeCamEntity = static_cast<unsigned int>(e);
+                        break;
+                    }
+                }
+                if (activeCamEntity == 0 && !camEntities.empty())
+                    activeCamEntity = static_cast<unsigned int>(camEntities.front());
+                if (activeCamEntity != 0)
+                {
+                    renderer->setActiveCameraEntity(activeCamEntity);
+                    logTimed(Logger::Category::Engine,
+                        "Runtime: using entity camera " + std::to_string(activeCamEntity),
+                        Logger::LogLevel::INFO);
+                }
+                rtCameraNeedInit = false;
+            }
+
             NativeScriptManager::Instance().updateScripts(static_cast<float>(dt));
             PhysicsWorld::Instance().step(static_cast<float>(dt));
             Scripting::UpdateScripts(static_cast<float>(dt));

@@ -18,12 +18,14 @@
 #include <SDL3/SDL.h>
 #include <cstring>
 #include <algorithm>
+#include <cmath>
 
 // ── Internal renderer pointer (set by engine, not exported) ──────────
 static Renderer* s_renderer = nullptr;
 // Thread-local buffer for getState string return
 static thread_local std::string s_stateBuffer;
 static thread_local std::string s_globalStringBuffer;
+static thread_local std::string s_entityNameBuffer;
 
 namespace GameplayAPI
 {
@@ -237,6 +239,119 @@ namespace GameplayAPI
 				outEntities[i] = entities[i];
 		}
 		return count;
+	}
+
+	// ── Entity queries ────────────────────────────────────────────────
+
+	bool isEntityValid(ECS::Entity entity)
+	{
+		if (entity == 0) return false;
+		ECS::Schema schema;
+		auto entities = ECS::ECSManager::Instance().getEntitiesMatchingSchema(schema);
+		for (auto e : entities)
+		{
+			if (e == entity) return true;
+		}
+		return false;
+	}
+
+	static bool HasComponentByKind(ECS::Entity entity, int kind)
+	{
+		switch (static_cast<ECS::ComponentKind>(kind))
+		{
+		case ECS::ComponentKind::Transform:      return ECS::hasComponent<ECS::TransformComponent>(entity);
+		case ECS::ComponentKind::Mesh:            return ECS::hasComponent<ECS::MeshComponent>(entity);
+		case ECS::ComponentKind::Material:        return ECS::hasComponent<ECS::MaterialComponent>(entity);
+		case ECS::ComponentKind::Light:           return ECS::hasComponent<ECS::LightComponent>(entity);
+		case ECS::ComponentKind::Camera:          return ECS::hasComponent<ECS::CameraComponent>(entity);
+		case ECS::ComponentKind::Physics:         return ECS::hasComponent<ECS::PhysicsComponent>(entity);
+		case ECS::ComponentKind::Collision:       return ECS::hasComponent<ECS::CollisionComponent>(entity);
+		case ECS::ComponentKind::Logic:           return ECS::hasComponent<ECS::LogicComponent>(entity);
+		case ECS::ComponentKind::Name:            return ECS::hasComponent<ECS::NameComponent>(entity);
+		case ECS::ComponentKind::ParticleEmitter: return ECS::hasComponent<ECS::ParticleEmitterComponent>(entity);
+		default: return false;
+		}
+	}
+
+	bool hasComponent(ECS::Entity entity, int componentKind)
+	{
+		return HasComponentByKind(entity, componentKind);
+	}
+
+	const char* getEntityName(ECS::Entity entity)
+	{
+		const auto* nc = ECS::ECSManager::Instance().getComponent<ECS::NameComponent>(entity);
+		if (!nc || nc->displayName.empty()) return "";
+		s_entityNameBuffer = nc->displayName;
+		return s_entityNameBuffer.c_str();
+	}
+
+	bool setEntityName(ECS::Entity entity, const char* name)
+	{
+		if (!name) return false;
+		auto* nc = ECS::ECSManager::Instance().getComponent<ECS::NameComponent>(entity);
+		if (!nc)
+		{
+			if (!ECS::addComponent<ECS::NameComponent>(entity))
+				return false;
+			nc = ECS::ECSManager::Instance().getComponent<ECS::NameComponent>(entity);
+			if (!nc) return false;
+		}
+		nc->displayName = name;
+		return true;
+	}
+
+	int getEntityCount()
+	{
+		ECS::Schema schema;
+		auto entities = ECS::ECSManager::Instance().getEntitiesMatchingSchema(schema);
+		return static_cast<int>(entities.size());
+	}
+
+	int getAllEntities(ECS::Entity* outEntities, int maxCount)
+	{
+		ECS::Schema schema;
+		auto entities = ECS::ECSManager::Instance().getEntitiesMatchingSchema(schema);
+		int count = static_cast<int>(entities.size());
+		if (outEntities && maxCount > 0)
+		{
+			int toCopy = (std::min)(count, maxCount);
+			for (int i = 0; i < toCopy; ++i)
+				outEntities[i] = entities[i];
+		}
+		return count;
+	}
+
+	float distanceBetween(ECS::Entity a, ECS::Entity b)
+	{
+		const auto* ta = ECS::ECSManager::Instance().getComponent<ECS::TransformComponent>(a);
+		const auto* tb = ECS::ECSManager::Instance().getComponent<ECS::TransformComponent>(b);
+		if (!ta || !tb) return -1.0f;
+		float dx = ta->position[0] - tb->position[0];
+		float dy = ta->position[1] - tb->position[1];
+		float dz = ta->position[2] - tb->position[2];
+		return std::sqrt(dx * dx + dy * dy + dz * dz);
+	}
+
+	// ── Cross-script communication ────────────────────────────────────
+
+	ScriptValue callScriptFunction(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args)
+	{
+		if (!funcName) return ScriptValue{};
+		INativeScript* script = NativeScriptManager::Instance().getInstance(entity);
+		if (!script) return ScriptValue{};
+		return script->onScriptCall(funcName, args);
+	}
+
+	ScriptValue callPythonFunctionOn(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args)
+	{
+		if (!funcName) return ScriptValue{};
+		return NativeScriptManager::Instance().callPythonForEntity(entity, funcName, args);
+	}
+
+	ScriptValue callFunction(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args)
+	{
+		return NativeScriptManager::Instance().callFunction(entity, funcName, args);
 	}
 
 	// ── Mesh ──────────────────────────────────────────────────────────
@@ -1067,6 +1182,39 @@ bool INativeScript::setEmitterEndColor(float r, float g, float b, float a) { ret
 ECS::Entity INativeScript::findEntityByName(const char* name) { return GameplayAPI::findEntityByName(name); }
 ECS::Entity INativeScript::createEntity()                     { return GameplayAPI::createEntity(); }
 bool INativeScript::removeEntity(ECS::Entity entity)          { return GameplayAPI::removeEntity(entity); }
+
+bool        INativeScript::isEntityValid(ECS::Entity entity)                  { return GameplayAPI::isEntityValid(entity); }
+bool        INativeScript::hasComponent(ECS::Entity entity, int componentKind){ return GameplayAPI::hasComponent(entity, componentKind); }
+const char* INativeScript::getEntityName(ECS::Entity entity)                  { return GameplayAPI::getEntityName(entity); }
+bool        INativeScript::setEntityName(ECS::Entity entity, const char* name){ return GameplayAPI::setEntityName(entity, name); }
+int         INativeScript::getEntityCount()                                   { return GameplayAPI::getEntityCount(); }
+int         INativeScript::getAllEntities(ECS::Entity* out, int maxCount)      { return GameplayAPI::getAllEntities(out, maxCount); }
+float       INativeScript::distanceBetween(ECS::Entity a, ECS::Entity b)      { return GameplayAPI::distanceBetween(a, b); }
+
+bool INativeScript::getPositionOf(ECS::Entity entity, float outPos[3])    { return GameplayAPI::getPosition(entity, outPos); }
+bool INativeScript::getRotationOf(ECS::Entity entity, float outRot[3])    { return GameplayAPI::getRotation(entity, outRot); }
+bool INativeScript::getScaleOf(ECS::Entity entity, float outScale[3])     { return GameplayAPI::getScale(entity, outScale); }
+bool INativeScript::setPositionOf(ECS::Entity entity, const float pos[3]) { return GameplayAPI::setPosition(entity, pos); }
+bool INativeScript::setRotationOf(ECS::Entity entity, const float rot[3]) { return GameplayAPI::setRotation(entity, rot); }
+bool INativeScript::setScaleOf(ECS::Entity entity, const float scale[3])  { return GameplayAPI::setScale(entity, scale); }
+
+void INativeScript::getVelocityOf(ECS::Entity entity, float outVel[3])    { GameplayAPI::getVelocity(entity, outVel); }
+void INativeScript::setVelocityOf(ECS::Entity entity, const float vel[3]) { GameplayAPI::setVelocity(entity, vel); }
+
+ScriptValue INativeScript::callScriptFunction(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args)
+{
+	return GameplayAPI::callScriptFunction(entity, funcName, args);
+}
+
+ScriptValue INativeScript::callPythonFunctionOn(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args)
+{
+	return GameplayAPI::callPythonFunctionOn(entity, funcName, args);
+}
+
+ScriptValue INativeScript::callFunction(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args)
+{
+	return GameplayAPI::callFunction(entity, funcName, args);
+}
 
 bool        INativeScript::setGlobalNumber(const char* name, double value)  { return GameplayAPI::setGlobalNumber(name, value); }
 bool        INativeScript::setGlobalString(const char* name, const char* value) { return GameplayAPI::setGlobalString(name, value); }

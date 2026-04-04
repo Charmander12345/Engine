@@ -1078,7 +1078,7 @@ void OutlinerPanel::populateDetails(unsigned int entity)
         if (logic->scriptPath.empty() && logic->nativeClassName.empty())
             lines.push_back(makeTextLine("No script or class assigned."));
 
-        // Dropdown to select a different script asset
+        // Dropdown to select a different Python script asset
         {
             DropdownButtonWidget dropdown;
             dropdown.setText(logic->scriptPath.empty() ? "Select Script..." : logic->scriptPath);
@@ -1107,6 +1107,92 @@ void OutlinerPanel::populateDetails(unsigned int entity)
             dropdownEl.fillX = true;
             dropdownEl.runtimeOnly = true;
             lines.push_back(std::move(dropdownEl));
+        }
+
+        // Dropdown to select a C++ native script class
+        {
+            const auto availableClasses = m_uiManager->getAvailableNativeClassNames();
+
+            DropdownButtonWidget cppDropdown;
+            cppDropdown.setText(logic->nativeClassName.empty() ? "Select C++ Class..." : logic->nativeClassName);
+            cppDropdown.setFont(EditorTheme::Get().fontDefault);
+            cppDropdown.setFontSize(EditorTheme::Get().fontSizeSmall);
+            cppDropdown.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
+            cppDropdown.setPadding(EditorTheme::Get().paddingNormal);
+            cppDropdown.setBackgroundColor(EditorTheme::Get().dropdownBackground);
+            cppDropdown.setHoverColor(EditorTheme::Get().dropdownHover);
+            cppDropdown.setTextColor(EditorTheme::Get().dropdownText);
+
+            // Option to clear the assigned class
+            if (!logic->nativeClassName.empty())
+            {
+                cppDropdown.addItem("(None)", [this, entity]()
+                {
+                    auto& e = ECS::ECSManager::Instance();
+                    auto* comp = e.getComponent<ECS::LogicComponent>(entity);
+                    if (!comp) return;
+                    ECS::LogicComponent oldComp = *comp;
+                    ECS::LogicComponent newComp = *comp;
+                    newComp.nativeClassName.clear();
+                    e.setComponent<ECS::LogicComponent>(entity, newComp);
+                    DiagnosticsManager::Instance().invalidateEntity(entity);
+                    if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+                    populateDetails(entity);
+                    UndoRedoManager::Instance().pushCommand({
+                        "Clear C++ Class",
+                        [entity, newComp]() {
+                            auto& e2 = ECS::ECSManager::Instance();
+                            if (e2.hasComponent<ECS::LogicComponent>(entity)) e2.setComponent(entity, newComp);
+                        },
+                        [entity, oldComp]() {
+                            auto& e2 = ECS::ECSManager::Instance();
+                            if (e2.hasComponent<ECS::LogicComponent>(entity)) e2.setComponent(entity, oldComp);
+                        }
+                    });
+                });
+            }
+
+            for (const auto& className : availableClasses)
+            {
+                cppDropdown.addItem(className, [this, entity, className]()
+                {
+                    auto& e = ECS::ECSManager::Instance();
+                    auto* comp = e.getComponent<ECS::LogicComponent>(entity);
+                    if (!comp) return;
+                    ECS::LogicComponent oldComp = *comp;
+                    ECS::LogicComponent newComp = *comp;
+                    newComp.nativeClassName = className;
+                    e.setComponent<ECS::LogicComponent>(entity, newComp);
+                    DiagnosticsManager::Instance().invalidateEntity(entity);
+                    if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+                    populateDetails(entity);
+                    m_uiManager->showToastMessage("C++ Class: " + className, UIManager::kToastShort);
+                    UndoRedoManager::Instance().pushCommand({
+                        "Assign C++ Class",
+                        [entity, newComp]() {
+                            auto& e2 = ECS::ECSManager::Instance();
+                            if (e2.hasComponent<ECS::LogicComponent>(entity)) e2.setComponent(entity, newComp);
+                            DiagnosticsManager::Instance().invalidateEntity(entity);
+                        },
+                        [entity, oldComp]() {
+                            auto& e2 = ECS::ECSManager::Instance();
+                            if (e2.hasComponent<ECS::LogicComponent>(entity)) e2.setComponent(entity, oldComp);
+                            DiagnosticsManager::Instance().invalidateEntity(entity);
+                        }
+                    });
+                });
+            }
+
+            if (availableClasses.empty())
+            {
+                cppDropdown.addItem("(Build C++ scripts first)", []() {});
+            }
+
+            WidgetElement cppDropdownEl = cppDropdown.toElement();
+            cppDropdownEl.id = "Details.Logic.CppClassDropdown";
+            cppDropdownEl.fillX = true;
+            cppDropdownEl.runtimeOnly = true;
+            lines.push_back(std::move(cppDropdownEl));
         }
 
         addSeparator("Logic", lines, [this, entity, saved = *logic]() {
@@ -1397,13 +1483,13 @@ void OutlinerPanel::populateDetails(unsigned int entity)
                           if (out.is_open())
                           {
                               out << "import engine\n\n";
-                              out << "def on_loaded(entity):\n";
+                              out << "def onloaded(entity):\n";
                               out << "    pass\n\n";
                               out << "def tick(entity, dt):\n";
                               out << "    pass\n\n";
-                              out << "def on_begin_overlap(entity, other):\n";
+                              out << "def on_entity_begin_overlap(entity, other_entity):\n";
                               out << "    pass\n\n";
-                              out << "def on_end_overlap(entity, other):\n";
+                              out << "def on_entity_end_overlap(entity, other_entity):\n";
                               out << "    pass\n";
                               out.close();
                               Logger::Instance().log(Logger::Category::Engine,

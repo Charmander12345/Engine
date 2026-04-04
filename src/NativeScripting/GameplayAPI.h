@@ -28,6 +28,23 @@ namespace GameplayAPI
 	GAMEPLAY_API bool detachComponent(ECS::Entity entity, int componentKind);
 	GAMEPLAY_API int  getEntities(const int* componentKinds, int kindCount, ECS::Entity* outEntities, int maxCount);
 
+	// ── Entity queries ────────────────────────────────────────────────
+	GAMEPLAY_API bool        isEntityValid(ECS::Entity entity);
+	GAMEPLAY_API bool        hasComponent(ECS::Entity entity, int componentKind);
+	GAMEPLAY_API const char* getEntityName(ECS::Entity entity);
+	GAMEPLAY_API bool        setEntityName(ECS::Entity entity, const char* name);
+	GAMEPLAY_API int         getEntityCount();
+	GAMEPLAY_API int         getAllEntities(ECS::Entity* outEntities, int maxCount);
+	GAMEPLAY_API float       distanceBetween(ECS::Entity a, ECS::Entity b);
+
+	// ── Cross-script communication ────────────────────────────────────
+	GAMEPLAY_API ScriptValue callScriptFunction(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args = {});
+	GAMEPLAY_API ScriptValue callPythonFunctionOn(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args = {});
+
+	/// Unified call: automatically routes to C++ (onScriptCall) or Python.
+	/// Callers never need to know which language implements the function.
+	GAMEPLAY_API ScriptValue callFunction(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args = {});
+
 	// ── Mesh ──────────────────────────────────────────────────────────
 	GAMEPLAY_API bool setMesh(ECS::Entity entity, const char* assetPath);
 	GAMEPLAY_API bool getMesh(ECS::Entity entity, char* outPath, int maxLen);

@@ -5,6 +5,64 @@
 
 ---
 
+## Letzte Änderung (Script Method Auto-Registration – SCRIPT_METHOD Makro)
+
+- ✅ `INativeScript.h`: Template-basiertes Method-Registration-System. Neue Includes: `<functional>`, `<unordered_map>`, `<type_traits>`, `<utility>`. `onScriptCall`-Default dispatcht jetzt aus `m_scriptMethods`-Map (Lookup → Aufruf → ScriptValue). Neue `protected`-Methoden: `registerMethod(name, &T::method)` (non-const + const Overloads) — deduziert Parametertypen via Member-Function-Pointer-Templates. Private Template-Helpers: `extractArg<T>` (if constexpr: float/double/int/bool/string/ScriptValue), `toScriptValue<T>` (Rückkonvertierung), `invokeUnpacked` (std::index_sequence für Parameter-Entpackung, 4 Overloads: void/non-void × const/non-const), `invokeMethod` (Entry-Point, 2 Overloads). `m_scriptMethods`: `unordered_map<string, function<ScriptValue(vector<ScriptValue>)>>`. `SCRIPT_METHOD(method)`-Makro nach Klasse: `this->registerMethod(#method, &std::remove_pointer_t<decltype(this)>::method)`. Void-Methoden geben `ScriptValue::makeBool(true)` zurück um Fall-Through zu Python in `callFunction` zu verhindern.
+- ✅ Build erfolgreich.
+- **Usage:** `void onLoaded() override { SCRIPT_METHOD(onMessage); }` + `void onMessage(const std::string& msg) { ... }` → Python: `engine.entity.call_function(entity, "onMessage", "Hello")`.
+- **Keine weiteren Dateiänderungen nötig** — bestehendes virtuelles Dispatch über `onScriptCall` in `NativeScriptManager::callFunction()` behandelt alles automatisch.
+
+## Letzte Änderung (Key-Callback Entity-Routing Fix)
+
+- ✅ `InputModule.cpp`: Per-Key-Callbacks übergeben jetzt die **Entity** statt den Key-Code. Neues `EntityCallback`-Struct (callback + entity). `s_currentEntity` wird vor `onloaded`/`tick`/overlap gesetzt.
+- ✅ `ScriptingInternal.h`: `EntityCallback`-Struct + `s_currentEntity`. Maps aktualisiert.
+- ✅ `PythonScripting.cpp`: `s_currentEntity` wird vor jedem Script-Aufruf gesetzt.
+- ✅ `engine.pyi`: Docstrings aktualisiert.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (Unified Script Call System – callFunction auto-routes C++ ↔ Python)
+
+- ✅ `NativeScriptManager.h/.cpp`: Neue Methode `callFunction(Entity, funcName, args)` — prüft zuerst C++ (`m_instances` → `onScriptCall`), fällt bei `ScriptValue::None` auf Python (`m_pythonCallHandler`) zurück. Aufrufer müssen die Zielsprache nicht kennen.
+- ✅ `GameplayAPI.h/.cpp`: Neue freie Funktion `GameplayAPI::callFunction()` delegiert an `NativeScriptManager::callFunction()`.
+- ✅ `INativeScript.h`: Neue statische Convenience-Methode `callFunction(entity, funcName, args)`. Bestehende `callScriptFunction` + `callPythonFunctionOn` bleiben als Legacy.
+- ✅ `EntityModule.cpp`: Neue Python-Funktion `engine.entity.call_function(entity, func_name, *args)` — unified Routing. `call_native` bleibt für expliziten C++-Zugriff erhalten.
+- ✅ `engine.pyi`: `call_function` Stub mit Docstring hinzugefügt.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (Scripting-Kommunikation Bugfixes)
+
+- ✅ `EntityModule.cpp`: `call_native` variadic-args Fix — `PyArg_ParseTuple("ks")` durch manuelles `PyTuple_GetItem` ersetzt, da ParseTuple Extra-Argumente ablehnte.
+- ✅ `PythonScripting.cpp`: `HandleCppCallsPython()` loggt jetzt Warnungen bei jedem Fehlerfall (kein Interpreter, kein LogicComponent, Script nicht geladen, Funktion nicht gefunden).
+- ✅ `AssetManagerEditorWidgets.cpp` + `OutlinerPanel.cpp`: Python-Script-Templates korrigiert: `on_loaded`→`onloaded`, `on_begin_overlap`→`on_entity_begin_overlap`, `on_end_overlap`→`on_entity_end_overlap`.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (Erweiterte C++ & Python Scripting APIs)
+
+- ✅ `GameplayAPI.h/.cpp`: Neue Entity-Query-Funktionen: `isEntityValid()`, `hasComponent(entity, kind)`, `getEntityName()`/`setEntityName()`, `getEntityCount()`, `getAllEntities()`, `distanceBetween()`.
+- ✅ `GameplayAPI.h/.cpp`: Cross-Script-Kommunikation: `callScriptFunction(entity, funcName, args)` ruft `onScriptCall()` auf anderem C++-Script. `callPythonFunctionOn(entity, funcName, args)` für Python-Aufrufe auf beliebiger Entity.
+- ✅ `INativeScript.h`: Neue Convenience-Methoden: Entity Queries (7 Methoden), Cross-Entity Transform (6 Methoden: get/setPositionOf, get/setRotationOf, get/setScaleOf), Cross-Entity Physics (2 Methoden: get/setVelocityOf), Cross-Script Communication (2 Methoden: callScriptFunction, callPythonFunctionOn).
+- ✅ `EntityModule.cpp`: 14 neue Python-Bindings: `remove_entity`, `has_component`, `find_entity_by_name`, `get_entity_name`, `set_entity_name`, `is_entity_valid`, `get_entity_count`, `get_all_entities`, `distance_between`, `get_velocity`, `set_velocity`, `add_force`, `add_impulse`.
+- ✅ `engine.pyi`: Alle neuen Python-Funktionen mit Typ-Annotationen und Docstrings eingetragen.
+- ✅ Build erfolgreich (Scripting.dll + ScriptingRuntime.dll + HorizonEngine.exe).
+
+## Letzte Änderung (GameScripts Runtime-DLL-Link Fix)
+
+- ✅ `BuildPipeline.cpp`: GameScripts CMakeLists linkt jetzt gegen `ScriptingRuntime` statt `Scripting`. **Root Cause:** `GameScripts.dll` hatte `Scripting.dll` als implizite Abhängigkeit im Import-Table, aber im Game-Build wird nur `ScriptingRuntime.dll` deployed (`Scripting.dll` ist editor-only und wird gefiltert). `LoadLibraryA` schlug fehl weil die Windows-DLL-Auflösung `Scripting.dll` nicht finden konnte. Fix: `target_link_libraries(GameScripts PRIVATE ScriptingRuntime)` — damit referenziert der Import-Table `ScriptingRuntime.dll`, die im Game-Build unter `Engine/` liegt.
+- ✅ `main.cpp`: Log-Meldung hinzugefügt wenn `GameScripts.dll` nicht gefunden wird ("no GameScripts.dll found at ..."), damit der Ladevorgang sichtbar ist.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (GameScripts im Game Build + Runtime-Laden)
+
+- ✅ `BuildPipeline.cpp`: Neuer Step 7 "Build C++ GameScripts DLL" (`kTotalSteps` von 9 auf 10). Prüft `Content/Scripts/Native/` auf `.cpp`-Dateien.
+- ✅ `Auto-Registration im Game Build`: Identischer Regex-Scan wie PIE-Build — scannt `.h`-Dateien nach `class X : public INativeScript`, generiert `_AutoRegister.cpp` mit `REGISTER_NATIVE_SCRIPT`-Makros.
+- ✅ `CMakeLists.txt-Generierung`: C++20, SHARED GameScripts-DLL, linkt gegen `ScriptingRuntime.lib` aus `Tools/lib/`, NativeScripting-Headers aus `Tools/include/`.
+- ✅ `CMake configure + build`: Im `<binaryDir>/GameScripts/`-Unterordner mit dem Build-Profil des Game-Builds (Debug/RelWithDebInfo/Release).
+- ✅ `Deployment`: `GameScripts.dll` → `<outputDir>/Engine/`, PDB → `<outputDir>/Symbols/` (non-Shipping).
+- ✅ `Runtime-Laden (main.cpp)`: War bereits implementiert — nach Level-Load lädt die Runtime `GameScripts.dll` aus `Engine/` via `NativeScriptManager::loadGameplayDLL()` + `initializeScripts()`.
+- ✅ `Includes`: `<regex>` und `<sstream>` zu `BuildPipeline.cpp` hinzugefügt.
+- ✅ `Graceful Skip`: Falls keine C++-Scripts vorhanden, wird der Step mit "No C++ game scripts found, skipping." übersprungen.
+- ✅ Build erfolgreich.
+
 ## Letzte Änderung (Popup-Fenster Hintergrundfarbe Fix)
 
 - ✅ `EditorApp.cpp`: Weiße Hintergründe in „New Level"- und „New Material"-Popup-Fenstern behoben — StackPanel-Elemente (`NL.Form`/`NM.Form`) erhielten transparente Hintergrundfarbe (`style.color = {0,0,0,0}`), da der `WidgetElementStyle::color`-Default `{1,1,1,1}` (weiß) war.
@@ -2146,6 +2204,11 @@ Große Feature-Blöcke, die noch nicht existieren:
 - ✅ **Outliner/Entity-Details-Extraktion (Section 1.3 komplett)** – World Outliner und Entity Details aus `UIManager.cpp` in `OutlinerPanel.h/.cpp` (~1.808 Zeilen) extrahiert. 9 Methoden (`populateWidget`, `populateDetails`, `refresh`, `selectEntity`, `navigateByArrow`, `copySelectedEntity`, `pasteEntity`, `duplicateEntity`, `applyAssetToEntity`), 5 Member-Variablen (`m_outlinerLevel`, `m_outlinerSelectedEntity`, `EntityClipboard`, `m_lastEcsComponentVersion`, `m_lastRegistryVersion`) und statische Helfer (`iconForEntity`, `iconTintForEntity`, `FindFirstStackPanel`, `setCompFieldWithUndo`) verschoben. `UIManager.cpp` von ~13.100 auf ~11.560 Zeilen reduziert (~1.545 Zeilen, ~12% weitere Reduktion). Neue UIManager-APIs: `getSelectedEntity()`, `invalidateHoveredElement()`. ~50 Cross-References aktualisiert.
 - ✅ **Build-System-UI-Extraktion (Section 1.4 komplett)** – Build-System-UI aus `UIManager.cpp` in `BuildSystemUI.h/.cpp` (~1.370 Zeilen) extrahiert. 16 Methoden (Profile-Management: `loadBuildProfiles`, `saveBuildProfile`, `deleteBuildProfile`; Build-Dialog: `openBuildGameDialog`, `setOnBuildGame`; Progress-UI: `showBuildProgress`, `updateBuildProgress`, `closeBuildProgress`, `dismissBuildProgress`, `appendBuildOutput`, `pollBuildThread`; CMake/Toolchain-Detection: `detectCMake`, `detectBuildToolchain`, `showCMakeInstallPrompt`, `showToolchainInstallPrompt`, `startAsyncToolchainDetection`, `pollToolchainDetection`), Structs (`BuildProfile`, `BuildGameConfig`, `ToolchainInfo`), statische Helfer (`shellExecSilent`, `shellReadSilent`) und alle Build-Thread-State-Variablen verschoben. Type-Aliases in `UIManager.h` für API-Kompatibilität (`UIManager::BuildGameConfig` etc.). `BuildPipeline.cpp` aktualisiert (Zugriff über `getBuildSystemUI()`). `UIManager.cpp` von ~11.560 auf ~10.300 Zeilen reduziert (~1.260 Zeilen, ~11% weitere Reduktion).
 - ✅ **Dialog-System-Extraktion (Section 1.5 komplett)** – Dialog-System aus `UIManager.cpp` in `EditorDialogs.h/.cpp` (~1.840 Zeilen) extrahiert. 13 Methoden (`showModalMessage`, `closeModalMessage`, `showConfirmDialog`, `showConfirmDialogWithCheckbox`, `ensureModalWidget`, `showSaveProgressModal`, `updateSaveProgress`, `closeSaveProgressModal`, `showUnsavedChangesDialog`, `showLevelLoadProgress`, `updateLevelLoadProgress`, `closeLevelLoadProgress`, `openProjectScreen`), `ModalRequest`-Struct, Member-Variablen (`m_modalWidget`, `m_modalMessage`, `m_modalVisible`, `m_modalOnClosed`, `m_modalQueue`, `m_saveProgressWidget/Visible/Total/Saved`, `m_levelLoadProgressWidget`) und statische Helfer verschoben. Accessors (`isModalVisible()`, `getModalWidget()`, `getSaveProgressWidget()`) für UIManager-Cross-References. `UIManager.cpp` von ~10.300 auf ~8.550 Zeilen reduziert (~1.750 Zeilen, ~17% weitere Reduktion).
+- ✅ **PIE DLL-Lifecycle-Fix** – `stopPIE()` ruft jetzt `NativeScriptManager::shutdownScripts()` + `unloadGameplayDLL()` vor `reloadScripts()`/`restoreEcsSnapshot()` auf, um File-Lock auf `GameScripts.dll` zu vermeiden. `buildGameScriptsForPIE()` entlädt die DLL *vor* dem CMake-Build, damit `POST_BUILD`-Copy die Datei überschreiben kann.
+- ✅ **Native Script Class Discovery & Entity Assignment** – `NativeScriptManager` cached entdeckte Klassennamen (`m_cachedClassNames`) nach DLL-Laden über `loadGameplayDLL()`. `getAvailableClassNames()` liefert die gecachte Liste auch nach DLL-Unload. Verbessertes Logging: bei 0 registrierten Klassen wird Warnung mit `REGISTER_NATIVE_SCRIPT`-Hinweis ausgegeben; `initializeScripts()` loggt jede Entity-Klassen-Zuordnung und Zusammenfassung. EntityDetails-Panel: neues `DropdownButtonWidget` (`Details.Logic.CppClassDropdown`) im LogicComponent-Abschnitt zeigt verfügbare C++-Klassen, mit "(None)"-Option und "(Build C++ scripts first)"-Hinweis. Undo/Redo-Support. `UIManager`: `NativeClassNamesProvider`-Callback überbrückt Renderer↔Scripting DLL-Grenze.
+- ✅ **Auto-Registration & New C++ Script Template** – `buildGameScriptsForPIE()` scannt vor dem CMake-Build alle `.h`-Dateien in `Content/Scripts/Native/` per Regex nach `class X : public INativeScript` und generiert automatisch `_AutoRegister.cpp` mit `#include`-Direktiven und `REGISTER_NATIVE_SCRIPT`-Makros für jede entdeckte Klasse. Benutzer müssen das Makro nie manuell schreiben. Content Browser Kontextmenü: neuer Eintrag "New C++ Script" erstellt `.h`+`.cpp`-Boilerplate mit `INativeScript`-Vererbung und `onLoaded()`/`tick()`-Overrides direkt in `Content/Scripts/Native/`.
+- ✅ **PIE Build Progress Popup (Async Build)** – `buildGameScriptsForPIE()` ist jetzt asynchron. Pre-Build-Setup (Auto-Register-Scan, CMakeLists.txt, DLL-Unload) läuft auf dem Main-Thread, CMake configure+build auf einem Background-Thread. Separates Popup-Fenster ("C++ Script Build", 780×460) zeigt Build-Output live: scrollbares StackPanel mit Fehler-Highlighting (rot für `[ERROR]`, `error`, `FAILED`) und Auto-Scroll. Bei Erfolg: Popup schließt automatisch, DLL wird geladen, PIE startet via `finishStartPIE()`. Bei Fehler: Popup bleibt offen mit roter Status-Meldung ("Compilation errors found") und Close-Button — Benutzer kann den gesamten Build-Output mit Compiler-Fehlermeldungen durchscrollen. Neue EditorApp-Methoden: `finishStartPIE()`, `pollPIEBuild()`, `dismissPIEBuildPopup()`. Neue Members: `m_pieBuildThread`, `m_pieBuildMutex`, `m_pieBuildRunning`, `m_pieBuildPendingLines`, `m_pieBuildFinished`, `m_pieBuildSuccess`, `m_pieBuildOutputLines`, `m_pieBuildWidget`, `m_pieBuildPopup`. `tick()` ruft `pollPIEBuild()` auf.
+- ✅ **Runtime Script-Initialisierung (Deferred)** – `initializeScripts()` wurde im Runtime-Modus zu früh aufgerufen (direkt nach `loadGameplayDLL()`), bevor ECS-Entities aus dem Level-JSON erstellt wurden. Fix: DLL wird weiterhin früh geladen, aber `initializeScripts()` wird im Game-Loop deferred aufgerufen — erst nachdem `diagnostics.isScenePrepared()` true ist (d.h. `prepareActiveLevel()` → `prepareEcs()` die Entities deserialisiert hat). Gleiches gilt für die Entity-Kamera-Zuweisung (`setActiveCameraEntity()`), die ebenfalls nach Scene-Preparation läuft. Neue Flags: `rtScriptsNeedInit`, `rtCameraNeedInit`.
 
 ---
 

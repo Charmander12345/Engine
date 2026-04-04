@@ -292,6 +292,9 @@ namespace
     {
         if (!Py_IsInitialized())
         {
+            Logger::Instance().log(Logger::Category::Engine,
+                "Python: callPythonFunction failed – interpreter not initialized",
+                Logger::LogLevel::WARNING);
             return ScriptValue{};
         }
 
@@ -299,12 +302,20 @@ namespace
         const auto* comp = ECS::ECSManager::Instance().getComponent<ECS::LogicComponent>(entity);
         if (!comp || comp->scriptPath.empty())
         {
+            Logger::Instance().log(Logger::Category::Engine,
+                "Python: callPythonFunction(\"" + std::string(funcName ? funcName : "?") +
+                "\") failed – " + DescribeEntity(entity) + " has no LogicComponent / script path",
+                Logger::LogLevel::WARNING);
             return ScriptValue{};
         }
 
         auto it = s_scripts.find(comp->scriptPath);
         if (it == s_scripts.end() || !it->second.module)
         {
+            Logger::Instance().log(Logger::Category::Engine,
+                "Python: callPythonFunction(\"" + std::string(funcName ? funcName : "?") +
+                "\") failed – script module not loaded: " + comp->scriptPath,
+                Logger::LogLevel::WARNING);
             return ScriptValue{};
         }
 
@@ -314,11 +325,16 @@ namespace
         PyObject* func = moduleDict ? PyDict_GetItemString(moduleDict, funcName) : nullptr;
         if (!func || !PyCallable_Check(func))
         {
+            Logger::Instance().log(Logger::Category::Engine,
+                "Python: callPythonFunction(\"" + std::string(funcName ? funcName : "?") +
+                "\") failed – function not found in " + comp->scriptPath,
+                Logger::LogLevel::WARNING);
             PyGILState_Release(gilState);
             return ScriptValue{};
         }
 
         // Build args tuple: (entity, arg1, arg2, ...)
+        ScriptDetail::s_currentEntity = static_cast<unsigned long>(entity);
         PyObject* pyArgs = PyTuple_New(1 + static_cast<Py_ssize_t>(args.size()));
         PyTuple_SetItem(pyArgs, 0, PyLong_FromUnsignedLong(entity));
         for (size_t i = 0; i < args.size(); ++i)
@@ -1227,6 +1243,7 @@ namespace Scripting
             if (state.onLoadedFunc &&
                 state.startedEntities.find(static_cast<unsigned long>(entity)) == state.startedEntities.end())
             {
+                ScriptDetail::s_currentEntity = static_cast<unsigned long>(entity);
                 PyObject* result = PyObject_CallFunction(state.onLoadedFunc, "k", static_cast<unsigned long>(entity));
                 if (!result)
                 {
@@ -1241,6 +1258,7 @@ namespace Scripting
 
             if (state.tickFunc)
             {
+                ScriptDetail::s_currentEntity = static_cast<unsigned long>(entity);
                 PyObject* result = PyObject_CallFunction(state.tickFunc, "kf", static_cast<unsigned long>(entity), deltaSeconds);
                 if (!result)
                 {
@@ -1266,6 +1284,7 @@ namespace Scripting
                 if (it == s_scripts.end() || !it->second.module) return;
                 PyObject* func = isBegin ? it->second.onBeginOverlapFunc : it->second.onEndOverlapFunc;
                 if (!func) return;
+                ScriptDetail::s_currentEntity = static_cast<unsigned long>(entity);
                 PyObject* result = PyObject_CallFunction(func, "kk",
                     static_cast<unsigned long>(entity),
                     static_cast<unsigned long>(otherEntity));

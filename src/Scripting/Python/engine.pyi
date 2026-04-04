@@ -44,6 +44,11 @@ class entity:
         ...
 
     @staticmethod
+    def remove_entity(entity: int) -> bool:
+        """Remove an entity from the scene."""
+        ...
+
+    @staticmethod
     def attach_component(entity: int, kind: int) -> bool:
         """Attach a component by kind."""
         ...
@@ -54,8 +59,49 @@ class entity:
         ...
 
     @staticmethod
+    def has_component(entity: int, kind: int) -> bool:
+        """Check if an entity has a component of the given kind."""
+        ...
+
+    @staticmethod
     def get_entities(kinds: list[int]) -> list[int]:
         """Get entities matching component kinds."""
+        ...
+
+    @staticmethod
+    def get_all_entities() -> list[int]:
+        """Get all entities currently in the scene."""
+        ...
+
+    @staticmethod
+    def get_entity_count() -> int:
+        """Get the total number of entities in the scene."""
+        ...
+
+    @staticmethod
+    def find_entity_by_name(name: str) -> int:
+        """Find an entity by its display name. Returns 0 if not found."""
+        ...
+
+    @staticmethod
+    def get_entity_name(entity: int) -> str:
+        """Get the display name of an entity. Returns empty string if no name."""
+        ...
+
+    @staticmethod
+    def set_entity_name(entity: int, name: str) -> bool:
+        """Set the display name of an entity. Adds NameComponent if missing."""
+        ...
+
+    @staticmethod
+    def is_entity_valid(entity: int) -> bool:
+        """Check if an entity id refers to a valid, existing entity."""
+        ...
+
+    @staticmethod
+    def distance_between(entity_a: int, entity_b: int) -> float:
+        """Get the world-space distance between two entities.
+        Both entities must have a TransformComponent."""
         ...
 
     @staticmethod
@@ -112,6 +158,33 @@ class entity:
     def call_native(entity: int, func_name: str, *args) -> object:
         """Call a named function on the entity's C++ native script.
         Returns the result from the C++ onScriptCall handler, or None if no native script is attached."""
+        ...
+
+    @staticmethod
+    def call_function(entity: int, func_name: str, *args) -> object:
+        """Call a named function on any entity's script (C++ or Python).
+        Automatically routes to C++ (onScriptCall) first, then Python.
+        Callers never need to know which language implements the function."""
+        ...
+
+    @staticmethod
+    def get_velocity(entity: int) -> tuple[float, float, float]:
+        """Get linear velocity of an entity -> (x, y, z). Returns (0,0,0) if no PhysicsComponent."""
+        ...
+
+    @staticmethod
+    def set_velocity(entity: int, x: float, y: float, z: float) -> bool:
+        """Set linear velocity of an entity with PhysicsComponent."""
+        ...
+
+    @staticmethod
+    def add_force(entity: int, fx: float, fy: float, fz: float) -> bool:
+        """Apply a force (divided by mass) to an entity with PhysicsComponent."""
+        ...
+
+    @staticmethod
+    def add_impulse(entity: int, ix: float, iy: float, iz: float) -> bool:
+        """Apply a direct velocity impulse to an entity with PhysicsComponent."""
         ...
 
     @staticmethod
@@ -385,12 +458,14 @@ class input:
 
     @staticmethod
     def register_key_pressed(key: int, callback: Callable[[int], None]) -> bool:
-        """Register a key pressed callback for a key."""
+        """Register a callback for when a specific key is pressed.
+        The callback receives the entity that registered it (not the key code)."""
         ...
 
     @staticmethod
     def register_key_released(key: int, callback: Callable[[int], None]) -> bool:
-        """Register a key released callback for a key."""
+        """Register a callback for when a specific key is released.
+        The callback receives the entity that registered it (not the key code)."""
         ...
 
     @staticmethod

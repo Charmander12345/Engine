@@ -19,6 +19,10 @@
 #include <functional>
 #include <string>
 #include <memory>
+#include <vector>
+#include <thread>
+#include <mutex>
+#include <atomic>
 #include <SDL3/SDL.h>
 #include "../Core/MathTypes.h"
 
@@ -95,7 +99,10 @@ private:
     void registerDragDropHandlers();
     void registerBuildPipeline();
     void startPIE();
-    bool buildGameScriptsForPIE();
+    void finishStartPIE();
+    void buildGameScriptsForPIE();
+    void pollPIEBuild();
+    void dismissPIEBuildPopup();
     bool handleDelete();
 
     IEditorBridge& m_bridge;
@@ -116,6 +123,17 @@ private:
     // Preloaded texture IDs
     unsigned int m_playTexId{ 0 };
     unsigned int m_stopTexId{ 0 };
+
+    // ── Async PIE build state ────────────────────────────────────────
+    std::thread              m_pieBuildThread;
+    std::mutex               m_pieBuildMutex;
+    std::atomic<bool>        m_pieBuildRunning{ false };
+    std::vector<std::string> m_pieBuildPendingLines;
+    bool                     m_pieBuildFinished{ false };
+    bool                     m_pieBuildSuccess{ false };
+    std::vector<std::string> m_pieBuildOutputLines;
+    std::shared_ptr<class EditorWidget> m_pieBuildWidget;
+    class PopupWindow*       m_pieBuildPopup{ nullptr };
 };
 
 #endif // ENGINE_EDITOR

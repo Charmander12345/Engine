@@ -5,6 +5,8 @@
 #include "../AssetManager/AssetTypes.h"
 #include "../NativeScripting/NativeScriptManager.h"
 
+#include <cmath>
+
 namespace
 {
     // ── engine.entity helpers ───────────────────────────────────────────
@@ -485,15 +487,16 @@ namespace
             return nullptr;
         }
 
-        unsigned long entity = 0;
-        const char* funcName = nullptr;
-        if (!PyArg_ParseTuple(args, "ks", &entity, &funcName))
+        PyObject* pyEntity = PyTuple_GetItem(args, 0);
+        PyObject* pyFunc   = PyTuple_GetItem(args, 1);
+        if (!pyEntity || !PyLong_Check(pyEntity) || !pyFunc || !PyUnicode_Check(pyFunc))
         {
+            PyErr_SetString(PyExc_TypeError, "call_native(entity: int, func_name: str, ...)");
             return nullptr;
         }
+        unsigned long entity = PyLong_AsUnsignedLong(pyEntity);
+        const char* funcName = PyUnicode_AsUTF8(pyFunc);
 
-        // This gets the rest of the positional args after entity and funcName
-        // We re-parse from the tuple manually
         std::vector<ScriptValue> scriptArgs;
         for (Py_ssize_t i = 2; i < argCount; ++i)
         {
@@ -511,13 +514,304 @@ namespace
         return ScriptValueToPyObject(result);
     }
 
+    // call_function(entity, func_name, *args) -> value
+    // Unified: automatically routes to C++ or Python, caller doesn't need to know.
+    PyObject* py_call_function(PyObject*, PyObject* args)
+    {
+        Py_ssize_t argCount = PyTuple_Size(args);
+        if (argCount < 2)
+        {
+            PyErr_SetString(PyExc_TypeError, "call_function requires at least (entity, func_name)");
+            return nullptr;
+        }
+
+        PyObject* pyEntity = PyTuple_GetItem(args, 0);
+        PyObject* pyFunc   = PyTuple_GetItem(args, 1);
+        if (!pyEntity || !PyLong_Check(pyEntity) || !pyFunc || !PyUnicode_Check(pyFunc))
+        {
+            PyErr_SetString(PyExc_TypeError, "call_function(entity: int, func_name: str, ...)");
+            return nullptr;
+        }
+        unsigned long entity = PyLong_AsUnsignedLong(pyEntity);
+        const char* funcName = PyUnicode_AsUTF8(pyFunc);
+
+        std::vector<ScriptValue> scriptArgs;
+        for (Py_ssize_t i = 2; i < argCount; ++i)
+        {
+            scriptArgs.push_back(PyObjectToScriptValue(PyTuple_GetItem(args, i)));
+        }
+
+        ScriptValue result = NativeScriptManager::Instance().callFunction(
+            static_cast<ECS::Entity>(entity), funcName, scriptArgs);
+        return ScriptValueToPyObject(result);
+    }
+
+    // ── Entity query functions ─────────────────────────────────────────
+
+    PyObject* py_find_entity_by_name(PyObject*, PyObject* args)
+    {
+        const char* name = nullptr;
+        if (!PyArg_ParseTuple(args, "s", &name))
+        {
+            return nullptr;
+        }
+        if (!name) Py_RETURN_NONE;
+
+        ECS::Schema schema;
+        schema.require<ECS::NameComponent>();
+        auto entities = ECS::ECSManager::Instance().getEntitiesMatchingSchema(schema);
+        for (auto entity : entities)
+        {
+            const auto* nc = ECS::ECSManager::Instance().getComponent<ECS::NameComponent>(entity);
+            if (nc && nc->displayName == name)
+            {
+                return PyLong_FromUnsignedLong(entity);
+            }
+        }
+        return PyLong_FromUnsignedLong(0);
+    }
+
+    PyObject* py_get_entity_name(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        if (!PyArg_ParseTuple(args, "k", &entity))
+        {
+            return nullptr;
+        }
+        const auto* nc = ECS::ECSManager::Instance().getComponent<ECS::NameComponent>(static_cast<ECS::Entity>(entity));
+        if (!nc || nc->displayName.empty())
+        {
+            return PyUnicode_FromString("");
+        }
+        return PyUnicode_FromString(nc->displayName.c_str());
+    }
+
+    PyObject* py_set_entity_name(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        const char* name = nullptr;
+        if (!PyArg_ParseTuple(args, "ks", &entity, &name))
+        {
+            return nullptr;
+        }
+        auto ecsEntity = static_cast<ECS::Entity>(entity);
+        auto* nc = ECS::ECSManager::Instance().getComponent<ECS::NameComponent>(ecsEntity);
+        if (!nc)
+        {
+            if (!ECS::addComponent<ECS::NameComponent>(ecsEntity))
+            {
+                Py_RETURN_FALSE;
+            }
+            nc = ECS::ECSManager::Instance().getComponent<ECS::NameComponent>(ecsEntity);
+            if (!nc) Py_RETURN_FALSE;
+        }
+        nc->displayName = name ? name : "";
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_is_entity_valid(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        if (!PyArg_ParseTuple(args, "k", &entity))
+        {
+            return nullptr;
+        }
+        if (entity == 0) Py_RETURN_FALSE;
+        ECS::Schema schema;
+        auto entities = ECS::ECSManager::Instance().getEntitiesMatchingSchema(schema);
+        for (auto e : entities)
+        {
+            if (e == static_cast<ECS::Entity>(entity)) Py_RETURN_TRUE;
+        }
+        Py_RETURN_FALSE;
+    }
+
+    PyObject* py_remove_entity(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        if (!PyArg_ParseTuple(args, "k", &entity))
+        {
+            return nullptr;
+        }
+        if (ECS::ECSManager::Instance().removeEntity(static_cast<ECS::Entity>(entity)))
+        {
+            Py_RETURN_TRUE;
+        }
+        Py_RETURN_FALSE;
+    }
+
+    PyObject* py_has_component(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        int kind = 0;
+        if (!PyArg_ParseTuple(args, "ki", &entity, &kind))
+        {
+            return nullptr;
+        }
+        auto ecsEntity = static_cast<ECS::Entity>(entity);
+        bool result = false;
+        switch (static_cast<ECS::ComponentKind>(kind))
+        {
+        case ECS::ComponentKind::Transform:      result = ECS::hasComponent<ECS::TransformComponent>(ecsEntity); break;
+        case ECS::ComponentKind::Mesh:            result = ECS::hasComponent<ECS::MeshComponent>(ecsEntity); break;
+        case ECS::ComponentKind::Material:        result = ECS::hasComponent<ECS::MaterialComponent>(ecsEntity); break;
+        case ECS::ComponentKind::Light:           result = ECS::hasComponent<ECS::LightComponent>(ecsEntity); break;
+        case ECS::ComponentKind::Camera:          result = ECS::hasComponent<ECS::CameraComponent>(ecsEntity); break;
+        case ECS::ComponentKind::Physics:         result = ECS::hasComponent<ECS::PhysicsComponent>(ecsEntity); break;
+        case ECS::ComponentKind::Collision:       result = ECS::hasComponent<ECS::CollisionComponent>(ecsEntity); break;
+        case ECS::ComponentKind::Logic:           result = ECS::hasComponent<ECS::LogicComponent>(ecsEntity); break;
+        case ECS::ComponentKind::Name:            result = ECS::hasComponent<ECS::NameComponent>(ecsEntity); break;
+        case ECS::ComponentKind::ParticleEmitter: result = ECS::hasComponent<ECS::ParticleEmitterComponent>(ecsEntity); break;
+        default:
+            PyErr_SetString(PyExc_ValueError, "Unknown component kind.");
+            return nullptr;
+        }
+        if (result) Py_RETURN_TRUE;
+        Py_RETURN_FALSE;
+    }
+
+    PyObject* py_get_entity_count(PyObject*, PyObject*)
+    {
+        ECS::Schema schema;
+        auto entities = ECS::ECSManager::Instance().getEntitiesMatchingSchema(schema);
+        return PyLong_FromSsize_t(static_cast<Py_ssize_t>(entities.size()));
+    }
+
+    PyObject* py_get_all_entities(PyObject*, PyObject*)
+    {
+        ECS::Schema schema;
+        auto entities = ECS::ECSManager::Instance().getEntitiesMatchingSchema(schema);
+        PyObject* result = PyList_New(static_cast<Py_ssize_t>(entities.size()));
+        for (size_t i = 0; i < entities.size(); ++i)
+        {
+            PyList_SetItem(result, static_cast<Py_ssize_t>(i), PyLong_FromUnsignedLong(entities[i]));
+        }
+        return result;
+    }
+
+    PyObject* py_distance_between(PyObject*, PyObject* args)
+    {
+        unsigned long a = 0;
+        unsigned long b = 0;
+        if (!PyArg_ParseTuple(args, "kk", &a, &b))
+        {
+            return nullptr;
+        }
+        const auto* ta = ECS::ECSManager::Instance().getComponent<ECS::TransformComponent>(static_cast<ECS::Entity>(a));
+        const auto* tb = ECS::ECSManager::Instance().getComponent<ECS::TransformComponent>(static_cast<ECS::Entity>(b));
+        if (!ta || !tb)
+        {
+            PyErr_SetString(PyExc_ValueError, "One or both entities have no TransformComponent.");
+            return nullptr;
+        }
+        float dx = ta->position[0] - tb->position[0];
+        float dy = ta->position[1] - tb->position[1];
+        float dz = ta->position[2] - tb->position[2];
+        return PyFloat_FromDouble(std::sqrt(dx * dx + dy * dy + dz * dz));
+    }
+
+    // ── Cross-entity physics ───────────────────────────────────────────
+
+    PyObject* py_get_velocity(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        if (!PyArg_ParseTuple(args, "k", &entity))
+        {
+            return nullptr;
+        }
+        const auto* pc = ECS::ECSManager::Instance().getComponent<ECS::PhysicsComponent>(static_cast<ECS::Entity>(entity));
+        if (!pc)
+        {
+            return Py_BuildValue("(fff)", 0.0f, 0.0f, 0.0f);
+        }
+        return Py_BuildValue("(fff)", pc->velocity[0], pc->velocity[1], pc->velocity[2]);
+    }
+
+    PyObject* py_set_velocity(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        float x = 0.0f, y = 0.0f, z = 0.0f;
+        if (!PyArg_ParseTuple(args, "kfff", &entity, &x, &y, &z))
+        {
+            return nullptr;
+        }
+        auto* pc = ECS::ECSManager::Instance().getComponent<ECS::PhysicsComponent>(static_cast<ECS::Entity>(entity));
+        if (!pc)
+        {
+            PyErr_SetString(PyExc_ValueError, "Entity has no PhysicsComponent.");
+            return nullptr;
+        }
+        pc->velocity[0] = x;
+        pc->velocity[1] = y;
+        pc->velocity[2] = z;
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_add_force(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        float x = 0.0f, y = 0.0f, z = 0.0f;
+        if (!PyArg_ParseTuple(args, "kfff", &entity, &x, &y, &z))
+        {
+            return nullptr;
+        }
+        auto* pc = ECS::ECSManager::Instance().getComponent<ECS::PhysicsComponent>(static_cast<ECS::Entity>(entity));
+        if (!pc)
+        {
+            PyErr_SetString(PyExc_ValueError, "Entity has no PhysicsComponent.");
+            return nullptr;
+        }
+        if (pc->motionType != ECS::PhysicsComponent::MotionType::Dynamic || pc->mass <= 0.0f)
+        {
+            Py_RETURN_FALSE;
+        }
+        const float invMass = 1.0f / pc->mass;
+        pc->velocity[0] += x * invMass;
+        pc->velocity[1] += y * invMass;
+        pc->velocity[2] += z * invMass;
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_add_impulse(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        float x = 0.0f, y = 0.0f, z = 0.0f;
+        if (!PyArg_ParseTuple(args, "kfff", &entity, &x, &y, &z))
+        {
+            return nullptr;
+        }
+        auto* pc = ECS::ECSManager::Instance().getComponent<ECS::PhysicsComponent>(static_cast<ECS::Entity>(entity));
+        if (!pc)
+        {
+            PyErr_SetString(PyExc_ValueError, "Entity has no PhysicsComponent.");
+            return nullptr;
+        }
+        if (pc->motionType != ECS::PhysicsComponent::MotionType::Dynamic)
+        {
+            Py_RETURN_FALSE;
+        }
+        pc->velocity[0] += x;
+        pc->velocity[1] += y;
+        pc->velocity[2] += z;
+        Py_RETURN_TRUE;
+    }
+
     // ── Method table & module definition ────────────────────────────────
 
     PyMethodDef EntityMethods[] = {
         { "create_entity", py_create_entity, METH_NOARGS, "Create an entity." },
+        { "remove_entity", py_remove_entity, METH_VARARGS, "Remove an entity." },
         { "attach_component", py_attach_component, METH_VARARGS, "Attach a component by kind." },
         { "detach_component", py_detach_component, METH_VARARGS, "Detach a component by kind." },
+        { "has_component", py_has_component, METH_VARARGS, "Check if entity has a component by kind." },
         { "get_entities", py_get_entities, METH_VARARGS, "Get entities matching component kinds." },
+        { "get_all_entities", py_get_all_entities, METH_NOARGS, "Get all entities in the scene." },
+        { "get_entity_count", py_get_entity_count, METH_NOARGS, "Get the total number of entities." },
+        { "find_entity_by_name", py_find_entity_by_name, METH_VARARGS, "Find an entity by display name." },
+        { "get_entity_name", py_get_entity_name, METH_VARARGS, "Get the display name of an entity." },
+        { "set_entity_name", py_set_entity_name, METH_VARARGS, "Set the display name of an entity." },
+        { "is_entity_valid", py_is_entity_valid, METH_VARARGS, "Check if an entity id is valid." },
+        { "distance_between", py_distance_between, METH_VARARGS, "Get distance between two entities." },
         { "get_transform", py_get_transform, METH_VARARGS, "Get transform (pos, rot, scale)." },
         { "set_position", py_set_position, METH_VARARGS, "Set entity position." },
         { "translate", py_translate, METH_VARARGS, "Translate entity position." },
@@ -528,6 +822,11 @@ namespace
         { "get_mesh", py_get_mesh, METH_VARARGS, "Get mesh asset path for an entity." },
         { "get_light_color", py_get_light_color, METH_VARARGS, "Get light color (entity) -> (r, g, b)." },
         { "set_light_color", py_set_light_color, METH_VARARGS, "Set light color (entity, r, g, b)." },
+        { "get_velocity", py_get_velocity, METH_VARARGS, "Get velocity of an entity -> (x, y, z)." },
+        { "set_velocity", py_set_velocity, METH_VARARGS, "Set velocity of an entity." },
+        { "add_force", py_add_force, METH_VARARGS, "Apply a force to an entity." },
+        { "add_impulse", py_add_impulse, METH_VARARGS, "Apply a direct velocity impulse to an entity." },
+        { "call_function", py_call_function, METH_VARARGS, "Call a function on any entity's script (C++ or Python, auto-routed)." },
         { "call_native", py_call_native, METH_VARARGS, "Call a function on the entity's C++ native script." },
         { nullptr, nullptr, 0, nullptr }
     };

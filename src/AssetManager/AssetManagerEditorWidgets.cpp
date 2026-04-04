@@ -1475,13 +1475,13 @@ void AssetManager::ensureDefaultAssetsCreated()
 			if (out.is_open())
 			{
 				out << "import engine\n\n";
-				out << "def on_loaded(entity):\n";
+				out << "def onloaded(entity):\n";
 				out << "    pass\n\n";
 				out << "def tick(entity, dt):\n";
 				out << "    pass\n\n";
-				out << "def on_begin_overlap(entity, other):\n";
+				out << "def on_entity_begin_overlap(entity, other_entity):\n";
 				out << "    pass\n\n";
-				out << "def on_end_overlap(entity, other):\n";
+				out << "def on_entity_end_overlap(entity, other_entity):\n";
 				out << "    pass\n";
 			}
 		}

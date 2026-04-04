@@ -62,9 +62,30 @@ return false;
 m_dllPath = dllPath;
 
 auto registered = NativeScriptRegistry::Instance().getRegisteredClassNames();
+m_cachedClassNames = registered;
+
+if (registered.empty())
+{
 Logger::Instance().log(Logger::Category::Engine,
-"NativeScriptManager: loaded DLL with " + std::to_string(registered.size()) + " class(es): " + dllPath,
+"NativeScriptManager: WARNING – DLL loaded but 0 script classes registered.\n"
+"  Make sure your .cpp files use REGISTER_NATIVE_SCRIPT(ClassName) after the class definition.\n"
+"  Example:\n"
+"    class MyScript : public INativeScript { ... };\n"
+"    REGISTER_NATIVE_SCRIPT(MyScript)",
+Logger::LogLevel::WARNING);
+}
+else
+{
+std::string classList;
+for (const auto& name : registered)
+{
+    if (!classList.empty()) classList += ", ";
+    classList += name;
+}
+Logger::Instance().log(Logger::Category::Engine,
+"NativeScriptManager: loaded DLL with " + std::to_string(registered.size()) + " class(es): [" + classList + "] from " + dllPath,
 Logger::LogLevel::INFO);
+}
 
 return true;
 }
@@ -96,6 +117,11 @@ const std::string& NativeScriptManager::getDLLPath() const
 return m_dllPath;
 }
 
+const std::vector<std::string>& NativeScriptManager::getAvailableClassNames() const
+{
+return m_cachedClassNames;
+}
+
 void NativeScriptManager::initializeScripts()
 {
 auto& ecs = ECS::ECSManager::Instance();
@@ -104,20 +130,39 @@ ECS::Schema schema;
 schema.require<ECS::LogicComponent>();
 auto entities = ecs.getEntitiesMatchingSchema(schema);
 
+int assignedCount = 0;
 for (auto entity : entities)
 {
 auto* comp = ecs.getComponent<ECS::LogicComponent>(entity);
 if (!comp || comp->nativeClassName.empty())
 {
-continue;
+    continue;
 }
 
 if (m_instances.find(entity) != m_instances.end())
 {
-continue;
+    continue;
 }
 
+Logger::Instance().log(Logger::Category::Engine,
+"NativeScriptManager: creating instance of '" + comp->nativeClassName + "' for entity " + std::to_string(entity),
+Logger::LogLevel::INFO);
 createInstance(entity, comp->nativeClassName);
+++assignedCount;
+}
+
+if (assignedCount == 0 && !entities.empty())
+{
+Logger::Instance().log(Logger::Category::Engine,
+"NativeScriptManager: " + std::to_string(entities.size()) + " entity(ies) have a LogicComponent but none have a nativeClassName set.\n"
+"  Assign a C++ class via the entity details panel (Logic > C++ Class dropdown).",
+Logger::LogLevel::INFO);
+}
+else
+{
+Logger::Instance().log(Logger::Category::Engine,
+"NativeScriptManager: initialized " + std::to_string(assignedCount) + " C++ script instance(s).",
+Logger::LogLevel::INFO);
 }
 }
 
@@ -226,6 +271,30 @@ if (it != m_instances.end())
 return it->second;
 }
 return nullptr;
+}
+
+ScriptValue NativeScriptManager::callFunction(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args) const
+{
+if (!funcName) return ScriptValue{};
+
+// 1. Try C++ native script first
+auto it = m_instances.find(entity);
+if (it != m_instances.end() && it->second)
+{
+ScriptValue result = it->second->onScriptCall(funcName, args);
+if (result.type != ScriptValue::None)
+{
+return result;
+}
+}
+
+// 2. Fall back to Python script
+if (m_pythonCallHandler)
+{
+return m_pythonCallHandler(entity, funcName, args);
+}
+
+return ScriptValue{};
 }
 
 #if ENGINE_EDITOR

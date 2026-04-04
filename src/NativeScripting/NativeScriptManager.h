@@ -22,6 +22,11 @@ public:
 	bool isDLLLoaded() const;
 	const std::string& getDLLPath() const;
 
+	/// Returns C++ script class names discovered from the last loaded DLL.
+	/// Available even after the DLL has been unloaded so the editor can
+	/// populate dropdowns for entity assignment.
+	const std::vector<std::string>& getAvailableClassNames() const;
+
 	// ── Script lifecycle ──────────────────────────────────────────────
 	void initializeScripts();
 	void updateScripts(float deltaTime);
@@ -40,6 +45,10 @@ public:
 	void setPythonCallHandler(PythonCallHandler handler);
 	ScriptValue callPythonForEntity(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args) const;
 	INativeScript* getInstance(ECS::Entity entity) const;
+
+	/// Unified call: tries C++ onScriptCall first, then Python.
+	/// Callers never need to know which language implements the function.
+	ScriptValue callFunction(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args) const;
 
 	// ── Hot-Reload (editor only) ──────────────────────────────────────
 #if ENGINE_EDITOR
@@ -62,6 +71,7 @@ private:
 	float m_lastDeltaTime{ 0.0f };
 	std::unordered_map<ECS::Entity, INativeScript*> m_instances;
 	PythonCallHandler m_pythonCallHandler;
+	std::vector<std::string> m_cachedClassNames;
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif

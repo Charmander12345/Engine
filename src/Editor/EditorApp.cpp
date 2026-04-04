@@ -8,6 +8,7 @@
 #include "../Renderer/EditorTheme.h"
 #include "../Renderer/UIWidget.h"
 #include "../Renderer/EditorUI/EditorWidget.h"
+#include "../Renderer/EditorUIBuilder.h"
 #include "../Renderer/EditorWindows/PopupWindow.h"
 #include "../Renderer/EditorWindows/TextureViewerWindow.h"
 #include "../Logger/Logger.h"
@@ -29,6 +30,7 @@
 #include <cstdio>
 #include <fstream>
 #include <sstream>
+#include <regex>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -45,7 +47,11 @@
 
 // Construction / Destruction
 EditorApp::EditorApp(IEditorBridge& bridge) : m_bridge(bridge) {}
-EditorApp::~EditorApp() = default;
+EditorApp::~EditorApp()
+{
+    if (m_pieBuildThread.joinable())
+        m_pieBuildThread.join();
+}
 
 // Lifecycle
 void EditorApp::initialize()
@@ -59,6 +65,9 @@ void EditorApp::initialize()
     registerDragDropHandlers();
     registerBuildPipeline();
     auto& uiMgr = m_bridge.getUIManager();
+    uiMgr.setNativeClassNamesProvider([]() {
+        return NativeScriptManager::Instance().getAvailableClassNames();
+    });
     uiMgr.rebuildEditorUIForDpi(EditorTheme::Get().dpiScale);
     uiMgr.markAllWidgetsDirty();
     uiMgr.showToastMessage("Engine ready!", UIManager::kToastMedium);
@@ -77,6 +86,7 @@ void EditorApp::tick(float dt)
     auto& uiMgr = m_bridge.getUIManager();
     uiMgr.pollBuildThread();
     uiMgr.pollToolchainDetection();
+    pollPIEBuild();
 }
 
 void EditorApp::shutdown()
@@ -98,6 +108,8 @@ void EditorApp::stopPIE()
     if (renderer) renderer->clearActiveCameraEntity();
     m_bridge.stopAllAudio();
     m_bridge.shutdownPhysics();
+    NativeScriptManager::Instance().shutdownScripts();
+    NativeScriptManager::Instance().unloadGameplayDLL();
     m_bridge.reloadScripts();
     m_bridge.restoreEcsSnapshot();
     m_pieMouseCaptured = false;
@@ -120,6 +132,7 @@ void EditorApp::stopPIE()
 void EditorApp::startPIE()
 {
     if (m_bridge.isPIEActive()) return;
+    if (m_pieBuildRunning.load()) return; // build already in progress
 
     // Auto-build C++ game scripts before PIE when C++ scripting is enabled
     {
@@ -127,17 +140,16 @@ void EditorApp::startPIE()
         if (mode == DiagnosticsManager::ScriptingMode::CppOnly ||
             mode == DiagnosticsManager::ScriptingMode::Both)
         {
-            if (!buildGameScriptsForPIE())
-            {
-                auto& uiMgr = m_bridge.getUIManager();
-                uiMgr.showToastMessage("C++ game scripts build failed.\nCheck the output log for details.", UIManager::kToastLong,
-                    UIManager::NotificationLevel::Error);
-                Logger::Instance().log(Logger::Category::Engine, "PIE: aborted – C++ game scripts build failed.", Logger::LogLevel::WARNING);
-                return;
-            }
+            buildGameScriptsForPIE(); // async — pollPIEBuild() will finish PIE start
+            return;
         }
     }
 
+    finishStartPIE();
+}
+
+void EditorApp::finishStartPIE()
+{
     Renderer* renderer = m_bridge.getRenderer();
     m_bridge.snapshotEcsState();
     m_bridge.initializePhysicsForPIE();
@@ -163,66 +175,114 @@ void EditorApp::startPIE()
     Logger::Instance().log(Logger::Category::Engine, "PIE: started.", Logger::LogLevel::INFO);
 }
 
-// ── Pre-PIE C++ Game Scripts Build ─────────────────────────────────────
-bool EditorApp::buildGameScriptsForPIE()
+// ── Pre-PIE C++ Game Scripts Build (async) ─────────────────────────────
+// Helper: recursively find a WidgetElement by id.
+static WidgetElement* FindPIEBuildElement(std::vector<WidgetElement>& elements, const std::string& id)
+{
+    for (auto& el : elements)
+    {
+        if (el.id == id) return &el;
+        auto* found = FindPIEBuildElement(el.children, id);
+        if (found) return found;
+    }
+    return nullptr;
+}
+
+void EditorApp::buildGameScriptsForPIE()
 {
     namespace fs = std::filesystem;
     auto& logger = Logger::Instance();
     auto& uiMgr = m_bridge.getUIManager();
 
-    // Verify CMake + toolchain
-    if (!uiMgr.isCMakeAvailable())
+    // Verify CMake + toolchain (non-fatal: skip build, go straight to PIE)
+    if (!uiMgr.isCMakeAvailable() || !uiMgr.isBuildToolchainAvailable())
     {
         logger.log(Logger::Category::Engine,
-            "PIE build: CMake not available – skipping C++ game scripts build.", Logger::LogLevel::WARNING);
-        return true; // non-fatal: allow PIE without C++ scripts
-    }
-    if (!uiMgr.isBuildToolchainAvailable())
-    {
-        logger.log(Logger::Category::Engine,
-            "PIE build: C++ toolchain not available – skipping C++ game scripts build.", Logger::LogLevel::WARNING);
-        return true;
+            "PIE build: CMake/toolchain not available – skipping C++ build.", Logger::LogLevel::WARNING);
+        finishStartPIE();
+        return;
     }
 
     const std::string projectPath = DiagnosticsManager::Instance().getProjectInfo().projectPath;
-    if (projectPath.empty()) return true;
+    if (projectPath.empty()) { finishStartPIE(); return; }
 
     const fs::path nativeDir = fs::path(projectPath) / "Content" / "Scripts" / "Native";
-    if (!fs::exists(nativeDir) || !fs::is_directory(nativeDir)) return true;
+    if (!fs::exists(nativeDir) || !fs::is_directory(nativeDir)) { finishStartPIE(); return; }
 
     // Check if there are any .cpp source files to compile
     bool hasCppFiles = false;
     for (const auto& entry : fs::directory_iterator(nativeDir))
     {
         if (entry.is_regular_file() && entry.path().extension() == ".cpp")
+        { hasCppFiles = true; break; }
+    }
+    if (!hasCppFiles) { finishStartPIE(); return; }
+
+    // ── Auto-generate _AutoRegister.cpp ────────────────────────────────
+    {
+        std::vector<std::pair<std::string, std::string>> discovered;
+        const std::regex classPattern(
+            R"(class\s+(\w+)\s*(?:final\s*)?:\s*(?:public\s+)?INativeScript\b)");
+
+        for (const auto& entry : fs::directory_iterator(nativeDir))
         {
-            hasCppFiles = true;
-            break;
+            if (!entry.is_regular_file()) continue;
+            const auto ext = entry.path().extension().string();
+            if (ext != ".h" && ext != ".hpp") continue;
+
+            std::ifstream hFile(entry.path());
+            if (!hFile.is_open()) continue;
+
+            std::string line;
+            while (std::getline(hFile, line))
+            {
+                std::smatch match;
+                if (std::regex_search(line, match, classPattern))
+                    discovered.emplace_back(match[1].str(), entry.path().filename().string());
+            }
+        }
+
+        const fs::path autoRegPath = nativeDir / "_AutoRegister.cpp";
+        std::ofstream autoReg(autoRegPath, std::ios::out | std::ios::trunc);
+        if (autoReg.is_open())
+        {
+            autoReg << "// Auto-generated by Horizon Engine -- DO NOT EDIT\n";
+            autoReg << "#include \"GameplayAPI.h\"\n";
+            for (const auto& [cls, hdr] : discovered)
+                autoReg << "#include \"" << hdr << "\"\n";
+            autoReg << "\n";
+            for (const auto& [cls, hdr] : discovered)
+                autoReg << "REGISTER_NATIVE_SCRIPT(" << cls << ")\n";
+            autoReg.close();
+
+            if (!discovered.empty())
+            {
+                logger.log(Logger::Category::Engine,
+                    "PIE build: auto-registered " + std::to_string(discovered.size()) +
+                    " native script class(es).", Logger::LogLevel::INFO);
+            }
         }
     }
-    if (!hasCppFiles) return true;
 
-    logger.log(Logger::Category::Engine, "PIE build: compiling C++ game scripts...", Logger::LogLevel::INFO);
-    uiMgr.showToastMessage("Building C++ game scripts...", UIManager::kToastShort);
+    // Unload any previously loaded GameScripts DLL
+    {
+        auto& nsm = NativeScriptManager::Instance();
+        if (nsm.isDLLLoaded())
+        {
+            nsm.shutdownScripts();
+            nsm.unloadGameplayDLL();
+        }
+    }
 
-    const std::string cmakePath    = uiMgr.getCMakePath();
-    const std::string engineSrcDir = ENGINE_SOURCE_DIR;
+    const std::string cmakePath = uiMgr.getCMakePath();
     const fs::path buildDir  = fs::path(projectPath) / "Binary" / "GameScripts";
     const fs::path outputDir = fs::path(projectPath) / "Engine";
 
-    // Ensure directories exist
-    {
-        std::error_code ec;
-        fs::create_directories(buildDir, ec);
-        fs::create_directories(outputDir, ec);
-    }
+    { std::error_code ec; fs::create_directories(buildDir, ec); fs::create_directories(outputDir, ec); }
 
-    // ── Generate CMakeLists.txt if missing or out-of-date ──────────────
+    // ── Generate CMakeLists.txt ──────────────────────────────────────
     {
         const fs::path cmakeListsPath = nativeDir / "CMakeLists.txt";
-
-        // Find the editor's Scripting import library path.
-        // The editor binary (and its DLLs) live next to the exe.
         const char* bp = SDL_GetBasePath();
         const std::string editorBinDir = bp ? std::string(bp) : fs::current_path().string();
 
@@ -238,179 +298,419 @@ bool EditorApp::buildGameScriptsForPIE()
         cmake << "file(GLOB GAME_SOURCES \"${CMAKE_CURRENT_SOURCE_DIR}/*.cpp\")\n";
         cmake << "file(GLOB GAME_HEADERS \"${CMAKE_CURRENT_SOURCE_DIR}/*.h\")\n\n";
         cmake << "add_library(GameScripts SHARED ${GAME_SOURCES} ${GAME_HEADERS})\n\n";
-        cmake << "# Engine NativeScripting API headers (deployed alongside editor)\n";
         cmake << "target_include_directories(GameScripts PRIVATE\n";
         cmake << "    \"" << (fs::path(editorBinDir) / "Tools" / "include" / "NativeScripting").generic_string() << "\"\n";
         cmake << ")\n\n";
-        cmake << "# Link against the editor's Scripting import library for GameplayAPI / NativeScriptRegistry\n";
         cmake << "target_link_directories(GameScripts PRIVATE\n";
         cmake << "    \"" << (fs::path(editorBinDir) / "Tools" / "lib").generic_string() << "\"\n";
         cmake << ")\n";
         cmake << "target_link_libraries(GameScripts PRIVATE Scripting)\n\n";
-        cmake << "# Copy DLL to project Engine/ directory after build\n";
         cmake << "add_custom_command(TARGET GameScripts POST_BUILD\n";
         cmake << "    COMMAND ${CMAKE_COMMAND} -E copy_if_different\n";
         cmake << "        $<TARGET_FILE:GameScripts>\n";
         cmake << "        \"" << outputDir.generic_string() << "/GameScripts.dll\"\n";
         cmake << ")\n";
 
-        // Always overwrite – the template references engine paths that may change
         std::ofstream out(cmakeListsPath, std::ios::out | std::ios::trunc);
-        if (out.is_open())
-        {
-            out << cmake.str();
-        }
+        if (out.is_open()) out << cmake.str();
     }
 
-    // ── Helper: run a command synchronously and capture output ──────────
+    // ── Open build progress popup ─────────────────────────────────────
+    Renderer* renderer = m_bridge.getRenderer();
+    m_pieBuildOutputLines.clear();
+    {
+        std::lock_guard<std::mutex> lock(m_pieBuildMutex);
+        m_pieBuildPendingLines.clear();
+        m_pieBuildFinished = false;
+        m_pieBuildSuccess = false;
+    }
+
+    if (renderer)
+        m_pieBuildPopup = renderer->openPopupWindow("PIEBuildOutput", "C++ Script Build", 780, 460);
+
+    if (m_pieBuildPopup)
+    {
+        m_pieBuildWidget = std::make_shared<EditorWidget>();
+        m_pieBuildWidget->setName("PIEBuildProgress");
+        m_pieBuildWidget->setAnchor(WidgetAnchor::TopLeft);
+        m_pieBuildWidget->setFillX(true);
+        m_pieBuildWidget->setFillY(true);
+        m_pieBuildWidget->setZOrder(100);
+
+        const auto& theme = EditorTheme::Get();
+
+        WidgetElement panel{};
+        panel.id = "PB.Panel";
+        panel.type = WidgetElementType::StackPanel;
+        panel.from = Vec2{ 0.0f, 0.0f };
+        panel.to   = Vec2{ 1.0f, 1.0f };
+        panel.padding = Vec2{ 14.0f, 10.0f };
+        panel.orientation = StackOrientation::Vertical;
+        panel.style.color = theme.windowBackground;
+        panel.runtimeOnly = true;
+
+        WidgetElement title{};
+        title.id = "PB.Title";
+        title.type = WidgetElementType::Text;
+        title.text = "Building C++ Scripts...";
+        title.font = theme.fontDefault;
+        title.fontSize = theme.fontSizeHeading;
+        title.textAlignH = TextAlignH::Left;
+        title.style.textColor = theme.textPrimary;
+        title.fillX = true;
+        title.minSize = Vec2{ 0.0f, 28.0f };
+        title.runtimeOnly = true;
+
+        WidgetElement status{};
+        status.id = "PB.Status";
+        status.type = WidgetElementType::Text;
+        status.text = "Configuring...";
+        status.font = theme.fontDefault;
+        status.fontSize = theme.fontSizeBody;
+        status.textAlignH = TextAlignH::Left;
+        status.style.textColor = theme.textSecondary;
+        status.fillX = true;
+        status.minSize = Vec2{ 0.0f, 20.0f };
+        status.runtimeOnly = true;
+
+        // Scrollable build output log
+        WidgetElement outputPanel{};
+        outputPanel.id = "PB.OutputScroll";
+        outputPanel.type = WidgetElementType::StackPanel;
+        outputPanel.orientation = StackOrientation::Vertical;
+        outputPanel.fillX = true;
+        outputPanel.fillY = true;
+        outputPanel.scrollable = true;
+        outputPanel.style.color = Vec4{ 0.04f, 0.04f, 0.04f, 0.95f };
+        outputPanel.style.borderRadius = 4.0f;
+        outputPanel.padding = Vec2{ 6.0f, 4.0f };
+        outputPanel.runtimeOnly = true;
+
+        // Close button (hidden during build)
+        auto closeBtn = EditorUIBuilder::makePrimaryButton("PB.CloseBtn", "Close", [this]() {
+            dismissPIEBuildPopup();
+        });
+        closeBtn.isCollapsed = true;
+
+        panel.children.push_back(std::move(title));
+        panel.children.push_back(std::move(status));
+        panel.children.push_back(std::move(outputPanel));
+        panel.children.push_back(std::move(closeBtn));
+
+        std::vector<WidgetElement> elems;
+        elems.push_back(std::move(panel));
+        m_pieBuildWidget->setElements(std::move(elems));
+        m_pieBuildWidget->markLayoutDirty();
+        m_pieBuildPopup->uiManager().registerWidget("PIEBuildProgress", m_pieBuildWidget);
+    }
+
+    // ── Launch build thread ───────────────────────────────────────────
+    if (m_pieBuildThread.joinable())
+        m_pieBuildThread.join();
+
+    m_pieBuildRunning.store(true);
+
+    const std::string nativeDirStr = nativeDir.string();
+    const std::string buildDirStr  = buildDir.string();
+
+    m_pieBuildThread = std::thread([this, cmakePath, nativeDirStr, buildDirStr]()
+    {
+        auto appendLine = [this](const std::string& line) {
+            std::lock_guard<std::mutex> lock(m_pieBuildMutex);
+            m_pieBuildPendingLines.push_back(line);
+        };
+
+        // Helper: run a command, capture output line-by-line
 #if defined(_WIN32)
-    auto runCmd = [&](const std::string& cmd) -> int
-    {
-        logger.log(Logger::Category::Engine, "PIE build > " + cmd, Logger::LogLevel::INFO);
-
-        SECURITY_ATTRIBUTES sa{};
-        sa.nLength = sizeof(sa);
-        sa.bInheritHandle = TRUE;
-
-        HANDLE hReadPipe = nullptr, hWritePipe = nullptr;
-        if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0))
-            return -1;
-        SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
-
-        STARTUPINFOA si{};
-        si.cb = sizeof(si);
-        si.dwFlags = STARTF_USESTDHANDLES;
-        si.hStdOutput = hWritePipe;
-        si.hStdError  = hWritePipe;
-
-        PROCESS_INFORMATION pi{};
-        std::string cmdLine = cmd;
-        BOOL created = CreateProcessA(
-            nullptr, cmdLine.data(), nullptr, nullptr, TRUE,
-            CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
-        CloseHandle(hWritePipe);
-
-        if (!created)
+        auto runCmd = [&](const std::string& cmd) -> int
         {
-            CloseHandle(hReadPipe);
-            logger.log(Logger::Category::Engine, "PIE build: failed to launch process.", Logger::LogLevel::WARNING);
-            return -1;
-        }
+            appendLine("> " + cmd);
 
-        char buf[4096];
-        DWORD bytesRead = 0;
-        std::string lineBuffer;
-        while (ReadFile(hReadPipe, buf, sizeof(buf) - 1, &bytesRead, nullptr) && bytesRead > 0)
-        {
-            buf[bytesRead] = '\0';
-            lineBuffer += buf;
-            size_t pos;
-            while ((pos = lineBuffer.find('\n')) != std::string::npos)
+            SECURITY_ATTRIBUTES sa{};
+            sa.nLength = sizeof(sa);
+            sa.bInheritHandle = TRUE;
+
+            HANDLE hReadPipe = nullptr, hWritePipe = nullptr;
+            if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0))
+                return -1;
+            SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
+
+            STARTUPINFOA si{};
+            si.cb = sizeof(si);
+            si.dwFlags = STARTF_USESTDHANDLES;
+            si.hStdOutput = hWritePipe;
+            si.hStdError  = hWritePipe;
+
+            PROCESS_INFORMATION pi{};
+            std::string cmdLine = cmd;
+            BOOL created = CreateProcessA(
+                nullptr, cmdLine.data(), nullptr, nullptr, TRUE,
+                CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+            CloseHandle(hWritePipe);
+
+            if (!created)
             {
-                std::string line = lineBuffer.substr(0, pos);
-                if (!line.empty() && line.back() == '\r') line.pop_back();
-                logger.log(Logger::Category::Engine, "  " + line, Logger::LogLevel::INFO);
-                lineBuffer.erase(0, pos + 1);
+                CloseHandle(hReadPipe);
+                appendLine("[ERROR] Failed to launch process.");
+                return -1;
             }
-        }
-        if (!lineBuffer.empty())
-            logger.log(Logger::Category::Engine, "  " + lineBuffer, Logger::LogLevel::INFO);
 
-        WaitForSingleObject(pi.hProcess, INFINITE);
-        DWORD exitCode = 0;
-        GetExitCodeProcess(pi.hProcess, &exitCode);
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
-        CloseHandle(hReadPipe);
-        return static_cast<int>(exitCode);
-    };
+            char buf[4096];
+            DWORD bytesRead = 0;
+            std::string lineBuffer;
+            while (ReadFile(hReadPipe, buf, sizeof(buf) - 1, &bytesRead, nullptr) && bytesRead > 0)
+            {
+                buf[bytesRead] = '\0';
+                lineBuffer += buf;
+                size_t pos;
+                while ((pos = lineBuffer.find('\n')) != std::string::npos)
+                {
+                    std::string line = lineBuffer.substr(0, pos);
+                    if (!line.empty() && line.back() == '\r') line.pop_back();
+                    appendLine(line);
+                    lineBuffer.erase(0, pos + 1);
+                }
+            }
+            if (!lineBuffer.empty())
+                appendLine(lineBuffer);
+
+            WaitForSingleObject(pi.hProcess, INFINITE);
+            DWORD exitCode = 0;
+            GetExitCodeProcess(pi.hProcess, &exitCode);
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+            CloseHandle(hReadPipe);
+            return static_cast<int>(exitCode);
+        };
 #else
-    auto runCmd = [&](const std::string& cmd) -> int
-    {
-        logger.log(Logger::Category::Engine, "PIE build > " + cmd, Logger::LogLevel::INFO);
-        std::string fullCmd = cmd + " 2>&1";
-        FILE* pipe = popen(fullCmd.c_str(), "r");
-        if (!pipe) return -1;
-        char buf[4096];
-        while (fgets(buf, sizeof(buf), pipe))
+        auto runCmd = [&](const std::string& cmd) -> int
         {
-            std::string line = buf;
-            while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
-                line.pop_back();
-            logger.log(Logger::Category::Engine, "  " + line, Logger::LogLevel::INFO);
-        }
-        return pclose(pipe);
-    };
+            appendLine("> " + cmd);
+            std::string fullCmd = cmd + " 2>&1";
+            FILE* pipe = popen(fullCmd.c_str(), "r");
+            if (!pipe) return -1;
+            char buf[4096];
+            while (fgets(buf, sizeof(buf), pipe))
+            {
+                std::string line = buf;
+                while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+                    line.pop_back();
+                appendLine(line);
+            }
+            return pclose(pipe);
+        };
 #endif
 
-    // ── CMake configure ────────────────────────────────────────────────
-    {
-        std::string configureCmd = "\"" + cmakePath + "\"";
-        configureCmd += " -S \"" + nativeDir.string() + "\"";
-        configureCmd += " -B \"" + buildDir.string() + "\"";
-        // Do not pass -G: let cmake auto-detect the appropriate generator
-        // for whatever toolchain is available on the system.
+        bool success = true;
 
-        int ret = runCmd(configureCmd);
-        if (ret != 0)
+        // CMake configure
         {
-            logger.log(Logger::Category::Engine,
-                "PIE build: CMake configure failed (exit code " + std::to_string(ret) + ").",
-                Logger::LogLevel::WARNING);
-            return false;
+            std::string configureCmd = "\"" + cmakePath + "\"";
+            configureCmd += " -S \"" + nativeDirStr + "\"";
+            configureCmd += " -B \"" + buildDirStr + "\"";
+            int ret = runCmd(configureCmd);
+            if (ret != 0)
+            {
+                appendLine("[ERROR] CMake configure failed (exit code " + std::to_string(ret) + ").");
+                success = false;
+            }
+        }
+
+        // CMake build
+        if (success)
+        {
+            std::string buildCmd = "\"" + cmakePath + "\"";
+            buildCmd += " --build \"" + buildDirStr + "\"";
+            buildCmd += " --target GameScripts";
+            buildCmd += " --config RelWithDebInfo";
+            int ret = runCmd(buildCmd);
+            if (ret != 0)
+            {
+                appendLine("[ERROR] CMake build failed (exit code " + std::to_string(ret) + ").");
+                success = false;
+            }
+        }
+
+        if (success)
+            appendLine("[OK] Build completed successfully.");
+
+        // Signal completion
+        {
+            std::lock_guard<std::mutex> lock(m_pieBuildMutex);
+            m_pieBuildFinished = true;
+            m_pieBuildSuccess = success;
+        }
+        m_pieBuildRunning.store(false);
+    });
+
+    logger.log(Logger::Category::Engine, "PIE build: compiling C++ game scripts (async)...", Logger::LogLevel::INFO);
+}
+
+void EditorApp::pollPIEBuild()
+{
+    if (!m_pieBuildWidget) return;
+
+    std::vector<std::string> newLines;
+    bool finished = false;
+    bool success  = false;
+
+    {
+        std::lock_guard<std::mutex> lock(m_pieBuildMutex);
+        if (!m_pieBuildPendingLines.empty())
+            newLines.swap(m_pieBuildPendingLines);
+        if (m_pieBuildFinished)
+        {
+            finished = true;
+            success  = m_pieBuildSuccess;
+            m_pieBuildFinished = false;
         }
     }
 
-    // ── CMake build (only GameScripts target, not the engine) ──────────
-    {
-        std::string buildCmd = "\"" + cmakePath + "\"";
-        buildCmd += " --build \"" + buildDir.string() + "\"";
-        buildCmd += " --target GameScripts";
-        buildCmd += " --config RelWithDebInfo";
+    bool dirty = false;
 
-        int ret = runCmd(buildCmd);
-        if (ret != 0)
+    // Append new output lines to the scroll panel
+    if (!newLines.empty())
+    {
+        for (auto& ln : newLines)
+            m_pieBuildOutputLines.push_back(std::move(ln));
+
+        auto& elems = m_pieBuildWidget->getElementsMutable();
+        WidgetElement* outputScroll = FindPIEBuildElement(elems, "PB.OutputScroll");
+        if (outputScroll)
         {
-            logger.log(Logger::Category::Engine,
-                "PIE build: CMake build failed (exit code " + std::to_string(ret) + ").",
-                Logger::LogLevel::WARNING);
-            return false;
+            const auto& theme = EditorTheme::Get();
+            const float rowH = EditorTheme::Scaled(16.0f);
+
+            outputScroll->children.clear();
+            for (size_t i = 0; i < m_pieBuildOutputLines.size(); ++i)
+            {
+                const auto& line = m_pieBuildOutputLines[i];
+                const bool isError = line.find("[ERROR]") != std::string::npos
+                                  || line.find("error") != std::string::npos
+                                  || line.find("FAILED") != std::string::npos;
+
+                WidgetElement row{};
+                row.id        = "PB.Row." + std::to_string(i);
+                row.type      = WidgetElementType::Text;
+                row.text      = line;
+                row.font      = theme.fontDefault;
+                row.fontSize  = theme.fontSizeSmall;
+                row.style.textColor = isError
+                    ? Vec4{ 0.95f, 0.3f, 0.3f, 1.0f }
+                    : Vec4{ 0.75f, 0.80f, 0.75f, 1.0f };
+                row.textAlignH = TextAlignH::Left;
+                row.textAlignV = TextAlignV::Center;
+                row.fillX     = true;
+                row.minSize   = Vec2{ 0.0f, rowH };
+                row.runtimeOnly = true;
+                outputScroll->children.push_back(std::move(row));
+            }
+
+            // Auto-scroll to bottom
+            const float totalH = rowH * static_cast<float>(m_pieBuildOutputLines.size());
+            outputScroll->scrollOffset = totalH;
         }
+        dirty = true;
     }
 
-    // ── Load / reload the built DLL ────────────────────────────────────
-    const fs::path dllPath = outputDir / "GameScripts.dll";
-    if (fs::exists(dllPath))
+    // Handle build completion
+    if (finished)
     {
-        auto& nsm = NativeScriptManager::Instance();
-        if (nsm.isDLLLoaded())
+        if (m_pieBuildThread.joinable())
+            m_pieBuildThread.join();
+
+        auto& logger = Logger::Instance();
+        auto& uiMgr  = m_bridge.getUIManager();
+
+        if (success)
         {
-            nsm.shutdownScripts();
-            nsm.unloadGameplayDLL();
-        }
-        if (nsm.loadGameplayDLL(dllPath.string()))
-        {
-            nsm.initializeScripts();
-            logger.log(Logger::Category::Engine,
-                "PIE build: GameScripts.dll loaded successfully.", Logger::LogLevel::INFO);
+            // Load the built DLL on the main thread
+            namespace fs = std::filesystem;
+            const std::string projectPath = DiagnosticsManager::Instance().getProjectInfo().projectPath;
+            const fs::path dllPath = fs::path(projectPath) / "Engine" / "GameScripts.dll";
+
+            bool dllOk = false;
+            if (fs::exists(dllPath))
+            {
+                auto& nsm = NativeScriptManager::Instance();
+                if (nsm.loadGameplayDLL(dllPath.string()))
+                {
+                    nsm.initializeScripts();
+                    logger.log(Logger::Category::Engine,
+                        "PIE build: GameScripts.dll loaded successfully.", Logger::LogLevel::INFO);
+                    dllOk = true;
+                }
+            }
+
+            if (dllOk)
+            {
+                // Auto-close popup on success
+                dismissPIEBuildPopup();
+                uiMgr.showToastMessage("C++ scripts built successfully.", UIManager::kToastShort,
+                    UIManager::NotificationLevel::Success);
+                finishStartPIE();
+            }
+            else
+            {
+                // DLL load failed — treat as build error
+                auto& elems = m_pieBuildWidget->getElementsMutable();
+                WidgetElement* titleEl = FindPIEBuildElement(elems, "PB.Title");
+                if (titleEl) titleEl->text = "Build Failed";
+                WidgetElement* statusEl = FindPIEBuildElement(elems, "PB.Status");
+                if (statusEl) statusEl->text = "Failed to load GameScripts.dll after build.";
+                statusEl->style.textColor = Vec4{ 0.95f, 0.3f, 0.3f, 1.0f };
+                WidgetElement* closeBtn = FindPIEBuildElement(elems, "PB.CloseBtn");
+                if (closeBtn) closeBtn->isCollapsed = false;
+
+                logger.log(Logger::Category::Engine,
+                    "PIE build: failed to load GameScripts.dll.", Logger::LogLevel::WARNING);
+                uiMgr.showToastMessage("C++ scripts build failed.", UIManager::kToastLong,
+                    UIManager::NotificationLevel::Error);
+            }
         }
         else
         {
+            // Build failed — update popup to show error, keep open
+            auto& elems = m_pieBuildWidget->getElementsMutable();
+            WidgetElement* titleEl = FindPIEBuildElement(elems, "PB.Title");
+            if (titleEl) titleEl->text = "Build Failed";
+            WidgetElement* statusEl = FindPIEBuildElement(elems, "PB.Status");
+            if (statusEl)
+            {
+                statusEl->text = "Compilation errors found. Review the output below.";
+                statusEl->style.textColor = Vec4{ 0.95f, 0.3f, 0.3f, 1.0f };
+            }
+            WidgetElement* closeBtn = FindPIEBuildElement(elems, "PB.CloseBtn");
+            if (closeBtn) closeBtn->isCollapsed = false;
+
             logger.log(Logger::Category::Engine,
-                "PIE build: failed to load GameScripts.dll.", Logger::LogLevel::WARNING);
-            return false;
+                "PIE build: C++ game scripts build failed.", Logger::LogLevel::WARNING);
+            uiMgr.showToastMessage("C++ scripts build failed.\nSee build output window for details.", UIManager::kToastLong,
+                UIManager::NotificationLevel::Error);
         }
-    }
-    else
-    {
-        logger.log(Logger::Category::Engine,
-            "PIE build: GameScripts.dll not found after build.", Logger::LogLevel::WARNING);
-        return false;
+        dirty = true;
     }
 
-    uiMgr.showToastMessage("C++ game scripts built successfully.", UIManager::kToastShort,
-        UIManager::NotificationLevel::Success);
-    return true;
+    if (dirty && m_pieBuildWidget)
+    {
+        m_pieBuildWidget->markLayoutDirty();
+        if (m_pieBuildPopup)
+            m_pieBuildPopup->uiManager().markRenderDirty();
+    }
+}
+
+void EditorApp::dismissPIEBuildPopup()
+{
+    if (m_pieBuildPopup)
+    {
+        m_pieBuildPopup->uiManager().unregisterWidget("PIEBuildProgress");
+        Renderer* renderer = m_bridge.getRenderer();
+        if (renderer)
+            renderer->closePopupWindow("PIEBuildOutput");
+        m_pieBuildPopup = nullptr;
+    }
+    m_pieBuildWidget.reset();
+    m_pieBuildOutputLines.clear();
 }
 
 // Widget Registration
@@ -1333,6 +1633,65 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
                 uiMgr.showToastMessage("Created: " + fileName, UIManager::kToastMedium);
             }
         }});
+
+    items.push_back({ "New C++ Script", [renderer]()
+        {
+            auto& uiMgr = renderer->getUIManager();
+
+            auto& diagnostics = DiagnosticsManager::Instance();
+            const std::filesystem::path contentDir =
+                std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content";
+            const std::filesystem::path nativeDir = contentDir / "Scripts" / "Native";
+            std::error_code ec;
+            std::filesystem::create_directories(nativeDir, ec);
+
+            std::string baseName = "NewScript";
+            std::string className = baseName;
+            int counter = 1;
+            while (std::filesystem::exists(nativeDir / (className + ".h")))
+                className = baseName + std::to_string(counter++);
+
+            // Generate header file
+            {
+                std::ofstream hdr(nativeDir / (className + ".h"), std::ios::out | std::ios::trunc);
+                if (hdr.is_open())
+                {
+                    hdr << "#pragma once\n";
+                    hdr << "#include \"GameplayAPI.h\"\n\n";
+                    hdr << "class " << className << " : public INativeScript\n";
+                    hdr << "{\n";
+                    hdr << "public:\n";
+                    hdr << "    void onLoaded() override;\n";
+                    hdr << "    void tick(float dt) override;\n";
+                    hdr << "};\n";
+                    hdr.close();
+                }
+            }
+
+            // Generate source file
+            {
+                std::ofstream src(nativeDir / (className + ".cpp"), std::ios::out | std::ios::trunc);
+                if (src.is_open())
+                {
+                    src << "#include \"" << className << ".h\"\n\n";
+                    src << "void " << className << "::onLoaded()\n";
+                    src << "{\n";
+                    src << "}\n\n";
+                    src << "void " << className << "::tick(float dt)\n";
+                    src << "{\n";
+                    src << "}\n";
+                    src.close();
+                }
+            }
+
+            uiMgr.refreshContentBrowser();
+            uiMgr.showToastMessage("Created C++ script: " + className + " (.h + .cpp)", UIManager::kToastMedium);
+            Logger::Instance().log(Logger::Category::Engine,
+                "Created C++ script: " + className + " in Content/Scripts/Native/",
+                Logger::LogLevel::INFO);
+        }});
+
+    items.push_back({ "", {}, true });
 
     items.push_back({ "New Level", [renderer]()
         {
