@@ -51,13 +51,31 @@ m_dllHandle = LoadLibraryA(dllPath.c_str());
 m_dllHandle = dlopen(dllPath.c_str(), RTLD_NOW);
 #endif
 
-if (!m_dllHandle)
-{
-Logger::Instance().log(Logger::Category::Engine,
-"NativeScriptManager: failed to load DLL: " + dllPath,
-static_cast<Logger::LogLevel>(2));
-return false;
-}
+    if (!m_dllHandle)
+    {
+        std::string errMsg = "NativeScriptManager: failed to load DLL: " + dllPath;
+#ifdef _WIN32
+        DWORD err = GetLastError();
+        if (err != 0)
+        {
+            LPSTR buf = nullptr;
+            FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                nullptr, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                reinterpret_cast<LPSTR>(&buf), 0, nullptr);
+            if (buf)
+            {
+                errMsg += " (Error " + std::to_string(err) + ": " + buf + ")";
+                LocalFree(buf);
+            }
+        }
+#else
+        const char* dlErr = dlerror();
+        if (dlErr) errMsg += std::string(" (") + dlErr + ")";
+#endif
+        Logger::Instance().log(Logger::Category::Engine, errMsg,
+            static_cast<Logger::LogLevel>(2));
+        return false;
+    }
 
 m_dllPath = dllPath;
 

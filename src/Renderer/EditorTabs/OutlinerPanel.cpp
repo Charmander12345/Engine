@@ -1402,6 +1402,77 @@ void OutlinerPanel::populateDetails(unsigned int entity)
         });
     }
 
+    // -- Audio Source Component ------------------------------------------------
+    if (const auto* audioSrc = ecs.getComponent<ECS::AudioSourceComponent>(entity))
+    {
+        std::vector<WidgetElement> lines;
+
+        // Asset Path (read-only display)
+        if (!audioSrc->assetPath.empty())
+        {
+            auto pathLabel = EditorUIBuilder::makeLabel("Asset: " + audioSrc->assetPath);
+            pathLabel.padding = EditorTheme::Scaled(Vec2{ 4.0f, 2.0f });
+            lines.push_back(std::move(pathLabel));
+        }
+
+        lines.push_back(makeCheckBoxRow("Details.Audio.Is3D", "3D Audio", audioSrc->is3D,
+            [this, entity](bool val) {
+                setCompFieldWithUndo<ECS::AudioSourceComponent>(entity, "Change Audio 3D",
+                    [val](ECS::AudioSourceComponent& c) { c.is3D = val; });
+                populateDetails(entity);
+            }));
+
+        if (audioSrc->is3D)
+        {
+            lines.push_back(makeFloatEntry("Details.Audio.MinDistance", "Min Distance", audioSrc->minDistance,
+                [entity](float val) {
+                    setCompFieldWithUndo<ECS::AudioSourceComponent>(entity, "Change Audio Min Distance",
+                        [val](ECS::AudioSourceComponent& c) { c.minDistance = val; });
+                }));
+
+            lines.push_back(makeFloatEntry("Details.Audio.MaxDistance", "Max Distance", audioSrc->maxDistance,
+                [entity](float val) {
+                    setCompFieldWithUndo<ECS::AudioSourceComponent>(entity, "Change Audio Max Distance",
+                        [val](ECS::AudioSourceComponent& c) { c.maxDistance = val; });
+                }));
+
+            lines.push_back(makeFloatEntry("Details.Audio.Rolloff", "Rolloff Factor", audioSrc->rolloffFactor,
+                [entity](float val) {
+                    setCompFieldWithUndo<ECS::AudioSourceComponent>(entity, "Change Audio Rolloff",
+                        [val](ECS::AudioSourceComponent& c) { c.rolloffFactor = val; });
+                }));
+        }
+
+        lines.push_back(makeFloatEntry("Details.Audio.Gain", "Volume", audioSrc->gain,
+            [entity](float val) {
+                setCompFieldWithUndo<ECS::AudioSourceComponent>(entity, "Change Audio Volume",
+                    [val](ECS::AudioSourceComponent& c) { c.gain = val; });
+            }));
+
+        lines.push_back(makeCheckBoxRow("Details.Audio.Loop", "Loop", audioSrc->loop,
+            [entity](bool val) {
+                setCompFieldWithUndo<ECS::AudioSourceComponent>(entity, "Change Audio Loop",
+                    [val](ECS::AudioSourceComponent& c) { c.loop = val; });
+            }));
+
+        lines.push_back(makeCheckBoxRow("Details.Audio.AutoPlay", "Auto Play", audioSrc->autoPlay,
+            [entity](bool val) {
+                setCompFieldWithUndo<ECS::AudioSourceComponent>(entity, "Change Audio Auto Play",
+                    [val](ECS::AudioSourceComponent& c) { c.autoPlay = val; });
+            }));
+
+        addSeparator("Audio Source", lines, [this, entity, saved = *audioSrc]() {
+            ECS::ECSManager::Instance().removeComponent<ECS::AudioSourceComponent>(entity);
+            if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            populateDetails(entity);
+            UndoRedoManager::Instance().pushCommand({
+                "Remove Audio Source",
+                [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::AudioSourceComponent>(entity); },
+                [entity, saved]() { ECS::ECSManager::Instance().setComponent<ECS::AudioSourceComponent>(entity, saved); }
+            });
+        });
+    }
+
 
     // "Add Component" dropdown button
     {
@@ -1483,13 +1554,13 @@ void OutlinerPanel::populateDetails(unsigned int entity)
                           if (out.is_open())
                           {
                               out << "import engine\n\n";
-                              out << "def onloaded(entity):\n";
+                              out << "def on_loaded(entity):\n";
                               out << "    pass\n\n";
                               out << "def tick(entity, dt):\n";
                               out << "    pass\n\n";
-                              out << "def on_entity_begin_overlap(entity, other_entity):\n";
+                              out << "def on_begin_overlap(entity, other_entity):\n";
                               out << "    pass\n\n";
-                              out << "def on_entity_end_overlap(entity, other_entity):\n";
+                              out << "def on_end_overlap(entity, other_entity):\n";
                               out << "    pass\n";
                               out.close();
                               Logger::Instance().log(Logger::Category::Engine,
@@ -1563,6 +1634,9 @@ void OutlinerPanel::populateDetails(unsigned int entity)
             { "Animation", ecs.hasComponent<ECS::AnimationComponent>(entity),
               [entity]() { ECS::ECSManager::Instance().addComponent<ECS::AnimationComponent>(entity); },
               [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::AnimationComponent>(entity); } },
+            { "Audio Source", ecs.hasComponent<ECS::AudioSourceComponent>(entity),
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::AudioSourceComponent>(entity); },
+              [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::AudioSourceComponent>(entity); } },
         };
 
         for (const auto& opt : options)

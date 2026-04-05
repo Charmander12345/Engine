@@ -5,6 +5,130 @@
 
 ---
 
+## Feature-Roadmap – Fehlende & Unvollständige Features
+
+> Vergleich mit Industriestandard-Engines (Unreal Engine 5, Unity 6, Godot 4).
+> Priorisiert nach **Impact auf Spieleentwicklung**.
+
+### 🔴 Kritisch fehlend (Prio 1 – Grundvoraussetzung für die meisten Spiele)
+
+| # | Feature | Status | Aufwand | Beschreibung |
+|---|---------|--------|---------|-------------|
+| 1 | **Entity Parent-Child Hierarchie (Transform Parenting)** | ✅ | Mittel | Hierarchische Transform-Vererbung vollständig implementiert. `TransformComponent` erweitert um `parent`, `children`, `localPosition/localRotation/localScale`, `dirty`-Flag. ECSManager API: `setParent()`, `removeParent()`, `getParent()`, `getChildren()`, `getRoot()`, `isAncestorOf()`, `updateWorldTransforms()`, `markTransformDirty()`. Dirty-Flag-Propagation top-down, YXZ-Euler-Rotation, World↔Local-Konvertierung bei Reparenting. Level-Serialisierung mit Backward-Kompatibilität. GameplayAPI + INativeScript + Python-Bindings (`engine.entity.set_parent/get_children/...`) + `engine.pyi` IntelliSense. `PhysicsWorld::step()` ruft `updateWorldTransforms()` vor Physics-Sync auf. |
+| 2 | **Character Controller** | ✅ | Mittel | Backend-agnostischer Character Controller implementiert. `CharacterControllerComponent` (Kapsel-Shape, MaxSlopeAngle, StepUp, SkinWidth, GravityFactor). `IPhysicsBackend` erweitert um `CharacterDesc/CharacterState/CharacterHandle` + 7 virtuelle Methoden. **JoltBackend:** `CharacterVirtual` mit `ExtendedUpdate` (StickToFloor, WalkStairs). **PhysXBackend:** `PxCapsuleController` mit `PxControllerManager`. `PhysicsWorld` synchronisiert Character Controller parallel zu Rigidbodies (create/update/readback). Exklusiv mit `PhysicsComponent`. |
+| 3 | **Physics Constraints / Joints** | ❌ | Mittel | Nur isolierte Rigidbodies, keine Verbindungen. Fehlt: Hinge Joint (Türen), Ball-Socket Joint (Ragdolls), Fixed Joint, Spring Joint, Distance Constraint. Jolt unterstützt alle Constraint-Typen nativ. Ohne Joints sind Türen, Fahrzeuge, Ragdolls, Ketten, Brücken unmöglich. |
+| 4 | **Animation Blending / State Machine** | ❌ | Hoch | Nur ein Animations-Clip gleichzeitig abspielbar (`AnimationComponent.currentClipIndex`). Fehlt: Animation Blending, Crossfade, Layers, State Machine, Blend Trees, Root Motion. Ohne das sind Walk→Run-Übergänge, Idle→Attack, Upper/Lower Body Split unmöglich. Unity: Animator Controller, Unreal: AnimGraph. |
+| 5 | **3D Spatial Audio** | ✅ | Gering | Vollständig implementiert. `AudioSourceComponent` (ECS, is3D, minDistance, maxDistance, rolloffFactor, gain, loop, autoPlay). `AudioManager` erweitert um `setSourcePosition()`, `setSourceSpatial()`, `updateListenerTransform()` (OpenAL AL_POSITION, AL_SOURCE_RELATIVE, AL_REFERENCE_DISTANCE, AL_MAX_DISTANCE, AL_ROLLOFF_FACTOR, alListenerfv). Listener-Sync vom aktiven CameraComponent in main.cpp. Editor: AudioPreviewTab mit 2D/3D-Dropdown + Spatial-Settings (MinDistance, MaxDistance, Rolloff) in Audio-Asset-Metadaten. Level-Serialisierung. OutlinerPanel-Inspector. GameplayAPI + INativeScript + Python-Bindings (`set_audio_position`, `set_audio_spatial`) + `engine.pyi`. |
+
+### 🟡 Wichtig fehlend (Prio 2 – Schränkt viele Spielgenres ein)
+
+| # | Feature | Status | Aufwand | Beschreibung |
+|---|---------|--------|---------|-------------|
+| 6 | **Runtime UI System (HUD / Menüs)** | ⚠️ Teilweise | Hoch | Widget-System existiert, ist aber primär als Editor-UI konzipiert. Fehlt: In-Game-UI-Framework (Health Bars, Inventar, Menüs, HUD) mit Data-Binding, Resolution-unabhängiges Anchoring. `spawnWidget` / `removeWidget` existieren, aber kein strukturiertes Runtime-UI-Framework. |
+| 7 | **AI / Navigation System** | ❌ | Hoch | Komplett fehlend. Kein NavMesh, kein Pathfinding (A*), kein AI Steering, keine Behavior Trees/State Machines. Empfehlung: Recast/Detour als Bibliothek integrieren. Unity: NavMesh + NavMeshAgent, Unreal: NavigationSystem + BehaviorTree. |
+| 8 | **Reflection Probes / Environment Mapping** | ❌ | Hoch | Nur Skybox-basiertes Ambient Light. Fehlt: Reflection Probes (Cube-Map basiert), Screen-Space Reflections (SSR), Image-Based Lighting (IBL). Essentiell für realistische Metalloberflächen und spiegelnde Materialien. |
+| 9 | **Multi-Level-Streaming / Additive Scenes** | ❌ | Hoch | Ein Level gleichzeitig, komplett geladen. Fehlt: Additives Level-Loading, Level-Streaming basierend auf Streaming Volumes oder Distanz, Sub-Levels. Unity: `SceneManager.LoadSceneAsync(Additive)`, Unreal: World Partition. |
+| 10 | **Decal System** | ❌ | Mittel | Keine projizierten Decals (Blut, Bullet Holes, Schmutz) auf beliebige Geometry. Unity: Decal Projector, Unreal: Decal Actor. |
+| 11 | **Physics Queries (Overlap / Sweep)** | ⚠️ Teilweise | Mittel | Nur Raycast implementiert. Sphere/Box Overlap und Sweep Queries fehlen. Wichtig für Explosion-Radius, Area-of-Effect, Ground-Check. |
+| 12 | **Force an Position (AddForceAtPosition)** | ❌ | Gering | Nur `addForce`/`addImpulse` am Zentrum. Force an bestimmtem Punkt fehlt (wichtig für Drehmoment, Explosion-Kickback). |
+
+### 🟢 Nice-to-have (Prio 3 – Erweitert die Möglichkeiten deutlich)
+
+| # | Feature | Status | Aufwand | Beschreibung |
+|---|---------|--------|---------|-------------|
+| 13 | **Root Motion** | ❌ | Mittel | Translation/Rotation aus Animation extrahieren und auf Entity-Transform anwenden. |
+| 14 | **Foliage / Vegetation Instancing** | ❌ | Hoch | Massenhaftes Platzieren von Gras/Bäumen auf Landscape mit GPU Instancing + Wind-Animation. |
+| 15 | **Lightmapping / Baked GI** | ❌ | Sehr Hoch | Baked Lighting für statische Szenen – deutlich bessere Lichtqualität ohne Runtime-Kosten. |
+| 16 | **Physics Material System** | ❌ | Gering | Verschiedene physikalische Materialien (Eis, Gummi, Metall) als wiederverwendbare Assets mit eigenen Friction/Restitution-Werten. |
+| 17 | **Visual Scripting / Blueprint-System** | ❌ | Sehr Hoch | Visuelles Node-basiertes Scripting für Designer. Extrem aufwändig. |
+| 18 | **Mesh Collider (Convex/Concave)** | ❌ | Mittel | Nur primitive Shapes verfügbar – komplexe Meshes als Collider fehlen. Jolt unterstützt `MeshShape` und `ConvexHullShape`. |
+| 19 | **Networking / Multiplayer** | ❌ | Sehr Hoch | Client-Server, Replication, RPC – eigenes Großprojekt. |
+| 20 | **Volumetric Fog / Clouds** | ❌ | Hoch | Volumetrischer Nebel und Wolken für atmosphärische Tiefe. |
+
+### Empfohlene Implementierungsreihenfolge
+
+```
+Phase 1 (Kern):     Transform Parenting ✅ → 3D Spatial Audio ✅
+Phase 2 (Gameplay): Physics Joints → Animation Blending → Physics Queries
+Phase 3 (Visuals):  Reflection Probes/IBL → Decals → Runtime UI Framework
+Phase 4 (Welt):     NavMesh/Pathfinding → Multi-Level-Streaming → Foliage
+Phase 5 (Polish):   Root Motion → Physics Materials → Mesh Colliders
+```
+
+---
+
+## Letzte Änderung (3D Spatial Audio – Vollständige Implementierung)
+
+- ✅ `Components.h`: `AudioSourceComponent` hinzugefügt — `assetPath`, `assetId`, `is3D`, `minDistance` (1.0), `maxDistance` (50.0), `rolloffFactor` (1.0), `gain` (1.0), `loop`, `autoPlay`, `runtimeHandle` (nicht serialisiert).
+- ✅ `ECS.h/ECS.cpp`: `ComponentKind::AudioSource` (Index 14), `MaxComponentTypes` auf 16 erhöht. `ComponentTraits`, `getStorage()`-Spezialisierungen, `SparseSet<AudioSourceComponent>`. `initialize()` und `removeEntity()` aktualisiert.
+- ✅ `AudioManager.h/.cpp`: 3 neue Methoden — `setSourcePosition(handle, x, y, z)` (alSource3f AL_POSITION), `setSourceSpatial(handle, is3D, minDist, maxDist, rolloff)` (AL_SOURCE_RELATIVE, AL_REFERENCE_DISTANCE, AL_MAX_DISTANCE, AL_ROLLOFF_FACTOR), `updateListenerTransform(pos, forward, up)` (alListener3f + alListenerfv AL_ORIENTATION).
+- ✅ `EngineLevel.cpp`: Serialisierung/Deserialisierung für `AudioSourceComponent` — assetPath, assetId, is3D, minDistance, maxDistance, rolloffFactor, gain, loop, autoPlay. `runtimeHandle` wird beim Laden auf 0 gesetzt.
+- ✅ `OutlinerPanel.cpp`: Inspector-UI für AudioSourceComponent — 3D-Checkbox (zeigt bedingt MinDistance/MaxDistance/Rolloff), Volume, Loop, AutoPlay, Asset-Pfad-Anzeige. "Add Component"-Dropdown um "Audio Source" erweitert.
+- ✅ `AudioPreviewTab.h/.cpp`: 2D/3D-Dropdown im Spatial-Audio-Abschnitt der Metadaten. Bei 3D: MinDistance/MaxDistance/Rolloff-Eingabefelder. Änderungen werden sofort ins Audio-Asset-JSON (`m_is3D`, `m_minDistance`, `m_maxDistance`, `m_rolloffFactor`) gespeichert.
+- ✅ `main.cpp`: Listener-Sync nach `audioManager.update()` — leitet Forward/Up-Vektoren aus der YXZ-Euler-Rotation des aktiven CameraComponent ab.
+- ✅ `GameplayAPI.h/.cpp`: `setAudioPosition()` und `setAudioSpatial()` hinzugefügt.
+- ✅ `INativeScript.h`: 11 Audio-Convenience-Methoden (createAudio, playAudio, playAudioHandle, setAudioVolume, getAudioVolume, pauseAudio, stopAudio, isAudioPlaying, invalidateAudioHandle, setAudioPosition, setAudioSpatial).
+- ✅ `AudioModule.cpp`: Python-Bindings `set_audio_position(handle, x, y, z)` und `set_audio_spatial(handle, is_3d, min_dist, max_dist, rolloff)`.
+- ✅ `engine.pyi`: Type-Stubs für `set_audio_position` und `set_audio_spatial`.
+- ✅ Build erfolgreich.
+
+## Vorherige Änderung (Transform Parenting – Vollständige Implementierung)
+
+- ✅ `Components.h`: `TransformComponent` erweitert um `parent` (uint, InvalidEntity=UINT32_MAX), `children` (vector), `localPosition[3]`, `localRotation[3]`, `localScale[3]`, `dirty`-Flag.
+- ✅ `ECS.h/ECS.cpp`: 8 Parenting-Methoden implementiert — `setParent()` (World→Local-Konvertierung), `removeParent()` (Local→World-Erhalt), `getParent()`, `getChildren()`, `getRoot()`, `isAncestorOf()`, `updateWorldTransforms()` (top-down dirty propagation), `markTransformDirty()`. Rotation-Helpers: `rotatePoint`/`inverseRotatePoint` (YXZ-Euler-Matrix). `removeEntity()` aktualisiert für Kind-Cleanup.
+- ✅ `EngineLevel.cpp`: Serialisierung/Deserialisierung erweitert — Parent-ID + lokale Transforms werden gespeichert. Deferred Parenting Pass nach Entity-Erstellung. Backward-Kompatibilität mit alten Levels (Fallback auf World-Werte).
+- ✅ `GameplayAPI.h/.cpp`: 13 Parenting-Funktionen hinzugefügt — `setParent`, `removeParent`, `getParent`, `getChildren`, `getChildCount`, `getRoot`, `isAncestorOf`, `getLocalPosition/Rotation/Scale`, `setLocalPosition/Rotation/Scale`. Bestehende Transform-Setter (`setPosition`, `setRotation`, `setScale`, `translate`, `rotate`) rufen jetzt `markTransformDirty()` auf.
+- ✅ `INativeScript.h`: 13 Parenting-Convenience-Methoden für C++-Scripts.
+- ✅ `EntityModule.cpp`: 14 Python-Bindings — `set_parent`, `remove_parent`, `get_parent`, `get_children`, `get_child_count`, `get_root`, `is_ancestor_of`, `get/set_local_position/rotation/scale`. Bestehende Python-Transform-Setter markieren jetzt dirty.
+- ✅ `engine.pyi`: Alle Parenting-Funktionen mit Type-Stubs für IntelliSense dokumentiert.
+- ✅ `PhysicsWorld.cpp`: `updateWorldTransforms()` wird vor `syncBodiesToBackend()` in `step()` aufgerufen — stellt sicher, dass Parented-Entities korrekte World-Transforms für Physics haben.
+- ✅ Build erfolgreich.
+
+## Vorherige Änderung (Character Controller Build-Fixes)
+
+- ✅ `JoltBackend.cpp`: `DefaultBroadPhaseLayerFilter`-Konstruktor korrigiert — `m_objectVsBroadPhaseFilter` statt `m_broadPhaseLayerInterface` verwendet. Kompilierungsfehler C2665 behoben.
+- ✅ `src/Physics/CMakeLists.txt`: `PhysXCharacterKinematic` zur PhysX-Linkerliste hinzugefügt — Linker-Fehler LNK2019 für `PxCreateControllerManager` behoben.
+- ✅ `PhysicsWorld.cpp`: Gravity-Initialisierungsreihenfolge korrigiert — `m_gravity` wird jetzt **vor** `m_backend->setGravity()` auf `(0, -9.81, 0)` gesetzt, statt danach. Zuvor wurde uninitialisierter/alter Gravity-Wert an das Backend gesendet.
+- ✅ Build erfolgreich.
+
+## Vorherige Änderung (PIE GameScripts DLL-Ladefix – RUNTIME_OUTPUT_DIRECTORY + CRT-Match + Diagnostik)
+
+- ✅ `CMakeLists.txt`: `RUNTIME_OUTPUT_DIRECTORY` (alle Configs) für `HorizonEngine` (und `HorizonEngineRuntime`) auf `ENGINE_DEPLOY_DIR` gesetzt. Zuvor wurde die Exe im CMake-Build-Tree erzeugt (`out/build/x64-release/DEBUG/`), wodurch `SDL_GetBasePath()` einen Pfad ohne `Tools/`-Verzeichnis zurückgab. Der PIE-Build konnte die NativeScripting-Header und `Scripting.lib` nicht finden.
+- ✅ `EditorApp.cpp`: **CRT-Mismatch behoben** — `--config RelWithDebInfo` war hartcodiert, aber die Engine lief im Debug-Modus. GameScripts.dll (Release-CRT) + Scripting.dll (Debug-CRT) = Error 1114 bei `LoadLibraryA`. Fix: Build-Config per `#ifdef _DEBUG` auf `Debug`/`RelWithDebInfo` gesetzt, sowohl für `-DCMAKE_BUILD_TYPE` (single-config) als auch `--config` (multi-config).
+- ✅ `EditorApp.cpp`: Fallback-Pfad-Erkennung in `buildGameScriptsForPIE` — wenn `Tools/` nicht neben der Exe existiert, wird im Elternverzeichnis nach `EngineBuild/Tools/` gesucht.
+- ✅ `NativeScriptManager.cpp`: `GetLastError()` + `FormatMessageA()` (Windows) bzw. `dlerror()` (Linux) Diagnostik bei fehlgeschlagenem `LoadLibraryA`/`dlopen`. Fehlermeldung enthält jetzt den OS-Fehlertext.
+- ✅ Build erfolgreich.
+
+## Vorherige Änderung (IDE-Empfehlung → VS Code, IntelliSense Auto-Generierung)
+
+- ✅ `EditorDialogs.cpp`: IDE-Empfehlung bei C++-Projekterstellung von Visual Studio auf VS Code geändert. Checkbox-Text und Download-URL auf `https://code.visualstudio.com/` aktualisiert.
+- ✅ `EditorApp.h`: `generateVSCodeConfig` von private nach public verschoben.
+- ✅ `main.cpp`: Bei neuen C++-Projekten (CppOnly/Both) wird `generateVSCodeConfig` automatisch nach Projekterstellung aufgerufen — `.vscode/c_cpp_properties.json` wird direkt initial generiert.
+
+## Vorherige Änderung (Test-Fix – DiagnosticsRHI String-Vergleich)
+
+- ✅ `RendererAbstractionTests.cpp`: 2 fehlschlagende Tests (`RHITypeToStringOpenGL`, `RHITypeToStringVulkan`) repariert — `EXPECT_EQ` auf `const char*` verglich Pointer-Adressen statt String-Inhalte. Fix: `EXPECT_STREQ` verwendet. Alle 17 Tests bestehen jetzt.
+
+## Letzte Änderung (Scripting-Cleanup – Redundanzen entfernt, API vereinheitlicht)
+
+- ✅ `GameplayAPI.h/.cpp`: `callScriptFunction` und `callPythonFunctionOn` entfernt — nur noch `callFunction` (unified auto-routing). `logInfo`/`logWarning`/`logError` entfernt — nur noch `log(msg, level)`.
+- ✅ `INativeScript.h`: `callScriptFunction`, `callPythonFunctionOn`, `callPythonFunction` entfernt. `logInfo`/`logWarning`/`logError` durch `log(msg, level)` ersetzt. Cross-Entity `*Of`-Methoden entfernt (`getPositionOf`, `setPositionOf`, `getRotationOf`, `setRotationOf`, `getScaleOf`, `setScaleOf`, `getVelocityOf`, `setVelocityOf`) — C++-Scripts nutzen `GameplayAPI::getPosition(entity, ...)` direkt.
+- ✅ `EntityModule.cpp`: Physics-Duplikate (`get_velocity`, `set_velocity`, `add_force`, `add_impulse`) entfernt — nur noch in `engine.physics`. `call_native` entfernt — nur noch `call_function`.
+- ✅ `PythonScripting.cpp`: Log-Meldungen in `HandleCppCallsPython` von "callPythonFunction" auf "callFunction" umbenannt.
+- ✅ `engine.pyi`: Entfernte Funktionen aus Type-Stubs gelöscht. Audio-Duplikate (`pause_audio_handle`, `stop_audio_handle`) entfernt. Typo `set_material_override_roughnessbbb` korrigiert.
+- ⚠️ **Breaking Changes:** Bestehende Scripts die `callScriptFunction`, `callPythonFunctionOn`, `callPythonFunction`, `call_native`, `logInfo`/`logWarning`/`logError`, `*Of`-Methoden, oder `engine.entity.get_velocity/set_velocity/add_force/add_impulse` verwenden, müssen aktualisiert werden.
+
+## Letzte Änderung (Scripting-Restrukturierung – Class-Based Model, Timer, Lifecycle, Vec3, SCRIPT_PROPERTY)
+
+- ✅ `INativeScript.h`: ScriptValue um `Vec3`-Typ erweitert (`vec3Val[3]`, `makeVec3`). `SCRIPT_PROPERTY`-Makros für editor-exponierte Properties. `extractArg<float>` mit int→float Coercion.
+- ✅ `EntityModule.cpp`: `engine.entity.self()`, `get_position()`, `get_rotation()`, `get_scale()` hinzugefügt. Vec3-Konverter aktualisiert.
+- ✅ `TimerModule.cpp` (NEU): `engine.timer` Submodul — `delay()`, `schedule(repeat=True/False)`, `cancel()`, `cancel_all()`.
+- ✅ `ScriptingInternal.h`: `ProcessTimers(dt)`, `ClearTimers()`, `CreateTimerModule()` Deklarationen.
+- ✅ `CMakeLists.txt`: `TimerModule.cpp` zu `SCRIPTING_SOURCES` hinzugefügt.
+- ✅ `PythonScripting.cpp`: `engine.Script` Basisklasse injiziert. Script-Subclass-Erkennung in `LoadScriptModule`. Per-Entity Instanz-Verwaltung (`s_entityInstances`). Klassenbasierter Dispatch in `UpdateScripts` (on_loaded/tick/overlap). Lifecycle-Namen vereinheitlicht: `on_loaded` primär (Fallback: `onloaded`), `on_begin_overlap`/`on_end_overlap` primär (Fallback: `on_entity_begin_overlap`/`on_entity_end_overlap`). Timer-Integration (ProcessTimers/ClearTimers). Vec3 PyObject↔ScriptValue Konverter.
+- ✅ `EditorApp.cpp`, `AssetManagerEditorWidgets.cpp`, `OutlinerPanel.cpp`: Script-Templates auf neue Lifecycle-Namen aktualisiert.
+- ✅ `engine.pyi`: Alle neuen APIs dokumentiert (self, get_position/rotation/scale, timer, Script-Klasse).
+
 ## Letzte Änderung (Bootstrap – Bundled Tools immer lokal installieren)
 
 - ✅ `tools/bootstrap.ps1 (CMake)`: System-CMake-Skip entfernt — Bootstrap installiert CMake **immer** lokal nach `Tools/cmake/`, auch wenn ein System-CMake im PATH existiert. Nur bereits vorhandenes gebündeltes CMake (`Tools/cmake/bin/cmake.exe`) überspringt den Download. Löst das Problem, dass der Editor-Prozess den PATH nicht erbt und kein cmake findet.

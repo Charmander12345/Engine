@@ -54,6 +54,7 @@ namespace GameplayAPI
 		tc->position[0] = pos[0];
 		tc->position[1] = pos[1];
 		tc->position[2] = pos[2];
+		ECS::ECSManager::Instance().markTransformDirty(entity);
 		return true;
 	}
 
@@ -74,6 +75,7 @@ namespace GameplayAPI
 		tc->rotation[0] = rot[0];
 		tc->rotation[1] = rot[1];
 		tc->rotation[2] = rot[2];
+		ECS::ECSManager::Instance().markTransformDirty(entity);
 		return true;
 	}
 
@@ -94,6 +96,7 @@ namespace GameplayAPI
 		tc->scale[0] = scale[0];
 		tc->scale[1] = scale[1];
 		tc->scale[2] = scale[2];
+		ECS::ECSManager::Instance().markTransformDirty(entity);
 		return true;
 	}
 
@@ -114,6 +117,7 @@ namespace GameplayAPI
 		tc->position[0] += delta[0];
 		tc->position[1] += delta[1];
 		tc->position[2] += delta[2];
+		ECS::ECSManager::Instance().markTransformDirty(entity);
 		return true;
 	}
 
@@ -124,6 +128,7 @@ namespace GameplayAPI
 		tc->rotation[0] += delta[0];
 		tc->rotation[1] += delta[1];
 		tc->rotation[2] += delta[2];
+		ECS::ECSManager::Instance().markTransformDirty(entity);
 		return true;
 	}
 
@@ -333,21 +338,115 @@ namespace GameplayAPI
 		return std::sqrt(dx * dx + dy * dy + dz * dz);
 	}
 
+	// ── Transform Parenting ──────────────────────────────────────────
+
+	bool setParent(ECS::Entity entity, ECS::Entity parent)
+	{
+		return ECS::ECSManager::Instance().setParent(entity, parent);
+	}
+
+	bool removeParent(ECS::Entity entity)
+	{
+		return ECS::ECSManager::Instance().removeParent(entity);
+	}
+
+	ECS::Entity getParent(ECS::Entity entity)
+	{
+		return ECS::ECSManager::Instance().getParent(entity);
+	}
+
+	int getChildren(ECS::Entity entity, ECS::Entity* outChildren, int maxCount)
+	{
+		const auto& children = ECS::ECSManager::Instance().getChildren(entity);
+		int count = static_cast<int>(children.size());
+		if (outChildren && maxCount > 0)
+		{
+			int toCopy = (std::min)(count, maxCount);
+			for (int i = 0; i < toCopy; ++i)
+				outChildren[i] = children[i];
+		}
+		return count;
+	}
+
+	int getChildCount(ECS::Entity entity)
+	{
+		return static_cast<int>(ECS::ECSManager::Instance().getChildren(entity).size());
+	}
+
+	ECS::Entity getRoot(ECS::Entity entity)
+	{
+		return ECS::ECSManager::Instance().getRoot(entity);
+	}
+
+	bool isAncestorOf(ECS::Entity ancestor, ECS::Entity descendant)
+	{
+		return ECS::ECSManager::Instance().isAncestorOf(ancestor, descendant);
+	}
+
+	bool getLocalPosition(ECS::Entity entity, float outPos[3])
+	{
+		const auto* tc = ECS::ECSManager::Instance().getComponent<ECS::TransformComponent>(entity);
+		if (!tc) return false;
+		outPos[0] = tc->localPosition[0];
+		outPos[1] = tc->localPosition[1];
+		outPos[2] = tc->localPosition[2];
+		return true;
+	}
+
+	bool setLocalPosition(ECS::Entity entity, const float pos[3])
+	{
+		auto* tc = ECS::ECSManager::Instance().getComponent<ECS::TransformComponent>(entity);
+		if (!tc) return false;
+		tc->localPosition[0] = pos[0];
+		tc->localPosition[1] = pos[1];
+		tc->localPosition[2] = pos[2];
+		ECS::ECSManager::Instance().markTransformDirty(entity);
+		return true;
+	}
+
+	bool getLocalRotation(ECS::Entity entity, float outRot[3])
+	{
+		const auto* tc = ECS::ECSManager::Instance().getComponent<ECS::TransformComponent>(entity);
+		if (!tc) return false;
+		outRot[0] = tc->localRotation[0];
+		outRot[1] = tc->localRotation[1];
+		outRot[2] = tc->localRotation[2];
+		return true;
+	}
+
+	bool setLocalRotation(ECS::Entity entity, const float rot[3])
+	{
+		auto* tc = ECS::ECSManager::Instance().getComponent<ECS::TransformComponent>(entity);
+		if (!tc) return false;
+		tc->localRotation[0] = rot[0];
+		tc->localRotation[1] = rot[1];
+		tc->localRotation[2] = rot[2];
+		ECS::ECSManager::Instance().markTransformDirty(entity);
+		return true;
+	}
+
+	bool getLocalScale(ECS::Entity entity, float outScale[3])
+	{
+		const auto* tc = ECS::ECSManager::Instance().getComponent<ECS::TransformComponent>(entity);
+		if (!tc) return false;
+		outScale[0] = tc->localScale[0];
+		outScale[1] = tc->localScale[1];
+		outScale[2] = tc->localScale[2];
+		return true;
+	}
+
+	bool setLocalScale(ECS::Entity entity, const float scale[3])
+	{
+		auto* tc = ECS::ECSManager::Instance().getComponent<ECS::TransformComponent>(entity);
+		if (!tc) return false;
+		tc->localScale[0] = scale[0];
+		tc->localScale[1] = scale[1];
+		tc->localScale[2] = scale[2];
+		ECS::ECSManager::Instance().markTransformDirty(entity);
+		return true;
+	}
+
 	// ── Cross-script communication ────────────────────────────────────
-
-	ScriptValue callScriptFunction(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args)
-	{
-		if (!funcName) return ScriptValue{};
-		INativeScript* script = NativeScriptManager::Instance().getInstance(entity);
-		if (!script) return ScriptValue{};
-		return script->onScriptCall(funcName, args);
-	}
-
-	ScriptValue callPythonFunctionOn(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args)
-	{
-		if (!funcName) return ScriptValue{};
-		return NativeScriptManager::Instance().callPythonForEntity(entity, funcName, args);
-	}
 
 	ScriptValue callFunction(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args)
 	{
@@ -714,6 +813,16 @@ namespace GameplayAPI
 	bool invalidateAudioHandle(unsigned int handle)
 	{
 		return AudioManager::Instance().invalidateHandle(handle);
+	}
+
+	bool setAudioPosition(unsigned int handle, float x, float y, float z)
+	{
+		return AudioManager::Instance().setSourcePosition(handle, x, y, z);
+	}
+
+	bool setAudioSpatial(unsigned int handle, bool is3D, float minDist, float maxDist, float rolloff)
+	{
+		return AudioManager::Instance().setSourceSpatial(handle, is3D, minDist, maxDist, rolloff);
 	}
 
 	// ── Input ─────────────────────────────────────────────────────────
@@ -1116,21 +1225,6 @@ namespace GameplayAPI
 
 	// ── Logging ───────────────────────────────────────────────────────
 
-	void logInfo(const char* msg)
-	{
-		Logger::Instance().log(Logger::Category::Scripting, msg ? msg : "", Logger::LogLevel::INFO);
-	}
-
-	void logWarning(const char* msg)
-	{
-		Logger::Instance().log(Logger::Category::Scripting, msg ? msg : "", Logger::LogLevel::WARNING);
-	}
-
-	void logError(const char* msg)
-	{
-		Logger::Instance().log(Logger::Category::Scripting, msg ? msg : "", Logger::LogLevel::ERROR);
-	}
-
 	void log(const char* msg, int level)
 	{
 		Logger::LogLevel logLevel = Logger::LogLevel::INFO;
@@ -1165,6 +1259,20 @@ bool INativeScript::getTransform(float outPos[3], float outRot[3], float outScal
 bool INativeScript::translate(const float delta[3])    { return GameplayAPI::translate(m_entity, delta); }
 bool INativeScript::rotate(const float delta[3])       { return GameplayAPI::rotate(m_entity, delta); }
 
+bool        INativeScript::setParent(ECS::Entity parent)                      { return GameplayAPI::setParent(m_entity, parent); }
+bool        INativeScript::removeParent()                                      { return GameplayAPI::removeParent(m_entity); }
+ECS::Entity INativeScript::getParent() const                                   { return GameplayAPI::getParent(m_entity); }
+int         INativeScript::getChildCount() const                               { return GameplayAPI::getChildCount(m_entity); }
+int         INativeScript::getChildren(ECS::Entity* out, int maxCount) const   { return GameplayAPI::getChildren(m_entity, out, maxCount); }
+ECS::Entity INativeScript::getRoot() const                                     { return GameplayAPI::getRoot(m_entity); }
+bool        INativeScript::isAncestorOf(ECS::Entity descendant) const          { return GameplayAPI::isAncestorOf(m_entity, descendant); }
+bool        INativeScript::getLocalPosition(float outPos[3]) const             { return GameplayAPI::getLocalPosition(m_entity, outPos); }
+bool        INativeScript::setLocalPosition(const float pos[3])                { return GameplayAPI::setLocalPosition(m_entity, pos); }
+bool        INativeScript::getLocalRotation(float outRot[3]) const             { return GameplayAPI::getLocalRotation(m_entity, outRot); }
+bool        INativeScript::setLocalRotation(const float rot[3])                { return GameplayAPI::setLocalRotation(m_entity, rot); }
+bool        INativeScript::getLocalScale(float outScale[3]) const              { return GameplayAPI::getLocalScale(m_entity, outScale); }
+bool        INativeScript::setLocalScale(const float scale[3])                 { return GameplayAPI::setLocalScale(m_entity, scale); }
+
 void INativeScript::setVelocity(const float vel[3])     { GameplayAPI::setVelocity(m_entity, vel); }
 void INativeScript::getVelocity(float outVel[3]) const  { GameplayAPI::getVelocity(m_entity, outVel); }
 void INativeScript::addForce(const float force[3])      { GameplayAPI::addForce(m_entity, force); }
@@ -1179,6 +1287,18 @@ bool INativeScript::setEmitterEnabled(bool enabled)               { return Gamep
 bool INativeScript::setEmitterColor(float r, float g, float b, float a)    { return GameplayAPI::setEmitterColor(m_entity, r, g, b, a); }
 bool INativeScript::setEmitterEndColor(float r, float g, float b, float a) { return GameplayAPI::setEmitterEndColor(m_entity, r, g, b, a); }
 
+unsigned int INativeScript::createAudio(const char* p, bool loop, float gain)           { return GameplayAPI::createAudio(p, loop, gain); }
+unsigned int INativeScript::playAudio(const char* p, bool loop, float gain)             { return GameplayAPI::playAudio(p, loop, gain); }
+bool         INativeScript::playAudioHandle(unsigned int h)                              { return GameplayAPI::playAudioHandle(h); }
+bool         INativeScript::setAudioVolume(unsigned int h, float g)                      { return GameplayAPI::setAudioVolume(h, g); }
+float        INativeScript::getAudioVolume(unsigned int h)                               { return GameplayAPI::getAudioVolume(h); }
+bool         INativeScript::pauseAudio(unsigned int h)                                   { return GameplayAPI::pauseAudio(h); }
+bool         INativeScript::stopAudio(unsigned int h)                                    { return GameplayAPI::stopAudio(h); }
+bool         INativeScript::isAudioPlaying(unsigned int h)                               { return GameplayAPI::isAudioPlaying(h); }
+bool         INativeScript::invalidateAudioHandle(unsigned int h)                        { return GameplayAPI::invalidateAudioHandle(h); }
+bool         INativeScript::setAudioPosition(unsigned int h, float x, float y, float z)  { return GameplayAPI::setAudioPosition(h, x, y, z); }
+bool         INativeScript::setAudioSpatial(unsigned int h, bool is3D, float minD, float maxD, float rolloff) { return GameplayAPI::setAudioSpatial(h, is3D, minD, maxD, rolloff); }
+
 ECS::Entity INativeScript::findEntityByName(const char* name) { return GameplayAPI::findEntityByName(name); }
 ECS::Entity INativeScript::createEntity()                     { return GameplayAPI::createEntity(); }
 bool INativeScript::removeEntity(ECS::Entity entity)          { return GameplayAPI::removeEntity(entity); }
@@ -1190,26 +1310,6 @@ bool        INativeScript::setEntityName(ECS::Entity entity, const char* name){ 
 int         INativeScript::getEntityCount()                                   { return GameplayAPI::getEntityCount(); }
 int         INativeScript::getAllEntities(ECS::Entity* out, int maxCount)      { return GameplayAPI::getAllEntities(out, maxCount); }
 float       INativeScript::distanceBetween(ECS::Entity a, ECS::Entity b)      { return GameplayAPI::distanceBetween(a, b); }
-
-bool INativeScript::getPositionOf(ECS::Entity entity, float outPos[3])    { return GameplayAPI::getPosition(entity, outPos); }
-bool INativeScript::getRotationOf(ECS::Entity entity, float outRot[3])    { return GameplayAPI::getRotation(entity, outRot); }
-bool INativeScript::getScaleOf(ECS::Entity entity, float outScale[3])     { return GameplayAPI::getScale(entity, outScale); }
-bool INativeScript::setPositionOf(ECS::Entity entity, const float pos[3]) { return GameplayAPI::setPosition(entity, pos); }
-bool INativeScript::setRotationOf(ECS::Entity entity, const float rot[3]) { return GameplayAPI::setRotation(entity, rot); }
-bool INativeScript::setScaleOf(ECS::Entity entity, const float scale[3])  { return GameplayAPI::setScale(entity, scale); }
-
-void INativeScript::getVelocityOf(ECS::Entity entity, float outVel[3])    { GameplayAPI::getVelocity(entity, outVel); }
-void INativeScript::setVelocityOf(ECS::Entity entity, const float vel[3]) { GameplayAPI::setVelocity(entity, vel); }
-
-ScriptValue INativeScript::callScriptFunction(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args)
-{
-	return GameplayAPI::callScriptFunction(entity, funcName, args);
-}
-
-ScriptValue INativeScript::callPythonFunctionOn(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args)
-{
-	return GameplayAPI::callPythonFunctionOn(entity, funcName, args);
-}
 
 ScriptValue INativeScript::callFunction(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args)
 {
@@ -1225,14 +1325,7 @@ bool        INativeScript::getGlobalBool(const char* name)                { retu
 bool        INativeScript::removeGlobal(const char* name)                 { return GameplayAPI::removeGlobal(name); }
 void        INativeScript::clearGlobals()                                 { GameplayAPI::clearGlobals(); }
 
-void INativeScript::logInfo(const char* msg)    { GameplayAPI::logInfo(msg); }
-void INativeScript::logWarning(const char* msg) { GameplayAPI::logWarning(msg); }
-void INativeScript::logError(const char* msg)   { GameplayAPI::logError(msg); }
+void INativeScript::log(const char* msg, int level) { GameplayAPI::log(msg, level); }
 
 float INativeScript::getDeltaTime()  { return GameplayAPI::getDeltaTime(); }
 float INativeScript::getTotalTime()  { return GameplayAPI::getTotalTime(); }
-
-ScriptValue INativeScript::callPythonFunction(const char* funcName, const std::vector<ScriptValue>& args) const
-{
-	return NativeScriptManager::Instance().callPythonForEntity(m_entity, funcName, args);
-}

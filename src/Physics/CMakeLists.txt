@@ -57,5 +57,6 @@ if(ENGINE_PHYSX_AVAILABLE)
             PhysXExtensions
             PhysXCooking
             PhysXPvdSDK
+            PhysXCharacterKinematic
     )
 endif()

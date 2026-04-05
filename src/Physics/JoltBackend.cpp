@@ -26,6 +26,7 @@
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Body/Body.h>
+#include <Jolt/Physics/Character/CharacterVirtual.h>
 
 #include <cmath>
 #include <algorithm>
@@ -298,6 +299,7 @@ void JoltBackend::initialize()
 
 void JoltBackend::shutdown()
 {
+    removeAllCharacters();
     removeAllBodies();
 
     if (m_physicsSystem)
@@ -607,7 +609,7 @@ void JoltBackend::setBodyPositionRotation(BodyHandle handle,
     JPH::BodyInterface& bi = m_physicsSystem->GetBodyInterface();
     JPH::BodyID id(static_cast<uint32_t>(handle));
     JPH::Quat rotation = eulerDegreesToQuat(eulerX, eulerY, eulerZ);
-    bi.SetPositionAndRotation(id, JPH::RVec3(px, py, pz), rotation, JPH::EActivation::DontActivate);
+    bi.SetPositionAndRotation(id, JPH::RVec3(px, py, pz), rotation, JPH::EActivation::Activate);
 }
 
 IPhysicsBackend::BodyState JoltBackend::getBodyState(BodyHandle handle) const
@@ -730,4 +732,168 @@ IPhysicsBackend::BodyHandle JoltBackend::getBodyForEntity(uint32_t entity) const
     if (it != m_entityToBodyID.end())
         return static_cast<BodyHandle>(it->second);
     return InvalidBody;
+}
+
+// ── Character Controller (Jolt CharacterVirtual) ───────────────────────
+
+IPhysicsBackend::CharacterHandle JoltBackend::createCharacter(const CharacterDesc& desc)
+{
+    if (!m_physicsSystem) return InvalidCharacter;
+
+    // Capsule half-height = (total height - 2*radius) / 2
+    float cylinderHalfHeight = (desc.height - 2.0f * desc.radius) * 0.5f;
+    if (cylinderHalfHeight < 0.0f) cylinderHalfHeight = 0.01f;
+
+    JPH::RefConst<JPH::Shape> capsule = new JPH::CapsuleShape(cylinderHalfHeight, desc.radius);
+
+    JPH::CharacterVirtualSettings settings;
+    settings.mShape = capsule;
+    settings.mMaxSlopeAngle = desc.maxSlopeAngle * (3.14159265358979f / 180.0f);
+    settings.mMaxStrength = 100.0f;
+    settings.mCharacterPadding = desc.skinWidth;
+    settings.mPenetrationRecoverySpeed = 1.0f;
+    settings.mPredictiveContactDistance = 0.1f;
+
+    JPH::RVec3 position(desc.position[0], desc.position[1], desc.position[2]);
+    JPH::Quat  rotation = JPH::Quat::sRotation(JPH::Vec3::sAxisY(),
+                              desc.rotationYDeg * (3.14159265358979f / 180.0f));
+
+    auto* character = new JPH::CharacterVirtual(&settings, position, rotation,
+                                                 0, m_physicsSystem.get());
+
+    CharacterHandle handle = m_nextCharacterHandle++;
+    m_handleToCharacter[handle] = character;
+    m_entityToCharacterHandle[desc.entityId] = handle;
+
+    return handle;
+}
+
+void JoltBackend::removeCharacter(CharacterHandle handle)
+{
+    auto it = m_handleToCharacter.find(handle);
+    if (it == m_handleToCharacter.end()) return;
+
+    // Remove entity mapping
+    for (auto eit = m_entityToCharacterHandle.begin(); eit != m_entityToCharacterHandle.end(); ++eit)
+    {
+        if (eit->second == handle)
+        {
+            m_entityToCharacterHandle.erase(eit);
+            break;
+        }
+    }
+
+    delete it->second;
+    m_handleToCharacter.erase(it);
+}
+
+void JoltBackend::removeAllCharacters()
+{
+    for (auto& [handle, character] : m_handleToCharacter)
+        delete character;
+
+    m_handleToCharacter.clear();
+    m_entityToCharacterHandle.clear();
+}
+
+void JoltBackend::updateCharacter(CharacterHandle handle,
+                                   float dt,
+                                   float desiredVelX, float desiredVelY, float desiredVelZ,
+                                   float gravityX, float gravityY, float gravityZ)
+{
+    auto it = m_handleToCharacter.find(handle);
+    if (it == m_handleToCharacter.end() || !m_physicsSystem) return;
+
+    JPH::CharacterVirtual* character = it->second;
+
+    JPH::Vec3 gravity(gravityX, gravityY, gravityZ);
+    JPH::Vec3 desiredVel(desiredVelX, desiredVelY, desiredVelZ);
+
+    // Apply gravity to vertical velocity if not grounded
+    JPH::Vec3 currentVel = character->GetLinearVelocity();
+    if (character->GetGroundState() != JPH::CharacterVirtual::EGroundState::OnGround)
+    {
+        desiredVel += JPH::Vec3(0, currentVel.GetY(), 0);
+        desiredVel += gravity * dt;
+    }
+    else
+    {
+        // On ground: zero out vertical velocity (unless jumping via desiredVelY)
+        if (desiredVelY <= 0.0f)
+            desiredVel = JPH::Vec3(desiredVelX, 0.0f, desiredVelZ);
+    }
+
+    character->SetLinearVelocity(desiredVel);
+
+    // Extended update handles step-up, stick-to-floor
+    JPH::CharacterVirtual::ExtendedUpdateSettings updateSettings;
+    updateSettings.mWalkStairsStepUp = JPH::Vec3(0, 0.3f, 0); // Will be configured per-entity
+    updateSettings.mStickToFloorStepDown = JPH::Vec3(0, -0.5f, 0);
+    updateSettings.mWalkStairsMinStepForward = 0.02f;
+    updateSettings.mWalkStairsStepForwardTest = 0.15f;
+
+    // Use the broad phase and object layer filters
+    JPH::DefaultBroadPhaseLayerFilter bpFilter(
+        *m_objectVsBroadPhaseFilter, Layers::MOVING);
+    JPH::DefaultObjectLayerFilter objFilter(
+        *m_objectLayerPairFilter, Layers::MOVING);
+
+    character->ExtendedUpdate(dt, gravity, updateSettings,
+                               bpFilter, objFilter,
+                               {}, {},
+                               *m_tempAllocator);
+}
+
+IPhysicsBackend::CharacterState JoltBackend::getCharacterState(CharacterHandle handle) const
+{
+    CharacterState state{};
+    auto it = m_handleToCharacter.find(handle);
+    if (it == m_handleToCharacter.end()) return state;
+
+    const JPH::CharacterVirtual* character = it->second;
+
+    JPH::RVec3 pos = character->GetPosition();
+    state.position[0] = static_cast<float>(pos.GetX());
+    state.position[1] = static_cast<float>(pos.GetY());
+    state.position[2] = static_cast<float>(pos.GetZ());
+
+    auto groundState = character->GetGroundState();
+    state.isGrounded = (groundState == JPH::CharacterVirtual::EGroundState::OnGround);
+
+    if (state.isGrounded || groundState == JPH::CharacterVirtual::EGroundState::OnSteepGround)
+    {
+        JPH::Vec3 normal = character->GetGroundNormal();
+        state.groundNormal[0] = normal.GetX();
+        state.groundNormal[1] = normal.GetY();
+        state.groundNormal[2] = normal.GetZ();
+
+        // Angle between ground normal and up vector
+        float dot = normal.GetY(); // dot(normal, up) where up = (0,1,0)
+        dot = std::clamp(dot, -1.0f, 1.0f);
+        state.groundAngle = std::acos(dot) * (180.0f / 3.14159265358979f);
+    }
+
+    JPH::Vec3 vel = character->GetLinearVelocity();
+    state.velocity[0] = vel.GetX();
+    state.velocity[1] = vel.GetY();
+    state.velocity[2] = vel.GetZ();
+
+    return state;
+}
+
+void JoltBackend::setCharacterPosition(CharacterHandle handle,
+                                        float x, float y, float z)
+{
+    auto it = m_handleToCharacter.find(handle);
+    if (it == m_handleToCharacter.end()) return;
+
+    it->second->SetPosition(JPH::RVec3(x, y, z));
+}
+
+IPhysicsBackend::CharacterHandle JoltBackend::getCharacterForEntity(uint32_t entity) const
+{
+    auto it = m_entityToCharacterHandle.find(entity);
+    if (it != m_entityToCharacterHandle.end())
+        return it->second;
+    return InvalidCharacter;
 }

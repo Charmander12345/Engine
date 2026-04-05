@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include <cstdio>
+#include <cmath>
 #include <functional>
 #include <optional>
 #include <thread>
@@ -711,6 +712,13 @@ int main()
     {
         editorBridge = std::make_unique<EditorBridgeImpl>(renderer);
         editorApp = std::make_unique<EditorApp>(*editorBridge);
+
+        // Auto-generate VS Code IntelliSense config for new C++ projects
+        if (chosenIsNew && (chosenScriptingMode == DiagnosticsManager::ScriptingMode::CppOnly ||
+                           chosenScriptingMode == DiagnosticsManager::ScriptingMode::Both))
+        {
+            editorApp->generateVSCodeConfig(diagnostics.getProjectInfo().projectPath);
+        }
     }
 #endif // ENGINE_EDITOR
 
@@ -1073,6 +1081,38 @@ int main()
         }
 
         audioManager.update();
+
+        // Sync OpenAL listener with active camera for 3D spatial audio
+        if (renderer)
+        {
+            auto& ecs = ECS::ECSManager::Instance();
+            unsigned int camEntity = renderer->getActiveCameraEntity();
+            if (camEntity != 0)
+            {
+                const auto* tc = ecs.getComponent<ECS::TransformComponent>(camEntity);
+                if (tc)
+                {
+                    // Rotation is Euler angles in degrees (YXZ order)
+                    constexpr float kDeg2Rad = 3.14159265358979323846f / 180.0f;
+                    float rx = tc->rotation[0] * kDeg2Rad;
+                    float ry = tc->rotation[1] * kDeg2Rad;
+                    float cx = std::cos(rx), sx = std::sin(rx);
+                    float cy = std::cos(ry), sy = std::sin(ry);
+                    // Forward = -Z rotated by Y then X
+                    float fwdX = -sy * cx;
+                    float fwdY =  sx;
+                    float fwdZ = -cy * cx;
+                    // Up = +Y rotated
+                    float upX = sy * sx;
+                    float upY = cx;
+                    float upZ = cy * sx;
+                    audioManager.updateListenerTransform(
+                        tc->position[0], tc->position[1], tc->position[2],
+                        fwdX, fwdY, fwdZ,
+                        upX, upY, upZ);
+                }
+            }
+        }
 
         cpuLoggerMs = 0.0;
         cpuGcMs = 0.0;
@@ -1735,6 +1775,23 @@ int main()
 
             NativeScriptManager::Instance().updateScripts(static_cast<float>(dt));
             PhysicsWorld::Instance().step(static_cast<float>(dt));
+
+            // Dispatch physics overlap events to C++ native scripts
+            {
+                auto& physics = PhysicsWorld::Instance();
+                auto& nativeScripts = NativeScriptManager::Instance();
+                for (const auto& ev : physics.getBeginOverlapEvents())
+                {
+                    nativeScripts.dispatchBeginOverlap(static_cast<ECS::Entity>(ev.entityA), static_cast<ECS::Entity>(ev.entityB));
+                    nativeScripts.dispatchBeginOverlap(static_cast<ECS::Entity>(ev.entityB), static_cast<ECS::Entity>(ev.entityA));
+                }
+                for (const auto& ev : physics.getEndOverlapEvents())
+                {
+                    nativeScripts.dispatchEndOverlap(static_cast<ECS::Entity>(ev.entityA), static_cast<ECS::Entity>(ev.entityB));
+                    nativeScripts.dispatchEndOverlap(static_cast<ECS::Entity>(ev.entityB), static_cast<ECS::Entity>(ev.entityA));
+                }
+            }
+
             Scripting::UpdateScripts(static_cast<float>(dt));
         }
 

@@ -37,10 +37,22 @@ namespace GameplayAPI
 	GAMEPLAY_API int         getAllEntities(ECS::Entity* outEntities, int maxCount);
 	GAMEPLAY_API float       distanceBetween(ECS::Entity a, ECS::Entity b);
 
-	// ── Cross-script communication ────────────────────────────────────
-	GAMEPLAY_API ScriptValue callScriptFunction(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args = {});
-	GAMEPLAY_API ScriptValue callPythonFunctionOn(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args = {});
+	// ── Transform Parenting ──────────────────────────────────────────
+	GAMEPLAY_API bool         setParent(ECS::Entity entity, ECS::Entity parent);
+	GAMEPLAY_API bool         removeParent(ECS::Entity entity);
+	GAMEPLAY_API ECS::Entity  getParent(ECS::Entity entity);
+	GAMEPLAY_API int          getChildren(ECS::Entity entity, ECS::Entity* outChildren, int maxCount);
+	GAMEPLAY_API int          getChildCount(ECS::Entity entity);
+	GAMEPLAY_API ECS::Entity  getRoot(ECS::Entity entity);
+	GAMEPLAY_API bool         isAncestorOf(ECS::Entity ancestor, ECS::Entity descendant);
+	GAMEPLAY_API bool         getLocalPosition(ECS::Entity entity, float outPos[3]);
+	GAMEPLAY_API bool         setLocalPosition(ECS::Entity entity, const float pos[3]);
+	GAMEPLAY_API bool         getLocalRotation(ECS::Entity entity, float outRot[3]);
+	GAMEPLAY_API bool         setLocalRotation(ECS::Entity entity, const float rot[3]);
+	GAMEPLAY_API bool         getLocalScale(ECS::Entity entity, float outScale[3]);
+	GAMEPLAY_API bool         setLocalScale(ECS::Entity entity, const float scale[3]);
 
+	// ── Cross-script communication ────────────────────────────────────
 	/// Unified call: automatically routes to C++ (onScriptCall) or Python.
 	/// Callers never need to know which language implements the function.
 	GAMEPLAY_API ScriptValue callFunction(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args = {});
@@ -109,6 +121,8 @@ namespace GameplayAPI
 	GAMEPLAY_API bool isAudioPlayingPath(const char* contentPath);
 	GAMEPLAY_API bool stopAudio(unsigned int handle);
 	GAMEPLAY_API bool invalidateAudioHandle(unsigned int handle);
+	GAMEPLAY_API bool setAudioPosition(unsigned int handle, float x, float y, float z);
+	GAMEPLAY_API bool setAudioSpatial(unsigned int handle, bool is3D, float minDist = 1.0f, float maxDist = 50.0f, float rolloff = 1.0f);
 
 	// ── Input ─────────────────────────────────────────────────────────
 	GAMEPLAY_API bool isKeyPressed(int keycode);
@@ -162,9 +176,6 @@ namespace GameplayAPI
 	GAMEPLAY_API void        clearGlobals();
 
 	// ── Logging ───────────────────────────────────────────────────────
-	GAMEPLAY_API void logInfo(const char* msg);
-	GAMEPLAY_API void logWarning(const char* msg);
-	GAMEPLAY_API void logError(const char* msg);
 	GAMEPLAY_API void log(const char* msg, int level = 0);
 
 	// ── Time ──────────────────────────────────────────────────────────

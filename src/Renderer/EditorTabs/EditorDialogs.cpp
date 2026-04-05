@@ -1806,14 +1806,14 @@ void EditorDialogs::openProjectScreen(std::function<void(const std::string& proj
                         {
                             screenMgr->showConfirmDialogWithCheckbox(
                                 "C++ scripting requires a C++ IDE for editing and compiling code.\n\n"
-                                "It is strongly recommended to install Visual Studio.",
-                                "Open Visual Studio download page",
+                                "It is strongly recommended to install VS Code.",
+                                "Open VS Code download page",
                                 true,
                                 [doCreateProject](bool openDownload)
                                 {
                                     if (openDownload)
                                     {
-                                        SDL_OpenURL("https://visualstudio.microsoft.com/downloads/");
+                                        SDL_OpenURL("https://code.visualstudio.com/");
                                     }
                                     doCreateProject();
                                 },

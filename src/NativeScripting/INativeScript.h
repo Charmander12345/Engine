@@ -13,18 +13,20 @@ namespace ECS { using Entity = unsigned int; }
 /// Simple variant for cross-language script communication (C++ <-> Python).
 struct ScriptValue
 {
-	enum Type { None, Float, Int, Bool, String };
+	enum Type { None, Float, Int, Bool, String, Vec3 };
 	Type type = None;
 	float floatVal = 0.0f;
 	int intVal = 0;
 	bool boolVal = false;
 	std::string stringVal;
+	float vec3Val[3]{};
 
 	ScriptValue() = default;
 	static ScriptValue makeFloat(float v)              { ScriptValue s; s.type = Float;  s.floatVal = v;    return s; }
 	static ScriptValue makeInt(int v)                   { ScriptValue s; s.type = Int;    s.intVal = v;      return s; }
 	static ScriptValue makeBool(bool v)                 { ScriptValue s; s.type = Bool;   s.boolVal = v;     return s; }
 	static ScriptValue makeString(const std::string& v) { ScriptValue s; s.type = String; s.stringVal = v;   return s; }
+	static ScriptValue makeVec3(float x, float y, float z) { ScriptValue s; s.type = Vec3; s.vec3Val[0] = x; s.vec3Val[1] = y; s.vec3Val[2] = z; return s; }
 };
 
 /// Base class for all C++ gameplay scripts.
@@ -54,9 +56,25 @@ public:
 	// ── Engine-set helpers ────────────────────────────────────────────
 	ECS::Entity getEntity() const { return m_entity; }
 
-	/// Call a Python function defined in this entity's Python script.
-	/// Returns ScriptValue::None if the entity has no Python script or the function is missing.
-	GAMEPLAY_API ScriptValue callPythonFunction(const char* funcName, const std::vector<ScriptValue>& args = {}) const;
+	// ── Script properties (editable from editor / other scripts) ─────
+	/// Set a named property value on this script instance.
+	void setProperty(const std::string& name, const ScriptValue& value) { m_scriptProperties[name] = value; }
+	/// Get a named property value. Returns ScriptValue::None if not found.
+	ScriptValue getProperty(const std::string& name) const
+	{
+		auto it = m_scriptProperties.find(name);
+		return it != m_scriptProperties.end() ? it->second : ScriptValue{};
+	}
+	/// Check if a named property exists.
+	bool hasProperty(const std::string& name) const { return m_scriptProperties.find(name) != m_scriptProperties.end(); }
+	/// Get all property names.
+	std::vector<std::string> getPropertyNames() const
+	{
+		std::vector<std::string> names;
+		names.reserve(m_scriptProperties.size());
+		for (const auto& [k, v] : m_scriptProperties) names.push_back(k);
+		return names;
+	}
 
 	// ── Convenience API (delegates to GameplayAPI for own entity) ────
 
@@ -70,6 +88,21 @@ public:
 	GAMEPLAY_API bool getTransform(float outPos[3], float outRot[3], float outScale[3]) const;
 	GAMEPLAY_API bool translate(const float delta[3]);
 	GAMEPLAY_API bool rotate(const float delta[3]);
+
+	// Transform Parenting
+	GAMEPLAY_API bool        setParent(ECS::Entity parent);
+	GAMEPLAY_API bool        removeParent();
+	GAMEPLAY_API ECS::Entity getParent() const;
+	GAMEPLAY_API int         getChildCount() const;
+	GAMEPLAY_API int         getChildren(ECS::Entity* outChildren, int maxCount) const;
+	GAMEPLAY_API ECS::Entity getRoot() const;
+	GAMEPLAY_API bool        isAncestorOf(ECS::Entity descendant) const;
+	GAMEPLAY_API bool        getLocalPosition(float outPos[3]) const;
+	GAMEPLAY_API bool        setLocalPosition(const float pos[3]);
+	GAMEPLAY_API bool        getLocalRotation(float outRot[3]) const;
+	GAMEPLAY_API bool        setLocalRotation(const float rot[3]);
+	GAMEPLAY_API bool        getLocalScale(float outScale[3]) const;
+	GAMEPLAY_API bool        setLocalScale(const float scale[3]);
 
 	// Physics
 	GAMEPLAY_API void setVelocity(const float vel[3]);
@@ -89,6 +122,19 @@ public:
 	GAMEPLAY_API bool setEmitterColor(float r, float g, float b, float a);
 	GAMEPLAY_API bool setEmitterEndColor(float r, float g, float b, float a);
 
+	// Audio (static – works on any handle, not entity-specific)
+	GAMEPLAY_API static unsigned int createAudio(const char* contentPath, bool loop = false, float gain = 1.0f);
+	GAMEPLAY_API static unsigned int playAudio(const char* contentPath, bool loop = false, float gain = 1.0f);
+	GAMEPLAY_API static bool         playAudioHandle(unsigned int handle);
+	GAMEPLAY_API static bool         setAudioVolume(unsigned int handle, float gain);
+	GAMEPLAY_API static float        getAudioVolume(unsigned int handle);
+	GAMEPLAY_API static bool         pauseAudio(unsigned int handle);
+	GAMEPLAY_API static bool         stopAudio(unsigned int handle);
+	GAMEPLAY_API static bool         isAudioPlaying(unsigned int handle);
+	GAMEPLAY_API static bool         invalidateAudioHandle(unsigned int handle);
+	GAMEPLAY_API static bool         setAudioPosition(unsigned int handle, float x, float y, float z);
+	GAMEPLAY_API static bool         setAudioSpatial(unsigned int handle, bool is3D, float minDist = 1.0f, float maxDist = 50.0f, float rolloff = 1.0f);
+
 	// Entity management
 	GAMEPLAY_API static ECS::Entity findEntityByName(const char* name);
 	GAMEPLAY_API static ECS::Entity createEntity();
@@ -103,22 +149,7 @@ public:
 	GAMEPLAY_API static int         getAllEntities(ECS::Entity* outEntities, int maxCount);
 	GAMEPLAY_API static float       distanceBetween(ECS::Entity a, ECS::Entity b);
 
-	// Cross-entity transform access
-	GAMEPLAY_API static bool getPositionOf(ECS::Entity entity, float outPos[3]);
-	GAMEPLAY_API static bool getRotationOf(ECS::Entity entity, float outRot[3]);
-	GAMEPLAY_API static bool getScaleOf(ECS::Entity entity, float outScale[3]);
-	GAMEPLAY_API static bool setPositionOf(ECS::Entity entity, const float pos[3]);
-	GAMEPLAY_API static bool setRotationOf(ECS::Entity entity, const float rot[3]);
-	GAMEPLAY_API static bool setScaleOf(ECS::Entity entity, const float scale[3]);
-
-	// Cross-entity physics access
-	GAMEPLAY_API static void getVelocityOf(ECS::Entity entity, float outVel[3]);
-	GAMEPLAY_API static void setVelocityOf(ECS::Entity entity, const float vel[3]);
-
 	// Cross-script communication
-	GAMEPLAY_API static ScriptValue callScriptFunction(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args = {});
-	GAMEPLAY_API static ScriptValue callPythonFunctionOn(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args = {});
-
 	/// Unified call: automatically routes to C++ (onScriptCall) or Python.
 	/// Callers never need to know which language implements the function.
 	GAMEPLAY_API static ScriptValue callFunction(ECS::Entity entity, const char* funcName, const std::vector<ScriptValue>& args = {});
@@ -141,9 +172,7 @@ public:
 	GAMEPLAY_API static void        clearGlobals();
 
 	// Logging
-	GAMEPLAY_API static void logInfo(const char* msg);
-	GAMEPLAY_API static void logWarning(const char* msg);
-	GAMEPLAY_API static void logError(const char* msg);
+	GAMEPLAY_API static void log(const char* msg, int level = 0);
 
 	// Time
 	GAMEPLAY_API static float getDeltaTime();
@@ -176,15 +205,16 @@ private:
 	friend class NativeScriptManager;
 	ECS::Entity m_entity{ 0 };
 	std::unordered_map<std::string, std::function<ScriptValue(const std::vector<ScriptValue>&)>> m_scriptMethods;
+	std::unordered_map<std::string, ScriptValue> m_scriptProperties;
 
 	// ── Argument extraction / conversion helpers ────────────────────
 
 	template<typename T>
 	static T extractArg(const ScriptValue& v)
 	{
-		if constexpr (std::is_same_v<T, float>)            return v.floatVal;
-		else if constexpr (std::is_same_v<T, double>)      return static_cast<double>(v.floatVal);
-		else if constexpr (std::is_same_v<T, int>)          return v.intVal;
+		if constexpr (std::is_same_v<T, float>)            return v.type == ScriptValue::Int ? static_cast<float>(v.intVal) : v.floatVal;
+		else if constexpr (std::is_same_v<T, double>)      return v.type == ScriptValue::Int ? static_cast<double>(v.intVal) : static_cast<double>(v.floatVal);
+		else if constexpr (std::is_same_v<T, int>)          return v.type == ScriptValue::Float ? static_cast<int>(v.floatVal) : v.intVal;
 		else if constexpr (std::is_same_v<T, bool>)         return v.boolVal;
 		else if constexpr (std::is_same_v<T, std::string>)  return v.stringVal;
 		else if constexpr (std::is_same_v<T, const std::string&>) return v.stringVal;
@@ -253,3 +283,19 @@ private:
 /// Usage in onLoaded():  SCRIPT_METHOD(myFunction);
 #define SCRIPT_METHOD(method) \
 	this->registerMethod(#method, &std::remove_pointer_t<decltype(this)>::method)
+
+/// Convenience macro: registers a named property with a default value.
+/// Usage in onLoaded():  SCRIPT_PROPERTY(speed, 5.0f);
+/// The property is accessible from other scripts via getProperty/setProperty
+/// and will be exposed in the editor details panel.
+#define SCRIPT_PROPERTY(name, defaultValue) \
+	do { if (!this->hasProperty(#name)) this->setProperty(#name, ScriptValue::makeFloat(static_cast<float>(defaultValue))); } while(0)
+
+#define SCRIPT_PROPERTY_INT(name, defaultValue) \
+	do { if (!this->hasProperty(#name)) this->setProperty(#name, ScriptValue::makeInt(defaultValue)); } while(0)
+
+#define SCRIPT_PROPERTY_BOOL(name, defaultValue) \
+	do { if (!this->hasProperty(#name)) this->setProperty(#name, ScriptValue::makeBool(defaultValue)); } while(0)
+
+#define SCRIPT_PROPERTY_STRING(name, defaultValue) \
+	do { if (!this->hasProperty(#name)) this->setProperty(#name, ScriptValue::makeString(defaultValue)); } while(0)

@@ -66,7 +66,20 @@ void EditorApp::initialize()
     registerBuildPipeline();
     auto& uiMgr = m_bridge.getUIManager();
     uiMgr.setNativeClassNamesProvider([]() {
-        return NativeScriptManager::Instance().getAvailableClassNames();
+        auto& nsm = NativeScriptManager::Instance();
+        if (nsm.isDLLLoaded())
+            return nsm.getAvailableClassNames();
+
+        // Fallback: retrieve C++ class names from the asset registry
+        std::vector<std::string> classes;
+        const auto& registry = AssetManager::Instance().getAssetRegistry();
+        for (const auto& entry : registry)
+        {
+            if (entry.type == AssetType::NativeScript)
+                classes.push_back(entry.name);
+        }
+        std::sort(classes.begin(), classes.end());
+        return classes;
     });
     uiMgr.rebuildEditorUIForDpi(EditorTheme::Get().dpiScale);
     uiMgr.markAllWidgetsDirty();
@@ -284,7 +297,16 @@ void EditorApp::buildGameScriptsForPIE()
     {
         const fs::path cmakeListsPath = nativeDir / "CMakeLists.txt";
         const char* bp = SDL_GetBasePath();
-        const std::string editorBinDir = bp ? std::string(bp) : fs::current_path().string();
+        std::string editorBinDir = bp ? std::string(bp) : fs::current_path().string();
+
+        // Fallback: if Tools/ does not exist next to the exe (e.g. running from
+        // the CMake build tree), look one level up for a sibling EngineBuild/.
+        if (!fs::exists(fs::path(editorBinDir) / "Tools"))
+        {
+            fs::path parent = fs::path(editorBinDir).parent_path();
+            if (fs::exists(parent / "EngineBuild" / "Tools"))
+                editorBinDir = (parent / "EngineBuild").string() + "/";
+        }
 
         std::ostringstream cmake;
         cmake << "cmake_minimum_required(VERSION 3.12)\n";
@@ -511,6 +533,11 @@ void EditorApp::buildGameScriptsForPIE()
             std::string configureCmd = "\"" + cmakePath + "\"";
             configureCmd += " -S \"" + nativeDirStr + "\"";
             configureCmd += " -B \"" + buildDirStr + "\"";
+#ifdef _DEBUG
+            configureCmd += " -DCMAKE_BUILD_TYPE=Debug";
+#else
+            configureCmd += " -DCMAKE_BUILD_TYPE=RelWithDebInfo";
+#endif
             int ret = runCmd(configureCmd);
             if (ret != 0)
             {
@@ -525,7 +552,11 @@ void EditorApp::buildGameScriptsForPIE()
             std::string buildCmd = "\"" + cmakePath + "\"";
             buildCmd += " --build \"" + buildDirStr + "\"";
             buildCmd += " --target GameScripts";
+#ifdef _DEBUG
+            buildCmd += " --config Debug";
+#else
             buildCmd += " --config RelWithDebInfo";
+#endif
             int ret = runCmd(buildCmd);
             if (ret != 0)
             {
@@ -1665,13 +1696,13 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             if (out.is_open())
             {
                 out << "import engine\n\n";
-                out << "def onloaded(entity):\n";
+                out << "def on_loaded(entity):\n";
                 out << "    pass\n\n";
                 out << "def tick(entity, dt):\n";
                 out << "    pass\n\n";
-                out << "def on_entity_begin_overlap(entity, other_entity):\n";
+                out << "def on_begin_overlap(entity, other_entity):\n";
                 out << "    pass\n\n";
-                out << "def on_entity_end_overlap(entity, other_entity):\n";
+                out << "def on_end_overlap(entity, other_entity):\n";
                 out << "    pass\n";
                 out.close();
 

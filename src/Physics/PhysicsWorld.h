@@ -93,6 +93,9 @@ private:
     // ── ECS ↔ Backend sync ──────────────────────────────────────────
     void syncBodiesToBackend();
     void syncBodiesFromBackend();
+    void syncCharactersToBackend();
+    void syncCharactersFromBackend();
+    void updateCharacters(float dt);
     void fireCollisionEvents();
     void updateOverlapTracking();
 
@@ -107,7 +110,8 @@ private:
     std::unique_ptr<IPhysicsBackend> m_backend;
 
     // ── Entity ↔ backend handle tracking ────────────────────────────
-    std::set<uint32_t> m_trackedEntities;   // entities that have a body in the backend
+    std::set<uint32_t> m_trackedEntities;     // entities that have a body in the backend
+    std::set<uint32_t> m_trackedCharacters;   // entities that have a character in the backend
 
     // ── Collision / overlap data ────────────────────────────────────
     std::vector<CollisionEvent>  m_collisionEvents;

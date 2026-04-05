@@ -130,6 +130,7 @@ namespace
         PyObject* tickFunc{ nullptr };
         PyObject* onBeginOverlapFunc{ nullptr };
         PyObject* onEndOverlapFunc{ nullptr };
+        PyObject* scriptClass{ nullptr }; // Script subclass (class-based model)
         std::unordered_set<unsigned long> startedEntities;
         bool loadFailed{ false };
     };
@@ -143,6 +144,8 @@ namespace
     };
 
     std::unordered_map<std::string, ScriptState> s_scripts;
+    // Per-entity Script class instances: key = (scriptPath, entity)
+    std::unordered_map<unsigned long, PyObject*> s_entityInstances;
     EngineLevel* s_lastLevel{ nullptr };
     std::string s_lastLevelScriptPath;
     LevelScriptState s_levelScript;
@@ -174,6 +177,11 @@ namespace
         {
             Py_DECREF(state.onEndOverlapFunc);
             state.onEndOverlapFunc = nullptr;
+        }
+        if (state.scriptClass)
+        {
+            Py_DECREF(state.scriptClass);
+            state.scriptClass = nullptr;
         }
         if (state.module)
         {
@@ -257,6 +265,7 @@ namespace
         case ScriptValue::Int:    return PyLong_FromLong(val.intVal);
         case ScriptValue::Bool:   if (val.boolVal) { Py_RETURN_TRUE; } else { Py_RETURN_FALSE; }
         case ScriptValue::String: return PyUnicode_FromString(val.stringVal.c_str());
+        case ScriptValue::Vec3:   return Py_BuildValue("(fff)", val.vec3Val[0], val.vec3Val[1], val.vec3Val[2]);
         case ScriptValue::None:
         default:                  Py_RETURN_NONE;
         }
@@ -285,6 +294,22 @@ namespace
             const char* str = PyUnicode_AsUTF8(obj);
             return str ? ScriptValue::makeString(str) : ScriptValue{};
         }
+        if (PyTuple_Check(obj) && PyTuple_Size(obj) == 3)
+        {
+            float x = 0, y = 0, z = 0;
+            PyObject* px = PyTuple_GetItem(obj, 0);
+            PyObject* py = PyTuple_GetItem(obj, 1);
+            PyObject* pz = PyTuple_GetItem(obj, 2);
+            if ((PyFloat_Check(px) || PyLong_Check(px)) &&
+                (PyFloat_Check(py) || PyLong_Check(py)) &&
+                (PyFloat_Check(pz) || PyLong_Check(pz)))
+            {
+                x = static_cast<float>(PyFloat_AsDouble(px));
+                y = static_cast<float>(PyFloat_AsDouble(py));
+                z = static_cast<float>(PyFloat_AsDouble(pz));
+                return ScriptValue::makeVec3(x, y, z);
+            }
+        }
         return ScriptValue{};
     }
 
@@ -293,7 +318,7 @@ namespace
         if (!Py_IsInitialized())
         {
             Logger::Instance().log(Logger::Category::Engine,
-                "Python: callPythonFunction failed – interpreter not initialized",
+                "Python: callFunction failed – interpreter not initialized",
                 Logger::LogLevel::WARNING);
             return ScriptValue{};
         }
@@ -303,7 +328,7 @@ namespace
         if (!comp || comp->scriptPath.empty())
         {
             Logger::Instance().log(Logger::Category::Engine,
-                "Python: callPythonFunction(\"" + std::string(funcName ? funcName : "?") +
+                "Python: callFunction(\"" + std::string(funcName ? funcName : "?") +
                 "\") failed – " + DescribeEntity(entity) + " has no LogicComponent / script path",
                 Logger::LogLevel::WARNING);
             return ScriptValue{};
@@ -313,7 +338,7 @@ namespace
         if (it == s_scripts.end() || !it->second.module)
         {
             Logger::Instance().log(Logger::Category::Engine,
-                "Python: callPythonFunction(\"" + std::string(funcName ? funcName : "?") +
+                "Python: callFunction(\"" + std::string(funcName ? funcName : "?") +
                 "\") failed – script module not loaded: " + comp->scriptPath,
                 Logger::LogLevel::WARNING);
             return ScriptValue{};
@@ -326,7 +351,7 @@ namespace
         if (!func || !PyCallable_Check(func))
         {
             Logger::Instance().log(Logger::Category::Engine,
-                "Python: callPythonFunction(\"" + std::string(funcName ? funcName : "?") +
+                "Python: callFunction(\"" + std::string(funcName ? funcName : "?") +
                 "\") failed – function not found in " + comp->scriptPath,
                 Logger::LogLevel::WARNING);
             PyGILState_Release(gilState);
@@ -461,43 +486,73 @@ namespace
         Py_DECREF(result);
 
         state.module = module;
-        PyObject* onLoadedFunc = PyDict_GetItemString(moduleDict, "onloaded");
-        PyObject* tickFunc = PyDict_GetItemString(moduleDict, "tick");
-        if (onLoadedFunc && PyCallable_Check(onLoadedFunc))
+
+        // ── Detect class-based Script subclass ──────────────────────────
+        PyObject* engineMod = PyImport_ImportModule("engine");
+        PyObject* scriptBaseClass = engineMod ? PyObject_GetAttrString(engineMod, "Script") : nullptr;
+        Py_XDECREF(engineMod);
+
+        if (scriptBaseClass)
         {
-            Py_INCREF(onLoadedFunc);
-            state.onLoadedFunc = onLoadedFunc;
-        }
-        else
-        {
-            Logger::Instance().log(Logger::Category::Engine,
-                "Python: script has no callable onloaded(): " + resolvedPath.string(),
-                Logger::LogLevel::WARNING);
-        }
-        if (tickFunc && PyCallable_Check(tickFunc))
-        {
-            Py_INCREF(tickFunc);
-            state.tickFunc = tickFunc;
-        }
-        else
-        {
-            Logger::Instance().log(Logger::Category::Engine,
-                "Python: script has no callable tick(entity, dt): " + resolvedPath.string(),
-                Logger::LogLevel::WARNING);
+            // Walk module dict to find a class that is a subclass of engine.Script
+            PyObject* key = nullptr;
+            PyObject* value = nullptr;
+            Py_ssize_t pos = 0;
+            while (PyDict_Next(moduleDict, &pos, &key, &value))
+            {
+                if (!PyType_Check(value)) continue;
+                if (value == scriptBaseClass) continue; // skip the base class itself
+                if (PyObject_IsSubclass(value, scriptBaseClass))
+                {
+                    Py_INCREF(value);
+                    state.scriptClass = value;
+                    Logger::Instance().log(Logger::Category::Engine,
+                        "Python: detected Script subclass in " + resolvedPath.string(),
+                        Logger::LogLevel::INFO);
+                    break;
+                }
+            }
+            Py_DECREF(scriptBaseClass);
         }
 
-        PyObject* beginOverlapFunc = PyDict_GetItemString(moduleDict, "on_entity_begin_overlap");
-        if (beginOverlapFunc && PyCallable_Check(beginOverlapFunc))
+        if (!state.scriptClass)
         {
-            Py_INCREF(beginOverlapFunc);
-            state.onBeginOverlapFunc = beginOverlapFunc;
-        }
+            // ── Function-based model (legacy + new naming) ──────────────
+            // Primary: on_loaded, fallback: onloaded
+            PyObject* onLoadedFunc = PyDict_GetItemString(moduleDict, "on_loaded");
+            if (!onLoadedFunc || !PyCallable_Check(onLoadedFunc))
+                onLoadedFunc = PyDict_GetItemString(moduleDict, "onloaded");
+            PyObject* tickFunc = PyDict_GetItemString(moduleDict, "tick");
+            if (onLoadedFunc && PyCallable_Check(onLoadedFunc))
+            {
+                Py_INCREF(onLoadedFunc);
+                state.onLoadedFunc = onLoadedFunc;
+            }
+            if (tickFunc && PyCallable_Check(tickFunc))
+            {
+                Py_INCREF(tickFunc);
+                state.tickFunc = tickFunc;
+            }
 
-        PyObject* endOverlapFunc = PyDict_GetItemString(moduleDict, "on_entity_end_overlap");
-        if (endOverlapFunc && PyCallable_Check(endOverlapFunc))
-        {
-            Py_INCREF(endOverlapFunc);
-            state.onEndOverlapFunc = endOverlapFunc;
+            // Primary: on_begin_overlap, fallback: on_entity_begin_overlap
+            PyObject* beginOverlapFunc = PyDict_GetItemString(moduleDict, "on_begin_overlap");
+            if (!beginOverlapFunc || !PyCallable_Check(beginOverlapFunc))
+                beginOverlapFunc = PyDict_GetItemString(moduleDict, "on_entity_begin_overlap");
+            if (beginOverlapFunc && PyCallable_Check(beginOverlapFunc))
+            {
+                Py_INCREF(beginOverlapFunc);
+                state.onBeginOverlapFunc = beginOverlapFunc;
+            }
+
+            // Primary: on_end_overlap, fallback: on_entity_end_overlap
+            PyObject* endOverlapFunc = PyDict_GetItemString(moduleDict, "on_end_overlap");
+            if (!endOverlapFunc || !PyCallable_Check(endOverlapFunc))
+                endOverlapFunc = PyDict_GetItemString(moduleDict, "on_entity_end_overlap");
+            if (endOverlapFunc && PyCallable_Check(endOverlapFunc))
+            {
+                Py_INCREF(endOverlapFunc);
+                state.onEndOverlapFunc = endOverlapFunc;
+            }
         }
 
         return true;
@@ -864,11 +919,12 @@ namespace
         PyObject* mathModule = CreateMathModule();
         PyObject* particleModule = CreateParticleModule();
         PyObject* globalStateModule = CreateGlobalStateModule();
+        PyObject* timerModule = CreateTimerModule();
 #if ENGINE_EDITOR
         PyObject* editorModule = CreateEditorModule();
 #endif
 
-        if (!entityModule || !assetModule || !audioModule || !inputModule || !uiModule || !cameraModule || !diagnosticsModule || !loggingModule || !physicsModule || !mathModule || !particleModule || !globalStateModule
+        if (!entityModule || !assetModule || !audioModule || !inputModule || !uiModule || !cameraModule || !diagnosticsModule || !loggingModule || !physicsModule || !mathModule || !particleModule || !globalStateModule || !timerModule
 #if ENGINE_EDITOR
             || !editorModule
 #endif
@@ -886,6 +942,7 @@ namespace
             Py_XDECREF(mathModule);
             Py_XDECREF(particleModule);
             Py_XDECREF(globalStateModule);
+            Py_XDECREF(timerModule);
 #if ENGINE_EDITOR
             Py_XDECREF(editorModule);
 #endif
@@ -917,7 +974,8 @@ namespace
             !AddSubmodule(module, physicsModule, "physics") ||
             !AddSubmodule(module, mathModule, "math") ||
             !AddSubmodule(module, particleModule, "particle") ||
-            !AddSubmodule(module, globalStateModule, "globalstate")
+            !AddSubmodule(module, globalStateModule, "globalstate") ||
+            !AddSubmodule(module, timerModule, "timer")
 #if ENGINE_EDITOR
             || !AddSubmodule(module, editorModule, "editor")
 #endif
@@ -931,9 +989,56 @@ namespace
         return module;
     }
 
+    // The Script base class is injected into the engine module so user scripts can inherit from it.
+    static const char* kScriptBaseClassDef = R"(
+class Script:
+    """Base class for Python gameplay scripts.
+
+    Subclass this and override lifecycle methods:
+        on_loaded()          – called once when the entity is first seen
+        tick(dt)             – called every frame
+        on_begin_overlap(other) – called when a physics overlap begins
+        on_end_overlap(other)   – called when a physics overlap ends
+        on_destroy()         – called when the entity is removed
+
+    The 'entity' property is set automatically by the engine.
+    """
+    def __init__(self):
+        self._entity = 0
+
+    @property
+    def entity(self):
+        return self._entity
+
+    def on_loaded(self): pass
+    def tick(self, dt): pass
+    def on_begin_overlap(self, other_entity): pass
+    def on_end_overlap(self, other_entity): pass
+    def on_destroy(self): pass
+)";
+
+    bool InjectScriptBaseClass(PyObject* engineModule)
+    {
+        PyObject* moduleDict = PyModule_GetDict(engineModule);
+        if (!moduleDict) return false;
+        PyObject* result = PyRun_StringFlags(kScriptBaseClassDef, Py_file_input, moduleDict, moduleDict, nullptr);
+        if (!result)
+        {
+            LogPythonError("Python: failed to inject Script base class");
+            return false;
+        }
+        Py_DECREF(result);
+        return true;
+    }
+
     PyMODINIT_FUNC PyInit_engine()
     {
-        return CreateEngineModule();
+        PyObject* mod = CreateEngineModule();
+        if (mod)
+        {
+            InjectScriptBaseClass(mod);
+        }
+        return mod;
     }
 
     // ── PyLogWriter – redirects sys.stdout / sys.stderr to Logger ────────
@@ -1073,6 +1178,11 @@ namespace Scripting
         if (Py_IsInitialized())
         {
             Logger::Instance().log(Logger::Category::Engine, "Python: shutting down", Logger::LogLevel::INFO);
+            for (auto& [entity, inst] : s_entityInstances)
+            {
+                Py_XDECREF(inst);
+            }
+            s_entityInstances.clear();
             for (auto& [path, state] : s_scripts)
             {
                 ReleaseScriptState(state);
@@ -1080,6 +1190,7 @@ namespace Scripting
             s_scripts.clear();
             ReleaseLevelScriptState();
             ScriptDetail::ClearKeyCallbacks();
+            ScriptDetail::ClearTimers();
             ClearAssetLoadCallbacks();
             s_lastLevel = nullptr;
             s_lastLevelScriptPath.clear();
@@ -1096,6 +1207,11 @@ namespace Scripting
 
         Logger::Instance().log(Logger::Category::Engine, "Python: reloading scripts", Logger::LogLevel::INFO);
         PyGILState_STATE gilState = PyGILState_Ensure();
+        for (auto& [entity, inst] : s_entityInstances)
+        {
+            Py_XDECREF(inst);
+        }
+        s_entityInstances.clear();
         for (auto& [path, state] : s_scripts)
         {
             ReleaseScriptState(state);
@@ -1103,6 +1219,7 @@ namespace Scripting
         s_scripts.clear();
         ReleaseLevelScriptState();
         ScriptDetail::ClearKeyCallbacks();
+        ScriptDetail::ClearTimers();
         ClearAssetLoadCallbacks();
         s_lastLevel = nullptr;
         s_lastLevelScriptPath.clear();
@@ -1127,6 +1244,7 @@ namespace Scripting
 
         PyGILState_STATE gilState = PyGILState_Ensure();
         ProcessAssetLoadCallbacks();
+        ScriptDetail::ProcessTimers(deltaSeconds);
         if (levelChanged)
         {
             if (s_levelScript.onUnloadedFunc && s_levelScript.loadedCalled)
@@ -1240,33 +1358,81 @@ namespace Scripting
                 }
             }
 
-            if (state.onLoadedFunc &&
-                state.startedEntities.find(static_cast<unsigned long>(entity)) == state.startedEntities.end())
-            {
-                ScriptDetail::s_currentEntity = static_cast<unsigned long>(entity);
-                PyObject* result = PyObject_CallFunction(state.onLoadedFunc, "k", static_cast<unsigned long>(entity));
-                if (!result)
-                {
-                    LogPythonError("Python: onloaded failed for " + DescribeEntity(entity) + " (script: " + component->scriptPath + ")");
-                }
-                else
-                {
-                    Py_DECREF(result);
-                }
-                state.startedEntities.insert(static_cast<unsigned long>(entity));
-            }
+            const unsigned long entityUL = static_cast<unsigned long>(entity);
+            ScriptDetail::s_currentEntity = entityUL;
 
-            if (state.tickFunc)
+            if (state.scriptClass)
             {
-                ScriptDetail::s_currentEntity = static_cast<unsigned long>(entity);
-                PyObject* result = PyObject_CallFunction(state.tickFunc, "kf", static_cast<unsigned long>(entity), deltaSeconds);
+                // ── Class-based model ──────────────────────────────────
+                auto instIt = s_entityInstances.find(entityUL);
+                if (instIt == s_entityInstances.end())
+                {
+                    // Create instance and set entity
+                    PyObject* instance = PyObject_CallNoArgs(state.scriptClass);
+                    if (!instance)
+                    {
+                        LogPythonError("Python: failed to create Script instance for " + DescribeEntity(entity));
+                        continue;
+                    }
+                    PyObject* pyEntity = PyLong_FromUnsignedLong(entityUL);
+                    PyObject_SetAttrString(instance, "_entity", pyEntity);
+                    Py_DECREF(pyEntity);
+                    s_entityInstances[entityUL] = instance;
+                    instIt = s_entityInstances.find(entityUL);
+
+                    // Call on_loaded
+                    PyObject* result = PyObject_CallMethod(instance, "on_loaded", nullptr);
+                    if (!result)
+                    {
+                        LogPythonError("Python: on_loaded failed for " + DescribeEntity(entity));
+                    }
+                    else
+                    {
+                        Py_DECREF(result);
+                    }
+                    state.startedEntities.insert(entityUL);
+                }
+
+                PyObject* instance = instIt->second;
+                PyObject* result = PyObject_CallMethod(instance, "tick", "f", deltaSeconds);
                 if (!result)
                 {
-                    LogPythonError("Python: tick failed for " + DescribeEntity(entity) + " (script: " + component->scriptPath + ")");
+                    LogPythonError("Python: tick failed for " + DescribeEntity(entity));
                 }
                 else
                 {
                     Py_DECREF(result);
+                }
+            }
+            else
+            {
+                // ── Function-based model (legacy) ──────────────────────
+                if (state.onLoadedFunc &&
+                    state.startedEntities.find(entityUL) == state.startedEntities.end())
+                {
+                    PyObject* result = PyObject_CallFunction(state.onLoadedFunc, "k", entityUL);
+                    if (!result)
+                    {
+                        LogPythonError("Python: on_loaded failed for " + DescribeEntity(entity) + " (script: " + component->scriptPath + ")");
+                    }
+                    else
+                    {
+                        Py_DECREF(result);
+                    }
+                    state.startedEntities.insert(entityUL);
+                }
+
+                if (state.tickFunc)
+                {
+                    PyObject* result = PyObject_CallFunction(state.tickFunc, "kf", entityUL, deltaSeconds);
+                    if (!result)
+                    {
+                        LogPythonError("Python: tick failed for " + DescribeEntity(entity) + " (script: " + component->scriptPath + ")");
+                    }
+                    else
+                    {
+                        Py_DECREF(result);
+                    }
                 }
             }
         }
@@ -1282,21 +1448,43 @@ namespace Scripting
                 if (!sc || sc->scriptPath.empty()) return;
                 auto it = s_scripts.find(sc->scriptPath);
                 if (it == s_scripts.end() || !it->second.module) return;
-                PyObject* func = isBegin ? it->second.onBeginOverlapFunc : it->second.onEndOverlapFunc;
-                if (!func) return;
                 ScriptDetail::s_currentEntity = static_cast<unsigned long>(entity);
-                PyObject* result = PyObject_CallFunction(func, "kk",
-                    static_cast<unsigned long>(entity),
-                    static_cast<unsigned long>(otherEntity));
-                if (!result)
+
+                if (it->second.scriptClass)
                 {
-                    LogPythonError(std::string("Python: ") +
-                        (isBegin ? "on_entity_begin_overlap" : "on_entity_end_overlap") +
-                        " failed for " + DescribeEntity(entity));
+                    // Class-based overlap dispatch
+                    auto instIt = s_entityInstances.find(static_cast<unsigned long>(entity));
+                    if (instIt == s_entityInstances.end()) return;
+                    const char* method = isBegin ? "on_begin_overlap" : "on_end_overlap";
+                    PyObject* result = PyObject_CallMethod(instIt->second, method, "k",
+                        static_cast<unsigned long>(otherEntity));
+                    if (!result)
+                    {
+                        LogPythonError(std::string("Python: ") + method + " failed for " + DescribeEntity(entity));
+                    }
+                    else
+                    {
+                        Py_DECREF(result);
+                    }
                 }
                 else
                 {
-                    Py_DECREF(result);
+                    // Function-based overlap dispatch
+                    PyObject* func = isBegin ? it->second.onBeginOverlapFunc : it->second.onEndOverlapFunc;
+                    if (!func) return;
+                    PyObject* result = PyObject_CallFunction(func, "kk",
+                        static_cast<unsigned long>(entity),
+                        static_cast<unsigned long>(otherEntity));
+                    if (!result)
+                    {
+                        LogPythonError(std::string("Python: ") +
+                            (isBegin ? "on_begin_overlap" : "on_end_overlap") +
+                            " failed for " + DescribeEntity(entity));
+                    }
+                    else
+                    {
+                        Py_DECREF(result);
+                    }
                 }
             };
 

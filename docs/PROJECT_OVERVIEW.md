@@ -5,6 +5,109 @@
 
 ---
 
+## Feature-Roadmap – Offene Kernfeatures
+
+> Vergleich mit Industriestandard-Engines (Unreal Engine 5, Unity 6, Godot 4). Siehe `ENGINE_STATUS.md` für die vollständige priorisierte Liste.
+
+**Kritisch fehlend (Prio 1):** Physics Constraints/Joints, Animation Blending/State Machine.
+
+**Bereits implementiert (Prio 1):** ✅ Entity Parent-Child Hierarchie (Transform Parenting), ✅ Character Controller (backend-agnostisch: Jolt `CharacterVirtual` + PhysX `PxCapsuleController`), ✅ 3D Spatial Audio (OpenAL Positional + Editor 2D/3D-Toggle).
+
+**Wichtig fehlend (Prio 2):** Runtime UI Framework (HUD/Menüs), AI/Navigation (NavMesh + Pathfinding via Recast/Detour), Reflection Probes/IBL, Multi-Level-Streaming, Decal System, Physics Overlap/Sweep Queries.
+
+**Nice-to-have (Prio 3):** Root Motion, Foliage Instancing, Lightmapping/Baked GI, Physics Materials als Assets, Mesh Collider (Convex/Concave), Visual Scripting, Networking, Volumetric Fog.
+
+**Empfohlene Reihenfolge:** ~~3D Spatial Audio~~ ✅ → Physics Joints → Animation Blending → Reflection Probes → Runtime UI → NavMesh → Decals → Level Streaming.
+
+---
+
+## Aktuelle Änderung (3D Spatial Audio + Editor 2D/3D Audio-Toggle)
+
+- **AudioSourceComponent (Components.h):** Neue ECS-Komponente für Audio-Quellen — `assetPath`, `assetId`, `is3D` (2D/3D-Modus), `minDistance` (1.0), `maxDistance` (50.0), `rolloffFactor` (1.0), `gain` (1.0), `loop`, `autoPlay`, `runtimeHandle` (nicht serialisiert).
+- **ECS (ECS.h/.cpp):** `ComponentKind::AudioSource` (Index 14), `MaxComponentTypes` von 15 auf 16 erhöht. `ComponentTraits`-Spezialisierung, `getStorage()`-Branches (const + non-const), `SparseSet<AudioSourceComponent>`. `initialize()` und `removeEntity()` aktualisiert.
+- **AudioManager (AudioManager.h/.cpp):** 3 neue Methoden — `setSourcePosition(handle, x, y, z)` (OpenAL `alSource3f(AL_POSITION)`), `setSourceSpatial(handle, is3D, minDist, maxDist, rolloff)` (setzt `AL_SOURCE_RELATIVE`, `AL_REFERENCE_DISTANCE`, `AL_MAX_DISTANCE`, `AL_ROLLOFF_FACTOR`), `updateListenerTransform(pos, forward, up)` (setzt `alListener3f(AL_POSITION)` + `alListenerfv(AL_ORIENTATION)`).
+- **Level-Serialisierung (EngineLevel.cpp):** `serializeAudioSourceComponent()` / `deserializeAudioSourceComponent()` für alle AudioSource-Felder (assetPath, assetId, is3D, minDistance, maxDistance, rolloffFactor, gain, loop, autoPlay). `runtimeHandle` wird beim Laden auf 0 gesetzt.
+- **Inspector (OutlinerPanel.cpp):** AudioSourceComponent-Inspektor — 3D-Checkbox (zeigt bedingt MinDistance/MaxDistance/Rolloff), Volume, Loop, AutoPlay, Asset-Pfad-Anzeige. "Add Component"-Dropdown um "Audio Source" erweitert.
+- **AudioPreviewTab (AudioPreviewTab.h/.cpp):** Neuer "Spatial Audio"-Abschnitt in der Metadaten-Ansicht — 2D/3D-Dropdown zur Auswahl des Audio-Modus. Bei 3D-Modus: Eingabefelder für MinDistance, MaxDistance, Rolloff. Änderungen werden sofort in die Audio-Asset-JSON-Datei (`m_is3D`, `m_minDistance`, `m_maxDistance`, `m_rolloffFactor`) persistiert.
+- **Listener-Sync (main.cpp):** Nach `audioManager.update()` wird die OpenAL-Listener-Position/Orientierung mit dem aktiven CameraComponent synchronisiert (YXZ-Euler → Forward/Up-Vektoren).
+- **GameplayAPI (GameplayAPI.h/.cpp):** `setAudioPosition(handle, x, y, z)` und `setAudioSpatial(handle, is3D, minDist, maxDist, rolloff)` hinzugefügt.
+- **INativeScript (INativeScript.h):** 11 Audio-Convenience-Methoden für C++-Scripts (createAudio, playAudio, playAudioHandle, setAudioVolume, getAudioVolume, pauseAudio, stopAudio, isAudioPlaying, invalidateAudioHandle, setAudioPosition, setAudioSpatial).
+- **Python-Bindings (AudioModule.cpp):** `set_audio_position(handle, x, y, z)` und `set_audio_spatial(handle, is_3d, min_dist, max_dist, rolloff)`.
+- **IntelliSense (engine.pyi):** Type-Stubs für `set_audio_position` und `set_audio_spatial`.
+- **Dateien:** `Components.h`, `ECS.h`, `ECS.cpp`, `AudioManager.h`, `AudioManager.cpp`, `EngineLevel.cpp`, `OutlinerPanel.cpp`, `AudioPreviewTab.h`, `AudioPreviewTab.cpp`, `main.cpp`, `GameplayAPI.h`, `GameplayAPI.cpp`, `INativeScript.h`, `AudioModule.cpp`, `engine.pyi`.
+
+## Vorherige Änderung (Transform Parenting – Vollständige Implementierung)
+
+- **TransformComponent (Components.h):** Erweitert um `parent` (uint, `InvalidEntity=UINT32_MAX`), `children` (vector<Entity>), `localPosition[3]`, `localRotation[3]`, `localScale[3]`, `dirty`-Flag. `InvalidEntity`-Sentinel als benannte Konstante.
+- **ECSManager (ECS.h/.cpp):** 8 neue Parenting-Methoden: `setParent()` (berechnet World→Local automatisch), `removeParent()` (erhält World-Position), `getParent()`, `getChildren()`, `getRoot()` (traversiert bis zur Wurzel), `isAncestorOf()` (transitiv), `updateWorldTransforms()` (top-down Dirty-Flag-Propagation über alle Entities), `markTransformDirty()` (markiert Entity + alle Kinder rekursiv). Interne Rotation-Helpers: `rotatePoint`/`inverseRotatePoint` (YXZ-Euler-Rotationsmatrix). `removeEntity()` bereinigt Kind-Referenzen beim Löschen.
+- **Level-Serialisierung (EngineLevel.cpp):** `serializeTransformComponent()` schreibt `parent`-ID + lokale Transforms wenn Entity einen Parent hat. `deserializeTransformComponent()` liest lokale Transforms mit Fallback auf World-Werte (Backward-Kompatibilität mit alten Levels). Deferred Parenting Pass in `prepareEcs()` — Parent-Child-Links werden erst nach Erstellung aller Entities aufgebaut.
+- **GameplayAPI (GameplayAPI.h/.cpp):** 13 neue Funktionen: `setParent`, `removeParent`, `getParent`, `getChildren`, `getChildCount`, `getRoot`, `isAncestorOf`, `getLocalPosition/Rotation/Scale`, `setLocalPosition/Rotation/Scale`. Bestehende Transform-Setter (`setPosition`, `setRotation`, `setScale`, `translate`, `rotate`) rufen jetzt `markTransformDirty()` auf.
+- **INativeScript (INativeScript.h):** 13 Convenience-Methoden für C++-Scripts — delegieren an GameplayAPI mit eigenem Entity.
+- **Python-Bindings (EntityModule.cpp):** 14 neue Funktionen im `engine.entity`-Modul: `set_parent`, `remove_parent`, `get_parent`, `get_children`, `get_child_count`, `get_root`, `is_ancestor_of`, `get/set_local_position`, `get/set_local_rotation`, `get/set_local_scale`. Bestehende Python-Transform-Setter markieren Dirty-Flag.
+- **IntelliSense (engine.pyi):** Alle Parenting-Funktionen mit vollständigen Type-Stubs dokumentiert.
+- **Physics-Integration (PhysicsWorld.cpp):** `updateWorldTransforms()` wird in `step()` vor `syncBodiesToBackend()` aufgerufen — garantiert korrekte World-Transforms für die Physics-Simulation.
+- **Dateien:** `Components.h`, `ECS.h`, `ECS.cpp`, `EngineLevel.cpp`, `GameplayAPI.h`, `GameplayAPI.cpp`, `INativeScript.h`, `EntityModule.cpp`, `engine.pyi`, `PhysicsWorld.cpp`.
+
+## Vorherige Änderung (Character Controller Build-Fixes)
+
+- **JoltBackend.cpp (DefaultBroadPhaseLayerFilter Fix):** `DefaultBroadPhaseLayerFilter`-Konstruktor verwendete fälschlicherweise `m_broadPhaseLayerInterface` (Typ `BroadPhaseLayerInterface`) statt `m_objectVsBroadPhaseFilter` (Typ `ObjectVsBroadPhaseLayerFilter`). Kompilierungsfehler C2665 behoben.
+- **CMakeLists.txt (PhysXCharacterKinematic Link):** `PhysXCharacterKinematic` fehlte in der PhysX-Linkerliste — `PxCreateControllerManager` (benötigt für `PhysXBackend::createCharacter()`) konnte nicht aufgelöst werden. LNK2019 behoben.
+- **PhysicsWorld.cpp (Gravity Init Order):** `m_backend->setGravity()` wurde aufgerufen, bevor `m_gravity` auf `(0, -9.81, 0)` initialisiert wurde — das Backend erhielt uninitialisierte Werte. Reihenfolge korrigiert: Gravity-Werte werden jetzt vor dem Backend-Aufruf gesetzt.
+- **Dateien:** `src/Physics/JoltBackend.cpp`, `src/Physics/CMakeLists.txt`, `src/Physics/PhysicsWorld.cpp`.
+
+## Vorherige Änderung (Backend-agnostischer Character Controller)
+
+- **CharacterControllerComponent (Components.h):** Neue ECS-Komponente mit Kapsel-Shape (radius, height), Movement-Parametern (maxSlopeAngle, stepUpHeight, skinWidth), Gravity-Settings (gravityFactor, maxFallSpeed) und Runtime-State (isGrounded, groundNormal, groundAngle, velocity). Exklusiv mit PhysicsComponent — eine Entity hat entweder Character Controller oder Rigidbody.
+- **ECS-Registrierung (ECS.h/.cpp):** `ComponentKind::CharacterController` (Index 13), `MaxComponentTypes` von 14 auf 15 erhöht. `ComponentTraits`-Spezialisierung, `SparseSet`-Storage, beide `getStorage()`-Überladungen erweitert. `initialize()`/`removeEntity()` aktualisiert.
+- **IPhysicsBackend-Erweiterung (IPhysicsBackend.h):** `CharacterHandle`, `CharacterDesc` (radius, height, maxSlopeAngle, stepUpHeight, skinWidth, position, rotationYDeg, entityId), `CharacterState` (position, isGrounded, groundNormal, groundAngle, velocity). 7 neue pure-virtual Methoden: `createCharacter`, `removeCharacter`, `removeAllCharacters`, `updateCharacter`, `getCharacterState`, `setCharacterPosition`, `getCharacterForEntity`.
+- **JoltBackend (JoltBackend.h/.cpp):** `CharacterVirtual`-Integration. `createCharacter()` erstellt `CapsuleShape` + `CharacterVirtualSettings` (MaxSlopeAngle, CharacterPadding). `updateCharacter()` nutzt `ExtendedUpdate` mit WalkStairs + StickToFloor. Ground-State aus `GetGroundState()` (OnGround/OnSteepGround/InAir). Entity→Handle Maps für Lifecycle-Management.
+- **PhysXBackend (PhysXBackend.h/.cpp):** `PxCapsuleController`-Integration über `PxControllerManager` (lazy-created). `createCharacter()` konfiguriert `PxCapsuleControllerDesc` (slopeLimit, stepOffset, contactOffset). `updateCharacter()` nutzt `controller->move()` mit Gravity-Akkumulation. Ground-Detection via `PxControllerCollisionFlag::eCOLLISION_DOWN`. Separater `m_controllerVerticalVel`-Tracker für Gravity.
+- **PhysicsWorld (PhysicsWorld.h/.cpp):** 3 neue Sync-Methoden: `syncCharactersToBackend()` (erstellt/entfernt Characters basierend auf ECS-Entities mit CharacterControllerComponent), `updateCharacters(dt)` (ruft backend->updateCharacter mit skalierter Gravitation auf), `syncCharactersFromBackend()` (schreibt Position/GroundState/Velocity zurück ins ECS). `step()` erweitert: Characters werden parallel zu Rigidbodies synchronisiert und nach jedem Physik-Schritt geupdated. `syncBodiesToBackend()` überspringt Entities mit CharacterControllerComponent.
+- **Dateien:** `Components.h`, `ECS.h`, `ECS.cpp`, `IPhysicsBackend.h`, `JoltBackend.h`, `JoltBackend.cpp`, `PhysXBackend.h`, `PhysXBackend.cpp`, `PhysicsWorld.h`, `PhysicsWorld.cpp`.
+
+## Aktuelle Änderung (PIE GameScripts DLL-Ladefix – RUNTIME_OUTPUT_DIRECTORY + CRT-Match + Diagnostik)
+
+- **RUNTIME_OUTPUT_DIRECTORY gesetzt:** `HorizonEngine` (und `HorizonEngineRuntime`) werden jetzt direkt nach `ENGINE_DEPLOY_DIR` gebaut. Zuvor landete die Exe im CMake-Build-Tree (`out/build/x64-release/DEBUG/`), wodurch `SDL_GetBasePath()` einen Pfad zurückgab, in dem das `Tools/`-Verzeichnis (Header, Libs) nicht existierte.
+- **CRT-Mismatch behoben (Error 1114):** `buildGameScriptsForPIE` hatte `--config RelWithDebInfo` hartcodiert. Wenn die Engine im Debug-Modus lief (Debug-CRT), wurde GameScripts.dll mit Release-CRT gebaut. Beim Laden über `LoadLibraryA` crashte die DLL-Initialisierung (STL-Objekte wie `std::string`/`std::function` über DLL-Grenze mit verschiedenen CRTs). Fix: Build-Config wird jetzt per `#ifdef _DEBUG` automatisch auf `Debug` bzw. `RelWithDebInfo` gesetzt — sowohl `CMAKE_BUILD_TYPE` (single-config) als auch `--config` (multi-config).
+- **DLL-Lade-Diagnostik:** `NativeScriptManager::loadGameplayDLL` loggt bei Fehlern jetzt den OS-spezifischen Fehlertext (`GetLastError`/`FormatMessageA` auf Windows, `dlerror` auf Linux).
+- **Fallback Tools-Pfad:** `buildGameScriptsForPIE` prüft, ob `Tools/` neben der Exe existiert. Falls nicht, wird im Elternverzeichnis nach `EngineBuild/Tools/` gesucht.
+- **Dateien:** `CMakeLists.txt`, `EditorApp.cpp`, `NativeScriptManager.cpp`.
+
+## Vorherige Änderung (IDE-Empfehlung → VS Code, IntelliSense Auto-Generierung)
+
+- **IDE-Empfehlung geändert:** Bei C++-Projekterstellung wird jetzt VS Code statt Visual Studio empfohlen. Download-Link auf `https://code.visualstudio.com/` aktualisiert.
+- **IntelliSense Auto-Generierung:** Bei neuen C++-Projekten (CppOnly/Both) wird `.vscode/c_cpp_properties.json` automatisch beim Erstellen generiert — IntelliSense ist sofort verfügbar.
+- **Dateien:** `EditorDialogs.cpp`, `EditorApp.h`, `main.cpp`.
+
+## Vorherige Änderung (Test-Fix – DiagnosticsRHI String-Vergleich)
+
+- **Test-Fix:** 2 fehlschlagende GTest-Tests (`RHITypeToStringOpenGL`, `RHITypeToStringVulkan`) repariert — `EXPECT_EQ` verglich `const char*` Pointer-Adressen statt String-Inhalte. Fix: `EXPECT_STREQ` verwendet. Alle 17 Tests bestehen jetzt.
+- **Dateien:** `tests/RendererAbstractionTests.cpp`.
+
+## Aktuelle Änderung (Scripting-Cleanup – Redundanzen entfernt, API vereinheitlicht)
+
+- **Cross-Script-Kommunikation vereinfacht:** `callScriptFunction` (nur C++→C++) und `callPythonFunctionOn` (nur Python) aus `GameplayAPI.h/.cpp` und `INativeScript.h` entfernt. Nur noch `callFunction(entity, funcName, args)` — routet automatisch zu C++ oder Python. `callPythonFunction` (Instanzmethode) ebenfalls entfernt — `callFunction` deckt den gleichen Fall ab.
+- **Logging konsolidiert:** `logInfo()`, `logWarning()`, `logError()` aus `GameplayAPI` und `INativeScript` entfernt. Nur noch `log(msg, level)` (level: 0=Info, 1=Warning, 2=Error). C++ und Python nutzen jetzt die gleiche API.
+- **Cross-Entity *Of-Methoden entfernt:** `getPositionOf/setPositionOf`, `getRotationOf/setRotationOf`, `getScaleOf/setScaleOf`, `getVelocityOf/setVelocityOf` aus `INativeScript.h` entfernt. C++-Scripts verwenden stattdessen `GameplayAPI::getPosition(entity, ...)` direkt für Cross-Entity-Zugriff.
+- **Physics aus entity-Modul entfernt:** `engine.entity.get_velocity/set_velocity/add_force/add_impulse` aus `EntityModule.cpp` entfernt — diese Funktionen existieren bereits in `engine.physics` und waren dort vollständiger (angular velocity, gravity, raycast, etc.). Einheitlicher Zugriff jetzt nur über `engine.physics`.
+- **call_native aus Python entfernt:** `engine.entity.call_native` entfernt — `engine.entity.call_function` routet automatisch und macht eine manuelle Unterscheidung zwischen C++ und Python überflüssig.
+- **Audio-Duplikate in engine.pyi entfernt:** `pause_audio_handle` und `stop_audio_handle` Duplikate entfernt (identisch mit `pause_audio`/`stop_audio`).
+- **engine.pyi aktualisiert:** Alle entfernten Funktionen aus den Type-Stubs entfernt. Typo `set_material_override_roughnessbbb` korrigiert.
+- **Dateien:** `GameplayAPI.h`, `GameplayAPI.cpp`, `INativeScript.h`, `EntityModule.cpp`, `PythonScripting.cpp`, `engine.pyi`.
+
+## Aktuelle Änderung (Scripting-Restrukturierung – Class-Based Model, Timer, Lifecycle-Vereinheitlichung, Vec3, SCRIPT_PROPERTY)
+
+- **ScriptValue Vec3-Erweiterung (INativeScript.h):** `ScriptValue::Vec3` Typ hinzugefügt (`float vec3Val[3]`, `makeVec3(x,y,z)`). `extractArg<float>` akzeptiert jetzt auch `Int`-Werte (automatische int→float Coercion) um Python-Typ-Fehler zu vermeiden.
+- **SCRIPT_PROPERTY Makros (INativeScript.h):** Neue Makros `SCRIPT_PROPERTY(name, defaultVal)`, `SCRIPT_PROPERTY_INT`, `SCRIPT_PROPERTY_BOOL`, `SCRIPT_PROPERTY_STRING` für editor-exponierte Script-Properties. Properties werden in `m_scriptProperties` Map gespeichert. Zugriff über `setProperty/getProperty/hasProperty/getPropertyNames`.
+- **entity.self() (EntityModule.cpp):** Neue Python-Funktion `engine.entity.self()` — gibt die Entity-ID des aktuell ausgeführten Scripts zurück (liest `ScriptDetail::s_currentEntity`).
+- **entity.get_position/get_rotation/get_scale (EntityModule.cpp):** Individuelle Accessor-Funktionen für Transform-Komponenten, die direkt `(x,y,z)` Tuples zurückgeben statt verschachtelter `get_transform()`-Aufrufe.
+- **Timer-Modul (TimerModule.cpp, NEU):** Neues `engine.timer` Submodul mit `delay(seconds, callback)`, `schedule(seconds, callback, repeat=False)`, `cancel(timer_id)`, `cancel_all()`. Timer werden pro Frame in `ProcessTimers(dt)` verarbeitet.
+- **Script Base Class (PythonScripting.cpp):** Neue `engine.Script` Basisklasse für klassenbasiertes Scripting. Entwickler erben von `engine.Script` und überschreiben `on_loaded()`, `tick(dt)`, `on_begin_overlap(other)`, `on_end_overlap(other)`, `on_destroy()`. Die Engine erstellt automatisch eine Instanz pro Entity und setzt `self.entity`. Funktionsbasierte Scripts (legacy) werden weiterhin unterstützt.
+- **Lifecycle-Namen vereinheitlicht:** Primäre Namen sind jetzt `on_loaded` (statt `onloaded`), `on_begin_overlap` (statt `on_entity_begin_overlap`), `on_end_overlap` (statt `on_entity_end_overlap`). Alte Namen werden als Fallback akzeptiert (nicht-breaking). Script-Templates in EditorApp.cpp, AssetManagerEditorWidgets.cpp, OutlinerPanel.cpp aktualisiert.
+- **Vec3 PyObject↔ScriptValue Konverter:** `ScriptValueToPyObject` gibt `(x,y,z)` Tuple für Vec3 zurück. `PyObjectToScriptValue` erkennt 3-Element-Float-Tuples und erzeugt `ScriptValue::Vec3`.
+- **engine.pyi aktualisiert:** `self()`, `get_position()`, `get_rotation()`, `get_scale()` in entity-Klasse. `timer`-Modul Stubs. `Script` Basisklasse mit vollständiger Dokumentation.
+- **Dateien:** `INativeScript.h` (Vec3, SCRIPT_PROPERTY, extractArg), `EntityModule.cpp` (self, get_position/rotation/scale, Vec3-Konverter), `TimerModule.cpp` (NEU), `ScriptingInternal.h` (Timer-Deklarationen), `PythonScripting.cpp` (Script-Klasse, Lifecycle-Namen, Timer-Integration, Vec3-Konverter), `CMakeLists.txt` (TimerModule), `engine.pyi` (alle neuen APIs), `EditorApp.cpp`/`AssetManagerEditorWidgets.cpp`/`OutlinerPanel.cpp` (Template-Updates).
+
 ## Aktuelle Änderung (Bootstrap – Bundled Tools immer lokal installieren)
 
 - `tools/bootstrap.ps1 (CMake)`: Bootstrap übersprang bisher den Download des portablen CMake, wenn ein System-CMake im PATH gefunden wurde (`Test-CommandExists 'cmake'`). Problem: Die Editor-Anwendung erbt nicht denselben PATH (z.B. VS Developer Shell fügt cmake hinzu, aber ein normaler User-Prozess nicht). **Fix:** Bootstrap installiert CMake **immer** lokal nach `Tools/cmake/`, unabhängig ob ein System-CMake existiert. Nur wenn bereits ein gebündeltes CMake in `Tools/cmake/bin/cmake.exe` vorhanden ist, wird der Download übersprungen. System-CMake wird nur noch als Info geloggt.

@@ -39,6 +39,26 @@ Log_Error: int
 
 class entity:
     @staticmethod
+    def self() -> int:
+        """Get the entity id of the currently executing script's entity."""
+        ...
+
+    @staticmethod
+    def get_position(entity: int) -> tuple[float, float, float]:
+        """Get entity position as (x, y, z). Returns (0,0,0) if no TransformComponent."""
+        ...
+
+    @staticmethod
+    def get_rotation(entity: int) -> tuple[float, float, float]:
+        """Get entity rotation as (pitch, yaw, roll). Returns (0,0,0) if no TransformComponent."""
+        ...
+
+    @staticmethod
+    def get_scale(entity: int) -> tuple[float, float, float]:
+        """Get entity scale as (sx, sy, sz). Returns (1,1,1) if no TransformComponent."""
+        ...
+
+    @staticmethod
     def create_entity() -> int:
         """Create an entity."""
         ...
@@ -155,36 +175,77 @@ class entity:
         ...
 
     @staticmethod
-    def call_native(entity: int, func_name: str, *args) -> object:
-        """Call a named function on the entity's C++ native script.
-        Returns the result from the C++ onScriptCall handler, or None if no native script is attached."""
-        ...
-
-    @staticmethod
     def call_function(entity: int, func_name: str, *args) -> object:
         """Call a named function on any entity's script (C++ or Python).
         Automatically routes to C++ (onScriptCall) first, then Python.
         Callers never need to know which language implements the function."""
         ...
 
+    # ── Transform Parenting ──────────────────────────────────────────
+
     @staticmethod
-    def get_velocity(entity: int) -> tuple[float, float, float]:
-        """Get linear velocity of an entity -> (x, y, z). Returns (0,0,0) if no PhysicsComponent."""
+    def set_parent(entity: int, parent: int) -> bool:
+        """Attach entity as a child of parent. Preserves world transform."""
         ...
 
     @staticmethod
-    def set_velocity(entity: int, x: float, y: float, z: float) -> bool:
-        """Set linear velocity of an entity with PhysicsComponent."""
+    def remove_parent(entity: int) -> bool:
+        """Detach entity from its parent. Preserves world transform."""
         ...
 
     @staticmethod
-    def add_force(entity: int, fx: float, fy: float, fz: float) -> bool:
-        """Apply a force (divided by mass) to an entity with PhysicsComponent."""
+    def get_parent(entity: int) -> int:
+        """Get parent entity id. Returns 0 if no parent."""
         ...
 
     @staticmethod
-    def add_impulse(entity: int, ix: float, iy: float, iz: float) -> bool:
-        """Apply a direct velocity impulse to an entity with PhysicsComponent."""
+    def get_children(entity: int) -> list[int]:
+        """Get list of direct child entity ids."""
+        ...
+
+    @staticmethod
+    def get_child_count(entity: int) -> int:
+        """Get number of direct children."""
+        ...
+
+    @staticmethod
+    def get_root(entity: int) -> int:
+        """Get root ancestor entity (walks up the parent chain)."""
+        ...
+
+    @staticmethod
+    def is_ancestor_of(ancestor: int, descendant: int) -> bool:
+        """Check if ancestor is a transitive parent of descendant."""
+        ...
+
+    @staticmethod
+    def get_local_position(entity: int) -> Optional[tuple[float, float, float]]:
+        """Get local position relative to parent."""
+        ...
+
+    @staticmethod
+    def set_local_position(entity: int, x: float, y: float, z: float) -> bool:
+        """Set local position relative to parent."""
+        ...
+
+    @staticmethod
+    def get_local_rotation(entity: int) -> Optional[tuple[float, float, float]]:
+        """Get local rotation relative to parent."""
+        ...
+
+    @staticmethod
+    def set_local_rotation(entity: int, pitch: float, yaw: float, roll: float) -> bool:
+        """Set local rotation relative to parent."""
+        ...
+
+    @staticmethod
+    def get_local_scale(entity: int) -> Optional[tuple[float, float, float]]:
+        """Get local scale relative to parent."""
+        ...
+
+    @staticmethod
+    def set_local_scale(entity: int, sx: float, sy: float, sz: float) -> bool:
+        """Set local scale relative to parent."""
         ...
 
     @staticmethod
@@ -204,7 +265,7 @@ class entity:
         ...
 
     @staticmethod
-    def set_material_override_roughnessbbb(entity: int, roughness: float) -> bool:
+    def set_material_override_roughness(entity: int, roughness: float) -> bool:
         """Set per-entity roughness override (0.0 - 1.0)."""
         ...
 
@@ -306,11 +367,6 @@ class audio:
         ...
 
     @staticmethod
-    def pause_audio_handle(handle: int) -> bool:
-        """Pause a playing audio handle."""
-        ...
-
-    @staticmethod
     def is_audio_playing(handle: int) -> bool:
         """Check if an audio handle is playing."""
         ...
@@ -326,13 +382,18 @@ class audio:
         ...
 
     @staticmethod
-    def stop_audio_handle(handle: int) -> bool:
-        """Stop a playing audio handle."""
+    def invalidate_audio_handle(handle: int) -> bool:
+        """Invalidate an audio handle."""
         ...
 
     @staticmethod
-    def invalidate_audio_handle(handle: int) -> bool:
-        """Invalidate an audio handle."""
+    def set_audio_position(handle: int, x: float, y: float, z: float) -> bool:
+        """Set the 3D position of an audio source."""
+        ...
+
+    @staticmethod
+    def set_audio_spatial(handle: int, is_3d: bool, min_dist: float = 1.0, max_dist: float = 50.0, rolloff: float = 1.0) -> bool:
+        """Set whether an audio source is 3D (positional) or 2D (non-spatial), with optional distance parameters."""
         ...
 
 # ---------------------------------------------------------------------------
@@ -1448,6 +1509,89 @@ class editor:
     @staticmethod
     def pi() -> float:
         """Return the constant pi."""
+        ...
+
+# ---------------------------------------------------------------------------
+# engine.timer – Time-based scheduling
+# ---------------------------------------------------------------------------
+
+class timer:
+    @staticmethod
+    def delay(seconds: float, callback: Callable[[], None]) -> int:
+        """Call a function after a delay in seconds. Returns a timer id."""
+        ...
+
+    @staticmethod
+    def schedule(seconds: float, callback: Callable[[], None], *, repeat: bool = False) -> int:
+        """Schedule a callback after a delay. If repeat=True, fires repeatedly.
+        Returns a timer id."""
+        ...
+
+    @staticmethod
+    def cancel(timer_id: int) -> bool:
+        """Cancel a scheduled timer by id."""
+        ...
+
+    @staticmethod
+    def cancel_all() -> bool:
+        """Cancel all active timers."""
+        ...
+
+# ---------------------------------------------------------------------------
+# engine.Script – Base class for class-based Python scripts
+# ---------------------------------------------------------------------------
+
+class Script:
+    """Base class for Python gameplay scripts.
+
+    Subclass this and override lifecycle methods. The engine automatically
+    creates one instance per entity and manages the entity property.
+
+    Example::
+
+        import engine
+
+        class PlayerController(engine.Script):
+            def on_loaded(self):
+                engine.logging.log(f"Player {self.entity} spawned")
+
+            def tick(self, dt: float):
+                pos = engine.entity.get_position(self.entity)
+                # move logic here
+
+            def on_begin_overlap(self, other_entity: int):
+                pass
+
+            def on_end_overlap(self, other_entity: int):
+                pass
+
+            def on_destroy(self):
+                pass
+    """
+
+    @property
+    def entity(self) -> int:
+        """The entity id this script instance is attached to (set by the engine)."""
+        ...
+
+    def on_loaded(self) -> None:
+        """Called once when the entity is first seen by the scripting system."""
+        ...
+
+    def tick(self, dt: float) -> None:
+        """Called every frame with the delta time in seconds."""
+        ...
+
+    def on_begin_overlap(self, other_entity: int) -> None:
+        """Called when a physics overlap begins with another entity."""
+        ...
+
+    def on_end_overlap(self, other_entity: int) -> None:
+        """Called when a physics overlap ends with another entity."""
+        ...
+
+    def on_destroy(self) -> None:
+        """Called when the entity is removed."""
         ...
 
 # ---------------------------------------------------------------------------

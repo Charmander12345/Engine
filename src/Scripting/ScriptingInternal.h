@@ -52,6 +52,10 @@ namespace ScriptDetail
     void InvokeKeyCallbacks(PyObject* callback, int key);
     void InvokeKeyCallbacksForKey(const std::unordered_map<int, std::vector<EntityCallback>>& map, int key);
     void ClearKeyCallbacks();
+
+    // Timer helpers (implemented in TimerModule.cpp)
+    void ProcessTimers(float dt);
+    void ClearTimers();
 }
 
 // Module creation functions (implemented in separate .cpp files)
@@ -66,6 +70,7 @@ PyObject* CreateDiagnosticsModule();
 PyObject* CreateLoggingModule();
 PyObject* CreateUIModule();
 PyObject* CreateGlobalStateModule();
+PyObject* CreateTimerModule();
 #if ENGINE_EDITOR
 PyObject* CreateEditorModule();
 #endif

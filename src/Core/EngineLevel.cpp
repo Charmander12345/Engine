@@ -1,6 +1,7 @@
 #include "EngineLevel.h"
 
 #include <algorithm>
+#include <cstring>
 
 #include "../Logger/Logger.h"
 
@@ -94,11 +95,19 @@ static void deserializeFloat3(const json& value, float outValues[3])
 
 static json serializeTransformComponent(const ECS::TransformComponent& component)
 {
-	return json{
+	json j = json{
 		{"position", serializeFloat3(component.position)},
 		{"rotation", serializeFloat3(component.rotation)},
 		{"scale", serializeFloat3(component.scale)}
 	};
+	if (component.parent != ECS::InvalidEntity)
+	{
+		j["parent"] = component.parent;
+		j["localPosition"] = serializeFloat3(component.localPosition);
+		j["localRotation"] = serializeFloat3(component.localRotation);
+		j["localScale"] = serializeFloat3(component.localScale);
+	}
+	return j;
 }
 
 static void deserializeTransformComponent(const json& value, ECS::TransformComponent& component)
@@ -119,6 +128,33 @@ static void deserializeTransformComponent(const json& value, ECS::TransformCompo
 	{
 		deserializeFloat3(value.at("scale"), component.scale);
 	}
+	// Local transform & parent (set during deferred parenting pass)
+	if (value.contains("localPosition"))
+	{
+		deserializeFloat3(value.at("localPosition"), component.localPosition);
+	}
+	else
+	{
+		std::memcpy(component.localPosition, component.position, sizeof(component.localPosition));
+	}
+	if (value.contains("localRotation"))
+	{
+		deserializeFloat3(value.at("localRotation"), component.localRotation);
+	}
+	else
+	{
+		std::memcpy(component.localRotation, component.rotation, sizeof(component.localRotation));
+	}
+	if (value.contains("localScale"))
+	{
+		deserializeFloat3(value.at("localScale"), component.localScale);
+	}
+	else
+	{
+		std::memcpy(component.localScale, component.scale, sizeof(component.localScale));
+	}
+	// Parent ID is read separately in prepareEcs for deferred linking
+	component.dirty = false;
 }
 
 static json serializeMeshComponent(const ECS::MeshComponent& component)
@@ -514,6 +550,35 @@ static void deserializeParticleEmitterComponent(const json& value, ECS::Particle
 	if (value.contains("loop"))          component.loop          = value.at("loop").get<bool>();
 }
 
+static json serializeAudioSourceComponent(const ECS::AudioSourceComponent& component)
+{
+	return json{
+		{"assetPath",      component.assetPath},
+		{"assetId",        component.assetId},
+		{"is3D",           component.is3D},
+		{"minDistance",     component.minDistance},
+		{"maxDistance",     component.maxDistance},
+		{"rolloffFactor",   component.rolloffFactor},
+		{"gain",           component.gain},
+		{"loop",           component.loop},
+		{"autoPlay",       component.autoPlay}
+	};
+}
+
+static void deserializeAudioSourceComponent(const json& value, ECS::AudioSourceComponent& component)
+{
+	if (!value.is_object()) return;
+	if (value.contains("assetPath"))      component.assetPath      = value.at("assetPath").get<std::string>();
+	if (value.contains("assetId"))        component.assetId        = value.at("assetId").get<unsigned int>();
+	if (value.contains("is3D"))           component.is3D           = value.at("is3D").get<bool>();
+	if (value.contains("minDistance"))     component.minDistance     = value.at("minDistance").get<float>();
+	if (value.contains("maxDistance"))     component.maxDistance     = value.at("maxDistance").get<float>();
+	if (value.contains("rolloffFactor"))   component.rolloffFactor   = value.at("rolloffFactor").get<float>();
+	if (value.contains("gain"))           component.gain           = value.at("gain").get<float>();
+	if (value.contains("loop"))           component.loop           = value.at("loop").get<bool>();
+	if (value.contains("autoPlay"))       component.autoPlay       = value.at("autoPlay").get<bool>();
+}
+
 static void deserializeNameComponent(const json& value, ECS::NameComponent& component)
 {
 	if (value.is_object() && value.contains("displayName"))
@@ -722,6 +787,13 @@ if (componentsJson.contains("ParticleEmitter"))
 	deserializeParticleEmitterComponent(componentsJson.at("ParticleEmitter"), component);
 	m_ecs->addComponent<ECS::ParticleEmitterComponent>(entity, component);
 }
+if (componentsJson.contains("AudioSource"))
+{
+	ECS::AudioSourceComponent component;
+	deserializeAudioSourceComponent(componentsJson.at("AudioSource"), component);
+	component.runtimeHandle = 0; // never restore runtime handle
+	m_ecs->addComponent<ECS::AudioSourceComponent>(entity, component);
+}
 			}
 		}
 
@@ -733,6 +805,31 @@ if (componentsJson.contains("ParticleEmitter"))
 		}
 
 		onEntityAdded(entity);
+	}
+
+	// ── Deferred parenting pass ─────────────────────────────────────
+	// All entities have been created; now set up parent-child links.
+	for (const auto& entityJson : entitiesJson)
+	{
+		if (!entityJson.is_object() || !entityJson.contains("id")) continue;
+		if (!entityJson.contains("components")) continue;
+		const auto& componentsJson = entityJson.at("components");
+		if (!componentsJson.is_object() || !componentsJson.contains("Transform")) continue;
+		const auto& tJson = componentsJson.at("Transform");
+		if (!tJson.contains("parent")) continue;
+
+		ECS::Entity entityId = entityJson.at("id").get<ECS::Entity>();
+		ECS::Entity parentId = tJson.at("parent").get<ECS::Entity>();
+		if (parentId == ECS::InvalidEntity) continue;
+
+		auto* tc = m_ecs->getComponent<ECS::TransformComponent>(entityId);
+		auto* ptc = m_ecs->getComponent<ECS::TransformComponent>(parentId);
+		if (tc && ptc)
+		{
+			tc->parent = parentId;
+			ptc->children.push_back(entityId);
+			tc->dirty = false;
+		}
 	}
 
 	Logger::Instance().log(Logger::Category::Engine,
@@ -942,6 +1039,10 @@ json EngineLevel::serializeEcsEntities() const
 if (const auto* component = ecs.getComponent<ECS::ParticleEmitterComponent>(entity))
 {
 	componentsJson["ParticleEmitter"] = serializeParticleEmitterComponent(*component);
+}
+if (const auto* component = ecs.getComponent<ECS::AudioSourceComponent>(entity))
+{
+	componentsJson["AudioSource"] = serializeAudioSourceComponent(*component);
 }
 
 entityJson["components"] = componentsJson;

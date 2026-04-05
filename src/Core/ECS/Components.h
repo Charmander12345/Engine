@@ -1,16 +1,34 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <cstdint>
 #include "../SkeletalData.h"
 
 
 namespace ECS
 {
+	/// Invalid entity sentinel used for "no parent".
+	static constexpr unsigned int InvalidEntity = UINT32_MAX;
+
 	struct TransformComponent
 	{
+		// ── World-space values (computed from parent + local) ────────
 		float position[3]{ 0.0f, 0.0f, 0.0f };
 		float rotation[3]{ 0.0f, 0.0f, 0.0f }; // Euler angles in degrees
 		float scale[3]{ 1.0f, 1.0f, 1.0f };
+
+		// ── Local-space values (relative to parent) ─────────────────
+		float localPosition[3]{ 0.0f, 0.0f, 0.0f };
+		float localRotation[3]{ 0.0f, 0.0f, 0.0f };
+		float localScale[3]{ 1.0f, 1.0f, 1.0f };
+
+		// ── Hierarchy ───────────────────────────────────────────────
+		unsigned int parent{ InvalidEntity };
+		std::vector<unsigned int> children;
+
+		/// When true the world transform needs recomputation from the
+		/// local transform and the parent chain.
+		bool dirty{ true };
 	};
 
 	struct MeshComponent
@@ -158,6 +176,45 @@ namespace ECS
 			float maxDistance{ 0.0f }; // 0 = fallback (lowest quality / farthest)
 		};
 		std::vector<LodLevel> levels;
+	};
+
+	/// Character Controller – kinematic capsule for player/NPC movement.
+	/// Mutually exclusive with PhysicsComponent (entity has either CC or Rigidbody).
+	struct CharacterControllerComponent
+	{
+		// ── Shape (Capsule) ─────────────────────────────────
+		float radius{ 0.3f };          ///< Capsule radius (meters)
+		float height{ 1.8f };          ///< Total height including hemispherical caps
+
+		// ── Movement Parameters ─────────────────────────────
+		float maxSlopeAngle{ 45.0f };  ///< Max walkable slope angle (degrees)
+		float stepUpHeight{ 0.3f };    ///< Max step-up height (meters)
+		float skinWidth{ 0.02f };      ///< Collision skin / contact offset
+
+		// ── Gravity & Falling ───────────────────────────────
+		float gravityFactor{ 1.0f };   ///< Scales world gravity (0 = no gravity)
+		float maxFallSpeed{ 50.0f };   ///< Terminal velocity (m/s)
+
+		// ── Runtime State (not serialized) ──────────────────
+		bool  isGrounded{ false };
+		float groundNormal[3]{ 0.0f, 1.0f, 0.0f };
+		float groundAngle{ 0.0f };     ///< Current ground slope in degrees
+		float velocity[3]{ 0.0f, 0.0f, 0.0f }; ///< Current movement velocity
+	};
+
+	/// Audio source – plays audio from the entity's position (3D) or globally (2D).
+	struct AudioSourceComponent
+	{
+		std::string assetPath;                   ///< Content-relative path to audio asset
+		unsigned int assetId{ 0 };               ///< Resolved asset id
+		bool is3D{ false };                      ///< true = positional 3D, false = 2D (non-spatial)
+		float minDistance{ 1.0f };               ///< Reference distance for 3D attenuation
+		float maxDistance{ 50.0f };              ///< Max audible distance for 3D
+		float rolloffFactor{ 1.0f };             ///< Rolloff factor for 3D attenuation
+		float gain{ 1.0f };                      ///< Volume (0..1+)
+		bool loop{ false };                      ///< Loop playback
+		bool autoPlay{ false };                  ///< Start playing automatically on level load
+		unsigned int runtimeHandle{ 0 };         ///< Runtime-only: AudioManager source handle (not serialized)
 	};
 
 	/// Particle emitter – spawns billboard particles from the entity's position.

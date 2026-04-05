@@ -400,6 +400,27 @@ foreach(_cfg DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
     set(CMAKE_PDB_OUTPUT_DIRECTORY_${_cfg_upper} "${ENGINE_DEPLOY_DIR}")
 endforeach()
 
+# Ensure the executable is built directly into the deploy directory so that
+# SDL_GetBasePath() returns a path where Tools/ (headers, libs) already exist.
+# Without this, VS launches from the CMake build tree and PIE builds fail
+# because the generated GameScripts CMakeLists cannot find the headers/libs.
+set_target_properties(HorizonEngine PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${ENGINE_DEPLOY_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${ENGINE_DEPLOY_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${ENGINE_DEPLOY_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${ENGINE_DEPLOY_DIR}"
+)
+if(ENGINE_BUILD_RUNTIME)
+    set_target_properties(HorizonEngineRuntime PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${ENGINE_DEPLOY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${ENGINE_DEPLOY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${ENGINE_DEPLOY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${ENGINE_DEPLOY_DIR}"
+    )
+endif()
+
 if(MSVC)
     set_target_properties(HorizonEngine PROPERTIES
         PDB_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}"

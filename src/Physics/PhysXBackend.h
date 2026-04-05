@@ -18,6 +18,8 @@ namespace physx {
     class PxDefaultCpuDispatcher;
     class PxRigidActor;
     class PxPvd;
+    class PxControllerManager;
+    class PxController;
 }
 
 /// NVIDIA PhysX 5.x implementation of IPhysicsBackend.
@@ -62,6 +64,19 @@ public:
 
     BodyHandle getBodyForEntity(uint32_t entity) const override;
 
+    // ── Character Controller ────────────────────────────────────────
+    CharacterHandle createCharacter(const CharacterDesc& desc) override;
+    void            removeCharacter(CharacterHandle handle)    override;
+    void            removeAllCharacters()                      override;
+    void updateCharacter(CharacterHandle handle,
+                         float dt,
+                         float desiredVelX, float desiredVelY, float desiredVelZ,
+                         float gravityX, float gravityY, float gravityZ) override;
+    CharacterState getCharacterState(CharacterHandle handle) const override;
+    void setCharacterPosition(CharacterHandle handle,
+                              float x, float y, float z) override;
+    CharacterHandle getCharacterForEntity(uint32_t entity) const override;
+
 private:
     float m_gravity[3]{ 0.0f, -9.81f, 0.0f };
 
@@ -88,6 +103,14 @@ private:
     uint64_t m_nextHandle{ 1 };
     std::map<uint64_t, physx::PxRigidActor*> m_handleToActor;
     std::map<physx::PxRigidActor*, uint64_t> m_actorToHandle;
+
+    // ── Character Controller ────────────────────────────────────────
+    physx::PxControllerManager*               m_controllerManager{ nullptr };
+    std::map<CharacterHandle, physx::PxController*> m_handleToController;
+    std::map<uint32_t, CharacterHandle>        m_entityToControllerHandle;
+    CharacterHandle                            m_nextControllerHandle{ 1 };
+    // Per-controller vertical velocity (PhysX CCT doesn't track this internally)
+    std::map<CharacterHandle, float>           m_controllerVerticalVel;
 
     bool m_initialized{ false };
 

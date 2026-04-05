@@ -189,6 +189,8 @@ void PhysXBackend::shutdown()
 {
     if (!m_initialized) return;
 
+    removeAllCharacters();
+    if (m_controllerManager) { m_controllerManager->release(); m_controllerManager = nullptr; }
     removeAllBodies();
 
     if (m_scene)       { m_scene->release();       m_scene = nullptr; }
@@ -544,4 +546,174 @@ IPhysicsBackend::BodyHandle PhysXBackend::getBodyForEntity(uint32_t entity) cons
     if (it == m_entityToActor.end()) return InvalidBody;
     auto hit = m_actorToHandle.find(it->second);
     return (hit != m_actorToHandle.end()) ? hit->second : InvalidBody;
+}
+
+// ── Character Controller (PhysX PxController) ──────────────────────────
+
+IPhysicsBackend::CharacterHandle PhysXBackend::createCharacter(const CharacterDesc& desc)
+{
+    if (!m_physics || !m_scene) return InvalidCharacter;
+
+    // Lazy-create the controller manager
+    if (!m_controllerManager)
+        m_controllerManager = PxCreateControllerManager(*m_scene);
+
+    if (!m_controllerManager) return InvalidCharacter;
+
+    // Capsule: PhysX height = cylinder height (total - 2*radius)
+    float cylinderHeight = desc.height - 2.0f * desc.radius;
+    if (cylinderHeight < 0.0f) cylinderHeight = 0.02f;
+
+    PxCapsuleControllerDesc cctDesc;
+    cctDesc.radius        = desc.radius;
+    cctDesc.height        = cylinderHeight;
+    cctDesc.slopeLimit    = std::cos(desc.maxSlopeAngle * (3.14159265358979f / 180.0f));
+    cctDesc.stepOffset    = desc.stepUpHeight;
+    cctDesc.contactOffset = desc.skinWidth;
+    cctDesc.material      = m_defaultMaterial;
+    cctDesc.position      = PxExtendedVec3(desc.position[0], desc.position[1], desc.position[2]);
+    cctDesc.upDirection   = PxVec3(0, 1, 0);
+
+    if (!cctDesc.isValid())
+    {
+        Logger::Instance().log(Logger::Category::Engine,
+            "PhysX: Invalid CapsuleControllerDesc", Logger::LogLevel::ERROR);
+        return InvalidCharacter;
+    }
+
+    PxController* controller = m_controllerManager->createController(cctDesc);
+    if (!controller)
+    {
+        Logger::Instance().log(Logger::Category::Engine,
+            "PhysX: Failed to create PxCapsuleController", Logger::LogLevel::ERROR);
+        return InvalidCharacter;
+    }
+
+    CharacterHandle handle = m_nextControllerHandle++;
+    m_handleToController[handle] = controller;
+    m_entityToControllerHandle[desc.entityId] = handle;
+    m_controllerVerticalVel[handle] = 0.0f;
+
+    return handle;
+}
+
+void PhysXBackend::removeCharacter(CharacterHandle handle)
+{
+    auto it = m_handleToController.find(handle);
+    if (it == m_handleToController.end()) return;
+
+    it->second->release();
+
+    for (auto eit = m_entityToControllerHandle.begin(); eit != m_entityToControllerHandle.end(); ++eit)
+    {
+        if (eit->second == handle)
+        {
+            m_entityToControllerHandle.erase(eit);
+            break;
+        }
+    }
+
+    m_handleToController.erase(it);
+    m_controllerVerticalVel.erase(handle);
+}
+
+void PhysXBackend::removeAllCharacters()
+{
+    for (auto& [handle, controller] : m_handleToController)
+        controller->release();
+
+    m_handleToController.clear();
+    m_entityToControllerHandle.clear();
+    m_controllerVerticalVel.clear();
+}
+
+void PhysXBackend::updateCharacter(CharacterHandle handle,
+                                    float dt,
+                                    float desiredVelX, float desiredVelY, float desiredVelZ,
+                                    float gravityX, float gravityY, float gravityZ)
+{
+    auto it = m_handleToController.find(handle);
+    if (it == m_handleToController.end()) return;
+
+    PxController* controller = it->second;
+
+    // Track vertical velocity for gravity accumulation
+    float& verticalVel = m_controllerVerticalVel[handle];
+
+    // Check if grounded from previous frame
+    PxControllerState state;
+    controller->getState(state);
+    bool wasGrounded = (state.collisionFlags & PxControllerCollisionFlag::eCOLLISION_DOWN) != 0;
+
+    if (wasGrounded)
+    {
+        // On ground: use desired Y velocity (for jumps), reset accumulated gravity
+        verticalVel = desiredVelY;
+    }
+    else
+    {
+        // In air: accumulate gravity
+        verticalVel += gravityY * dt;
+    }
+
+    // Build displacement
+    PxVec3 displacement;
+    displacement.x = desiredVelX * dt;
+    displacement.y = verticalVel * dt;
+    displacement.z = desiredVelZ * dt;
+
+    PxControllerFilters filters;
+    controller->move(displacement, 0.001f, dt, filters);
+}
+
+IPhysicsBackend::CharacterState PhysXBackend::getCharacterState(CharacterHandle handle) const
+{
+    CharacterState result{};
+    auto it = m_handleToController.find(handle);
+    if (it == m_handleToController.end()) return result;
+
+    const PxController* controller = it->second;
+
+    PxExtendedVec3 pos = controller->getPosition();
+    result.position[0] = static_cast<float>(pos.x);
+    result.position[1] = static_cast<float>(pos.y);
+    result.position[2] = static_cast<float>(pos.z);
+
+    // Ground detection
+    PxControllerState state;
+    const_cast<PxController*>(controller)->getState(state);
+    result.isGrounded = (state.collisionFlags & PxControllerCollisionFlag::eCOLLISION_DOWN) != 0;
+
+    if (result.isGrounded && state.touchedShape)
+    {
+        // Approximate ground normal from the touched shape
+        // For a flat ground this is (0,1,0); for slopes we'd need a sweep query
+        result.groundNormal[0] = 0.0f;
+        result.groundNormal[1] = 1.0f;
+        result.groundNormal[2] = 0.0f;
+        result.groundAngle = 0.0f;
+    }
+
+    // Velocity
+    auto vit = m_controllerVerticalVel.find(handle);
+    result.velocity[1] = (vit != m_controllerVerticalVel.end()) ? vit->second : 0.0f;
+
+    return result;
+}
+
+void PhysXBackend::setCharacterPosition(CharacterHandle handle,
+                                         float x, float y, float z)
+{
+    auto it = m_handleToController.find(handle);
+    if (it == m_handleToController.end()) return;
+
+    it->second->setPosition(PxExtendedVec3(x, y, z));
+}
+
+IPhysicsBackend::CharacterHandle PhysXBackend::getCharacterForEntity(uint32_t entity) const
+{
+    auto it = m_entityToControllerHandle.find(entity);
+    if (it != m_entityToControllerHandle.end())
+        return it->second;
+    return InvalidCharacter;
 }

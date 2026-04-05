@@ -29,6 +29,11 @@ public:
         size_t       dataBytes{ 0 };
         float        durationSeconds{ 0.0f };
         std::string  displayName;
+        // Spatial audio settings (stored in asset JSON)
+        bool         is3D{ false };
+        float        minDistance{ 1.0f };
+        float        maxDistance{ 50.0f };
+        float        rolloffFactor{ 1.0f };
     };
 
     explicit AudioPreviewTab(UIManager* uiManager, Renderer* renderer);

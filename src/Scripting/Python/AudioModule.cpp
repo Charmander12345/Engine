@@ -319,6 +319,43 @@ namespace
         Py_RETURN_TRUE;
     }
 
+    PyObject* py_set_audio_position(PyObject*, PyObject* args)
+    {
+        unsigned long handle = 0;
+        float x = 0.0f, y = 0.0f, z = 0.0f;
+        if (!PyArg_ParseTuple(args, "kfff", &handle, &x, &y, &z))
+        {
+            return nullptr;
+        }
+
+        if (!AudioManager::Instance().setSourcePosition(static_cast<unsigned int>(handle), x, y, z))
+        {
+            PyErr_SetString(PyExc_ValueError, "Audio handle not found.");
+            return nullptr;
+        }
+
+        Py_RETURN_TRUE;
+    }
+
+    PyObject* py_set_audio_spatial(PyObject*, PyObject* args)
+    {
+        unsigned long handle = 0;
+        int is3D = 0;
+        float minDist = 1.0f, maxDist = 50.0f, rolloff = 1.0f;
+        if (!PyArg_ParseTuple(args, "kp|fff", &handle, &is3D, &minDist, &maxDist, &rolloff))
+        {
+            return nullptr;
+        }
+
+        if (!AudioManager::Instance().setSourceSpatial(static_cast<unsigned int>(handle), is3D != 0, minDist, maxDist, rolloff))
+        {
+            PyErr_SetString(PyExc_ValueError, "Audio handle not found.");
+            return nullptr;
+        }
+
+        Py_RETURN_TRUE;
+    }
+
     // ── Method table & module definition ────────────────────────────────
 
     PyMethodDef AudioMethods[] = {
@@ -336,6 +373,8 @@ namespace
         { "stop_audio", py_stop_audio, METH_VARARGS, "Stop a playing audio handle." },
         { "stop_audio_handle", py_stop_audio_handle, METH_VARARGS, "Stop a playing audio handle." },
         { "invalidate_audio_handle", py_invalidate_audio_handle, METH_VARARGS, "Invalidate an audio handle." },
+        { "set_audio_position", py_set_audio_position, METH_VARARGS, "Set 3D position of an audio source (handle, x, y, z)." },
+        { "set_audio_spatial", py_set_audio_spatial, METH_VARARGS, "Set audio source spatial mode (handle, is_3d, min_dist=1, max_dist=50, rolloff=1)." },
         { nullptr, nullptr, 0, nullptr }
     };
 

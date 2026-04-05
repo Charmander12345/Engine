@@ -92,6 +92,10 @@ public:
     /// Returns true if a context menu was shown.
     bool handleContentBrowserContextMenu(const Vec2& mousePos);
 
+    /// Generate VS Code IntelliSense config (.vscode/c_cpp_properties.json)
+    /// for C++ native scripting in the given project.
+    void generateVSCodeConfig(const std::string& projectPath);
+
 private:
     void registerWidgets();
     void registerClickEvents();
@@ -104,7 +108,6 @@ private:
     void pollPIEBuild();
     void dismissPIEBuildPopup();
     bool handleDelete();
-    void generateVSCodeConfig(const std::string& projectPath);
 
     IEditorBridge& m_bridge;
 

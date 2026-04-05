@@ -128,6 +128,56 @@ namespace
 
     // ── engine.entity functions ─────────────────────────────────────────
 
+    PyObject* py_self(PyObject*, PyObject*)
+    {
+        return PyLong_FromUnsignedLong(ScriptDetail::s_currentEntity);
+    }
+
+    PyObject* py_get_position(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        if (!PyArg_ParseTuple(args, "k", &entity))
+        {
+            return nullptr;
+        }
+        const auto* transform = GetTransformComponent(static_cast<ECS::Entity>(entity));
+        if (!transform)
+        {
+            Py_RETURN_NONE;
+        }
+        return Py_BuildValue("(fff)", transform->position[0], transform->position[1], transform->position[2]);
+    }
+
+    PyObject* py_get_rotation(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        if (!PyArg_ParseTuple(args, "k", &entity))
+        {
+            return nullptr;
+        }
+        const auto* transform = GetTransformComponent(static_cast<ECS::Entity>(entity));
+        if (!transform)
+        {
+            Py_RETURN_NONE;
+        }
+        return Py_BuildValue("(fff)", transform->rotation[0], transform->rotation[1], transform->rotation[2]);
+    }
+
+    PyObject* py_get_scale(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        if (!PyArg_ParseTuple(args, "k", &entity))
+        {
+            return nullptr;
+        }
+        const auto* transform = GetTransformComponent(static_cast<ECS::Entity>(entity));
+        if (!transform)
+        {
+            Py_RETURN_NONE;
+        }
+        return Py_BuildValue("(fff)", transform->scale[0], transform->scale[1], transform->scale[2]);
+    }
+
     PyObject* py_create_entity(PyObject*, PyObject*)
     {
         const ECS::Entity entity = ECS::createEntity();
@@ -251,6 +301,7 @@ namespace
         transform->position[0] = x;
         transform->position[1] = y;
         transform->position[2] = z;
+        ECS::ECSManager::Instance().markTransformDirty(static_cast<ECS::Entity>(entity));
         Py_RETURN_TRUE;
     }
 
@@ -273,6 +324,7 @@ namespace
         transform->position[0] += dx;
         transform->position[1] += dy;
         transform->position[2] += dz;
+        ECS::ECSManager::Instance().markTransformDirty(static_cast<ECS::Entity>(entity));
         Py_RETURN_TRUE;
     }
 
@@ -295,6 +347,7 @@ namespace
         transform->rotation[0] = pitch;
         transform->rotation[1] = yaw;
         transform->rotation[2] = roll;
+        ECS::ECSManager::Instance().markTransformDirty(static_cast<ECS::Entity>(entity));
         Py_RETURN_TRUE;
     }
 
@@ -317,6 +370,7 @@ namespace
         transform->rotation[0] += dp;
         transform->rotation[1] += dy;
         transform->rotation[2] += dr;
+        ECS::ECSManager::Instance().markTransformDirty(static_cast<ECS::Entity>(entity));
         Py_RETURN_TRUE;
     }
 
@@ -339,6 +393,7 @@ namespace
         transform->scale[0] = sx;
         transform->scale[1] = sy;
         transform->scale[2] = sz;
+        ECS::ECSManager::Instance().markTransformDirty(static_cast<ECS::Entity>(entity));
         Py_RETURN_TRUE;
     }
 
@@ -461,6 +516,21 @@ namespace
             const char* str = PyUnicode_AsUTF8(obj);
             return str ? ScriptValue::makeString(str) : ScriptValue{};
         }
+        if (PyTuple_Check(obj) && PyTuple_Size(obj) == 3)
+        {
+            PyObject* px = PyTuple_GetItem(obj, 0);
+            PyObject* py = PyTuple_GetItem(obj, 1);
+            PyObject* pz = PyTuple_GetItem(obj, 2);
+            if ((PyFloat_Check(px) || PyLong_Check(px)) &&
+                (PyFloat_Check(py) || PyLong_Check(py)) &&
+                (PyFloat_Check(pz) || PyLong_Check(pz)))
+            {
+                float x = static_cast<float>(PyFloat_AsDouble(px));
+                float y = static_cast<float>(PyFloat_AsDouble(py));
+                float z = static_cast<float>(PyFloat_AsDouble(pz));
+                return ScriptValue::makeVec3(x, y, z);
+            }
+        }
         return ScriptValue{};
     }
 
@@ -472,46 +542,10 @@ namespace
         case ScriptValue::Int:    return PyLong_FromLong(val.intVal);
         case ScriptValue::Bool:   if (val.boolVal) { Py_RETURN_TRUE; } else { Py_RETURN_FALSE; }
         case ScriptValue::String: return PyUnicode_FromString(val.stringVal.c_str());
+        case ScriptValue::Vec3:   return Py_BuildValue("(fff)", val.vec3Val[0], val.vec3Val[1], val.vec3Val[2]);
         case ScriptValue::None:
         default:                  Py_RETURN_NONE;
         }
-    }
-
-    // call_native(entity, func_name, *args) -> value
-    PyObject* py_call_native(PyObject*, PyObject* args)
-    {
-        Py_ssize_t argCount = PyTuple_Size(args);
-        if (argCount < 2)
-        {
-            PyErr_SetString(PyExc_TypeError, "call_native requires at least (entity, func_name)");
-            return nullptr;
-        }
-
-        PyObject* pyEntity = PyTuple_GetItem(args, 0);
-        PyObject* pyFunc   = PyTuple_GetItem(args, 1);
-        if (!pyEntity || !PyLong_Check(pyEntity) || !pyFunc || !PyUnicode_Check(pyFunc))
-        {
-            PyErr_SetString(PyExc_TypeError, "call_native(entity: int, func_name: str, ...)");
-            return nullptr;
-        }
-        unsigned long entity = PyLong_AsUnsignedLong(pyEntity);
-        const char* funcName = PyUnicode_AsUTF8(pyFunc);
-
-        std::vector<ScriptValue> scriptArgs;
-        for (Py_ssize_t i = 2; i < argCount; ++i)
-        {
-            scriptArgs.push_back(PyObjectToScriptValue(PyTuple_GetItem(args, i)));
-        }
-
-        INativeScript* script = NativeScriptManager::Instance().getInstance(static_cast<ECS::Entity>(entity));
-        if (!script)
-        {
-            PyErr_SetString(PyExc_ValueError, "Entity has no C++ native script instance.");
-            return nullptr;
-        }
-
-        ScriptValue result = script->onScriptCall(funcName, scriptArgs);
-        return ScriptValueToPyObject(result);
     }
 
     // call_function(entity, func_name, *args) -> value
@@ -710,95 +744,153 @@ namespace
         return PyFloat_FromDouble(std::sqrt(dx * dx + dy * dy + dz * dz));
     }
 
-    // ── Cross-entity physics ───────────────────────────────────────────
+    // ── Transform Parenting ─────────────────────────────────────────────
 
-    PyObject* py_get_velocity(PyObject*, PyObject* args)
+    PyObject* py_set_parent(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        unsigned long parent = 0;
+        if (!PyArg_ParseTuple(args, "kk", &entity, &parent))
+            return nullptr;
+        if (ECS::ECSManager::Instance().setParent(static_cast<ECS::Entity>(entity), static_cast<ECS::Entity>(parent)))
+            Py_RETURN_TRUE;
+        Py_RETURN_FALSE;
+    }
+
+    PyObject* py_remove_parent(PyObject*, PyObject* args)
     {
         unsigned long entity = 0;
         if (!PyArg_ParseTuple(args, "k", &entity))
-        {
             return nullptr;
-        }
-        const auto* pc = ECS::ECSManager::Instance().getComponent<ECS::PhysicsComponent>(static_cast<ECS::Entity>(entity));
-        if (!pc)
-        {
-            return Py_BuildValue("(fff)", 0.0f, 0.0f, 0.0f);
-        }
-        return Py_BuildValue("(fff)", pc->velocity[0], pc->velocity[1], pc->velocity[2]);
+        if (ECS::ECSManager::Instance().removeParent(static_cast<ECS::Entity>(entity)))
+            Py_RETURN_TRUE;
+        Py_RETURN_FALSE;
     }
 
-    PyObject* py_set_velocity(PyObject*, PyObject* args)
+    PyObject* py_get_parent(PyObject*, PyObject* args)
     {
         unsigned long entity = 0;
-        float x = 0.0f, y = 0.0f, z = 0.0f;
+        if (!PyArg_ParseTuple(args, "k", &entity))
+            return nullptr;
+        ECS::Entity parent = ECS::ECSManager::Instance().getParent(static_cast<ECS::Entity>(entity));
+        if (parent == ECS::InvalidEntity)
+            return PyLong_FromUnsignedLong(0);
+        return PyLong_FromUnsignedLong(parent);
+    }
+
+    PyObject* py_get_children(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        if (!PyArg_ParseTuple(args, "k", &entity))
+            return nullptr;
+        const auto& children = ECS::ECSManager::Instance().getChildren(static_cast<ECS::Entity>(entity));
+        PyObject* list = PyList_New(static_cast<Py_ssize_t>(children.size()));
+        for (size_t i = 0; i < children.size(); ++i)
+            PyList_SetItem(list, static_cast<Py_ssize_t>(i), PyLong_FromUnsignedLong(children[i]));
+        return list;
+    }
+
+    PyObject* py_get_child_count(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        if (!PyArg_ParseTuple(args, "k", &entity))
+            return nullptr;
+        return PyLong_FromSsize_t(static_cast<Py_ssize_t>(
+            ECS::ECSManager::Instance().getChildren(static_cast<ECS::Entity>(entity)).size()));
+    }
+
+    PyObject* py_get_root(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        if (!PyArg_ParseTuple(args, "k", &entity))
+            return nullptr;
+        return PyLong_FromUnsignedLong(ECS::ECSManager::Instance().getRoot(static_cast<ECS::Entity>(entity)));
+    }
+
+    PyObject* py_is_ancestor_of(PyObject*, PyObject* args)
+    {
+        unsigned long ancestor = 0;
+        unsigned long descendant = 0;
+        if (!PyArg_ParseTuple(args, "kk", &ancestor, &descendant))
+            return nullptr;
+        if (ECS::ECSManager::Instance().isAncestorOf(static_cast<ECS::Entity>(ancestor), static_cast<ECS::Entity>(descendant)))
+            Py_RETURN_TRUE;
+        Py_RETURN_FALSE;
+    }
+
+    PyObject* py_get_local_position(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        if (!PyArg_ParseTuple(args, "k", &entity))
+            return nullptr;
+        const auto* tc = GetTransformComponent(static_cast<ECS::Entity>(entity));
+        if (!tc) Py_RETURN_NONE;
+        return Py_BuildValue("(fff)", tc->localPosition[0], tc->localPosition[1], tc->localPosition[2]);
+    }
+
+    PyObject* py_set_local_position(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        float x = 0, y = 0, z = 0;
         if (!PyArg_ParseTuple(args, "kfff", &entity, &x, &y, &z))
-        {
             return nullptr;
-        }
-        auto* pc = ECS::ECSManager::Instance().getComponent<ECS::PhysicsComponent>(static_cast<ECS::Entity>(entity));
-        if (!pc)
-        {
-            PyErr_SetString(PyExc_ValueError, "Entity has no PhysicsComponent.");
-            return nullptr;
-        }
-        pc->velocity[0] = x;
-        pc->velocity[1] = y;
-        pc->velocity[2] = z;
+        auto* tc = GetTransformComponent(static_cast<ECS::Entity>(entity));
+        if (!tc) { PyErr_SetString(PyExc_ValueError, "Entity has no TransformComponent."); return nullptr; }
+        tc->localPosition[0] = x; tc->localPosition[1] = y; tc->localPosition[2] = z;
+        ECS::ECSManager::Instance().markTransformDirty(static_cast<ECS::Entity>(entity));
         Py_RETURN_TRUE;
     }
 
-    PyObject* py_add_force(PyObject*, PyObject* args)
+    PyObject* py_get_local_rotation(PyObject*, PyObject* args)
     {
         unsigned long entity = 0;
-        float x = 0.0f, y = 0.0f, z = 0.0f;
+        if (!PyArg_ParseTuple(args, "k", &entity))
+            return nullptr;
+        const auto* tc = GetTransformComponent(static_cast<ECS::Entity>(entity));
+        if (!tc) Py_RETURN_NONE;
+        return Py_BuildValue("(fff)", tc->localRotation[0], tc->localRotation[1], tc->localRotation[2]);
+    }
+
+    PyObject* py_set_local_rotation(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        float x = 0, y = 0, z = 0;
         if (!PyArg_ParseTuple(args, "kfff", &entity, &x, &y, &z))
-        {
             return nullptr;
-        }
-        auto* pc = ECS::ECSManager::Instance().getComponent<ECS::PhysicsComponent>(static_cast<ECS::Entity>(entity));
-        if (!pc)
-        {
-            PyErr_SetString(PyExc_ValueError, "Entity has no PhysicsComponent.");
-            return nullptr;
-        }
-        if (pc->motionType != ECS::PhysicsComponent::MotionType::Dynamic || pc->mass <= 0.0f)
-        {
-            Py_RETURN_FALSE;
-        }
-        const float invMass = 1.0f / pc->mass;
-        pc->velocity[0] += x * invMass;
-        pc->velocity[1] += y * invMass;
-        pc->velocity[2] += z * invMass;
+        auto* tc = GetTransformComponent(static_cast<ECS::Entity>(entity));
+        if (!tc) { PyErr_SetString(PyExc_ValueError, "Entity has no TransformComponent."); return nullptr; }
+        tc->localRotation[0] = x; tc->localRotation[1] = y; tc->localRotation[2] = z;
+        ECS::ECSManager::Instance().markTransformDirty(static_cast<ECS::Entity>(entity));
         Py_RETURN_TRUE;
     }
 
-    PyObject* py_add_impulse(PyObject*, PyObject* args)
+    PyObject* py_get_local_scale(PyObject*, PyObject* args)
     {
         unsigned long entity = 0;
-        float x = 0.0f, y = 0.0f, z = 0.0f;
+        if (!PyArg_ParseTuple(args, "k", &entity))
+            return nullptr;
+        const auto* tc = GetTransformComponent(static_cast<ECS::Entity>(entity));
+        if (!tc) Py_RETURN_NONE;
+        return Py_BuildValue("(fff)", tc->localScale[0], tc->localScale[1], tc->localScale[2]);
+    }
+
+    PyObject* py_set_local_scale(PyObject*, PyObject* args)
+    {
+        unsigned long entity = 0;
+        float x = 1, y = 1, z = 1;
         if (!PyArg_ParseTuple(args, "kfff", &entity, &x, &y, &z))
-        {
             return nullptr;
-        }
-        auto* pc = ECS::ECSManager::Instance().getComponent<ECS::PhysicsComponent>(static_cast<ECS::Entity>(entity));
-        if (!pc)
-        {
-            PyErr_SetString(PyExc_ValueError, "Entity has no PhysicsComponent.");
-            return nullptr;
-        }
-        if (pc->motionType != ECS::PhysicsComponent::MotionType::Dynamic)
-        {
-            Py_RETURN_FALSE;
-        }
-        pc->velocity[0] += x;
-        pc->velocity[1] += y;
-        pc->velocity[2] += z;
+        auto* tc = GetTransformComponent(static_cast<ECS::Entity>(entity));
+        if (!tc) { PyErr_SetString(PyExc_ValueError, "Entity has no TransformComponent."); return nullptr; }
+        tc->localScale[0] = x; tc->localScale[1] = y; tc->localScale[2] = z;
+        ECS::ECSManager::Instance().markTransformDirty(static_cast<ECS::Entity>(entity));
         Py_RETURN_TRUE;
     }
 
     // ── Method table & module definition ────────────────────────────────
 
     PyMethodDef EntityMethods[] = {
+        { "self", py_self, METH_NOARGS, "Get the entity currently executing this script." },
         { "create_entity", py_create_entity, METH_NOARGS, "Create an entity." },
         { "remove_entity", py_remove_entity, METH_VARARGS, "Remove an entity." },
         { "attach_component", py_attach_component, METH_VARARGS, "Attach a component by kind." },
@@ -813,6 +905,9 @@ namespace
         { "is_entity_valid", py_is_entity_valid, METH_VARARGS, "Check if an entity id is valid." },
         { "distance_between", py_distance_between, METH_VARARGS, "Get distance between two entities." },
         { "get_transform", py_get_transform, METH_VARARGS, "Get transform (pos, rot, scale)." },
+        { "get_position", py_get_position, METH_VARARGS, "Get entity position -> (x, y, z)." },
+        { "get_rotation", py_get_rotation, METH_VARARGS, "Get entity rotation -> (pitch, yaw, roll)." },
+        { "get_scale", py_get_scale, METH_VARARGS, "Get entity scale -> (sx, sy, sz)." },
         { "set_position", py_set_position, METH_VARARGS, "Set entity position." },
         { "translate", py_translate, METH_VARARGS, "Translate entity position." },
         { "set_rotation", py_set_rotation, METH_VARARGS, "Set entity rotation." },
@@ -822,12 +917,20 @@ namespace
         { "get_mesh", py_get_mesh, METH_VARARGS, "Get mesh asset path for an entity." },
         { "get_light_color", py_get_light_color, METH_VARARGS, "Get light color (entity) -> (r, g, b)." },
         { "set_light_color", py_set_light_color, METH_VARARGS, "Set light color (entity, r, g, b)." },
-        { "get_velocity", py_get_velocity, METH_VARARGS, "Get velocity of an entity -> (x, y, z)." },
-        { "set_velocity", py_set_velocity, METH_VARARGS, "Set velocity of an entity." },
-        { "add_force", py_add_force, METH_VARARGS, "Apply a force to an entity." },
-        { "add_impulse", py_add_impulse, METH_VARARGS, "Apply a direct velocity impulse to an entity." },
         { "call_function", py_call_function, METH_VARARGS, "Call a function on any entity's script (C++ or Python, auto-routed)." },
-        { "call_native", py_call_native, METH_VARARGS, "Call a function on the entity's C++ native script." },
+        { "set_parent", py_set_parent, METH_VARARGS, "Set parent entity (entity, parent) -> bool." },
+        { "remove_parent", py_remove_parent, METH_VARARGS, "Remove parent from entity (entity) -> bool." },
+        { "get_parent", py_get_parent, METH_VARARGS, "Get parent entity id (entity) -> int (0 if none)." },
+        { "get_children", py_get_children, METH_VARARGS, "Get list of child entity ids (entity) -> [int]." },
+        { "get_child_count", py_get_child_count, METH_VARARGS, "Get number of children (entity) -> int." },
+        { "get_root", py_get_root, METH_VARARGS, "Get root ancestor entity (entity) -> int." },
+        { "is_ancestor_of", py_is_ancestor_of, METH_VARARGS, "Check if ancestor is transitive parent of descendant." },
+        { "get_local_position", py_get_local_position, METH_VARARGS, "Get local position (entity) -> (x,y,z)." },
+        { "set_local_position", py_set_local_position, METH_VARARGS, "Set local position (entity, x, y, z)." },
+        { "get_local_rotation", py_get_local_rotation, METH_VARARGS, "Get local rotation (entity) -> (p,y,r)." },
+        { "set_local_rotation", py_set_local_rotation, METH_VARARGS, "Set local rotation (entity, p, y, r)." },
+        { "get_local_scale", py_get_local_scale, METH_VARARGS, "Get local scale (entity) -> (sx,sy,sz)." },
+        { "set_local_scale", py_set_local_scale, METH_VARARGS, "Set local scale (entity, sx, sy, sz)." },
         { nullptr, nullptr, 0, nullptr }
     };
 
