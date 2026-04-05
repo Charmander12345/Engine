@@ -8,6 +8,7 @@
 #include "../Renderer/EditorTheme.h"
 #include "../Renderer/UIWidget.h"
 #include "../Renderer/EditorUI/EditorWidget.h"
+#include "../Renderer/EditorUIBuilder.h"
 #include "../Renderer/EditorWindows/PopupWindow.h"
 #include "../Renderer/EditorWindows/TextureViewerWindow.h"
 #include "../Logger/Logger.h"
@@ -20,17 +21,37 @@
 #include "../Core/EngineLevel.h"
 #include "../Core/ShortcutManager.h"
 #include "../Physics/PhysicsWorld.h"
-#include "../Scripting/PythonScripting.h"
+#include "../Scripting/Python/PythonScripting.h"
+#include "../NativeScripting/NativeScriptManager.h"
 #include <filesystem>
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
 #include <fstream>
+#include <sstream>
+#include <regex>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <Windows.h>
+#ifdef ERROR
+#undef ERROR
+#endif
+#endif
 
 // Construction / Destruction
 EditorApp::EditorApp(IEditorBridge& bridge) : m_bridge(bridge) {}
-EditorApp::~EditorApp() = default;
+EditorApp::~EditorApp()
+{
+    if (m_pieBuildThread.joinable())
+        m_pieBuildThread.join();
+}
 
 // Lifecycle
 void EditorApp::initialize()
@@ -44,6 +65,22 @@ void EditorApp::initialize()
     registerDragDropHandlers();
     registerBuildPipeline();
     auto& uiMgr = m_bridge.getUIManager();
+    uiMgr.setNativeClassNamesProvider([]() {
+        auto& nsm = NativeScriptManager::Instance();
+        if (nsm.isDLLLoaded())
+            return nsm.getAvailableClassNames();
+
+        // Fallback: retrieve C++ class names from the asset registry
+        std::vector<std::string> classes;
+        const auto& registry = AssetManager::Instance().getAssetRegistry();
+        for (const auto& entry : registry)
+        {
+            if (entry.type == AssetType::NativeScript)
+                classes.push_back(entry.name);
+        }
+        std::sort(classes.begin(), classes.end());
+        return classes;
+    });
     uiMgr.rebuildEditorUIForDpi(EditorTheme::Get().dpiScale);
     uiMgr.markAllWidgetsDirty();
     uiMgr.showToastMessage("Engine ready!", UIManager::kToastMedium);
@@ -62,6 +99,7 @@ void EditorApp::tick(float dt)
     auto& uiMgr = m_bridge.getUIManager();
     uiMgr.pollBuildThread();
     uiMgr.pollToolchainDetection();
+    pollPIEBuild();
 }
 
 void EditorApp::shutdown()
@@ -83,6 +121,8 @@ void EditorApp::stopPIE()
     if (renderer) renderer->clearActiveCameraEntity();
     m_bridge.stopAllAudio();
     m_bridge.shutdownPhysics();
+    NativeScriptManager::Instance().shutdownScripts();
+    NativeScriptManager::Instance().unloadGameplayDLL();
     m_bridge.reloadScripts();
     m_bridge.restoreEcsSnapshot();
     m_pieMouseCaptured = false;
@@ -105,6 +145,24 @@ void EditorApp::stopPIE()
 void EditorApp::startPIE()
 {
     if (m_bridge.isPIEActive()) return;
+    if (m_pieBuildRunning.load()) return; // build already in progress
+
+    // Auto-build C++ game scripts before PIE when C++ scripting is enabled
+    {
+        const auto mode = DiagnosticsManager::Instance().getProjectInfo().scriptingMode;
+        if (mode == DiagnosticsManager::ScriptingMode::CppOnly ||
+            mode == DiagnosticsManager::ScriptingMode::Both)
+        {
+            buildGameScriptsForPIE(); // async — pollPIEBuild() will finish PIE start
+            return;
+        }
+    }
+
+    finishStartPIE();
+}
+
+void EditorApp::finishStartPIE()
+{
     Renderer* renderer = m_bridge.getRenderer();
     m_bridge.snapshotEcsState();
     m_bridge.initializePhysicsForPIE();
@@ -128,6 +186,614 @@ void EditorApp::startPIE()
     if (auto* el = uiMgr.findElementById("ViewportOverlay.PIE")) el->textureId = m_stopTexId;
     uiMgr.markAllWidgetsDirty();
     Logger::Instance().log(Logger::Category::Engine, "PIE: started.", Logger::LogLevel::INFO);
+}
+
+// ── Pre-PIE C++ Game Scripts Build (async) ─────────────────────────────
+// Helper: recursively find a WidgetElement by id.
+static WidgetElement* FindPIEBuildElement(std::vector<WidgetElement>& elements, const std::string& id)
+{
+    for (auto& el : elements)
+    {
+        if (el.id == id) return &el;
+        auto* found = FindPIEBuildElement(el.children, id);
+        if (found) return found;
+    }
+    return nullptr;
+}
+
+void EditorApp::buildGameScriptsForPIE()
+{
+    namespace fs = std::filesystem;
+    auto& logger = Logger::Instance();
+    auto& uiMgr = m_bridge.getUIManager();
+
+    // Verify CMake + toolchain (non-fatal: skip build, go straight to PIE)
+    if (!uiMgr.isCMakeAvailable() || !uiMgr.isBuildToolchainAvailable())
+    {
+        logger.log(Logger::Category::Engine,
+            "PIE build: CMake/toolchain not available – skipping C++ build.", Logger::LogLevel::WARNING);
+        finishStartPIE();
+        return;
+    }
+
+    const std::string projectPath = DiagnosticsManager::Instance().getProjectInfo().projectPath;
+    if (projectPath.empty()) { finishStartPIE(); return; }
+
+    const fs::path nativeDir = fs::path(projectPath) / "Content" / "Scripts" / "Native";
+    if (!fs::exists(nativeDir) || !fs::is_directory(nativeDir)) { finishStartPIE(); return; }
+
+    // Check if there are any .cpp source files to compile
+    bool hasCppFiles = false;
+    for (const auto& entry : fs::directory_iterator(nativeDir))
+    {
+        if (entry.is_regular_file() && entry.path().extension() == ".cpp")
+        { hasCppFiles = true; break; }
+    }
+    if (!hasCppFiles) { finishStartPIE(); return; }
+
+    // ── Auto-generate _AutoRegister.cpp ────────────────────────────────
+    {
+        std::vector<std::pair<std::string, std::string>> discovered;
+        const std::regex classPattern(
+            R"(class\s+(\w+)\s*(?:final\s*)?:\s*(?:public\s+)?INativeScript\b)");
+
+        for (const auto& entry : fs::directory_iterator(nativeDir))
+        {
+            if (!entry.is_regular_file()) continue;
+            const auto ext = entry.path().extension().string();
+            if (ext != ".h" && ext != ".hpp") continue;
+
+            std::ifstream hFile(entry.path());
+            if (!hFile.is_open()) continue;
+
+            std::string line;
+            while (std::getline(hFile, line))
+            {
+                std::smatch match;
+                if (std::regex_search(line, match, classPattern))
+                    discovered.emplace_back(match[1].str(), entry.path().filename().string());
+            }
+        }
+
+        const fs::path autoRegPath = nativeDir / "_AutoRegister.cpp";
+        std::ofstream autoReg(autoRegPath, std::ios::out | std::ios::trunc);
+        if (autoReg.is_open())
+        {
+            autoReg << "// Auto-generated by Horizon Engine -- DO NOT EDIT\n";
+            autoReg << "#include \"GameplayAPI.h\"\n";
+            for (const auto& [cls, hdr] : discovered)
+                autoReg << "#include \"" << hdr << "\"\n";
+            autoReg << "\n";
+            for (const auto& [cls, hdr] : discovered)
+                autoReg << "REGISTER_NATIVE_SCRIPT(" << cls << ")\n";
+            autoReg.close();
+
+            if (!discovered.empty())
+            {
+                logger.log(Logger::Category::Engine,
+                    "PIE build: auto-registered " + std::to_string(discovered.size()) +
+                    " native script class(es).", Logger::LogLevel::INFO);
+            }
+        }
+    }
+
+    // Unload any previously loaded GameScripts DLL
+    {
+        auto& nsm = NativeScriptManager::Instance();
+        if (nsm.isDLLLoaded())
+        {
+            nsm.shutdownScripts();
+            nsm.unloadGameplayDLL();
+        }
+    }
+
+    const std::string cmakePath = uiMgr.getCMakePath();
+    const fs::path buildDir  = fs::path(projectPath) / "Binary" / "GameScripts";
+    const fs::path outputDir = fs::path(projectPath) / "Engine";
+
+    { std::error_code ec; fs::create_directories(buildDir, ec); fs::create_directories(outputDir, ec); }
+
+    // ── Generate CMakeLists.txt ──────────────────────────────────────
+    {
+        const fs::path cmakeListsPath = nativeDir / "CMakeLists.txt";
+        const char* bp = SDL_GetBasePath();
+        std::string editorBinDir = bp ? std::string(bp) : fs::current_path().string();
+
+        // Fallback: if Tools/ does not exist next to the exe (e.g. running from
+        // the CMake build tree), look one level up for a sibling EngineBuild/.
+        if (!fs::exists(fs::path(editorBinDir) / "Tools"))
+        {
+            fs::path parent = fs::path(editorBinDir).parent_path();
+            if (fs::exists(parent / "EngineBuild" / "Tools"))
+                editorBinDir = (parent / "EngineBuild").string() + "/";
+        }
+
+        std::ostringstream cmake;
+        cmake << "cmake_minimum_required(VERSION 3.12)\n";
+        cmake << "project(GameScripts LANGUAGES CXX)\n\n";
+        cmake << "set(CMAKE_CXX_STANDARD 20)\n";
+        cmake << "set(CMAKE_CXX_STANDARD_REQUIRED ON)\n";
+        cmake << "set(CMAKE_CXX_EXTENSIONS OFF)\n\n";
+        cmake << "if(MSVC)\n";
+        cmake << "    set(CMAKE_MSVC_RUNTIME_LIBRARY \"MultiThreaded$<$<CONFIG:Debug>:Debug>DLL\")\n";
+        cmake << "endif()\n\n";
+        cmake << "file(GLOB GAME_SOURCES \"${CMAKE_CURRENT_SOURCE_DIR}/*.cpp\")\n";
+        cmake << "file(GLOB GAME_HEADERS \"${CMAKE_CURRENT_SOURCE_DIR}/*.h\")\n\n";
+        cmake << "add_library(GameScripts SHARED ${GAME_SOURCES} ${GAME_HEADERS})\n\n";
+        cmake << "target_include_directories(GameScripts PRIVATE\n";
+        cmake << "    \"" << (fs::path(editorBinDir) / "Tools" / "include" / "NativeScripting").generic_string() << "\"\n";
+        cmake << ")\n\n";
+        cmake << "target_link_directories(GameScripts PRIVATE\n";
+        cmake << "    \"" << (fs::path(editorBinDir) / "Tools" / "lib").generic_string() << "\"\n";
+        cmake << ")\n";
+        cmake << "target_link_libraries(GameScripts PRIVATE Scripting)\n\n";
+        cmake << "add_custom_command(TARGET GameScripts POST_BUILD\n";
+        cmake << "    COMMAND ${CMAKE_COMMAND} -E copy_if_different\n";
+        cmake << "        $<TARGET_FILE:GameScripts>\n";
+        cmake << "        \"" << outputDir.generic_string() << "/GameScripts.dll\"\n";
+        cmake << ")\n";
+
+        std::ofstream out(cmakeListsPath, std::ios::out | std::ios::trunc);
+        if (out.is_open()) out << cmake.str();
+    }
+
+    // ── Generate VS Code IntelliSense config ─────────────────────────
+    generateVSCodeConfig(projectPath);
+
+    // ── Open build progress popup ───────────────────────────────────
+    Renderer* renderer = m_bridge.getRenderer();
+    m_pieBuildOutputLines.clear();
+    {
+        std::lock_guard<std::mutex> lock(m_pieBuildMutex);
+        m_pieBuildPendingLines.clear();
+        m_pieBuildFinished = false;
+        m_pieBuildSuccess = false;
+    }
+
+    if (renderer)
+        m_pieBuildPopup = renderer->openPopupWindow("PIEBuildOutput", "C++ Script Build", 780, 460);
+
+    if (m_pieBuildPopup)
+    {
+        m_pieBuildWidget = std::make_shared<EditorWidget>();
+        m_pieBuildWidget->setName("PIEBuildProgress");
+        m_pieBuildWidget->setAnchor(WidgetAnchor::TopLeft);
+        m_pieBuildWidget->setFillX(true);
+        m_pieBuildWidget->setFillY(true);
+        m_pieBuildWidget->setZOrder(100);
+
+        const auto& theme = EditorTheme::Get();
+
+        WidgetElement panel{};
+        panel.id = "PB.Panel";
+        panel.type = WidgetElementType::StackPanel;
+        panel.from = Vec2{ 0.0f, 0.0f };
+        panel.to   = Vec2{ 1.0f, 1.0f };
+        panel.padding = Vec2{ 14.0f, 10.0f };
+        panel.orientation = StackOrientation::Vertical;
+        panel.style.color = theme.windowBackground;
+        panel.runtimeOnly = true;
+
+        WidgetElement title{};
+        title.id = "PB.Title";
+        title.type = WidgetElementType::Text;
+        title.text = "Building C++ Scripts...";
+        title.font = theme.fontDefault;
+        title.fontSize = theme.fontSizeHeading;
+        title.textAlignH = TextAlignH::Left;
+        title.style.textColor = theme.textPrimary;
+        title.fillX = true;
+        title.minSize = Vec2{ 0.0f, 28.0f };
+        title.runtimeOnly = true;
+
+        WidgetElement status{};
+        status.id = "PB.Status";
+        status.type = WidgetElementType::Text;
+        status.text = "Configuring...";
+        status.font = theme.fontDefault;
+        status.fontSize = theme.fontSizeBody;
+        status.textAlignH = TextAlignH::Left;
+        status.style.textColor = theme.textSecondary;
+        status.fillX = true;
+        status.minSize = Vec2{ 0.0f, 20.0f };
+        status.runtimeOnly = true;
+
+        // Scrollable build output log
+        WidgetElement outputPanel{};
+        outputPanel.id = "PB.OutputScroll";
+        outputPanel.type = WidgetElementType::StackPanel;
+        outputPanel.orientation = StackOrientation::Vertical;
+        outputPanel.fillX = true;
+        outputPanel.fillY = true;
+        outputPanel.scrollable = true;
+        outputPanel.style.color = Vec4{ 0.04f, 0.04f, 0.04f, 0.95f };
+        outputPanel.style.borderRadius = 4.0f;
+        outputPanel.padding = Vec2{ 6.0f, 4.0f };
+        outputPanel.runtimeOnly = true;
+
+        // Close button (hidden during build)
+        auto closeBtn = EditorUIBuilder::makePrimaryButton("PB.CloseBtn", "Close", [this]() {
+            dismissPIEBuildPopup();
+        });
+        closeBtn.isCollapsed = true;
+
+        panel.children.push_back(std::move(title));
+        panel.children.push_back(std::move(status));
+        panel.children.push_back(std::move(outputPanel));
+        panel.children.push_back(std::move(closeBtn));
+
+        std::vector<WidgetElement> elems;
+        elems.push_back(std::move(panel));
+        m_pieBuildWidget->setElements(std::move(elems));
+        m_pieBuildWidget->markLayoutDirty();
+        m_pieBuildPopup->uiManager().registerWidget("PIEBuildProgress", m_pieBuildWidget);
+    }
+
+    // ── Launch build thread ───────────────────────────────────────────
+    if (m_pieBuildThread.joinable())
+        m_pieBuildThread.join();
+
+    m_pieBuildRunning.store(true);
+
+    const std::string nativeDirStr = nativeDir.string();
+    const std::string buildDirStr  = buildDir.string();
+
+    m_pieBuildThread = std::thread([this, cmakePath, nativeDirStr, buildDirStr]()
+    {
+        auto appendLine = [this](const std::string& line) {
+            std::lock_guard<std::mutex> lock(m_pieBuildMutex);
+            m_pieBuildPendingLines.push_back(line);
+        };
+
+        // Helper: run a command, capture output line-by-line
+#if defined(_WIN32)
+        auto runCmd = [&](const std::string& cmd) -> int
+        {
+            appendLine("> " + cmd);
+
+            SECURITY_ATTRIBUTES sa{};
+            sa.nLength = sizeof(sa);
+            sa.bInheritHandle = TRUE;
+
+            HANDLE hReadPipe = nullptr, hWritePipe = nullptr;
+            if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0))
+                return -1;
+            SetHandleInformation(hReadPipe, HANDLE_FLAG_INHERIT, 0);
+
+            STARTUPINFOA si{};
+            si.cb = sizeof(si);
+            si.dwFlags = STARTF_USESTDHANDLES;
+            si.hStdOutput = hWritePipe;
+            si.hStdError  = hWritePipe;
+
+            PROCESS_INFORMATION pi{};
+            std::string cmdLine = cmd;
+            BOOL created = CreateProcessA(
+                nullptr, cmdLine.data(), nullptr, nullptr, TRUE,
+                CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+            CloseHandle(hWritePipe);
+
+            if (!created)
+            {
+                CloseHandle(hReadPipe);
+                appendLine("[ERROR] Failed to launch process.");
+                return -1;
+            }
+
+            char buf[4096];
+            DWORD bytesRead = 0;
+            std::string lineBuffer;
+            while (ReadFile(hReadPipe, buf, sizeof(buf) - 1, &bytesRead, nullptr) && bytesRead > 0)
+            {
+                buf[bytesRead] = '\0';
+                lineBuffer += buf;
+                size_t pos;
+                while ((pos = lineBuffer.find('\n')) != std::string::npos)
+                {
+                    std::string line = lineBuffer.substr(0, pos);
+                    if (!line.empty() && line.back() == '\r') line.pop_back();
+                    appendLine(line);
+                    lineBuffer.erase(0, pos + 1);
+                }
+            }
+            if (!lineBuffer.empty())
+                appendLine(lineBuffer);
+
+            WaitForSingleObject(pi.hProcess, INFINITE);
+            DWORD exitCode = 0;
+            GetExitCodeProcess(pi.hProcess, &exitCode);
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+            CloseHandle(hReadPipe);
+            return static_cast<int>(exitCode);
+        };
+#else
+        auto runCmd = [&](const std::string& cmd) -> int
+        {
+            appendLine("> " + cmd);
+            std::string fullCmd = cmd + " 2>&1";
+            FILE* pipe = popen(fullCmd.c_str(), "r");
+            if (!pipe) return -1;
+            char buf[4096];
+            while (fgets(buf, sizeof(buf), pipe))
+            {
+                std::string line = buf;
+                while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
+                    line.pop_back();
+                appendLine(line);
+            }
+            return pclose(pipe);
+        };
+#endif
+
+        bool success = true;
+
+        // CMake configure
+        {
+            std::string configureCmd = "\"" + cmakePath + "\"";
+            configureCmd += " -S \"" + nativeDirStr + "\"";
+            configureCmd += " -B \"" + buildDirStr + "\"";
+#ifdef _DEBUG
+            configureCmd += " -DCMAKE_BUILD_TYPE=Debug";
+#else
+            configureCmd += " -DCMAKE_BUILD_TYPE=RelWithDebInfo";
+#endif
+            int ret = runCmd(configureCmd);
+            if (ret != 0)
+            {
+                appendLine("[ERROR] CMake configure failed (exit code " + std::to_string(ret) + ").");
+                success = false;
+            }
+        }
+
+        // CMake build
+        if (success)
+        {
+            std::string buildCmd = "\"" + cmakePath + "\"";
+            buildCmd += " --build \"" + buildDirStr + "\"";
+            buildCmd += " --target GameScripts";
+#ifdef _DEBUG
+            buildCmd += " --config Debug";
+#else
+            buildCmd += " --config RelWithDebInfo";
+#endif
+            int ret = runCmd(buildCmd);
+            if (ret != 0)
+            {
+                appendLine("[ERROR] CMake build failed (exit code " + std::to_string(ret) + ").");
+                success = false;
+            }
+        }
+
+        if (success)
+            appendLine("[OK] Build completed successfully.");
+
+        // Signal completion
+        {
+            std::lock_guard<std::mutex> lock(m_pieBuildMutex);
+            m_pieBuildFinished = true;
+            m_pieBuildSuccess = success;
+        }
+        m_pieBuildRunning.store(false);
+    });
+
+    logger.log(Logger::Category::Engine, "PIE build: compiling C++ game scripts (async)...", Logger::LogLevel::INFO);
+}
+
+void EditorApp::generateVSCodeConfig(const std::string& projectPath)
+{
+    namespace fs = std::filesystem;
+
+    const char* bp = SDL_GetBasePath();
+    const std::string editorBinDir = bp ? std::string(bp) : fs::current_path().string();
+    const std::string includePath = (fs::path(editorBinDir) / "Tools" / "include" / "NativeScripting").generic_string();
+
+    const fs::path vscodeDir = fs::path(projectPath) / "Content" / "Scripts" / ".vscode";
+    const fs::path configPath = vscodeDir / "c_cpp_properties.json";
+
+    std::error_code ec;
+    fs::create_directories(vscodeDir, ec);
+
+    std::ostringstream json;
+    json << "{\n";
+    json << "    \"configurations\": [\n";
+    json << "        {\n";
+    json << "            \"name\": \"Horizon Engine\",\n";
+    json << "            \"includePath\": [\n";
+    json << "                \"${workspaceFolder}/Native/**\",\n";
+    json << "                \"" << includePath << "\"\n";
+    json << "            ],\n";
+    json << "            \"defines\": [\n";
+    json << "                \"GAMEPLAY_EXPORTS\"\n";
+    json << "            ],\n";
+    json << "            \"cStandard\": \"c17\",\n";
+    json << "            \"cppStandard\": \"c++20\",\n";
+#ifdef _WIN32
+    json << "            \"intelliSenseMode\": \"windows-msvc-x64\"\n";
+#else
+    json << "            \"intelliSenseMode\": \"linux-gcc-x64\"\n";
+#endif
+    json << "        }\n";
+    json << "    ],\n";
+    json << "    \"version\": 4\n";
+    json << "}\n";
+
+    std::ofstream out(configPath, std::ios::out | std::ios::trunc);
+    if (out.is_open())
+    {
+        out << json.str();
+        out.close();
+        Logger::Instance().log(Logger::Category::Engine,
+            "Generated VS Code IntelliSense config: " + configPath.string(),
+            Logger::LogLevel::INFO);
+    }
+}
+
+void EditorApp::pollPIEBuild()
+{
+    if (!m_pieBuildWidget) return;
+
+    std::vector<std::string> newLines;
+    bool finished = false;
+    bool success  = false;
+
+    {
+        std::lock_guard<std::mutex> lock(m_pieBuildMutex);
+        if (!m_pieBuildPendingLines.empty())
+            newLines.swap(m_pieBuildPendingLines);
+        if (m_pieBuildFinished)
+        {
+            finished = true;
+            success  = m_pieBuildSuccess;
+            m_pieBuildFinished = false;
+        }
+    }
+
+    bool dirty = false;
+
+    // Append new output lines to the scroll panel
+    if (!newLines.empty())
+    {
+        for (auto& ln : newLines)
+            m_pieBuildOutputLines.push_back(std::move(ln));
+
+        auto& elems = m_pieBuildWidget->getElementsMutable();
+        WidgetElement* outputScroll = FindPIEBuildElement(elems, "PB.OutputScroll");
+        if (outputScroll)
+        {
+            const auto& theme = EditorTheme::Get();
+            const float rowH = EditorTheme::Scaled(16.0f);
+
+            outputScroll->children.clear();
+            for (size_t i = 0; i < m_pieBuildOutputLines.size(); ++i)
+            {
+                const auto& line = m_pieBuildOutputLines[i];
+                const bool isError = line.find("[ERROR]") != std::string::npos
+                                  || line.find("error") != std::string::npos
+                                  || line.find("FAILED") != std::string::npos;
+
+                WidgetElement row{};
+                row.id        = "PB.Row." + std::to_string(i);
+                row.type      = WidgetElementType::Text;
+                row.text      = line;
+                row.font      = theme.fontDefault;
+                row.fontSize  = theme.fontSizeSmall;
+                row.style.textColor = isError
+                    ? Vec4{ 0.95f, 0.3f, 0.3f, 1.0f }
+                    : Vec4{ 0.75f, 0.80f, 0.75f, 1.0f };
+                row.textAlignH = TextAlignH::Left;
+                row.textAlignV = TextAlignV::Center;
+                row.fillX     = true;
+                row.minSize   = Vec2{ 0.0f, rowH };
+                row.runtimeOnly = true;
+                outputScroll->children.push_back(std::move(row));
+            }
+
+            // Auto-scroll to bottom
+            const float totalH = rowH * static_cast<float>(m_pieBuildOutputLines.size());
+            outputScroll->scrollOffset = totalH;
+        }
+        dirty = true;
+    }
+
+    // Handle build completion
+    if (finished)
+    {
+        if (m_pieBuildThread.joinable())
+            m_pieBuildThread.join();
+
+        auto& logger = Logger::Instance();
+        auto& uiMgr  = m_bridge.getUIManager();
+
+        if (success)
+        {
+            // Load the built DLL on the main thread
+            namespace fs = std::filesystem;
+            const std::string projectPath = DiagnosticsManager::Instance().getProjectInfo().projectPath;
+            const fs::path dllPath = fs::path(projectPath) / "Engine" / "GameScripts.dll";
+
+            bool dllOk = false;
+            if (fs::exists(dllPath))
+            {
+                auto& nsm = NativeScriptManager::Instance();
+                if (nsm.loadGameplayDLL(dllPath.string()))
+                {
+                    nsm.initializeScripts();
+                    logger.log(Logger::Category::Engine,
+                        "PIE build: GameScripts.dll loaded successfully.", Logger::LogLevel::INFO);
+                    dllOk = true;
+                }
+            }
+
+            if (dllOk)
+            {
+                // Auto-close popup on success
+                dismissPIEBuildPopup();
+                uiMgr.showToastMessage("C++ scripts built successfully.", UIManager::kToastShort,
+                    UIManager::NotificationLevel::Success);
+                finishStartPIE();
+            }
+            else
+            {
+                // DLL load failed — treat as build error
+                auto& elems = m_pieBuildWidget->getElementsMutable();
+                WidgetElement* titleEl = FindPIEBuildElement(elems, "PB.Title");
+                if (titleEl) titleEl->text = "Build Failed";
+                WidgetElement* statusEl = FindPIEBuildElement(elems, "PB.Status");
+                if (statusEl) statusEl->text = "Failed to load GameScripts.dll after build.";
+                statusEl->style.textColor = Vec4{ 0.95f, 0.3f, 0.3f, 1.0f };
+                WidgetElement* closeBtn = FindPIEBuildElement(elems, "PB.CloseBtn");
+                if (closeBtn) closeBtn->isCollapsed = false;
+
+                logger.log(Logger::Category::Engine,
+                    "PIE build: failed to load GameScripts.dll.", Logger::LogLevel::WARNING);
+                uiMgr.showToastMessage("C++ scripts build failed.", UIManager::kToastLong,
+                    UIManager::NotificationLevel::Error);
+            }
+        }
+        else
+        {
+            // Build failed — update popup to show error, keep open
+            auto& elems = m_pieBuildWidget->getElementsMutable();
+            WidgetElement* titleEl = FindPIEBuildElement(elems, "PB.Title");
+            if (titleEl) titleEl->text = "Build Failed";
+            WidgetElement* statusEl = FindPIEBuildElement(elems, "PB.Status");
+            if (statusEl)
+            {
+                statusEl->text = "Compilation errors found. Review the output below.";
+                statusEl->style.textColor = Vec4{ 0.95f, 0.3f, 0.3f, 1.0f };
+            }
+            WidgetElement* closeBtn = FindPIEBuildElement(elems, "PB.CloseBtn");
+            if (closeBtn) closeBtn->isCollapsed = false;
+
+            logger.log(Logger::Category::Engine,
+                "PIE build: C++ game scripts build failed.", Logger::LogLevel::WARNING);
+            uiMgr.showToastMessage("C++ scripts build failed.\nSee build output window for details.", UIManager::kToastLong,
+                UIManager::NotificationLevel::Error);
+        }
+        dirty = true;
+    }
+
+    if (dirty && m_pieBuildWidget)
+    {
+        m_pieBuildWidget->markLayoutDirty();
+        if (m_pieBuildPopup)
+            m_pieBuildPopup->uiManager().markRenderDirty();
+    }
+}
+
+void EditorApp::dismissPIEBuildPopup()
+{
+    if (m_pieBuildPopup)
+    {
+        m_pieBuildPopup->uiManager().unregisterWidget("PIEBuildProgress");
+        Renderer* renderer = m_bridge.getRenderer();
+        if (renderer)
+            renderer->closePopupWindow("PIEBuildOutput");
+        m_pieBuildPopup = nullptr;
+    }
+    m_pieBuildWidget.reset();
+    m_pieBuildOutputLines.clear();
 }
 
 // Widget Registration
@@ -512,11 +1178,15 @@ void EditorApp::registerDragDropHandlers()
             Vec3 sp{0,0,0}; if (!renderer->screenToWorldPos((int)screenPos.x,(int)screenPos.y,sp)){const Vec3 cp=renderer->getCameraPosition();const Vec2 cr=renderer->getCameraRotationDegrees();float y=cr.x*3.14159265f/180.f,p=cr.y*3.14159265f/180.f;sp.x=cp.x+cosf(y)*cosf(p)*5.f;sp.y=cp.y+sinf(p)*5.f;sp.z=cp.z+sinf(y)*cosf(p)*5.f;}
             renderer->getUIManager().spawnPrefabAtPosition(relPath,sp); return; }
 
+        if (assetType == AssetType::Entity) {
+            Vec3 sp{0,0,0}; if (!renderer->screenToWorldPos((int)screenPos.x,(int)screenPos.y,sp)){const Vec3 cp=renderer->getCameraPosition();const Vec2 cr=renderer->getCameraRotationDegrees();float y=cr.x*3.14159265f/180.f,p=cr.y*3.14159265f/180.f;sp.x=cp.x+cosf(y)*cosf(p)*5.f;sp.y=cp.y+sinf(p)*5.f;sp.z=cp.z+sinf(y)*cosf(p)*5.f;}
+            renderer->getUIManager().spawnEntityAssetAtPosition(relPath,sp); return; }
+
         if (assetType != AssetType::Model3D) {
             if (targetEntity!=0) {
                 switch(assetType){
                 case AssetType::Material: case AssetType::Texture: {ECS::MaterialComponent mc{};mc.materialAssetPath=relPath;if(ecs.hasComponent<ECS::MaterialComponent>(target))ecs.setComponent<ECS::MaterialComponent>(target,mc);else ecs.addComponent<ECS::MaterialComponent>(target,mc);break;}
-                case AssetType::Script: {ECS::ScriptComponent sc{};sc.scriptPath=relPath;if(ecs.hasComponent<ECS::ScriptComponent>(target))ecs.setComponent<ECS::ScriptComponent>(target,sc);else ecs.addComponent<ECS::ScriptComponent>(target,sc);break;}
+                case AssetType::Script: {ECS::LogicComponent sc{};sc.scriptPath=relPath;if(ecs.hasComponent<ECS::LogicComponent>(target))ecs.setComponent<ECS::LogicComponent>(target,sc);else ecs.addComponent<ECS::LogicComponent>(target,sc);break;}
                 default:break;}
                 diagnostics.invalidateEntity(targetEntity);auto*level=diagnostics.getActiveLevelSoft();if(level)level->setIsSaved(false);
                 renderer->getUIManager().selectEntity(targetEntity);renderer->getUIManager().showToastMessage("Applied "+assetName+" \xe2\x86\x92 Entity "+std::to_string(targetEntity),UIManager::kToastMedium);
@@ -543,7 +1213,7 @@ void EditorApp::registerDragDropHandlers()
         auto spL=ecs.hasComponent<ECS::LightComponent>(entity)?std::make_optional(*ecs.getComponent<ECS::LightComponent>(entity)):std::nullopt;
         auto spC=ecs.hasComponent<ECS::CameraComponent>(entity)?std::make_optional(*ecs.getComponent<ECS::CameraComponent>(entity)):std::nullopt;
         auto spP=ecs.hasComponent<ECS::PhysicsComponent>(entity)?std::make_optional(*ecs.getComponent<ECS::PhysicsComponent>(entity)):std::nullopt;
-        auto spS=ecs.hasComponent<ECS::ScriptComponent>(entity)?std::make_optional(*ecs.getComponent<ECS::ScriptComponent>(entity)):std::nullopt;
+        auto spS=ecs.hasComponent<ECS::LogicComponent>(entity)?std::make_optional(*ecs.getComponent<ECS::LogicComponent>(entity)):std::nullopt;
         auto spCo=ecs.hasComponent<ECS::CollisionComponent>(entity)?std::make_optional(*ecs.getComponent<ECS::CollisionComponent>(entity)):std::nullopt;
         auto spH=ecs.hasComponent<ECS::HeightFieldComponent>(entity)?std::make_optional(*ecs.getComponent<ECS::HeightFieldComponent>(entity)):std::nullopt;
 
@@ -552,7 +1222,7 @@ void EditorApp::registerDragDropHandlers()
             if(spT)e.addComponent<ECS::TransformComponent>(entity,*spT);if(spN)e.addComponent<ECS::NameComponent>(entity,*spN);
             if(spM)e.addComponent<ECS::MeshComponent>(entity,*spM);if(spMa)e.addComponent<ECS::MaterialComponent>(entity,*spMa);
             if(spL)e.addComponent<ECS::LightComponent>(entity,*spL);if(spC)e.addComponent<ECS::CameraComponent>(entity,*spC);
-            if(spP)e.addComponent<ECS::PhysicsComponent>(entity,*spP);if(spS)e.addComponent<ECS::ScriptComponent>(entity,*spS);
+            if(spP)e.addComponent<ECS::PhysicsComponent>(entity,*spP);if(spS)e.addComponent<ECS::LogicComponent>(entity,*spS);
             if(spCo)e.addComponent<ECS::CollisionComponent>(entity,*spCo);if(spH)e.addComponent<ECS::HeightFieldComponent>(entity,*spH);
             auto*lvl=DiagnosticsManager::Instance().getActiveLevelSoft();if(lvl)lvl->onEntityAdded(entity);};
         spawnCmd.undo=[entity](){auto&e=ECS::ECSManager::Instance();auto*lvl=DiagnosticsManager::Instance().getActiveLevelSoft();if(lvl)lvl->onEntityRemoved(entity);e.removeEntity(entity);};
@@ -579,7 +1249,7 @@ void EditorApp::registerDragDropHandlers()
             {auto meshAsset=AssetManager::Instance().getLoadedAssetByPath(relPath);if(!meshAsset){int id=AssetManager::Instance().loadAsset(relPath,AssetType::Model3D);if(id>0)meshAsset=AssetManager::Instance().getLoadedAssetByID((unsigned int)id);}
              if(meshAsset){auto&ad=meshAsset->getData();if(ad.contains("m_materialAssetPaths")&&ad["m_materialAssetPaths"].is_array()&&!ad["m_materialAssetPaths"].empty()){std::string mp=ad["m_materialAssetPaths"][0].get<std::string>();if(!mp.empty()){ECS::MaterialComponent mc{};mc.materialAssetPath=mp;if(ecs.hasComponent<ECS::MaterialComponent>(entity))ecs.setComponent<ECS::MaterialComponent>(entity,mc);else ecs.addComponent<ECS::MaterialComponent>(entity,mc);}}}}
             break;}
-        case AssetType::Script:{ECS::ScriptComponent sc{};sc.scriptPath=relPath;if(ecs.hasComponent<ECS::ScriptComponent>(entity))ecs.setComponent<ECS::ScriptComponent>(entity,sc);else ecs.addComponent<ECS::ScriptComponent>(entity,sc);break;}
+        case AssetType::Script:{ECS::LogicComponent sc{};sc.scriptPath=relPath;if(ecs.hasComponent<ECS::LogicComponent>(entity))ecs.setComponent<ECS::LogicComponent>(entity,sc);else ecs.addComponent<ECS::LogicComponent>(entity,sc);break;}
         default:break;}
         DiagnosticsManager::Instance().invalidateEntity(entityId);auto*level=DiagnosticsManager::Instance().getActiveLevelSoft();if(level)level->setIsSaved(false);
         renderer->getUIManager().showToastMessage("Applied "+assetName+" \xe2\x86\x92 Entity "+std::to_string(entityId),UIManager::kToastMedium);
@@ -862,7 +1532,7 @@ bool EditorApp::handleDelete()
         std::optional<ECS::LightComponent>           light;
         std::optional<ECS::CameraComponent>          camera;
         std::optional<ECS::PhysicsComponent>         physics;
-        std::optional<ECS::ScriptComponent>          script;
+        std::optional<ECS::LogicComponent>           logic;
         std::optional<ECS::CollisionComponent>       collision;
         std::optional<ECS::HeightFieldComponent>     heightField;
     };
@@ -888,7 +1558,7 @@ bool EditorApp::handleDelete()
         snap.light       = ecs.hasComponent<ECS::LightComponent>(entity)       ? std::make_optional(*ecs.getComponent<ECS::LightComponent>(entity))       : std::nullopt;
         snap.camera      = ecs.hasComponent<ECS::CameraComponent>(entity)      ? std::make_optional(*ecs.getComponent<ECS::CameraComponent>(entity))      : std::nullopt;
         snap.physics     = ecs.hasComponent<ECS::PhysicsComponent>(entity)     ? std::make_optional(*ecs.getComponent<ECS::PhysicsComponent>(entity))     : std::nullopt;
-        snap.script      = ecs.hasComponent<ECS::ScriptComponent>(entity)      ? std::make_optional(*ecs.getComponent<ECS::ScriptComponent>(entity))      : std::nullopt;
+        snap.logic       = ecs.hasComponent<ECS::LogicComponent>(entity)       ? std::make_optional(*ecs.getComponent<ECS::LogicComponent>(entity))       : std::nullopt;
         snap.collision   = ecs.hasComponent<ECS::CollisionComponent>(entity)   ? std::make_optional(*ecs.getComponent<ECS::CollisionComponent>(entity))   : std::nullopt;
         snap.heightField = ecs.hasComponent<ECS::HeightFieldComponent>(entity) ? std::make_optional(*ecs.getComponent<ECS::HeightFieldComponent>(entity)) : std::nullopt;
         snapshots.push_back(std::move(snap));
@@ -943,7 +1613,7 @@ bool EditorApp::handleDelete()
                 if (snap.light)       e.addComponent<ECS::LightComponent>(snap.entity, *snap.light);
                 if (snap.camera)      e.addComponent<ECS::CameraComponent>(snap.entity, *snap.camera);
                 if (snap.physics)     e.addComponent<ECS::PhysicsComponent>(snap.entity, *snap.physics);
-                if (snap.script)      e.addComponent<ECS::ScriptComponent>(snap.entity, *snap.script);
+                if (snap.logic)       e.addComponent<ECS::LogicComponent>(snap.entity, *snap.logic);
                 if (snap.collision)   e.addComponent<ECS::CollisionComponent>(snap.entity, *snap.collision);
                 if (snap.heightField) e.addComponent<ECS::HeightFieldComponent>(snap.entity, *snap.heightField);
                 if (lvl) lvl->onEntityAdded(snap.entity);
@@ -1026,13 +1696,13 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             if (out.is_open())
             {
                 out << "import engine\n\n";
-                out << "def onloaded(entity):\n";
+                out << "def on_loaded(entity):\n";
                 out << "    pass\n\n";
                 out << "def tick(entity, dt):\n";
                 out << "    pass\n\n";
-                out << "def on_entity_begin_overlap(entity, other_entity):\n";
+                out << "def on_begin_overlap(entity, other_entity):\n";
                 out << "    pass\n\n";
-                out << "def on_entity_end_overlap(entity, other_entity):\n";
+                out << "def on_end_overlap(entity, other_entity):\n";
                 out << "    pass\n";
                 out.close();
 
@@ -1047,6 +1717,67 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             }
         }});
 
+    items.push_back({ "New C++ Script", [this, renderer]()
+        {
+            auto& uiMgr = renderer->getUIManager();
+
+            auto& diagnostics = DiagnosticsManager::Instance();
+            const std::string projectPath = diagnostics.getProjectInfo().projectPath;
+            const std::filesystem::path contentDir =
+                std::filesystem::path(projectPath) / "Content";
+            const std::filesystem::path nativeDir = contentDir / "Scripts" / "Native";
+            std::error_code ec;
+            std::filesystem::create_directories(nativeDir, ec);
+
+            std::string baseName = "NewScript";
+            std::string className = baseName;
+            int counter = 1;
+            while (std::filesystem::exists(nativeDir / (className + ".h")))
+                className = baseName + std::to_string(counter++);
+
+            // Generate header file
+            {
+                std::ofstream hdr(nativeDir / (className + ".h"), std::ios::out | std::ios::trunc);
+                if (hdr.is_open())
+                {
+                    hdr << "#pragma once\n";
+                    hdr << "#include \"GameplayAPI.h\"\n\n";
+                    hdr << "class " << className << " : public INativeScript\n";
+                    hdr << "{\n";
+                    hdr << "public:\n";
+                    hdr << "    void onLoaded() override;\n";
+                    hdr << "    void tick(float dt) override;\n";
+                    hdr << "};\n";
+                    hdr.close();
+                }
+            }
+
+            // Generate source file
+            {
+                std::ofstream src(nativeDir / (className + ".cpp"), std::ios::out | std::ios::trunc);
+                if (src.is_open())
+                {
+                    src << "#include \"" << className << ".h\"\n\n";
+                    src << "void " << className << "::onLoaded()\n";
+                    src << "{\n";
+                    src << "}\n\n";
+                    src << "void " << className << "::tick(float dt)\n";
+                    src << "{\n";
+                    src << "}\n";
+                    src.close();
+                }
+            }
+
+            uiMgr.refreshContentBrowser();
+            uiMgr.showToastMessage("Created C++ script: " + className + " (.h + .cpp)", UIManager::kToastMedium);
+            generateVSCodeConfig(projectPath);
+            Logger::Instance().log(Logger::Category::Engine,
+                "Created C++ script: " + className + " in Content/Scripts/Native/",
+                Logger::LogLevel::INFO);
+        }});
+
+    items.push_back({ "", {}, true });
+
     items.push_back({ "New Level", [renderer]()
         {
             auto& uiMgr = renderer->getUIManager();
@@ -1054,7 +1785,7 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             if (folder == "__Shaders__") return;
 
             constexpr float kBaseW = 360.0f;
-            constexpr float kBaseH = 180.0f;
+            constexpr float kBaseH = 240.0f;
             const int kPopupW = static_cast<int>(EditorTheme::Scaled(kBaseW));
             const int kPopupH = static_cast<int>(EditorTheme::Scaled(kBaseH));
             PopupWindow* popup = renderer->openPopupWindow(
@@ -1071,6 +1802,7 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             {
                 std::string name = "NewLevel";
                 std::string folder;
+                int templateIndex = 0;
             };
             auto state = std::make_shared<LevelState>();
             state->folder = folder;
@@ -1107,6 +1839,7 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             formStack.from = Vec2{ nx(16.0f), ny(44.0f) };
             formStack.to = Vec2{ nx(W - 16.0f), ny(H - 50.0f) };
             formStack.padding = EditorTheme::Scaled(Vec2{ 4.0f, 4.0f });
+            formStack.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
 
             {
                 WidgetElement lbl;
@@ -1138,6 +1871,38 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
                 formStack.children.push_back(std::move(entry));
             }
 
+            {
+                WidgetElement typeLbl;
+                typeLbl.type = WidgetElementType::Text;
+                typeLbl.id = "NL.TypeLbl";
+                typeLbl.text = "Template";
+                typeLbl.fontSize = EditorTheme::Get().fontSizeBody;
+                typeLbl.style.textColor = Vec4{ 0.7f, 0.75f, 0.85f, 1.0f };
+                typeLbl.fillX = true;
+                typeLbl.minSize = Vec2{ 0.0f, EditorTheme::Scaled(20.0f) };
+                typeLbl.runtimeOnly = true;
+                formStack.children.push_back(std::move(typeLbl));
+            }
+
+            {
+                WidgetElement dropdown;
+                dropdown.type = WidgetElementType::DropdownButton;
+                dropdown.id = "NL.Template";
+                dropdown.text = "Empty";
+                dropdown.items = { "Empty", "Basic Outdoor", "Prototype" };
+                dropdown.fontSize = EditorTheme::Get().fontSizeBody;
+                dropdown.style.textColor = Vec4{ 0.9f, 0.9f, 0.95f, 1.0f };
+                dropdown.style.color = Vec4{ 0.12f, 0.12f, 0.16f, 0.9f };
+                dropdown.style.hoverColor = Vec4{ 0.18f, 0.18f, 0.24f, 0.95f };
+                dropdown.fillX = true;
+                dropdown.minSize = Vec2{ 0.0f, EditorTheme::Scaled(24.0f) };
+                dropdown.padding = EditorTheme::Scaled(Vec2{ 6.0f, 4.0f });
+                dropdown.hitTestMode = HitTestMode::Enabled;
+                dropdown.runtimeOnly = true;
+                dropdown.onSelectionChanged = [state](int index) { state->templateIndex = index; };
+                formStack.children.push_back(std::move(dropdown));
+            }
+
             elements.push_back(std::move(formStack));
 
             {
@@ -1161,7 +1926,13 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
                     auto& ui = renderer->getUIManager();
                     const std::string levelName = state->name.empty() ? "NewLevel" : state->name;
                     const std::string relFolder = state->folder.empty() ? "Levels" : state->folder;
-                    ui.createNewLevelWithTemplate(UIManager::SceneTemplate::Empty, levelName, relFolder);
+                    constexpr UIManager::SceneTemplate templates[] = {
+                        UIManager::SceneTemplate::Empty,
+                        UIManager::SceneTemplate::BasicOutdoor,
+                        UIManager::SceneTemplate::Prototype,
+                    };
+                    const int idx = std::clamp(state->templateIndex, 0, 2);
+                    ui.createNewLevelWithTemplate(templates[idx], levelName, relFolder);
                     popup->close();
                 };
                 elements.push_back(std::move(createBtn));
@@ -1289,6 +2060,130 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             uiMgr.openWidgetEditorPopup(relPath);
         }});
 
+    items.push_back({ "New Input Action", [renderer]()
+        {
+            auto& uiMgr = renderer->getUIManager();
+            const auto& folder = uiMgr.getSelectedBrowserFolder();
+            if (folder == "__Shaders__") return;
+
+            auto& diagnostics = DiagnosticsManager::Instance();
+            auto& assetMgr = AssetManager::Instance();
+            const std::filesystem::path contentDir =
+                std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content";
+            const std::filesystem::path targetDir = folder.empty() ? contentDir : contentDir / folder;
+            std::error_code ec;
+            std::filesystem::create_directories(targetDir, ec);
+
+            std::string baseName = "NewInputAction";
+            std::string fileName = baseName + ".asset";
+            int counter = 1;
+            while (std::filesystem::exists(targetDir / fileName))
+                fileName = baseName + std::to_string(counter++) + ".asset";
+
+            const std::string displayName = std::filesystem::path(fileName).stem().string();
+            const std::string relPath = std::filesystem::relative(targetDir / fileName, contentDir).generic_string();
+
+            auto actionAsset = std::make_shared<AssetData>();
+            actionAsset->setName(displayName);
+            actionAsset->setAssetType(AssetType::InputAction);
+            actionAsset->setType(AssetType::InputAction);
+            actionAsset->setPath(relPath);
+
+            nlohmann::json data = nlohmann::json::object();
+            data["shift"] = false;
+            data["ctrl"]  = false;
+            data["alt"]   = false;
+            actionAsset->setData(data);
+
+            const unsigned int id = assetMgr.registerLoadedAsset(actionAsset);
+            if (id == 0)
+            {
+                uiMgr.showToastMessage("Failed to create input action.", UIManager::kToastMedium);
+                return;
+            }
+
+            actionAsset->setId(id);
+            Asset asset;
+            asset.ID   = id;
+            asset.type = AssetType::InputAction;
+            if (!assetMgr.saveAsset(asset, AssetManager::Sync))
+            {
+                uiMgr.showToastMessage("Failed to save input action.", UIManager::kToastMedium);
+                return;
+            }
+
+            AssetRegistryEntry entry;
+            entry.name = displayName;
+            entry.path = relPath;
+            entry.type = AssetType::InputAction;
+            assetMgr.registerAssetInRegistry(entry);
+
+            uiMgr.refreshContentBrowser();
+            uiMgr.showToastMessage("Created: " + fileName, UIManager::kToastMedium);
+            uiMgr.openInputActionEditorTab(relPath);
+        }});
+
+    items.push_back({ "New Input Mapping", [renderer]()
+        {
+            auto& uiMgr = renderer->getUIManager();
+            const auto& folder = uiMgr.getSelectedBrowserFolder();
+            if (folder == "__Shaders__") return;
+
+            auto& diagnostics = DiagnosticsManager::Instance();
+            auto& assetMgr = AssetManager::Instance();
+            const std::filesystem::path contentDir =
+                std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content";
+            const std::filesystem::path targetDir = folder.empty() ? contentDir : contentDir / folder;
+            std::error_code ec;
+            std::filesystem::create_directories(targetDir, ec);
+
+            std::string baseName = "NewInputMapping";
+            std::string fileName = baseName + ".asset";
+            int counter = 1;
+            while (std::filesystem::exists(targetDir / fileName))
+                fileName = baseName + std::to_string(counter++) + ".asset";
+
+            const std::string displayName = std::filesystem::path(fileName).stem().string();
+            const std::string relPath = std::filesystem::relative(targetDir / fileName, contentDir).generic_string();
+
+            auto mappingAsset = std::make_shared<AssetData>();
+            mappingAsset->setName(displayName);
+            mappingAsset->setAssetType(AssetType::InputMapping);
+            mappingAsset->setType(AssetType::InputMapping);
+            mappingAsset->setPath(relPath);
+
+            nlohmann::json data = nlohmann::json::object();
+            data["bindings"] = nlohmann::json::array();
+            mappingAsset->setData(data);
+
+            const unsigned int id = assetMgr.registerLoadedAsset(mappingAsset);
+            if (id == 0)
+            {
+                uiMgr.showToastMessage("Failed to create input mapping.", UIManager::kToastMedium);
+                return;
+            }
+
+            mappingAsset->setId(id);
+            Asset asset;
+            asset.ID   = id;
+            asset.type = AssetType::InputMapping;
+            if (!assetMgr.saveAsset(asset, AssetManager::Sync))
+            {
+                uiMgr.showToastMessage("Failed to save input mapping.", UIManager::kToastMedium);
+                return;
+            }
+
+            AssetRegistryEntry entry;
+            entry.name = displayName;
+            entry.path = relPath;
+            entry.type = AssetType::InputMapping;
+            assetMgr.registerAssetInRegistry(entry);
+
+            uiMgr.refreshContentBrowser();
+            uiMgr.showToastMessage("Created: " + fileName, UIManager::kToastMedium);
+            uiMgr.openInputMappingEditorTab(relPath);
+        }});
+
     items.push_back({ "New Material", [renderer]()
         {
             auto& uiMgr = renderer->getUIManager();
@@ -1356,6 +2251,7 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             formStack.from = Vec2{ nx(16.0f), ny(44.0f) };
             formStack.to = Vec2{ nx(W - 16.0f), ny(H - 50.0f) };
             formStack.padding = EditorTheme::Scaled(Vec2{ 4.0f, 4.0f });
+            formStack.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
             formStack.scrollable = true;
 
             auto makeLabel = [](const std::string& id, const std::string& text) {
@@ -1509,6 +2405,63 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             widget->setFillY(true);
             widget->setElements(std::move(elements));
             popup->uiManager().registerWidget("NewMaterial", widget);
+        }});
+
+    items.push_back({ "New Entity", [renderer]()
+        {
+            auto& uiMgr = renderer->getUIManager();
+            const auto& folder = uiMgr.getSelectedBrowserFolder();
+            if (folder == "__Shaders__") return;
+
+            auto& diagnostics = DiagnosticsManager::Instance();
+            auto& assetMgr = AssetManager::Instance();
+            const std::filesystem::path contentDir =
+                std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content";
+            const std::filesystem::path targetDir = folder.empty() ? contentDir : contentDir / folder;
+            std::error_code ec;
+            std::filesystem::create_directories(targetDir, ec);
+
+            std::string baseName = "NewEntity";
+            std::string fileName = baseName + ".asset";
+            int counter = 1;
+            while (std::filesystem::exists(targetDir / fileName))
+                fileName = baseName + std::to_string(counter++) + ".asset";
+
+            const std::filesystem::path absPath = targetDir / fileName;
+            const std::string displayName = std::filesystem::path(fileName).stem().string();
+            const std::string relPath = std::filesystem::relative(absPath, contentDir).generic_string();
+
+            // Build a minimal entity asset with a Name and Transform
+            nlohmann::json fileJson;
+            fileJson["magic"]   = 0x41535453;
+            fileJson["version"] = 2;
+            fileJson["type"]    = static_cast<int>(AssetType::Entity);
+            fileJson["name"]    = displayName;
+            fileJson["data"]    = nlohmann::json{
+                {"components", nlohmann::json{
+                    {"Name", {{"displayName", displayName}}},
+                    {"Transform", {{"position", {0.0f, 0.0f, 0.0f}}, {"rotation", {0.0f, 0.0f, 0.0f}}, {"scale", {1.0f, 1.0f, 1.0f}}}}
+                }}
+            };
+
+            std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+            if (!out.is_open())
+            {
+                uiMgr.showToastMessage("Failed to create entity file.", UIManager::kToastMedium);
+                return;
+            }
+            out << fileJson.dump(4);
+            out.close();
+
+            AssetRegistryEntry entry;
+            entry.name = displayName;
+            entry.path = relPath;
+            entry.type = AssetType::Entity;
+            assetMgr.registerAssetInRegistry(entry);
+
+            uiMgr.refreshContentBrowser();
+            uiMgr.showToastMessage("Created: " + fileName, UIManager::kToastMedium);
+            uiMgr.openEntityEditorTab(relPath);
         }});
 
     // ?? Save selected entity as Prefab ??

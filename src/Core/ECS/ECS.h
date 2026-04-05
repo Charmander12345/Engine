@@ -16,7 +16,7 @@ struct ECSConfig
 };
 
 using Entity = unsigned int;
-static constexpr size_t MaxComponentTypes = 13;
+static constexpr size_t MaxComponentTypes = 16;
 
 enum class ComponentKind : size_t
 {
@@ -26,13 +26,15 @@ enum class ComponentKind : size_t
 	Light,
 	Camera,
 	Physics,
-	Script,
+	Logic,
 	Name,
 	Collision,
 	HeightField,
 	Lod,
 	Animation,
-	ParticleEmitter
+	CharacterController,
+	ParticleEmitter,
+	AudioSource
 };
 
 template<typename T>
@@ -75,9 +77,9 @@ struct ComponentTraits<PhysicsComponent>
 };
 
 template<>
-struct ComponentTraits<ScriptComponent>
+struct ComponentTraits<LogicComponent>
 {
-	static constexpr ComponentKind kind = ComponentKind::Script;
+	static constexpr ComponentKind kind = ComponentKind::Logic;
 };
 
 template<>
@@ -111,9 +113,21 @@ struct ComponentTraits<AnimationComponent>
 };
 
 template<>
+struct ComponentTraits<CharacterControllerComponent>
+{
+	static constexpr ComponentKind kind = ComponentKind::CharacterController;
+};
+
+template<>
 struct ComponentTraits<ParticleEmitterComponent>
 {
 	static constexpr ComponentKind kind = ComponentKind::ParticleEmitter;
+};
+
+template<>
+struct ComponentTraits<AudioSourceComponent>
+{
+	static constexpr ComponentKind kind = ComponentKind::AudioSource;
 };
 
 class Schema
@@ -190,6 +204,34 @@ public:
 	template<typename T>
 	const T* getComponent(Entity entity) const;
 
+	// ── Transform Parenting ──────────────────────────────────────
+	/// Attach \p entity as a child of \p parentEntity.
+	/// The entity's current world transform is preserved (converted to local).
+	bool setParent(Entity entity, Entity parentEntity);
+
+	/// Detach \p entity from its parent.
+	/// The entity's current world transform is preserved.
+	bool removeParent(Entity entity);
+
+	/// Return the parent entity, or InvalidEntity if none.
+	Entity getParent(Entity entity) const;
+
+	/// Return the direct children of \p entity.
+	const std::vector<Entity>& getChildren(Entity entity) const;
+
+	/// Walk up the parent chain to find the root entity.
+	Entity getRoot(Entity entity) const;
+
+	/// Return true if \p ancestor is a (transitive) parent of \p descendant.
+	bool isAncestorOf(Entity ancestor, Entity descendant) const;
+
+	/// Recompute world transforms for all dirty entities (top-down).
+	/// Call once per frame before physics/rendering.
+	void updateWorldTransforms();
+
+	/// Mark an entity's transform as dirty (and all descendants).
+	void markTransformDirty(Entity entity);
+
 
 	private:
 		ECSManager() = default;
@@ -213,13 +255,21 @@ public:
 	SparseSet<LightComponent, MaxEntities> m_lightComponents;
 	SparseSet<CameraComponent, MaxEntities> m_cameraComponents;
 	SparseSet<PhysicsComponent, MaxEntities> m_physicsComponents;
-	SparseSet<ScriptComponent, MaxEntities> m_scriptComponents;
+	SparseSet<LogicComponent, MaxEntities> m_logicComponents;
 	SparseSet<NameComponent, MaxEntities> m_nameComponents;
 	SparseSet<CollisionComponent, MaxEntities> m_collisionComponents;
 	SparseSet<HeightFieldComponent, MaxEntities> m_heightFieldComponents;
 	SparseSet<LodComponent, MaxEntities> m_lodComponents;
 	SparseSet<AnimationComponent, MaxEntities> m_animationComponents;
+	SparseSet<CharacterControllerComponent, MaxEntities> m_characterControllerComponents;
 	SparseSet<ParticleEmitterComponent, MaxEntities> m_particleEmitterComponents;
+	SparseSet<AudioSourceComponent, MaxEntities> m_audioSourceComponents;
+
+	/// Empty vector
+	static inline const std::vector<Entity> s_emptyChildren{};
+
+	/// Recursive helper for updateWorldTransforms().
+	void updateWorldTransformRecursive(Entity entity, const TransformComponent& parentWorld);
 
 	template<typename T>
 	SparseSet<T, MaxEntities>& getStorage();
@@ -325,9 +375,9 @@ inline SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage()
 	{
 		return m_collisionComponents;
 	}
-	else if constexpr (std::is_same_v<T, ScriptComponent>)
+	else if constexpr (std::is_same_v<T, LogicComponent>)
 	{
-		return m_scriptComponents;
+		return m_logicComponents;
 	}
 	else if constexpr (std::is_same_v<T, HeightFieldComponent>)
 	{
@@ -341,10 +391,22 @@ inline SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage()
 	{
 		return m_animationComponents;
 	}
+	else if constexpr (std::is_same_v<T, CharacterControllerComponent>)
+	{
+		return m_characterControllerComponents;
+	}
+	else if constexpr (std::is_same_v<T, ParticleEmitterComponent>)
+	{
+		return m_particleEmitterComponents;
+	}
+	else if constexpr (std::is_same_v<T, AudioSourceComponent>)
+	{
+		return m_audioSourceComponents;
+	}
 	else
 	{
-		static_assert(std::is_same_v<T, ParticleEmitterComponent>, "Unsupported component type");
-		return m_particleEmitterComponents;
+		static_assert(std::is_same_v<T, AudioSourceComponent>, "Unsupported component type");
+		return m_audioSourceComponents;
 	}
 }
 
@@ -383,9 +445,9 @@ inline const SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage() con
 	{
 		return m_collisionComponents;
 	}
-	else if constexpr (std::is_same_v<T, ScriptComponent>)
+	else if constexpr (std::is_same_v<T, LogicComponent>)
 	{
-		return m_scriptComponents;
+		return m_logicComponents;
 	}
 	else if constexpr (std::is_same_v<T, HeightFieldComponent>)
 	{
@@ -399,10 +461,22 @@ inline const SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage() con
 	{
 		return m_animationComponents;
 	}
+	else if constexpr (std::is_same_v<T, CharacterControllerComponent>)
+	{
+		return m_characterControllerComponents;
+	}
+	else if constexpr (std::is_same_v<T, ParticleEmitterComponent>)
+	{
+		return m_particleEmitterComponents;
+	}
+	else if constexpr (std::is_same_v<T, AudioSourceComponent>)
+	{
+		return m_audioSourceComponents;
+	}
 	else
 	{
-		static_assert(std::is_same_v<T, ParticleEmitterComponent>, "Unsupported component type");
-		return m_particleEmitterComponents;
+		static_assert(std::is_same_v<T, AudioSourceComponent>, "Unsupported component type");
+		return m_audioSourceComponents;
 	}
 }
 
@@ -478,9 +552,9 @@ inline bool ECSManager::setComponentAsset(Entity entity, const std::shared_ptr<A
 		component.materialAssetId = asset->getId();
 		return setComponent(entity, component);
 	}
-	else if constexpr (std::is_same_v<T, ScriptComponent>)
+	else if constexpr (std::is_same_v<T, LogicComponent>)
 	{
-		ScriptComponent component;
+		LogicComponent component;
 		component.scriptPath = asset->getPath();
 		component.scriptAssetId = asset->getId();
 		return setComponent(entity, component);

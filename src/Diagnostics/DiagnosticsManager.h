@@ -28,14 +28,22 @@ public:
         DirectX12
     };
 
-    
-    struct ProjectInfo
+    enum class ScriptingMode
     {
-        std::string projectName;
-        std::string projectVersion;
-        std::string engineVersion;
-        std::string projectPath;
+        PythonOnly,
+        CppOnly,
+        Both
+    };
+
+    
+	struct ProjectInfo
+	{
+		std::string projectName;
+		std::string projectVersion;
+		std::string engineVersion;
+		std::string projectPath;
 		RHIType selectedRHI;
+		ScriptingMode scriptingMode{ ScriptingMode::Both };
 	};
 
     enum class ActionType
@@ -82,6 +90,8 @@ public:
     void setRHIType(RHIType type);
     RHIType getRHIType() const;
     static const char* rhiTypeToString(RHIType type);
+    static const char* scriptingModeToString(ScriptingMode mode);
+    static ScriptingMode scriptingModeFromString(const std::string& value);
     static const char* windowStateToString(WindowState state);
     static WindowState windowStateFromString(const std::string& value);
 

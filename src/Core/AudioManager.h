@@ -50,6 +50,13 @@ public:
     bool invalidateHandle(unsigned int handle);
     void stopAll();
 
+    // 3D Spatial Audio
+    bool setSourcePosition(unsigned int handle, float x, float y, float z);
+    bool setSourceSpatial(unsigned int handle, bool is3D, float minDist = 1.0f, float maxDist = 50.0f, float rolloff = 1.0f);
+    void updateListenerTransform(float posX, float posY, float posZ,
+                                 float forwardX, float forwardY, float forwardZ,
+                                 float upX, float upY, float upZ);
+
     bool isInitialized() const;
 
 private:

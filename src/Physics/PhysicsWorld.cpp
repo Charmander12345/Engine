@@ -50,7 +50,6 @@ void PhysicsWorld::initialize(Backend backend)
     }
 
     m_backend->initialize();
-    m_backend->setGravity(m_gravity[0], m_gravity[1], m_gravity[2]);
 
     m_gravity[0] = 0.0f;
     m_gravity[1] = -9.81f;
@@ -59,11 +58,14 @@ void PhysicsWorld::initialize(Backend backend)
     m_accumulator = m_fixedTimestep;
     m_sleepThreshold = 0.05f;
 
+    m_backend->setGravity(m_gravity[0], m_gravity[1], m_gravity[2]);
+
     m_collisionEvents.clear();
     m_activeOverlaps.clear();
     m_beginOverlapEvents.clear();
     m_endOverlapEvents.clear();
     m_trackedEntities.clear();
+    m_trackedCharacters.clear();
 
     m_initialized = true;
     Logger::Instance().log(Logger::Category::Engine, "PhysicsWorld initialised.", Logger::LogLevel::INFO);
@@ -78,6 +80,7 @@ void PhysicsWorld::shutdown()
     }
 
     m_trackedEntities.clear();
+    m_trackedCharacters.clear();
     m_collisionEvents.clear();
     m_collisionCallback = nullptr;
     m_activeOverlaps.clear();
@@ -113,14 +116,19 @@ void PhysicsWorld::step(float dt)
 
     m_collisionEvents.clear();
 
+    // Update world transforms from local transforms (parenting hierarchy)
+    ECS::ECSManager::Instance().updateWorldTransforms();
+
     // Sync ECS → Backend (create/update bodies)
     syncBodiesToBackend();
+    syncCharactersToBackend();
 
     m_accumulator += dt;
 
     while (m_accumulator >= m_fixedTimestep)
     {
         m_backend->update(m_fixedTimestep);
+        updateCharacters(m_fixedTimestep);
         m_accumulator -= m_fixedTimestep;
     }
 
@@ -140,6 +148,7 @@ void PhysicsWorld::step(float dt)
 
     // Sync Backend → ECS
     syncBodiesFromBackend();
+    syncCharactersFromBackend();
 
     updateOverlapTracking();
     fireCollisionEvents();
@@ -161,6 +170,9 @@ void PhysicsWorld::syncBodiesToBackend()
         const auto* cc = ecs.getComponent<ECS::CollisionComponent>(entity);
         if (!tc || !cc) continue;
 
+        // Skip entities that use a Character Controller instead of a Rigidbody
+        if (ecs.hasComponent<ECS::CharacterControllerComponent>(entity)) continue;
+
         const auto* pc = ecs.getComponent<ECS::PhysicsComponent>(entity);
 
         aliveEntities.insert(entity);
@@ -170,17 +182,18 @@ void PhysicsWorld::syncBodiesToBackend()
         if (existingHandle != IPhysicsBackend::InvalidBody)
         {
             // Body already exists — update kinematic/static position
-            IPhysicsBackend::BodyDesc::MotionType mt = IPhysicsBackend::BodyDesc::MotionType::Static;
+            IPhysicsBackend::BodyDesc::MotionType mt = IPhysicsBackend::BodyDesc::MotionType::Kinematic;
             if (pc)
             {
                 switch (pc->motionType)
                 {
                 case ECS::PhysicsComponent::MotionType::Dynamic:   mt = IPhysicsBackend::BodyDesc::MotionType::Dynamic;   break;
                 case ECS::PhysicsComponent::MotionType::Kinematic:  mt = IPhysicsBackend::BodyDesc::MotionType::Kinematic;  break;
+                case ECS::PhysicsComponent::MotionType::Static:     mt = IPhysicsBackend::BodyDesc::MotionType::Static;     break;
                 default: break;
                 }
             }
-            if (mt == IPhysicsBackend::BodyDesc::MotionType::Static || mt == IPhysicsBackend::BodyDesc::MotionType::Kinematic)
+            if (mt != IPhysicsBackend::BodyDesc::MotionType::Dynamic)
             {
                 m_backend->setBodyPositionRotation(existingHandle,
                     tc->position[0], tc->position[1], tc->position[2],
@@ -251,9 +264,12 @@ void PhysicsWorld::syncBodiesToBackend()
             desc.isSensor    = cc->isSensor;
 
             // Motion type
-            desc.motionType = IPhysicsBackend::BodyDesc::MotionType::Static;
+            // Entities without PhysicsComponent default to Kinematic so their
+            // collider stays active on the MOVING layer and detects overlaps.
+            // PhysicsComponent is only needed for dynamics (gravity, forces).
             if (pc)
             {
+                desc.motionType = IPhysicsBackend::BodyDesc::MotionType::Static;
                 switch (pc->motionType)
                 {
                 case ECS::PhysicsComponent::MotionType::Dynamic:   desc.motionType = IPhysicsBackend::BodyDesc::MotionType::Dynamic;   break;
@@ -273,6 +289,23 @@ void PhysicsWorld::syncBodiesToBackend()
                     : IPhysicsBackend::BodyDesc::MotionQuality::Discrete;
                 std::memcpy(desc.velocity, pc->velocity, sizeof(desc.velocity));
                 std::memcpy(desc.angularVelocity, pc->angularVelocity, sizeof(desc.angularVelocity));
+            }
+            else
+            {
+                // No PhysicsComponent → Kinematic so the collider follows the
+                // entity transform and participates in overlap detection.
+                desc.motionType    = IPhysicsBackend::BodyDesc::MotionType::Kinematic;
+                desc.allowSleeping = false;
+                desc.gravityFactor = 0.0f;
+            }
+
+            // Sensors with explicit Static motion type still need Kinematic
+            // for overlap detection (two Static bodies never generate contacts).
+            if (desc.isSensor && desc.motionType == IPhysicsBackend::BodyDesc::MotionType::Static)
+            {
+                desc.motionType    = IPhysicsBackend::BodyDesc::MotionType::Kinematic;
+                desc.allowSleeping = false;
+                desc.gravityFactor = 0.0f;
             }
 
             m_backend->createBody(desc);
@@ -413,4 +446,119 @@ PhysicsWorld::RaycastHit PhysicsWorld::raycast(float ox, float oy, float oz,
     std::memcpy(result.normal, br.normal, sizeof(result.normal));
 
     return result;
+}
+
+// ── Character Controller sync ──────────────────────────────────────────
+
+void PhysicsWorld::syncCharactersToBackend()
+{
+    auto& ecs = ECS::ECSManager::Instance();
+    auto schema = ECS::Schema()
+        .require<ECS::TransformComponent>()
+        .require<ECS::CharacterControllerComponent>()
+        .require<ECS::CollisionComponent>();
+    auto entities = ecs.getEntitiesMatchingSchema(schema);
+
+    std::set<uint32_t> aliveCharacters;
+
+    for (auto entity : entities)
+    {
+        const auto* tc  = ecs.getComponent<ECS::TransformComponent>(entity);
+        const auto* ccc = ecs.getComponent<ECS::CharacterControllerComponent>(entity);
+        if (!tc || !ccc) continue;
+
+        aliveCharacters.insert(entity);
+
+        auto existingHandle = m_backend->getCharacterForEntity(entity);
+        if (existingHandle != IPhysicsBackend::InvalidCharacter)
+        {
+            // Character already exists — nothing to update (position is managed by backend)
+            continue;
+        }
+
+        // Create a new character in the backend
+        IPhysicsBackend::CharacterDesc desc{};
+        desc.entityId      = entity;
+        desc.radius        = ccc->radius;
+        desc.height        = ccc->height;
+        desc.maxSlopeAngle = ccc->maxSlopeAngle;
+        desc.stepUpHeight  = ccc->stepUpHeight;
+        desc.skinWidth     = ccc->skinWidth;
+        std::memcpy(desc.position, tc->position, sizeof(desc.position));
+        desc.rotationYDeg  = tc->rotation[1]; // Yaw
+
+        m_backend->createCharacter(desc);
+        m_trackedCharacters.insert(entity);
+    }
+
+    // Remove characters for entities that no longer exist
+    std::vector<uint32_t> toRemove;
+    for (uint32_t entity : m_trackedCharacters)
+    {
+        if (aliveCharacters.find(entity) == aliveCharacters.end())
+            toRemove.push_back(entity);
+    }
+    for (uint32_t entity : toRemove)
+    {
+        auto handle = m_backend->getCharacterForEntity(entity);
+        if (handle != IPhysicsBackend::InvalidCharacter)
+            m_backend->removeCharacter(handle);
+        m_trackedCharacters.erase(entity);
+    }
+}
+
+void PhysicsWorld::updateCharacters(float dt)
+{
+    auto& ecs = ECS::ECSManager::Instance();
+
+    for (uint32_t entity : m_trackedCharacters)
+    {
+        auto* ccc = ecs.getComponent<ECS::CharacterControllerComponent>(entity);
+        if (!ccc) continue;
+
+        auto handle = m_backend->getCharacterForEntity(entity);
+        if (handle == IPhysicsBackend::InvalidCharacter) continue;
+
+        float gx = m_gravity[0] * ccc->gravityFactor;
+        float gy = m_gravity[1] * ccc->gravityFactor;
+        float gz = m_gravity[2] * ccc->gravityFactor;
+
+        m_backend->updateCharacter(handle, dt,
+            ccc->velocity[0], ccc->velocity[1], ccc->velocity[2],
+            gx, gy, gz);
+    }
+}
+
+void PhysicsWorld::syncCharactersFromBackend()
+{
+    auto& ecs = ECS::ECSManager::Instance();
+
+    for (uint32_t entity : m_trackedCharacters)
+    {
+        auto* tc  = ecs.getComponent<ECS::TransformComponent>(entity);
+        auto* ccc = ecs.getComponent<ECS::CharacterControllerComponent>(entity);
+        if (!tc || !ccc) continue;
+
+        auto handle = m_backend->getCharacterForEntity(entity);
+        if (handle == IPhysicsBackend::InvalidCharacter) continue;
+
+        auto state = m_backend->getCharacterState(handle);
+
+        tc->position[0] = state.position[0];
+        tc->position[1] = state.position[1];
+        tc->position[2] = state.position[2];
+
+        ccc->isGrounded = state.isGrounded;
+        std::memcpy(ccc->groundNormal, state.groundNormal, sizeof(ccc->groundNormal));
+        ccc->groundAngle = state.groundAngle;
+
+        // Clamp fall speed
+        float vy = state.velocity[1];
+        if (vy < -ccc->maxFallSpeed)
+            vy = -ccc->maxFallSpeed;
+
+        ccc->velocity[0] = state.velocity[0];
+        ccc->velocity[1] = vy;
+        ccc->velocity[2] = state.velocity[2];
+    }
 }

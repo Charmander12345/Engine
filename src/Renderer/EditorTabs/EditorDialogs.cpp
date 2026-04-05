@@ -86,7 +86,7 @@ void EditorDialogs::closeModalMessage()
 }
 
 #if ENGINE_EDITOR
-void EditorDialogs::showConfirmDialog(const std::string& message, std::function<void()> onConfirm, std::function<void()> onCancel)
+void EditorDialogs::showConfirmDialog(const std::string& message, std::function<void()> onConfirm, std::function<void()> onCancel, const std::string& confirmLabel, const std::string& cancelLabel)
 {
     if (message.empty())
     {
@@ -177,14 +177,16 @@ void EditorDialogs::showConfirmDialog(const std::string& message, std::function<
     spacerRight.style.color = theme.transparent;
     spacerRight.runtimeOnly = true;
 
-    WidgetElement yesBtn = EditorUIBuilder::makeDangerButton("Modal.Yes", "Delete", {}, Vec2{ 110.0f, 32.0f });
+    WidgetElement yesBtn = (confirmLabel == "Delete")
+        ? EditorUIBuilder::makeDangerButton("Modal.Yes", confirmLabel, {}, Vec2{ 110.0f, 32.0f })
+        : EditorUIBuilder::makePrimaryButton("Modal.Yes", confirmLabel, {}, Vec2{ 110.0f, 32.0f });
     yesBtn.onClicked = [this, confirmCb]()
     {
         closeModalMessage();
         if (*confirmCb) (*confirmCb)();
     };
 
-    WidgetElement noBtn = EditorUIBuilder::makeButton("Modal.No", "Cancel", {}, Vec2{ 110.0f, 32.0f });
+    WidgetElement noBtn = EditorUIBuilder::makeButton("Modal.No", cancelLabel, {}, Vec2{ 110.0f, 32.0f });
     noBtn.onClicked = [this, cancelCb]()
     {
         closeModalMessage();
@@ -217,7 +219,7 @@ void EditorDialogs::showConfirmDialog(const std::string& message, std::function<
 }
 
 void EditorDialogs::showConfirmDialogWithCheckbox(const std::string& message, const std::string& checkboxLabel, bool checkedByDefault,
-    std::function<void(bool checked)> onConfirm, std::function<void()> onCancel)
+    std::function<void(bool checked)> onConfirm, std::function<void()> onCancel, const std::string& confirmLabel, const std::string& cancelLabel)
 {
     if (message.empty())
     {
@@ -330,14 +332,16 @@ void EditorDialogs::showConfirmDialogWithCheckbox(const std::string& message, co
     spacerRight.style.color = theme.transparent;
     spacerRight.runtimeOnly = true;
 
-    WidgetElement yesBtn = EditorUIBuilder::makeDangerButton("Modal.Yes", "Delete", {}, Vec2{ 110.0f, 32.0f });
+    WidgetElement yesBtn = (confirmLabel == "Delete")
+        ? EditorUIBuilder::makeDangerButton("Modal.Yes", confirmLabel, {}, Vec2{ 110.0f, 32.0f })
+        : EditorUIBuilder::makePrimaryButton("Modal.Yes", confirmLabel, {}, Vec2{ 110.0f, 32.0f });
     yesBtn.onClicked = [this, confirmCb, checkboxState]()
     {
         closeModalMessage();
         if (*confirmCb) (*confirmCb)(*checkboxState);
     };
 
-    WidgetElement noBtn = EditorUIBuilder::makeButton("Modal.No", "Cancel", {}, Vec2{ 110.0f, 32.0f });
+    WidgetElement noBtn = EditorUIBuilder::makeButton("Modal.No", cancelLabel, {}, Vec2{ 110.0f, 32.0f });
     noBtn.onClicked = [this, cancelCb]()
     {
         closeModalMessage();
@@ -954,7 +958,7 @@ void EditorDialogs::closeLevelLoadProgress()
 }
 
 
-void EditorDialogs::openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)> onProjectChosen)
+void EditorDialogs::openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI, DiagnosticsManager::ScriptingMode scriptingMode)> onProjectChosen)
 {
     if (!m_renderer)
         return;
@@ -981,6 +985,7 @@ void EditorDialogs::openProjectScreen(std::function<void(const std::string& proj
         bool setAsDefault{ false };
         bool includeDefaultContent{ true };
         int selectedRHI{ 0 };
+        int selectedScripting{ 2 };
     };
     auto state = std::make_shared<PSState>();
 
@@ -1127,7 +1132,7 @@ void EditorDialogs::openProjectScreen(std::function<void(const std::string& proj
     const float kCatBtnGap = EditorTheme::Scaled(2.0f);
     const float kCatBtnY0 = kTitleH + EditorTheme::Scaled(10.0f);
 
-    auto callbackPtr = std::make_shared<std::function<void(const std::string&, bool, bool, bool, DiagnosticsManager::RHIType)>>(std::move(onProjectChosen));
+    auto callbackPtr = std::make_shared<std::function<void(const std::string&, bool, bool, bool, DiagnosticsManager::RHIType, DiagnosticsManager::ScriptingMode)>>(std::move(onProjectChosen));
     auto closeScreen = [screenMgr]()
     {
         if (screenMgr)
@@ -1192,6 +1197,7 @@ void EditorDialogs::openProjectScreen(std::function<void(const std::string& proj
             btn.minSize       = Vec2{ contentW - kContentPad * 2.0f, EditorTheme::Scaled(38.0f) };
             btn.shaderVertex   = "button_vertex.glsl";
             btn.shaderFragment = "button_fragment.glsl";
+            btn.style.transitionDuration = EditorTheme::Get().hoverTransitionSpeed;
             btn.onClicked     = std::move(onClick);
             entry->children.push_back(btn);
         };
@@ -1215,6 +1221,7 @@ void EditorDialogs::openProjectScreen(std::function<void(const std::string& proj
             btn.minSize       = Vec2{ EditorTheme::Scaled(160.0f), EditorTheme::Scaled(30.0f) };
             btn.shaderVertex   = "button_vertex.glsl";
             btn.shaderFragment = "button_fragment.glsl";
+            btn.style.transitionDuration = theme.hoverTransitionSpeed;
             btn.onClicked     = std::move(onClick);
             entry->children.push_back(btn);
         };
@@ -1336,6 +1343,7 @@ void EditorDialogs::openProjectScreen(std::function<void(const std::string& proj
                     row.style.hoverColor  = exists
                         ? EditorTheme::Get().selectionHighlightHover
                         : row.style.color;
+                    row.style.transitionDuration = EditorTheme::Get().hoverTransitionSpeed;
                     row.padding     = Vec2{ 0.0f, 0.0f };
                     row.hitTestMode = exists ? HitTestMode::Enabled : HitTestMode::DisabledSelf;
 
@@ -1443,11 +1451,11 @@ void EditorDialogs::openProjectScreen(std::function<void(const std::string& proj
                     if (exists)
                     {
                         row.onClicked = [callbackPtr, projPath, state, closeScreen]()
-                        {
-                            if (*callbackPtr)
-                                (*callbackPtr)(projPath, false, state->setAsDefault, state->includeDefaultContent, DiagnosticsManager::RHIType::OpenGL);
-                            closeScreen();
-                        };
+                            {
+                                if (*callbackPtr)
+                                    (*callbackPtr)(projPath, false, state->setAsDefault, state->includeDefaultContent, DiagnosticsManager::RHIType::OpenGL, DiagnosticsManager::ScriptingMode::Both);
+                                closeScreen();
+                            };
                     }
 
                     entry->children.push_back(row);
@@ -1492,7 +1500,7 @@ void EditorDialogs::openProjectScreen(std::function<void(const std::string& proj
 
                     struct BrowseCtx
                     {
-                        std::shared_ptr<std::function<void(const std::string&, bool, bool, bool, DiagnosticsManager::RHIType)>> callback;
+                        std::shared_ptr<std::function<void(const std::string&, bool, bool, bool, DiagnosticsManager::RHIType, DiagnosticsManager::ScriptingMode)>> callback;
                         std::shared_ptr<PSState> state;
                         std::function<void()> closeScreen;
                     };
@@ -1507,7 +1515,7 @@ void EditorDialogs::openProjectScreen(std::function<void(const std::string& proj
                                 std::filesystem::path projFile(filelist[0]);
                                 std::string projDir = projFile.parent_path().string();
                                 if (*(c->callback))
-                                    (*(c->callback))(projDir, false, c->state->setAsDefault, c->state->includeDefaultContent, DiagnosticsManager::RHIType::OpenGL);
+                                    (*(c->callback))(projDir, false, c->state->setAsDefault, c->state->includeDefaultContent, DiagnosticsManager::RHIType::OpenGL, DiagnosticsManager::ScriptingMode::Both);
                                 if (c->closeScreen)
                                     c->closeScreen();
                             }
@@ -1697,6 +1705,46 @@ void EditorDialogs::openProjectScreen(std::function<void(const std::string& proj
                 entry->children.push_back(rhiRow);
             }
 
+            {
+                WidgetElement scriptRow;
+                scriptRow.type        = WidgetElementType::StackPanel;
+                scriptRow.id          = "PS.C.Script.Row";
+                scriptRow.orientation = StackOrientation::Horizontal;
+                scriptRow.minSize     = Vec2{ contentW - kContentPad * 2.0f, kRowH };
+                scriptRow.style.color       = EditorTheme::Get().transparent;
+                scriptRow.padding     = Vec2{ 6.0f, 2.0f };
+
+                WidgetElement scriptLbl;
+                scriptLbl.type      = WidgetElementType::Text;
+                scriptLbl.id        = "PS.C.Script.Lbl";
+                scriptLbl.text      = "Gameplay Scripting";
+                scriptLbl.fontSize  = EditorTheme::Get().fontSizeBody;
+                scriptLbl.style.textColor = EditorTheme::Get().textSecondary;
+                scriptLbl.textAlignV = TextAlignV::Center;
+                scriptLbl.minSize   = Vec2{ EditorTheme::Scaled(120.0f), kRowH };
+                scriptRow.children.push_back(scriptLbl);
+
+                WidgetElement scriptDd;
+                scriptDd.type          = WidgetElementType::DropDown;
+                scriptDd.id            = "PS.C.Script";
+                scriptDd.items         = { "Python only", "C++ only", "Both" };
+                scriptDd.selectedIndex = state->selectedScripting;
+                scriptDd.fontSize      = EditorTheme::Get().fontSizeMonospace;
+                scriptDd.style.color         = EditorTheme::Get().inputBackground;
+                scriptDd.style.hoverColor    = EditorTheme::Get().inputBackgroundHover;
+                scriptDd.style.textColor     = EditorTheme::Get().textPrimary;
+                scriptDd.padding       = Vec2{ 6.0f, 4.0f };
+                scriptDd.hitTestMode = HitTestMode::Enabled;
+                scriptDd.minSize       = Vec2{ contentW - kContentPad * 2.0f - EditorTheme::Scaled(120.0f) - EditorTheme::Scaled(12.0f), kRowH };
+                scriptDd.onSelectionChanged = [state](int idx)
+                {
+                    state->selectedScripting = idx;
+                };
+                scriptRow.children.push_back(scriptDd);
+
+                entry->children.push_back(scriptRow);
+            }
+
             addActionButton("PS.C.CreateBtn", "Create Project",
                 EditorTheme::Get().accentGreen,
                 Vec4{ 0.40f, 0.78f, 0.44f, 1.0f },
@@ -1727,7 +1775,9 @@ void EditorDialogs::openProjectScreen(std::function<void(const std::string& proj
                                     {
                                         constexpr DiagnosticsManager::RHIType rhiMap[] = { DiagnosticsManager::RHIType::OpenGL };
                                         const auto rhi = (state->selectedRHI >= 0 && state->selectedRHI < static_cast<int>(std::size(rhiMap))) ? rhiMap[state->selectedRHI] : DiagnosticsManager::RHIType::OpenGL;
-                                        (*callbackPtr)(fullPath, false, state->setAsDefault, state->includeDefaultContent, rhi);
+                                        constexpr DiagnosticsManager::ScriptingMode scriptMap[] = { DiagnosticsManager::ScriptingMode::PythonOnly, DiagnosticsManager::ScriptingMode::CppOnly, DiagnosticsManager::ScriptingMode::Both };
+                                        const auto sm = (state->selectedScripting >= 0 && state->selectedScripting < static_cast<int>(std::size(scriptMap))) ? scriptMap[state->selectedScripting] : DiagnosticsManager::ScriptingMode::Both;
+                                        (*callbackPtr)(fullPath, false, state->setAsDefault, state->includeDefaultContent, rhi, sm);
                                     }
                                     if (screenMgr) screenMgr->unregisterWidget("ProjectScreen.Main");
                                 },
@@ -1737,13 +1787,53 @@ void EditorDialogs::openProjectScreen(std::function<void(const std::string& proj
                         return;
                     }
 
-                    if (*callbackPtr)
+                    const auto doCreateProject = [callbackPtr, fullPath, state, closeScreen]()
                     {
-                        constexpr DiagnosticsManager::RHIType rhiMap[] = { DiagnosticsManager::RHIType::OpenGL };
-                        const auto rhi = (state->selectedRHI >= 0 && state->selectedRHI < static_cast<int>(std::size(rhiMap))) ? rhiMap[state->selectedRHI] : DiagnosticsManager::RHIType::OpenGL;
-                        (*callbackPtr)(fullPath, true, state->setAsDefault, state->includeDefaultContent, rhi);
+                        if (*callbackPtr)
+                        {
+                            constexpr DiagnosticsManager::RHIType rhiMap[] = { DiagnosticsManager::RHIType::OpenGL };
+                            const auto rhi = (state->selectedRHI >= 0 && state->selectedRHI < static_cast<int>(std::size(rhiMap))) ? rhiMap[state->selectedRHI] : DiagnosticsManager::RHIType::OpenGL;
+                            constexpr DiagnosticsManager::ScriptingMode scriptMap[] = { DiagnosticsManager::ScriptingMode::PythonOnly, DiagnosticsManager::ScriptingMode::CppOnly, DiagnosticsManager::ScriptingMode::Both };
+                            const auto sm = (state->selectedScripting >= 0 && state->selectedScripting < static_cast<int>(std::size(scriptMap))) ? scriptMap[state->selectedScripting] : DiagnosticsManager::ScriptingMode::Both;
+                            (*callbackPtr)(fullPath, true, state->setAsDefault, state->includeDefaultContent, rhi, sm);
+                        }
+                        closeScreen();
+                    };
+
+                    if (state->selectedScripting == 1 || state->selectedScripting == 2)
+                    {
+                        if (screenMgr)
+                        {
+                            screenMgr->showConfirmDialogWithCheckbox(
+                                "C++ scripting requires a C++ IDE for editing and compiling code.\n\n"
+                                "It is strongly recommended to install VS Code.",
+                                "Open VS Code download page",
+                                true,
+                                [doCreateProject](bool openDownload)
+                                {
+                                    if (openDownload)
+                                    {
+                                        SDL_OpenURL("https://code.visualstudio.com/");
+                                    }
+                                    doCreateProject();
+                                },
+                                []()
+                                {
+                                    // Cancelled - do not create project
+                                },
+                                "Continue",
+                                "Cancel"
+                            );
+                        }
+                        else
+                        {
+                            doCreateProject();
+                        }
                     }
-                    closeScreen();
+                    else
+                    {
+                        doCreateProject();
+                    }
                 });
         }
 
@@ -1785,6 +1875,7 @@ void EditorDialogs::openProjectScreen(std::function<void(const std::string& proj
             ? EditorTheme::Get().selectionHighlight
             : EditorTheme::Get().transparent;
         catBtn.style.hoverColor    = EditorTheme::Get().buttonSubtleHover;
+        catBtn.style.transitionDuration = EditorTheme::Get().hoverTransitionSpeed;
         catBtn.style.textColor     = active
             ? EditorTheme::Get().textPrimary
             : EditorTheme::Get().textSecondary;

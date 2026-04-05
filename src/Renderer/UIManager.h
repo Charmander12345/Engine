@@ -35,6 +35,9 @@ class LevelCompositionTab;
 class AnimationEditorTab;
 class UIDesignerTab;
 class WidgetEditorTab;
+class EntityEditorTab;
+class InputActionEditorTab;
+class InputMappingEditorTab;
 class ContentBrowserPanel;
 class OutlinerPanel;
 #include "EditorTabs/BuildSystemUI.h"
@@ -140,9 +143,11 @@ public:
     void showModalMessage(const std::string& message, std::function<void()> onClosed = {});
     void closeModalMessage();
 	#if ENGINE_EDITOR
-	void showConfirmDialog(const std::string& message, std::function<void()> onConfirm, std::function<void()> onCancel = {});
+	void showConfirmDialog(const std::string& message, std::function<void()> onConfirm, std::function<void()> onCancel = {},
+		   const std::string& confirmLabel = "Delete", const std::string& cancelLabel = "Cancel");
 	void showConfirmDialogWithCheckbox(const std::string& message, const std::string& checkboxLabel, bool checkedByDefault,
-		std::function<void(bool checked)> onConfirm, std::function<void()> onCancel = {});
+		   std::function<void(bool checked)> onConfirm, std::function<void()> onCancel = {},
+		   const std::string& confirmLabel = "Delete", const std::string& cancelLabel = "Cancel");
 #endif
 	// Notification levels for priority-based styling (alias from DiagnosticsManager)
 	using NotificationLevel = DiagnosticsManager::NotificationLevel;
@@ -244,6 +249,21 @@ public:
 	void closeAnimationEditorTab();
 	bool isAnimationEditorOpen() const;
 
+	// Entity Editor tab (entity asset editing)
+	void openEntityEditorTab(const std::string& assetPath);
+	void closeEntityEditorTab();
+	bool isEntityEditorOpen() const;
+
+	// Input Action Editor tab
+	void openInputActionEditorTab(const std::string& assetPath);
+	void closeInputActionEditorTab();
+	bool isInputActionEditorOpen() const;
+
+	// Input Mapping Editor tab
+	void openInputMappingEditorTab(const std::string& assetPath);
+	void closeInputMappingEditorTab();
+	bool isInputMappingEditorOpen() const;
+
 	// Entity clipboard (Copy/Paste/Duplicate)
 	void copySelectedEntity();
 	bool pasteEntity();
@@ -269,8 +289,9 @@ public:
 	// Prefab / Entity Templates
 	bool savePrefabFromEntity(ECS::Entity entity, const std::string& name, const std::string& folder);
 	bool spawnPrefabAtPosition(const std::string& prefabRelPath, const Vec3& pos);
+	bool spawnEntityAssetAtPosition(const std::string& entityAssetRelPath, const Vec3& pos);
 	bool spawnBuiltinTemplate(const std::string& templateName, const Vec3& pos);
-    void openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)> onProjectChosen);
+	void openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI, DiagnosticsManager::ScriptingMode scriptingMode)> onProjectChosen);
 
 	// Returns true if the active tab is a widget editor and had a selected element to delete
 	bool tryDeleteWidgetEditorElement();
@@ -455,6 +476,13 @@ private:
 	// Animation Editor tab (extracted to EditorTabs/AnimationEditorTab.h)
 	std::unique_ptr<AnimationEditorTab> m_animationEditorTab;
 
+	// Entity Editor tab (extracted to EditorTabs/EntityEditorTab.h)
+	std::unique_ptr<EntityEditorTab> m_entityEditorTab;
+
+	// Input Action / Input Mapping Editor tabs
+	std::unique_ptr<InputActionEditorTab> m_inputActionEditorTab;
+	std::unique_ptr<InputMappingEditorTab> m_inputMappingEditorTab;
+
 public:
 	bool getWidgetEditorCanvasRect(Vec4& outRect) const;
 	bool isWidgetEditorContentWidget(const std::string& widgetId) const;
@@ -535,6 +563,11 @@ public:
 	using DropOnEntityCallback = std::function<void(const std::string& payload, unsigned int entity)>;
 	void setOnDropOnEntity(DropOnEntityCallback callback) { m_onDropOnEntity = std::move(callback); }
 
+	// Provider callback for available C++ native script class names
+	using NativeClassNamesProvider = std::function<std::vector<std::string>()>;
+	void setNativeClassNamesProvider(NativeClassNamesProvider provider) { m_nativeClassNamesProvider = std::move(provider); }
+	std::vector<std::string> getAvailableNativeClassNames() const { return m_nativeClassNamesProvider ? m_nativeClassNamesProvider() : std::vector<std::string>{}; }
+
 	// ── Build System UI (extracted to EditorTabs/BuildSystemUI) ──────────
 	// Type aliases for external consumers (main.cpp, BuildPipeline)
 	using BuildProfile     = BuildSystemUI::BuildProfile;
@@ -590,6 +623,9 @@ private:
 	std::function<void(const std::string&, const Vec2&)> m_onDropOnViewport;
 	std::function<void(const std::string&, const std::string&)> m_onDropOnFolder;
 	std::function<void(const std::string&, unsigned int)> m_onDropOnEntity;
+#if ENGINE_EDITOR
+	NativeClassNamesProvider m_nativeClassNamesProvider;
+#endif
 
 #if ENGINE_EDITOR
 	// Build System UI (extracted to EditorTabs/BuildSystemUI)

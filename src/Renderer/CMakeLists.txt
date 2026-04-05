@@ -96,6 +96,12 @@ set(RENDERER_CORE_EDITOR_SOURCES
     EditorTabs/BuildSystemUI.cpp
     EditorTabs/EditorDialogs.h
     EditorTabs/EditorDialogs.cpp
+    EditorTabs/EntityEditorTab.h
+    EditorTabs/EntityEditorTab.cpp
+    EditorTabs/InputActionEditorTab.h
+    EditorTabs/InputActionEditorTab.cpp
+    EditorTabs/InputMappingEditorTab.h
+    EditorTabs/InputMappingEditorTab.cpp
 )
 
 # Shared properties for both RendererCore variants

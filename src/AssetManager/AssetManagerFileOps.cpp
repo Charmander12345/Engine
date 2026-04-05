@@ -301,22 +301,22 @@ size_t AssetManager::validateEntityReferences(bool showToast)
         }
     }
 
-    // Validate ScriptComponent references
-    {
-        ECS::Schema schema;
-        schema.require<ECS::ScriptComponent>();
-        for (const auto e : ecs.getEntitiesMatchingSchema(schema))
-        {
-            const auto* sc = ecs.getComponent<ECS::ScriptComponent>(e);
-            if (sc && !sc->scriptPath.empty() && !assetExistsOnDisk(sc->scriptPath))
-            {
-                logger.log(Logger::Category::AssetManagement,
-                    "[Integrity] Entity " + std::to_string(e) + " references missing script: " + sc->scriptPath,
-                    Logger::LogLevel::WARNING);
-                ++broken;
-            }
-        }
-    }
+	// Validate LogicComponent references
+	{
+		ECS::Schema schema;
+		schema.require<ECS::LogicComponent>();
+		for (const auto e : ecs.getEntitiesMatchingSchema(schema))
+		{
+			const auto* sc = ecs.getComponent<ECS::LogicComponent>(e);
+			if (sc && !sc->scriptPath.empty() && !assetExistsOnDisk(sc->scriptPath))
+			{
+				logger.log(Logger::Category::AssetManagement,
+					"[Integrity] Entity " + std::to_string(e) + " references missing script: " + sc->scriptPath,
+					Logger::LogLevel::WARNING);
+				++broken;
+			}
+		}
+	}
 
     if (broken > 0)
     {
@@ -536,13 +536,13 @@ bool AssetManager::moveAsset(const std::string& oldRelPath, const std::string& n
 	}
 	{
 		ECS::Schema scriptSchema;
-		scriptSchema.require<ECS::ScriptComponent>();
+		scriptSchema.require<ECS::LogicComponent>();
 		for (const auto e : ecs.getEntitiesMatchingSchema(scriptSchema))
 		{
-			if (auto* script = ecs.getComponent<ECS::ScriptComponent>(e))
+			if (auto* logic = ecs.getComponent<ECS::LogicComponent>(e))
 			{
-				if (script->scriptPath == oldRelPath)
-					script->scriptPath = newRelPath;
+				if (logic->scriptPath == oldRelPath)
+					logic->scriptPath = newRelPath;
 			}
 		}
 	}
@@ -730,13 +730,13 @@ bool AssetManager::renameAsset(const std::string& relPath, const std::string& ne
 	}
 	{
 		ECS::Schema scriptSchema;
-		scriptSchema.require<ECS::ScriptComponent>();
+		scriptSchema.require<ECS::LogicComponent>();
 		for (const auto e : ecs.getEntitiesMatchingSchema(scriptSchema))
 		{
-			if (auto* script = ecs.getComponent<ECS::ScriptComponent>(e))
+			if (auto* logic = ecs.getComponent<ECS::LogicComponent>(e))
 			{
-				if (script->scriptPath == relPath)
-					script->scriptPath = newRelPath;
+				if (logic->scriptPath == relPath)
+					logic->scriptPath = newRelPath;
 			}
 		}
 	}
@@ -849,10 +849,10 @@ std::vector<AssetManager::AssetReference> AssetManager::findReferencesTo(const s
 	}
 	{
 		ECS::Schema schema;
-		schema.require<ECS::ScriptComponent>();
+		schema.require<ECS::LogicComponent>();
 		for (const auto e : ecs.getEntitiesMatchingSchema(schema))
 		{
-			const auto* sc = ecs.getComponent<ECS::ScriptComponent>(e);
+			const auto* sc = ecs.getComponent<ECS::LogicComponent>(e);
 			if (sc && sc->scriptPath == relPath)
 			{
 				std::string label = "Entity " + std::to_string(e);

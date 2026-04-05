@@ -61,13 +61,15 @@ ProjectSelection showProjectSelection(RendererBackend backend)
 
         tempRenderer->getUIManager().openProjectScreen(
             [&](const std::string& path, bool isNew, bool setAsDefault,
-                bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)
+                bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI,
+                DiagnosticsManager::ScriptingMode scriptingMode)
             {
                 result.path                  = path;
                 result.isNew                 = isNew;
                 result.setAsDefault          = setAsDefault;
                 result.includeDefaultContent  = includeDefaultContent;
                 result.rhi                   = selectedRHI;
+                result.scriptingMode         = scriptingMode;
                 result.chosen                = true;
             });
 

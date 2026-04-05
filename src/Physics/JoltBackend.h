@@ -19,6 +19,7 @@ namespace JPH {
     class ObjectVsBroadPhaseLayerFilter;
     class ObjectLayerPairFilter;
     struct BodyID;
+    class CharacterVirtual;
 }
 
 /// Jolt Physics implementation of IPhysicsBackend.
@@ -63,6 +64,19 @@ public:
 
     BodyHandle getBodyForEntity(uint32_t entity) const override;
 
+    // ── Character Controller ────────────────────────────────────────
+    CharacterHandle createCharacter(const CharacterDesc& desc) override;
+    void            removeCharacter(CharacterHandle handle)    override;
+    void            removeAllCharacters()                      override;
+    void updateCharacter(CharacterHandle handle,
+                         float dt,
+                         float desiredVelX, float desiredVelY, float desiredVelZ,
+                         float gravityX, float gravityY, float gravityZ) override;
+    CharacterState getCharacterState(CharacterHandle handle) const override;
+    void setCharacterPosition(CharacterHandle handle,
+                              float x, float y, float z) override;
+    CharacterHandle getCharacterForEntity(uint32_t entity) const override;
+
 private:
     float m_gravity[3]{ 0.0f, -9.81f, 0.0f };
 
@@ -78,6 +92,11 @@ private:
     // ── Entity ↔ Jolt BodyID mapping ────────────────────────────────
     std::map<uint32_t, uint32_t> m_entityToBodyID;   // ECS entity → Jolt BodyID raw value
     std::map<uint32_t, uint32_t> m_bodyIDToEntity;   // Jolt BodyID raw value → ECS entity
+
+    // ── Character Controller ────────────────────────────────────────
+    std::map<CharacterHandle, JPH::CharacterVirtual*> m_handleToCharacter;
+    std::map<uint32_t, CharacterHandle>               m_entityToCharacterHandle;
+    CharacterHandle                                    m_nextCharacterHandle{ 1 };
 
     bool m_initialized{ false };
 };

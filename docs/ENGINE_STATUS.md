@@ -1,9 +1,405 @@
 # Engine – Status & Roadmap
 
 > Übersicht über den aktuellen Implementierungsstand und offene Punkte – pro Modul gegliedert.
-> Branch: `Json_and_ecs` | Stand: aktuell
+> Branch: `C++-Scripting` | Stand: aktuell
 
 ---
+
+## Feature-Roadmap – Fehlende & Unvollständige Features
+
+> Vergleich mit Industriestandard-Engines (Unreal Engine 5, Unity 6, Godot 4).
+> Priorisiert nach **Impact auf Spieleentwicklung**.
+
+### 🔴 Kritisch fehlend (Prio 1 – Grundvoraussetzung für die meisten Spiele)
+
+| # | Feature | Status | Aufwand | Beschreibung |
+|---|---------|--------|---------|-------------|
+| 1 | **Entity Parent-Child Hierarchie (Transform Parenting)** | ✅ | Mittel | Hierarchische Transform-Vererbung vollständig implementiert. `TransformComponent` erweitert um `parent`, `children`, `localPosition/localRotation/localScale`, `dirty`-Flag. ECSManager API: `setParent()`, `removeParent()`, `getParent()`, `getChildren()`, `getRoot()`, `isAncestorOf()`, `updateWorldTransforms()`, `markTransformDirty()`. Dirty-Flag-Propagation top-down, YXZ-Euler-Rotation, World↔Local-Konvertierung bei Reparenting. Level-Serialisierung mit Backward-Kompatibilität. GameplayAPI + INativeScript + Python-Bindings (`engine.entity.set_parent/get_children/...`) + `engine.pyi` IntelliSense. `PhysicsWorld::step()` ruft `updateWorldTransforms()` vor Physics-Sync auf. |
+| 2 | **Character Controller** | ✅ | Mittel | Backend-agnostischer Character Controller implementiert. `CharacterControllerComponent` (Kapsel-Shape, MaxSlopeAngle, StepUp, SkinWidth, GravityFactor). `IPhysicsBackend` erweitert um `CharacterDesc/CharacterState/CharacterHandle` + 7 virtuelle Methoden. **JoltBackend:** `CharacterVirtual` mit `ExtendedUpdate` (StickToFloor, WalkStairs). **PhysXBackend:** `PxCapsuleController` mit `PxControllerManager`. `PhysicsWorld` synchronisiert Character Controller parallel zu Rigidbodies (create/update/readback). Exklusiv mit `PhysicsComponent`. |
+| 3 | **Physics Constraints / Joints** | ❌ | Mittel | Nur isolierte Rigidbodies, keine Verbindungen. Fehlt: Hinge Joint (Türen), Ball-Socket Joint (Ragdolls), Fixed Joint, Spring Joint, Distance Constraint. Jolt unterstützt alle Constraint-Typen nativ. Ohne Joints sind Türen, Fahrzeuge, Ragdolls, Ketten, Brücken unmöglich. |
+| 4 | **Animation Blending / State Machine** | ❌ | Hoch | Nur ein Animations-Clip gleichzeitig abspielbar (`AnimationComponent.currentClipIndex`). Fehlt: Animation Blending, Crossfade, Layers, State Machine, Blend Trees, Root Motion. Ohne das sind Walk→Run-Übergänge, Idle→Attack, Upper/Lower Body Split unmöglich. Unity: Animator Controller, Unreal: AnimGraph. |
+| 5 | **3D Spatial Audio** | ✅ | Gering | Vollständig implementiert. `AudioSourceComponent` (ECS, is3D, minDistance, maxDistance, rolloffFactor, gain, loop, autoPlay). `AudioManager` erweitert um `setSourcePosition()`, `setSourceSpatial()`, `updateListenerTransform()` (OpenAL AL_POSITION, AL_SOURCE_RELATIVE, AL_REFERENCE_DISTANCE, AL_MAX_DISTANCE, AL_ROLLOFF_FACTOR, alListenerfv). Listener-Sync vom aktiven CameraComponent in main.cpp. Editor: AudioPreviewTab mit 2D/3D-Dropdown + Spatial-Settings (MinDistance, MaxDistance, Rolloff) in Audio-Asset-Metadaten. Level-Serialisierung. OutlinerPanel-Inspector. GameplayAPI + INativeScript + Python-Bindings (`set_audio_position`, `set_audio_spatial`) + `engine.pyi`. |
+
+### 🟡 Wichtig fehlend (Prio 2 – Schränkt viele Spielgenres ein)
+
+| # | Feature | Status | Aufwand | Beschreibung |
+|---|---------|--------|---------|-------------|
+| 6 | **Runtime UI System (HUD / Menüs)** | ⚠️ Teilweise | Hoch | Widget-System existiert, ist aber primär als Editor-UI konzipiert. Fehlt: In-Game-UI-Framework (Health Bars, Inventar, Menüs, HUD) mit Data-Binding, Resolution-unabhängiges Anchoring. `spawnWidget` / `removeWidget` existieren, aber kein strukturiertes Runtime-UI-Framework. |
+| 7 | **AI / Navigation System** | ❌ | Hoch | Komplett fehlend. Kein NavMesh, kein Pathfinding (A*), kein AI Steering, keine Behavior Trees/State Machines. Empfehlung: Recast/Detour als Bibliothek integrieren. Unity: NavMesh + NavMeshAgent, Unreal: NavigationSystem + BehaviorTree. |
+| 8 | **Reflection Probes / Environment Mapping** | ❌ | Hoch | Nur Skybox-basiertes Ambient Light. Fehlt: Reflection Probes (Cube-Map basiert), Screen-Space Reflections (SSR), Image-Based Lighting (IBL). Essentiell für realistische Metalloberflächen und spiegelnde Materialien. |
+| 9 | **Multi-Level-Streaming / Additive Scenes** | ❌ | Hoch | Ein Level gleichzeitig, komplett geladen. Fehlt: Additives Level-Loading, Level-Streaming basierend auf Streaming Volumes oder Distanz, Sub-Levels. Unity: `SceneManager.LoadSceneAsync(Additive)`, Unreal: World Partition. |
+| 10 | **Decal System** | ❌ | Mittel | Keine projizierten Decals (Blut, Bullet Holes, Schmutz) auf beliebige Geometry. Unity: Decal Projector, Unreal: Decal Actor. |
+| 11 | **Physics Queries (Overlap / Sweep)** | ⚠️ Teilweise | Mittel | Nur Raycast implementiert. Sphere/Box Overlap und Sweep Queries fehlen. Wichtig für Explosion-Radius, Area-of-Effect, Ground-Check. |
+| 12 | **Force an Position (AddForceAtPosition)** | ❌ | Gering | Nur `addForce`/`addImpulse` am Zentrum. Force an bestimmtem Punkt fehlt (wichtig für Drehmoment, Explosion-Kickback). |
+
+### 🟢 Nice-to-have (Prio 3 – Erweitert die Möglichkeiten deutlich)
+
+| # | Feature | Status | Aufwand | Beschreibung |
+|---|---------|--------|---------|-------------|
+| 13 | **Root Motion** | ❌ | Mittel | Translation/Rotation aus Animation extrahieren und auf Entity-Transform anwenden. |
+| 14 | **Foliage / Vegetation Instancing** | ❌ | Hoch | Massenhaftes Platzieren von Gras/Bäumen auf Landscape mit GPU Instancing + Wind-Animation. |
+| 15 | **Lightmapping / Baked GI** | ❌ | Sehr Hoch | Baked Lighting für statische Szenen – deutlich bessere Lichtqualität ohne Runtime-Kosten. |
+| 16 | **Physics Material System** | ❌ | Gering | Verschiedene physikalische Materialien (Eis, Gummi, Metall) als wiederverwendbare Assets mit eigenen Friction/Restitution-Werten. |
+| 17 | **Visual Scripting / Blueprint-System** | ❌ | Sehr Hoch | Visuelles Node-basiertes Scripting für Designer. Extrem aufwändig. |
+| 18 | **Mesh Collider (Convex/Concave)** | ❌ | Mittel | Nur primitive Shapes verfügbar – komplexe Meshes als Collider fehlen. Jolt unterstützt `MeshShape` und `ConvexHullShape`. |
+| 19 | **Networking / Multiplayer** | ❌ | Sehr Hoch | Client-Server, Replication, RPC – eigenes Großprojekt. |
+| 20 | **Volumetric Fog / Clouds** | ❌ | Hoch | Volumetrischer Nebel und Wolken für atmosphärische Tiefe. |
+
+### Empfohlene Implementierungsreihenfolge
+
+```
+Phase 1 (Kern):     Transform Parenting ✅ → 3D Spatial Audio ✅
+Phase 2 (Gameplay): Physics Joints → Animation Blending → Physics Queries
+Phase 3 (Visuals):  Reflection Probes/IBL → Decals → Runtime UI Framework
+Phase 4 (Welt):     NavMesh/Pathfinding → Multi-Level-Streaming → Foliage
+Phase 5 (Polish):   Root Motion → Physics Materials → Mesh Colliders
+```
+
+---
+
+## Letzte Änderung (3D Spatial Audio – Vollständige Implementierung)
+
+- ✅ `Components.h`: `AudioSourceComponent` hinzugefügt — `assetPath`, `assetId`, `is3D`, `minDistance` (1.0), `maxDistance` (50.0), `rolloffFactor` (1.0), `gain` (1.0), `loop`, `autoPlay`, `runtimeHandle` (nicht serialisiert).
+- ✅ `ECS.h/ECS.cpp`: `ComponentKind::AudioSource` (Index 14), `MaxComponentTypes` auf 16 erhöht. `ComponentTraits`, `getStorage()`-Spezialisierungen, `SparseSet<AudioSourceComponent>`. `initialize()` und `removeEntity()` aktualisiert.
+- ✅ `AudioManager.h/.cpp`: 3 neue Methoden — `setSourcePosition(handle, x, y, z)` (alSource3f AL_POSITION), `setSourceSpatial(handle, is3D, minDist, maxDist, rolloff)` (AL_SOURCE_RELATIVE, AL_REFERENCE_DISTANCE, AL_MAX_DISTANCE, AL_ROLLOFF_FACTOR), `updateListenerTransform(pos, forward, up)` (alListener3f + alListenerfv AL_ORIENTATION).
+- ✅ `EngineLevel.cpp`: Serialisierung/Deserialisierung für `AudioSourceComponent` — assetPath, assetId, is3D, minDistance, maxDistance, rolloffFactor, gain, loop, autoPlay. `runtimeHandle` wird beim Laden auf 0 gesetzt.
+- ✅ `OutlinerPanel.cpp`: Inspector-UI für AudioSourceComponent — 3D-Checkbox (zeigt bedingt MinDistance/MaxDistance/Rolloff), Volume, Loop, AutoPlay, Asset-Pfad-Anzeige. "Add Component"-Dropdown um "Audio Source" erweitert.
+- ✅ `AudioPreviewTab.h/.cpp`: 2D/3D-Dropdown im Spatial-Audio-Abschnitt der Metadaten. Bei 3D: MinDistance/MaxDistance/Rolloff-Eingabefelder. Änderungen werden sofort ins Audio-Asset-JSON (`m_is3D`, `m_minDistance`, `m_maxDistance`, `m_rolloffFactor`) gespeichert.
+- ✅ `main.cpp`: Listener-Sync nach `audioManager.update()` — leitet Forward/Up-Vektoren aus der YXZ-Euler-Rotation des aktiven CameraComponent ab.
+- ✅ `GameplayAPI.h/.cpp`: `setAudioPosition()` und `setAudioSpatial()` hinzugefügt.
+- ✅ `INativeScript.h`: 11 Audio-Convenience-Methoden (createAudio, playAudio, playAudioHandle, setAudioVolume, getAudioVolume, pauseAudio, stopAudio, isAudioPlaying, invalidateAudioHandle, setAudioPosition, setAudioSpatial).
+- ✅ `AudioModule.cpp`: Python-Bindings `set_audio_position(handle, x, y, z)` und `set_audio_spatial(handle, is_3d, min_dist, max_dist, rolloff)`.
+- ✅ `engine.pyi`: Type-Stubs für `set_audio_position` und `set_audio_spatial`.
+- ✅ Build erfolgreich.
+
+## Vorherige Änderung (Transform Parenting – Vollständige Implementierung)
+
+- ✅ `Components.h`: `TransformComponent` erweitert um `parent` (uint, InvalidEntity=UINT32_MAX), `children` (vector), `localPosition[3]`, `localRotation[3]`, `localScale[3]`, `dirty`-Flag.
+- ✅ `ECS.h/ECS.cpp`: 8 Parenting-Methoden implementiert — `setParent()` (World→Local-Konvertierung), `removeParent()` (Local→World-Erhalt), `getParent()`, `getChildren()`, `getRoot()`, `isAncestorOf()`, `updateWorldTransforms()` (top-down dirty propagation), `markTransformDirty()`. Rotation-Helpers: `rotatePoint`/`inverseRotatePoint` (YXZ-Euler-Matrix). `removeEntity()` aktualisiert für Kind-Cleanup.
+- ✅ `EngineLevel.cpp`: Serialisierung/Deserialisierung erweitert — Parent-ID + lokale Transforms werden gespeichert. Deferred Parenting Pass nach Entity-Erstellung. Backward-Kompatibilität mit alten Levels (Fallback auf World-Werte).
+- ✅ `GameplayAPI.h/.cpp`: 13 Parenting-Funktionen hinzugefügt — `setParent`, `removeParent`, `getParent`, `getChildren`, `getChildCount`, `getRoot`, `isAncestorOf`, `getLocalPosition/Rotation/Scale`, `setLocalPosition/Rotation/Scale`. Bestehende Transform-Setter (`setPosition`, `setRotation`, `setScale`, `translate`, `rotate`) rufen jetzt `markTransformDirty()` auf.
+- ✅ `INativeScript.h`: 13 Parenting-Convenience-Methoden für C++-Scripts.
+- ✅ `EntityModule.cpp`: 14 Python-Bindings — `set_parent`, `remove_parent`, `get_parent`, `get_children`, `get_child_count`, `get_root`, `is_ancestor_of`, `get/set_local_position/rotation/scale`. Bestehende Python-Transform-Setter markieren jetzt dirty.
+- ✅ `engine.pyi`: Alle Parenting-Funktionen mit Type-Stubs für IntelliSense dokumentiert.
+- ✅ `PhysicsWorld.cpp`: `updateWorldTransforms()` wird vor `syncBodiesToBackend()` in `step()` aufgerufen — stellt sicher, dass Parented-Entities korrekte World-Transforms für Physics haben.
+- ✅ Build erfolgreich.
+
+## Vorherige Änderung (Character Controller Build-Fixes)
+
+- ✅ `JoltBackend.cpp`: `DefaultBroadPhaseLayerFilter`-Konstruktor korrigiert — `m_objectVsBroadPhaseFilter` statt `m_broadPhaseLayerInterface` verwendet. Kompilierungsfehler C2665 behoben.
+- ✅ `src/Physics/CMakeLists.txt`: `PhysXCharacterKinematic` zur PhysX-Linkerliste hinzugefügt — Linker-Fehler LNK2019 für `PxCreateControllerManager` behoben.
+- ✅ `PhysicsWorld.cpp`: Gravity-Initialisierungsreihenfolge korrigiert — `m_gravity` wird jetzt **vor** `m_backend->setGravity()` auf `(0, -9.81, 0)` gesetzt, statt danach. Zuvor wurde uninitialisierter/alter Gravity-Wert an das Backend gesendet.
+- ✅ Build erfolgreich.
+
+## Vorherige Änderung (PIE GameScripts DLL-Ladefix – RUNTIME_OUTPUT_DIRECTORY + CRT-Match + Diagnostik)
+
+- ✅ `CMakeLists.txt`: `RUNTIME_OUTPUT_DIRECTORY` (alle Configs) für `HorizonEngine` (und `HorizonEngineRuntime`) auf `ENGINE_DEPLOY_DIR` gesetzt. Zuvor wurde die Exe im CMake-Build-Tree erzeugt (`out/build/x64-release/DEBUG/`), wodurch `SDL_GetBasePath()` einen Pfad ohne `Tools/`-Verzeichnis zurückgab. Der PIE-Build konnte die NativeScripting-Header und `Scripting.lib` nicht finden.
+- ✅ `EditorApp.cpp`: **CRT-Mismatch behoben** — `--config RelWithDebInfo` war hartcodiert, aber die Engine lief im Debug-Modus. GameScripts.dll (Release-CRT) + Scripting.dll (Debug-CRT) = Error 1114 bei `LoadLibraryA`. Fix: Build-Config per `#ifdef _DEBUG` auf `Debug`/`RelWithDebInfo` gesetzt, sowohl für `-DCMAKE_BUILD_TYPE` (single-config) als auch `--config` (multi-config).
+- ✅ `EditorApp.cpp`: Fallback-Pfad-Erkennung in `buildGameScriptsForPIE` — wenn `Tools/` nicht neben der Exe existiert, wird im Elternverzeichnis nach `EngineBuild/Tools/` gesucht.
+- ✅ `NativeScriptManager.cpp`: `GetLastError()` + `FormatMessageA()` (Windows) bzw. `dlerror()` (Linux) Diagnostik bei fehlgeschlagenem `LoadLibraryA`/`dlopen`. Fehlermeldung enthält jetzt den OS-Fehlertext.
+- ✅ Build erfolgreich.
+
+## Vorherige Änderung (IDE-Empfehlung → VS Code, IntelliSense Auto-Generierung)
+
+- ✅ `EditorDialogs.cpp`: IDE-Empfehlung bei C++-Projekterstellung von Visual Studio auf VS Code geändert. Checkbox-Text und Download-URL auf `https://code.visualstudio.com/` aktualisiert.
+- ✅ `EditorApp.h`: `generateVSCodeConfig` von private nach public verschoben.
+- ✅ `main.cpp`: Bei neuen C++-Projekten (CppOnly/Both) wird `generateVSCodeConfig` automatisch nach Projekterstellung aufgerufen — `.vscode/c_cpp_properties.json` wird direkt initial generiert.
+
+## Vorherige Änderung (Test-Fix – DiagnosticsRHI String-Vergleich)
+
+- ✅ `RendererAbstractionTests.cpp`: 2 fehlschlagende Tests (`RHITypeToStringOpenGL`, `RHITypeToStringVulkan`) repariert — `EXPECT_EQ` auf `const char*` verglich Pointer-Adressen statt String-Inhalte. Fix: `EXPECT_STREQ` verwendet. Alle 17 Tests bestehen jetzt.
+
+## Letzte Änderung (Scripting-Cleanup – Redundanzen entfernt, API vereinheitlicht)
+
+- ✅ `GameplayAPI.h/.cpp`: `callScriptFunction` und `callPythonFunctionOn` entfernt — nur noch `callFunction` (unified auto-routing). `logInfo`/`logWarning`/`logError` entfernt — nur noch `log(msg, level)`.
+- ✅ `INativeScript.h`: `callScriptFunction`, `callPythonFunctionOn`, `callPythonFunction` entfernt. `logInfo`/`logWarning`/`logError` durch `log(msg, level)` ersetzt. Cross-Entity `*Of`-Methoden entfernt (`getPositionOf`, `setPositionOf`, `getRotationOf`, `setRotationOf`, `getScaleOf`, `setScaleOf`, `getVelocityOf`, `setVelocityOf`) — C++-Scripts nutzen `GameplayAPI::getPosition(entity, ...)` direkt.
+- ✅ `EntityModule.cpp`: Physics-Duplikate (`get_velocity`, `set_velocity`, `add_force`, `add_impulse`) entfernt — nur noch in `engine.physics`. `call_native` entfernt — nur noch `call_function`.
+- ✅ `PythonScripting.cpp`: Log-Meldungen in `HandleCppCallsPython` von "callPythonFunction" auf "callFunction" umbenannt.
+- ✅ `engine.pyi`: Entfernte Funktionen aus Type-Stubs gelöscht. Audio-Duplikate (`pause_audio_handle`, `stop_audio_handle`) entfernt. Typo `set_material_override_roughnessbbb` korrigiert.
+- ⚠️ **Breaking Changes:** Bestehende Scripts die `callScriptFunction`, `callPythonFunctionOn`, `callPythonFunction`, `call_native`, `logInfo`/`logWarning`/`logError`, `*Of`-Methoden, oder `engine.entity.get_velocity/set_velocity/add_force/add_impulse` verwenden, müssen aktualisiert werden.
+
+## Letzte Änderung (Scripting-Restrukturierung – Class-Based Model, Timer, Lifecycle, Vec3, SCRIPT_PROPERTY)
+
+- ✅ `INativeScript.h`: ScriptValue um `Vec3`-Typ erweitert (`vec3Val[3]`, `makeVec3`). `SCRIPT_PROPERTY`-Makros für editor-exponierte Properties. `extractArg<float>` mit int→float Coercion.
+- ✅ `EntityModule.cpp`: `engine.entity.self()`, `get_position()`, `get_rotation()`, `get_scale()` hinzugefügt. Vec3-Konverter aktualisiert.
+- ✅ `TimerModule.cpp` (NEU): `engine.timer` Submodul — `delay()`, `schedule(repeat=True/False)`, `cancel()`, `cancel_all()`.
+- ✅ `ScriptingInternal.h`: `ProcessTimers(dt)`, `ClearTimers()`, `CreateTimerModule()` Deklarationen.
+- ✅ `CMakeLists.txt`: `TimerModule.cpp` zu `SCRIPTING_SOURCES` hinzugefügt.
+- ✅ `PythonScripting.cpp`: `engine.Script` Basisklasse injiziert. Script-Subclass-Erkennung in `LoadScriptModule`. Per-Entity Instanz-Verwaltung (`s_entityInstances`). Klassenbasierter Dispatch in `UpdateScripts` (on_loaded/tick/overlap). Lifecycle-Namen vereinheitlicht: `on_loaded` primär (Fallback: `onloaded`), `on_begin_overlap`/`on_end_overlap` primär (Fallback: `on_entity_begin_overlap`/`on_entity_end_overlap`). Timer-Integration (ProcessTimers/ClearTimers). Vec3 PyObject↔ScriptValue Konverter.
+- ✅ `EditorApp.cpp`, `AssetManagerEditorWidgets.cpp`, `OutlinerPanel.cpp`: Script-Templates auf neue Lifecycle-Namen aktualisiert.
+- ✅ `engine.pyi`: Alle neuen APIs dokumentiert (self, get_position/rotation/scale, timer, Script-Klasse).
+
+## Letzte Änderung (Bootstrap – Bundled Tools immer lokal installieren)
+
+- ✅ `tools/bootstrap.ps1 (CMake)`: System-CMake-Skip entfernt — Bootstrap installiert CMake **immer** lokal nach `Tools/cmake/`, auch wenn ein System-CMake im PATH existiert. Nur bereits vorhandenes gebündeltes CMake (`Tools/cmake/bin/cmake.exe`) überspringt den Download. Löst das Problem, dass der Editor-Prozess den PATH nicht erbt und kein cmake findet.
+- ✅ `tools/bootstrap.ps1 (Ninja)`: Gleicher Fix — System-Ninja auf PATH verhindert nicht mehr den lokalen Download.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (VS Code IntelliSense Config in Content/Scripts + Non-Static callFunction)
+
+- ✅ `EditorApp.cpp`: `generateVSCodeConfig()` generiert `.vscode/c_cpp_properties.json` jetzt im `Content/Scripts/`-Unterverzeichnis statt im Projekt-Root. Include-Pfad geändert auf `${workspaceFolder}/Native/**` (da Workspace-Root nun `Content/Scripts/` ist). Benutzer öffnet `Content/Scripts/` in VS Code → volle IntelliSense.
+- ✅ `INativeScript.h`: Neue nicht-statische `callFunction(funcName, args)` Overload — inline, delegiert an `callFunction(m_entity, funcName, args)`. Ermöglicht `callFunction("doSomething")` statt `callFunction(getEntity(), "doSomething")` für eigene Entity. Statische Version bleibt für Cross-Entity-Aufrufe.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (Script Method Auto-Registration – SCRIPT_METHOD Makro)
+
+- ✅ `INativeScript.h`: Template-basiertes Method-Registration-System. Neue Includes: `<functional>`, `<unordered_map>`, `<type_traits>`, `<utility>`. `onScriptCall`-Default dispatcht jetzt aus `m_scriptMethods`-Map (Lookup → Aufruf → ScriptValue). Neue `protected`-Methoden: `registerMethod(name, &T::method)` (non-const + const Overloads) — deduziert Parametertypen via Member-Function-Pointer-Templates. Private Template-Helpers: `extractArg<T>` (if constexpr: float/double/int/bool/string/ScriptValue), `toScriptValue<T>` (Rückkonvertierung), `invokeUnpacked` (std::index_sequence für Parameter-Entpackung, 4 Overloads: void/non-void × const/non-const), `invokeMethod` (Entry-Point, 2 Overloads). `m_scriptMethods`: `unordered_map<string, function<ScriptValue(vector<ScriptValue>)>>`. `SCRIPT_METHOD(method)`-Makro nach Klasse: `this->registerMethod(#method, &std::remove_pointer_t<decltype(this)>::method)`. Void-Methoden geben `ScriptValue::makeBool(true)` zurück um Fall-Through zu Python in `callFunction` zu verhindern.
+- ✅ Build erfolgreich.
+- **Usage:** `void onLoaded() override { SCRIPT_METHOD(onMessage); }` + `void onMessage(const std::string& msg) { ... }` → Python: `engine.entity.call_function(entity, "onMessage", "Hello")`.
+- **Keine weiteren Dateiänderungen nötig** — bestehendes virtuelles Dispatch über `onScriptCall` in `NativeScriptManager::callFunction()` behandelt alles automatisch.
+
+## Letzte Änderung (Key-Callback Entity-Routing Fix)
+
+- ✅ `InputModule.cpp`: Per-Key-Callbacks übergeben jetzt die **Entity** statt den Key-Code. Neues `EntityCallback`-Struct (callback + entity). `s_currentEntity` wird vor `onloaded`/`tick`/overlap gesetzt.
+- ✅ `ScriptingInternal.h`: `EntityCallback`-Struct + `s_currentEntity`. Maps aktualisiert.
+- ✅ `PythonScripting.cpp`: `s_currentEntity` wird vor jedem Script-Aufruf gesetzt.
+- ✅ `engine.pyi`: Docstrings aktualisiert.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (Unified Script Call System – callFunction auto-routes C++ ↔ Python)
+
+- ✅ `NativeScriptManager.h/.cpp`: Neue Methode `callFunction(Entity, funcName, args)` — prüft zuerst C++ (`m_instances` → `onScriptCall`), fällt bei `ScriptValue::None` auf Python (`m_pythonCallHandler`) zurück. Aufrufer müssen die Zielsprache nicht kennen.
+- ✅ `GameplayAPI.h/.cpp`: Neue freie Funktion `GameplayAPI::callFunction()` delegiert an `NativeScriptManager::callFunction()`.
+- ✅ `INativeScript.h`: Neue statische Convenience-Methode `callFunction(entity, funcName, args)`. Bestehende `callScriptFunction` + `callPythonFunctionOn` bleiben als Legacy.
+- ✅ `EntityModule.cpp`: Neue Python-Funktion `engine.entity.call_function(entity, func_name, *args)` — unified Routing. `call_native` bleibt für expliziten C++-Zugriff erhalten.
+- ✅ `engine.pyi`: `call_function` Stub mit Docstring hinzugefügt.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (Scripting-Kommunikation Bugfixes)
+
+- ✅ `EntityModule.cpp`: `call_native` variadic-args Fix — `PyArg_ParseTuple("ks")` durch manuelles `PyTuple_GetItem` ersetzt, da ParseTuple Extra-Argumente ablehnte.
+- ✅ `PythonScripting.cpp`: `HandleCppCallsPython()` loggt jetzt Warnungen bei jedem Fehlerfall (kein Interpreter, kein LogicComponent, Script nicht geladen, Funktion nicht gefunden).
+- ✅ `AssetManagerEditorWidgets.cpp` + `OutlinerPanel.cpp`: Python-Script-Templates korrigiert: `on_loaded`→`onloaded`, `on_begin_overlap`→`on_entity_begin_overlap`, `on_end_overlap`→`on_entity_end_overlap`.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (Erweiterte C++ & Python Scripting APIs)
+
+- ✅ `GameplayAPI.h/.cpp`: Neue Entity-Query-Funktionen: `isEntityValid()`, `hasComponent(entity, kind)`, `getEntityName()`/`setEntityName()`, `getEntityCount()`, `getAllEntities()`, `distanceBetween()`.
+- ✅ `GameplayAPI.h/.cpp`: Cross-Script-Kommunikation: `callScriptFunction(entity, funcName, args)` ruft `onScriptCall()` auf anderem C++-Script. `callPythonFunctionOn(entity, funcName, args)` für Python-Aufrufe auf beliebiger Entity.
+- ✅ `INativeScript.h`: Neue Convenience-Methoden: Entity Queries (7 Methoden), Cross-Entity Transform (6 Methoden: get/setPositionOf, get/setRotationOf, get/setScaleOf), Cross-Entity Physics (2 Methoden: get/setVelocityOf), Cross-Script Communication (2 Methoden: callScriptFunction, callPythonFunctionOn).
+- ✅ `EntityModule.cpp`: 14 neue Python-Bindings: `remove_entity`, `has_component`, `find_entity_by_name`, `get_entity_name`, `set_entity_name`, `is_entity_valid`, `get_entity_count`, `get_all_entities`, `distance_between`, `get_velocity`, `set_velocity`, `add_force`, `add_impulse`.
+- ✅ `engine.pyi`: Alle neuen Python-Funktionen mit Typ-Annotationen und Docstrings eingetragen.
+- ✅ Build erfolgreich (Scripting.dll + ScriptingRuntime.dll + HorizonEngine.exe).
+
+## Letzte Änderung (GameScripts Runtime-DLL-Link Fix)
+
+- ✅ `BuildPipeline.cpp`: GameScripts CMakeLists linkt jetzt gegen `ScriptingRuntime` statt `Scripting`. **Root Cause:** `GameScripts.dll` hatte `Scripting.dll` als implizite Abhängigkeit im Import-Table, aber im Game-Build wird nur `ScriptingRuntime.dll` deployed (`Scripting.dll` ist editor-only und wird gefiltert). `LoadLibraryA` schlug fehl weil die Windows-DLL-Auflösung `Scripting.dll` nicht finden konnte. Fix: `target_link_libraries(GameScripts PRIVATE ScriptingRuntime)` — damit referenziert der Import-Table `ScriptingRuntime.dll`, die im Game-Build unter `Engine/` liegt.
+- ✅ `main.cpp`: Log-Meldung hinzugefügt wenn `GameScripts.dll` nicht gefunden wird ("no GameScripts.dll found at ..."), damit der Ladevorgang sichtbar ist.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (GameScripts im Game Build + Runtime-Laden)
+
+- ✅ `BuildPipeline.cpp`: Neuer Step 7 "Build C++ GameScripts DLL" (`kTotalSteps` von 9 auf 10). Prüft `Content/Scripts/Native/` auf `.cpp`-Dateien.
+- ✅ `Auto-Registration im Game Build`: Identischer Regex-Scan wie PIE-Build — scannt `.h`-Dateien nach `class X : public INativeScript`, generiert `_AutoRegister.cpp` mit `REGISTER_NATIVE_SCRIPT`-Makros.
+- ✅ `CMakeLists.txt-Generierung`: C++20, SHARED GameScripts-DLL, linkt gegen `ScriptingRuntime.lib` aus `Tools/lib/`, NativeScripting-Headers aus `Tools/include/`.
+- ✅ `CMake configure + build`: Im `<binaryDir>/GameScripts/`-Unterordner mit dem Build-Profil des Game-Builds (Debug/RelWithDebInfo/Release).
+- ✅ `Deployment`: `GameScripts.dll` → `<outputDir>/Engine/`, PDB → `<outputDir>/Symbols/` (non-Shipping).
+- ✅ `Runtime-Laden (main.cpp)`: War bereits implementiert — nach Level-Load lädt die Runtime `GameScripts.dll` aus `Engine/` via `NativeScriptManager::loadGameplayDLL()` + `initializeScripts()`.
+- ✅ `Includes`: `<regex>` und `<sstream>` zu `BuildPipeline.cpp` hinzugefügt.
+- ✅ `Graceful Skip`: Falls keine C++-Scripts vorhanden, wird der Step mit "No C++ game scripts found, skipping." übersprungen.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (Popup-Fenster Hintergrundfarbe Fix)
+
+- ✅ `EditorApp.cpp`: Weiße Hintergründe in „New Level"- und „New Material"-Popup-Fenstern behoben — StackPanel-Elemente (`NL.Form`/`NM.Form`) erhielten transparente Hintergrundfarbe (`style.color = {0,0,0,0}`), da der `WidgetElementStyle::color`-Default `{1,1,1,1}` (weiß) war.
+
+## Letzte Änderung (Content Browser Filter & Toolbar Überarbeitung)
+
+- ✅ `ContentBrowserPanel.cpp`: 11 einzelne Asset-Typ-Filter-Buttons durch einen "Filter"-Dropdown-Button ersetzt (Toggle-Menü pro Typ + Show/Hide All).
+- ✅ `ContentBrowserPanel.cpp`: "+ Entity" und "+ Level" Buttons aus der PathBar entfernt.
+- ✅ `EditorApp.cpp`: "New Level" Kontextmenü-Popup erweitert mit Template-Dropdown (Empty/Basic Outdoor/Prototype) und Name-Eingabe.
+
+## Letzte Änderung (Bidirektionale C++↔Python Script-Kommunikation)
+
+- ✅ `INativeScript.h`: `ScriptValue`-Variantentyp (None/Float/Int/Bool/String) für cross-language Daten.
+- ✅ `INativeScript.h`: `onScriptCall()` virtuelle Methode — C++-Scripts empfangen benannte Aufrufe von Python.
+- ✅ `INativeScript.h`: `callPythonFunction()` GAMEPLAY_API — C++-Scripts rufen Python-Funktionen der Entity auf.
+- ✅ `NativeScriptManager.h/.cpp`: `PythonCallHandler`, `setPythonCallHandler()`, `callPythonForEntity()`, `getInstance()`.
+- ✅ `GameplayAPI.cpp`: `callPythonFunction` Implementierung via `NativeScriptManager::callPythonForEntity`.
+- ✅ `EntityModule.cpp`: `engine.entity.call_native()` Python-Funktion mit PyObject↔ScriptValue Konvertierung.
+- ✅ `PythonScripting.cpp`: `HandleCppCallsPython` Callback registriert in `Initialize()`.
+- ✅ `engine.pyi`: `call_native` IntelliSense-Stub.
+- **Architektur**: Callback-Pattern entkoppelt NativeScripting (kein Python.h) von PythonScripting. `ScriptValue` als gemeinsamer Datentyp.
+
+## Letzte Änderung (Input Action / Input Mapping System)
+
+- ✅ `AssetTypes.h`: `InputAction = 15`, `InputMapping = 16` im `AssetType`-Enum.
+- ✅ `InputActionManager.h/.cpp` (neu): Core-Singleton mit ActionDef (Name + Modifier-Bitmask), KeyBinding (Action + Keycode), C++ Callback-Registration (ID-basiert), DispatchHook für Python-Integration. Convenience-Overloads `addAction(name, mods)` / `addBinding(actionName, keycode)`.
+- ✅ `InputActionEditorTab.h/.cpp` (neu): Editor-Tab für InputAction-Assets — Modifier-Checkboxen (Shift/Ctrl/Alt), Save aktualisiert InputActionManager.
+- ✅ `InputMappingEditorTab.h/.cpp` (neu): Editor-Tab für InputMapping-Assets — Bindings-Liste mit Action-Cycling, Key-Dropdown, Add/Remove.
+- ✅ `UIManager.h/.cpp`: Forward-Declarations, unique_ptr-Member, open/close/isOpen-Methoden für beide Tabs. Includes in UIManager.cpp für Complete-Type.
+- ✅ `UIManagerEditor.cpp`: 6 Tab-Methoden implementiert (Lazy-Creation).
+- ✅ `ContentBrowserPanel.cpp`: Icons, Tints (gelb/türkis), Filter-Buttons ("Action"/"Mapping"), Doppelklick-Handler.
+- ✅ `AssetManager.h/.cpp`: `saveGenericJsonAsset()` für einfache JSON-Assets. `populateInputActionsFromRegistry()` lädt beim Projektstart alle InputAction/InputMapping-Assets. Aufgerufen nach Async-Discovery (Editor) und nach Registry-Load (Packaged Build).
+- ✅ `EditorApp.cpp`: "New Input Action" / "New Input Mapping" Kontextmenü-Einträge.
+- ✅ `InputModule.cpp`: `register_action_pressed` / `register_action_released` Python-Funktionen.
+- ✅ `ScriptingInternal.h`: `s_actionPressedCallbacks` / `s_actionReleasedCallbacks` Extern-Deklarationen.
+- ✅ `PythonScripting.cpp`: DispatchHook-Setup in `SetRenderer()` — Lambda mit PyGILState für Python-Callbacks.
+- ✅ `GameplayAPI.h/.cpp`: `registerInputActionCallback()` / `unregisterInputActionCallback()` für C++ Gameplay-Scripts.
+- ✅ `engine.pyi`: Python IntelliSense Stubs für Action-Registration.
+- ✅ `main.cpp`: `InputActionManager::Instance().handleKeyDown/handleKeyUp` im SDL-Event-Loop.
+- ✅ `CMakeLists.txt (Core)`: InputActionManager.cpp/.h hinzugefügt.
+- ✅ `CMakeLists.txt (Renderer)`: InputActionEditorTab + InputMappingEditorTab zu RENDERER_CORE_EDITOR_SOURCES.
+- ✅ Build erfolgreich.
+- **Entkopplung**: Core ↔ Scripting via DispatchHook-Pattern (kein Python.h in Core).
+- **Modifier-Semantik**: KeyDown prüft Modifier, KeyUp feuert immer (Modifier können zwischen Down/Up losgelassen werden).
+- **Asset-Persistenz**: Actions/Mappings werden bei Projektstart aus .asset-Dateien geladen und im InputActionManager registriert.
+
+## Letzte Änderung (GameplayAPI Python-Parität – alle Scripting-APIs für C++)
+- ✅ `GameplayAPI.h`: Erweitert von 18 auf ~90 exportierte Funktionen — deckt alle Python-Module ab (Entity, Physics, Camera, Audio, Input, UI, Particle, Diagnostics, GlobalState, Logging). Ausnahme: `math`-Modul (nur in Python aus Performance-Gründen), Callback-basierte Funktionen (`set_on_collision`, `set_on_key_pressed/released`, `register_key_pressed/released`) — C++-Scripts nutzen stattdessen virtuelle Methoden (`onBeginOverlap`/`onEndOverlap`) und Input-Polling in `tick()`.
+- ✅ `GameplayAPI.cpp`: Vollständige Implementierungen aller neuen Funktionen. Zugriff auf ECS, PhysicsWorld, Renderer, AudioManager, AssetManager, UIManager, ViewportUIManager, DiagnosticsManager, ScriptingGlobalState, SDL3.
+- ✅ `GameplayAPIInternal.h` (neu): Engine-interner Header für `setRendererInternal()` — trennt Engine-Setup von öffentlicher Gameplay-API.
+- ✅ `INativeScript.h`: Convenience-Methoden erweitert um: `getTransform()`, `translate()`, `rotate()`, `setAngularVelocity()`, `getAngularVelocity()`, `getLightColor()`, `setLightColor()`, `setEmitterProperty()`, `setEmitterEnabled()`, `setEmitterColor()`, `setEmitterEndColor()`.
+- ✅ `main.cpp`: `GameplayAPI::setRendererInternal(renderer)` Aufruf für Camera/UI-Funktionen.
+- ✅ `CMakeLists.txt (Scripting)`: `GameplayAPIInternal.h` in SCRIPTING_SOURCES.
+- ✅ Build erfolgreich.
+- **RaycastResult-Struct**: C++-Gameplay-Struct mit entity, point[3], normal[3], distance, hit — ersetzt Python-Dict.
+- **Global State**: Typisierte API (Number/String/Bool) statt generischem Python-Objekt — sicherer und performanter.
+- **Keine Callback-API**: Python-Callbacks (set_on_collision, set_on_key_pressed/released) durch C++-Patterns ersetzt: virtuelle Methoden für Overlap-Events, SDL-Polling für Input.
+
+## Letzte Änderung (NativeScript Engine-API-Zugriff + Content Browser C++-Klassen-Anzeige)
+
+- ✅ `INativeScript.h (Convenience API)`: 14 Convenience-Methoden (Transform, Physics, Entity, Logging, Time) delegieren an `GameplayAPI`-Funktionen. Kein extra Include nötig — Scripts nutzen Member-Methoden direkt.
+- ✅ `GameplayAPI.cpp`: Implementierung aller `INativeScript`-Convenience-Methoden.
+- ✅ `AssetTypes.h`: Neuer `AssetType::NativeScript` Enum-Wert.
+- ✅ `AssetManager.cpp`: Sync/Async Asset-Discovery erkennt `.h`/`.hpp`+`.cpp`-Paare als einzelne `NativeScript`-Einträge. Standalone `.cpp` ohne Header ebenfalls registriert. Save-Switch aktualisiert.
+- ✅ `AssetManagerImport.cpp`: Extension-Detection für `.h`, `.hpp`, `.cpp` → `NativeScript`.
+- ✅ `ContentBrowserPanel.cpp`: Icon (blauer Tint), Type-Filter `"C++"`, Unreferenced-Badge für NativeScript deaktiviert.
+- ✅ `PythonScripting.cpp`: `Asset_NativeScript` Konstante.
+- ✅ `engine.pyi`: `Asset_NativeScript` IntelliSense-Stub.
+- ✅ Build erfolgreich.
+- **Keine extra DLL-Abhängigkeiten**: GameScripts.dll nutzt Engine-API über bereits exportierte `GAMEPLAY_API`-Symbole (über `NativeScriptRegistry` ohnehin gelinkt).
+- **Content Browser**: C++-Klassen werden mit blauem Script-Icon angezeigt, Header+Source als eine Klasse zusammengefasst. Eigener Filter-Button trennt Python- von C++-Scripts.
+
+## Letzte Änderung (Engine-Lib-Deployment + Leichtgewichtiger Game Build)
+
+- ✅ `CMakeLists.txt (POST_BUILD)`: .lib-Import-Libraries aller Shared/Static-Targets nach `Tools/lib/` deployed (Scripting, Renderer, AssetManager, Core, Logger, Diagnostics, Physics, SDL3 + Runtime-Varianten + Landscape).
+- ✅ `CMakeLists.txt (Runtime-DLL-Deploy)`: Runtime-Varianten-DLLs (ScriptingRuntime.dll, RendererRuntime.dll, AssetManagerRuntime.dll) werden nach `Tools/lib/` deployed. `add_dependencies(HorizonEngine ...)` stellt sicher, dass Runtime-Targets beim Editor-Build mitgebaut werden.
+- ✅ `CMakeLists.txt (Header-Deploy)`: NativeScripting-Headers nach `Tools/include/NativeScripting/`, SDL3-Headers nach `Tools/include/SDL3/`.
+- ✅ `CMakeLists.txt (EngineConfig.cmake)`: Generierte Config-Datei mit Python/Engine-Pfaden in `Tools/`.
+- ✅ `EditorApp.cpp (GameScripts Fix)`: Link-Verzeichnis auf `Tools/lib/`, Include-Verzeichnis auf `Tools/include/NativeScripting/`. Behebt "kann Scripting.lib nicht öffnen" Fehler.
+- ✅ `BuildPipeline.cpp (Leichtgewichtiger Build)`: Erkennt vorgebaute Libs → generiert minimales CMakeLists.txt (nur main.cpp kompilieren + pre-built libs linken). Engine wird nicht neu kompiliert. Fallback auf vollständigen Build wenn Libs fehlen.
+- ✅ `BuildPipeline.cpp (DLL-Deploy)`: Leichtgewichtiger Modus kopiert (1) Shared-DLLs aus Editor-Root (Core.dll, SDL3.dll etc.) und (2) Runtime-Varianten-DLLs aus `Tools/lib/` (ScriptingRuntime.dll etc.) in das Game-Ausgabe-Verzeichnis.
+- ✅ Build erfolgreich.
+- **Geschwindigkeitsverbesserung**: Game Build überspringt cmake configure/build aller externen Dependencies (SDL, assimp, jolt, PhysX, freetype, OpenAL) und kompiliert nur main.cpp (~Sekunden statt Minuten).
+- **Fix**: Game-Exe stürzte sofort ab weil Runtime-DLLs (ScriptingRuntime.dll etc.) nicht im Deploy-Verzeichnis vorhanden waren — jetzt werden sie mit `add_dependencies` mitgebaut und nach `Tools/lib/` deployed.
+
+## Letzte Änderung (Auto-Build GameScripts.dll vor PIE)
+
+- ✅ `EditorApp::buildGameScriptsForPIE()`: Neue Methode (~180 Zeilen) kompiliert C++-Game-Scripts automatisch vor jedem PIE-Start.
+- ✅ `startPIE() Integration`: Prüft `ScriptingMode` (CppOnly/Both) und ruft `buildGameScriptsForPIE()` synchron auf. PIE wird bei Build-Fehlschlag mit Toast-Fehlermeldung abgebrochen.
+- ✅ `CMakeLists.txt-Generierung`: Automatisch generiert in `Content/Scripts/Native/` (C++20, SHARED GameScripts, linkt gegen Scripting-Import-Lib, POST_BUILD kopiert nach Engine/GameScripts.dll).
+- ✅ `CMake Auto-Detection`: Kein hardcoded `-G`-Generator — cmake erkennt automatisch den passenden Generator anhand der installierten Toolchain (behebt "could not create named generator" Fehler).
+- ✅ `Synchroner CMake-Build`: Configure + Build (`--target GameScripts --config RelWithDebInfo`) via CreateProcessA/CREATE_NO_WINDOW mit Pipe-Output ins Logger-System.
+- ✅ `DLL-Reload`: Lädt/reloaded GameScripts.dll via NativeScriptManager::loadGameplayDLL() + initializeScripts().
+- ✅ `Build-Cache`: Inkrementelle Builds in `<projectPath>/Binary/GameScripts/`.
+- ✅ `CMAKE_GENERATOR entfernt`: Compile-Define aus Editor/CMakeLists.txt und Root-CMakeLists.txt (HorizonEngine) entfernt. BuildPipeline ebenfalls auf Auto-Detection umgestellt.
+- ✅ Build erfolgreich.
+- **Nicht-fatal**: Wenn CMake/Toolchain nicht verfügbar, läuft PIE ohne C++-Scripts weiter.
+- **Engine wird nicht gebaut**: Nur Spieler-Code in Content/Scripts/Native/ wird kompiliert.
+- ✅ Build erfolgreich.
+- **Nicht-fatal**: Wenn CMake/Toolchain nicht verfügbar, läuft PIE ohne C++-Scripts weiter.
+- **Engine wird nicht gebaut**: Nur Spieler-Code in Content/Scripts/Native/ wird kompiliert.
+
+## Letzte Änderung (Default-Content ScriptingMode-Awareness + DefaultCubeScript entfernt)
+
+- ✅ `DefaultCubeScript.py entfernt`: Überflüssige Script-Generierung aus Beispielprojekt-Erstellung entfernt.
+- ✅ `DefaultCube1-5 ScriptingMode-aware`: Python-Skripte nur bei PythonOnly/Both, C++-Klassen (Scripts/Native/) nur bei CppOnly/Both generiert.
+- ✅ `Default-Level nutzt "Logic"-Key`: Entity-JSON mit `scriptPath`/`nativeClassName` statt altem `"Script"`-Key.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (Unified LogicComponent: Script + NativeScript zusammengeführt)
+
+- ✅ `LogicComponent (Components.h)`: `ScriptComponent` + `NativeScriptComponent` zu `LogicComponent` zusammengeführt (Felder: `scriptPath`, `nativeClassName`, `scriptAssetId`).
+- ✅ `ComponentKind::Logic (ECS.h)`: Ersetzt `Script` + `NativeScript`. Storage, getStorage (const/non-const), setComponentAsset, ComponentTraits aktualisiert.
+- ✅ `ECS.cpp`: initialize() und removeEntity() nutzen LogicComponent.
+- ✅ `EngineLevel.cpp/h`: Serialisierung/Deserialisierung mit Backward-Kompatibilität für alte "Script"/"NativeScript" JSON-Keys. EntitySnapshot aktualisiert.
+- ✅ `OutlinerPanel.cpp/h`: Logic-Sektion in Entity-Details. Auto-Erzeugung von Python-/C++-Template-Dateien beim Hinzufügen basierend auf ScriptingMode. Copy/Paste/Duplicate aktualisiert.
+- ✅ `EntityModule.cpp`: Alle 3 ComponentKind-Switches (Add/Remove/Require) nutzen LogicComponent.
+- ✅ `PythonScripting.cpp`: Entity-Loop, Overlap-Dispatch, Python-Konstante `Component_Logic` (ersetzt `Component_Script` + `Component_NativeScript`).
+- ✅ `NativeScriptManager.cpp`: Schema-Query und Komponentenzugriff über LogicComponent.nativeClassName.
+- ✅ `UIManagerEditor.cpp`: Prefab-Serialisierung/Deserialisierung mit Backward-Compat. Icon/Tint aktualisiert.
+- ✅ `AssetManagerFileOps.cpp`: Integrität, moveAsset, renameAsset, findAssetReferences aktualisiert.
+- ✅ `EditorApp.cpp`: Viewport-Drop, Spawn, Delete-Snapshots, Undo/Redo aktualisiert.
+- ✅ `ContentBrowserPanel.cpp`: Asset-Referenz-Sammlung aktualisiert.
+- ✅ `engine.pyi`: `Component_Logic` IntelliSense-Stub.
+- ✅ Build erfolgreich (Editor-Target).
+- **Backward-Kompatibilität**: Bestehende Level- und Prefab-Dateien mit alten "Script"/"NativeScript"-Keys werden automatisch migriert.
+
+## Letzte Änderung (ScriptingMode-Persistenz in Projektdatei)
+
+- ✅ `DiagnosticsManager.h/cpp`: `scriptingModeToString()` / `scriptingModeFromString()` Hilfsfunktionen.
+- ✅ `AssetManager.cpp`: `ScriptingMode=` wird in `.project`-Datei gespeichert und geladen.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (Editor-UI-Verbesserungen: Hover-Effekte, IDE-Empfehlung, Dialog-Buttons)
+
+- ✅ `Popup-Hover-Effekte`: `style.transitionDuration = 0.15f` an 4 Dialog-Stellen hinzugefügt.
+- ✅ `VS IDE-Empfehlungs-Popup`: Dialog bei C++/Both-Scripting mit Download-Link und "Do not show again"-Checkbox.
+- ✅ `Optionale Button-Labels`: `showConfirmDialog` / `showConfirmDialogWithCheckbox` mit optionalen `confirmLabel`/`cancelLabel`. Primary/Danger-Button-Styling.
+- ✅ `Cancel-Button-Fix`: IDE-Dialog Cancel erstellt Projekt nicht mehr.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (C++ Native Scripting System: DLL-basiertes Gameplay-Scripting)
+
+- ✅ `INativeScript.h`: Basisklasse mit 5 Lifecycle-Events (onLoaded, tick, onBeginOverlap, onEndOverlap, onDestroy). Entity-ID über `getEntity()`.
+- ✅ `NativeScriptRegistry.h/cpp`: Singleton-Registry mit Factory-Pattern + `REGISTER_NATIVE_SCRIPT`-Makro für automatische Klassenregistrierung bei DLL-Load.
+- ✅ `NativeScriptManager.h/cpp`: Kern-Singleton — DLL-Management (LoadLibrary/FreeLibrary), Script-Lifecycle (init/update/shutdown), Instanz-Verwaltung, Overlap-Dispatch, Hot-Reload (ENGINE_EDITOR-only).
+- ✅ `GameplayAPI.h/cpp`: Öffentliche Spieler-API — Transform, Entity, Physics, Logging, Time Wrapper-Funktionen. Zentral-Include für Spieler-Code.
+- ✅ `GameplayAPIExport.h`: DLL-Export-Macros (GAMEPLAY_API).
+- ✅ `ECS-Integration (Components.h, ECS.h, EngineLevel.cpp)`: NativeScriptComponent (className + instance*), ComponentKind::NativeScript = 13, MaxComponentTypes = 14, Serialisierung.
+- ✅ `CMakeLists.txt (Scripting)`: C++ NativeScripting-Quellen in Scripting.dll/ScriptingRuntime.dll zusammengeführt (kein separates NativeScripting-Target mehr). GAMEPLAY_DLL_EXPORT=1, WINDOWS_EXPORT_ALL_SYMBOLS=ON.
+- ✅ `Root CMakeLists.txt`: Scripting enthält Python + C++ NativeScripting vereint. ENGINE_EDITOR_LIBS/ENGINE_RUNTIME_LIBS bereinigt.
+- ✅ `main.cpp Phase 3 Integration`: (1) Include NativeScriptManager.h. (2) Runtime: GameScripts.dll aus Engine/ laden + initializeScripts nach Level-Load. (3) Game-Loop: updateScripts(dt) vor Physics/Python. (4) Shutdown: shutdownScripts + unloadGameplayDLL.
+- ✅ `Python-Integration`: engine.pyi (Component_NativeScript), EntityModule.cpp (Switch-Cases), PythonScripting.cpp (Konstante).
+- ✅ Build erfolgreich für alle Targets (Scripting.dll mit Python+C++, ScriptingRuntime.dll, HorizonEngine.exe, HorizonEngineRuntime.exe).
+- **Lifecycle-Reihenfolge**: C++ Scripts → Physics → Python Scripts → Overlap-Dispatch.
+- **Nächste Schritte**: Phase 5 (Spieler-Projekt-Template + Editor UI), Phase 6 (Hot-Reload FileWatcher), Phase 7 (Python↔C++ Brücke), Phase 8 (Build-Pipeline-Erweiterung).
+
+## Letzte Änderung (Global State Module: Daten zwischen Python-Entities austauschen)
+
+- ✅ `ScriptingGlobalState.h`: Singleton-Fix (`static Instance()`), neue Methoden (`setVariable`, `removeVariable`, `getAllVariables`, `clear`).
+- ✅ `GlobalStateModule.cpp`: Neues `engine.globalstate`-Submodul mit `set_global`, `get_global`, `remove_global`, `get_all`, `clear`. String-Heap-Management korrekt.
+- ✅ `ScriptingInternal.h`: `CreateGlobalStateModule()` Factory-Deklaration.
+- ✅ `PythonScripting.cpp`: `globalStateModule` in `CreateEngineModule()` registriert.
+- ✅ `engine.pyi`: `globalstate`-Klasse mit IntelliSense-Stubs.
+- ✅ `CMakeLists.txt`: `Python/GlobalStateModule.cpp` in `SCRIPTING_SOURCES`.
+
+## Letzte Änderung (VC++ Redistributable Auto-Bundling im Game Build)
+
+- ✅ `BuildPipeline.cpp – Step 5 (VC++ Redist)`: Automatische Suche in 4 Verzeichnissen, Download via PowerShell falls nicht vorhanden, Kopie ins Game-Build-Root.
+- ✅ `Launcher-Script generiert`: `<GameName>.bat` prüft ob `vcruntime140.dll` vorhanden ist, installiert VC++ Redist silent falls nötig, startet dann die Exe.
+- ✅ `bootstrap.ps1 erweitert`: Neuer Abschnitt 5 lädt `vc_redist.x64.exe` in Tools/ herunter.
+- ✅ `Build-Pipeline renummeriert`: 8 → 9 Schritte.
+- ✅ Build erfolgreich (Editor-Target).
+- **Download-URL**: `https://aka.ms/vs/17/release/vc_redist.x64.exe` (~24 MB, immer aktuellste VS 2015-2022+ Version).
+
+## Letzte Änderung (Entity Asset Drag & Drop: Spawn in Szene)
+
+- ✅ `Entity-Asset Viewport-Spawn (EditorApp.cpp)`: Entity-Assets werden beim Drag & Drop auf den Viewport als neue Entity in die Szene gespawnt (statt Anwenden auf bestehende Entities). Oberflächenerkennung via `screenToWorldPos()`, Fallback 5 Einheiten vor Kamera.
+- ✅ `UIManager::spawnEntityAssetAtPosition() (UIManagerEditor.cpp)`: Neue Methode — lädt Entity-Asset-JSON, nutzt `prefabDeserializeEntity()` für Komponenten-Deserialisierung mit Position-Override, Undo/Redo-fähig.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (Entity Editor Rework: Split-Layout + Asset-Dropdowns)
+
+- ✅ `EntityEditorTab Rework (EntityEditorTab.h/cpp)`: Komplette Überarbeitung — Split-Layout mit Komponentenliste links und Detail-Panel rechts. Klickbare Komponenten-Einträge mit Selektion-Highlighting. „+ Add Component" als kompakter `DropdownButtonWidget`. Asset-Properties (Mesh, Material, Script) nutzen jetzt Dropdowns aus dem AssetRegistry statt String-Eingabe. Neuer `selectedComponent`-State. Neue Hilfsmethode `getAssetPathsByType()`.
+- ✅ Build erfolgreich (Editor-Target).
+
+## Letzte Änderung (Entity Asset Type: Neuer Asset-Typ mit dediziertem Editor-Tab)
+
+- ✅ `AssetType::Entity (AssetTypes.h)`: Neuer Enum-Wert nach `Prefab` für wiederverwendbare Entity-Vorlagen.
+- ✅ `EntityEditorTab (EntityEditorTab.h/cpp)`: ~600 Zeilen. Editor-Tab zum Bearbeiten von Entity-Assets: Laden/Speichern als JSON-Asset, 11 Komponenten-Sektionen (Name, Transform, Mesh, Material, Light, Camera, Physics, Collision, Script, Animation, ParticleEmitter) mit editierbaren Properties, Add/Remove-Buttons, Dirty-Tracking, Save-Button im Toolbar.
+- ✅ `UIManager-Integration`: `openEntityEditorTab()`, `closeEntityEditorTab()`, `isEntityEditorOpen()`. Lazy-Init via `std::unique_ptr<EntityEditorTab>`.
+- ✅ `Content Browser: New Entity (EditorApp.cpp)`: Kontextmenü-Eintrag erzeugt .asset mit Name+Transform Defaults, registriert in AssetRegistry, öffnet Editor-Tab.
+- ✅ `Content Browser: Doppelklick (ContentBrowserPanel.cpp)`: Entity-Assets öffnen im EntityEditorTab. Icon: `entity.png`, Tint: Lila.
+- ✅ `CMakeLists.txt`: EntityEditorTab.h/.cpp in RENDERER_CORE_EDITOR_SOURCES.
+- ✅ Build erfolgreich (Editor-Target).
+
+## Letzte Änderung (Tools-Deploy: Bootstrap-Skripte neben Editor-Exe)
+
+- ✅ `CMakeLists.txt POST_BUILD Copy`: `tools/bootstrap.ps1`, `tools/bootstrap.sh`, `tools/README.md` werden beim Build nach `ENGINE_DEPLOY_DIR/tools/` kopiert. Skripte liegen zur Laufzeit neben der Editor-Exe.
+- ✅ `BuildSystemUI::runBootstrapInstall() refactored`: `ENGINE_SOURCE_DIR`-Abhängigkeit komplett entfernt. Skript-Lokalisierung rein exe-relativ: `<exe>/tools/` (Primary) → `<exe>/../tools/` (Fallback Multi-Config). Plattformunabhängige Skriptname-Auswahl einmalig am Funktionsanfang. Linux-Pfad-Lookup vereinfacht. `canonical()` für saubere Log-Pfade.
+- ✅ Build erfolgreich (Editor-Target).
 
 ## Letzte Änderung (In-Engine Auto-Install: Build-Tools beim Start prüfen und installieren)
 
@@ -1944,6 +2340,11 @@ Große Feature-Blöcke, die noch nicht existieren:
 - ✅ **Outliner/Entity-Details-Extraktion (Section 1.3 komplett)** – World Outliner und Entity Details aus `UIManager.cpp` in `OutlinerPanel.h/.cpp` (~1.808 Zeilen) extrahiert. 9 Methoden (`populateWidget`, `populateDetails`, `refresh`, `selectEntity`, `navigateByArrow`, `copySelectedEntity`, `pasteEntity`, `duplicateEntity`, `applyAssetToEntity`), 5 Member-Variablen (`m_outlinerLevel`, `m_outlinerSelectedEntity`, `EntityClipboard`, `m_lastEcsComponentVersion`, `m_lastRegistryVersion`) und statische Helfer (`iconForEntity`, `iconTintForEntity`, `FindFirstStackPanel`, `setCompFieldWithUndo`) verschoben. `UIManager.cpp` von ~13.100 auf ~11.560 Zeilen reduziert (~1.545 Zeilen, ~12% weitere Reduktion). Neue UIManager-APIs: `getSelectedEntity()`, `invalidateHoveredElement()`. ~50 Cross-References aktualisiert.
 - ✅ **Build-System-UI-Extraktion (Section 1.4 komplett)** – Build-System-UI aus `UIManager.cpp` in `BuildSystemUI.h/.cpp` (~1.370 Zeilen) extrahiert. 16 Methoden (Profile-Management: `loadBuildProfiles`, `saveBuildProfile`, `deleteBuildProfile`; Build-Dialog: `openBuildGameDialog`, `setOnBuildGame`; Progress-UI: `showBuildProgress`, `updateBuildProgress`, `closeBuildProgress`, `dismissBuildProgress`, `appendBuildOutput`, `pollBuildThread`; CMake/Toolchain-Detection: `detectCMake`, `detectBuildToolchain`, `showCMakeInstallPrompt`, `showToolchainInstallPrompt`, `startAsyncToolchainDetection`, `pollToolchainDetection`), Structs (`BuildProfile`, `BuildGameConfig`, `ToolchainInfo`), statische Helfer (`shellExecSilent`, `shellReadSilent`) und alle Build-Thread-State-Variablen verschoben. Type-Aliases in `UIManager.h` für API-Kompatibilität (`UIManager::BuildGameConfig` etc.). `BuildPipeline.cpp` aktualisiert (Zugriff über `getBuildSystemUI()`). `UIManager.cpp` von ~11.560 auf ~10.300 Zeilen reduziert (~1.260 Zeilen, ~11% weitere Reduktion).
 - ✅ **Dialog-System-Extraktion (Section 1.5 komplett)** – Dialog-System aus `UIManager.cpp` in `EditorDialogs.h/.cpp` (~1.840 Zeilen) extrahiert. 13 Methoden (`showModalMessage`, `closeModalMessage`, `showConfirmDialog`, `showConfirmDialogWithCheckbox`, `ensureModalWidget`, `showSaveProgressModal`, `updateSaveProgress`, `closeSaveProgressModal`, `showUnsavedChangesDialog`, `showLevelLoadProgress`, `updateLevelLoadProgress`, `closeLevelLoadProgress`, `openProjectScreen`), `ModalRequest`-Struct, Member-Variablen (`m_modalWidget`, `m_modalMessage`, `m_modalVisible`, `m_modalOnClosed`, `m_modalQueue`, `m_saveProgressWidget/Visible/Total/Saved`, `m_levelLoadProgressWidget`) und statische Helfer verschoben. Accessors (`isModalVisible()`, `getModalWidget()`, `getSaveProgressWidget()`) für UIManager-Cross-References. `UIManager.cpp` von ~10.300 auf ~8.550 Zeilen reduziert (~1.750 Zeilen, ~17% weitere Reduktion).
+- ✅ **PIE DLL-Lifecycle-Fix** – `stopPIE()` ruft jetzt `NativeScriptManager::shutdownScripts()` + `unloadGameplayDLL()` vor `reloadScripts()`/`restoreEcsSnapshot()` auf, um File-Lock auf `GameScripts.dll` zu vermeiden. `buildGameScriptsForPIE()` entlädt die DLL *vor* dem CMake-Build, damit `POST_BUILD`-Copy die Datei überschreiben kann.
+- ✅ **Native Script Class Discovery & Entity Assignment** – `NativeScriptManager` cached entdeckte Klassennamen (`m_cachedClassNames`) nach DLL-Laden über `loadGameplayDLL()`. `getAvailableClassNames()` liefert die gecachte Liste auch nach DLL-Unload. Verbessertes Logging: bei 0 registrierten Klassen wird Warnung mit `REGISTER_NATIVE_SCRIPT`-Hinweis ausgegeben; `initializeScripts()` loggt jede Entity-Klassen-Zuordnung und Zusammenfassung. EntityDetails-Panel: neues `DropdownButtonWidget` (`Details.Logic.CppClassDropdown`) im LogicComponent-Abschnitt zeigt verfügbare C++-Klassen, mit "(None)"-Option und "(Build C++ scripts first)"-Hinweis. Undo/Redo-Support. `UIManager`: `NativeClassNamesProvider`-Callback überbrückt Renderer↔Scripting DLL-Grenze.
+- ✅ **Auto-Registration & New C++ Script Template** – `buildGameScriptsForPIE()` scannt vor dem CMake-Build alle `.h`-Dateien in `Content/Scripts/Native/` per Regex nach `class X : public INativeScript` und generiert automatisch `_AutoRegister.cpp` mit `#include`-Direktiven und `REGISTER_NATIVE_SCRIPT`-Makros für jede entdeckte Klasse. Benutzer müssen das Makro nie manuell schreiben. Content Browser Kontextmenü: neuer Eintrag "New C++ Script" erstellt `.h`+`.cpp`-Boilerplate mit `INativeScript`-Vererbung und `onLoaded()`/`tick()`-Overrides direkt in `Content/Scripts/Native/`.
+- ✅ **PIE Build Progress Popup (Async Build)** – `buildGameScriptsForPIE()` ist jetzt asynchron. Pre-Build-Setup (Auto-Register-Scan, CMakeLists.txt, DLL-Unload) läuft auf dem Main-Thread, CMake configure+build auf einem Background-Thread. Separates Popup-Fenster ("C++ Script Build", 780×460) zeigt Build-Output live: scrollbares StackPanel mit Fehler-Highlighting (rot für `[ERROR]`, `error`, `FAILED`) und Auto-Scroll. Bei Erfolg: Popup schließt automatisch, DLL wird geladen, PIE startet via `finishStartPIE()`. Bei Fehler: Popup bleibt offen mit roter Status-Meldung ("Compilation errors found") und Close-Button — Benutzer kann den gesamten Build-Output mit Compiler-Fehlermeldungen durchscrollen. Neue EditorApp-Methoden: `finishStartPIE()`, `pollPIEBuild()`, `dismissPIEBuildPopup()`. Neue Members: `m_pieBuildThread`, `m_pieBuildMutex`, `m_pieBuildRunning`, `m_pieBuildPendingLines`, `m_pieBuildFinished`, `m_pieBuildSuccess`, `m_pieBuildOutputLines`, `m_pieBuildWidget`, `m_pieBuildPopup`. `tick()` ruft `pollPIEBuild()` auf.
+- ✅ **Runtime Script-Initialisierung (Deferred)** – `initializeScripts()` wurde im Runtime-Modus zu früh aufgerufen (direkt nach `loadGameplayDLL()`), bevor ECS-Entities aus dem Level-JSON erstellt wurden. Fix: DLL wird weiterhin früh geladen, aber `initializeScripts()` wird im Game-Loop deferred aufgerufen — erst nachdem `diagnostics.isScenePrepared()` true ist (d.h. `prepareActiveLevel()` → `prepareEcs()` die Entities deserialisiert hat). Gleiches gilt für die Entity-Kamera-Zuweisung (`setActiveCameraEntity()`), die ebenfalls nach Scene-Preparation läuft. Neue Flags: `rtScriptsNeedInit`, `rtCameraNeedInit`.
 
 ---
 

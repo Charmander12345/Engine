@@ -23,6 +23,9 @@ set_target_properties(Editor PROPERTIES
 )
 
 target_compile_definitions(Editor PRIVATE ENGINE_EDITOR=1)
+target_compile_definitions(Editor PRIVATE
+    ENGINE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
 
 target_include_directories(Editor PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}

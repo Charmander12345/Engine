@@ -13,7 +13,7 @@
 #include "../AssetManager/AssetTypes.h"
 #include "../Diagnostics/DiagnosticsManager.h"
 #include "../Physics/PhysicsWorld.h"
-#include "../Scripting/PythonScripting.h"
+#include "../Scripting/Python/PythonScripting.h"
 
 // ═════════════════════════════════════════════════════════════════════════
 //  Construction

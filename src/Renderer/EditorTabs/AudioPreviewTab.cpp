@@ -116,6 +116,16 @@ void AudioPreviewTab::open(const std::string& assetPath)
             m_state.durationSeconds = static_cast<float>(m_state.dataBytes) / static_cast<float>(frameSize * m_state.sampleRate);
     }
 
+    // Extract spatial audio settings
+    if (data.contains("m_is3D") && data["m_is3D"].is_boolean())
+        m_state.is3D = data["m_is3D"].get<bool>();
+    if (data.contains("m_minDistance") && data["m_minDistance"].is_number())
+        m_state.minDistance = data["m_minDistance"].get<float>();
+    if (data.contains("m_maxDistance") && data["m_maxDistance"].is_number())
+        m_state.maxDistance = data["m_maxDistance"].get<float>();
+    if (data.contains("m_rolloffFactor") && data["m_rolloffFactor"].is_number())
+        m_state.rolloffFactor = data["m_rolloffFactor"].get<float>();
+
     // --- Build the widget ---
     {
         auto widget = std::make_shared<EditorWidget>();
@@ -657,4 +667,111 @@ void AudioPreviewTab::buildMetadata(WidgetElement& root)
             }
         }
     }
+
+    // ── Spatial Audio Settings ────────────────────────────────────────────
+    {
+        WidgetElement spacer{};
+        spacer.type        = WidgetElementType::Panel;
+        spacer.fillX       = true;
+        spacer.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 10.0f });
+        spacer.style.color = Vec4{ 0, 0, 0, 0 };
+        spacer.runtimeOnly = true;
+        root.children.push_back(std::move(spacer));
+    }
+    {
+        WidgetElement heading = EditorUIBuilder::makeHeading("Spatial Audio");
+        heading.padding = EditorTheme::Scaled(Vec2{ 0.0f, 4.0f });
+        root.children.push_back(std::move(heading));
+    }
+
+    // Helper to persist spatial settings to the audio asset JSON and re-save
+    auto saveSpatialSettings = [this]()
+    {
+        auto& assetMgr = AssetManager::Instance();
+        auto asset = assetMgr.getLoadedAssetByPath(m_state.assetPath);
+        if (!asset) return;
+        auto data = asset->getData();
+        data["m_is3D"]           = m_state.is3D;
+        data["m_minDistance"]     = m_state.minDistance;
+        data["m_maxDistance"]     = m_state.maxDistance;
+        data["m_rolloffFactor"]  = m_state.rolloffFactor;
+        asset->setData(data);
+        asset->setIsSaved(false);
+        Asset assetRef;
+        assetRef.type = AssetType::Audio;
+        assetRef.ID = asset->getId();
+        assetMgr.saveAsset(assetRef);
+    };
+
+    // 2D / 3D dropdown
+    {
+        WidgetElement dropdown = EditorUIBuilder::makeDropDown(
+            "AudioPreview.Spatial.Mode",
+            { "2D (Non-Spatial)", "3D (Positional)" },
+            m_state.is3D ? 1 : 0,
+            [this, saveSpatialSettings](int idx) {
+                m_state.is3D = (idx == 1);
+                saveSpatialSettings();
+                refresh();
+            });
+        dropdown.fillX = true;
+        dropdown.runtimeOnly = true;
+        root.children.push_back(std::move(dropdown));
+    }
+
+    // 3D-only settings
+    if (m_state.is3D)
+    {
+        auto addFloatRow = [&](const std::string& id, const std::string& label, float value,
+                               std::function<void(float)> onChanged)
+        {
+            WidgetElement row{};
+            row.type        = WidgetElementType::StackPanel;
+            row.orientation = StackOrientation::Horizontal;
+            row.fillX       = true;
+            row.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 26.0f });
+            row.runtimeOnly = true;
+
+            WidgetElement lbl{};
+            lbl.type            = WidgetElementType::Text;
+            lbl.text            = label;
+            lbl.font            = theme.fontDefault;
+            lbl.fontSize        = theme.fontSizeBody;
+            lbl.style.textColor = theme.textSecondary;
+            lbl.minSize         = EditorTheme::Scaled(Vec2{ 120.0f, 24.0f });
+            lbl.textAlignV      = TextAlignV::Center;
+            lbl.runtimeOnly     = true;
+            row.children.push_back(std::move(lbl));
+
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%.2f", value);
+            WidgetElement input = EditorUIBuilder::makeEntryBar(id, buf, [onChanged](const std::string& text) {
+                try { onChanged(std::stof(text)); } catch (...) {}
+            });
+            input.fillX       = true;
+            input.runtimeOnly = true;
+            row.children.push_back(std::move(input));
+            root.children.push_back(std::move(row));
+        };
+
+        addFloatRow("AudioPreview.Spatial.MinDist", "Min Distance", m_state.minDistance,
+            [this, saveSpatialSettings](float val) {
+                m_state.minDistance = val;
+                saveSpatialSettings();
+            });
+
+        addFloatRow("AudioPreview.Spatial.MaxDist", "Max Distance", m_state.maxDistance,
+            [this, saveSpatialSettings](float val) {
+                m_state.maxDistance = val;
+                saveSpatialSettings();
+            });
+
+        addFloatRow("AudioPreview.Spatial.Rolloff", "Rolloff Factor", m_state.rolloffFactor,
+            [this, saveSpatialSettings](float val) {
+                m_state.rolloffFactor = val;
+                saveSpatialSettings();
+            });
+    }
+
+    addInfoRow("Audio Mode", m_state.is3D ? "3D Positional" : "2D Non-Spatial");
 }

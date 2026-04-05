@@ -26,19 +26,36 @@ namespace ScriptDetail
     extern PyObject* s_onCollision;
     extern float s_lastDeltaSeconds;
 
+    /// The entity whose script is currently executing (set before onloaded/tick/overlap calls).
+    /// Used by register_key_pressed/register_key_released to capture the registering entity.
+    extern unsigned long s_currentEntity;
+
+    /// Per-key callback with the entity that registered it.
+    struct EntityCallback
+    {
+        PyObject* callback{ nullptr };
+        unsigned long entity{ 0 };
+    };
+
     // Input callback state (shared between InputModule and PythonScripting HandleKey*)
     extern PyObject* s_onKeyPressed;
     extern PyObject* s_onKeyReleased;
-    extern std::unordered_map<int, std::vector<PyObject*>> s_keyPressedCallbacks;
-    extern std::unordered_map<int, std::vector<PyObject*>> s_keyReleasedCallbacks;
+    extern std::unordered_map<int, std::vector<EntityCallback>> s_keyPressedCallbacks;
+    extern std::unordered_map<int, std::vector<EntityCallback>> s_keyReleasedCallbacks;
+    extern std::unordered_map<std::string, std::vector<PyObject*>> s_actionPressedCallbacks;
+    extern std::unordered_map<std::string, std::vector<PyObject*>> s_actionReleasedCallbacks;
 
     // Shared helper: log a Python exception with traceback to Logger + modal notification.
     void LogPythonError(const std::string& context);
 
     // Input callback helpers (used by HandleKeyDown/HandleKeyUp in PythonScripting.cpp)
     void InvokeKeyCallbacks(PyObject* callback, int key);
-    void InvokeKeyCallbacksForKey(const std::unordered_map<int, std::vector<PyObject*>>& map, int key);
+    void InvokeKeyCallbacksForKey(const std::unordered_map<int, std::vector<EntityCallback>>& map, int key);
     void ClearKeyCallbacks();
+
+    // Timer helpers (implemented in TimerModule.cpp)
+    void ProcessTimers(float dt);
+    void ClearTimers();
 }
 
 // Module creation functions (implemented in separate .cpp files)
@@ -52,6 +69,8 @@ PyObject* CreateParticleModule();
 PyObject* CreateDiagnosticsModule();
 PyObject* CreateLoggingModule();
 PyObject* CreateUIModule();
+PyObject* CreateGlobalStateModule();
+PyObject* CreateTimerModule();
 #if ENGINE_EDITOR
 PyObject* CreateEditorModule();
 #endif

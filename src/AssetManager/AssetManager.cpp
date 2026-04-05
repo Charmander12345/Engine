@@ -20,6 +20,7 @@
 
 #include "../Renderer/Material.h"
 #include "../Core/AudioManager.h"
+#include "../Core/InputActionManager.h"
 
 #if ENGINE_EDITOR
 #include <assimp/Importer.hpp>
@@ -526,6 +527,43 @@ bool AssetManager::discoverAssetsAndBuildRegistry(const std::string& projectRoot
             ++filesRegistered;
             continue;
         }
+        if (ext == ".h" || ext == ".hpp")
+        {
+            // Check for matching .cpp to register as NativeScript (header+source grouped as one)
+            fs::path cppPath = p;
+            cppPath.replace_extension(".cpp");
+            if (fs::exists(cppPath))
+            {
+                AssetRegistryEntry e;
+                e.name = p.stem().string();
+                e.type = AssetType::NativeScript;
+                e.path = fs::relative(p, contentRoot).generic_string();
+                log.log(Logger::Category::AssetManagement, "[Registry]   + registered (native script) name='" + e.name + "' path='" + e.path + "'", Logger::LogLevel::INFO);
+                registerAssetInRegistry(e);
+                ++filesRegistered;
+            }
+            continue;
+        }
+        if (ext == ".cpp")
+        {
+            // Skip .cpp files that have a matching .h (already registered via the .h)
+            fs::path hPath = p;
+            hPath.replace_extension(".h");
+            fs::path hppPath = p;
+            hppPath.replace_extension(".hpp");
+            if (!fs::exists(hPath) && !fs::exists(hppPath))
+            {
+                // Standalone .cpp without header
+                AssetRegistryEntry e;
+                e.name = p.stem().string();
+                e.type = AssetType::NativeScript;
+                e.path = fs::relative(p, contentRoot).generic_string();
+                log.log(Logger::Category::AssetManagement, "[Registry]   + registered (native script, standalone) name='" + e.name + "' path='" + e.path + "'", Logger::LogLevel::INFO);
+                registerAssetInRegistry(e);
+                ++filesRegistered;
+            }
+            continue;
+        }
         if (ext == ".wav" || ext == ".mp3" || ext == ".ogg" || ext == ".flac")
         {
             AssetRegistryEntry e;
@@ -648,6 +686,36 @@ void AssetManager::discoverAssetsAndBuildRegistryAsync(const std::string& projec
                 registerLocal(std::move(e));
                 continue;
             }
+            if (ext == ".h" || ext == ".hpp")
+            {
+                fs::path cppPath = p;
+                cppPath.replace_extension(".cpp");
+                if (fs::exists(cppPath))
+                {
+                    AssetRegistryEntry e;
+                    e.name = p.stem().string();
+                    e.type = AssetType::NativeScript;
+                    e.path = fs::relative(p, contentRoot).generic_string();
+                    registerLocal(std::move(e));
+                }
+                continue;
+            }
+            if (ext == ".cpp")
+            {
+                fs::path hPath = p;
+                hPath.replace_extension(".h");
+                fs::path hppPath = p;
+                hppPath.replace_extension(".hpp");
+                if (!fs::exists(hPath) && !fs::exists(hppPath))
+                {
+                    AssetRegistryEntry e;
+                    e.name = p.stem().string();
+                    e.type = AssetType::NativeScript;
+                    e.path = fs::relative(p, contentRoot).generic_string();
+                    registerLocal(std::move(e));
+                }
+                continue;
+            }
             if (ext == ".wav" || ext == ".mp3" || ext == ".ogg" || ext == ".flac")
             {
                 AssetRegistryEntry e;
@@ -705,7 +773,75 @@ void AssetManager::discoverAssetsAndBuildRegistryAsync(const std::string& projec
 #endif
 
         log.log(Logger::Category::AssetManagement, "[Registry] async registry ready. Total assets: " + std::to_string(m_registry.size()), Logger::LogLevel::INFO);
+
+        // Populate InputActionManager from discovered InputAction/InputMapping assets.
+        populateInputActionsFromRegistry(projectRoot);
     });
+}
+
+void AssetManager::populateInputActionsFromRegistry(const std::string& projectRoot)
+{
+    auto& iam = InputActionManager::Instance();
+    iam.clearAll();
+
+    const fs::path contentRoot = fs::path(projectRoot) / "Content";
+    auto& log = Logger::Instance();
+
+    // First pass: register all InputAction definitions.
+    for (const auto& entry : m_registry)
+    {
+        if (entry.type != AssetType::InputAction) continue;
+
+        fs::path fullPath = contentRoot / entry.path;
+        std::ifstream in(fullPath, std::ios::binary);
+        if (!in.is_open()) continue;
+
+        std::string raw((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        in.close();
+
+        json j = json::parse(raw, nullptr, false);
+        if (j.is_discarded() || !j.contains("data")) continue;
+
+        const auto& data = j["data"];
+        std::string actionName = data.value("name", entry.name);
+        int mods = 0;
+        if (data.value("shift", false)) mods |= InputActionManager::ModShift;
+        if (data.value("ctrl",  false)) mods |= InputActionManager::ModCtrl;
+        if (data.value("alt",   false)) mods |= InputActionManager::ModAlt;
+
+        iam.addAction(actionName, mods);
+    }
+
+    // Second pass: register all InputMapping key bindings.
+    for (const auto& entry : m_registry)
+    {
+        if (entry.type != AssetType::InputMapping) continue;
+
+        fs::path fullPath = contentRoot / entry.path;
+        std::ifstream in(fullPath, std::ios::binary);
+        if (!in.is_open()) continue;
+
+        std::string raw((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        in.close();
+
+        json j = json::parse(raw, nullptr, false);
+        if (j.is_discarded() || !j.contains("data")) continue;
+
+        const auto& data = j["data"];
+        if (!data.contains("bindings") || !data["bindings"].is_array()) continue;
+
+        for (const auto& b : data["bindings"])
+        {
+            std::string actionName = b.value("action", "");
+            int keycode = b.value("key", 0);
+            if (!actionName.empty() && keycode != 0)
+                iam.addBinding(actionName, keycode);
+        }
+    }
+
+    log.log(Logger::Category::AssetManagement,
+        "[InputActions] Populated InputActionManager from registry.",
+        Logger::LogLevel::INFO);
 }
 
 bool AssetManager::doesAssetExist(const std::string& pathOrName) const
@@ -1746,16 +1882,21 @@ bool AssetManager::saveAsset(const Asset& asset, SyncState syncState, Diagnostic
 	case AssetType::Skybox:
 		result = saveSkyboxAsset(assetData);
 		break;
+	case AssetType::InputAction:
+	case AssetType::InputMapping:
+		result = saveGenericJsonAsset(assetData);
+		break;
 		case AssetType::Script:
-        case AssetType::Shader:
-        case AssetType::Unknown:
-        default:
-            Logger::Instance().log(
-                Logger::Category::AssetManagement,
+		case AssetType::NativeScript:
+		case AssetType::Shader:
+		case AssetType::Unknown:
+		default:
+			Logger::Instance().log(
+				Logger::Category::AssetManagement,
 				"saveAsset(): Unsupported asset type for asset: " + assetData->getName(),
-                Logger::LogLevel::ERROR);
-            return false;
-        }
+				Logger::LogLevel::ERROR);
+			return false;
+		}
         if (!result.success)
         {
             Logger::Instance().log(
@@ -1917,6 +2058,10 @@ bool AssetManager::loadProject(const std::string& projectPath, SyncState syncSta
                 else if (value == "DirectX12") info.selectedRHI = DiagnosticsManager::RHIType::DirectX12;
                 else info.selectedRHI = DiagnosticsManager::RHIType::Unknown;
             }
+            else if (key == "ScriptingMode")
+            {
+                info.scriptingMode = DiagnosticsManager::scriptingModeFromString(value);
+            }
             else if (key == "Level")
             {
                 LevelPath = value;
@@ -2004,6 +2149,7 @@ bool AssetManager::loadProject(const std::string& projectPath, SyncState syncSta
 				"Asset registry loaded: " + std::to_string(m_registry.size()) + " entries.",
 				Logger::LogLevel::INFO);
 			DiagnosticsManager::Instance().setAssetRegistryReady(true);
+			populateInputActionsFromRegistry(info.projectPath);
 		}
 		else
 		{
@@ -2129,6 +2275,7 @@ bool AssetManager::saveProject(const std::string& projectPath, SyncState syncSta
     out << "EngineVersion=" << info.engineVersion << "\n";
     out << "Path=" << info.projectPath << "\n";
     out << "RHI=" << DiagnosticsManager::rhiTypeToString(info.selectedRHI) << "\n";
+    out << "ScriptingMode=" << DiagnosticsManager::scriptingModeToString(info.scriptingMode) << "\n";
     out << "Level=" << levelPathToSave << "\n";
 
     diagnostics.setActionInProgress(DiagnosticsManager::ActionType::SavingProject, false);
@@ -3152,6 +3299,78 @@ AssetManager::SaveResult AssetManager::saveSkyboxAsset(const std::shared_ptr<Ass
     }
 
     skybox->setIsSaved(true);
+    result.success = true;
+    return result;
+}
+
+AssetManager::SaveResult AssetManager::saveGenericJsonAsset(const std::shared_ptr<AssetData>& asset)
+{
+    SaveResult result;
+    if (!asset)
+    {
+        result.errorMessage = "Asset is null.";
+        return result;
+    }
+
+    auto& diagnostics = DiagnosticsManager::Instance();
+    if (!diagnostics.isProjectLoaded())
+    {
+        result.errorMessage = "No project loaded.";
+        return result;
+    }
+
+    std::string name = asset->getName();
+    if (name.empty())
+    {
+        name = "Asset";
+        asset->setName(name);
+    }
+
+    std::string relPath = asset->getPath();
+    if (relPath.empty())
+    {
+        relPath = name + ".asset";
+        asset->setPath(relPath);
+    }
+
+    fs::path rel = fs::path(relPath);
+    if (rel.extension().empty())
+    {
+        rel.replace_extension(".asset");
+        relPath = rel.generic_string();
+        asset->setPath(relPath);
+    }
+
+    const fs::path absPath = fs::path(diagnostics.getProjectInfo().projectPath) / "Content" / fs::path(relPath);
+    std::error_code ec;
+    fs::create_directories(absPath.parent_path(), ec);
+
+    std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+    if (!out.is_open())
+    {
+        result.errorMessage = "Failed to open asset file for writing.";
+        return result;
+    }
+
+    json data = asset->getData();
+    if (data.is_null())
+        data = json::object();
+
+    json fileJson = json::object();
+    fileJson["magic"]   = 0x41535453;
+    fileJson["version"] = 2;
+    fileJson["type"]    = static_cast<int>(asset->getAssetType());
+    fileJson["name"]    = name;
+    fileJson["data"]    = data;
+
+    out << fileJson.dump(4);
+    if (!out.good())
+    {
+        result.errorMessage = "Failed to write asset data.";
+        return result;
+    }
+
+    asset->setIsSaved(true);
     result.success = true;
     return result;
 }

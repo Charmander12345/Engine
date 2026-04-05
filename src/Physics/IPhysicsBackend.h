@@ -134,4 +134,59 @@ public:
 
     // ── Handle ↔ Entity mapping (convenience for PhysicsWorld) ──────
     virtual BodyHandle getBodyForEntity(uint32_t entity) const = 0;
+
+    // ── Character Controller ────────────────────────────────────────
+    using CharacterHandle = uint64_t;
+    static constexpr CharacterHandle InvalidCharacter = 0;
+
+    /// Backend-agnostic creation parameters for a character controller.
+    struct CharacterDesc
+    {
+        // Shape (Capsule)
+        float radius{ 0.3f };
+        float height{ 1.8f };          // Total height (including hemispherical caps)
+
+        // Movement
+        float maxSlopeAngle{ 45.0f };  // Degrees
+        float stepUpHeight{ 0.3f };    // Meters
+        float skinWidth{ 0.02f };      // Contact offset / padding
+
+        // Initial transform
+        float position[3]{ 0.0f, 0.0f, 0.0f };
+        float rotationYDeg{ 0.0f };
+
+        // Entity ID (so the backend can map character ↔ entity)
+        uint32_t entityId{ 0 };
+    };
+
+    /// Character state read back after update.
+    struct CharacterState
+    {
+        float position[3]{};
+        bool  isGrounded{ false };
+        float groundNormal[3]{ 0.0f, 1.0f, 0.0f };
+        float groundAngle{ 0.0f };     // Slope angle in degrees
+        float velocity[3]{};
+    };
+
+    virtual CharacterHandle createCharacter(const CharacterDesc& desc) = 0;
+    virtual void            removeCharacter(CharacterHandle handle)    = 0;
+    virtual void            removeAllCharacters()                      = 0;
+
+    /// Move the character by desired velocity for one fixed step.
+    /// The backend handles collision, step-up, slope limiting internally.
+    virtual void updateCharacter(CharacterHandle handle,
+                                 float dt,
+                                 float desiredVelX, float desiredVelY, float desiredVelZ,
+                                 float gravityX, float gravityY, float gravityZ) = 0;
+
+    /// Read back the character's state after the update.
+    virtual CharacterState getCharacterState(CharacterHandle handle) const = 0;
+
+    /// Teleport the character to a specific position (no collision).
+    virtual void setCharacterPosition(CharacterHandle handle,
+                                      float x, float y, float z) = 0;
+
+    /// Get character handle for a given entity (InvalidCharacter if none).
+    virtual CharacterHandle getCharacterForEntity(uint32_t entity) const = 0;
 };

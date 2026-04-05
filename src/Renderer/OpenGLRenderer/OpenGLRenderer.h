@@ -427,7 +427,7 @@ private:
         GLuint  ibo{0};
         GLsizei indexCount{0};
         bool    enabled{false};
-        unsigned int version{0};
+        uint64_t version{0};
     };
     HeightFieldDebugResources m_hfDebug;
 

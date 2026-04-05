@@ -16,5 +16,9 @@ enum class AssetType
     Level,
     Widget,
     Skybox,
-    Prefab
+    Prefab,
+    Entity,
+    NativeScript,
+    InputAction,
+    InputMapping
 };

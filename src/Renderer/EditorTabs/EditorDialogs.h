@@ -30,12 +30,16 @@ public:
 #if ENGINE_EDITOR
     void showConfirmDialog(const std::string& message,
                            std::function<void()> onConfirm,
-                           std::function<void()> onCancel = {});
+                           std::function<void()> onCancel = {},
+                           const std::string& confirmLabel = "Delete",
+                           const std::string& cancelLabel = "Cancel");
     void showConfirmDialogWithCheckbox(const std::string& message,
                                        const std::string& checkboxLabel,
                                        bool checkedByDefault,
                                        std::function<void(bool checked)> onConfirm,
-                                       std::function<void()> onCancel = {});
+                                       std::function<void()> onCancel = {},
+                                       const std::string& confirmLabel = "Delete",
+                                       const std::string& cancelLabel = "Cancel");
 
     // ── Save Progress Modal ─────────────────────────────────────────────
     void showSaveProgressModal(size_t total);
@@ -55,7 +59,8 @@ public:
                                               bool isNew,
                                               bool setAsDefault,
                                               bool includeDefaultContent,
-                                              DiagnosticsManager::RHIType selectedRHI)> onProjectChosen);
+                                              DiagnosticsManager::RHIType selectedRHI,
+                                              DiagnosticsManager::ScriptingMode scriptingMode)> onProjectChosen);
 #endif // ENGINE_EDITOR
 
     // ── Accessors (for theme application / transient widgets) ───────────

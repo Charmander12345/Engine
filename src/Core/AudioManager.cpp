@@ -388,6 +388,57 @@ bool AudioManager::isInitialized() const
     return m_initialized;
 }
 
+bool AudioManager::setSourcePosition(unsigned int handle, float x, float y, float z)
+{
+    auto it = m_sources.find(handle);
+    if (it == m_sources.end())
+    {
+        return false;
+    }
+
+    ALuint source = static_cast<ALuint>(handle);
+    alSource3f(source, AL_POSITION, x, y, z);
+    return true;
+}
+
+bool AudioManager::setSourceSpatial(unsigned int handle, bool is3D, float minDist, float maxDist, float rolloff)
+{
+    auto it = m_sources.find(handle);
+    if (it == m_sources.end())
+    {
+        return false;
+    }
+
+    ALuint source = static_cast<ALuint>(handle);
+    if (is3D)
+    {
+        alSourcei(source, AL_SOURCE_RELATIVE, AL_FALSE);
+        alSourcef(source, AL_REFERENCE_DISTANCE, minDist);
+        alSourcef(source, AL_MAX_DISTANCE, maxDist);
+        alSourcef(source, AL_ROLLOFF_FACTOR, rolloff);
+    }
+    else
+    {
+        alSourcei(source, AL_SOURCE_RELATIVE, AL_TRUE);
+        alSource3f(source, AL_POSITION, 0.0f, 0.0f, 0.0f);
+    }
+    return true;
+}
+
+void AudioManager::updateListenerTransform(float posX, float posY, float posZ,
+                                            float forwardX, float forwardY, float forwardZ,
+                                            float upX, float upY, float upZ)
+{
+    if (!m_initialized)
+    {
+        return;
+    }
+
+    alListener3f(AL_POSITION, posX, posY, posZ);
+    ALfloat orientation[6] = { forwardX, forwardY, forwardZ, upX, upY, upZ };
+    alListenerfv(AL_ORIENTATION, orientation);
+}
+
 unsigned int AudioManager::getBufferForAsset(unsigned int assetId)
 {
     if (assetId == 0)

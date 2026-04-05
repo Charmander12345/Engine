@@ -1,9 +1,10 @@
-﻿#include <iostream>
+#include <iostream>
 #include <filesystem>
 #include <fstream>
 #include <cstdlib>
 #include <algorithm>
 #include <cstdio>
+#include <cmath>
 #include <functional>
 #include <optional>
 #include <thread>
@@ -28,8 +29,10 @@
 #include "Core/MathTypes.h"
 #include "Core/AudioManager.h"
 #include "Core/EngineLevel.h"
-#include "Scripting/PythonScripting.h"
+#include "Scripting/Python/PythonScripting.h"
 #include "Physics/PhysicsWorld.h"
+#include "NativeScripting/NativeScriptManager.h"
+#include "NativeScripting/GameplayAPIInternal.h"
 #include "CrashProtocol.h"
 
 #include "Renderer/ViewportUIManager.h"
@@ -46,6 +49,7 @@
 #if !defined(ENGINE_BUILD_SHIPPING)
 #include "Core/ShortcutManager.h"
 #endif
+#include "Core/InputActionManager.h"
 
 using namespace std;
 
@@ -198,6 +202,7 @@ int main()
     bool chosenSetDefault = false;
     bool chosenIncludeDefaultContent = true;
     DiagnosticsManager::RHIType chosenRHI = DiagnosticsManager::RHIType::OpenGL;
+    DiagnosticsManager::ScriptingMode chosenScriptingMode = DiagnosticsManager::ScriptingMode::Both;
     bool projectChosen = false;
 
     // Runtime mode: use the executable directory as the project path
@@ -270,6 +275,7 @@ int main()
         chosenSetDefault            = selection.setAsDefault;
         chosenIncludeDefaultContent = selection.includeDefaultContent;
         chosenRHI                   = selection.rhi;
+        chosenScriptingMode         = selection.scriptingMode;
         projectChosen               = selection.chosen;
     }
 #endif // ENGINE_EDITOR
@@ -496,7 +502,7 @@ int main()
         const auto& hw = diagnostics.getHardwareInfo();
         char hwBuf[512];
         std::snprintf(hwBuf, sizeof(hwBuf),
-            "CPU=%s (%uC/%uT)\nGPU=%s\nGPU Vendor=%s\nGPU Driver=%s\nVRAM=%u MB (free: %u MB)\nRAM=%u MB (available: %u MB)\n",
+            "CPU=%s (%uC/%uT)\nGPU=%s\nGPU Vendor=%s\nGPU Driver=%s\nVRAM=%lld MB (free: %lld MB)\nRAM=%lld MB (available: %lld MB)\n",
             hw.cpu.brand.c_str(), hw.cpu.physicalCores, hw.cpu.logicalCores,
             hw.gpu.renderer.c_str(), hw.gpu.vendor.c_str(), hw.gpu.driverVersion.c_str(),
             hw.gpu.vramTotalMB, hw.gpu.vramFreeMB,
@@ -559,6 +565,7 @@ int main()
         logTimed(Logger::Category::Engine, "Failed to initialize Python scripting.", Logger::LogLevel::ERROR);
     }
     Scripting::SetRenderer(renderer);
+    GameplayAPI::setRendererInternal(renderer);
 
     // Audio
     showProgress("Initializing audio...");
@@ -624,7 +631,7 @@ int main()
         const std::string parentDir = std::filesystem::path(chosenPath).parent_path().string();
         const std::string projName = std::filesystem::path(chosenPath).filename().string();
         logTimed(Logger::Category::Engine, "Creating new project: " + projName + " at " + parentDir, Logger::LogLevel::INFO);
-        if (assetManager.createProject(parentDir, projName, { projName, "1.0", "1.0", "", chosenRHI }, AssetManager::Sync, chosenIncludeDefaultContent))
+        if (assetManager.createProject(parentDir, projName, { projName, "1.0", "1.0", "", chosenRHI, chosenScriptingMode }, AssetManager::Sync, chosenIncludeDefaultContent))
         {
             projectLoaded = true;
         }
@@ -705,6 +712,13 @@ int main()
     {
         editorBridge = std::make_unique<EditorBridgeImpl>(renderer);
         editorApp = std::make_unique<EditorApp>(*editorBridge);
+
+        // Auto-generate VS Code IntelliSense config for new C++ projects
+        if (chosenIsNew && (chosenScriptingMode == DiagnosticsManager::ScriptingMode::CppOnly ||
+                           chosenScriptingMode == DiagnosticsManager::ScriptingMode::Both))
+        {
+            editorApp->generateVSCodeConfig(diagnostics.getProjectInfo().projectPath);
+        }
     }
 #endif // ENGINE_EDITOR
 
@@ -761,33 +775,9 @@ int main()
                     renderer->setSkyboxPath(newLevel->getSkyboxPath());
                 }
 
-                // Find the first active CameraComponent and hand control to it
-                {
-                    ECS::Schema camSchema;
-                    camSchema.require<ECS::CameraComponent>().require<ECS::TransformComponent>();
-                    auto& ecs = ECS::ECSManager::Instance();
-                    const auto camEntities = ecs.getEntitiesMatchingSchema(camSchema);
-                    unsigned int activeCamEntity = 0;
-                    for (const auto e : camEntities)
-                    {
-                        const auto* cam = ecs.getComponent<ECS::CameraComponent>(e);
-                        if (cam && cam->isActive)
-                        {
-                            activeCamEntity = static_cast<unsigned int>(e);
-                            break;
-                        }
-                    }
-                    if (activeCamEntity == 0 && !camEntities.empty())
-                        activeCamEntity = static_cast<unsigned int>(camEntities.front());
-
-                    if (activeCamEntity != 0)
-                    {
-                        renderer->setActiveCameraEntity(activeCamEntity);
-                        logTimed(Logger::Category::Engine,
-                            "Runtime: using entity camera " + std::to_string(activeCamEntity),
-                            Logger::LogLevel::INFO);
-                    }
-                }
+                // Find the first active CameraComponent and hand control to it.
+                // NOTE: ECS entities are created during scene preparation (deferred),
+                // so camera assignment is also deferred to the game loop.
 
                 // Capture mouse for game input
                 pieMouseCaptured = true;
@@ -800,6 +790,28 @@ int main()
                 SDL_HideCursor();
 
                 logTimed(Logger::Category::Engine, "Runtime mode: level loaded successfully.", Logger::LogLevel::INFO);
+
+                // Load C++ gameplay scripts DLL (GameScripts.dll in Engine/)
+                // NOTE: initializeScripts() is deferred until after scene preparation
+                // creates ECS entities from the level JSON (see game loop below).
+                {
+                    auto dllPath = std::filesystem::path(chosenPath) / "Engine" / "GameScripts.dll";
+                    if (std::filesystem::exists(dllPath))
+                    {
+                        if (NativeScriptManager::Instance().loadGameplayDLL(dllPath.string()))
+                        {
+                            logTimed(Logger::Category::Engine, "Loaded C++ gameplay DLL: " + dllPath.string(), Logger::LogLevel::INFO);
+                        }
+                        else
+                        {
+                            logTimed(Logger::Category::Engine, "Failed to load C++ gameplay DLL: " + dllPath.string(), Logger::LogLevel::ERROR);
+                        }
+                    }
+                    else
+                    {
+                        logTimed(Logger::Category::Engine, "Runtime: no GameScripts.dll found at " + dllPath.string() + " (no C++ scripts to load).", Logger::LogLevel::INFO);
+                    }
+                }
             }
             else
             {
@@ -869,6 +881,13 @@ int main()
     Vec2 mousePosPixels{};
     bool hasMousePos = false;
     bool isOverUI = false;
+
+    // Deferred native-script initialization: the DLL is loaded before scene
+    // preparation, but ECS entities don't exist yet.  Once the renderer's
+    // prepareActiveLevel() deserialises the level JSON into ECS, we call
+    // initializeScripts() exactly once.
+    bool rtScriptsNeedInit = isRuntimeMode && NativeScriptManager::Instance().isDLLLoaded();
+    bool rtCameraNeedInit  = isRuntimeMode;
 
     uint64_t lastCounter = SDL_GetPerformanceCounter();
     const double freq = static_cast<double>(SDL_GetPerformanceFrequency());
@@ -1062,6 +1081,38 @@ int main()
         }
 
         audioManager.update();
+
+        // Sync OpenAL listener with active camera for 3D spatial audio
+        if (renderer)
+        {
+            auto& ecs = ECS::ECSManager::Instance();
+            unsigned int camEntity = renderer->getActiveCameraEntity();
+            if (camEntity != 0)
+            {
+                const auto* tc = ecs.getComponent<ECS::TransformComponent>(camEntity);
+                if (tc)
+                {
+                    // Rotation is Euler angles in degrees (YXZ order)
+                    constexpr float kDeg2Rad = 3.14159265358979323846f / 180.0f;
+                    float rx = tc->rotation[0] * kDeg2Rad;
+                    float ry = tc->rotation[1] * kDeg2Rad;
+                    float cx = std::cos(rx), sx = std::sin(rx);
+                    float cy = std::cos(ry), sy = std::sin(ry);
+                    // Forward = -Z rotated by Y then X
+                    float fwdX = -sy * cx;
+                    float fwdY =  sx;
+                    float fwdZ = -cy * cx;
+                    // Up = +Y rotated
+                    float upX = sy * sx;
+                    float upY = cx;
+                    float upZ = cy * sx;
+                    audioManager.updateListenerTransform(
+                        tc->position[0], tc->position[1], tc->position[2],
+                        fwdX, fwdY, fwdZ,
+                        upX, upY, upZ);
+                }
+            }
+        }
 
         cpuLoggerMs = 0.0;
         cpuGcMs = 0.0;
@@ -1562,6 +1613,7 @@ int main()
                 if (isRuntimeMode || diagnostics.isPIEActive())
                 {
                     Scripting::HandleKeyUp(event.key.key);
+                    InputActionManager::Instance().handleKeyUp(event.key.key, event.key.mod);
                 }
             }
             else if (event.type == SDL_EVENT_KEY_DOWN)
@@ -1592,6 +1644,7 @@ int main()
                 if (isRuntimeMode || diagnostics.isPIEActive())
                 {
                     Scripting::HandleKeyDown(event.key.key);
+                    InputActionManager::Instance().handleKeyDown(event.key.key, event.key.mod);
                 }
             }
 
@@ -1682,7 +1735,63 @@ int main()
 
         if (isRuntimeMode || diagnostics.isPIEActive())
         {
+            // Deferred native-script init: run once after scene preparation
+            // has created ECS entities from the level JSON.
+            if (rtScriptsNeedInit && diagnostics.isScenePrepared())
+            {
+                NativeScriptManager::Instance().initializeScripts();
+                rtScriptsNeedInit = false;
+            }
+
+            // Deferred camera assignment: find the first active CameraComponent
+            // now that ECS entities exist after scene preparation.
+            if (rtCameraNeedInit && diagnostics.isScenePrepared() && renderer)
+            {
+                auto& ecs = ECS::ECSManager::Instance();
+                ECS::Schema camSchema;
+                camSchema.require<ECS::CameraComponent>().require<ECS::TransformComponent>();
+                const auto camEntities = ecs.getEntitiesMatchingSchema(camSchema);
+                unsigned int activeCamEntity = 0;
+                for (const auto e : camEntities)
+                {
+                    const auto* cam = ecs.getComponent<ECS::CameraComponent>(e);
+                    if (cam && cam->isActive)
+                    {
+                        activeCamEntity = static_cast<unsigned int>(e);
+                        break;
+                    }
+                }
+                if (activeCamEntity == 0 && !camEntities.empty())
+                    activeCamEntity = static_cast<unsigned int>(camEntities.front());
+                if (activeCamEntity != 0)
+                {
+                    renderer->setActiveCameraEntity(activeCamEntity);
+                    logTimed(Logger::Category::Engine,
+                        "Runtime: using entity camera " + std::to_string(activeCamEntity),
+                        Logger::LogLevel::INFO);
+                }
+                rtCameraNeedInit = false;
+            }
+
+            NativeScriptManager::Instance().updateScripts(static_cast<float>(dt));
             PhysicsWorld::Instance().step(static_cast<float>(dt));
+
+            // Dispatch physics overlap events to C++ native scripts
+            {
+                auto& physics = PhysicsWorld::Instance();
+                auto& nativeScripts = NativeScriptManager::Instance();
+                for (const auto& ev : physics.getBeginOverlapEvents())
+                {
+                    nativeScripts.dispatchBeginOverlap(static_cast<ECS::Entity>(ev.entityA), static_cast<ECS::Entity>(ev.entityB));
+                    nativeScripts.dispatchBeginOverlap(static_cast<ECS::Entity>(ev.entityB), static_cast<ECS::Entity>(ev.entityA));
+                }
+                for (const auto& ev : physics.getEndOverlapEvents())
+                {
+                    nativeScripts.dispatchEndOverlap(static_cast<ECS::Entity>(ev.entityA), static_cast<ECS::Entity>(ev.entityB));
+                    nativeScripts.dispatchEndOverlap(static_cast<ECS::Entity>(ev.entityB), static_cast<ECS::Entity>(ev.entityA));
+                }
+            }
+
             Scripting::UpdateScripts(static_cast<float>(dt));
         }
 
@@ -1898,7 +2007,7 @@ int main()
         SDL_GetWindowSize(w, &windowW, &windowH);
         diagnostics.setWindowSize(Vec2{ static_cast<float>(windowW), static_cast<float>(windowH) });
 
-        const Uint32 flags = SDL_GetWindowFlags(w);
+        const SDL_WindowFlags flags = SDL_GetWindowFlags(w);
         DiagnosticsManager::WindowState state = DiagnosticsManager::WindowState::Normal;
         if ((flags & SDL_WINDOW_FULLSCREEN) != 0)
         {
@@ -1969,6 +2078,8 @@ int main()
     }
 #endif // !ENGINE_BUILD_SHIPPING
 
+    NativeScriptManager::Instance().shutdownScripts();
+    NativeScriptManager::Instance().unloadGameplayDLL();
     logTimed(Logger::Category::Engine, "Engine shutdown complete.", Logger::LogLevel::INFO);
     Scripting::Shutdown();
     logger.stopCrashHandler();

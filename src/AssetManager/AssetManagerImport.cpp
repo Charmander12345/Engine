@@ -60,6 +60,10 @@ namespace
 		if (ext == ".py")
 			return AssetType::Script;
 
+		// C++ Native Scripts
+		if (ext == ".h" || ext == ".hpp" || ext == ".cpp")
+			return AssetType::NativeScript;
+
 		return AssetType::Unknown;
 	}
 

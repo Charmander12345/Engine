@@ -18,7 +18,9 @@ add_library(Core SHARED
     "ECS/ECS.h"
     "ECS/Components.h"
     "ECS/ECS.cpp" "Asset.cpp"
-    "Asset.h" "Core.h")
+    "Asset.h" "Core.h"
+    "InputActionManager.cpp"
+    "InputActionManager.h")
 
 set_target_properties(Core PROPERTIES
     CXX_STANDARD 20

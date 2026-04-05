@@ -142,10 +142,10 @@ TEST(NullRendererCameraTest, ScreenToWorldReturnsFalse)
 
 TEST(DiagnosticsRHITest, RHITypeToStringOpenGL)
 {
-    EXPECT_EQ(DiagnosticsManager::rhiTypeToString(DiagnosticsManager::RHIType::OpenGL), "OpenGL");
+    EXPECT_STREQ(DiagnosticsManager::rhiTypeToString(DiagnosticsManager::RHIType::OpenGL), "OpenGL");
 }
 
 TEST(DiagnosticsRHITest, RHITypeToStringVulkan)
 {
-    EXPECT_EQ(DiagnosticsManager::rhiTypeToString(DiagnosticsManager::RHIType::Vulkan), "Vulkan");
+    EXPECT_STREQ(DiagnosticsManager::rhiTypeToString(DiagnosticsManager::RHIType::Vulkan), "Vulkan");
 }

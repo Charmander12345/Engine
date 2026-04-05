@@ -67,7 +67,7 @@ private:
         std::optional<ECS::LightComponent>           light;
         std::optional<ECS::CameraComponent>          camera;
         std::optional<ECS::PhysicsComponent>         physics;
-        std::optional<ECS::ScriptComponent>          script;
+        std::optional<ECS::LogicComponent>           logic;
         std::optional<ECS::NameComponent>            name;
         std::optional<ECS::CollisionComponent>       collision;
         std::optional<ECS::HeightFieldComponent>     heightField;

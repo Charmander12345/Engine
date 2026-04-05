@@ -44,8 +44,8 @@ if (MSVC)
     set(CMAKE_VS_PLATFORM_NAME "x64" CACHE STRING "" FORCE)
 
     if (CMAKE_CONFIGURATION_TYPES)
-        set(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO} /PROFILE")
-        set(CMAKE_EXE_LINKER_FLAGS_DEBUG "${CMAKE_EXE_LINKER_FLAGS_DEBUG} /PROFILE")
+        set(CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO "${CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO} /PROFILE /INCREMENTAL:NO")
+        set(CMAKE_EXE_LINKER_FLAGS_DEBUG "${CMAKE_EXE_LINKER_FLAGS_DEBUG} /PROFILE /INCREMENTAL:NO")
     endif()
 endif()
 
@@ -291,7 +291,6 @@ target_include_directories(HorizonEngine PRIVATE ${ENGINE_COMMON_INCLUDES} ${CMA
 target_link_libraries(HorizonEngine PRIVATE ${ENGINE_EDITOR_LIBS} Renderer Editor)
 target_compile_definitions(HorizonEngine PRIVATE ENGINE_EDITOR=1
     ENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-    CMAKE_GENERATOR="${CMAKE_GENERATOR}"
 )
 
 # ── Runtime target (ENGINE_EDITOR=0) ────────────────────────────────────
@@ -350,11 +349,8 @@ if(ENGINE_BUILD_RUNTIME)
                     "/DELAYLOAD:$<TARGET_FILE_NAME:${_t}>")
             endif()
         endforeach()
-        # Python DLL (name varies by version)
-        if(Python3_RUNTIME_LIBRARY_RELEASE)
-            get_filename_component(_py_dll_name "${Python3_RUNTIME_LIBRARY_RELEASE}" NAME)
-            target_link_options(HorizonEngineRuntime PRIVATE "/DELAYLOAD:${_py_dll_name}")
-        endif()
+        # NOTE: Python DELAYLOAD intentionally omitted – HorizonEngineRuntime
+        # has no direct python imports; Python is loaded by ScriptingRuntime.dll.
         target_link_libraries(HorizonEngineRuntime PRIVATE delayimp)
     endif()
 endif()
@@ -404,6 +400,27 @@ foreach(_cfg DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
     set(CMAKE_PDB_OUTPUT_DIRECTORY_${_cfg_upper} "${ENGINE_DEPLOY_DIR}")
 endforeach()
 
+# Ensure the executable is built directly into the deploy directory so that
+# SDL_GetBasePath() returns a path where Tools/ (headers, libs) already exist.
+# Without this, VS launches from the CMake build tree and PIE builds fail
+# because the generated GameScripts CMakeLists cannot find the headers/libs.
+set_target_properties(HorizonEngine PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${ENGINE_DEPLOY_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${ENGINE_DEPLOY_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${ENGINE_DEPLOY_DIR}"
+    RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${ENGINE_DEPLOY_DIR}"
+)
+if(ENGINE_BUILD_RUNTIME)
+    set_target_properties(HorizonEngineRuntime PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${ENGINE_DEPLOY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${ENGINE_DEPLOY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${ENGINE_DEPLOY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${ENGINE_DEPLOY_DIR}"
+    )
+endif()
+
 if(MSVC)
     set_target_properties(HorizonEngine PROPERTIES
         PDB_OUTPUT_DIRECTORY "${ENGINE_DEPLOY_DIR}"
@@ -434,8 +451,8 @@ add_custom_command(TARGET HorizonEngine POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/Content/Textures"
 
-    # Copy Engine executable to deploy directory
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:HorizonEngine>" "${ENGINE_DEPLOY_DIR}/$<TARGET_FILE_NAME:HorizonEngine>"
+    # Copy Engine executable to deploy directory (with retry to survive Defender locks)
+    COMMAND ${CMAKE_COMMAND} -DSRC=$<TARGET_FILE:HorizonEngine> -DDST=${ENGINE_DEPLOY_DIR}/$<TARGET_FILE_NAME:HorizonEngine> -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/retry_copy.cmake
 
     # Clean shaders output dir first so removed/renamed shaders don't stay around
     COMMAND ${CMAKE_COMMAND} -E rm -rf "${ENGINE_DEPLOY_DIR}/shaders"
@@ -450,7 +467,23 @@ add_custom_command(TARGET HorizonEngine POST_BUILD
 
     # Copy static engine.pyi type stub to deploy directory for project distribution
     COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/Content/Scripting"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/src/Scripting/engine.pyi" "${ENGINE_DEPLOY_DIR}/Content/Scripting/engine.pyi"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/src/Scripting/Python/engine.pyi" "${ENGINE_DEPLOY_DIR}/Content/Scripting/engine.pyi"
+
+    # Copy tools/ bootstrap scripts to deploy directory so the editor can
+    # locate and execute them at runtime (next to the exe, no ENGINE_SOURCE_DIR needed).
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/tools"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/tools/bootstrap.ps1" "${ENGINE_DEPLOY_DIR}/tools/bootstrap.ps1"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/tools/bootstrap.sh"  "${ENGINE_DEPLOY_DIR}/tools/bootstrap.sh"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/tools/README.md"     "${ENGINE_DEPLOY_DIR}/tools/README.md"
+
+    # Deploy a minimal bundled CMake (cmake.exe + Modules + Templates) so the
+    # editor can build C++ game scripts even if CMake is not installed system-wide.
+    # Clean first to remove stale files from previous bootstrap downloads.
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${ENGINE_DEPLOY_DIR}/Tools/cmake"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/Tools/cmake/bin"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_COMMAND}" "${ENGINE_DEPLOY_DIR}/Tools/cmake/bin/"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_ROOT}/Modules"   "${ENGINE_DEPLOY_DIR}/Tools/cmake/share/cmake-${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION}/Modules"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_ROOT}/Templates" "${ENGINE_DEPLOY_DIR}/Tools/cmake/share/cmake-${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION}/Templates"
 
     COMMAND_EXPAND_LISTS
 )
@@ -468,15 +501,95 @@ if(WIN32)
     endif()
 endif()
 
+# ── Deploy import libraries (.lib) to Tools/lib/ ────────────────────────
+# GameScripts (PIE) and lightweight game builds link against pre-built
+# engine libraries, so we copy the .lib files next to the editor.
+set(_ENGINE_LIB_DEPLOY_DIR "${ENGINE_DEPLOY_DIR}/Tools/lib")
+add_custom_command(TARGET HorizonEngine POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${_ENGINE_LIB_DEPLOY_DIR}"
+    # Shared library import libs (editor variants)
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_LINKER_FILE:Scripting>"      "${_ENGINE_LIB_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_LINKER_FILE:Renderer>"       "${_ENGINE_LIB_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_LINKER_FILE:AssetManager>"   "${_ENGINE_LIB_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_LINKER_FILE:Core>"           "${_ENGINE_LIB_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_LINKER_FILE:Logger>"         "${_ENGINE_LIB_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_LINKER_FILE:Diagnostics>"    "${_ENGINE_LIB_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_LINKER_FILE:Physics>"        "${_ENGINE_LIB_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_LINKER_FILE:SDL3::SDL3>"     "${_ENGINE_LIB_DEPLOY_DIR}/"
+    COMMAND_EXPAND_LISTS
+)
+if(ENGINE_BUILD_RUNTIME)
+    # Ensure runtime shared libs are built when the editor is built so that
+    # POST_BUILD deployment below can find the .lib/.dll files.
+    add_dependencies(HorizonEngine ScriptingRuntime RendererRuntime AssetManagerRuntime LandscapeRuntime)
+
+    add_custom_command(TARGET HorizonEngine POST_BUILD
+        # Runtime-variant import libs (for game builds)
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_LINKER_FILE:ScriptingRuntime>"    "${_ENGINE_LIB_DEPLOY_DIR}/"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_LINKER_FILE:RendererRuntime>"     "${_ENGINE_LIB_DEPLOY_DIR}/"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_LINKER_FILE:AssetManagerRuntime>" "${_ENGINE_LIB_DEPLOY_DIR}/"
+        # Runtime-variant DLLs (lightweight game build copies these to game output)
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:ScriptingRuntime>"    "${_ENGINE_LIB_DEPLOY_DIR}/"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:RendererRuntime>"     "${_ENGINE_LIB_DEPLOY_DIR}/"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:AssetManagerRuntime>" "${_ENGINE_LIB_DEPLOY_DIR}/"
+        # Static libraries used by runtime target
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:LandscapeRuntime>"  "${_ENGINE_LIB_DEPLOY_DIR}/"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:Landscape>"         "${_ENGINE_LIB_DEPLOY_DIR}/"
+        COMMAND_EXPAND_LISTS
+    )
+endif()
+
+# ── Deploy NativeScripting headers to Tools/include/ ────────────────────
+# GameScripts projects need these headers to compile against the engine API.
+set(_ENGINE_INCLUDE_DEPLOY_DIR "${ENGINE_DEPLOY_DIR}/Tools/include/NativeScripting")
+add_custom_command(TARGET HorizonEngine POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${_ENGINE_INCLUDE_DEPLOY_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/src/NativeScripting/GameplayAPIExport.h"  "${_ENGINE_INCLUDE_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/src/NativeScripting/INativeScript.h"      "${_ENGINE_INCLUDE_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/src/NativeScripting/NativeScriptRegistry.h" "${_ENGINE_INCLUDE_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/src/NativeScripting/GameplayAPI.h"        "${_ENGINE_INCLUDE_DEPLOY_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/src/NativeScripting/NativeScriptManager.h" "${_ENGINE_INCLUDE_DEPLOY_DIR}/"
+    COMMAND_EXPAND_LISTS
+)
+
+# ── Deploy SDL3 headers to Tools/include/ ────────────────────────────────
+# Lightweight game builds need SDL3 headers to compile main.cpp.
+add_custom_command(TARGET HorizonEngine POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/external/SDL3/include/SDL3" "${ENGINE_DEPLOY_DIR}/Tools/include/SDL3"
+    COMMAND_EXPAND_LISTS
+)
+
 # Copy the runtime executable to a Tools/ subdirectory so it is not directly
 # visible next to the editor but Build Game can still locate it.
 if(ENGINE_BUILD_RUNTIME)
     add_custom_command(TARGET HorizonEngineRuntime POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/Tools"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:HorizonEngineRuntime>" "${ENGINE_DEPLOY_DIR}/Tools/$<TARGET_FILE_NAME:HorizonEngineRuntime>"
+        COMMAND ${CMAKE_COMMAND} -DSRC=$<TARGET_FILE:HorizonEngineRuntime> -DDST=${ENGINE_DEPLOY_DIR}/Tools/$<TARGET_FILE_NAME:HorizonEngineRuntime> -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/retry_copy.cmake
         COMMAND_EXPAND_LISTS
     )
 endif()
+
+# ── Generate EngineConfig.cmake for lightweight game builds ─────────────
+# This file is written at configure time and deployed next to the editor.
+# BuildPipeline.cpp and EditorApp.cpp can read it to know library names,
+# Python paths, etc. without running a full cmake configure on the engine tree.
+set(_ENGINE_CONFIG_CONTENT "# Auto-generated by HorizonEngine CMake – do not edit\n")
+string(APPEND _ENGINE_CONFIG_CONTENT "set(ENGINE_SOURCE_DIR \"${CMAKE_SOURCE_DIR}\")\n")
+string(APPEND _ENGINE_CONFIG_CONTENT "set(ENGINE_DEPLOY_DIR \"${ENGINE_DEPLOY_DIR}\")\n")
+string(APPEND _ENGINE_CONFIG_CONTENT "set(Python3_INCLUDE_DIRS \"${Python3_INCLUDE_DIRS}\")\n")
+if(Python3_LIBRARY_RELEASE)
+    string(APPEND _ENGINE_CONFIG_CONTENT "set(ENGINE_PYTHON_LIB \"${Python3_LIBRARY_RELEASE}\")\n")
+else()
+    string(APPEND _ENGINE_CONFIG_CONTENT "set(ENGINE_PYTHON_LIB \"${Python3_LIBRARIES}\")\n")
+endif()
+if(Python3_RUNTIME_LIBRARY_RELEASE)
+    string(APPEND _ENGINE_CONFIG_CONTENT "set(Python3_RUNTIME_LIBRARY_RELEASE \"${Python3_RUNTIME_LIBRARY_RELEASE}\")\n")
+endif()
+file(WRITE "${CMAKE_BINARY_DIR}/EngineConfig.cmake" "${_ENGINE_CONFIG_CONTENT}")
+add_custom_command(TARGET HorizonEngine POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ENGINE_DEPLOY_DIR}/Tools"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_BINARY_DIR}/EngineConfig.cmake" "${ENGINE_DEPLOY_DIR}/Tools/EngineConfig.cmake"
+)
 
 # ── CrashHandler (out-of-process crash reporter) ────────────────────────
 add_subdirectory(CrashHandler)

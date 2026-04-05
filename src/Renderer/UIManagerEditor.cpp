@@ -49,6 +49,9 @@
 #include "EditorTabs/SequencerTab.h"
 #include "EditorTabs/LevelCompositionTab.h"
 #include "EditorTabs/AnimationEditorTab.h"
+#include "EditorTabs/EntityEditorTab.h"
+#include "EditorTabs/InputActionEditorTab.h"
+#include "EditorTabs/InputMappingEditorTab.h"
 #include "EditorTabs/UIDesignerTab.h"
 #include "EditorTabs/WidgetEditorTab.h"
 #include "EditorTabs/ContentBrowserPanel.h"
@@ -102,15 +105,15 @@ void UIManager::invalidateHoveredElement()
 
 
 #if ENGINE_EDITOR
-void UIManager::showConfirmDialog(const std::string& message, std::function<void()> onConfirm, std::function<void()> onCancel)
+void UIManager::showConfirmDialog(const std::string& message, std::function<void()> onConfirm, std::function<void()> onCancel, const std::string& confirmLabel, const std::string& cancelLabel)
 {
-    m_editorDialogs->showConfirmDialog(message, std::move(onConfirm), std::move(onCancel));
+    m_editorDialogs->showConfirmDialog(message, std::move(onConfirm), std::move(onCancel), confirmLabel, cancelLabel);
 }
 
 void UIManager::showConfirmDialogWithCheckbox(const std::string& message, const std::string& checkboxLabel, bool checkedByDefault,
-    std::function<void(bool checked)> onConfirm, std::function<void()> onCancel)
+    std::function<void(bool checked)> onConfirm, std::function<void()> onCancel, const std::string& confirmLabel, const std::string& cancelLabel)
 {
-    m_editorDialogs->showConfirmDialogWithCheckbox(message, checkboxLabel, checkedByDefault, std::move(onConfirm), std::move(onCancel));
+    m_editorDialogs->showConfirmDialogWithCheckbox(message, checkboxLabel, checkedByDefault, std::move(onConfirm), std::move(onCancel), confirmLabel, cancelLabel);
 }
 #endif // ENGINE_EDITOR
 
@@ -305,8 +308,8 @@ static nlohmann::json prefabSerializeEntity(ECS::Entity entity, ECS::ECSManager&
             {"isSensor",       c->isSensor}
         };
 
-    if (const auto* c = ecs.getComponent<ECS::ScriptComponent>(entity))
-        comps["Script"] = json{ {"scriptPath", c->scriptPath} };
+    if (const auto* c = ecs.getComponent<ECS::LogicComponent>(entity))
+        comps["Logic"] = json{ {"scriptPath", c->scriptPath}, {"nativeClassName", c->nativeClassName} };
 
     if (const auto* c = ecs.getComponent<ECS::LodComponent>(entity))
     {
@@ -446,11 +449,19 @@ static void prefabDeserializeEntity(const nlohmann::json& entityJson, ECS::Entit
         ecs.addComponent<ECS::CollisionComponent>(entity, comp);
     }
 
-    if (c.contains("Script"))
+    if (c.contains("Logic"))
     {
-        ECS::ScriptComponent comp;
+        ECS::LogicComponent comp;
+        if (c.at("Logic").contains("scriptPath")) comp.scriptPath = c.at("Logic").at("scriptPath").get<std::string>();
+        if (c.at("Logic").contains("nativeClassName")) comp.nativeClassName = c.at("Logic").at("nativeClassName").get<std::string>();
+        ecs.addComponent<ECS::LogicComponent>(entity, comp);
+    }
+    else if (c.contains("Script"))
+    {
+        // Backward compat
+        ECS::LogicComponent comp;
         if (c.at("Script").contains("scriptPath")) comp.scriptPath = c.at("Script").at("scriptPath").get<std::string>();
-        ecs.addComponent<ECS::ScriptComponent>(entity, comp);
+        ecs.addComponent<ECS::LogicComponent>(entity, comp);
     }
 
     if (c.contains("Lod"))
@@ -676,6 +687,108 @@ bool UIManager::spawnPrefabAtPosition(const std::string& prefabRelPath, const Ve
     showToastMessage("Spawned: " + prefabName, 2.0f);
     Logger::Instance().log(Logger::Category::Engine,
         "Spawned prefab '" + prefabName + "' at (" +
+        std::to_string(pos.x) + ", " + std::to_string(pos.y) + ", " + std::to_string(pos.z) + ")",
+        Logger::LogLevel::INFO);
+    return true;
+}
+
+bool UIManager::spawnEntityAssetAtPosition(const std::string& entityAssetRelPath, const Vec3& pos)
+{
+    using json = nlohmann::json;
+    auto& ecs = ECS::ECSManager::Instance();
+    auto& diagnostics = DiagnosticsManager::Instance();
+
+    if (!diagnostics.isProjectLoaded())
+    {
+        showToastMessage("No project loaded.", kToastMedium);
+        return false;
+    }
+
+    const std::filesystem::path absPath =
+        std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content" / entityAssetRelPath;
+
+    if (!std::filesystem::exists(absPath))
+    {
+        showToastMessage("Entity asset not found.", kToastMedium);
+        return false;
+    }
+
+    std::ifstream in(absPath);
+    if (!in.is_open())
+    {
+        showToastMessage("Failed to open entity asset.", kToastMedium);
+        return false;
+    }
+
+    json fileJson;
+    try { in >> fileJson; } catch (...) { showToastMessage("Invalid entity asset file.", kToastMedium); return false; }
+
+    if (!fileJson.is_object() || !fileJson.contains("data"))
+    {
+        showToastMessage("Invalid entity asset format.", kToastMedium);
+        return false;
+    }
+
+    const auto& data = fileJson.at("data");
+    if (!data.contains("components") || !data.at("components").is_object())
+    {
+        showToastMessage("Entity asset has no components.", kToastMedium);
+        return false;
+    }
+
+    const std::string entityName = fileJson.value("name", std::filesystem::path(entityAssetRelPath).stem().string());
+    auto* level = diagnostics.getActiveLevelSoft();
+
+    const ECS::Entity newEntity = ecs.createEntity();
+    prefabDeserializeEntity(data, newEntity, ecs, pos, true);
+
+    if (!ecs.hasComponent<ECS::NameComponent>(newEntity))
+    {
+        ECS::NameComponent nc;
+        nc.displayName = entityName;
+        ecs.addComponent<ECS::NameComponent>(newEntity, nc);
+    }
+
+    if (level) level->onEntityAdded(newEntity);
+
+    selectEntity(static_cast<unsigned int>(newEntity));
+    if (m_renderer) m_renderer->setSelectedEntity(newEntity);
+
+    const json snapshot = data;
+    const Vec3 spawnPos = pos;
+    const std::string displayName = ecs.hasComponent<ECS::NameComponent>(newEntity)
+        ? ecs.getComponent<ECS::NameComponent>(newEntity)->displayName
+        : ("Entity " + std::to_string(newEntity));
+
+    UndoRedoManager::Command cmd;
+    cmd.description = "Spawn Entity: " + displayName;
+    cmd.execute = [newEntity, snapshot, spawnPos]()
+    {
+        auto& e = ECS::ECSManager::Instance();
+        e.createEntity(newEntity);
+        prefabDeserializeEntity(snapshot, newEntity, e, spawnPos, true);
+        if (!e.hasComponent<ECS::NameComponent>(newEntity))
+        {
+            ECS::NameComponent nc;
+            nc.displayName = "Entity " + std::to_string(newEntity);
+            e.addComponent<ECS::NameComponent>(newEntity, nc);
+        }
+        auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
+        if (lvl) lvl->onEntityAdded(newEntity);
+    };
+    cmd.undo = [newEntity]()
+    {
+        auto& e = ECS::ECSManager::Instance();
+        auto* lvl = DiagnosticsManager::Instance().getActiveLevelSoft();
+        if (lvl) lvl->onEntityRemoved(newEntity);
+        e.removeEntity(newEntity);
+    };
+    UndoRedoManager::Instance().pushCommand(std::move(cmd));
+
+    refreshWorldOutliner();
+    showToastMessage("Spawned: " + entityName, kToastMedium);
+    Logger::Instance().log(Logger::Category::Engine,
+        "Spawned entity asset '" + entityName + "' at (" +
         std::to_string(pos.x) + ", " + std::to_string(pos.y) + ", " + std::to_string(pos.z) + ")",
         Logger::LogLevel::INFO);
     return true;
@@ -1262,7 +1375,7 @@ static const char* iconForEntity(ECS::Entity entity)
     if (ecs.hasComponent<ECS::LightComponent>(entity))       return "light.png";
     if (ecs.hasComponent<ECS::CameraComponent>(entity))      return "camera.png";
     if (ecs.hasComponent<ECS::MeshComponent>(entity))        return "model3d.png";
-    if (ecs.hasComponent<ECS::ScriptComponent>(entity))      return "script.png";
+    if (ecs.hasComponent<ECS::LogicComponent>(entity))       return "script.png";
     if (ecs.hasComponent<ECS::HeightFieldComponent>(entity)) return "level.png";
     if (ecs.hasComponent<ECS::PhysicsComponent>(entity))     return "entity.png";
     return "entity.png";
@@ -1275,7 +1388,7 @@ static Vec4 iconTintForEntity(ECS::Entity entity)
     if (ecs.hasComponent<ECS::LightComponent>(entity))       return Vec4{ 1.00f, 0.90f, 0.30f, 1.0f }; // yellow
     if (ecs.hasComponent<ECS::CameraComponent>(entity))      return Vec4{ 0.40f, 0.85f, 0.40f, 1.0f }; // green
     if (ecs.hasComponent<ECS::MeshComponent>(entity))        return Vec4{ 0.50f, 0.80f, 0.90f, 1.0f }; // cyan
-    if (ecs.hasComponent<ECS::ScriptComponent>(entity))      return Vec4{ 0.40f, 0.90f, 0.40f, 1.0f }; // green
+    if (ecs.hasComponent<ECS::LogicComponent>(entity))       return Vec4{ 0.40f, 0.90f, 0.40f, 1.0f }; // green
     if (ecs.hasComponent<ECS::HeightFieldComponent>(entity)) return Vec4{ 0.65f, 0.85f, 0.45f, 1.0f }; // lime
     if (ecs.hasComponent<ECS::PhysicsComponent>(entity))     return Vec4{ 0.75f, 0.50f, 1.00f, 1.0f }; // purple
     return Vec4{ 0.85f, 0.85f, 0.85f, 1.0f }; // light grey
@@ -4545,7 +4658,7 @@ void UIManager::endProgress(ProgressBarHandle handle)
 }
 
 // Project Selection Screen
-void UIManager::openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI)> onProjectChosen)
+void UIManager::openProjectScreen(std::function<void(const std::string& projectPath, bool isNew, bool setAsDefault, bool includeDefaultContent, DiagnosticsManager::RHIType selectedRHI, DiagnosticsManager::ScriptingMode scriptingMode)> onProjectChosen)
 {
     m_editorDialogs->openProjectScreen(std::move(onProjectChosen));
 }
@@ -4933,6 +5046,69 @@ void UIManager::closeAnimationEditorTab()
 {
     if (m_animationEditorTab)
         m_animationEditorTab->close();
+}
+
+// ===========================================================================
+// Entity Editor Tab (extracted to EditorTabs/EntityEditorTab.h)
+// ===========================================================================
+bool UIManager::isEntityEditorOpen() const
+{
+    return m_entityEditorTab && m_entityEditorTab->isOpen();
+}
+
+void UIManager::openEntityEditorTab(const std::string& assetPath)
+{
+    if (!m_entityEditorTab)
+        m_entityEditorTab = std::make_unique<EntityEditorTab>(this, m_renderer);
+    m_entityEditorTab->open(assetPath);
+}
+
+void UIManager::closeEntityEditorTab()
+{
+    if (m_entityEditorTab)
+        m_entityEditorTab->close();
+}
+
+// ===========================================================================
+// Input Action Editor Tab
+// ===========================================================================
+bool UIManager::isInputActionEditorOpen() const
+{
+    return m_inputActionEditorTab && m_inputActionEditorTab->isOpen();
+}
+
+void UIManager::openInputActionEditorTab(const std::string& assetPath)
+{
+    if (!m_inputActionEditorTab)
+        m_inputActionEditorTab = std::make_unique<InputActionEditorTab>(this, m_renderer);
+    m_inputActionEditorTab->open(assetPath);
+}
+
+void UIManager::closeInputActionEditorTab()
+{
+    if (m_inputActionEditorTab)
+        m_inputActionEditorTab->close();
+}
+
+// ===========================================================================
+// Input Mapping Editor Tab
+// ===========================================================================
+bool UIManager::isInputMappingEditorOpen() const
+{
+    return m_inputMappingEditorTab && m_inputMappingEditorTab->isOpen();
+}
+
+void UIManager::openInputMappingEditorTab(const std::string& assetPath)
+{
+    if (!m_inputMappingEditorTab)
+        m_inputMappingEditorTab = std::make_unique<InputMappingEditorTab>(this, m_renderer);
+    m_inputMappingEditorTab->open(assetPath);
+}
+
+void UIManager::closeInputMappingEditorTab()
+{
+    if (m_inputMappingEditorTab)
+        m_inputMappingEditorTab->close();
 }
 
 #endif // ENGINE_EDITOR

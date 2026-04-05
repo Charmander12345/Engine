@@ -10,6 +10,8 @@
 #include <string>
 #include <cstdio>
 #include <cctype>
+#include <regex>
+#include <sstream>
 
 #include <SDL3/SDL.h>
 
@@ -107,7 +109,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
 
     buildUI.m_buildThread = std::thread([buildPtr, config, cmakePath, engineSourceDir, toolchainName, toolchainVersion, editorBaseDir, projectPath]()
     {
-        constexpr int kTotalSteps = 8;
+        constexpr int kTotalSteps = 10;
         int step = 0;
         bool ok = true;
         std::string errorMsg;
@@ -276,6 +278,17 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
           const std::string buildDir = config.binaryDir;
           const std::string deployDir = (std::filesystem::path(buildDir) / "deploy").string();
 
+          // ── Detect pre-built engine libraries for lightweight game build ──
+          // If the editor deployed .lib files into Tools/lib/ we can skip
+          // the full engine configure+build and only compile main.cpp.
+          const std::filesystem::path editorToolsLib = std::filesystem::path(editorBaseDir) / "Tools" / "lib";
+          const std::filesystem::path editorToolsInclude = std::filesystem::path(editorBaseDir) / "Tools" / "include";
+          const bool hasPrebuiltLibs = std::filesystem::exists(editorToolsLib / "ScriptingRuntime.lib")
+                                    && std::filesystem::exists(editorToolsLib / "RendererRuntime.lib")
+                                    && std::filesystem::exists(editorToolsLib / "AssetManagerRuntime.lib")
+                                    && std::filesystem::exists(editorToolsLib / "Core.lib")
+                                    && std::filesystem::exists(editorToolsLib / "SDL3.lib");
+
           // Step 2: CMake configure
           if (ok && !checkCancelled())
           {
@@ -294,24 +307,130 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                   std::filesystem::create_directories(buildDir, ec);
               }
 
-              // Build the cmake configure command
-              std::string configureCmd = "\"" + cmakePath + "\"";
-              configureCmd += " -S \"" + engineSourceDir + "\"";
-              configureCmd += " -B \"" + buildDir + "\"";
-#if defined(CMAKE_GENERATOR)
-              configureCmd += " -G \"" CMAKE_GENERATOR "\"";
-#endif
-              configureCmd += " -DENGINE_BUILD_RUNTIME=ON";
-              configureCmd += " -DGAME_START_LEVEL=\"" + config.startLevel + "\"";
-              configureCmd += " -DGAME_WINDOW_TITLE=\"" + config.windowTitle + "\"";
-              configureCmd += " -DENGINE_BUILD_PROFILE=" + config.profile.name;
-              configureCmd += " -DENGINE_DEPLOY_DIR=\"" + deployDir + "\"";
-
-              int ret = runCmdWithOutput(configureCmd);
-              if (ret != 0)
+              if (hasPrebuiltLibs)
               {
-                  ok = false;
-                  errorMsg = "CMake configure failed (exit code " + std::to_string(ret) + ").";
+                  // ── Lightweight game build ──────────────────────────────
+                  // Generate a minimal CMakeLists.txt that only compiles
+                  // main.cpp and links against pre-built engine libraries.
+                  // This avoids recompiling the entire engine.
+                  buildPtr->appendBuildOutput("  Using pre-built engine libraries (lightweight build)");
+
+                  const std::filesystem::path lightCMake = std::filesystem::path(buildDir) / "CMakeLists.txt";
+                  {
+                      std::ostringstream cm;
+                      cm << "cmake_minimum_required(VERSION 3.12)\n";
+                      cm << "project(HorizonEngineGameBuild LANGUAGES C CXX)\n\n";
+                      cm << "set(CMAKE_CXX_STANDARD 20)\n";
+                      cm << "set(CMAKE_CXX_STANDARD_REQUIRED ON)\n";
+                      cm << "set(CMAKE_CXX_EXTENSIONS OFF)\n\n";
+                      cm << "if(MSVC)\n";
+                      cm << "    set(CMAKE_MSVC_RUNTIME_LIBRARY \"MultiThreaded$<$<CONFIG:Debug>:Debug>DLL\")\n";
+                      cm << "endif()\n\n";
+
+                      // Engine source for headers
+                      const auto srcDir = std::filesystem::path(engineSourceDir);
+                      cm << "set(ENGINE_SRC \"" << srcDir.generic_string() << "/src\")\n";
+                      cm << "set(ENGINE_EXT \"" << srcDir.generic_string() << "/external\")\n";
+                      cm << "set(EDITOR_BASE \"" << std::filesystem::path(editorBaseDir).generic_string() << "\")\n\n";
+
+                      cm << "add_executable(HorizonEngineRuntime \"${ENGINE_SRC}/main.cpp\")\n\n";
+
+                      cm << "target_include_directories(HorizonEngineRuntime PRIVATE\n";
+                      cm << "    \"${ENGINE_SRC}\"\n";
+                      cm << "    \"${ENGINE_SRC}/Renderer\"\n";
+                      cm << "    \"${ENGINE_SRC}/Logger\"\n";
+                      cm << "    \"${ENGINE_SRC}/AssetManager\"\n";
+                      cm << "    \"${ENGINE_SRC}/Diagnostics\"\n";
+                      cm << "    \"${ENGINE_SRC}/Core\"\n";
+                      cm << "    \"${ENGINE_SRC}/Landscape\"\n";
+                      cm << "    \"${ENGINE_SRC}/Physics\"\n";
+                      cm << "    \"${ENGINE_SRC}/Scripting\"\n";
+                      cm << "    \"${ENGINE_SRC}/NativeScripting\"\n";
+                      cm << "    \"${EDITOR_BASE}/Tools/include\"\n";  // SDL3 headers
+                      cm << "    \"" << srcDir.generic_string() << "/CrashHandler\"\n";
+                      cm << ")\n\n";
+
+                      cm << "target_compile_definitions(HorizonEngineRuntime PRIVATE ENGINE_EDITOR=0)\n";
+                      if (!config.startLevel.empty())
+                          cm << "target_compile_definitions(HorizonEngineRuntime PRIVATE GAME_START_LEVEL=\"" << config.startLevel << "\")\n";
+                      if (!config.windowTitle.empty())
+                          cm << "target_compile_definitions(HorizonEngineRuntime PRIVATE GAME_WINDOW_TITLE_BAKED=\"" << config.windowTitle << "\")\n";
+
+                      // Build profile
+                      if (config.profile.name == "Debug")
+                          cm << "target_compile_definitions(HorizonEngineRuntime PRIVATE ENGINE_BUILD_DEBUG=1)\n";
+                      else if (config.profile.name == "Development")
+                          cm << "target_compile_definitions(HorizonEngineRuntime PRIVATE ENGINE_BUILD_DEVELOPMENT=1)\n";
+                      else
+                          cm << "target_compile_definitions(HorizonEngineRuntime PRIVATE ENGINE_BUILD_SHIPPING=1)\n";
+
+                      cm << "\n# Link against pre-built engine libraries\n";
+                      cm << "target_link_directories(HorizonEngineRuntime PRIVATE\n";
+                      cm << "    \"${EDITOR_BASE}/Tools/lib\"\n";
+                      cm << ")\n";
+                      cm << "target_link_libraries(HorizonEngineRuntime PRIVATE\n";
+                      cm << "    ScriptingRuntime RendererRuntime AssetManagerRuntime\n";
+                      cm << "    Core Logger Diagnostics Physics\n";
+                      cm << "    LandscapeRuntime SDL3\n";
+                      cm << ")\n\n";
+
+                      // DELAYLOAD for runtime DLLs
+                      cm << "if(MSVC)\n";
+                      cm << "    target_link_options(HorizonEngineRuntime PRIVATE\n";
+                      cm << "        /DELAYLOAD:SDL3.dll\n";
+                      cm << "        /DELAYLOAD:Logger.dll\n";
+                      cm << "        /DELAYLOAD:Diagnostics.dll\n";
+                      cm << "        /DELAYLOAD:Core.dll\n";
+                      cm << "        /DELAYLOAD:Physics.dll\n";
+                      cm << "        /DELAYLOAD:AssetManagerRuntime.dll\n";
+                      cm << "        /DELAYLOAD:ScriptingRuntime.dll\n";
+                      cm << "        /DELAYLOAD:RendererRuntime.dll\n";
+                      cm << "    )\n";
+                      cm << "    target_link_libraries(HorizonEngineRuntime PRIVATE delayimp)\n";
+                      cm << "endif()\n\n";
+
+                      // Windows GUI settings
+                      cm << "if(WIN32)\n";
+                      cm << "    set_target_properties(HorizonEngineRuntime PROPERTIES WIN32_EXECUTABLE OFF)\n";
+                      cm << "endif()\n";
+
+                      std::ofstream out(lightCMake, std::ios::out | std::ios::trunc);
+                      if (out.is_open())
+                          out << cm.str();
+                  }
+
+                  // Configure the lightweight project
+                  std::string configureCmd = "\"" + cmakePath + "\"";
+                  configureCmd += " -S \"" + buildDir + "\"";
+                  configureCmd += " -B \"" + buildDir + "\"";
+
+                  int ret = runCmdWithOutput(configureCmd);
+                  if (ret != 0)
+                  {
+                      ok = false;
+                      errorMsg = "CMake configure failed (exit code " + std::to_string(ret) + ").";
+                  }
+              }
+              else
+              {
+                  // ── Full engine build (fallback) ───────────────────────
+                  buildPtr->appendBuildOutput("  Pre-built libraries not found, using full engine build");
+
+                  std::string configureCmd = "\"" + cmakePath + "\"";
+                  configureCmd += " -S \"" + engineSourceDir + "\"";
+                  configureCmd += " -B \"" + buildDir + "\"";
+                  configureCmd += " -DENGINE_BUILD_RUNTIME=ON";
+                  configureCmd += " -DGAME_START_LEVEL=\"" + config.startLevel + "\"";
+                  configureCmd += " -DGAME_WINDOW_TITLE=\"" + config.windowTitle + "\"";
+                  configureCmd += " -DENGINE_BUILD_PROFILE=" + config.profile.name;
+                  configureCmd += " -DENGINE_DEPLOY_DIR=\"" + deployDir + "\"";
+
+                  int ret = runCmdWithOutput(configureCmd);
+                  if (ret != 0)
+                  {
+                      ok = false;
+                      errorMsg = "CMake configure failed (exit code " + std::to_string(ret) + ").";
+                  }
               }
           }
 
@@ -320,16 +439,15 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
           {
               advanceStep("CMake build...");
 
-              // Clean the deploy directory before building so that stale
-              // DLLs from a previous build configuration (e.g. OpenAL32d.dll
-              // left over from a Debug build) don't contaminate the output.
+              if (!hasPrebuiltLibs)
               {
+                  // Full build: clean deploy dir to avoid stale DLLs
                   std::error_code ec;
                   std::filesystem::remove_all(deployDir, ec);
               }
 
               std::string buildCmd = "\"" + cmakePath + "\"";
-              buildCmd += " --build \"" + config.binaryDir + "\"";
+              buildCmd += " --build \"" + buildDir + "\"";
               buildCmd += " --target HorizonEngineRuntime";
               buildCmd += " --config " + config.profile.cmakeBuildType;
 
@@ -415,49 +533,115 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                   }
               }
 
-              // Copy DLLs from the binary cache into Engine/ subdirectory.
-              // The binary cache may contain editor-only DLLs from previous
-              // builds (e.g. AssetManager.dll, Scripting.dll, Renderer.dll).
-              // The runtime links against the *Runtime variants instead, so
-              // we skip the editor-only DLLs to keep the game build clean.
+              // Copy DLLs into Engine/ subdirectory.
               const std::filesystem::path engineDir = dstDir / "Engine";
               if (ok)
               {
                   std::error_code mkEc;
                   std::filesystem::create_directories(engineDir, mkEc);
-                  const std::filesystem::path builtDir = builtExe.parent_path();
 
-                  // Editor-only shared libraries that must NOT be deployed.
-                  // The runtime target links *Runtime variants instead.
-                  auto isEditorOnlyDll = [](const std::string& filename) -> bool
+                  if (hasPrebuiltLibs)
                   {
-                      std::string lower = filename;
-                      std::transform(lower.begin(), lower.end(), lower.begin(),
-                          [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                      return lower == "assetmanager.dll"
-                          || lower == "scripting.dll"
-                          || lower == "renderer.dll";
-                  };
-
-                  for (const auto& entry : std::filesystem::directory_iterator(builtDir))
-                  {
-                      if (!entry.is_regular_file()) continue;
-                      const auto ext = entry.path().extension().string();
-                      if (ext != ".dll" && ext != ".DLL") continue;
-
-                      const auto fname = entry.path().filename().string();
-                      if (isEditorOnlyDll(fname))
+                      // Lightweight build: copy runtime DLLs from editor deploy dir.
+                      // Shared engine DLLs live in the editor root, runtime-variant
+                      // DLLs are deployed to Tools/lib/ alongside the .lib files.
+                      auto isRuntimeDll = [](const std::string& filename) -> bool
                       {
-                          buildPtr->appendBuildOutput("  Skipped editor DLL: " + fname);
-                          continue;
+                          std::string lower = filename;
+                          std::transform(lower.begin(), lower.end(), lower.begin(),
+                              [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                          // Editor-only DLLs to skip
+                          if (lower == "assetmanager.dll" || lower == "scripting.dll" || lower == "renderer.dll")
+                              return false;
+                          // Skip the editor exe
+                          if (lower == "horizonengine.exe")
+                              return false;
+                          return true;
+                      };
+
+                      // 1) Copy shared DLLs from editor root (Core, Logger, SDL3, etc.)
+                      for (const auto& entry : std::filesystem::directory_iterator(editorDir))
+                      {
+                          if (!entry.is_regular_file()) continue;
+                          const auto ext = entry.path().extension().string();
+                          std::string extLower = ext;
+                          std::transform(extLower.begin(), extLower.end(), extLower.begin(),
+                              [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                          if (extLower != ".dll") continue;
+
+                          const auto fname = entry.path().filename().string();
+                          if (!isRuntimeDll(fname))
+                          {
+                              buildPtr->appendBuildOutput("  Skipped editor DLL: " + fname);
+                              continue;
+                          }
+
+                          std::error_code copyEc;
+                          std::filesystem::copy_file(entry.path(),
+                              engineDir / entry.path().filename(),
+                              std::filesystem::copy_options::overwrite_existing, copyEc);
+                          if (!copyEc)
+                              buildPtr->appendBuildOutput("  Deployed DLL: " + fname);
                       }
 
-                      std::error_code copyEc;
-                      std::filesystem::copy_file(entry.path(),
-                          engineDir / entry.path().filename(),
-                          std::filesystem::copy_options::overwrite_existing, copyEc);
-                      if (!copyEc)
-                          buildPtr->appendBuildOutput("  Deployed DLL: " + fname);
+                      // 2) Copy runtime-variant DLLs from Tools/lib/
+                      //    (ScriptingRuntime.dll, RendererRuntime.dll, AssetManagerRuntime.dll)
+                      if (std::filesystem::exists(editorToolsLib))
+                      {
+                          for (const auto& entry : std::filesystem::directory_iterator(editorToolsLib))
+                          {
+                              if (!entry.is_regular_file()) continue;
+                              const auto ext = entry.path().extension().string();
+                              std::string extLower = ext;
+                              std::transform(extLower.begin(), extLower.end(), extLower.begin(),
+                                  [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                              if (extLower != ".dll") continue;
+
+                              std::error_code copyEc;
+                              std::filesystem::copy_file(entry.path(),
+                                  engineDir / entry.path().filename(),
+                                  std::filesystem::copy_options::overwrite_existing, copyEc);
+                              if (!copyEc)
+                                  buildPtr->appendBuildOutput("  Deployed runtime DLL: " + entry.path().filename().string());
+                          }
+                      }
+                  }
+                  else
+                  {
+                      // Full build: copy DLLs from the binary cache.
+                      const std::filesystem::path builtDir = builtExe.parent_path();
+
+                      // Editor-only shared libraries that must NOT be deployed.
+                      auto isEditorOnlyDll = [](const std::string& filename) -> bool
+                      {
+                          std::string lower = filename;
+                          std::transform(lower.begin(), lower.end(), lower.begin(),
+                              [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                          return lower == "assetmanager.dll"
+                              || lower == "scripting.dll"
+                              || lower == "renderer.dll";
+                      };
+
+                      for (const auto& entry : std::filesystem::directory_iterator(builtDir))
+                      {
+                          if (!entry.is_regular_file()) continue;
+                          const auto ext = entry.path().extension().string();
+                          if (ext != ".dll" && ext != ".DLL") continue;
+
+                          const auto fname = entry.path().filename().string();
+                          if (isEditorOnlyDll(fname))
+                          {
+                              buildPtr->appendBuildOutput("  Skipped editor DLL: " + fname);
+                              continue;
+                          }
+
+                          std::error_code copyEc;
+                          std::filesystem::copy_file(entry.path(),
+                              engineDir / entry.path().filename(),
+                              std::filesystem::copy_options::overwrite_existing, copyEc);
+                          if (!copyEc)
+                              buildPtr->appendBuildOutput("  Deployed DLL: " + fname);
+                      }
                   }
 
                   // Copy PDBs from binary cache into Symbols/ for non-Shipping
@@ -466,7 +650,8 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
                       const auto symbolsDir = dstDir / "Symbols";
                       std::error_code mkEc;
                       std::filesystem::create_directories(symbolsDir, mkEc);
-                      for (const auto& entry : std::filesystem::directory_iterator(builtDir))
+                      const auto pdbDir = builtExe.parent_path();
+                      for (const auto& entry : std::filesystem::directory_iterator(pdbDir))
                       {
                           if (!entry.is_regular_file()) continue;
                           if (entry.path().extension().string() != ".pdb") continue;
@@ -536,7 +721,144 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
               }
           }
 
-        // Step 5: Cook assets + copy shaders + asset registry
+        // Step 5: Bundle VC++ Redistributable
+        if (ok && !checkCancelled())
+        {
+            advanceStep("Bundling VC++ Redistributable...");
+
+            const std::filesystem::path dstDir = config.outputDir;
+
+            // Search for vc_redist.x64.exe in several locations
+            std::filesystem::path vcRedistSrc;
+            {
+                // 1. Tools/ next to editor exe
+                auto tryPath = std::filesystem::path(editorBaseDir) / "Tools" / "vc_redist.x64.exe";
+                if (std::filesystem::exists(tryPath))
+                    vcRedistSrc = tryPath;
+
+                // 2. tools/ next to editor exe (lowercase)
+                if (vcRedistSrc.empty())
+                {
+                    tryPath = std::filesystem::path(editorBaseDir) / "tools" / "vc_redist.x64.exe";
+                    if (std::filesystem::exists(tryPath))
+                        vcRedistSrc = tryPath;
+                }
+
+                // 3. Engine source tools/ directory
+                if (vcRedistSrc.empty())
+                {
+                    tryPath = std::filesystem::path(engineSourceDir) / "tools" / "vc_redist.x64.exe";
+                    if (std::filesystem::exists(tryPath))
+                        vcRedistSrc = tryPath;
+                }
+
+                // 4. Engine source Tools/ directory
+                if (vcRedistSrc.empty())
+                {
+                    tryPath = std::filesystem::path(engineSourceDir) / "Tools" / "vc_redist.x64.exe";
+                    if (std::filesystem::exists(tryPath))
+                        vcRedistSrc = tryPath;
+                }
+            }
+
+            // If not found locally, try to download it
+            if (vcRedistSrc.empty())
+            {
+                buildPtr->appendBuildOutput("  vc_redist.x64.exe not found locally, downloading...");
+
+                const std::filesystem::path toolsDir = std::filesystem::path(editorBaseDir) / "Tools";
+                {
+                    std::error_code ec;
+                    std::filesystem::create_directories(toolsDir, ec);
+                }
+                const std::filesystem::path downloadDst = toolsDir / "vc_redist.x64.exe";
+
+#if defined(_WIN32)
+                // Use PowerShell to download (same pattern as bootstrap.ps1)
+                std::string dlCmd = "powershell -NoProfile -ExecutionPolicy Bypass -Command \"";
+                dlCmd += "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; ";
+                dlCmd += "Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x64.exe' ";
+                dlCmd += "-OutFile '";
+                dlCmd += downloadDst.string();
+                dlCmd += "' -UseBasicParsing\"";
+
+                int dlRet = runCmdWithOutput(dlCmd);
+                if (dlRet == 0 && std::filesystem::exists(downloadDst))
+                {
+                    vcRedistSrc = downloadDst;
+                    buildPtr->appendBuildOutput("  Downloaded vc_redist.x64.exe successfully.");
+                }
+                else
+                {
+                    buildPtr->appendBuildOutput("  [WARN] Failed to download vc_redist.x64.exe.");
+                    buildPtr->appendBuildOutput("  [WARN] Users may need to install the VC++ Redistributable manually.");
+                    buildPtr->appendBuildOutput("  [WARN] Download: https://aka.ms/vs/17/release/vc_redist.x64.exe");
+                }
+#else
+                buildPtr->appendBuildOutput("  [INFO] VC++ Redistributable is Windows-only, skipping.");
+#endif
+            }
+
+            // Copy to game output
+            if (!vcRedistSrc.empty())
+            {
+                const auto dstRedist = dstDir / "vc_redist.x64.exe";
+                std::error_code ec;
+                std::filesystem::copy_file(vcRedistSrc, dstRedist,
+                    std::filesystem::copy_options::overwrite_existing, ec);
+                if (!ec)
+                    buildPtr->appendBuildOutput("  Bundled: vc_redist.x64.exe");
+                else
+                    buildPtr->appendBuildOutput("  [WARN] Failed to copy vc_redist.x64.exe: " + ec.message());
+            }
+
+            // Generate launcher batch script that checks for VC runtime
+            // and installs it silently if missing before starting the game.
+            {
+                const std::filesystem::path batPath = dstDir / (config.windowTitle + ".bat");
+                std::ofstream bat(batPath);
+                if (bat.is_open())
+                {
+                    bat << "@echo off\r\n";
+                    bat << ":: Auto-generated by HorizonEngine Build\r\n";
+                    bat << ":: Checks for VC++ Runtime and installs if missing, then launches the game.\r\n";
+                    bat << "\r\n";
+                    bat << ":: Check if vcruntime140.dll is loadable\r\n";
+                    bat << "where /Q vcruntime140.dll >nul 2>&1\r\n";
+                    bat << "if %ERRORLEVEL% EQU 0 goto :launch\r\n";
+                    bat << "\r\n";
+                    bat << ":: Check System32 directly\r\n";
+                    bat << "if exist \"%SystemRoot%\\System32\\vcruntime140.dll\" goto :launch\r\n";
+                    bat << "\r\n";
+                    bat << ":: VC++ Runtime not found - install it\r\n";
+                    bat << "echo Installing Microsoft Visual C++ Runtime...\r\n";
+                    bat << "if exist \"%~dp0vc_redist.x64.exe\" (\r\n";
+                    bat << "    \"%~dp0vc_redist.x64.exe\" /install /quiet /norestart\r\n";
+                    bat << "    if %ERRORLEVEL% NEQ 0 (\r\n";
+                    bat << "        echo.\r\n";
+                    bat << "        echo VC++ Runtime installation failed. Please install manually:\r\n";
+                    bat << "        echo https://aka.ms/vs/17/release/vc_redist.x64.exe\r\n";
+                    bat << "        pause\r\n";
+                    bat << "        exit /b 1\r\n";
+                    bat << "    )\r\n";
+                    bat << ") else (\r\n";
+                    bat << "    echo.\r\n";
+                    bat << "    echo Missing: vc_redist.x64.exe\r\n";
+                    bat << "    echo Please download and install the VC++ Redistributable:\r\n";
+                    bat << "    echo https://aka.ms/vs/17/release/vc_redist.x64.exe\r\n";
+                    bat << "    pause\r\n";
+                    bat << "    exit /b 1\r\n";
+                    bat << ")\r\n";
+                    bat << "\r\n";
+                    bat << ":launch\r\n";
+                    bat << "start \"\" \"%~dp0" << config.windowTitle << ".exe\"\r\n";
+                    bat.close();
+                    buildPtr->appendBuildOutput("  Generated launcher: " + batPath.filename().string());
+                }
+            }
+        }
+
+        // Step 6: Cook assets + copy shaders + asset registry
         if (ok && !checkCancelled())
         {
             advanceStep("Cooking assets...");
@@ -625,7 +947,194 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
 
             }
 
-            // Step 6: Package content into HPK archive
+          // Step 7: Build C++ GameScripts DLL
+          if (ok && !checkCancelled())
+          {
+              advanceStep("Building C++ game scripts...");
+
+              const std::filesystem::path nativeDir = std::filesystem::path(projectPath) / "Content" / "Scripts" / "Native";
+              bool hasNativeCpp = false;
+
+              if (std::filesystem::exists(nativeDir) && std::filesystem::is_directory(nativeDir))
+              {
+                  for (const auto& entry : std::filesystem::directory_iterator(nativeDir))
+                  {
+                      if (entry.is_regular_file() && entry.path().extension() == ".cpp")
+                      { hasNativeCpp = true; break; }
+                  }
+              }
+
+              if (hasNativeCpp)
+              {
+                  // ── Auto-generate _AutoRegister.cpp ──
+                  {
+                      std::vector<std::pair<std::string, std::string>> discovered;
+                      const std::regex classPattern(
+                          R"(class\s+(\w+)\s*(?:final\s*)?:\s*(?:public\s+)?INativeScript\b)");
+
+                      for (const auto& entry : std::filesystem::directory_iterator(nativeDir))
+                      {
+                          if (!entry.is_regular_file()) continue;
+                          const auto ext = entry.path().extension().string();
+                          if (ext != ".h" && ext != ".hpp") continue;
+
+                          std::ifstream hFile(entry.path());
+                          if (!hFile.is_open()) continue;
+
+                          std::string hLine;
+                          while (std::getline(hFile, hLine))
+                          {
+                              std::smatch match;
+                              if (std::regex_search(hLine, match, classPattern))
+                                  discovered.emplace_back(match[1].str(), entry.path().filename().string());
+                          }
+                      }
+
+                      const auto autoRegPath = nativeDir / "_AutoRegister.cpp";
+                      std::ofstream autoReg(autoRegPath, std::ios::out | std::ios::trunc);
+                      if (autoReg.is_open())
+                      {
+                          autoReg << "// Auto-generated by Horizon Engine -- DO NOT EDIT\n";
+                          autoReg << "#include \"GameplayAPI.h\"\n";
+                          for (const auto& [cls, hdr] : discovered)
+                              autoReg << "#include \"" << hdr << "\"\n";
+                          autoReg << "\n";
+                          for (const auto& [cls, hdr] : discovered)
+                              autoReg << "REGISTER_NATIVE_SCRIPT(" << cls << ")\n";
+                          autoReg.close();
+                      }
+
+                      buildPtr->appendBuildOutput("  Auto-registered " + std::to_string(discovered.size()) + " native script class(es).");
+                  }
+
+                  // ── Generate CMakeLists.txt for GameScripts ──
+                  {
+                      const auto cmakeListsPath = nativeDir / "CMakeLists.txt";
+                      const auto toolsInclude = std::filesystem::path(editorBaseDir) / "Tools" / "include" / "NativeScripting";
+                      const auto toolsLib = std::filesystem::path(editorBaseDir) / "Tools" / "lib";
+
+                      std::ostringstream cm;
+                      cm << "cmake_minimum_required(VERSION 3.12)\n";
+                      cm << "project(GameScripts LANGUAGES CXX)\n\n";
+                      cm << "set(CMAKE_CXX_STANDARD 20)\n";
+                      cm << "set(CMAKE_CXX_STANDARD_REQUIRED ON)\n";
+                      cm << "set(CMAKE_CXX_EXTENSIONS OFF)\n\n";
+                      cm << "if(MSVC)\n";
+                      cm << "    set(CMAKE_MSVC_RUNTIME_LIBRARY \"MultiThreaded$<$<CONFIG:Debug>:Debug>DLL\")\n";
+                      cm << "endif()\n\n";
+                      cm << "file(GLOB GAME_SOURCES \"${CMAKE_CURRENT_SOURCE_DIR}/*.cpp\")\n";
+                      cm << "file(GLOB GAME_HEADERS \"${CMAKE_CURRENT_SOURCE_DIR}/*.h\")\n\n";
+                      cm << "add_library(GameScripts SHARED ${GAME_SOURCES} ${GAME_HEADERS})\n\n";
+                      cm << "target_include_directories(GameScripts PRIVATE\n";
+                      cm << "    \"" << toolsInclude.generic_string() << "\"\n";
+                      cm << ")\n\n";
+                      cm << "target_link_directories(GameScripts PRIVATE\n";
+                      cm << "    \"" << toolsLib.generic_string() << "\"\n";
+                      cm << ")\n";
+                      cm << "target_link_libraries(GameScripts PRIVATE ScriptingRuntime)\n";
+
+                      std::ofstream out(cmakeListsPath, std::ios::out | std::ios::trunc);
+                      if (out.is_open()) out << cm.str();
+                  }
+
+                  // ── CMake configure GameScripts ──
+                  const std::string gsBuildDir = (std::filesystem::path(config.binaryDir) / "GameScripts").string();
+                  {
+                      std::error_code ec;
+                      std::filesystem::create_directories(gsBuildDir, ec);
+                  }
+
+                  {
+                      std::string gsConfigureCmd = "\"" + cmakePath + "\"";
+                      gsConfigureCmd += " -S \"" + nativeDir.string() + "\"";
+                      gsConfigureCmd += " -B \"" + gsBuildDir + "\"";
+
+                      int ret = runCmdWithOutput(gsConfigureCmd);
+                      if (ret != 0)
+                      {
+                          ok = false;
+                          errorMsg = "GameScripts CMake configure failed (exit code " + std::to_string(ret) + ").";
+                      }
+                  }
+
+                  // ── CMake build GameScripts ──
+                  if (ok && !checkCancelled())
+                  {
+                      std::string gsBuildCmd = "\"" + cmakePath + "\"";
+                      gsBuildCmd += " --build \"" + gsBuildDir + "\"";
+                      gsBuildCmd += " --target GameScripts";
+                      gsBuildCmd += " --config " + config.profile.cmakeBuildType;
+
+                      int ret = runCmdWithOutput(gsBuildCmd);
+                      if (ret != 0)
+                      {
+                          ok = false;
+                          errorMsg = "GameScripts build failed (exit code " + std::to_string(ret) + ").";
+                      }
+                  }
+
+                  // ── Deploy GameScripts.dll to output Engine/ directory ──
+                  if (ok)
+                  {
+                      const std::filesystem::path engineOutDir = std::filesystem::path(config.outputDir) / "Engine";
+                      std::error_code ec;
+                      std::filesystem::create_directories(engineOutDir, ec);
+
+                      // Search for the built DLL in several possible locations
+                      std::filesystem::path builtDll;
+                      {
+                          // Multi-config generator (MSVC): <buildDir>/<Config>/GameScripts.dll
+                          auto tryPath = std::filesystem::path(gsBuildDir) / config.profile.cmakeBuildType / "GameScripts.dll";
+                          if (std::filesystem::exists(tryPath))
+                              builtDll = tryPath;
+                          // Single-config generator
+                          if (builtDll.empty())
+                          {
+                              tryPath = std::filesystem::path(gsBuildDir) / "GameScripts.dll";
+                              if (std::filesystem::exists(tryPath))
+                                  builtDll = tryPath;
+                          }
+                      }
+
+                      if (!builtDll.empty())
+                      {
+                          std::filesystem::copy_file(builtDll, engineOutDir / "GameScripts.dll",
+                              std::filesystem::copy_options::overwrite_existing, ec);
+                          if (!ec)
+                              buildPtr->appendBuildOutput("  Deployed GameScripts.dll to Engine/");
+                          else
+                              buildPtr->appendBuildOutput("  [WARN] Failed to copy GameScripts.dll: " + ec.message());
+
+                          // Copy PDB for non-Shipping builds
+                          if (config.profile.name != "Shipping")
+                          {
+                              auto builtPdb = builtDll;
+                              builtPdb.replace_extension(".pdb");
+                              if (std::filesystem::exists(builtPdb))
+                              {
+                                  const auto symbolsDir = std::filesystem::path(config.outputDir) / "Symbols";
+                                  std::filesystem::create_directories(symbolsDir, ec);
+                                  std::filesystem::copy_file(builtPdb, symbolsDir / "GameScripts.pdb",
+                                      std::filesystem::copy_options::overwrite_existing, ec);
+                                  if (!ec)
+                                      buildPtr->appendBuildOutput("  Copied GameScripts.pdb to Symbols/");
+                              }
+                          }
+                      }
+                      else
+                      {
+                          ok = false;
+                          errorMsg = "GameScripts.dll not found after build in: " + gsBuildDir;
+                      }
+                  }
+              }
+              else
+              {
+                  buildPtr->appendBuildOutput("  No C++ game scripts found, skipping.");
+              }
+          }
+
+            // Step 8: Package content into HPK archive
             if (ok && !checkCancelled())
             {
                 advanceStep("Packaging content into HPK...");
@@ -717,7 +1226,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
             }
         }
 
-        // Step 7: Generate game.ini with profile settings
+        // Step 9: Generate game.ini with profile settings
         if (ok && !checkCancelled())
         {
             advanceStep("Generating game.ini...");
@@ -759,7 +1268,7 @@ void BuildPipeline::execute(const UIManager::BuildGameConfig& config,
             }
         }
 
-        // Step 8: Done
+        // Step 10: Done
         advanceStep(ok ? "Build complete!" : "Build failed.");
 
         if (ok)
