@@ -533,10 +533,11 @@ void EditorApp::buildGameScriptsForPIE()
             std::string configureCmd = "\"" + cmakePath + "\"";
             configureCmd += " -S \"" + nativeDirStr + "\"";
             configureCmd += " -B \"" + buildDirStr + "\"";
+            configureCmd += " -DCMAKE_BUILD_TYPE=";
 #ifdef _DEBUG
-            configureCmd += " -DCMAKE_BUILD_TYPE=Debug";
+            configureCmd += "Debug";
 #else
-            configureCmd += " -DCMAKE_BUILD_TYPE=RelWithDebInfo";
+            configureCmd += "Release";
 #endif
             int ret = runCmd(configureCmd);
             if (ret != 0)
@@ -552,10 +553,11 @@ void EditorApp::buildGameScriptsForPIE()
             std::string buildCmd = "\"" + cmakePath + "\"";
             buildCmd += " --build \"" + buildDirStr + "\"";
             buildCmd += " --target GameScripts";
+            buildCmd += " --config ";
 #ifdef _DEBUG
-            buildCmd += " --config Debug";
+            buildCmd += "Debug";
 #else
-            buildCmd += " --config RelWithDebInfo";
+            buildCmd += "Release";
 #endif
             int ret = runCmd(buildCmd);
             if (ret != 0)

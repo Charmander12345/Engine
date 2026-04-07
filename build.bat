@@ -5,7 +5,7 @@ REM ═════════════════════════�
 REM  HorizonEngine Build Script (Windows)
 REM
 REM  Usage:
-REM    build.bat                     Build editor (RelWithDebInfo)
+REM    build.bat                     Build editor (Release)
 REM    build.bat release             Build editor (Release)
 REM    build.bat debug               Build editor (Debug)
 REM    build.bat runtime             Build runtime only (Release)
@@ -23,7 +23,7 @@ REM ═════════════════════════�
 set "ENGINE_ROOT=%~dp0"
 set "BUILD_DIR=%ENGINE_ROOT%build"
 set "TOOLS_DIR=%ENGINE_ROOT%Tools"
-set "BUILD_CONFIG=RelWithDebInfo"
+set "BUILD_CONFIG=Release"
 set "BUILD_TARGET=HorizonEngine"
 set "CONFIGURE_ONLY=0"
 set "CLEAN_BUILD=0"

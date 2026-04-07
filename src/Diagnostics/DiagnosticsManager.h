@@ -136,6 +136,11 @@ public:
     void consumeDirtyEntities(std::vector<unsigned int>& out);
     bool hasDirtyEntities() const;
 
+    void invalidatePhysicsEntity(unsigned int entityId);
+    std::vector<unsigned int> consumeDirtyPhysicsEntities();
+    void consumeDirtyPhysicsEntities(std::vector<unsigned int>& out);
+    bool hasDirtyPhysicsEntities() const;
+
     void setAssetRegistryReady(bool ready);
     bool isAssetRegistryReady() const;
 
@@ -240,6 +245,7 @@ private:
 
     bool m_scenePrepared{ false };
     std::unordered_set<unsigned int> m_dirtyEntities;
+    std::unordered_set<unsigned int> m_dirtyPhysicsEntities;
     bool m_pieActive{ false };
     bool m_assetRegistryReady{ false };
     std::vector<std::string> m_knownProjects;

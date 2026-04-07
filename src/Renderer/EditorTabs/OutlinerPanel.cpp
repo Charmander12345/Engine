@@ -156,6 +156,17 @@ template<typename CompT>
 void setCompFieldWithUndo(unsigned int entity, const std::string& desc,
     std::function<void(CompT&)> applyChange)
 {
+    auto invalidatePhysics = [entity]()
+    {
+        if constexpr (std::is_same_v<CompT, ECS::CollisionComponent>
+            || std::is_same_v<CompT, ECS::PhysicsComponent>
+            || std::is_same_v<CompT, ECS::TransformComponent>
+            || std::is_same_v<CompT, ECS::HeightFieldComponent>)
+        {
+            DiagnosticsManager::Instance().invalidatePhysicsEntity(entity);
+        }
+    };
+
     auto e = static_cast<ECS::Entity>(entity);
     auto& ecs = ECS::ECSManager::Instance();
     auto* comp = ecs.getComponent<CompT>(e);
@@ -164,21 +175,24 @@ void setCompFieldWithUndo(unsigned int entity, const std::string& desc,
     CompT newComp = *comp;
     applyChange(newComp);
     ecs.setComponent<CompT>(e, newComp);
+    invalidatePhysics();
     DiagnosticsManager::Instance().invalidateEntity(entity);
     UndoRedoManager::Instance().pushCommand({
         desc,
-        [entity, newComp]() {
+        [entity, newComp, invalidatePhysics]() {
             auto e2 = static_cast<ECS::Entity>(entity);
             auto& ecs2 = ECS::ECSManager::Instance();
             if (ecs2.hasComponent<CompT>(e2))
                 ecs2.setComponent<CompT>(e2, newComp);
+            invalidatePhysics();
             DiagnosticsManager::Instance().invalidateEntity(entity);
         },
-        [entity, oldComp]() {
+        [entity, oldComp, invalidatePhysics]() {
             auto e2 = static_cast<ECS::Entity>(entity);
             auto& ecs2 = ECS::ECSManager::Instance();
             if (ecs2.hasComponent<CompT>(e2))
                 ecs2.setComponent<CompT>(e2, oldComp);
+            invalidatePhysics();
             DiagnosticsManager::Instance().invalidateEntity(entity);
         }
     });

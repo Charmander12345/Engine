@@ -1009,6 +1009,42 @@ class physics:
         """Check if an entity's physics body is sleeping."""
         ...
 
+    @staticmethod
+    def overlap_sphere(cx: float, cy: float, cz: float, radius: float) -> list[int]:
+        """Test a sphere against the world and return a list of overlapping entity IDs."""
+        ...
+
+    @staticmethod
+    def overlap_box(cx: float, cy: float, cz: float, hx: float, hy: float, hz: float,
+                    ex: float = 0.0, ey: float = 0.0, ez: float = 0.0) -> list[int]:
+        """Test a box against the world and return a list of overlapping entity IDs.
+        Optional euler rotation in degrees."""
+        ...
+
+    @staticmethod
+    def sweep_sphere(ox: float, oy: float, oz: float, radius: float,
+                     dx: float, dy: float, dz: float, max_dist: float = 1000.0) -> Optional[dict]:
+        """Sweep a sphere along a direction. Returns hit dict {entity, point, normal, distance} or None."""
+        ...
+
+    @staticmethod
+    def sweep_box(ox: float, oy: float, oz: float, hx: float, hy: float, hz: float,
+                  dx: float, dy: float, dz: float, max_dist: float = 1000.0) -> Optional[dict]:
+        """Sweep a box along a direction. Returns hit dict {entity, point, normal, distance} or None."""
+        ...
+
+    @staticmethod
+    def add_force_at_position(entity: int, fx: float, fy: float, fz: float,
+                              px: float, py: float, pz: float) -> None:
+        """Apply a force at a specific world position (generates torque)."""
+        ...
+
+    @staticmethod
+    def add_impulse_at_position(entity: int, ix: float, iy: float, iz: float,
+                                px: float, py: float, pz: float) -> None:
+        """Apply an impulse at a specific world position (generates angular impulse)."""
+        ...
+
 # ---------------------------------------------------------------------------
 # engine.camera
 # ---------------------------------------------------------------------------

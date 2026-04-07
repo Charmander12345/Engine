@@ -1,6 +1,6 @@
 #pragma once
 
-#include "IPhysicsBackend.h"
+#include "PhysicsTypes.h"
 
 #include <map>
 #include <memory>
@@ -22,60 +22,97 @@ namespace JPH {
     class CharacterVirtual;
 }
 
-/// Jolt Physics implementation of IPhysicsBackend.
-class JoltBackend final : public IPhysicsBackend
+/// Direct Jolt-backed physics implementation.
+/// `IPhysicsBackend` types are kept here only as compatibility-facing data
+/// shapes for externally exposed layers.
+class JoltBackend final
 {
 public:
+    using BodyHandle = PhysicsTypes::BodyHandle;
+    static constexpr BodyHandle InvalidBody = PhysicsTypes::InvalidBody;
+    using BodyDesc = PhysicsTypes::BodyDesc;
+    using BodyState = PhysicsTypes::BodyState;
+    using CollisionEventData = PhysicsTypes::CollisionEventData;
+    using RaycastResult = PhysicsTypes::RaycastResult;
+    using CharacterHandle = PhysicsTypes::CharacterHandle;
+    static constexpr CharacterHandle InvalidCharacter = PhysicsTypes::InvalidCharacter;
+    using CharacterDesc = PhysicsTypes::CharacterDesc;
+    using CharacterState = PhysicsTypes::CharacterState;
+
     JoltBackend();
-    ~JoltBackend() override;
+    ~JoltBackend();
 
     // ── Lifecycle ───────────────────────────────────────────────────
-    void initialize() override;
-    void shutdown()   override;
-    void update(float fixedDt) override;
+    void initialize();
+    void shutdown();
+    void update(float fixedDt);
 
     // ── Gravity ─────────────────────────────────────────────────────
-    void setGravity(float x, float y, float z) override;
-    void getGravity(float& x, float& y, float& z) const override;
+    void setGravity(float x, float y, float z);
+    void getGravity(float& x, float& y, float& z) const;
 
     // ── Body management ─────────────────────────────────────────────
-    BodyHandle createBody(const BodyDesc& desc) override;
-    void       removeBody(BodyHandle handle)    override;
-    void       removeAllBodies()                override;
+    BodyHandle createBody(const BodyDesc& desc);
+    void       removeBody(BodyHandle handle);
+    void       removeAllBodies();
 
     void setBodyPositionRotation(BodyHandle handle,
                                   float px, float py, float pz,
-                                  float eulerX, float eulerY, float eulerZ) override;
+                                   float eulerX, float eulerY, float eulerZ);
 
-    BodyState getBodyState(BodyHandle handle) const override;
+    BodyState getBodyState(BodyHandle handle) const;
 
-    void setLinearVelocity(BodyHandle handle, float vx, float vy, float vz)  override;
-    void setAngularVelocity(BodyHandle handle, float vx, float vy, float vz) override;
+    void setLinearVelocity(BodyHandle handle, float vx, float vy, float vz);
+    void setAngularVelocity(BodyHandle handle, float vx, float vy, float vz);
+
+    void addForce(BodyHandle handle, float fx, float fy, float fz);
+    void addImpulse(BodyHandle handle, float ix, float iy, float iz);
 
     // ── Collision events ────────────────────────────────────────────
-    std::vector<CollisionEventData> drainCollisionEvents() override;
+    std::vector<CollisionEventData> drainCollisionEvents();
 
     // ── Queries ─────────────────────────────────────────────────────
     RaycastResult raycast(float ox, float oy, float oz,
                           float dx, float dy, float dz,
-                          float maxDist = 1000.0f) const override;
+                          float maxDist = 1000.0f) const;
 
-    bool isBodySleeping(BodyHandle handle) const override;
+    std::vector<uint32_t> overlapSphere(float cx, float cy, float cz,
+                                        float radius) const;
+    std::vector<uint32_t> overlapBox(float cx, float cy, float cz,
+                                     float hx, float hy, float hz,
+                                     float eulerX = 0, float eulerY = 0, float eulerZ = 0) const;
+    RaycastResult sweepSphere(float ox, float oy, float oz,
+                              float radius,
+                              float dx, float dy, float dz,
+                              float maxDist = 1000.0f) const;
+    RaycastResult sweepBox(float ox, float oy, float oz,
+                           float hx, float hy, float hz,
+                           float dx, float dy, float dz,
+                           float maxDist = 1000.0f) const;
 
-    BodyHandle getBodyForEntity(uint32_t entity) const override;
+    void addForceAtPosition(BodyHandle handle,
+                            float fx, float fy, float fz,
+                            float px, float py, float pz);
+    void addImpulseAtPosition(BodyHandle handle,
+                              float ix, float iy, float iz,
+                              float px, float py, float pz);
+
+    bool isBodySleeping(BodyHandle handle) const;
+
+    BodyHandle getBodyForEntity(uint32_t entity) const;
 
     // ── Character Controller ────────────────────────────────────────
-    CharacterHandle createCharacter(const CharacterDesc& desc) override;
-    void            removeCharacter(CharacterHandle handle)    override;
-    void            removeAllCharacters()                      override;
+    CharacterHandle createCharacter(const CharacterDesc& desc);
+    void            removeCharacter(CharacterHandle handle);
+    void            removeAllCharacters();
     void updateCharacter(CharacterHandle handle,
                          float dt,
                          float desiredVelX, float desiredVelY, float desiredVelZ,
-                         float gravityX, float gravityY, float gravityZ) override;
-    CharacterState getCharacterState(CharacterHandle handle) const override;
+                         float gravityX, float gravityY, float gravityZ);
+    CharacterState getCharacterState(CharacterHandle handle) const;
     void setCharacterPosition(CharacterHandle handle,
-                              float x, float y, float z) override;
-    CharacterHandle getCharacterForEntity(uint32_t entity) const override;
+                              float x, float y, float z);
+    CharacterHandle getCharacterForEntity(uint32_t entity) const;
 
 private:
     float m_gravity[3]{ 0.0f, -9.81f, 0.0f };

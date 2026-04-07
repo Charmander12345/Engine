@@ -139,6 +139,8 @@ void DiagnosticsManager::clear()
     m_states.clear();
     m_projectStates.clear();
     m_rhiType = RHIType::Unknown;
+    m_dirtyEntities.clear();
+    m_dirtyPhysicsEntities.clear();
     m_modalNotificationCache.clear();
     m_modalNotifications.clear();
     m_toastNotifications.clear();
@@ -630,6 +632,35 @@ bool DiagnosticsManager::hasDirtyEntities() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return !m_dirtyEntities.empty();
+}
+
+void DiagnosticsManager::invalidatePhysicsEntity(unsigned int entityId)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_dirtyPhysicsEntities.insert(entityId);
+}
+
+std::vector<unsigned int> DiagnosticsManager::consumeDirtyPhysicsEntities()
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<unsigned int> result(m_dirtyPhysicsEntities.begin(), m_dirtyPhysicsEntities.end());
+    m_dirtyPhysicsEntities.clear();
+    return result;
+}
+
+void DiagnosticsManager::consumeDirtyPhysicsEntities(std::vector<unsigned int>& out)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    out.clear();
+    out.reserve(m_dirtyPhysicsEntities.size());
+    out.assign(m_dirtyPhysicsEntities.begin(), m_dirtyPhysicsEntities.end());
+    m_dirtyPhysicsEntities.clear();
+}
+
+bool DiagnosticsManager::hasDirtyPhysicsEntities() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return !m_dirtyPhysicsEntities.empty();
 }
 
 void DiagnosticsManager::setAssetRegistryReady(bool ready)

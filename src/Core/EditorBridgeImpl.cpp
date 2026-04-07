@@ -6,6 +6,7 @@
 #include "EngineLevel.h"
 #include "AudioManager.h"
 #include "UndoRedoManager.h"
+#include "../Logger/Logger.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/UIManager.h"
 #include "../Renderer/ViewportUIManager.h"
@@ -304,14 +305,24 @@ void EditorBridgeImpl::setPIEActive(bool active)
 void EditorBridgeImpl::initializePhysicsForPIE()
 {
     auto& diag = DiagnosticsManager::Instance();
-    PhysicsWorld::Backend backend = PhysicsWorld::Backend::Jolt;
     if (auto v = diag.getState("PhysicsBackend"))
     {
-#ifdef ENGINE_PHYSX_BACKEND_AVAILABLE
-        if (*v == "PhysX") backend = PhysicsWorld::Backend::PhysX;
-#endif
+        if (*v != "Jolt")
+        {
+            Logger::Instance().log(Logger::Category::Engine,
+                "PIE physics backend request is not Jolt. Falling back to Jolt.",
+                Logger::LogLevel::WARNING);
+            diag.setState("PhysicsBackend", "Jolt");
+            diag.saveConfig();
+        }
     }
-    PhysicsWorld::Instance().initialize(backend);
+    else
+    {
+        diag.setState("PhysicsBackend", "Jolt");
+        diag.saveConfig();
+    }
+
+    PhysicsWorld::Instance().initialize(PhysicsWorld::Backend::Jolt);
 
     auto toFloat = [&](const std::string& key, float fallback) -> float {
         if (auto v = diag.getState(key)) {
