@@ -148,6 +148,7 @@ private:
     // ── Entity ↔ backend handle tracking ────────────────────────────
     std::set<uint32_t> m_trackedEntities;     // entities that have a body in the backend
     std::set<uint32_t> m_trackedCharacters;   // entities that have a character in the backend
+    std::set<uint32_t> m_editorDirtyBodies;   // bodies whose ECS state was explicitly edited this frame
     std::map<uint32_t, uint64_t> m_bodyConfigHashes;
     std::map<uint32_t, uint64_t> m_bodyTransformHashes;
 

@@ -306,6 +306,7 @@ void PhysicsWorld::initialize(Backend backend)
     m_endOverlapEvents.clear();
     m_trackedEntities.clear();
     m_trackedCharacters.clear();
+    m_editorDirtyBodies.clear();
     m_bodyConfigHashes.clear();
     m_bodyTransformHashes.clear();
 
@@ -323,6 +324,7 @@ void PhysicsWorld::shutdown()
 
     m_trackedEntities.clear();
     m_trackedCharacters.clear();
+    m_editorDirtyBodies.clear();
     m_bodyConfigHashes.clear();
     m_bodyTransformHashes.clear();
     m_collisionEvents.clear();
@@ -360,8 +362,10 @@ void PhysicsWorld::step(float dt)
 
     std::vector<unsigned int> dirtyPhysicsEntities;
     DiagnosticsManager::Instance().consumeDirtyPhysicsEntities(dirtyPhysicsEntities);
+    m_editorDirtyBodies.clear();
     for (unsigned int entity : dirtyPhysicsEntities)
     {
+        m_editorDirtyBodies.insert(entity);
         requestBodyRebuild(entity);
     }
 
@@ -572,6 +576,7 @@ void PhysicsWorld::syncBodiesToBackend()
         auto existingHandle = m_backend->getBodyForEntity(entity);
         uint64_t configHash = hashBodyConfig(desc);
         uint64_t transformHash = hashBodyTransform(desc.position, desc.rotationEulerDeg);
+        const bool editorDirty = m_editorDirtyBodies.find(entity) != m_editorDirtyBodies.end();
 
         if (existingHandle != JoltBackend::InvalidBody)
         {
@@ -580,7 +585,7 @@ void PhysicsWorld::syncBodiesToBackend()
 
             if (needsRebuild)
             {
-                if (desc.motionType == JoltBackend::BodyDesc::MotionType::Dynamic)
+                if (desc.motionType == JoltBackend::BodyDesc::MotionType::Dynamic && !editorDirty)
                 {
                     auto state = m_backend->getBodyState(existingHandle);
                     std::memcpy(desc.position, state.position, sizeof(desc.position));
@@ -632,6 +637,8 @@ void PhysicsWorld::syncBodiesToBackend()
         m_bodyConfigHashes.erase(entity);
         m_bodyTransformHashes.erase(entity);
     }
+
+    m_editorDirtyBodies.clear();
 }
 
 // ── Sync Backend → ECS ──────────────────────────────────────────────────

@@ -1,5 +1,34 @@
 # Engine Status
 
+## Editor Finalization: Notifications Tab (Implemented)
+- Added a `Notifications` editor tab that exposes the stored notification history, unread count, relative age, and severity coloring in a persistent reviewable view.
+- The dedicated `Build Pipeline` editor tab (separate dockable tab) has been removed. The `Build Pipeline` category inside `Engine Settings` remains, showing CMake/toolchain status, build profiles, and quick actions.
+- The `Build Game` action is also accessible directly from the viewport settings dropdown.
+
+## Editor Settings Menu Cleanup (Implemented)
+- Moved editor tab/tool shortcuts into a separate quick-access `Workspace Tools` popup reachable from the viewport settings dropdown, keeping top-level menu clutter low.
+
+### Follow-up Fix: `Build Game` dialog no longer opens blank
+- **Problem**: The `Build Game` popup could reopen in a stale state and its `EntryBar` field values were written/read through the wrong member, which could make the dialog appear empty or lose its visible form state.
+- **Fix**: The dialog now unregisters and rebuilds its `BuildGameForm` widget each time it opens, writes default text into `EntryBar::value`, and reads the selected start level / title back from the proper UI fields.
+- **Result**: `Build Game` opens reliably with its full form UI again.
+
+## PIE Native C++ Build Skip on Unchanged Sources (Implemented)
+- The editor-side PIE path now computes a fingerprint for native C++ gameplay script inputs in `Content/Scripts/Native` using file name, size, and last-write time for `.cpp`, `.h`, and `.hpp` files.
+- If that fingerprint matches the last successful PIE native-script build and `Engine/GameScripts.dll` is still present, the editor skips the pre-PIE C++ rebuild and immediately reuses the previous DLL.
+- Successful native-script builds store the current fingerprint in `Binary/GameScripts/.pie_native_build_fingerprint`.
+- `_AutoRegister.cpp`, the generated native-script `CMakeLists.txt`, and the VS Code IntelliSense config are now only rewritten when their content actually changes, preventing generated-file timestamp noise from forcing unnecessary rebuild work.
+
+## Bug Fix 20: Editor-side physics value changes now survive dynamic body hot-rebuilds
+- **Problem**: Most `CollisionComponent` / `PhysicsComponent` values already flowed into `PhysicsWorld` and into Jolt correctly, but one editor-live-edit gap remained for existing dynamic bodies. Editor changes marked the entity as physics-dirty and forced a rebuild, yet the dynamic-body rebuild path always restored transform and velocities from the old backend state. That meant editor-authored `PhysicsComponent::velocity` / `angularVelocity` changes — and dynamic transform edits during the same rebuild path — could be silently overwritten.
+- **Fix**: `PhysicsWorld` now tracks which bodies were explicitly dirtied by editor-side physics edits during the current step. When such a dynamic body is rebuilt, the edited ECS transform/velocity values are kept and passed into the recreated `JoltBackend::BodyDesc` instead of being replaced unconditionally by the pre-rebuild backend state.
+- **Result**: Collision/physics property edits still hot-rebuild as before, but explicit editor changes to dynamic-body transform and initial velocities now apply directly to the live Jolt body as expected.
+
+### Follow-up Fix: Dynamic mass changes now enforced after Jolt body creation
+- **Problem**: `PhysicsComponent::mass` already participated in the rebuild hash and body descriptor, but edited mass values could still appear ineffective on recreated dynamic bodies.
+- **Fix**: After creating and adding a dynamic Jolt body, the backend now explicitly calls `MotionProperties::ScaleToMass(desc.mass)` through a write lock. This directly rescales mass/inertia on the live Jolt body to the requested editor value.
+- **Result**: Changing mass in the editor now reliably affects the recreated dynamic rigidbody.
+
 ## Physics Queries - Overlap & Sweep (Implemented)
 - Added `overlapSphere` and `overlapBox` to test a shape against the world and return all overlapping entity IDs.
 - Added `sweepSphere` and `sweepBox` to sweep a shape along a direction and return the closest hit (same result format as raycast).

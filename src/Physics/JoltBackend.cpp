@@ -763,6 +763,17 @@ JoltBackend::BodyHandle JoltBackend::createBody(const BodyDesc& desc)
         ? JPH::EActivation::DontActivate
         : JPH::EActivation::Activate);
 
+    if (desc.motionType == BodyDesc::MotionType::Dynamic && desc.mass > 0.0f)
+    {
+        JPH::BodyLockWrite lock(m_physicsSystem->GetBodyLockInterface(), id);
+        if (lock.Succeeded())
+        {
+            JPH::Body& lockedBody = lock.GetBody();
+            if (JPH::MotionProperties* motionProperties = lockedBody.GetMotionProperties())
+                motionProperties->ScaleToMass(desc.mass);
+        }
+    }
+
     // Set initial velocity for dynamic bodies
     if (desc.motionType == BodyDesc::MotionType::Dynamic)
     {

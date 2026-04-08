@@ -195,7 +195,8 @@ void BuildSystemUI::openBuildGameDialog()
     PopupWindow* popup = m_renderer->openPopupWindow(
         "BuildGame", "Build Game", kPopupW, kPopupH);
     if (!popup) return;
-    if (!popup->uiManager().getRegisteredWidgets().empty()) return;
+
+    popup->uiManager().unregisterWidget("BuildGameForm");
 
     const float W = static_cast<float>(kPopupW);
     const float H = static_cast<float>(kPopupH);
@@ -319,7 +320,7 @@ void BuildSystemUI::openBuildGameDialog()
         entry.id = id;
         entry.from = Vec2{ nx(leftPad + labelW + gap), ny(y) };
         entry.to = Vec2{ nx(W - rightPad), ny(y + entryH) };
-        entry.text = defaultVal;
+        entry.value = defaultVal;
         entry.fontSize = EditorTheme::Get().fontSizeBody;
         entry.style.color = EditorTheme::Get().inputBackground;
         entry.style.textColor = EditorTheme::Get().textPrimary;
@@ -537,8 +538,9 @@ void BuildSystemUI::openBuildGameDialog()
     auto* parentBuildUI = this;
     auto* parentUIMgr = m_uiManager;
     auto profilesCopy = std::make_shared<std::vector<BuildProfile>>(m_buildProfiles);
+    auto levelPathsCopy = std::make_shared<std::vector<std::string>>(levelPaths);
     popup->uiManager().registerClickEvent("BG.Btn.Build",
-        [popup, parentBuildUI, parentUIMgr, formState, profilesCopy, defaultOutputDir, defaultBinaryDir]()
+        [popup, parentBuildUI, parentUIMgr, formState, profilesCopy, levelPathsCopy, defaultOutputDir, defaultBinaryDir]()
     {
         auto& popupUI = popup->uiManager();
 
@@ -553,9 +555,15 @@ void BuildSystemUI::openBuildGameDialog()
 
         // Read other form values
         if (auto* el = popupUI.findElementById("BG.DD.StartLevel"))
-            config.startLevel = el->text;
+        {
+            const int selectedLevel = el->selectedIndex;
+            if (selectedLevel >= 0 && selectedLevel < static_cast<int>(levelPathsCopy->size()))
+                config.startLevel = (*levelPathsCopy)[static_cast<size_t>(selectedLevel)];
+            else
+                config.startLevel = el->text;
+        }
         if (auto* el = popupUI.findElementById("BG.Entry.Title"))
-            config.windowTitle = el->text;
+            config.windowTitle = !el->value.empty() ? el->value : el->text;
         if (auto* el = popupUI.findElementById("BG.Chk.Launch"))
             config.launchAfterBuild = el->isChecked;
         if (auto* el = popupUI.findElementById("BG.Chk.Clean"))

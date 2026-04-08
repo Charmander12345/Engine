@@ -9,6 +9,25 @@ The engine provides a physics system layered around `IPhysicsBackend`, but the a
 - The Visual Studio `x64-debug` preset is constrained to `Debug` and outputs to `out/build/x64-debug/DEBUG`.
 - Non-debug editor-internal script builds and the default `build.bat` path also use `Release` so distributable builds are not accidentally produced as `RelWithDebInfo`.
 
+## Editor Tabs
+- The editor exposes a `Notifications` tab that mirrors the in-editor notification history with unread counts and recent toast entries, making editor feedback easier to review after longer workflows.
+- The dedicated `Build Pipeline` editor tab (separate dockable tab) has been removed. The `Build Pipeline` category inside `Engine Settings` remains, showing project/environment info, CMake/toolchain status, build profiles, and quick actions.
+- The `Build Game` action is accessible directly from the viewport settings dropdown.
+- Workspace tools are exposed through a dedicated quick-access `Workspace Tools` popup from the viewport settings dropdown.
+- The `Build Game` dialog now rebuilds its widget tree every time it is opened and reads `EntryBar` values correctly, preventing the dialog from appearing blank or losing form content.
+
+## PIE Native C++ Script Build
+- Before PIE, native C++ gameplay scripts under `Content/Scripts/Native` are fingerprinted by filename, size, and write time.
+- The editor now reuses the last successful `GameScripts.dll` build when those native C++ source/header files have not changed since the previous PIE build.
+- Successful PIE builds persist their fingerprint under `Binary/GameScripts/.pie_native_build_fingerprint`.
+- Generated helper files such as `_AutoRegister.cpp`, native-script `CMakeLists.txt`, and VS Code IntelliSense config are only rewritten when their content actually changes, avoiding unnecessary timestamp churn.
+
+## Live Physics Editing
+- Editor-side changes to `CollisionComponent`, `PhysicsComponent`, `TransformComponent`, and `HeightFieldComponent` continue to mark bodies as physics-dirty for hot-rebuild in PIE.
+- Dynamic rigidbodies now keep editor-authored transform and velocity state when such a hot-rebuild was triggered by an explicit editor change, instead of always restoring the previous backend state over the edited ECS values.
+- This ensures values like `PhysicsComponent::velocity` and `PhysicsComponent::angularVelocity` are applied correctly to the recreated Jolt body when changed from the editor.
+- Dynamic-body mass changes are now also enforced explicitly after Jolt body creation via `MotionProperties::ScaleToMass(...)`, so edited `PhysicsComponent::mass` values reliably affect recreated bodies.
+
 The live runtime/build path is currently **Jolt-only**: `PhysicsWorld` and PIE always initialize Jolt, the editor backend selector is pinned to Jolt, and the `Physics` target links only against `Jolt`.
 
 ### Physics Queries
