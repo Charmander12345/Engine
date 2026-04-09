@@ -173,6 +173,7 @@ namespace GameplayAPI
 		case ECS::ComponentKind::Light:           return ECS::addComponent<ECS::LightComponent>(entity);
 		case ECS::ComponentKind::Camera:          return ECS::addComponent<ECS::CameraComponent>(entity);
 		case ECS::ComponentKind::Physics:         return ECS::addComponent<ECS::PhysicsComponent>(entity);
+        case ECS::ComponentKind::Constraint:      return ECS::addComponent<ECS::ConstraintComponent>(entity);
 		case ECS::ComponentKind::Collision:       return ECS::addComponent<ECS::CollisionComponent>(entity);
 		case ECS::ComponentKind::Logic:           return ECS::addComponent<ECS::LogicComponent>(entity);
 		case ECS::ComponentKind::Name:            return ECS::addComponent<ECS::NameComponent>(entity);
@@ -191,6 +192,7 @@ namespace GameplayAPI
 		case ECS::ComponentKind::Light:           return ECS::removeComponent<ECS::LightComponent>(entity);
 		case ECS::ComponentKind::Camera:          return ECS::removeComponent<ECS::CameraComponent>(entity);
 		case ECS::ComponentKind::Physics:         return ECS::removeComponent<ECS::PhysicsComponent>(entity);
+     case ECS::ComponentKind::Constraint:      return ECS::removeComponent<ECS::ConstraintComponent>(entity);
 		case ECS::ComponentKind::Collision:       return ECS::removeComponent<ECS::CollisionComponent>(entity);
 		case ECS::ComponentKind::Logic:           return ECS::removeComponent<ECS::LogicComponent>(entity);
 		case ECS::ComponentKind::Name:            return ECS::removeComponent<ECS::NameComponent>(entity);
@@ -209,6 +211,7 @@ namespace GameplayAPI
 		case ECS::ComponentKind::Light:           schema.require<ECS::LightComponent>(); return true;
 		case ECS::ComponentKind::Camera:          schema.require<ECS::CameraComponent>(); return true;
 		case ECS::ComponentKind::Physics:         schema.require<ECS::PhysicsComponent>(); return true;
+       case ECS::ComponentKind::Constraint:      schema.require<ECS::ConstraintComponent>(); return true;
 		case ECS::ComponentKind::Collision:       schema.require<ECS::CollisionComponent>(); return true;
 		case ECS::ComponentKind::Logic:           schema.require<ECS::LogicComponent>(); return true;
 		case ECS::ComponentKind::Name:            schema.require<ECS::NameComponent>(); return true;
@@ -270,6 +273,7 @@ namespace GameplayAPI
 		case ECS::ComponentKind::Light:           return ECS::hasComponent<ECS::LightComponent>(entity);
 		case ECS::ComponentKind::Camera:          return ECS::hasComponent<ECS::CameraComponent>(entity);
 		case ECS::ComponentKind::Physics:         return ECS::hasComponent<ECS::PhysicsComponent>(entity);
+        case ECS::ComponentKind::Constraint:      return ECS::hasComponent<ECS::ConstraintComponent>(entity);
 		case ECS::ComponentKind::Collision:       return ECS::hasComponent<ECS::CollisionComponent>(entity);
 		case ECS::ComponentKind::Logic:           return ECS::hasComponent<ECS::LogicComponent>(entity);
 		case ECS::ComponentKind::Name:            return ECS::hasComponent<ECS::NameComponent>(entity);

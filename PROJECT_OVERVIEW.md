@@ -4,6 +4,25 @@
 The engine provides a physics system layered around `IPhysicsBackend`, but the active implementation/build is currently Jolt-only:
 - **Jolt Physics** (default) - primary backend, LinearCast CCD by default, enhanced internal edge removal for smooth heightfield interaction, tuned solver settings (Baumgarte 0.35, 12 velocity steps, 8 position steps, max penetration distance 1.0, 4 collision sub-steps, speculative contact distance 0.05) for robust collision handling and penetration recovery
 
+### Constraint Authoring Groundwork
+- Entities can now carry a `ConstraintComponent` that stores joint authoring data for hinge, ball-socket, fixed, slider, distance, spring, and cone constraints.
+- Saved levels preserve connected entity ids, anchors, axis, limits, spring tuning, and breakability thresholds.
+- The editor details panel supports adding/removing and editing this constraint data directly.
+
+### Runtime Constraints
+- The current runtime path supports live `Fixed`, `Hinge`, `Distance`, `BallSocket`, `Slider`, `Spring`, and `Cone` constraints through Jolt.
+- `PhysicsWorld` creates/removes these constraints automatically from `ConstraintComponent` data after body sync.
+- Fixed constraints now preserve the initial relative attachment more robustly instead of collapsing both bodies toward each other by default.
+- Hinge constraints use local authoring anchors/axis data, optional angle limits, and Jolt spring settings for soft limits.
+- Distance constraints keep two authored anchor points within a min/max range; leaving both limits at `0` now auto-preserves the current distance when the joint is created.
+- Ball-socket and cone constraints use shared world anchors to avoid conflicting per-body target points.
+- Slider constraints default to an unrestricted range when authored with `0/0` limits and use derived normal axes for a stable constraint frame.
+- Spring constraints are implemented through Jolt distance constraints with active spring settings.
+- Constraint teardown now follows Jolt's reference-counted ownership model correctly, avoiding PIE-exit crashes when active constraints are removed during physics shutdown.
+- Constraint authoring in the editor now uses a scene-entity dropdown for the connected target instead of requiring raw entity-id entry.
+- A single entity can now own multiple constraint entries, so one object can be attached to several others without spawning helper entities or overwriting previous constraint data.
+- The runtime now internally substeps physics updates for better stability when constrained dynamic bodies collide while rotating, reducing visible penetration on impact.
+
 ## Build Configuration
 - The Visual Studio `x64-release` preset is constrained to a true `Release` configuration and outputs to `out/build/x64-release/RELEASE`.
 - The Visual Studio `x64-debug` preset is constrained to `Debug` and outputs to `out/build/x64-debug/DEBUG`.

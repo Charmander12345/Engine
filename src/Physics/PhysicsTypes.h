@@ -7,6 +7,9 @@ namespace PhysicsTypes
     using BodyHandle = uint64_t;
     constexpr BodyHandle InvalidBody = 0;
 
+    using ConstraintHandle = uint64_t;
+    constexpr ConstraintHandle InvalidConstraint = 0;
+
     struct BodyDesc
     {
         enum class Shape { Box, Sphere, Capsule, Cylinder, Mesh, HeightField };
@@ -82,6 +85,37 @@ namespace PhysicsTypes
         float    normal[3]{};
         float    distance{ 0.0f };
         bool     hit{ false };
+    };
+
+    struct ConstraintDesc
+    {
+        enum class Type
+        {
+            Fixed,
+            Hinge,
+            Distance,
+            BallSocket,
+            Slider,
+            Spring,
+            Cone
+        } type{ Type::Fixed };
+
+        BodyHandle bodyHandleA{ InvalidBody };
+        BodyHandle bodyHandleB{ InvalidBody };
+
+        float point1[3]{ 0.0f, 0.0f, 0.0f };
+        float point2[3]{ 0.0f, 0.0f, 0.0f };
+        bool autoDetectPoint{ false };
+        float axisX1[3]{ 1.0f, 0.0f, 0.0f };
+        float axisY1[3]{ 0.0f, 1.0f, 0.0f };
+        float axisX2[3]{ 1.0f, 0.0f, 0.0f };
+        float axisY2[3]{ 0.0f, 1.0f, 0.0f };
+        float limits[2]{ -180.0f, 180.0f };
+        float springStiffness{ 0.0f };
+        float springDamping{ 0.0f };
+
+        uint64_t constraintId{ 0 };
+        uint32_t entityId{ 0 };
     };
 
     using CharacterHandle = uint64_t;

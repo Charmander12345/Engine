@@ -45,6 +45,8 @@ namespace
             return ECS::addComponent<ECS::CameraComponent>(entity);
         case ECS::ComponentKind::Physics:
             return ECS::addComponent<ECS::PhysicsComponent>(entity);
+        case ECS::ComponentKind::Constraint:
+            return ECS::addComponent<ECS::ConstraintComponent>(entity);
         case ECS::ComponentKind::Collision:
             return ECS::addComponent<ECS::CollisionComponent>(entity);
         case ECS::ComponentKind::Logic:
@@ -74,6 +76,8 @@ namespace
             return ECS::removeComponent<ECS::CameraComponent>(entity);
         case ECS::ComponentKind::Physics:
             return ECS::removeComponent<ECS::PhysicsComponent>(entity);
+        case ECS::ComponentKind::Constraint:
+            return ECS::removeComponent<ECS::ConstraintComponent>(entity);
         case ECS::ComponentKind::Collision:
             return ECS::removeComponent<ECS::CollisionComponent>(entity);
         case ECS::ComponentKind::Logic:
@@ -108,6 +112,9 @@ namespace
             return true;
         case ECS::ComponentKind::Physics:
             schema.require<ECS::PhysicsComponent>();
+            return true;
+        case ECS::ComponentKind::Constraint:
+            schema.require<ECS::ConstraintComponent>();
             return true;
         case ECS::ComponentKind::Collision:
             schema.require<ECS::CollisionComponent>();

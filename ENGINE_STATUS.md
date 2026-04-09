@@ -1,5 +1,47 @@
 # Engine Status
 
+## Physics Constraints Groundwork (Implemented)
+- Added `ConstraintComponent` to the ECS as the first implementation step for `Phase 2.1 - Physics Constraints / Joints`.
+- Constraint data now serializes/deserializes in levels: type, connected entity, anchors, axis, limits, spring settings, and break thresholds.
+- The editor Outliner can now add/remove and edit `ConstraintComponent` data directly in the entity details panel.
+- Component-kind exposure was updated for C++/Python attach-detach/query paths, and `engine.pyi` now includes `Component_Constraint`.
+
+### Follow-up: Runtime Jolt constraint support for `Fixed` and `Hinge`
+- `PhysicsWorld` now turns supported `ConstraintComponent` entries into live Jolt constraints each frame after rigidbody sync.
+- Implemented backend creation/removal in `JoltBackend` for `FixedConstraint` and `HingeConstraint`.
+- Constraint rebuilds now follow edited component values and body-handle changes, and backend cleanup removes dependent constraints before body destruction.
+- Hinge limits and optional spring tuning are applied through Jolt's hinge settings.
+- Other planned constraint kinds (`BallSocket`, `Slider`, `Distance`, `Spring`, `Cone`) still remain pending.
+
+### Crash Fix: PIE exit after constraint testing
+- **Problem**: Leaving PIE after testing runtime constraints could terminate the engine unexpectedly during physics shutdown.
+- **Cause**: `JoltBackend::removeConstraint()` manually deleted a Jolt `Constraint` after `PhysicsSystem::RemoveConstraint()`, but Jolt constraints are reference-counted and already owned through the internal constraint manager.
+- **Fix**: Removed the extra manual `delete` so constraint lifetime now stays fully under Jolt's reference-counted ownership path.
+- **Result**: PIE shutdown no longer double-frees live constraints when constraints are present.
+
+### Constraint Follow-up: logging, fixed-anchor behavior, distance runtime, and editor target dropdown
+- Added targeted constraint lifecycle logging in `JoltBackend` for creation, removal, and backend creation failures.
+- Fixed `Fixed` constraints so they no longer collapse both bodies into each other by default. When no explicit anchors are authored, Jolt now auto-detects a shared weld point; with explicit anchors, a shared midpoint anchor is used instead of forcing both body centers together.
+- Added runtime support for `Distance` constraints in the Jolt path. If min/max distance are left at `0/0`, the current distance is now preserved automatically on creation instead of behaving like an ineffective or collapsing setup.
+- The editor `ConstraintComponent` no longer requires typing raw entity IDs for the connected body. It now offers a dropdown of entities currently present in the scene and still shows the resolved entity ID read-only.
+
+### Constraint Follow-up 2: remaining Jolt mappings hardened
+- Added runtime mappings for the remaining currently authored constraint kinds: `BallSocket` (`PointConstraint`), `Slider`, `Spring` (distance-based spring mapping), and `Cone`.
+- `BallSocket` and `Cone` now use a shared world anchor so authored per-body anchors do not collapse the two bodies toward different target points.
+- `Slider` now uses robust slider/normal axis setup and defaults `0/0` limits to an unrestricted slide range instead of a confusing zero-range lock.
+- `Spring` now maps to Jolt distance constraints with spring settings enabled, preserving current distance automatically when no explicit range is authored.
+
+### Constraint Follow-up 3: multiple constraints per entity
+- `ConstraintComponent` now stores a list of constraint entries instead of only a single constraint definition.
+- The level serializer/deserializer supports the new array-based format and still reads older single-constraint saves.
+- `PhysicsWorld` and `JoltBackend` now track constraints by per-entry logical ids so multiple constraints on the same entity can coexist at runtime.
+- The Outliner details panel can add, edit, and remove individual constraint entries on one entity, allowing one object to attach multiple other objects at once.
+
+### Constraint Follow-up 4: reduced intersection on constrained impacts
+- Added internal Jolt physics substepping in `JoltBackend::update()` so each engine fixed step is split into smaller physics integration steps.
+- Dynamic bodies now use stronger per-body solver overrides matching the constraint solver strength.
+- This reduces residual interpenetration when multiple constrained dynamic bodies swing/rotate into each other at contact.
+
 ## Editor Finalization: Notifications Tab (Implemented)
 - Added a `Notifications` editor tab that exposes the stored notification history, unread count, relative age, and severity coloring in a persistent reviewable view.
 - The dedicated `Build Pipeline` editor tab (separate dockable tab) has been removed. The `Build Pipeline` category inside `Engine Settings` remains, showing CMake/toolchain status, build profiles, and quick actions.

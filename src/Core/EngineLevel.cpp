@@ -93,6 +93,23 @@ static void deserializeFloat3(const json& value, float outValues[3])
 	}
 }
 
+static json serializeFloat2(const float values[2])
+{
+	return json::array({ values[0], values[1] });
+}
+
+static void deserializeFloat2(const json& value, float outValues[2])
+{
+	if (!value.is_array() || value.size() < 2)
+	{
+		return;
+	}
+	for (size_t i = 0; i < 2; ++i)
+	{
+		outValues[i] = value.at(i).get<float>();
+	}
+}
+
 static json serializeTransformComponent(const ECS::TransformComponent& component)
 {
 	json j = json{
@@ -369,6 +386,80 @@ static void deserializePhysicsComponent(const json& value, ECS::PhysicsComponent
 		deserializeFloat3(value.at("velocity"), component.velocity);
 	if (value.contains("angularVelocity"))
 		deserializeFloat3(value.at("angularVelocity"), component.angularVelocity);
+}
+
+static json serializeConstraintEntry(const ECS::ConstraintComponent::ConstraintEntry& entry)
+{
+	return json{
+     {"type", static_cast<int>(entry.type)},
+		{"connectedEntity", entry.connectedEntity},
+		{"anchor", serializeFloat3(entry.anchor)},
+		{"connectedAnchor", serializeFloat3(entry.connectedAnchor)},
+		{"axis", serializeFloat3(entry.axis)},
+		{"limits", serializeFloat2(entry.limits)},
+		{"springStiffness", entry.springStiffness},
+		{"springDamping", entry.springDamping},
+		{"breakable", entry.breakable},
+		{"breakForce", entry.breakForce},
+		{"breakTorque", entry.breakTorque}
+	};
+}
+
+static void deserializeConstraintEntry(const json& value, ECS::ConstraintComponent::ConstraintEntry& entry)
+{
+	if (!value.is_object()) return;
+	if (value.contains("type"))
+        entry.type = static_cast<ECS::ConstraintComponent::ConstraintType>(value.at("type").get<int>());
+	if (value.contains("connectedEntity"))
+        entry.connectedEntity = value.at("connectedEntity").get<unsigned int>();
+	if (value.contains("anchor"))
+        deserializeFloat3(value.at("anchor"), entry.anchor);
+	if (value.contains("connectedAnchor"))
+      deserializeFloat3(value.at("connectedAnchor"), entry.connectedAnchor);
+	if (value.contains("axis"))
+        deserializeFloat3(value.at("axis"), entry.axis);
+	if (value.contains("limits"))
+        deserializeFloat2(value.at("limits"), entry.limits);
+	if (value.contains("springStiffness"))
+       entry.springStiffness = value.at("springStiffness").get<float>();
+	if (value.contains("springDamping"))
+       entry.springDamping = value.at("springDamping").get<float>();
+	if (value.contains("breakable"))
+        entry.breakable = value.at("breakable").get<bool>();
+	if (value.contains("breakForce"))
+     entry.breakForce = value.at("breakForce").get<float>();
+	if (value.contains("breakTorque"))
+       entry.breakTorque = value.at("breakTorque").get<float>();
+}
+
+static json serializeConstraintComponent(const ECS::ConstraintComponent& component)
+{
+	json constraintsJson = json::array();
+	for (const auto& entry : component.constraints)
+		constraintsJson.push_back(serializeConstraintEntry(entry));
+
+	return json{ {"constraints", constraintsJson} };
+}
+
+static void deserializeConstraintComponent(const json& value, ECS::ConstraintComponent& component)
+{
+	component.constraints.clear();
+	if (!value.is_object()) return;
+
+	if (value.contains("constraints") && value.at("constraints").is_array())
+	{
+		for (const auto& constraintValue : value.at("constraints"))
+		{
+			ECS::ConstraintComponent::ConstraintEntry entry{};
+			deserializeConstraintEntry(constraintValue, entry);
+			component.constraints.push_back(entry);
+		}
+		return;
+	}
+
+	ECS::ConstraintComponent::ConstraintEntry entry{};
+	deserializeConstraintEntry(value, entry);
+	component.constraints.push_back(entry);
 }
 
 /// Backward compatibility: old "Physics" block had collision fields mixed in.
@@ -724,6 +815,12 @@ bool EngineLevel::prepareEcs()
 							m_ecs->addComponent<ECS::PhysicsComponent>(entity, pc);
 						}
 					}
+                   if (componentsJson.contains("Constraint"))
+					{
+						ECS::ConstraintComponent component;
+						deserializeConstraintComponent(componentsJson.at("Constraint"), component);
+						m_ecs->addComponent<ECS::ConstraintComponent>(entity, component);
+					}
 					if (componentsJson.contains("Collision"))
 					{
 						ECS::CollisionComponent component;
@@ -1015,6 +1112,10 @@ json EngineLevel::serializeEcsEntities() const
 		if (const auto* component = ecs.getComponent<ECS::PhysicsComponent>(entity))
 		{
 			componentsJson["Physics"] = serializePhysicsComponent(*component);
+		}
+      if (const auto* component = ecs.getComponent<ECS::ConstraintComponent>(entity))
+		{
+			componentsJson["Constraint"] = serializeConstraintComponent(*component);
 		}
 		if (const auto* component = ecs.getComponent<ECS::CollisionComponent>(entity))
 		{

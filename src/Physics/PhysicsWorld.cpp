@@ -5,6 +5,7 @@
 #include <cstring>
 #include <fstream>
 #include <filesystem>
+#include <limits>
 
 #include "../AssetManager/json.hpp"
 
@@ -67,6 +68,13 @@ namespace
         return hash;
     }
 
+    bool isNearlyZeroVec3(const float values[3], float epsilon = 1.0e-4f)
+    {
+        return std::abs(values[0]) <= epsilon
+            && std::abs(values[1]) <= epsilon
+            && std::abs(values[2]) <= epsilon;
+    }
+
     uint64_t hashBodyTransform(const float position[3], const float rotationEulerDeg[3])
     {
         uint64_t hash = 1469598103934665603ull;
@@ -81,6 +89,139 @@ namespace
         for (int i = 0; i < 3; ++i) hashFloat(position[i]);
         for (int i = 0; i < 3; ++i) hashFloat(rotationEulerDeg[i]);
         return hash;
+    }
+
+    uint64_t hashConstraintInstanceId(uint32_t entity, size_t index)
+    {
+        return (static_cast<uint64_t>(entity) << 32) | static_cast<uint64_t>(index + 1);
+    }
+
+    uint64_t hashConstraintConfig(const ECS::ConstraintComponent::ConstraintEntry& component,
+        JoltBackend::BodyHandle bodyA, JoltBackend::BodyHandle bodyB)
+    {
+        uint64_t hash = 1469598103934665603ull;
+
+        auto hashFloat = [&hash](float value)
+        {
+            uint32_t bits = 0;
+            std::memcpy(&bits, &value, sizeof(bits));
+            hash = mixBodyConfigHash(hash, bits);
+        };
+
+        hash = mixBodyConfigHash(hash, static_cast<uint64_t>(component.type));
+        hash = mixBodyConfigHash(hash, static_cast<uint64_t>(component.connectedEntity));
+        hash = mixBodyConfigHash(hash, static_cast<uint64_t>(bodyA));
+        hash = mixBodyConfigHash(hash, static_cast<uint64_t>(bodyB));
+        for (float v : component.anchor) hashFloat(v);
+        for (float v : component.connectedAnchor) hashFloat(v);
+        for (float v : component.axis) hashFloat(v);
+        for (float v : component.limits) hashFloat(v);
+        hashFloat(component.springStiffness);
+        hashFloat(component.springDamping);
+        hash = mixBodyConfigHash(hash, component.breakable ? 1ull : 0ull);
+        hashFloat(component.breakForce);
+        hashFloat(component.breakTorque);
+
+        return hash;
+    }
+
+    void rotateVector(const float euler[3], const float in[3], float out[3])
+    {
+        constexpr float deg2rad = 3.14159265358979f / 180.0f;
+        const float cx = cosf(euler[0] * deg2rad), sx = sinf(euler[0] * deg2rad);
+        const float cy = cosf(euler[1] * deg2rad), sy = sinf(euler[1] * deg2rad);
+        const float cz = cosf(euler[2] * deg2rad), sz = sinf(euler[2] * deg2rad);
+
+        const float r00 = cy * cz + sy * sx * sz;
+        const float r01 = -cy * sz + sy * sx * cz;
+        const float r02 = sy * cx;
+        const float r10 = cx * sz;
+        const float r11 = cx * cz;
+        const float r12 = -sx;
+        const float r20 = -sy * cz + cy * sx * sz;
+        const float r21 = sy * sz + cy * sx * cz;
+        const float r22 = cy * cx;
+
+        out[0] = r00 * in[0] + r01 * in[1] + r02 * in[2];
+        out[1] = r10 * in[0] + r11 * in[1] + r12 * in[2];
+        out[2] = r20 * in[0] + r21 * in[1] + r22 * in[2];
+    }
+
+    void normalizeVector(float io[3], const float fallback[3])
+    {
+        const float lenSq = io[0] * io[0] + io[1] * io[1] + io[2] * io[2];
+        if (lenSq <= 1.0e-8f)
+        {
+            io[0] = fallback[0];
+            io[1] = fallback[1];
+            io[2] = fallback[2];
+            return;
+        }
+
+        const float invLen = 1.0f / std::sqrt(lenSq);
+        io[0] *= invLen;
+        io[1] *= invLen;
+        io[2] *= invLen;
+    }
+
+    void choosePerpendicularAxis(const float axis[3], float out[3])
+    {
+        const float absX = std::abs(axis[0]);
+        const float absY = std::abs(axis[1]);
+        const float absZ = std::abs(axis[2]);
+
+        float reference[3]{ 0.0f, 0.0f, 0.0f };
+        if (absX <= absY && absX <= absZ)
+            reference[0] = 1.0f;
+        else if (absY <= absZ)
+            reference[1] = 1.0f;
+        else
+            reference[2] = 1.0f;
+
+        out[0] = axis[1] * reference[2] - axis[2] * reference[1];
+        out[1] = axis[2] * reference[0] - axis[0] * reference[2];
+        out[2] = axis[0] * reference[1] - axis[1] * reference[0];
+        const float fallback[3]{ 0.0f, 1.0f, 0.0f };
+        normalizeVector(out, fallback);
+    }
+
+    void transformLocalPoint(const ECS::TransformComponent& transform, const float local[3], float out[3])
+    {
+        const float scaled[3] = {
+            local[0] * transform.scale[0],
+            local[1] * transform.scale[1],
+            local[2] * transform.scale[2]
+        };
+
+        float rotated[3]{};
+        rotateVector(transform.rotation, scaled, rotated);
+        out[0] = transform.position[0] + rotated[0];
+        out[1] = transform.position[1] + rotated[1];
+        out[2] = transform.position[2] + rotated[2];
+    }
+
+    void transformSharedAnchor(const ECS::TransformComponent& transformA, const float localA[3],
+        const ECS::TransformComponent& transformB, const float localB[3], float out[3])
+    {
+        float worldA[3]{};
+        float worldB[3]{};
+        transformLocalPoint(transformA, localA, worldA);
+        transformLocalPoint(transformB, localB, worldB);
+        out[0] = 0.5f * (worldA[0] + worldB[0]);
+        out[1] = 0.5f * (worldA[1] + worldB[1]);
+        out[2] = 0.5f * (worldA[2] + worldB[2]);
+    }
+
+    void getBodyFrameAxes(const ECS::TransformComponent& transform, float axisX[3], float axisY[3])
+    {
+        const float localX[3]{ 1.0f, 0.0f, 0.0f };
+        const float localY[3]{ 0.0f, 1.0f, 0.0f };
+        rotateVector(transform.rotation, localX, axisX);
+        rotateVector(transform.rotation, localY, axisY);
+        const float fallbackX[3]{ 1.0f, 0.0f, 0.0f };
+        const float fallbackY[3]{ 0.0f, 1.0f, 0.0f };
+        normalizeVector(axisX, fallbackX);
+        normalizeVector(axisY, fallbackY);
     }
 
     void inverseRotatePoint(const float euler[3], const float in[3], float out[3])
@@ -306,9 +447,11 @@ void PhysicsWorld::initialize(Backend backend)
     m_endOverlapEvents.clear();
     m_trackedEntities.clear();
     m_trackedCharacters.clear();
+    m_trackedConstraints.clear();
     m_editorDirtyBodies.clear();
     m_bodyConfigHashes.clear();
     m_bodyTransformHashes.clear();
+    m_constraintConfigHashes.clear();
 
     m_initialized = true;
     Logger::Instance().log(Logger::Category::Engine, "PhysicsWorld initialised.", Logger::LogLevel::INFO);
@@ -324,9 +467,11 @@ void PhysicsWorld::shutdown()
 
     m_trackedEntities.clear();
     m_trackedCharacters.clear();
+    m_trackedConstraints.clear();
     m_editorDirtyBodies.clear();
     m_bodyConfigHashes.clear();
     m_bodyTransformHashes.clear();
+    m_constraintConfigHashes.clear();
     m_collisionEvents.clear();
     m_collisionCallback = nullptr;
     m_activeOverlaps.clear();
@@ -376,6 +521,7 @@ void PhysicsWorld::step(float dt)
 
     // Sync ECS → Backend (create/update bodies)
     syncBodiesToBackend();
+    syncConstraintsToBackend();
     syncCharactersToBackend();
 
     m_accumulator += dt;
@@ -636,6 +782,278 @@ void PhysicsWorld::syncBodiesToBackend()
         m_trackedEntities.erase(entity);
         m_bodyConfigHashes.erase(entity);
         m_bodyTransformHashes.erase(entity);
+    }
+
+}
+
+void PhysicsWorld::syncConstraintsToBackend()
+{
+    if (!m_backend) return;
+
+    auto& ecs = ECS::ECSManager::Instance();
+    auto schema = ECS::Schema().require<ECS::ConstraintComponent>();
+    auto entities = ecs.getEntitiesMatchingSchema(schema);
+
+    std::set<uint64_t> aliveConstraints;
+
+    for (auto entity : entities)
+    {
+        const auto* constraintComponent = ecs.getComponent<ECS::ConstraintComponent>(entity);
+        const auto* transformA = ecs.getComponent<ECS::TransformComponent>(entity);
+        if (!constraintComponent || !transformA)
+            continue;
+
+        for (size_t constraintIndex = 0; constraintIndex < constraintComponent->constraints.size(); ++constraintIndex)
+        {
+            const auto& constraint = constraintComponent->constraints[constraintIndex];
+            const uint64_t constraintId = hashConstraintInstanceId(entity, constraintIndex);
+            aliveConstraints.insert(constraintId);
+
+            const uint32_t connectedEntity = constraint.connectedEntity;
+            if (connectedEntity == 0 || connectedEntity == entity)
+            {
+                if (auto handle = m_backend->getConstraintById(constraintId); handle != JoltBackend::InvalidConstraint)
+                    m_backend->removeConstraint(handle);
+                m_trackedConstraints.erase(constraintId);
+                m_constraintConfigHashes.erase(constraintId);
+                continue;
+            }
+
+            const auto* transformB = ecs.getComponent<ECS::TransformComponent>(connectedEntity);
+            const auto bodyA = m_backend->getBodyForEntity(entity);
+            const auto bodyB = m_backend->getBodyForEntity(connectedEntity);
+            if (!transformB || bodyA == JoltBackend::InvalidBody || bodyB == JoltBackend::InvalidBody)
+            {
+                if (auto handle = m_backend->getConstraintById(constraintId); handle != JoltBackend::InvalidConstraint)
+                    m_backend->removeConstraint(handle);
+                m_trackedConstraints.erase(constraintId);
+                m_constraintConfigHashes.erase(constraintId);
+                continue;
+            }
+
+            JoltBackend::ConstraintDesc desc{};
+            desc.constraintId = constraintId;
+            desc.entityId = entity;
+            desc.bodyHandleA = bodyA;
+            desc.bodyHandleB = bodyB;
+            const bool editorDirtyConstraint = m_editorDirtyBodies.find(entity) != m_editorDirtyBodies.end()
+                || m_editorDirtyBodies.find(connectedEntity) != m_editorDirtyBodies.end();
+
+            switch (constraint.type)
+            {
+            case ECS::ConstraintComponent::ConstraintType::BallSocket:
+            {
+                desc.type = JoltBackend::ConstraintDesc::Type::BallSocket;
+                float sharedAnchor[3]{};
+                transformSharedAnchor(*transformA, constraint.anchor, *transformB, constraint.connectedAnchor, sharedAnchor);
+                std::memcpy(desc.point1, sharedAnchor, sizeof(desc.point1));
+                std::memcpy(desc.point2, sharedAnchor, sizeof(desc.point2));
+                break;
+            }
+
+            case ECS::ConstraintComponent::ConstraintType::Fixed:
+            {
+                desc.type = JoltBackend::ConstraintDesc::Type::Fixed;
+                desc.autoDetectPoint = isNearlyZeroVec3(constraint.anchor) && isNearlyZeroVec3(constraint.connectedAnchor);
+                if (!desc.autoDetectPoint)
+                {
+                    float sharedAnchor[3]{};
+                    transformSharedAnchor(*transformA, constraint.anchor, *transformB, constraint.connectedAnchor, sharedAnchor);
+                    std::memcpy(desc.point1, sharedAnchor, sizeof(desc.point1));
+                    std::memcpy(desc.point2, sharedAnchor, sizeof(desc.point2));
+                }
+                getBodyFrameAxes(*transformA, desc.axisX1, desc.axisY1);
+                getBodyFrameAxes(*transformB, desc.axisX2, desc.axisY2);
+                break;
+            }
+
+            case ECS::ConstraintComponent::ConstraintType::Hinge:
+            {
+                desc.type = JoltBackend::ConstraintDesc::Type::Hinge;
+                transformLocalPoint(*transformA, constraint.anchor, desc.point1);
+                transformLocalPoint(*transformB, constraint.connectedAnchor, desc.point2);
+
+                float localAxis[3]{ constraint.axis[0], constraint.axis[1], constraint.axis[2] };
+                const float fallbackAxis[3]{ 1.0f, 0.0f, 0.0f };
+                normalizeVector(localAxis, fallbackAxis);
+                float localNormal[3]{};
+                choosePerpendicularAxis(localAxis, localNormal);
+
+                rotateVector(transformA->rotation, localAxis, desc.axisX1);
+                rotateVector(transformB->rotation, localAxis, desc.axisX2);
+                rotateVector(transformA->rotation, localNormal, desc.axisY1);
+                rotateVector(transformB->rotation, localNormal, desc.axisY2);
+                normalizeVector(desc.axisX1, fallbackAxis);
+                normalizeVector(desc.axisX2, fallbackAxis);
+                const float fallbackNormal[3]{ 0.0f, 1.0f, 0.0f };
+                normalizeVector(desc.axisY1, fallbackNormal);
+                normalizeVector(desc.axisY2, fallbackNormal);
+
+                desc.limits[0] = constraint.limits[0];
+                desc.limits[1] = constraint.limits[1];
+                desc.springStiffness = constraint.springStiffness;
+                desc.springDamping = constraint.springDamping;
+                break;
+            }
+
+            case ECS::ConstraintComponent::ConstraintType::Slider:
+            {
+                desc.type = JoltBackend::ConstraintDesc::Type::Slider;
+                desc.autoDetectPoint = isNearlyZeroVec3(constraint.anchor) && isNearlyZeroVec3(constraint.connectedAnchor);
+                if (!desc.autoDetectPoint)
+                {
+                    float sharedAnchor[3]{};
+                    transformSharedAnchor(*transformA, constraint.anchor, *transformB, constraint.connectedAnchor, sharedAnchor);
+                    std::memcpy(desc.point1, sharedAnchor, sizeof(desc.point1));
+                    std::memcpy(desc.point2, sharedAnchor, sizeof(desc.point2));
+                }
+
+                float localAxis[3]{ constraint.axis[0], constraint.axis[1], constraint.axis[2] };
+                const float fallbackAxis[3]{ 1.0f, 0.0f, 0.0f };
+                normalizeVector(localAxis, fallbackAxis);
+                float localNormal[3]{};
+                choosePerpendicularAxis(localAxis, localNormal);
+
+                rotateVector(transformA->rotation, localAxis, desc.axisX1);
+                rotateVector(transformB->rotation, localAxis, desc.axisX2);
+                rotateVector(transformA->rotation, localNormal, desc.axisY1);
+                rotateVector(transformB->rotation, localNormal, desc.axisY2);
+                normalizeVector(desc.axisX1, fallbackAxis);
+                normalizeVector(desc.axisX2, fallbackAxis);
+                const float fallbackNormal[3]{ 0.0f, 1.0f, 0.0f };
+                normalizeVector(desc.axisY1, fallbackNormal);
+                normalizeVector(desc.axisY2, fallbackNormal);
+
+                if (std::abs(constraint.limits[0]) <= 1.0e-4f && std::abs(constraint.limits[1]) <= 1.0e-4f)
+                {
+                    desc.limits[0] = -std::numeric_limits<float>::max();
+                    desc.limits[1] = std::numeric_limits<float>::max();
+                }
+                else
+                {
+                    desc.limits[0] = std::min(constraint.limits[0], constraint.limits[1]);
+                    desc.limits[1] = std::max(constraint.limits[0], constraint.limits[1]);
+                }
+                desc.springStiffness = constraint.springStiffness;
+                desc.springDamping = constraint.springDamping;
+                break;
+            }
+
+            case ECS::ConstraintComponent::ConstraintType::Distance:
+            {
+                desc.type = JoltBackend::ConstraintDesc::Type::Distance;
+                transformLocalPoint(*transformA, constraint.anchor, desc.point1);
+                transformLocalPoint(*transformB, constraint.connectedAnchor, desc.point2);
+                const float minDistance = constraint.limits[0];
+                const float maxDistance = constraint.limits[1];
+                if (std::abs(minDistance) <= 1.0e-4f && std::abs(maxDistance) <= 1.0e-4f)
+                {
+                    desc.limits[0] = -1.0f;
+                    desc.limits[1] = -1.0f;
+                }
+                else
+                {
+                    desc.limits[0] = std::min(minDistance, maxDistance);
+                    desc.limits[1] = std::max(minDistance, maxDistance);
+                }
+                desc.springStiffness = constraint.springStiffness;
+                desc.springDamping = constraint.springDamping;
+                break;
+            }
+
+            case ECS::ConstraintComponent::ConstraintType::Spring:
+            {
+                desc.type = JoltBackend::ConstraintDesc::Type::Spring;
+                transformLocalPoint(*transformA, constraint.anchor, desc.point1);
+                transformLocalPoint(*transformB, constraint.connectedAnchor, desc.point2);
+                const float minDistance = constraint.limits[0];
+                const float maxDistance = constraint.limits[1];
+                if (std::abs(minDistance) <= 1.0e-4f && std::abs(maxDistance) <= 1.0e-4f)
+                {
+                    desc.limits[0] = -1.0f;
+                    desc.limits[1] = -1.0f;
+                }
+                else
+                {
+                    desc.limits[0] = std::min(minDistance, maxDistance);
+                    desc.limits[1] = std::max(minDistance, maxDistance);
+                }
+                desc.springStiffness = constraint.springStiffness;
+                desc.springDamping = constraint.springDamping;
+                break;
+            }
+
+            case ECS::ConstraintComponent::ConstraintType::Cone:
+            {
+                desc.type = JoltBackend::ConstraintDesc::Type::Cone;
+                float sharedAnchor[3]{};
+                transformSharedAnchor(*transformA, constraint.anchor, *transformB, constraint.connectedAnchor, sharedAnchor);
+                std::memcpy(desc.point1, sharedAnchor, sizeof(desc.point1));
+                std::memcpy(desc.point2, sharedAnchor, sizeof(desc.point2));
+
+                float localAxis[3]{ constraint.axis[0], constraint.axis[1], constraint.axis[2] };
+                const float fallbackAxis[3]{ 1.0f, 0.0f, 0.0f };
+                normalizeVector(localAxis, fallbackAxis);
+                rotateVector(transformA->rotation, localAxis, desc.axisX1);
+                rotateVector(transformB->rotation, localAxis, desc.axisX2);
+                normalizeVector(desc.axisX1, fallbackAxis);
+                normalizeVector(desc.axisX2, fallbackAxis);
+                desc.limits[1] = std::max(std::abs(constraint.limits[0]), std::abs(constraint.limits[1]));
+                break;
+            }
+
+            default:
+                if (auto handle = m_backend->getConstraintById(constraintId); handle != JoltBackend::InvalidConstraint)
+                    m_backend->removeConstraint(handle);
+                m_trackedConstraints.erase(constraintId);
+                m_constraintConfigHashes.erase(constraintId);
+                continue;
+            }
+
+            const uint64_t configHash = hashConstraintConfig(constraint, bodyA, bodyB);
+            const auto existingHandle = m_backend->getConstraintById(constraintId);
+            const auto existingIt = m_constraintConfigHashes.find(constraintId);
+            const bool needsRebuild = existingHandle == JoltBackend::InvalidConstraint
+                || existingIt == m_constraintConfigHashes.end()
+                || editorDirtyConstraint
+                || existingIt->second != configHash;
+
+            if (needsRebuild)
+            {
+                if (existingHandle != JoltBackend::InvalidConstraint)
+                    m_backend->removeConstraint(existingHandle);
+
+                if (m_backend->createConstraint(desc) != JoltBackend::InvalidConstraint)
+                {
+                    m_trackedConstraints.insert(constraintId);
+                    m_constraintConfigHashes[constraintId] = configHash;
+                }
+                else
+                {
+                    m_trackedConstraints.erase(constraintId);
+                    m_constraintConfigHashes.erase(constraintId);
+                }
+            }
+            else
+            {
+                m_trackedConstraints.insert(constraintId);
+            }
+        }
+    }
+
+    std::vector<uint64_t> toRemove;
+    for (uint64_t constraintId : m_trackedConstraints)
+    {
+        if (aliveConstraints.find(constraintId) == aliveConstraints.end())
+            toRemove.push_back(constraintId);
+    }
+
+    for (uint64_t constraintId : toRemove)
+    {
+        if (auto handle = m_backend->getConstraintById(constraintId); handle != JoltBackend::InvalidConstraint)
+            m_backend->removeConstraint(handle);
+        m_trackedConstraints.erase(constraintId);
+        m_constraintConfigHashes.erase(constraintId);
     }
 
     m_editorDirtyBodies.clear();

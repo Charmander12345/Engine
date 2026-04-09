@@ -13,5 +13,8 @@
 - Use IPhysicsBackend only as a compatibility layer for externally exposed APIs (e.g., scripting), while keeping the internal physics implementation directly Jolt-based and maintaining the same exposed functions.
 - Only actual build-related functionality should reside under Build Pipeline; workspace tools should remain separate and be quickly accessible elsewhere in the UI.
 
+## Implementation Approach
+- When asked to continue with the next implementation step, proceed directly with the implementation instead of only describing it as a future next step.
+
 ## File Modification Preferences
 - Remember that the ViewportOverlay toolbar previously had Select/Move/Rotate/Scale buttons (tool mode buttons) in a left StackPanel, which were removed by user request but should be considered for potential re-addition later.

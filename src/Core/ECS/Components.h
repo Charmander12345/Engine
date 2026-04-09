@@ -131,6 +131,37 @@ namespace ECS
 		float angularVelocity[3]{ 0.0f, 0.0f, 0.0f };
 	};
 
+	struct ConstraintComponent
+	{
+		enum class ConstraintType
+		{
+			Hinge,
+			BallSocket,
+			Fixed,
+			Slider,
+			Distance,
+			Spring,
+			Cone
+        };
+
+		struct ConstraintEntry
+		{
+			ConstraintType type{ ConstraintType::Fixed };
+			unsigned int connectedEntity{ 0 };
+			float anchor[3]{ 0.0f, 0.0f, 0.0f };
+			float connectedAnchor[3]{ 0.0f, 0.0f, 0.0f };
+			float axis[3]{ 1.0f, 0.0f, 0.0f };
+			float limits[2]{ 0.0f, 0.0f };
+			float springStiffness{ 0.0f };
+			float springDamping{ 0.0f };
+			bool breakable{ false };
+			float breakForce{ 0.0f };
+			float breakTorque{ 0.0f };
+		};
+
+		std::vector<ConstraintEntry> constraints{ ConstraintEntry{} };
+	};
+
 	struct LogicComponent
 	{
 		std::string scriptPath;      // Python script path (empty if not used)

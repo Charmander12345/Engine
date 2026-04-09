@@ -20,6 +20,7 @@ namespace JPH {
     class ObjectLayerPairFilter;
     struct BodyID;
     class CharacterVirtual;
+    class Constraint;
 }
 
 /// Direct Jolt-backed physics implementation.
@@ -34,6 +35,9 @@ public:
     using BodyState = PhysicsTypes::BodyState;
     using CollisionEventData = PhysicsTypes::CollisionEventData;
     using RaycastResult = PhysicsTypes::RaycastResult;
+    using ConstraintHandle = PhysicsTypes::ConstraintHandle;
+    static constexpr ConstraintHandle InvalidConstraint = PhysicsTypes::InvalidConstraint;
+    using ConstraintDesc = PhysicsTypes::ConstraintDesc;
     using CharacterHandle = PhysicsTypes::CharacterHandle;
     static constexpr CharacterHandle InvalidCharacter = PhysicsTypes::InvalidCharacter;
     using CharacterDesc = PhysicsTypes::CharacterDesc;
@@ -101,6 +105,11 @@ public:
 
     BodyHandle getBodyForEntity(uint32_t entity) const;
 
+    ConstraintHandle createConstraint(const ConstraintDesc& desc);
+    void             removeConstraint(ConstraintHandle handle);
+    void             removeAllConstraints();
+    ConstraintHandle getConstraintById(uint64_t constraintId) const;
+
     // ── Character Controller ────────────────────────────────────────
     CharacterHandle createCharacter(const CharacterDesc& desc);
     void            removeCharacter(CharacterHandle handle);
@@ -129,6 +138,13 @@ private:
     // ── Entity ↔ Jolt BodyID mapping ────────────────────────────────
     std::map<uint32_t, uint32_t> m_entityToBodyID;   // ECS entity → Jolt BodyID raw value
     std::map<uint32_t, uint32_t> m_bodyIDToEntity;   // Jolt BodyID raw value → ECS entity
+
+    std::map<ConstraintHandle, JPH::Constraint*>      m_handleToConstraint;
+    std::map<ConstraintHandle, std::pair<uint32_t, uint32_t>> m_constraintHandleToBodies;
+    std::map<uint64_t, ConstraintHandle>              m_constraintIdToHandle;
+    std::map<ConstraintHandle, uint64_t>              m_handleToConstraintId;
+    std::map<ConstraintHandle, uint32_t>              m_constraintHandleToEntity;
+    ConstraintHandle                                   m_nextConstraintHandle{ 1 };
 
     // ── Character Controller ────────────────────────────────────────
     std::map<CharacterHandle, JPH::CharacterVirtual*> m_handleToCharacter;

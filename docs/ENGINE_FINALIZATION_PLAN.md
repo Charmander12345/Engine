@@ -82,11 +82,13 @@
 
 ### 2.1 Physics Constraints / Joints
 
-**Status:** ❌ Fehlend | **Aufwand:** Mittel | **Priorität:** 🔴 Kritisch
+**Status:** ⚠️ Teilweise | **Aufwand:** Mittel | **Priorität:** 🔴 Kritisch
 
 **Problem:** Keine Verbindungen zwischen Rigidbodies. Türen, Fahrzeuge, Ragdolls, Ketten, Brücken sind unmöglich.
 
 **Vergleich:** Unity (HingeJoint, ConfigurableJoint), Unreal (Physics Constraints). Jolt und PhysX unterstützen Constraints nativ.
+
+**Aktuell umgesetzt:** `ConstraintComponent` als ECS-Datenbasis inklusive Level-Serialisierung, Editor-Inspector/Add-Component-Integration sowie Komponentenkind-Unterstützung in C++/Python (`Component_Constraint`, Attach/Detach/Query). Laufzeitseitig werden `Fixed`-, `Hinge`-, `Distance`-, `BallSocket`-, `Slider`-, `Spring`- und `Cone`-Constraints jetzt in `PhysicsWorld` / `JoltBackend` als echte Jolt-Constraints erzeugt und verwaltet. Ein Entity kann dabei mehrere Constraint-Einträge gleichzeitig besitzen. Der Inspector bietet außerdem eine Szenen-Entity-Auswahl für `connectedEntity` statt reiner ID-Eingabe.
 
 #### Implementierungsschritte
 

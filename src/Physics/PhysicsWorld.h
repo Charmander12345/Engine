@@ -128,6 +128,7 @@ private:
 
     // ── ECS ↔ Backend sync ──────────────────────────────────────────
     void syncBodiesToBackend();
+    void syncConstraintsToBackend();
     void syncBodiesFromBackend();
     void syncCharactersToBackend();
     void syncCharactersFromBackend();
@@ -148,9 +149,11 @@ private:
     // ── Entity ↔ backend handle tracking ────────────────────────────
     std::set<uint32_t> m_trackedEntities;     // entities that have a body in the backend
     std::set<uint32_t> m_trackedCharacters;   // entities that have a character in the backend
+    std::set<uint64_t> m_trackedConstraints;  // logical constraint ids that own a backend constraint
     std::set<uint32_t> m_editorDirtyBodies;   // bodies whose ECS state was explicitly edited this frame
     std::map<uint32_t, uint64_t> m_bodyConfigHashes;
     std::map<uint32_t, uint64_t> m_bodyTransformHashes;
+    std::map<uint64_t, uint64_t> m_constraintConfigHashes;
 
     // ── Collision / overlap data ────────────────────────────────────
     std::vector<CollisionEvent>  m_collisionEvents;

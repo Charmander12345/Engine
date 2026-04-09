@@ -885,6 +885,7 @@ namespace
         PyModule_AddIntConstant(module, "Component_Light", static_cast<int>(ECS::ComponentKind::Light));
         PyModule_AddIntConstant(module, "Component_Camera", static_cast<int>(ECS::ComponentKind::Camera));
         PyModule_AddIntConstant(module, "Component_Physics", static_cast<int>(ECS::ComponentKind::Physics));
+        PyModule_AddIntConstant(module, "Component_Constraint", static_cast<int>(ECS::ComponentKind::Constraint));
         PyModule_AddIntConstant(module, "Component_Logic", static_cast<int>(ECS::ComponentKind::Logic));
         PyModule_AddIntConstant(module, "Component_Name", static_cast<int>(ECS::ComponentKind::Name));
         PyModule_AddIntConstant(module, "Component_Collision", static_cast<int>(ECS::ComponentKind::Collision));

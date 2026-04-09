@@ -34,7 +34,8 @@ enum class ComponentKind : size_t
 	Animation,
 	CharacterController,
 	ParticleEmitter,
-	AudioSource
+ AudioSource,
+	Constraint
 };
 
 template<typename T>
@@ -74,6 +75,12 @@ template<>
 struct ComponentTraits<PhysicsComponent>
 {
 	static constexpr ComponentKind kind = ComponentKind::Physics;
+};
+
+template<>
+struct ComponentTraits<ConstraintComponent>
+{
+	static constexpr ComponentKind kind = ComponentKind::Constraint;
 };
 
 template<>
@@ -264,6 +271,7 @@ public:
 	SparseSet<CharacterControllerComponent, MaxEntities> m_characterControllerComponents;
 	SparseSet<ParticleEmitterComponent, MaxEntities> m_particleEmitterComponents;
 	SparseSet<AudioSourceComponent, MaxEntities> m_audioSourceComponents;
+	SparseSet<ConstraintComponent, MaxEntities> m_constraintComponents;
 
 	/// Empty vector
 	static inline const std::vector<Entity> s_emptyChildren{};
@@ -367,6 +375,10 @@ inline SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage()
 	{
 		return m_physicsComponents;
 	}
+    else if constexpr (std::is_same_v<T, ConstraintComponent>)
+	{
+		return m_constraintComponents;
+	}
 	else if constexpr (std::is_same_v<T, NameComponent>)
 	{
 		return m_nameComponents;
@@ -405,8 +417,8 @@ inline SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage()
 	}
 	else
 	{
-		static_assert(std::is_same_v<T, AudioSourceComponent>, "Unsupported component type");
-		return m_audioSourceComponents;
+       static_assert(std::is_same_v<T, ConstraintComponent>, "Unsupported component type");
+		return m_constraintComponents;
 	}
 }
 
@@ -437,6 +449,10 @@ inline const SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage() con
 	{
 		return m_physicsComponents;
 	}
+    else if constexpr (std::is_same_v<T, ConstraintComponent>)
+	{
+		return m_constraintComponents;
+	}
 	else if constexpr (std::is_same_v<T, NameComponent>)
 	{
 		return m_nameComponents;
@@ -475,8 +491,8 @@ inline const SparseSet<T, ECSManager::MaxEntities>& ECSManager::getStorage() con
 	}
 	else
 	{
-		static_assert(std::is_same_v<T, AudioSourceComponent>, "Unsupported component type");
-		return m_audioSourceComponents;
+       static_assert(std::is_same_v<T, ConstraintComponent>, "Unsupported component type");
+		return m_constraintComponents;
 	}
 }
 

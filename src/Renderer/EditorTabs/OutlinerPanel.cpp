@@ -160,6 +160,7 @@ void setCompFieldWithUndo(unsigned int entity, const std::string& desc,
     {
         if constexpr (std::is_same_v<CompT, ECS::CollisionComponent>
             || std::is_same_v<CompT, ECS::PhysicsComponent>
+            || std::is_same_v<CompT, ECS::ConstraintComponent>
             || std::is_same_v<CompT, ECS::TransformComponent>
             || std::is_same_v<CompT, ECS::HeightFieldComponent>)
         {
@@ -450,6 +451,20 @@ void OutlinerPanel::populateDetails(unsigned int entity)
     }
 
     auto& ecs = ECS::ECSManager::Instance();
+
+    const auto getEntityLabel = [&ecs](ECS::Entity id) -> std::string
+    {
+        if (id == 0)
+            return "(None)";
+
+        std::string label = "Entity " + std::to_string(id);
+        if (const auto* nc = ecs.getComponent<ECS::NameComponent>(id))
+        {
+            if (!nc->displayName.empty())
+                label = nc->displayName;
+        }
+        return label + " (#" + std::to_string(id) + ")";
+    };
 
     std::vector<WidgetElement> entityLines;
     entityLines.push_back(makeTextLine("ID: " + std::to_string(entity)));
@@ -1487,6 +1502,246 @@ void OutlinerPanel::populateDetails(unsigned int entity)
         });
     }
 
+    if (const auto* constraintComponent = ecs.getComponent<ECS::ConstraintComponent>(entity))
+    {
+        std::vector<WidgetElement> summaryLines;
+        summaryLines.push_back(makeTextLine("Constraint Count: " + std::to_string(constraintComponent->constraints.size())));
+        {
+            WidgetElement addBtn = EditorUIBuilder::makePrimaryButton(
+                "Details.Constraint.Add", "Add Constraint",
+                [this, entity]() {
+                    setCompFieldWithUndo<ECS::ConstraintComponent>(entity, "Add Constraint",
+                        [](ECS::ConstraintComponent& c) { c.constraints.emplace_back(); });
+                    populateDetails(entity);
+                },
+                EditorTheme::Scaled(Vec2{ 0.0f, 26.0f }));
+            addBtn.fillX = true;
+            addBtn.padding = EditorTheme::Scaled(Vec2{ 0.0f, 4.0f });
+            summaryLines.push_back(std::move(addBtn));
+        }
+
+        addSeparator("Constraints", summaryLines, [this, entity, saved = *constraintComponent]() {
+            ECS::ECSManager::Instance().removeComponent<ECS::ConstraintComponent>(entity);
+            if (auto* level = DiagnosticsManager::Instance().getActiveLevelSoft()) level->setIsSaved(false);
+            populateDetails(entity);
+            UndoRedoManager::Instance().pushCommand({
+                "Remove Constraints",
+                [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::ConstraintComponent>(entity); },
+                [entity, saved]() { ECS::ECSManager::Instance().setComponent<ECS::ConstraintComponent>(entity, saved); }
+            });
+        });
+
+        for (size_t constraintIndex = 0; constraintIndex < constraintComponent->constraints.size(); ++constraintIndex)
+        {
+            const auto& constraint = constraintComponent->constraints[constraintIndex];
+            std::vector<WidgetElement> lines;
+            const std::string suffix = "." + std::to_string(constraintIndex);
+
+            {
+                int currentIdx = static_cast<int>(constraint.type);
+                DropDownWidget typeDropdown;
+                typeDropdown.setItems({ "Hinge", "Ball Socket", "Fixed", "Slider", "Distance", "Spring", "Cone" });
+                typeDropdown.setSelectedIndex(currentIdx);
+                typeDropdown.setFont(EditorTheme::Get().fontDefault);
+                typeDropdown.setFontSize(EditorTheme::Get().fontSizeSmall);
+                typeDropdown.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
+                typeDropdown.setPadding(EditorTheme::Get().paddingNormal);
+                typeDropdown.setOnSelectionChanged([entity, constraintIndex](int idx) {
+                    setCompFieldWithUndo<ECS::ConstraintComponent>(entity, "Change Constraint Type",
+                        [constraintIndex, idx](ECS::ConstraintComponent& c) {
+                            if (constraintIndex < c.constraints.size())
+                                c.constraints[constraintIndex].type = static_cast<ECS::ConstraintComponent::ConstraintType>(idx);
+                        });
+                });
+
+                WidgetElement row{};
+                row.type = WidgetElementType::StackPanel;
+                row.orientation = StackOrientation::Horizontal;
+                row.fillX = true;
+                row.sizeToContent = true;
+                row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                row.padding = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+                row.runtimeOnly = true;
+
+                WidgetElement lbl = makeTextLine("Type");
+                lbl.minSize = EditorTheme::Scaled(Vec2{ 90.0f, 20.0f });
+                lbl.fillX = false;
+                row.children.push_back(std::move(lbl));
+
+                WidgetElement ddEl = typeDropdown.toElement();
+                ddEl.id = "Details.Constraint.Type" + suffix;
+                ddEl.fillX = true;
+                ddEl.runtimeOnly = true;
+                row.children.push_back(std::move(ddEl));
+                lines.push_back(std::move(row));
+            }
+
+            {
+                DropdownButtonWidget dropdown;
+                dropdown.setText(getEntityLabel(static_cast<ECS::Entity>(constraint.connectedEntity)));
+                dropdown.setFont(EditorTheme::Get().fontDefault);
+                dropdown.setFontSize(EditorTheme::Get().fontSizeSmall);
+                dropdown.setMinSize(Vec2{ 0.0f, EditorTheme::Get().rowHeightSmall });
+                dropdown.setPadding(EditorTheme::Get().paddingNormal);
+                dropdown.setBackgroundColor(EditorTheme::Get().dropdownBackground);
+                dropdown.setHoverColor(EditorTheme::Get().dropdownHover);
+                dropdown.setTextColor(EditorTheme::Get().dropdownText);
+
+                dropdown.addItem("(None)", [entity, constraintIndex, this]() {
+                    setCompFieldWithUndo<ECS::ConstraintComponent>(entity, "Clear Connected Entity",
+                        [constraintIndex](ECS::ConstraintComponent& c) {
+                            if (constraintIndex < c.constraints.size())
+                                c.constraints[constraintIndex].connectedEntity = 0;
+                        });
+                    populateDetails(entity);
+                });
+
+                ECS::Schema schema;
+                for (const auto otherEntity : ecs.getEntitiesMatchingSchema(schema))
+                {
+                    if (otherEntity == entity)
+                        continue;
+
+                    const std::string label = getEntityLabel(otherEntity);
+                    dropdown.addItem(label, [entity, constraintIndex, otherEntity, this]() {
+                        setCompFieldWithUndo<ECS::ConstraintComponent>(entity, "Change Connected Entity",
+                            [constraintIndex, otherEntity](ECS::ConstraintComponent& c) {
+                                if (constraintIndex < c.constraints.size())
+                                    c.constraints[constraintIndex].connectedEntity = otherEntity;
+                            });
+                        populateDetails(entity);
+                    });
+                }
+
+                WidgetElement row{};
+                row.type = WidgetElementType::StackPanel;
+                row.orientation = StackOrientation::Horizontal;
+                row.fillX = true;
+                row.sizeToContent = true;
+                row.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f };
+                row.padding = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
+                row.runtimeOnly = true;
+
+                WidgetElement lbl = makeTextLine("Attached Entity");
+                lbl.minSize = EditorTheme::Scaled(Vec2{ 90.0f, 20.0f });
+                lbl.fillX = false;
+                row.children.push_back(std::move(lbl));
+
+                WidgetElement ddEl = dropdown.toElement();
+                ddEl.id = "Details.Constraint.ConnectedEntity" + suffix;
+                ddEl.fillX = true;
+                ddEl.runtimeOnly = true;
+                row.children.push_back(std::move(ddEl));
+                lines.push_back(std::move(row));
+            }
+
+            lines.push_back(makeTextLine("Attached Entity ID: " + std::to_string(constraint.connectedEntity)));
+
+            lines.push_back(makeVec3Row("Details.Constraint.Anchor" + suffix, "Anchor", constraint.anchor,
+                [entity, constraintIndex](int axis, float val) {
+                    setCompFieldWithUndo<ECS::ConstraintComponent>(entity, "Change Constraint Anchor",
+                        [constraintIndex, axis, val](ECS::ConstraintComponent& c) {
+                            if (constraintIndex < c.constraints.size())
+                                c.constraints[constraintIndex].anchor[axis] = val;
+                        });
+                }));
+
+            lines.push_back(makeVec3Row("Details.Constraint.ConnectedAnchor" + suffix, "Connected Anchor", constraint.connectedAnchor,
+                [entity, constraintIndex](int axis, float val) {
+                    setCompFieldWithUndo<ECS::ConstraintComponent>(entity, "Change Connected Anchor",
+                        [constraintIndex, axis, val](ECS::ConstraintComponent& c) {
+                            if (constraintIndex < c.constraints.size())
+                                c.constraints[constraintIndex].connectedAnchor[axis] = val;
+                        });
+                }));
+
+            lines.push_back(makeVec3Row("Details.Constraint.Axis" + suffix, "Axis", constraint.axis,
+                [entity, constraintIndex](int axis, float val) {
+                    setCompFieldWithUndo<ECS::ConstraintComponent>(entity, "Change Constraint Axis",
+                        [constraintIndex, axis, val](ECS::ConstraintComponent& c) {
+                            if (constraintIndex < c.constraints.size())
+                                c.constraints[constraintIndex].axis[axis] = val;
+                        });
+                }));
+
+            lines.push_back(makeFloatEntry("Details.Constraint.MinLimit" + suffix, "Limit Min", constraint.limits[0],
+                [entity, constraintIndex](float val) {
+                    setCompFieldWithUndo<ECS::ConstraintComponent>(entity, "Change Constraint Min Limit",
+                        [constraintIndex, val](ECS::ConstraintComponent& c) {
+                            if (constraintIndex < c.constraints.size())
+                                c.constraints[constraintIndex].limits[0] = val;
+                        });
+                }));
+
+            lines.push_back(makeFloatEntry("Details.Constraint.MaxLimit" + suffix, "Limit Max", constraint.limits[1],
+                [entity, constraintIndex](float val) {
+                    setCompFieldWithUndo<ECS::ConstraintComponent>(entity, "Change Constraint Max Limit",
+                        [constraintIndex, val](ECS::ConstraintComponent& c) {
+                            if (constraintIndex < c.constraints.size())
+                                c.constraints[constraintIndex].limits[1] = val;
+                        });
+                }));
+
+            lines.push_back(makeFloatEntry("Details.Constraint.SpringStiffness" + suffix, "Spring Stiffness", constraint.springStiffness,
+                [entity, constraintIndex](float val) {
+                    setCompFieldWithUndo<ECS::ConstraintComponent>(entity, "Change Spring Stiffness",
+                        [constraintIndex, val](ECS::ConstraintComponent& c) {
+                            if (constraintIndex < c.constraints.size())
+                                c.constraints[constraintIndex].springStiffness = val;
+                        });
+                }));
+
+            lines.push_back(makeFloatEntry("Details.Constraint.SpringDamping" + suffix, "Spring Damping", constraint.springDamping,
+                [entity, constraintIndex](float val) {
+                    setCompFieldWithUndo<ECS::ConstraintComponent>(entity, "Change Spring Damping",
+                        [constraintIndex, val](ECS::ConstraintComponent& c) {
+                            if (constraintIndex < c.constraints.size())
+                                c.constraints[constraintIndex].springDamping = val;
+                        });
+                }));
+
+            lines.push_back(makeCheckBoxRow("Details.Constraint.Breakable" + suffix, "Breakable", constraint.breakable,
+                [this, entity, constraintIndex](bool val) {
+                    setCompFieldWithUndo<ECS::ConstraintComponent>(entity, "Change Constraint Breakable",
+                        [constraintIndex, val](ECS::ConstraintComponent& c) {
+                            if (constraintIndex < c.constraints.size())
+                                c.constraints[constraintIndex].breakable = val;
+                        });
+                    populateDetails(entity);
+                }));
+
+            if (constraint.breakable)
+            {
+                lines.push_back(makeFloatEntry("Details.Constraint.BreakForce" + suffix, "Break Force", constraint.breakForce,
+                    [entity, constraintIndex](float val) {
+                        setCompFieldWithUndo<ECS::ConstraintComponent>(entity, "Change Break Force",
+                            [constraintIndex, val](ECS::ConstraintComponent& c) {
+                                if (constraintIndex < c.constraints.size())
+                                    c.constraints[constraintIndex].breakForce = val;
+                            });
+                    }));
+
+                lines.push_back(makeFloatEntry("Details.Constraint.BreakTorque" + suffix, "Break Torque", constraint.breakTorque,
+                    [entity, constraintIndex](float val) {
+                        setCompFieldWithUndo<ECS::ConstraintComponent>(entity, "Change Break Torque",
+                            [constraintIndex, val](ECS::ConstraintComponent& c) {
+                                if (constraintIndex < c.constraints.size())
+                                    c.constraints[constraintIndex].breakTorque = val;
+                            });
+                    }));
+            }
+
+            addSeparator("Constraint " + std::to_string(constraintIndex + 1), lines, [this, entity, constraintIndex]() {
+                setCompFieldWithUndo<ECS::ConstraintComponent>(entity, "Remove Constraint Entry",
+                    [constraintIndex](ECS::ConstraintComponent& c) {
+                        if (constraintIndex < c.constraints.size())
+                            c.constraints.erase(c.constraints.begin() + static_cast<std::ptrdiff_t>(constraintIndex));
+                    });
+                populateDetails(entity);
+            });
+        }
+    }
+
 
     // "Add Component" dropdown button
     {
@@ -1533,6 +1788,9 @@ void OutlinerPanel::populateDetails(unsigned int entity)
               [entity]() {
                   ECS::ECSManager::Instance().removeComponent<ECS::PhysicsComponent>(entity);
               } },
+            { "Constraint", ecs.hasComponent<ECS::ConstraintComponent>(entity),
+              [entity]() { ECS::ECSManager::Instance().addComponent<ECS::ConstraintComponent>(entity); },
+              [entity]() { ECS::ECSManager::Instance().removeComponent<ECS::ConstraintComponent>(entity); } },
             { "Logic", ecs.hasComponent<ECS::LogicComponent>(entity),
               [this, entity]() {
                   auto& e = ECS::ECSManager::Instance();

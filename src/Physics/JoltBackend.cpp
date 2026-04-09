@@ -29,8 +29,17 @@
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/Body/BodyLock.h>
+#include <Jolt/Physics/Body/BodyLockMulti.h>
 #include <Jolt/Physics/Body/Body.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
+#include <Jolt/Physics/Constraints/Constraint.h>
+#include <Jolt/Physics/Constraints/DistanceConstraint.h>
+#include <Jolt/Physics/Constraints/FixedConstraint.h>
+#include <Jolt/Physics/Constraints/HingeConstraint.h>
+#include <Jolt/Physics/Constraints/PointConstraint.h>
+#include <Jolt/Physics/Constraints/SliderConstraint.h>
+#include <Jolt/Physics/Constraints/ConeConstraint.h>
+#include <Jolt/Physics/Constraints/SpringSettings.h>
 
 #include <cmath>
 #include <algorithm>
@@ -65,6 +74,12 @@ namespace
 {
     constexpr float cShapeMinExtent = 0.001f;
     constexpr float cBoxLikeTolerance = 1.0e-4f;
+    constexpr int cPhysicsCollisionSteps = 4;
+    constexpr float cMaxInternalPhysicsSubstep = 1.0f / 120.0f;
+    constexpr int cMaxInternalPhysicsSubsteps = 4;
+    constexpr uint32_t cConstraintPriority = 100;
+    constexpr uint32_t cConstraintVelocitySteps = 16;
+    constexpr uint32_t cConstraintPositionSteps = 16;
 
     bool isNear(float a, float b, float tolerance)
     {
@@ -170,6 +185,36 @@ namespace
             outShape = new JPH::OffsetCenterOfMassShape(outShape, JPH::Vec3(cx, cy, cz));
 
         return true;
+    }
+
+    const char* constraintTypeToString(JoltBackend::ConstraintDesc::Type type)
+    {
+        switch (type)
+        {
+        case JoltBackend::ConstraintDesc::Type::Fixed: return "Fixed";
+        case JoltBackend::ConstraintDesc::Type::Hinge: return "Hinge";
+        case JoltBackend::ConstraintDesc::Type::Distance: return "Distance";
+        default: return "Unknown";
+        }
+    }
+
+    const char* constraintSubTypeToString(JPH::EConstraintSubType type)
+    {
+        switch (type)
+        {
+        case JPH::EConstraintSubType::Fixed: return "Fixed";
+        case JPH::EConstraintSubType::Hinge: return "Hinge";
+        case JPH::EConstraintSubType::Distance: return "Distance";
+        default: return "Unknown";
+        }
+    }
+
+    template <typename TSettings>
+    void applyConstraintStabilitySettings(TSettings& settings)
+    {
+        settings.mConstraintPriority = cConstraintPriority;
+        settings.mNumVelocityStepsOverride = cConstraintVelocitySteps;
+        settings.mNumPositionStepsOverride = cConstraintPositionSteps;
     }
 }
 
@@ -409,11 +454,11 @@ void JoltBackend::initialize()
     // single position iteration, while mNumVelocitySteps / mNumPositionSteps
     // control how much contact resolution work is done per step.
     JPH::PhysicsSettings ps = m_physicsSystem->GetPhysicsSettings();
-    ps.mBaumgarte                  = 0.35f;  // default 0.2  — faster penetration recovery
-    ps.mNumVelocitySteps           = 12;     // default 10   — stronger contact/friction solving
-    ps.mNumPositionSteps           = 8;      // default 2    — more position correction passes
-    ps.mMaxPenetrationDistance     = 1.0f;   // default 0.2  — allow deeper overlap recovery in one frame
-    ps.mSpeculativeContactDistance = 0.05f;  // default 0.02 — wider contact buffer for edge stability
+    ps.mBaumgarte                  = 0.30f;  // slightly softer than before to avoid over-aggressive corrections around joints
+    ps.mNumVelocitySteps           = 16;     // stronger contact/friction solving for constrained body pairs
+    ps.mNumPositionSteps           = 12;     // more position correction passes for joint + contact stacks
+    ps.mMaxPenetrationDistance     = 0.25f;  // reduce visually obvious interpenetration before correction
+    ps.mSpeculativeContactDistance = 0.03f;  // keep some contact margin without making contacts too soft
     m_physicsSystem->SetPhysicsSettings(ps);
 
     auto listener = std::make_unique<EngineContactListener>();
@@ -423,6 +468,12 @@ void JoltBackend::initialize()
 
     m_entityToBodyID.clear();
     m_bodyIDToEntity.clear();
+    m_constraintIdToHandle.clear();
+    m_handleToConstraintId.clear();
+    m_constraintHandleToEntity.clear();
+    m_constraintHandleToBodies.clear();
+    m_handleToConstraint.clear();
+    m_nextConstraintHandle = 1;
 
     m_initialized = true;
     Logger::Instance().log(Logger::Category::Engine, "JoltBackend initialised (Jolt Physics).", Logger::LogLevel::INFO);
@@ -431,6 +482,7 @@ void JoltBackend::initialize()
 void JoltBackend::shutdown()
 {
     removeAllCharacters();
+    removeAllConstraints();
     removeAllBodies();
 
     if (m_physicsSystem)
@@ -451,13 +503,28 @@ void JoltBackend::shutdown()
         JPH::Factory::sInstance = nullptr;
     }
 
+    m_constraintIdToHandle.clear();
+    m_handleToConstraintId.clear();
+    m_constraintHandleToEntity.clear();
+    m_constraintHandleToBodies.clear();
+    m_handleToConstraint.clear();
+    m_nextConstraintHandle = 1;
+
     m_initialized = false;
 }
 
 void JoltBackend::update(float fixedDt)
 {
     if (!m_initialized || !m_physicsSystem) return;
-    m_physicsSystem->Update(fixedDt, 4, m_tempAllocator.get(), m_jobSystem.get());
+
+    const int substeps = std::clamp(
+        static_cast<int>(std::ceil(fixedDt / cMaxInternalPhysicsSubstep)),
+        1,
+        cMaxInternalPhysicsSubsteps);
+
+    const float substepDt = fixedDt / static_cast<float>(substeps);
+    for (int i = 0; i < substeps; ++i)
+        m_physicsSystem->Update(substepDt, cPhysicsCollisionSteps, m_tempAllocator.get(), m_jobSystem.get());
 }
 
 // ── Gravity ─────────────────────────────────────────────────────────────
@@ -740,8 +807,8 @@ JoltBackend::BodyHandle JoltBackend::createBody(const BodyDesc& desc)
         {
             settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
             settings.mMassPropertiesOverride.mMass = desc.mass;
-            settings.mNumVelocityStepsOverride = 12;
-            settings.mNumPositionStepsOverride = 8;
+            settings.mNumVelocityStepsOverride = cConstraintVelocitySteps;
+            settings.mNumPositionStepsOverride = cConstraintPositionSteps;
         }
         settings.mGravityFactor      = desc.gravityFactor;
         settings.mLinearDamping      = desc.linearDamping;
@@ -847,6 +914,15 @@ void JoltBackend::removeBody(BodyHandle handle)
     if (!m_physicsSystem) return;
 
     uint32_t rawId = static_cast<uint32_t>(handle);
+    std::vector<ConstraintHandle> constraintsToRemove;
+    for (const auto& [constraintHandle, bodies] : m_constraintHandleToBodies)
+    {
+        if (bodies.first == rawId || bodies.second == rawId)
+            constraintsToRemove.push_back(constraintHandle);
+    }
+    for (ConstraintHandle constraintHandle : constraintsToRemove)
+        removeConstraint(constraintHandle);
+
     JPH::BodyInterface& bi = m_physicsSystem->GetBodyInterface();
     JPH::BodyID id(rawId);
     bi.RemoveBody(id);
@@ -873,6 +949,226 @@ void JoltBackend::removeAllBodies()
     }
     m_entityToBodyID.clear();
     m_bodyIDToEntity.clear();
+}
+
+JoltBackend::ConstraintHandle JoltBackend::createConstraint(const ConstraintDesc& desc)
+{
+    if (!m_physicsSystem) return InvalidConstraint;
+    if (desc.bodyHandleA == InvalidBody || desc.bodyHandleB == InvalidBody || desc.bodyHandleA == desc.bodyHandleB)
+        return InvalidConstraint;
+
+    if (auto existing = getConstraintById(desc.constraintId); existing != InvalidConstraint)
+        removeConstraint(existing);
+
+    const JPH::BodyID bodyIDs[2] = {
+        JPH::BodyID(static_cast<uint32_t>(desc.bodyHandleA)),
+        JPH::BodyID(static_cast<uint32_t>(desc.bodyHandleB))
+    };
+
+    JPH::BodyLockMultiWrite bodyLock(m_physicsSystem->GetBodyLockInterface(), bodyIDs, 2);
+    JPH::Body* body1 = bodyLock.GetBody(0);
+    JPH::Body* body2 = bodyLock.GetBody(1);
+    if (body1 == nullptr || body2 == nullptr)
+        return InvalidConstraint;
+
+    JPH::Constraint* constraint = nullptr;
+    constexpr float deg2rad = 3.14159265358979f / 180.0f;
+    constexpr float pi = 3.14159265358979f;
+
+    switch (desc.type)
+    {
+    case ConstraintDesc::Type::Fixed:
+    {
+        JPH::FixedConstraintSettings settings;
+        applyConstraintStabilitySettings(settings);
+        settings.mSpace = JPH::EConstraintSpace::WorldSpace;
+        settings.mAutoDetectPoint = desc.autoDetectPoint;
+        settings.mPoint1 = JPH::RVec3(desc.point1[0], desc.point1[1], desc.point1[2]);
+        settings.mPoint2 = JPH::RVec3(desc.point2[0], desc.point2[1], desc.point2[2]);
+        settings.mAxisX1 = JPH::Vec3(desc.axisX1[0], desc.axisX1[1], desc.axisX1[2]);
+        settings.mAxisY1 = JPH::Vec3(desc.axisY1[0], desc.axisY1[1], desc.axisY1[2]);
+        settings.mAxisX2 = JPH::Vec3(desc.axisX2[0], desc.axisX2[1], desc.axisX2[2]);
+        settings.mAxisY2 = JPH::Vec3(desc.axisY2[0], desc.axisY2[1], desc.axisY2[2]);
+        constraint = settings.Create(*body1, *body2);
+        break;
+    }
+    case ConstraintDesc::Type::Hinge:
+    {
+        JPH::HingeConstraintSettings settings;
+        applyConstraintStabilitySettings(settings);
+        settings.mSpace = JPH::EConstraintSpace::WorldSpace;
+        settings.mPoint1 = JPH::RVec3(desc.point1[0], desc.point1[1], desc.point1[2]);
+        settings.mPoint2 = JPH::RVec3(desc.point2[0], desc.point2[1], desc.point2[2]);
+        settings.mHingeAxis1 = JPH::Vec3(desc.axisX1[0], desc.axisX1[1], desc.axisX1[2]);
+        settings.mNormalAxis1 = JPH::Vec3(desc.axisY1[0], desc.axisY1[1], desc.axisY1[2]);
+        settings.mHingeAxis2 = JPH::Vec3(desc.axisX2[0], desc.axisX2[1], desc.axisX2[2]);
+        settings.mNormalAxis2 = JPH::Vec3(desc.axisY2[0], desc.axisY2[1], desc.axisY2[2]);
+        settings.mLimitsMin = std::clamp(desc.limits[0] * deg2rad, -pi, 0.0f);
+        settings.mLimitsMax = std::clamp(desc.limits[1] * deg2rad, 0.0f, pi);
+        settings.mLimitsSpringSettings.mMode = JPH::ESpringMode::StiffnessAndDamping;
+        settings.mLimitsSpringSettings.mStiffness = desc.springStiffness;
+        settings.mLimitsSpringSettings.mDamping = desc.springDamping;
+        constraint = settings.Create(*body1, *body2);
+        break;
+    }
+    case ConstraintDesc::Type::Distance:
+    {
+        JPH::DistanceConstraintSettings settings;
+        applyConstraintStabilitySettings(settings);
+        settings.mSpace = JPH::EConstraintSpace::WorldSpace;
+        settings.mPoint1 = JPH::RVec3(desc.point1[0], desc.point1[1], desc.point1[2]);
+        settings.mPoint2 = JPH::RVec3(desc.point2[0], desc.point2[1], desc.point2[2]);
+        settings.mMinDistance = desc.limits[0];
+        settings.mMaxDistance = desc.limits[1];
+        settings.mLimitsSpringSettings.mMode = JPH::ESpringMode::StiffnessAndDamping;
+        settings.mLimitsSpringSettings.mStiffness = desc.springStiffness;
+        settings.mLimitsSpringSettings.mDamping = desc.springDamping;
+        constraint = settings.Create(*body1, *body2);
+        break;
+    }
+    case ConstraintDesc::Type::BallSocket:
+    {
+        JPH::PointConstraintSettings settings;
+        applyConstraintStabilitySettings(settings);
+        settings.mSpace = JPH::EConstraintSpace::WorldSpace;
+        settings.mPoint1 = JPH::RVec3(desc.point1[0], desc.point1[1], desc.point1[2]);
+        settings.mPoint2 = JPH::RVec3(desc.point2[0], desc.point2[1], desc.point2[2]);
+        constraint = settings.Create(*body1, *body2);
+        break;
+    }
+    case ConstraintDesc::Type::Slider:
+    {
+        JPH::SliderConstraintSettings settings;
+        applyConstraintStabilitySettings(settings);
+        settings.mSpace = JPH::EConstraintSpace::WorldSpace;
+        settings.mAutoDetectPoint = desc.autoDetectPoint;
+        settings.mPoint1 = JPH::RVec3(desc.point1[0], desc.point1[1], desc.point1[2]);
+        settings.mPoint2 = JPH::RVec3(desc.point2[0], desc.point2[1], desc.point2[2]);
+        settings.mSliderAxis1 = JPH::Vec3(desc.axisX1[0], desc.axisX1[1], desc.axisX1[2]);
+        settings.mNormalAxis1 = JPH::Vec3(desc.axisY1[0], desc.axisY1[1], desc.axisY1[2]);
+        settings.mSliderAxis2 = JPH::Vec3(desc.axisX2[0], desc.axisX2[1], desc.axisX2[2]);
+        settings.mNormalAxis2 = JPH::Vec3(desc.axisY2[0], desc.axisY2[1], desc.axisY2[2]);
+        settings.mLimitsMin = desc.limits[0];
+        settings.mLimitsMax = desc.limits[1];
+        settings.mLimitsSpringSettings.mMode = JPH::ESpringMode::StiffnessAndDamping;
+        settings.mLimitsSpringSettings.mStiffness = desc.springStiffness;
+        settings.mLimitsSpringSettings.mDamping = desc.springDamping;
+        constraint = settings.Create(*body1, *body2);
+        break;
+    }
+    case ConstraintDesc::Type::Spring:
+    {
+        JPH::DistanceConstraintSettings settings;
+        applyConstraintStabilitySettings(settings);
+        settings.mSpace = JPH::EConstraintSpace::WorldSpace;
+        settings.mPoint1 = JPH::RVec3(desc.point1[0], desc.point1[1], desc.point1[2]);
+        settings.mPoint2 = JPH::RVec3(desc.point2[0], desc.point2[1], desc.point2[2]);
+        settings.mMinDistance = desc.limits[0];
+        settings.mMaxDistance = desc.limits[1];
+        settings.mLimitsSpringSettings.mMode = JPH::ESpringMode::StiffnessAndDamping;
+        settings.mLimitsSpringSettings.mStiffness = desc.springStiffness;
+        settings.mLimitsSpringSettings.mDamping = desc.springDamping;
+        constraint = settings.Create(*body1, *body2);
+        break;
+    }
+    case ConstraintDesc::Type::Cone:
+    {
+        JPH::ConeConstraintSettings settings;
+        applyConstraintStabilitySettings(settings);
+        settings.mSpace = JPH::EConstraintSpace::WorldSpace;
+        settings.mPoint1 = JPH::RVec3(desc.point1[0], desc.point1[1], desc.point1[2]);
+        settings.mPoint2 = JPH::RVec3(desc.point2[0], desc.point2[1], desc.point2[2]);
+        settings.mTwistAxis1 = JPH::Vec3(desc.axisX1[0], desc.axisX1[1], desc.axisX1[2]);
+        settings.mTwistAxis2 = JPH::Vec3(desc.axisX2[0], desc.axisX2[1], desc.axisX2[2]);
+        settings.mHalfConeAngle = std::clamp(desc.limits[1] * deg2rad, 0.0f, pi);
+        constraint = settings.Create(*body1, *body2);
+        break;
+    }
+    default:
+        break;
+    }
+
+    if (constraint == nullptr)
+    {
+        Logger::Instance().log(Logger::Category::Engine,
+            "JoltBackend: failed to create " + std::string(constraintTypeToString(desc.type))
+            + " constraint for entity " + std::to_string(desc.entityId) + ".",
+            Logger::LogLevel::WARNING);
+        return InvalidConstraint;
+    }
+
+    m_physicsSystem->AddConstraint(constraint);
+
+    const ConstraintHandle handle = m_nextConstraintHandle++;
+    m_handleToConstraint[handle] = constraint;
+    m_constraintHandleToBodies[handle] = {
+        static_cast<uint32_t>(desc.bodyHandleA),
+        static_cast<uint32_t>(desc.bodyHandleB)
+    };
+    m_constraintIdToHandle[desc.constraintId] = handle;
+    m_handleToConstraintId[handle] = desc.constraintId;
+    m_constraintHandleToEntity[handle] = desc.entityId;
+
+    Logger::Instance().log(Logger::Category::Engine,
+        "JoltBackend: created " + std::string(constraintTypeToString(desc.type))
+        + " constraint for entity " + std::to_string(desc.entityId)
+        + " between bodies " + std::to_string(static_cast<uint32_t>(desc.bodyHandleA))
+        + " and " + std::to_string(static_cast<uint32_t>(desc.bodyHandleB)) + ".",
+        Logger::LogLevel::INFO);
+
+    return handle;
+}
+
+void JoltBackend::removeConstraint(ConstraintHandle handle)
+{
+    auto it = m_handleToConstraint.find(handle);
+    if (it == m_handleToConstraint.end())
+        return;
+
+    const JPH::EConstraintSubType subType = it->second->GetSubType();
+
+    if (m_physicsSystem)
+        m_physicsSystem->RemoveConstraint(it->second);
+
+    auto entityIt = m_constraintHandleToEntity.find(handle);
+    if (entityIt != m_constraintHandleToEntity.end())
+    {
+        Logger::Instance().log(Logger::Category::Engine,
+            "JoltBackend: removed " + std::string(constraintSubTypeToString(subType))
+            + " constraint for entity " + std::to_string(entityIt->second) + ".",
+            Logger::LogLevel::INFO);
+    }
+
+    m_handleToConstraint.erase(it);
+    m_constraintHandleToBodies.erase(handle);
+
+    entityIt = m_constraintHandleToEntity.find(handle);
+    if (entityIt != m_constraintHandleToEntity.end())
+    {
+        m_constraintHandleToEntity.erase(entityIt);
+    }
+}
+
+void JoltBackend::removeAllConstraints()
+{
+    std::vector<ConstraintHandle> handles;
+    handles.reserve(m_handleToConstraint.size());
+    for (const auto& [handle, constraint] : m_handleToConstraint)
+    {
+        (void)constraint;
+        handles.push_back(handle);
+    }
+
+    for (ConstraintHandle handle : handles)
+        removeConstraint(handle);
+}
+
+JoltBackend::ConstraintHandle JoltBackend::getConstraintById(uint64_t constraintId) const
+{
+    auto it = m_constraintIdToHandle.find(constraintId);
+    if (it != m_constraintIdToHandle.end())
+        return it->second;
+    return InvalidConstraint;
 }
 
 void JoltBackend::setBodyPositionRotation(BodyHandle handle,
