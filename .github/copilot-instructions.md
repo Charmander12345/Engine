@@ -10,8 +10,6 @@
 - Keep the `ENGINE_STATUS.md` document in the repository root up to date whenever changes are made to the engine project, just like `PROJECT_OVERVIEW.md`. All modifications should be reflected in this status document.
 - A major rework is planned: the editor will be fundamentally separated from the engine. The editor will connect to the engine core via an API and can be disabled during the build for the final game using a preprocessor definition (e.g., `#if ENGINE_EDITOR`). The build game functionality (Phase 10) will be re-implemented after this rework.
 - Whenever possible use stack allocations instead of heap allocations for better performance and memory management, especially in performance-critical sections of the code.
-- Use IPhysicsBackend only as a compatibility layer for externally exposed APIs (e.g., scripting), while keeping the internal physics implementation directly Jolt-based and maintaining the same exposed functions.
-- Only actual build-related functionality should reside under Build Pipeline; workspace tools should remain separate and be quickly accessible elsewhere in the UI.
 
 ## Implementation Approach
 - When asked to continue with the next implementation step, proceed directly with the implementation instead of only describing it as a future next step.
