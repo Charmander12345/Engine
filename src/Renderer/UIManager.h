@@ -26,6 +26,7 @@ class Renderer;
 class PopupWindow;
 class ConsoleTab;
 class ProfilerTab;
+class NotificationsTab;
 class AudioPreviewTab;
 class ParticleEditorTab;
 class ShaderViewerTab;
@@ -188,6 +189,7 @@ public:
 	void openLandscapeManagerPopup();
 	void openEngineSettingsPopup();
 	void openEditorSettingsPopup();
+   void openWorkspaceToolsPopup();
 	void openShortcutHelpPopup();
 	void openAssetReferencesPopup(const std::string& title, const std::string& assetPath,
 		const std::vector<std::pair<std::string, std::string>>& items);
@@ -212,6 +214,11 @@ public:
 	void openProfilerTab();
 	void closeProfilerTab();
 	bool isProfilerOpen() const;
+
+	// Notifications tab
+	void openNotificationsTab();
+	void closeNotificationsTab();
+	bool isNotificationsTabOpen() const;
 
 	// Audio Preview tab
 	void openAudioPreviewTab(const std::string& assetPath);
@@ -455,6 +462,9 @@ private:
 	// Profiler / Performance-Monitor tab (extracted to EditorTabs/ProfilerTab.h)
 	std::unique_ptr<ProfilerTab> m_profilerTab;
 
+	// Notifications tab (extracted to EditorTabs/NotificationsTab.h)
+	std::unique_ptr<NotificationsTab> m_notificationsTab;
+
 	// Audio Preview tab (extracted to EditorTabs/AudioPreviewTab.h)
 	std::unique_ptr<AudioPreviewTab> m_audioPreviewTab;
 
@@ -606,6 +616,9 @@ public:
 
 	void startAsyncToolchainDetection();
 	void pollToolchainDetection();
+	void promptAndInstallBuildTools();
+	bool isBuildToolInstallRunning() const;
+	void pollBuildToolInstall();
 
 	// ── Editor Dialogs (extracted to EditorTabs/EditorDialogs) ──────────
 	EditorDialogs& getEditorDialogs();

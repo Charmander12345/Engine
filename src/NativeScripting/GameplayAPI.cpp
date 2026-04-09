@@ -575,6 +575,7 @@ namespace GameplayAPI
 		pc->velocity[0] = vel[0];
 		pc->velocity[1] = vel[1];
 		pc->velocity[2] = vel[2];
+		PhysicsWorld::Instance().setVelocity(entity, vel[0], vel[1], vel[2]);
 	}
 
 	void getVelocity(ECS::Entity entity, float outVel[3])
@@ -595,10 +596,7 @@ namespace GameplayAPI
 		auto* pc = ECS::ECSManager::Instance().getComponent<ECS::PhysicsComponent>(entity);
 		if (!pc) return;
 		if (pc->motionType != ECS::PhysicsComponent::MotionType::Dynamic || pc->mass <= 0.0f) return;
-		const float invMass = 1.0f / pc->mass;
-		pc->velocity[0] += force[0] * invMass;
-		pc->velocity[1] += force[1] * invMass;
-		pc->velocity[2] += force[2] * invMass;
+		PhysicsWorld::Instance().addForce(entity, force[0], force[1], force[2]);
 	}
 
 	void addImpulse(ECS::Entity entity, const float impulse[3])
@@ -606,9 +604,7 @@ namespace GameplayAPI
 		auto* pc = ECS::ECSManager::Instance().getComponent<ECS::PhysicsComponent>(entity);
 		if (!pc) return;
 		if (pc->motionType != ECS::PhysicsComponent::MotionType::Dynamic) return;
-		pc->velocity[0] += impulse[0];
-		pc->velocity[1] += impulse[1];
-		pc->velocity[2] += impulse[2];
+		PhysicsWorld::Instance().addImpulse(entity, impulse[0], impulse[1], impulse[2]);
 	}
 
 	void setAngularVelocity(ECS::Entity entity, const float vel[3])
@@ -618,6 +614,7 @@ namespace GameplayAPI
 		pc->angularVelocity[0] = vel[0];
 		pc->angularVelocity[1] = vel[1];
 		pc->angularVelocity[2] = vel[2];
+		PhysicsWorld::Instance().setAngularVelocity(entity, vel[0], vel[1], vel[2]);
 	}
 
 	void getAngularVelocity(ECS::Entity entity, float outVel[3])
@@ -665,6 +662,79 @@ namespace GameplayAPI
 			result.distance = hit.distance;
 		}
 		return result;
+	}
+
+	// ── Physics Queries (Overlap / Sweep) ──────────────────────────────
+
+	std::vector<ECS::Entity> overlapSphere(const float center[3], float radius)
+	{
+		auto entities = PhysicsWorld::Instance().overlapSphere(center[0], center[1], center[2], radius);
+		return std::vector<ECS::Entity>(entities.begin(), entities.end());
+	}
+
+	std::vector<ECS::Entity> overlapBox(const float center[3], const float halfExtents[3],
+										const float eulerDeg[3])
+	{
+		float ex = 0, ey = 0, ez = 0;
+		if (eulerDeg) { ex = eulerDeg[0]; ey = eulerDeg[1]; ez = eulerDeg[2]; }
+		auto entities = PhysicsWorld::Instance().overlapBox(
+			center[0], center[1], center[2],
+			halfExtents[0], halfExtents[1], halfExtents[2],
+			ex, ey, ez);
+		return std::vector<ECS::Entity>(entities.begin(), entities.end());
+	}
+
+	RaycastResult sweepSphere(const float origin[3], float radius,
+							  const float direction[3], float maxDist)
+	{
+		auto hit = PhysicsWorld::Instance().sweepSphere(
+			origin[0], origin[1], origin[2], radius,
+			direction[0], direction[1], direction[2], maxDist);
+
+		RaycastResult result{};
+		result.hit = hit.hit;
+		if (hit.hit)
+		{
+			result.entity = hit.entity;
+			result.point[0] = hit.point[0]; result.point[1] = hit.point[1]; result.point[2] = hit.point[2];
+			result.normal[0] = hit.normal[0]; result.normal[1] = hit.normal[1]; result.normal[2] = hit.normal[2];
+			result.distance = hit.distance;
+		}
+		return result;
+	}
+
+	RaycastResult sweepBox(const float origin[3], const float halfExtents[3],
+						   const float direction[3], float maxDist)
+	{
+		auto hit = PhysicsWorld::Instance().sweepBox(
+			origin[0], origin[1], origin[2],
+			halfExtents[0], halfExtents[1], halfExtents[2],
+			direction[0], direction[1], direction[2], maxDist);
+
+		RaycastResult result{};
+		result.hit = hit.hit;
+		if (hit.hit)
+		{
+			result.entity = hit.entity;
+			result.point[0] = hit.point[0]; result.point[1] = hit.point[1]; result.point[2] = hit.point[2];
+			result.normal[0] = hit.normal[0]; result.normal[1] = hit.normal[1]; result.normal[2] = hit.normal[2];
+			result.distance = hit.distance;
+		}
+		return result;
+	}
+
+	// ── Force / impulse at position ─────────────────────────────────
+
+	void addForceAtPosition(ECS::Entity entity, const float force[3], const float position[3])
+	{
+		PhysicsWorld::Instance().addForceAtPosition(entity, force[0], force[1], force[2],
+			position[0], position[1], position[2]);
+	}
+
+	void addImpulseAtPosition(ECS::Entity entity, const float impulse[3], const float position[3])
+	{
+		PhysicsWorld::Instance().addImpulseAtPosition(entity, impulse[0], impulse[1], impulse[2],
+			position[0], position[1], position[2]);
 	}
 
 	// ── Camera ────────────────────────────────────────────────────────
@@ -1277,6 +1347,8 @@ void INativeScript::setVelocity(const float vel[3])     { GameplayAPI::setVeloci
 void INativeScript::getVelocity(float outVel[3]) const  { GameplayAPI::getVelocity(m_entity, outVel); }
 void INativeScript::addForce(const float force[3])      { GameplayAPI::addForce(m_entity, force); }
 void INativeScript::addImpulse(const float impulse[3])  { GameplayAPI::addImpulse(m_entity, impulse); }
+void INativeScript::addForceAtPosition(const float force[3], const float position[3])    { GameplayAPI::addForceAtPosition(m_entity, force, position); }
+void INativeScript::addImpulseAtPosition(const float impulse[3], const float position[3]) { GameplayAPI::addImpulseAtPosition(m_entity, impulse, position); }
 void INativeScript::setAngularVelocity(const float vel[3])    { GameplayAPI::setAngularVelocity(m_entity, vel); }
 void INativeScript::getAngularVelocity(float outVel[3]) const { GameplayAPI::getAngularVelocity(m_entity, outVel); }
 

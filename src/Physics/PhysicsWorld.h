@@ -1,5 +1,7 @@
 #pragma once
 
+#include "JoltBackend.h"
+
 #include <vector>
 #include <set>
 #include <map>
@@ -7,25 +9,24 @@
 #include <functional>
 #include <memory>
 
-class IPhysicsBackend;
-
 namespace ECS { class ECSManager; }
 
-/// Rigid-body physics simulation – backend-agnostic.
-/// Delegates to IPhysicsBackend (JoltBackend, PhysXBackend, …) while keeping
-/// ECS synchronisation and event dispatch in this layer.
+/// Rigid-body physics simulation built directly on top of `JoltBackend`.
+/// The former backend abstraction is retained elsewhere only for incremental
+/// migration compatibility.
 class PhysicsWorld
 {
 public:
     static PhysicsWorld& Instance();
 
-    /// Available physics backend implementations.
-    enum class Backend { Jolt, PhysX };
+    /// Legacy backend selector retained for API compatibility.
+    enum class Backend { Jolt };
 
     /// Initialize with the default backend (Jolt).
     void initialize();
 
-    /// Initialize with a specific backend.
+    /// Initialize physics. The backend selector is retained for API
+    /// compatibility, but the implementation is Jolt-only.
     void initialize(Backend backend);
 
     void shutdown();
@@ -79,10 +80,45 @@ public:
                        float dx, float dy, float dz,
                        float maxDist = 1000.0f) const;
 
+    // ── Overlap queries ─────────────────────────────────────────────
+    std::vector<uint32_t> overlapSphere(float cx, float cy, float cz,
+                                        float radius) const;
+    std::vector<uint32_t> overlapBox(float cx, float cy, float cz,
+                                     float hx, float hy, float hz,
+                                     float eulerX = 0, float eulerY = 0, float eulerZ = 0) const;
+
+    // ── Sweep queries ───────────────────────────────────────────────
+    RaycastHit sweepSphere(float ox, float oy, float oz,
+                           float radius,
+                           float dx, float dy, float dz,
+                           float maxDist = 1000.0f) const;
+    RaycastHit sweepBox(float ox, float oy, float oz,
+                        float hx, float hy, float hz,
+                        float dx, float dy, float dz,
+                        float maxDist = 1000.0f) const;
+
+    // ── Force / impulse ────────────────────────────────────────────
+    void addForce(uint32_t entity, float fx, float fy, float fz);
+    void addImpulse(uint32_t entity, float ix, float iy, float iz);
+    void addForceAtPosition(uint32_t entity,
+                            float fx, float fy, float fz,
+                            float px, float py, float pz);
+    void addImpulseAtPosition(uint32_t entity,
+                              float ix, float iy, float iz,
+                              float px, float py, float pz);
+
+    // ── Velocity (backend-routed) ───────────────────────────────────
+    void setVelocity(uint32_t entity, float vx, float vy, float vz);
+    void setAngularVelocity(uint32_t entity, float vx, float vy, float vz);
+
     // ── Sleep / deactivation ────────────────────────────────────────
     void  setSleepThreshold(float t) { m_sleepThreshold = t; }
     float getSleepThreshold() const  { return m_sleepThreshold; }
     bool  isBodySleeping(uint32_t entity) const;
+
+    // ── Rebuild invalidation ────────────────────────────────────────
+    void requestBodyRebuild(uint32_t entity);
+    void requestAllBodyRebuilds();
 
 private:
     PhysicsWorld() = default;
@@ -107,11 +143,14 @@ private:
     bool  m_initialized{ false };
 
     // ── Backend ─────────────────────────────────────────────────────
-    std::unique_ptr<IPhysicsBackend> m_backend;
+    std::unique_ptr<JoltBackend> m_backend;
 
     // ── Entity ↔ backend handle tracking ────────────────────────────
     std::set<uint32_t> m_trackedEntities;     // entities that have a body in the backend
     std::set<uint32_t> m_trackedCharacters;   // entities that have a character in the backend
+    std::set<uint32_t> m_editorDirtyBodies;   // bodies whose ECS state was explicitly edited this frame
+    std::map<uint32_t, uint64_t> m_bodyConfigHashes;
+    std::map<uint32_t, uint64_t> m_bodyTransformHashes;
 
     // ── Collision / overlap data ────────────────────────────────────
     std::vector<CollisionEvent>  m_collisionEvents;

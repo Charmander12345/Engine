@@ -23,6 +23,7 @@
 #include <thread>
 #include <mutex>
 #include <atomic>
+#include <filesystem>
 #include <SDL3/SDL.h>
 #include "../Core/MathTypes.h"
 
@@ -136,6 +137,7 @@ private:
     bool                     m_pieBuildFinished{ false };
     bool                     m_pieBuildSuccess{ false };
     std::vector<std::string> m_pieBuildOutputLines;
+    std::string              m_pieBuildFingerprint;
     std::shared_ptr<class EditorWidget> m_pieBuildWidget;
     class PopupWindow*       m_pieBuildPopup{ nullptr };
 };

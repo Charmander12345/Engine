@@ -94,6 +94,19 @@ namespace GameplayAPI
 	};
 	GAMEPLAY_API RaycastResult raycast(const float origin[3], const float direction[3], float maxDist = 1000.0f);
 
+	// ── Physics Queries (Overlap / Sweep) ─────────────────────────────
+	GAMEPLAY_API std::vector<ECS::Entity> overlapSphere(const float center[3], float radius);
+	GAMEPLAY_API std::vector<ECS::Entity> overlapBox(const float center[3], const float halfExtents[3],
+													 const float eulerDeg[3] = nullptr);
+	GAMEPLAY_API RaycastResult sweepSphere(const float origin[3], float radius,
+										   const float direction[3], float maxDist = 1000.0f);
+	GAMEPLAY_API RaycastResult sweepBox(const float origin[3], const float halfExtents[3],
+										const float direction[3], float maxDist = 1000.0f);
+
+	// ── Force / impulse at position ──────────────────────────────────
+	GAMEPLAY_API void addForceAtPosition(ECS::Entity entity, const float force[3], const float position[3]);
+	GAMEPLAY_API void addImpulseAtPosition(ECS::Entity entity, const float impulse[3], const float position[3]);
+
 	// ── Camera ────────────────────────────────────────────────────────
 	GAMEPLAY_API void getCameraPosition(float outPos[3]);
 	GAMEPLAY_API void setCameraPosition(const float pos[3]);

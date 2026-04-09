@@ -16,9 +16,13 @@
 #include <Jolt/Physics/Collision/Shape/ScaledShape.h>
 #include <Jolt/Physics/Collision/Shape/OffsetCenterOfMassShape.h>
 #include <Jolt/Physics/Collision/Shape/HeightFieldShape.h>
+#include <Jolt/Physics/Collision/Shape/MeshShape.h>
+#include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
+#include <Jolt/Physics/Collision/ShapeCast.h>
+#include <Jolt/Physics/Collision/CollideShape.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h>
 #include <Jolt/Physics/Collision/ObjectLayer.h>
 #include <Jolt/Physics/Collision/ContactListener.h>
@@ -33,6 +37,8 @@
 #include <cstring>
 #include <thread>
 #include <mutex>
+#include <array>
+#include <unordered_set>
 
 #include "../Logger/Logger.h"
 
@@ -53,6 +59,118 @@ namespace BPLayers
     static constexpr JPH::BroadPhaseLayer NON_MOVING(0);
     static constexpr JPH::BroadPhaseLayer MOVING(1);
     static constexpr JPH::uint NUM_LAYERS = 2;
+}
+
+namespace
+{
+    constexpr float cShapeMinExtent = 0.001f;
+    constexpr float cBoxLikeTolerance = 1.0e-4f;
+
+    bool isNear(float a, float b, float tolerance)
+    {
+        return std::abs(a - b) <= tolerance;
+    }
+
+    bool tryBuildBoxShapeFromMesh(const JoltBackend::BodyDesc& desc, JPH::RefConst<JPH::Shape>& outShape)
+    {
+        constexpr int cMeshVertexStrideFloats = 5;
+        if (desc.meshVertices == nullptr || desc.meshVertexFloatCount < (8 * cMeshVertexStrideFloats)
+            || (desc.meshVertexFloatCount % cMeshVertexStrideFloats) != 0)
+        {
+            return false;
+        }
+
+        const int vertexCount = desc.meshVertexFloatCount / cMeshVertexStrideFloats;
+        float minX = std::numeric_limits<float>::max();
+        float minY = std::numeric_limits<float>::max();
+        float minZ = std::numeric_limits<float>::max();
+        float maxX = std::numeric_limits<float>::lowest();
+        float maxY = std::numeric_limits<float>::lowest();
+        float maxZ = std::numeric_limits<float>::lowest();
+
+        for (int i = 0; i < vertexCount; ++i)
+        {
+            const int base = i * cMeshVertexStrideFloats;
+            const float x = desc.meshVertices[base + 0] * desc.meshScale[0];
+            const float y = desc.meshVertices[base + 1] * desc.meshScale[1];
+            const float z = desc.meshVertices[base + 2] * desc.meshScale[2];
+            minX = std::min(minX, x); maxX = std::max(maxX, x);
+            minY = std::min(minY, y); maxY = std::max(maxY, y);
+            minZ = std::min(minZ, z); maxZ = std::max(maxZ, z);
+        }
+
+        const float hx = std::max((maxX - minX) * 0.5f, cShapeMinExtent);
+        const float hy = std::max((maxY - minY) * 0.5f, cShapeMinExtent);
+        const float hz = std::max((maxZ - minZ) * 0.5f, cShapeMinExtent);
+        const float cx = (minX + maxX) * 0.5f;
+        const float cy = (minY + maxY) * 0.5f;
+        const float cz = (minZ + maxZ) * 0.5f;
+
+        for (int i = 0; i < vertexCount; ++i)
+        {
+            const int base = i * cMeshVertexStrideFloats;
+            const float x = desc.meshVertices[base + 0] * desc.meshScale[0];
+            const float y = desc.meshVertices[base + 1] * desc.meshScale[1];
+            const float z = desc.meshVertices[base + 2] * desc.meshScale[2];
+
+            if ((!isNear(x, minX, cBoxLikeTolerance) && !isNear(x, maxX, cBoxLikeTolerance))
+                || (!isNear(y, minY, cBoxLikeTolerance) && !isNear(y, maxY, cBoxLikeTolerance))
+                || (!isNear(z, minZ, cBoxLikeTolerance) && !isNear(z, maxZ, cBoxLikeTolerance)))
+            {
+                return false;
+            }
+        }
+
+        outShape = new JPH::BoxShape(JPH::Vec3(hx, hy, hz));
+        if (!isNear(cx, 0.0f, cBoxLikeTolerance) || !isNear(cy, 0.0f, cBoxLikeTolerance) || !isNear(cz, 0.0f, cBoxLikeTolerance))
+        {
+            outShape = new JPH::OffsetCenterOfMassShape(outShape, JPH::Vec3(cx, cy, cz));
+        }
+
+        return true;
+    }
+
+    bool tryBuildBoundsBoxShapeFromMesh(const JoltBackend::BodyDesc& desc, JPH::RefConst<JPH::Shape>& outShape)
+    {
+        constexpr int cMeshVertexStrideFloats = 5;
+        if (desc.meshVertices == nullptr || desc.meshVertexFloatCount < (3 * cMeshVertexStrideFloats)
+            || (desc.meshVertexFloatCount % cMeshVertexStrideFloats) != 0)
+        {
+            return false;
+        }
+
+        const int vertexCount = desc.meshVertexFloatCount / cMeshVertexStrideFloats;
+        float minX = std::numeric_limits<float>::max();
+        float minY = std::numeric_limits<float>::max();
+        float minZ = std::numeric_limits<float>::max();
+        float maxX = std::numeric_limits<float>::lowest();
+        float maxY = std::numeric_limits<float>::lowest();
+        float maxZ = std::numeric_limits<float>::lowest();
+
+        for (int i = 0; i < vertexCount; ++i)
+        {
+            const int base = i * cMeshVertexStrideFloats;
+            const float x = desc.meshVertices[base + 0] * desc.meshScale[0];
+            const float y = desc.meshVertices[base + 1] * desc.meshScale[1];
+            const float z = desc.meshVertices[base + 2] * desc.meshScale[2];
+            minX = std::min(minX, x); maxX = std::max(maxX, x);
+            minY = std::min(minY, y); maxY = std::max(maxY, y);
+            minZ = std::min(minZ, z); maxZ = std::max(maxZ, z);
+        }
+
+        const float hx = std::max((maxX - minX) * 0.5f, cShapeMinExtent);
+        const float hy = std::max((maxY - minY) * 0.5f, cShapeMinExtent);
+        const float hz = std::max((maxZ - minZ) * 0.5f, cShapeMinExtent);
+        const float cx = (minX + maxX) * 0.5f;
+        const float cy = (minY + maxY) * 0.5f;
+        const float cz = (minZ + maxZ) * 0.5f;
+
+        outShape = new JPH::BoxShape(JPH::Vec3(hx, hy, hz));
+        if (!isNear(cx, 0.0f, cBoxLikeTolerance) || !isNear(cy, 0.0f, cBoxLikeTolerance) || !isNear(cz, 0.0f, cBoxLikeTolerance))
+            outShape = new JPH::OffsetCenterOfMassShape(outShape, JPH::Vec3(cx, cy, cz));
+
+        return true;
+    }
 }
 
 // ── Layer interface implementations ────────────────────────────────────
@@ -153,10 +271,10 @@ public:
     {
     }
 
-    std::vector<IPhysicsBackend::CollisionEventData> DrainEvents()
+    std::vector<PhysicsTypes::CollisionEventData> DrainEvents()
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        std::vector<IPhysicsBackend::CollisionEventData> out;
+        std::vector<PhysicsTypes::CollisionEventData> out;
         out.swap(m_events);
         return out;
     }
@@ -177,7 +295,7 @@ private:
         if (itA == m_bodyIDToEntity->end() || itB == m_bodyIDToEntity->end())
             return;
 
-        IPhysicsBackend::CollisionEventData ev{};
+        PhysicsTypes::CollisionEventData ev{};
         ev.entityA = itA->second;
         ev.entityB = itB->second;
 
@@ -200,7 +318,7 @@ private:
 
     const std::map<uint32_t, uint32_t>* m_bodyIDToEntity{ nullptr };
     std::mutex m_mutex;
-    std::vector<IPhysicsBackend::CollisionEventData> m_events;
+    std::vector<PhysicsTypes::CollisionEventData> m_events;
 };
 
 // ── Euler <-> Quat helpers ──────────────────────────────────────────────
@@ -285,6 +403,19 @@ void JoltBackend::initialize()
 
     m_physicsSystem->SetGravity(JPH::Vec3(m_gravity[0], m_gravity[1], m_gravity[2]));
 
+    // Tune solver for better penetration recovery and more stable convex-convex
+    // contacts. Jolt's PhysicsSettings documentation notes that
+    // mMaxPenetrationDistance caps how much overlap can be corrected in a
+    // single position iteration, while mNumVelocitySteps / mNumPositionSteps
+    // control how much contact resolution work is done per step.
+    JPH::PhysicsSettings ps = m_physicsSystem->GetPhysicsSettings();
+    ps.mBaumgarte                  = 0.35f;  // default 0.2  — faster penetration recovery
+    ps.mNumVelocitySteps           = 12;     // default 10   — stronger contact/friction solving
+    ps.mNumPositionSteps           = 8;      // default 2    — more position correction passes
+    ps.mMaxPenetrationDistance     = 1.0f;   // default 0.2  — allow deeper overlap recovery in one frame
+    ps.mSpeculativeContactDistance = 0.05f;  // default 0.02 — wider contact buffer for edge stability
+    m_physicsSystem->SetPhysicsSettings(ps);
+
     auto listener = std::make_unique<EngineContactListener>();
     listener->SetMappings(&m_bodyIDToEntity);
     m_physicsSystem->SetContactListener(listener.get());
@@ -326,7 +457,7 @@ void JoltBackend::shutdown()
 void JoltBackend::update(float fixedDt)
 {
     if (!m_initialized || !m_physicsSystem) return;
-    m_physicsSystem->Update(fixedDt, 1, m_tempAllocator.get(), m_jobSystem.get());
+    m_physicsSystem->Update(fixedDt, 4, m_tempAllocator.get(), m_jobSystem.get());
 }
 
 // ── Gravity ─────────────────────────────────────────────────────────────
@@ -349,7 +480,7 @@ void JoltBackend::getGravity(float& x, float& y, float& z) const
 
 // ── Body management ─────────────────────────────────────────────────────
 
-IPhysicsBackend::BodyHandle JoltBackend::createBody(const BodyDesc& desc)
+JoltBackend::BodyHandle JoltBackend::createBody(const BodyDesc& desc)
 {
     if (!m_physicsSystem) return InvalidBody;
 
@@ -487,6 +618,93 @@ IPhysicsBackend::BodyHandle JoltBackend::createBody(const BodyDesc& desc)
         }
         break;
     }
+    case BodyDesc::Shape::Mesh:
+    {
+        constexpr int cMeshVertexStrideFloats = 5;
+        const bool hasVertices = desc.meshVertices != nullptr && desc.meshVertexFloatCount >= (3 * cMeshVertexStrideFloats)
+            && (desc.meshVertexFloatCount % cMeshVertexStrideFloats) == 0;
+
+        if (hasVertices)
+        {
+            const int vertexCount = desc.meshVertexFloatCount / cMeshVertexStrideFloats;
+
+            if (desc.meshTreatAsConvex && tryBuildBoxShapeFromMesh(desc, shape))
+                break;
+
+            if (desc.motionType == BodyDesc::MotionType::Static && !desc.meshTreatAsConvex)
+            {
+                JPH::TriangleList triangles;
+                const int triangleCount = desc.meshIndexCount >= 3 ? (desc.meshIndexCount / 3) : (vertexCount / 3);
+                triangles.reserve(triangleCount);
+
+                auto readPoint = [&](int index) -> JPH::Vec3
+                {
+                    const int base = index * cMeshVertexStrideFloats;
+                    return JPH::Vec3(
+                        desc.meshVertices[base + 0] * desc.meshScale[0],
+                        desc.meshVertices[base + 1] * desc.meshScale[1],
+                        desc.meshVertices[base + 2] * desc.meshScale[2]);
+                };
+
+                if (desc.meshIndices && desc.meshIndexCount >= 3)
+                {
+                    for (int i = 0; i + 2 < desc.meshIndexCount; i += 3)
+                    {
+                        const uint32_t i0 = desc.meshIndices[i + 0];
+                        const uint32_t i1 = desc.meshIndices[i + 1];
+                        const uint32_t i2 = desc.meshIndices[i + 2];
+                        if (i0 >= static_cast<uint32_t>(vertexCount) || i1 >= static_cast<uint32_t>(vertexCount) || i2 >= static_cast<uint32_t>(vertexCount))
+                            continue;
+                        triangles.emplace_back(readPoint(static_cast<int>(i0)), readPoint(static_cast<int>(i1)), readPoint(static_cast<int>(i2)));
+                    }
+                }
+                else
+                {
+                    for (int i = 0; i + 2 < vertexCount; i += 3)
+                        triangles.emplace_back(readPoint(i + 0), readPoint(i + 1), readPoint(i + 2));
+                }
+
+                JPH::MeshShapeSettings meshSettings(triangles);
+                meshSettings.mBuildQuality = JPH::MeshShapeSettings::EBuildQuality::FavorRuntimePerformance;
+                JPH::ShapeSettings::ShapeResult result = meshSettings.Create();
+                if (!result.HasError())
+                    shape = result.Get();
+            }
+
+            if (shape == nullptr)
+            {
+                JPH::Array<JPH::Vec3> points;
+                points.reserve(vertexCount);
+                for (int i = 0; i < vertexCount; ++i)
+                {
+                    const int base = i * cMeshVertexStrideFloats;
+                    points.push_back(JPH::Vec3(
+                        desc.meshVertices[base + 0] * desc.meshScale[0],
+                        desc.meshVertices[base + 1] * desc.meshScale[1],
+                        desc.meshVertices[base + 2] * desc.meshScale[2]));
+                }
+
+                JPH::ConvexHullShapeSettings hullSettings(points);
+                hullSettings.mMaxConvexRadius = 0.0f;
+                hullSettings.mHullTolerance = 1.0e-4f;
+                JPH::ShapeSettings::ShapeResult result = hullSettings.Create();
+                if (!result.HasError())
+                    shape = result.Get();
+            }
+        }
+
+        if (shape == nullptr)
+        {
+            if (!tryBuildBoundsBoxShapeFromMesh(desc, shape))
+            {
+            Logger::Instance().log(Logger::Category::Engine,
+                "Mesh collision shape creation failed or mesh data was missing. Falling back to BoxShape.",
+                Logger::LogLevel::WARNING);
+                shape = new JPH::BoxShape(JPH::Vec3(1.0f, 1.0f, 1.0f));
+            }
+        }
+        break;
+    }
     default: // Box
     {
         float hx = desc.halfExtents[0];
@@ -522,6 +740,8 @@ IPhysicsBackend::BodyHandle JoltBackend::createBody(const BodyDesc& desc)
         {
             settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
             settings.mMassPropertiesOverride.mMass = desc.mass;
+            settings.mNumVelocityStepsOverride = 12;
+            settings.mNumPositionStepsOverride = 8;
         }
         settings.mGravityFactor      = desc.gravityFactor;
         settings.mLinearDamping      = desc.linearDamping;
@@ -532,6 +752,7 @@ IPhysicsBackend::BodyHandle JoltBackend::createBody(const BodyDesc& desc)
         settings.mMotionQuality      = (desc.motionQuality == BodyDesc::MotionQuality::LinearCast)
             ? JPH::EMotionQuality::LinearCast
             : JPH::EMotionQuality::Discrete;
+        settings.mEnhancedInternalEdgeRemoval = true;
     }
 
     JPH::Body* body = bi.CreateBody(settings);
@@ -541,6 +762,17 @@ IPhysicsBackend::BodyHandle JoltBackend::createBody(const BodyDesc& desc)
     bi.AddBody(id, motionType == JPH::EMotionType::Static
         ? JPH::EActivation::DontActivate
         : JPH::EActivation::Activate);
+
+    if (desc.motionType == BodyDesc::MotionType::Dynamic && desc.mass > 0.0f)
+    {
+        JPH::BodyLockWrite lock(m_physicsSystem->GetBodyLockInterface(), id);
+        if (lock.Succeeded())
+        {
+            JPH::Body& lockedBody = lock.GetBody();
+            if (JPH::MotionProperties* motionProperties = lockedBody.GetMotionProperties())
+                motionProperties->ScaleToMass(desc.mass);
+        }
+    }
 
     // Set initial velocity for dynamic bodies
     if (desc.motionType == BodyDesc::MotionType::Dynamic)
@@ -557,6 +789,49 @@ IPhysicsBackend::BodyHandle JoltBackend::createBody(const BodyDesc& desc)
                 desc.angularVelocity[0] * deg2rad,
                 desc.angularVelocity[1] * deg2rad,
                 desc.angularVelocity[2] * deg2rad));
+        }
+    }
+
+    // Resolve initial penetration for dynamic bodies.  A rotated box whose
+    // corners start inside a heightfield (one-sided triangle surface) can
+    // trap the iterative solver because back-face contacts produce inverted
+    // normals.  Detect the overlap right after creation and shift the body
+    // out before simulation begins.
+    if (desc.motionType == BodyDesc::MotionType::Dynamic)
+    {
+        JPH::RMat44 comTransform = bi.GetCenterOfMassTransform(id);
+
+        JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> depCollector;
+
+        m_physicsSystem->GetNarrowPhaseQuery().CollideShape(
+            shape,
+            JPH::Vec3::sReplicate(1.0f),
+            comTransform,
+            JPH::CollideShapeSettings(),
+            JPH::RVec3::sZero(),
+            depCollector);
+
+        JPH::Vec3 correction = JPH::Vec3::sZero();
+        for (const auto& hit : depCollector.mHits)
+        {
+            if (hit.mBodyID2 == id) continue;  // skip self
+
+            JPH::Vec3 axis = hit.mPenetrationAxis;
+            float len = axis.Length();
+            if (len < 1.0e-6f) continue;
+
+            // mPenetrationAxis = direction to move the *hit body* out of
+            // collision.  We move our body in the opposite direction.
+            JPH::Vec3 pushback = (-axis / len) * hit.mPenetrationDepth;
+            if (pushback.LengthSq() > correction.LengthSq())
+                correction = pushback;
+        }
+
+        if (correction.LengthSq() > 1.0e-6f)
+        {
+            correction *= 1.02f;  // tiny margin for clean separation
+            JPH::RVec3 curPos = bi.GetPosition(id);
+            bi.SetPosition(id, curPos + JPH::RVec3(correction), JPH::EActivation::Activate);
         }
     }
 
@@ -612,7 +887,7 @@ void JoltBackend::setBodyPositionRotation(BodyHandle handle,
     bi.SetPositionAndRotation(id, JPH::RVec3(px, py, pz), rotation, JPH::EActivation::Activate);
 }
 
-IPhysicsBackend::BodyState JoltBackend::getBodyState(BodyHandle handle) const
+PhysicsTypes::BodyState JoltBackend::getBodyState(BodyHandle handle) const
 {
     BodyState state{};
     if (!m_physicsSystem) return state;
@@ -620,7 +895,7 @@ IPhysicsBackend::BodyState JoltBackend::getBodyState(BodyHandle handle) const
     JPH::BodyInterface& bi = m_physicsSystem->GetBodyInterface();
     JPH::BodyID id(static_cast<uint32_t>(handle));
 
-    JPH::RVec3 pos = bi.GetCenterOfMassPosition(id);
+    JPH::RVec3 pos = bi.GetPosition(id);
     state.position[0] = static_cast<float>(pos.GetX());
     state.position[1] = static_cast<float>(pos.GetY());
     state.position[2] = static_cast<float>(pos.GetZ());
@@ -659,9 +934,25 @@ void JoltBackend::setAngularVelocity(BodyHandle handle, float vx, float vy, floa
         JPH::Vec3(vx * deg2rad, vy * deg2rad, vz * deg2rad));
 }
 
+void JoltBackend::addForce(BodyHandle handle, float fx, float fy, float fz)
+{
+    if (!m_physicsSystem) return;
+    JPH::BodyInterface& bi = m_physicsSystem->GetBodyInterface();
+    JPH::BodyID id(static_cast<uint32_t>(handle));
+    bi.AddForce(id, JPH::Vec3(fx, fy, fz));
+}
+
+void JoltBackend::addImpulse(BodyHandle handle, float ix, float iy, float iz)
+{
+    if (!m_physicsSystem) return;
+    JPH::BodyInterface& bi = m_physicsSystem->GetBodyInterface();
+    JPH::BodyID id(static_cast<uint32_t>(handle));
+    bi.AddImpulse(id, JPH::Vec3(ix, iy, iz));
+}
+
 // ── Collision events ────────────────────────────────────────────────────
 
-std::vector<IPhysicsBackend::CollisionEventData> JoltBackend::drainCollisionEvents()
+std::vector<JoltBackend::CollisionEventData> JoltBackend::drainCollisionEvents()
 {
     auto* listener = static_cast<EngineContactListener*>(m_contactListener.get());
     if (listener)
@@ -671,9 +962,9 @@ std::vector<IPhysicsBackend::CollisionEventData> JoltBackend::drainCollisionEven
 
 // ── Queries ─────────────────────────────────────────────────────────────
 
-IPhysicsBackend::RaycastResult JoltBackend::raycast(float ox, float oy, float oz,
-                                                     float dx, float dy, float dz,
-                                                     float maxDist) const
+JoltBackend::RaycastResult JoltBackend::raycast(float ox, float oy, float oz,
+                                                float dx, float dy, float dz,
+                                                float maxDist) const
 {
     RaycastResult result{};
     if (!m_physicsSystem) return result;
@@ -717,6 +1008,184 @@ IPhysicsBackend::RaycastResult JoltBackend::raycast(float ox, float oy, float oz
     return result;
 }
 
+// ── Overlap / Sweep queries ─────────────────────────────────────────────
+
+std::vector<uint32_t> JoltBackend::overlapSphere(float cx, float cy, float cz,
+                                                  float radius) const
+{
+    std::vector<uint32_t> result;
+    if (!m_physicsSystem) return result;
+    std::unordered_set<uint32_t> uniqueEntities;
+
+    JPH::SphereShape sphere(radius);
+    JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> collector;
+
+    m_physicsSystem->GetNarrowPhaseQuery().CollideShape(
+        &sphere,
+        JPH::Vec3::sReplicate(1.0f),
+        JPH::RMat44::sTranslation(JPH::RVec3(cx, cy, cz)),
+        JPH::CollideShapeSettings(),
+        JPH::RVec3::sZero(),
+        collector);
+
+    for (size_t i = 0; i < collector.mHits.size(); ++i)
+    {
+        uint32_t rawId = collector.mHits[i].mBodyID2.GetIndexAndSequenceNumber();
+        auto it = m_bodyIDToEntity.find(rawId);
+        if (it != m_bodyIDToEntity.end() && uniqueEntities.insert(it->second).second)
+            result.push_back(it->second);
+    }
+    return result;
+}
+
+std::vector<uint32_t> JoltBackend::overlapBox(float cx, float cy, float cz,
+                                               float hx, float hy, float hz,
+                                               float eulerX, float eulerY, float eulerZ) const
+{
+    std::vector<uint32_t> result;
+    if (!m_physicsSystem) return result;
+    std::unordered_set<uint32_t> uniqueEntities;
+
+    JPH::BoxShape box(JPH::Vec3(hx, hy, hz));
+
+    constexpr float deg2rad = 3.14159265358979f / 180.0f;
+    JPH::Quat rot = JPH::Quat::sEulerAngles(JPH::Vec3(eulerX * deg2rad, eulerY * deg2rad, eulerZ * deg2rad));
+    JPH::RMat44 transform = JPH::RMat44::sRotationTranslation(rot, JPH::RVec3(cx, cy, cz));
+
+    JPH::AllHitCollisionCollector<JPH::CollideShapeCollector> collector;
+
+    m_physicsSystem->GetNarrowPhaseQuery().CollideShape(
+        &box,
+        JPH::Vec3::sReplicate(1.0f),
+        transform,
+        JPH::CollideShapeSettings(),
+        JPH::RVec3::sZero(),
+        collector);
+
+    for (size_t i = 0; i < collector.mHits.size(); ++i)
+    {
+        uint32_t rawId = collector.mHits[i].mBodyID2.GetIndexAndSequenceNumber();
+        auto it = m_bodyIDToEntity.find(rawId);
+        if (it != m_bodyIDToEntity.end() && uniqueEntities.insert(it->second).second)
+            result.push_back(it->second);
+    }
+    return result;
+}
+
+JoltBackend::RaycastResult JoltBackend::sweepSphere(float ox, float oy, float oz,
+                                                    float radius,
+                                                    float dx, float dy, float dz,
+                                                    float maxDist) const
+{
+    RaycastResult result{};
+    if (!m_physicsSystem) return result;
+
+    float dirLen = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (dirLen < 1e-8f) return result;
+    dx /= dirLen; dy /= dirLen; dz /= dirLen;
+
+    JPH::SphereShape sphere(radius);
+    JPH::RShapeCast shapeCast(
+        &sphere,
+        JPH::Vec3::sReplicate(1.0f),
+        JPH::RMat44::sTranslation(JPH::RVec3(ox, oy, oz)),
+        JPH::Vec3(dx * maxDist, dy * maxDist, dz * maxDist));
+
+    JPH::ShapeCastSettings settings;
+    JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
+
+    m_physicsSystem->GetNarrowPhaseQuery().CastShape(
+        shapeCast, settings, JPH::RVec3::sZero(), collector);
+
+    if (collector.HadHit())
+    {
+        result.hit = true;
+        result.distance = collector.mHit.mFraction * maxDist;
+        result.point[0] = ox + dx * result.distance;
+        result.point[1] = oy + dy * result.distance;
+        result.point[2] = oz + dz * result.distance;
+
+        uint32_t rawId = collector.mHit.mBodyID2.GetIndexAndSequenceNumber();
+        auto it = m_bodyIDToEntity.find(rawId);
+        if (it != m_bodyIDToEntity.end())
+            result.entity = it->second;
+
+        JPH::Vec3 normal = -collector.mHit.mPenetrationAxis.Normalized();
+        result.normal[0] = normal.GetX();
+        result.normal[1] = normal.GetY();
+        result.normal[2] = normal.GetZ();
+    }
+    return result;
+}
+
+JoltBackend::RaycastResult JoltBackend::sweepBox(float ox, float oy, float oz,
+                                                 float hx, float hy, float hz,
+                                                 float dx, float dy, float dz,
+                                                 float maxDist) const
+{
+    RaycastResult result{};
+    if (!m_physicsSystem) return result;
+
+    float dirLen = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (dirLen < 1e-8f) return result;
+    dx /= dirLen; dy /= dirLen; dz /= dirLen;
+
+    JPH::BoxShape box(JPH::Vec3(hx, hy, hz));
+    JPH::RShapeCast shapeCast(
+        &box,
+        JPH::Vec3::sReplicate(1.0f),
+        JPH::RMat44::sTranslation(JPH::RVec3(ox, oy, oz)),
+        JPH::Vec3(dx * maxDist, dy * maxDist, dz * maxDist));
+
+    JPH::ShapeCastSettings settings;
+    JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
+
+    m_physicsSystem->GetNarrowPhaseQuery().CastShape(
+        shapeCast, settings, JPH::RVec3::sZero(), collector);
+
+    if (collector.HadHit())
+    {
+        result.hit = true;
+        result.distance = collector.mHit.mFraction * maxDist;
+        result.point[0] = ox + dx * result.distance;
+        result.point[1] = oy + dy * result.distance;
+        result.point[2] = oz + dz * result.distance;
+
+        uint32_t rawId = collector.mHit.mBodyID2.GetIndexAndSequenceNumber();
+        auto it = m_bodyIDToEntity.find(rawId);
+        if (it != m_bodyIDToEntity.end())
+            result.entity = it->second;
+
+        JPH::Vec3 normal = -collector.mHit.mPenetrationAxis.Normalized();
+        result.normal[0] = normal.GetX();
+        result.normal[1] = normal.GetY();
+        result.normal[2] = normal.GetZ();
+    }
+    return result;
+}
+
+// ── Force / impulse at position ─────────────────────────────────────────
+
+void JoltBackend::addForceAtPosition(BodyHandle handle,
+                                      float fx, float fy, float fz,
+                                      float px, float py, float pz)
+{
+    if (!m_physicsSystem) return;
+    JPH::BodyInterface& bi = m_physicsSystem->GetBodyInterface();
+    JPH::BodyID id(static_cast<uint32_t>(handle));
+    bi.AddForce(id, JPH::Vec3(fx, fy, fz), JPH::RVec3(px, py, pz));
+}
+
+void JoltBackend::addImpulseAtPosition(BodyHandle handle,
+                                        float ix, float iy, float iz,
+                                        float px, float py, float pz)
+{
+    if (!m_physicsSystem) return;
+    JPH::BodyInterface& bi = m_physicsSystem->GetBodyInterface();
+    JPH::BodyID id(static_cast<uint32_t>(handle));
+    bi.AddImpulse(id, JPH::Vec3(ix, iy, iz), JPH::RVec3(px, py, pz));
+}
+
 bool JoltBackend::isBodySleeping(BodyHandle handle) const
 {
     if (!m_physicsSystem) return false;
@@ -726,7 +1195,7 @@ bool JoltBackend::isBodySleeping(BodyHandle handle) const
     return !bi.IsActive(id);
 }
 
-IPhysicsBackend::BodyHandle JoltBackend::getBodyForEntity(uint32_t entity) const
+PhysicsTypes::BodyHandle JoltBackend::getBodyForEntity(uint32_t entity) const
 {
     auto it = m_entityToBodyID.find(entity);
     if (it != m_entityToBodyID.end())
@@ -736,7 +1205,7 @@ IPhysicsBackend::BodyHandle JoltBackend::getBodyForEntity(uint32_t entity) const
 
 // ── Character Controller (Jolt CharacterVirtual) ───────────────────────
 
-IPhysicsBackend::CharacterHandle JoltBackend::createCharacter(const CharacterDesc& desc)
+PhysicsTypes::CharacterHandle JoltBackend::createCharacter(const CharacterDesc& desc)
 {
     if (!m_physicsSystem) return InvalidCharacter;
 
@@ -844,7 +1313,7 @@ void JoltBackend::updateCharacter(CharacterHandle handle,
                                *m_tempAllocator);
 }
 
-IPhysicsBackend::CharacterState JoltBackend::getCharacterState(CharacterHandle handle) const
+PhysicsTypes::CharacterState JoltBackend::getCharacterState(CharacterHandle handle) const
 {
     CharacterState state{};
     auto it = m_handleToCharacter.find(handle);
@@ -890,7 +1359,7 @@ void JoltBackend::setCharacterPosition(CharacterHandle handle,
     it->second->SetPosition(JPH::RVec3(x, y, z));
 }
 
-IPhysicsBackend::CharacterHandle JoltBackend::getCharacterForEntity(uint32_t entity) const
+PhysicsTypes::CharacterHandle JoltBackend::getCharacterForEntity(uint32_t entity) const
 {
     auto it = m_entityToCharacterHandle.find(entity);
     if (it != m_entityToCharacterHandle.end())

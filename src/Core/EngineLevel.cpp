@@ -358,7 +358,11 @@ static void deserializePhysicsComponent(const json& value, ECS::PhysicsComponent
 	if (value.contains("maxAngularVelocity"))
 		component.maxAngularVelocity = value.at("maxAngularVelocity").get<float>();
 	if (value.contains("motionQuality"))
+  {
 		component.motionQuality = static_cast<ECS::PhysicsComponent::MotionQuality>(value.at("motionQuality").get<int>());
+		if (component.motionQuality == ECS::PhysicsComponent::MotionQuality::Discrete)
+			component.motionQuality = ECS::PhysicsComponent::MotionQuality::LinearCast;
+	}
 	if (value.contains("allowSleeping"))
 		component.allowSleeping = value.at("allowSleeping").get<bool>();
 	if (value.contains("velocity"))

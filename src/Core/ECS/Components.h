@@ -125,7 +125,7 @@ namespace ECS
 		{
 			Discrete,
 			LinearCast   // Continuous collision detection
-		} motionQuality{ MotionQuality::Discrete };
+		} motionQuality{ MotionQuality::LinearCast };
 		bool  allowSleeping{ true };
 		float velocity[3]{ 0.0f, 0.0f, 0.0f };
 		float angularVelocity[3]{ 0.0f, 0.0f, 0.0f };

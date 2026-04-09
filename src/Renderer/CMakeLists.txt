@@ -70,6 +70,8 @@ set(RENDERER_CORE_EDITOR_SOURCES
     EditorTabs/ConsoleTab.cpp
     EditorTabs/ProfilerTab.h
     EditorTabs/ProfilerTab.cpp
+    EditorTabs/NotificationsTab.h
+    EditorTabs/NotificationsTab.cpp
     EditorTabs/AudioPreviewTab.h
     EditorTabs/AudioPreviewTab.cpp
     EditorTabs/ParticleEditorTab.h

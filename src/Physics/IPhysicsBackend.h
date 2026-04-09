@@ -1,13 +1,14 @@
 #pragma once
 
-#include <cstdint>
+#include "PhysicsTypes.h"
+
 #include <vector>
 #include <functional>
 
-/// Abstract physics backend interface.
-/// Concrete implementations (JoltBackend, PhysXBackend, …) provide the
-/// simulation, body management and queries.  PhysicsWorld delegates to the
-/// active backend while keeping ECS synchronisation in its own layer.
+/// Legacy physics backend compatibility interface.
+/// The active engine runtime is Jolt-based, but this interface is retained so
+/// externally exposed layers can keep stable function shapes while the engine
+/// internals migrate to direct `JoltBackend` usage.
 class IPhysicsBackend
 {
 public:
@@ -25,59 +26,9 @@ public:
     virtual void getGravity(float& x, float& y, float& z) const = 0;
 
     // ── Body descriptor (backend-agnostic creation params) ──────────
-    /// Opaque body handle returned by the backend.
-    using BodyHandle = uint64_t;
-    static constexpr BodyHandle InvalidBody = 0;
-
-    struct BodyDesc
-    {
-        // Shape ---
-        enum class Shape { Box, Sphere, Capsule, Cylinder, HeightField };
-        Shape shape{ Shape::Box };
-
-        float halfExtents[3]{ 0.5f, 0.5f, 0.5f };   // Box
-        float radius{ 0.5f };                         // Sphere / Capsule / Cylinder
-        float halfHeight{ 0.5f };                     // Capsule / Cylinder
-
-        // HeightField data (only for Shape::HeightField)
-        const float* heightData{ nullptr };
-        int          heightSampleCount{ 0 };
-        float        heightOffset[3]{ 0.0f, 0.0f, 0.0f };
-        float        heightScale[3]{ 1.0f, 1.0f, 1.0f };
-
-        // Collider offset (local-space)
-        float colliderOffset[3]{ 0.0f, 0.0f, 0.0f };
-
-        // Transform ---
-        float position[3]{ 0.0f, 0.0f, 0.0f };
-        float rotationEulerDeg[3]{ 0.0f, 0.0f, 0.0f };
-
-        // Motion ---
-        enum class MotionType { Static, Kinematic, Dynamic };
-        MotionType motionType{ MotionType::Static };
-
-        enum class MotionQuality { Discrete, LinearCast };
-        MotionQuality motionQuality{ MotionQuality::Discrete };
-
-        // Material ---
-        float restitution{ 0.3f };
-        float friction{ 0.5f };
-        bool  isSensor{ false };
-
-        // Dynamics ---
-        float mass{ 1.0f };
-        float gravityFactor{ 1.0f };
-        float linearDamping{ 0.05f };
-        float angularDamping{ 0.05f };
-        float maxLinearVelocity{ 500.0f };
-        float maxAngularVelocity{ 47.1239f };
-        bool  allowSleeping{ true };
-        float velocity[3]{ 0.0f, 0.0f, 0.0f };
-        float angularVelocity[3]{ 0.0f, 0.0f, 0.0f };
-
-        // Entity ID (so the backend can map body ↔ entity)
-        uint32_t entityId{ 0 };
-    };
+    using BodyHandle = PhysicsTypes::BodyHandle;
+    static constexpr BodyHandle InvalidBody = PhysicsTypes::InvalidBody;
+    using BodyDesc = PhysicsTypes::BodyDesc;
 
     // ── Body management ─────────────────────────────────────────────
     virtual BodyHandle createBody(const BodyDesc& desc) = 0;
@@ -90,13 +41,7 @@ public:
                                          float eulerX, float eulerY, float eulerZ) = 0;
 
     // ── Body readback (after simulation step) ───────────────────────
-    struct BodyState
-    {
-        float position[3]{};
-        float rotationEulerDeg[3]{};
-        float velocity[3]{};
-        float angularVelocityDeg[3]{};
-    };
+    using BodyState = PhysicsTypes::BodyState;
 
     virtual BodyState getBodyState(BodyHandle handle) const = 0;
 
@@ -104,31 +49,53 @@ public:
     virtual void setLinearVelocity(BodyHandle handle, float vx, float vy, float vz)  = 0;
     virtual void setAngularVelocity(BodyHandle handle, float vx, float vy, float vz) = 0;
 
+    // ── Force / impulse (at center of mass) ─────────────────────────
+    virtual void addForce(BodyHandle handle, float fx, float fy, float fz)     = 0;
+    virtual void addImpulse(BodyHandle handle, float ix, float iy, float iz)   = 0;
+
     // ── Collision events ────────────────────────────────────────────
-    struct CollisionEventData
-    {
-        uint32_t entityA{ 0 };
-        uint32_t entityB{ 0 };
-        float    normal[3]{};
-        float    depth{ 0.0f };
-        float    contactPoint[3]{};
-    };
+    using CollisionEventData = PhysicsTypes::CollisionEventData;
 
     virtual std::vector<CollisionEventData> drainCollisionEvents() = 0;
 
     // ── Queries ─────────────────────────────────────────────────────
-    struct RaycastResult
-    {
-        uint32_t entity{ 0 };
-        float    point[3]{};
-        float    normal[3]{};
-        float    distance{ 0.0f };
-        bool     hit{ false };
-    };
+    using RaycastResult = PhysicsTypes::RaycastResult;
 
     virtual RaycastResult raycast(float ox, float oy, float oz,
                                   float dx, float dy, float dz,
                                   float maxDist = 1000.0f) const = 0;
+
+    /// Overlap a sphere against the world – returns entity IDs of all overlapping bodies.
+    virtual std::vector<uint32_t> overlapSphere(float cx, float cy, float cz,
+                                                float radius) const = 0;
+
+    /// Overlap a box against the world – returns entity IDs of all overlapping bodies.
+    virtual std::vector<uint32_t> overlapBox(float cx, float cy, float cz,
+                                             float hx, float hy, float hz,
+                                             float eulerX = 0, float eulerY = 0, float eulerZ = 0) const = 0;
+
+    /// Sweep a sphere from origin along direction – returns closest hit.
+    virtual RaycastResult sweepSphere(float ox, float oy, float oz,
+                                      float radius,
+                                      float dx, float dy, float dz,
+                                      float maxDist = 1000.0f) const = 0;
+
+    /// Sweep a box from origin along direction – returns closest hit.
+    virtual RaycastResult sweepBox(float ox, float oy, float oz,
+                                   float hx, float hy, float hz,
+                                   float dx, float dy, float dz,
+                                   float maxDist = 1000.0f) const = 0;
+
+    // ── Force / impulse at world-space position ─────────────────────
+    /// Apply a force at a specific world-space position (generates torque).
+    virtual void addForceAtPosition(BodyHandle handle,
+                                    float fx, float fy, float fz,
+                                    float px, float py, float pz) = 0;
+
+    /// Apply an impulse at a specific world-space position (generates angular impulse).
+    virtual void addImpulseAtPosition(BodyHandle handle,
+                                      float ix, float iy, float iz,
+                                      float px, float py, float pz) = 0;
 
     virtual bool isBodySleeping(BodyHandle handle) const = 0;
 
@@ -136,38 +103,10 @@ public:
     virtual BodyHandle getBodyForEntity(uint32_t entity) const = 0;
 
     // ── Character Controller ────────────────────────────────────────
-    using CharacterHandle = uint64_t;
-    static constexpr CharacterHandle InvalidCharacter = 0;
-
-    /// Backend-agnostic creation parameters for a character controller.
-    struct CharacterDesc
-    {
-        // Shape (Capsule)
-        float radius{ 0.3f };
-        float height{ 1.8f };          // Total height (including hemispherical caps)
-
-        // Movement
-        float maxSlopeAngle{ 45.0f };  // Degrees
-        float stepUpHeight{ 0.3f };    // Meters
-        float skinWidth{ 0.02f };      // Contact offset / padding
-
-        // Initial transform
-        float position[3]{ 0.0f, 0.0f, 0.0f };
-        float rotationYDeg{ 0.0f };
-
-        // Entity ID (so the backend can map character ↔ entity)
-        uint32_t entityId{ 0 };
-    };
-
-    /// Character state read back after update.
-    struct CharacterState
-    {
-        float position[3]{};
-        bool  isGrounded{ false };
-        float groundNormal[3]{ 0.0f, 1.0f, 0.0f };
-        float groundAngle{ 0.0f };     // Slope angle in degrees
-        float velocity[3]{};
-    };
+    using CharacterHandle = PhysicsTypes::CharacterHandle;
+    static constexpr CharacterHandle InvalidCharacter = PhysicsTypes::InvalidCharacter;
+    using CharacterDesc = PhysicsTypes::CharacterDesc;
+    using CharacterState = PhysicsTypes::CharacterState;
 
     virtual CharacterHandle createCharacter(const CharacterDesc& desc) = 0;
     virtual void            removeCharacter(CharacterHandle handle)    = 0;

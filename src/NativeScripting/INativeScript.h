@@ -109,6 +109,8 @@ public:
 	GAMEPLAY_API void getVelocity(float outVel[3]) const;
 	GAMEPLAY_API void addForce(const float force[3]);
 	GAMEPLAY_API void addImpulse(const float impulse[3]);
+	GAMEPLAY_API void addForceAtPosition(const float force[3], const float position[3]);
+	GAMEPLAY_API void addImpulseAtPosition(const float impulse[3], const float position[3]);
 	GAMEPLAY_API void setAngularVelocity(const float vel[3]);
 	GAMEPLAY_API void getAngularVelocity(float outVel[3]) const;
 
