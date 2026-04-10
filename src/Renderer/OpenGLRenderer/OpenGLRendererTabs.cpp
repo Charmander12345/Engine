@@ -7,6 +7,7 @@
 
 #include "../../Diagnostics/DiagnosticsManager.h"
 #include "../EditorTheme.h"
+#include "../EditorTabs/ActorEditorTab.h"
 
 // ─── Editor tab system ──────────────────────────────────────────────────────
 #if ENGINE_EDITOR
@@ -159,8 +160,10 @@ void OpenGLRenderer::setActiveTab(const std::string& id)
 		auto matIt  = m_materialEditors.find(oldTabId);
 		const bool isMeshViewer = (meshIt != m_meshViewers.end() && meshIt->second);
 		const bool isMatEditor  = (matIt  != m_materialEditors.end() && matIt->second);
+		auto* actorTab = m_uiManager.getActorEditorTab();
+		const bool isActorEditor = (actorTab && actorTab->isOpen() && actorTab->getTabId() == oldTabId);
 
-		if (isMeshViewer || isMatEditor)
+		if (isMeshViewer || isMatEditor || isActorEditor)
 		{
 			// Save camera state into the viewer's runtime level before swapping out
 			auto returnedLevel = diag.swapActiveLevel(std::move(m_savedViewportLevel));
@@ -175,8 +178,10 @@ void OpenGLRenderer::setActiveTab(const std::string& id)
 				returnedLevel->resetPreparedState();
 				if (isMeshViewer)
 					meshIt->second->giveRuntimeLevel(std::move(returnedLevel));
-				else
+				else if (isMatEditor)
 					matIt->second->giveRuntimeLevel(std::move(returnedLevel));
+				else
+					actorTab->giveRuntimeLevel(std::move(returnedLevel));
 			}
 		}
 	}
@@ -202,11 +207,14 @@ void OpenGLRenderer::setActiveTab(const std::string& id)
 
 		auto meshIt = m_meshViewers.find(id);
 		auto matIt  = m_materialEditors.find(id);
+		auto* actorTab = m_uiManager.getActorEditorTab();
 
 		if (meshIt != m_meshViewers.end() && meshIt->second)
 			incomingLevel = meshIt->second->takeRuntimeLevel();
 		else if (matIt != m_materialEditors.end() && matIt->second)
 			incomingLevel = matIt->second->takeRuntimeLevel();
+		else if (actorTab && actorTab->isOpen() && actorTab->getTabId() == id)
+			incomingLevel = actorTab->takeRuntimeLevel();
 
 		if (incomingLevel)
 		{
@@ -239,10 +247,13 @@ void OpenGLRenderer::setActiveTab(const std::string& id)
 				old->resetPreparedState();
 				auto meshIt = m_meshViewers.find(oldTabId);
 				auto matIt  = m_materialEditors.find(oldTabId);
+				auto* actorTab = m_uiManager.getActorEditorTab();
 				if (meshIt != m_meshViewers.end() && meshIt->second)
 					meshIt->second->giveRuntimeLevel(std::move(old));
 				else if (matIt != m_materialEditors.end() && matIt->second)
 					matIt->second->giveRuntimeLevel(std::move(old));
+				else if (actorTab && actorTab->isOpen() && actorTab->getTabId() == oldTabId)
+					actorTab->giveRuntimeLevel(std::move(old));
 			}
 			diag.setScenePrepared(false);
 		}

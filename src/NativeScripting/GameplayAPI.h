@@ -194,4 +194,10 @@ namespace GameplayAPI
 	// ── Time ──────────────────────────────────────────────────────────
 	GAMEPLAY_API float getDeltaTime();
 	GAMEPLAY_API float getTotalTime();
+
+	// ── Actor System ─────────────────────────────────────────────────
+	/// Get the active World pointer (set by the engine main loop).
+	GAMEPLAY_API void* getWorld();
+	/// Set the active World pointer (called by engine internals).
+	GAMEPLAY_API void  setWorld(void* world);
 }

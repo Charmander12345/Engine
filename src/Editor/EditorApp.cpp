@@ -23,6 +23,7 @@
 #include "../Physics/PhysicsWorld.h"
 #include "../Scripting/Python/PythonScripting.h"
 #include "../NativeScripting/NativeScriptManager.h"
+#include "../Core/Actor/ActorAssetData.h"
 #include <filesystem>
 #include <algorithm>
 #include <cmath>
@@ -2551,6 +2552,77 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             uiMgr.refreshContentBrowser();
             uiMgr.showToastMessage("Created: " + fileName, UIManager::kToastMedium);
             uiMgr.openEntityEditorTab(relPath);
+        }});
+
+    items.push_back({ "New Actor", [renderer]()
+        {
+            auto& uiMgr = renderer->getUIManager();
+            const auto& folder = uiMgr.getSelectedBrowserFolder();
+            if (folder == "__Shaders__") return;
+
+            auto& diagnostics = DiagnosticsManager::Instance();
+            auto& assetMgr = AssetManager::Instance();
+            const std::filesystem::path contentDir =
+                std::filesystem::path(diagnostics.getProjectInfo().projectPath) / "Content";
+            const std::filesystem::path targetDir = folder.empty() ? contentDir : contentDir / folder;
+            std::error_code ec;
+            std::filesystem::create_directories(targetDir, ec);
+
+            std::string baseName = "NewActor";
+            std::string fileName = baseName + ".asset";
+            int counter = 1;
+            while (std::filesystem::exists(targetDir / fileName))
+                fileName = baseName + std::to_string(counter++) + ".asset";
+
+            const std::filesystem::path absPath = targetDir / fileName;
+            const std::string displayName = std::filesystem::path(fileName).stem().string();
+            const std::string relPath = std::filesystem::relative(absPath, contentDir).generic_string();
+
+            // Build actor asset data with embedded script
+            ActorAssetData actorData;
+            actorData.name = displayName;
+            actorData.actorClass = "Actor"; // base class
+
+            // Build script paths relative to Content/
+            const std::string scriptFolder = folder.empty() ? "Scripts" : folder + "/Scripts";
+            const std::filesystem::path scriptDir = contentDir / scriptFolder;
+            std::filesystem::create_directories(scriptDir, ec);
+
+            actorData.scriptClassName  = displayName + "_Script";
+            actorData.scriptHeaderPath = scriptFolder + "/" + displayName + "_Script.h";
+            actorData.scriptCppPath    = scriptFolder + "/" + displayName + "_Script.cpp";
+            actorData.scriptEnabled    = true;
+
+            // Write the actor asset file
+            nlohmann::json fileJson;
+            fileJson["magic"]   = 0x41535453;
+            fileJson["version"] = 2;
+            fileJson["type"]    = static_cast<int>(AssetType::ActorAsset);
+            fileJson["name"]    = displayName;
+            fileJson["data"]    = actorData.toJson();
+
+            std::ofstream out(absPath, std::ios::out | std::ios::trunc);
+            if (!out.is_open())
+            {
+                uiMgr.showToastMessage("Failed to create actor asset.", UIManager::kToastMedium);
+                return;
+            }
+            out << fileJson.dump(4);
+            out.close();
+
+            // Auto-generate script files
+            actorData.generateScriptFiles(contentDir.string());
+
+            // Register in asset registry
+            AssetRegistryEntry entry;
+            entry.name = displayName;
+            entry.path = relPath;
+            entry.type = AssetType::ActorAsset;
+            assetMgr.registerAssetInRegistry(entry);
+
+            uiMgr.refreshContentBrowser();
+            uiMgr.showToastMessage("Created actor: " + fileName, UIManager::kToastMedium);
+            uiMgr.openActorEditorTab(relPath);
         }});
 
     // ?? Save selected entity as Prefab ??

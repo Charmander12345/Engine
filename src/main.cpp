@@ -33,6 +33,8 @@
 #include "Physics/PhysicsWorld.h"
 #include "NativeScripting/NativeScriptManager.h"
 #include "NativeScripting/GameplayAPIInternal.h"
+#include "NativeScripting/GameplayAPI.h"
+#include "Core/Actor/World.h"
 #include "CrashProtocol.h"
 
 #include "Renderer/ViewportUIManager.h"
@@ -888,6 +890,10 @@ int main()
     // initializeScripts() exactly once.
     bool rtScriptsNeedInit = isRuntimeMode && NativeScriptManager::Instance().isDLLLoaded();
     bool rtCameraNeedInit  = isRuntimeMode;
+
+    // Actor system world – ticked alongside native scripts & physics.
+    World actorWorld;
+    GameplayAPI::setWorld(&actorWorld);
 
     uint64_t lastCounter = SDL_GetPerformanceCounter();
     const double freq = static_cast<double>(SDL_GetPerformanceFrequency());
@@ -1784,13 +1790,18 @@ int main()
                 {
                     nativeScripts.dispatchBeginOverlap(static_cast<ECS::Entity>(ev.entityA), static_cast<ECS::Entity>(ev.entityB));
                     nativeScripts.dispatchBeginOverlap(static_cast<ECS::Entity>(ev.entityB), static_cast<ECS::Entity>(ev.entityA));
+                    actorWorld.dispatchBeginOverlap(static_cast<ECS::Entity>(ev.entityA), static_cast<ECS::Entity>(ev.entityB));
                 }
                 for (const auto& ev : physics.getEndOverlapEvents())
                 {
                     nativeScripts.dispatchEndOverlap(static_cast<ECS::Entity>(ev.entityA), static_cast<ECS::Entity>(ev.entityB));
                     nativeScripts.dispatchEndOverlap(static_cast<ECS::Entity>(ev.entityB), static_cast<ECS::Entity>(ev.entityA));
+                    actorWorld.dispatchEndOverlap(static_cast<ECS::Entity>(ev.entityA), static_cast<ECS::Entity>(ev.entityB));
                 }
             }
+
+            // Tick actor system (after physics, before Python scripts)
+            actorWorld.tick(static_cast<float>(dt));
 
             Scripting::UpdateScripts(static_cast<float>(dt));
         }

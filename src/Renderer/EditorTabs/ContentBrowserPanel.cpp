@@ -59,6 +59,7 @@ static const char* iconForAssetType(AssetType type)
     case AssetType::Entity:   return "entity.png";
     case AssetType::InputAction:  return "entity.png";
     case AssetType::InputMapping: return "entity.png";
+    case AssetType::ActorAsset:   return "entity.png";
     default:                  return "entity.png";
     }
 }
@@ -82,6 +83,7 @@ static Vec4 iconTintForAssetType(AssetType type)
     case AssetType::Entity:   return Vec4{ 0.85f, 0.55f, 1.00f, 1.0f };
     case AssetType::InputAction:  return Vec4{ 1.00f, 0.80f, 0.30f, 1.0f };
     case AssetType::InputMapping: return Vec4{ 0.30f, 1.00f, 0.80f, 1.0f };
+    case AssetType::ActorAsset:   return Vec4{ 0.90f, 0.45f, 0.60f, 1.0f };
     default:                  return Vec4{ 0.85f, 0.85f, 0.85f, 1.0f };
     }
 }
@@ -884,11 +886,12 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
                     { "Prefab",        AssetType::Prefab        },
                     { "Input Action",  AssetType::InputAction   },
                     { "Input Mapping", AssetType::InputMapping  },
+                    { "Actor",         AssetType::ActorAsset    },
                 };
                 std::vector<UIManager::DropdownMenuItem> items;
                 for (const auto& f : filters)
                 {
-                    const uint16_t bit = static_cast<uint16_t>(1 << static_cast<int>(f.type));
+                    const uint32_t bit = static_cast<uint32_t>(1u << static_cast<int>(f.type));
                     const bool active = (m_browserTypeFilter & bit) != 0;
                     const std::string prefix = active ? "[x] " : "[  ] ";
                     items.push_back({ prefix + f.label, [this, bit]()
@@ -900,7 +903,7 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
                 items.push_back({ "", {}, true });
                 items.push_back({ "Show All", [this]()
                 {
-                    m_browserTypeFilter = 0xFFFF;
+                    m_browserTypeFilter = 0xFFFFFFFF;
                     refresh();
                 }});
                 items.push_back({ "Hide All", [this]()
@@ -960,9 +963,9 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
         };
 
         // Helper: check if an asset type passes the type filter
-        auto matchesTypeFilter = [this](AssetType type) -> bool
+            auto matchesTypeFilter = [this](AssetType type) -> bool
         {
-            const uint16_t bit = static_cast<uint16_t>(1 << static_cast<int>(type));
+            const uint32_t bit = static_cast<uint32_t>(1u << static_cast<int>(type));
             return (m_browserTypeFilter & bit) != 0;
         };
 
@@ -1044,31 +1047,8 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
                 if (referencedAssets.count(relPath) == 0 &&
                     item.type != AssetType::Level && item.type != AssetType::Shader &&
                     item.type != AssetType::NativeScript &&
+                    item.type != AssetType::ActorAsset &&
                     item.type != AssetType::Unknown)
-                {
-                    WidgetElement badge{};
-                    badge.id = tile.id + ".Unref";
-                    badge.type = WidgetElementType::Text;
-                    badge.text = "\xe2\x97\x8f";
-                    badge.font = EditorTheme::Get().fontDefault;
-                    badge.fontSize = EditorTheme::Get().fontSizeSmall;
-                    badge.textAlignH = TextAlignH::Right;
-                    badge.textAlignV = TextAlignV::Top;
-                    badge.style.textColor = EditorTheme::Get().textMuted;
-                    badge.from = Vec2{ 0.75f, 0.0f };
-                    badge.to   = Vec2{ 1.0f, 0.15f };
-                    badge.runtimeOnly = true;
-                    tile.children.push_back(std::move(badge));
-                }
-
-                tile.isDraggable = true;
-                tile.dragPayload = std::to_string(static_cast<int>(item.type)) + "|" + relPath;
-
-                tile.onClicked = [this, relPath]()
-                {
-                    m_selectedGridAsset = relPath;
-                    refresh();
-                };
 
                 tile.onDoubleClicked = [this, relPath, assetType = item.type]()
                 {
@@ -1212,6 +1192,7 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
             if (referencedAssets.count(relPath) == 0 &&
                 item.type != AssetType::Level && item.type != AssetType::Shader &&
                 item.type != AssetType::NativeScript &&
+                item.type != AssetType::ActorAsset &&
                 item.type != AssetType::Unknown)
             {
                 WidgetElement badge{};
@@ -1315,6 +1296,11 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
                 if (assetType == AssetType::Entity)
                 {
                     m_uiManager->openEntityEditorTab(relPath);
+                    return;
+                }
+                if (assetType == AssetType::ActorAsset)
+                {
+                    m_uiManager->openActorEditorTab(relPath);
                     return;
                 }
                 if (assetType == AssetType::InputAction)

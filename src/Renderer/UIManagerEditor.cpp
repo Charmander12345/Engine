@@ -51,6 +51,7 @@
 #include "EditorTabs/LevelCompositionTab.h"
 #include "EditorTabs/AnimationEditorTab.h"
 #include "EditorTabs/EntityEditorTab.h"
+#include "EditorTabs/ActorEditorTab.h"
 #include "EditorTabs/InputActionEditorTab.h"
 #include "EditorTabs/InputMappingEditorTab.h"
 #include "EditorTabs/UIDesignerTab.h"
@@ -5266,6 +5267,32 @@ void UIManager::closeEntityEditorTab()
 {
     if (m_entityEditorTab)
         m_entityEditorTab->close();
+}
+
+// ===========================================================================
+// Actor Editor Tab (extracted to EditorTabs/ActorEditorTab.h)
+// ===========================================================================
+bool UIManager::isActorEditorOpen() const
+{
+    return m_actorEditorTab && m_actorEditorTab->isOpen();
+}
+
+void UIManager::openActorEditorTab(const std::string& assetPath)
+{
+    if (!m_actorEditorTab)
+        m_actorEditorTab = std::make_unique<ActorEditorTab>(this, m_renderer);
+    m_actorEditorTab->open(assetPath);
+}
+
+void UIManager::closeActorEditorTab()
+{
+    if (m_actorEditorTab)
+        m_actorEditorTab->close();
+}
+
+ActorEditorTab* UIManager::getActorEditorTab() const
+{
+    return m_actorEditorTab.get();
 }
 
 // ===========================================================================

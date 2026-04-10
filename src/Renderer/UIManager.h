@@ -37,6 +37,7 @@ class AnimationEditorTab;
 class UIDesignerTab;
 class WidgetEditorTab;
 class EntityEditorTab;
+class ActorEditorTab;
 class InputActionEditorTab;
 class InputMappingEditorTab;
 class ContentBrowserPanel;
@@ -260,6 +261,12 @@ public:
 	void openEntityEditorTab(const std::string& assetPath);
 	void closeEntityEditorTab();
 	bool isEntityEditorOpen() const;
+
+	// Actor Editor tab (actor asset editing)
+	void openActorEditorTab(const std::string& assetPath);
+	void closeActorEditorTab();
+	bool isActorEditorOpen() const;
+	ActorEditorTab* getActorEditorTab() const;
 
 	// Input Action Editor tab
 	void openInputActionEditorTab(const std::string& assetPath);
@@ -488,6 +495,9 @@ private:
 
 	// Entity Editor tab (extracted to EditorTabs/EntityEditorTab.h)
 	std::unique_ptr<EntityEditorTab> m_entityEditorTab;
+
+	// Actor Editor tab (extracted to EditorTabs/ActorEditorTab.h)
+	std::unique_ptr<ActorEditorTab> m_actorEditorTab;
 
 	// Input Action / Input Mapping Editor tabs
 	std::unique_ptr<InputActionEditorTab> m_inputActionEditorTab;

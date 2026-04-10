@@ -49,6 +49,7 @@
 #include "EditorTabs/LevelCompositionTab.h"
 #include "EditorTabs/AnimationEditorTab.h"
 #include "EditorTabs/EntityEditorTab.h"
+#include "EditorTabs/ActorEditorTab.h"
 #include "EditorTabs/InputActionEditorTab.h"
 #include "EditorTabs/InputMappingEditorTab.h"
 #include "EditorTabs/UIDesignerTab.h"

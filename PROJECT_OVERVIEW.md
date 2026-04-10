@@ -1,5 +1,27 @@
 # Project Overview
 
+## Actor System (ECS Abstraction)
+The engine provides an Unreal-Engine-style **Actor system** that abstracts the low-level ECS for gameplay developers:
+
+- **`Actor`** – Base class wrapping a single `ECS::Entity`. Provides lifecycle events (`beginPlay`, `tick`, `endPlay`, `onBeginOverlap`, `onEndOverlap`), transform convenience methods, parent/child actor hierarchy, and name/tag support.
+- **`ActorComponent`** – Base class for modular actor functionality with `onRegister`/`onUnregister`/`tickComponent` lifecycle. Components are attached to actors and automatically manage the underlying ECS components.
+- **Built-in Components**: `SceneComponent`, `StaticMeshComponent`, `ActorLightComponent`, `PhysicsBodyComponent`, `CameraActorComponent`, `AudioActorComponent`, `ParticleActorComponent`, `CharacterControllerActorComponent` – each wraps the corresponding ECS component with type-safe getters/setters.
+- **Built-in Actors**: `StaticMeshActor`, `PointLightActor`, `DirectionalLightActor`, `SpotLightActor`, `CameraActor`, `PhysicsActor`, `CharacterActor`, `AudioActor`, `ParticleActor` – pre-configured actor subclasses for common game objects.
+- **`World`** – Manages actor lifecycle: `spawnActor<T>()` factory, `spawnActorFromAsset()`, `destroyActor()`, per-frame tick dispatch, deferred destruction, actor queries by name/tag/class, and physics overlap event dispatch to actors. Provides a `setScriptAttacher()` callback so native scripts can be attached without a direct dependency on NativeScripting.
+- **`ActorRegistry`** – Singleton with `REGISTER_ACTOR(ClassName)` macro for data-driven actor spawning via `World::spawnActorByClass("ClassName")`.
+- The Actor system runs alongside the existing `INativeScript` / `NativeScriptManager` system – game developers can choose either approach. The World is ticked in the main loop after physics and overlap dispatch.
+
+## Actor Asset System
+The engine supports creating reusable **Actor Assets** (`.asset` files with `AssetType::ActorAsset`) as an alternative to entity-based assets:
+
+- **`ActorAssetData`** (`src/Core/Actor/ActorAssetData.h/.cpp`) – Serializable struct defining an actor template: base actor class, root mesh/material paths, a nestable tree of child actors (`ChildActorEntry`), embedded script info (class name, header/source paths, enabled flag), name, and tag. Each `ChildActorEntry` holds an actor class, mesh/material paths, local position/rotation/scale, and a recursive `children` vector. Legacy component-based formats are auto-migrated on load. Provides `toJson()`/`fromJson()` for JSON serialization.
+- **Auto-generated C++ Scripts** – When a new actor asset is created, `ActorAssetData::generateScriptFiles()` automatically creates a C++ header (INativeScript subclass with lifecycle methods) and source file (with `REGISTER_NATIVE_SCRIPT` macro) in the content directory. Existing scripts are never overwritten.
+- **Auto-cleanup on Delete** – When an actor asset is deleted, `ActorAssetData::cleanupScriptFiles()` removes the auto-generated script files. This is triggered automatically from `AssetManager::deleteAsset()`.
+- **`ActorEditorTab`** (`src/Renderer/EditorTabs/ActorEditorTab.h/.cpp`) – Dedicated editor tab with a 3D preview viewport (left) and a sidebar (right). The preview viewport renders the actor's mesh hierarchy using a dedicated `EngineLevel` with the same camera controls as the main viewport (right-click rotation, WASD movement, laptop mode, scroll wheel speed). The sidebar contains sections for Actor Class selection (with root mesh/material), Child Actors (add/remove nestable child actors of various types), and Script details. Transform is not displayed in the editor tab (only available when the actor is placed in a level).
+- **Preview Viewport Level Swap** – The ActorEditorTab uses the same level-swap pattern as MeshViewer/MaterialEditor: `takeRuntimeLevel()`/`giveRuntimeLevel()` manage a preview `EngineLevel` that is swapped into the active level slot when the tab is activated, allowing the existing renderer and camera system to display the actor preview.
+- **Content Browser Integration** – Actor assets can be created via the "New Actor" context menu item and opened by double-clicking in the content browser. Actors appear in the content browser grid with a distinctive icon and tint, support the type filter dropdown ("Actor" filter), and can be renamed inline via the Rename button (renaming also updates the embedded script file names and class name).
+- **Spawning** – `World::spawnActorFromAsset()` instantiates an actor from an asset definition, recursively spawning child actors from the `childActors` hierarchy, setting mesh/material per actor, applying local transforms, attaching children to their parent, and attaching the embedded native script via a callback mechanism.
+
 ## Physics System
 The engine provides a physics system layered around `IPhysicsBackend`, but the active implementation/build is currently Jolt-only:
 - **Jolt Physics** (default) - primary backend, LinearCast CCD by default, enhanced internal edge removal for smooth heightfield interaction, tuned solver settings (Baumgarte 0.35, 12 velocity steps, 8 position steps, max penetration distance 1.0, 4 collision sub-steps, speculative contact distance 0.05) for robust collision handling and penetration recovery

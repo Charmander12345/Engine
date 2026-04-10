@@ -1471,6 +1471,44 @@ class editor:
     def deg_to_rad(degrees: float) -> float:
         """Convert degrees to radians."""
         ...
+
+# ---------------------------------------------------------------------------
+# engine.actor (Actor System – C++ primary, Python-queryable)
+# ---------------------------------------------------------------------------
+
+class actor:
+    """Actor system queries accessible from Python.
+    The Actor system is primarily a C++ abstraction over ECS.
+    Python scripts can query and interact with actors via these helpers."""
+
+    @staticmethod
+    def get_world() -> int:
+        """Get an opaque handle to the active World (0 if none).
+        Used internally by cross-language dispatch."""
+        ...
+
+    @staticmethod
+    def find_actor_by_name(name: str) -> int:
+        """Find the entity ID of the first actor with the given name.
+        Returns 0 if not found."""
+        ...
+
+    @staticmethod
+    def find_actors_by_tag(tag: str) -> List[int]:
+        """Find entity IDs of all actors with the given tag."""
+        ...
+
+    @staticmethod
+    def get_actor_count() -> int:
+        """Get the total number of living actors in the world."""
+        ...
+
+    @staticmethod
+    def spawn_actor_from_asset(asset_path: str) -> int:
+        """Spawn an actor into the world from an .asset file path (content-relative).
+        Returns the entity ID of the spawned actor, or 0 on failure."""
+        ...
+
     @staticmethod
     def rad_to_deg(radians: float) -> float:
         """Convert radians to degrees."""

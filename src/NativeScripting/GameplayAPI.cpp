@@ -2,6 +2,7 @@
 #include "NativeScriptManager.h"
 
 #include "../Core/ECS/ECS.h"
+#include "../Core/Actor/World.h"
 #include "../Logger/Logger.h"
 #include "../Physics/PhysicsWorld.h"
 #include "../Core/AudioManager.h"
@@ -1317,6 +1318,28 @@ namespace GameplayAPI
 	float getTotalTime()
 	{
 		return static_cast<float>(SDL_GetTicks()) / 1000.0f;
+	}
+
+	// ── Actor System ─────────────────────────────────────────────────
+
+	static void* s_activeWorld = nullptr;
+
+	void* getWorld()
+	{
+		return s_activeWorld;
+	}
+
+	void setWorld(void* world)
+	{
+		s_activeWorld = world;
+		if (world)
+		{
+			auto* w = static_cast<World*>(world);
+			w->setScriptAttacher([](ECS::Entity entity, const std::string& className)
+			{
+				NativeScriptManager::Instance().createInstance(entity, className);
+			});
+		}
 	}
 }
 

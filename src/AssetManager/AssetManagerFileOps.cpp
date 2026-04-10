@@ -13,6 +13,7 @@
 #include "AssetTypes.h"
 
 #include "../Core/ECS/ECS.h"
+#include "../Core/Actor/ActorAssetData.h"
 
 namespace fs = std::filesystem;
 
@@ -151,12 +152,38 @@ bool AssetManager::deleteAsset(const std::string& relPath, bool deleteFromDisk)
         m_registryVersion.fetch_add(1, std::memory_order_relaxed);
     }
 
-    // Delete file from disk
-    if (deleteFromDisk && diagnostics.isProjectLoaded())
-    {
-        const fs::path contentDir = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
-        const fs::path absPath = contentDir / fs::path(relPath);
-        std::error_code ec;
+	// Delete file from disk
+	if (deleteFromDisk && diagnostics.isProjectLoaded())
+	{
+		const fs::path contentDir = fs::path(diagnostics.getProjectInfo().projectPath) / "Content";
+		const fs::path absPath = contentDir / fs::path(relPath);
+
+		// If this is an ActorAsset, clean up auto-generated script files
+		{
+			std::error_code readEc;
+			if (fs::exists(absPath, readEc))
+			{
+				std::ifstream in(absPath);
+				if (in.is_open())
+				{
+					json fileJson = json::parse(in, nullptr, false);
+					in.close();
+					if (!fileJson.is_discarded() && fileJson.contains("type") &&
+						fileJson["type"].get<int>() == static_cast<int>(AssetType::ActorAsset) &&
+						fileJson.contains("data"))
+					{
+						ActorAssetData actorData = ActorAssetData::fromJson(fileJson["data"]);
+						if (actorData.cleanupScriptFiles(contentDir.string()))
+						{
+							logger.log(Logger::Category::AssetManagement,
+								"Cleaned up script files for actor: " + relPath, Logger::LogLevel::INFO);
+						}
+					}
+				}
+			}
+		}
+
+		std::error_code ec;
         if (fs::exists(absPath, ec))
         {
             if (fs::remove(absPath, ec))
@@ -657,23 +684,69 @@ bool AssetManager::renameAsset(const std::string& relPath, const std::string& ne
 					}
 				}
 
-				// Update the name field inside the asset file
-				if (fileJson.contains("name"))
-				{
-					fileJson["name"] = newName;
-					std::ofstream out(destAbs, std::ios::out | std::ios::trunc);
-					if (out.is_open())
-					{
-						out << fileJson.dump(4);
+						// Update the name field inside the asset file
+							if (fileJson.contains("name"))
+							{
+								fileJson["name"] = newName;
+							}
+
+							// ActorAsset: rename embedded script files and update paths
+							if (fileJson.contains("type") &&
+								fileJson["type"].get<int>() == static_cast<int>(AssetType::ActorAsset) &&
+								fileJson.contains("data") && fileJson["data"].is_object())
+							{
+								auto& data = fileJson["data"];
+								data["name"] = newName;
+
+								const std::string newClassName = newName + "_Script";
+
+								// Rename header file
+								if (data.contains("scriptHeaderPath"))
+								{
+									const std::string oldHeader = data["scriptHeaderPath"].get<std::string>();
+									const fs::path oldHeaderAbs = contentDir / oldHeader;
+									if (fs::exists(oldHeaderAbs))
+									{
+										const fs::path newHeaderAbs = oldHeaderAbs.parent_path() / (newClassName + ".h");
+										std::error_code renameEc;
+										fs::rename(oldHeaderAbs, newHeaderAbs, renameEc);
+										data["scriptHeaderPath"] = fs::relative(newHeaderAbs, contentDir).generic_string();
+									}
+								}
+								// Rename cpp file
+								if (data.contains("scriptCppPath"))
+								{
+									const std::string oldCpp = data["scriptCppPath"].get<std::string>();
+									const fs::path oldCppAbs = contentDir / oldCpp;
+									if (fs::exists(oldCppAbs))
+									{
+										const fs::path newCppAbs = oldCppAbs.parent_path() / (newClassName + ".cpp");
+										std::error_code renameEc;
+										fs::rename(oldCppAbs, newCppAbs, renameEc);
+										data["scriptCppPath"] = fs::relative(newCppAbs, contentDir).generic_string();
+									}
+								}
+								if (data.contains("scriptClassName"))
+								{
+									data["scriptClassName"] = newClassName;
+								}
+							}
+
+							// Write updated JSON back to disk
+							{
+								std::ofstream out(destAbs, std::ios::out | std::ios::trunc);
+								if (out.is_open())
+								{
+									out << fileJson.dump(4);
+								}
+							}
+						}
+						catch (...)
+						{
+							// Not valid JSON, skip
+						}
 					}
 				}
-			}
-			catch (...)
-			{
-				// Not valid JSON, skip
-			}
-		}
-	}
 
 	// Update registry entry
 	{

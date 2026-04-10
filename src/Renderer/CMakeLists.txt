@@ -100,6 +100,8 @@ set(RENDERER_CORE_EDITOR_SOURCES
     EditorTabs/EditorDialogs.cpp
     EditorTabs/EntityEditorTab.h
     EditorTabs/EntityEditorTab.cpp
+    EditorTabs/ActorEditorTab.h
+    EditorTabs/ActorEditorTab.cpp
     EditorTabs/InputActionEditorTab.h
     EditorTabs/InputActionEditorTab.cpp
     EditorTabs/InputMappingEditorTab.h

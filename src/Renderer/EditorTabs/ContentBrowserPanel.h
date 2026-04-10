@@ -41,7 +41,7 @@ private:
 	std::string m_selectedGridAsset;
 	std::unordered_set<std::string> m_expandedFolders;
 	std::string m_browserSearchText;
-	uint16_t m_browserTypeFilter{ 0xFFFF };
+	uint32_t m_browserTypeFilter{ 0xFFFFFFFF };
 	bool m_registryWasReady{ false };
 	bool m_renamingGridAsset{ false };
 	std::string m_renameOriginalPath;

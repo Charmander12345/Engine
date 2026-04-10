@@ -20,5 +20,6 @@ enum class AssetType
     Entity,
     NativeScript,
     InputAction,
-    InputMapping
+    InputMapping,
+    ActorAsset
 };
