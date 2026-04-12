@@ -218,6 +218,11 @@ void OpenGLRenderer::setActiveTab(const std::string& id)
 
 		if (incomingLevel)
 		{
+			// Capture the tab's saved camera before moving the level
+			const bool hasTabCamera = incomingLevel->hasEditorCamera();
+			const Vec3 tabCamPos = incomingLevel->getEditorCameraPosition();
+			const Vec2 tabCamRot = incomingLevel->getEditorCameraRotation();
+
 			incomingLevel->resetPreparedState();
 			m_savedViewportLevel = diag.swapActiveLevel(std::move(incomingLevel));
 			if (m_savedViewportLevel)
@@ -225,6 +230,13 @@ void OpenGLRenderer::setActiveTab(const std::string& id)
 				m_savedViewportLevel->resetPreparedState();
 			}
 			diag.setScenePrepared(false);
+
+			// Restore camera from the tab's level so the preview is framed correctly
+			if (hasTabCamera && m_camera)
+			{
+				m_camera->setPosition(tabCamPos);
+				m_camera->setRotationDegrees(tabCamRot.x, tabCamRot.y);
+			}
 		}
 
 		// Restore per-tab entity selection

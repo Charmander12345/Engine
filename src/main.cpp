@@ -1780,7 +1780,14 @@ int main()
             }
 
             NativeScriptManager::Instance().updateScripts(static_cast<float>(dt));
+
+            // Pre-physics tick group (gameplay logic that must run before physics)
+            actorWorld.tickGroup(ETickGroup::PrePhysics, static_cast<float>(dt));
+
             PhysicsWorld::Instance().step(static_cast<float>(dt));
+
+            // During-physics tick group (actors that tick alongside physics)
+            actorWorld.tickGroup(ETickGroup::DuringPhysics, static_cast<float>(dt));
 
             // Dispatch physics overlap events to C++ native scripts
             {
@@ -1800,8 +1807,14 @@ int main()
                 }
             }
 
-            // Tick actor system (after physics, before Python scripts)
-            actorWorld.tick(static_cast<float>(dt));
+            // Post-physics tick group (most actors default here)
+            actorWorld.tickGroup(ETickGroup::PostPhysics, static_cast<float>(dt));
+
+            // Post-update-work tick group (final cleanup / camera follow)
+            actorWorld.tickGroup(ETickGroup::PostUpdateWork, static_cast<float>(dt));
+
+            // Flush deferred actor destructions
+            actorWorld.flushDestroys();
 
             Scripting::UpdateScripts(static_cast<float>(dt));
         }

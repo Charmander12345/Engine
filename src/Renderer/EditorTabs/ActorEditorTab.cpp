@@ -9,6 +9,7 @@
 #include "../../Logger/Logger.h"
 #include "../../Core/Actor/ActorRegistry.h"
 #include "../../Core/EngineLevel.h"
+#include "../../Core/ECS/ECS.h"
 
 #include <filesystem>
 #include <fstream>
@@ -93,9 +94,9 @@ void ActorEditorTab::open(const std::string& assetPath)
         return;
     }
 
-    m_renderer->addTab(tabId, "Actor Editor", true);
-    m_renderer->setActiveTab(tabId);
-
+    // Initialise state BEFORE addTab/setActiveTab so that the tab-switch
+    // logic can find isOpen()==true, getTabId()=="ActorEditor", and a valid
+    // runtime level for the level-swap.
     const std::string widgetId = "ActorEditor.Main";
     m_ui->unregisterWidget(widgetId);
 
@@ -111,11 +112,13 @@ void ActorEditorTab::open(const std::string& assetPath)
     m_state.actorData = ActorAssetData::fromJson(fileJson["data"]);
     m_state.actorData.name = m_state.assetName;
 
-    // Default section selection
-    m_state.selectedSection = "ActorClass";
-
-    // Build the preview runtime level
+    // Build the preview runtime level so it is available for the level-swap
     rebuildPreviewLevel();
+
+    // Now create the tab and switch — setActiveTab will find the actor tab
+    // fully initialised and swap in the preview level.
+    m_renderer->addTab(tabId, "Actor Editor", true);
+    m_renderer->setActiveTab(tabId);
 
     // Build the main widget (sidebar overlay on the right)
     {
@@ -260,6 +263,97 @@ void ActorEditorTab::update(float deltaSeconds)
     if (!m_state.isOpen)
         return;
     (void)deltaSeconds;
+
+    // ── Gizmo → ActorAssetData sync ─────────────────────────────────
+    // If the actor editor is the active tab, check if any preview entity
+    // has been moved by the gizmo and write the transform back to the
+    // in-memory ActorAssetData so the sidebar stays in sync.
+    if (!m_renderer || m_renderer->getActiveTabId() != m_state.tabId)
+        return;
+
+    if (m_previewEntities.empty())
+    {
+        // Entities may not be ready yet (prepareEcs hasn't run).
+        // Try to capture them from the level's entity list.
+        auto& diag = DiagnosticsManager::Instance();
+        EngineLevel* level = diag.getActiveLevelSoft();
+        if (level)
+        {
+            const auto& ents = level->getEntities();
+            if (!ents.empty())
+            {
+                // Order: root (if mesh), child actors depth-first, preview light (last).
+                m_previewEntities.reserve(ents.size());
+                for (auto e : ents)
+                    m_previewEntities.push_back(static_cast<unsigned int>(e));
+            }
+        }
+        return; // first frame after capture — skip sync
+    }
+
+    auto& ecs = ECS::ECSManager::Instance();
+    auto& ad  = m_state.actorData;
+
+    // Index into m_previewEntities.  Order matches rebuildPreviewLevel:
+    // [0] = root entity (only if ad.meshPath is non-empty)
+    // [1..N] = child actors (depth-first)
+    // [last]  = preview light — skip
+    size_t idx = 0;
+
+    // --- Sync root entity transform ---
+    if (!ad.meshPath.empty() && idx < m_previewEntities.size())
+    {
+        const auto entity = static_cast<ECS::Entity>(m_previewEntities[idx]);
+        if (const auto* tc = ecs.getComponent<ECS::TransformComponent>(entity))
+        {
+            ad.rootPosition[0] = tc->position[0];
+            ad.rootPosition[1] = tc->position[1];
+            ad.rootPosition[2] = tc->position[2];
+            ad.rootRotation[0] = tc->rotation[0];
+            ad.rootRotation[1] = tc->rotation[1];
+            ad.rootRotation[2] = tc->rotation[2];
+            ad.rootScale[0]    = tc->scale[0];
+            ad.rootScale[1]    = tc->scale[1];
+            ad.rootScale[2]    = tc->scale[2];
+        }
+        ++idx;
+    }
+
+    // --- Sync child actors (depth-first, matching rebuildPreviewLevel order) ---
+    std::function<void(std::vector<ChildActorEntry>&, float, float, float)> syncChildren;
+    syncChildren = [&](std::vector<ChildActorEntry>& children, float px, float py, float pz)
+    {
+        for (auto& child : children)
+        {
+            if (idx >= m_previewEntities.size())
+                return;
+
+            const auto entity = static_cast<ECS::Entity>(m_previewEntities[idx]);
+            if (const auto* tc = ecs.getComponent<ECS::TransformComponent>(entity))
+            {
+                // Entity world position → local offset relative to parent
+                child.position[0] = tc->position[0] - px;
+                child.position[1] = tc->position[1] - py;
+                child.position[2] = tc->position[2] - pz;
+                child.rotation[0] = tc->rotation[0];
+                child.rotation[1] = tc->rotation[1];
+                child.rotation[2] = tc->rotation[2];
+                child.scale[0]    = tc->scale[0];
+                child.scale[1]    = tc->scale[1];
+                child.scale[2]    = tc->scale[2];
+            }
+            ++idx;
+
+            if (!child.children.empty())
+            {
+                const float cx = px + child.position[0];
+                const float cy = py + child.position[1];
+                const float cz = pz + child.position[2];
+                syncChildren(child.children, cx, cy, cz);
+            }
+        }
+    };
+    syncChildren(ad.childActors, 0.0f, 0.0f, 0.0f);
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -326,30 +420,11 @@ void ActorEditorTab::refresh()
     if (auto* sidebar = findElementById(elements, "ActorEditor.Sidebar"))
     {
         sidebar->children.clear();
-        buildSectionListPanel(*sidebar);
-
-        // Separator
-        const auto& theme = EditorTheme::Get();
-        WidgetElement sep{};
-        sep.type        = WidgetElementType::Panel;
-        sep.fillX       = true;
-        sep.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 1.0f });
-        sep.style.color = theme.panelBorder;
-        sep.runtimeOnly = true;
-        sidebar->children.push_back(std::move(sep));
-
-        buildDetailsPanel(*sidebar);
+        buildSidebar(*sidebar);
     }
 
     entry->widget->markLayoutDirty();
     m_ui->markRenderDirty();
-}
-
-// ───────────────────────────────────────────────────────────────────────────
-void ActorEditorTab::selectSection(const std::string& section)
-{
-    m_state.selectedSection = section;
-    refresh();
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -389,170 +464,161 @@ void ActorEditorTab::buildToolbar(WidgetElement& root)
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-void ActorEditorTab::buildSectionListPanel(WidgetElement& parent)
+void ActorEditorTab::buildSidebar(WidgetElement& sidebar)
 {
-    const auto& theme = EditorTheme::Get();
-
-    // Section heading
-    {
-        WidgetElement heading{};
-        heading.type            = WidgetElementType::Text;
-        heading.text            = "Sections";
-        heading.fontSize        = theme.fontSizeSubheading;
-        heading.style.textColor = theme.textMuted;
-        heading.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 22.0f });
-        heading.runtimeOnly     = true;
-        parent.children.push_back(std::move(heading));
-    }
-
-    // Section entries — no Transform section (transform only in level)
-    const std::vector<std::string> sections = { "ActorClass", "ChildActors", "Script" };
-
-    for (const auto& section : sections)
-    {
-        const bool selected = (section == m_state.selectedSection);
-
-        WidgetElement row{};
-        row.id              = "ActorEditor.Section." + section;
-        row.type            = WidgetElementType::Button;
-        row.text            = section;
-        row.fontSize        = theme.fontSizeBody;
-        row.style.textColor = selected ? Vec4{ 1.0f, 1.0f, 1.0f, 1.0f } : theme.textMuted;
-        row.style.color     = selected ? Vec4{ 0.22f, 0.28f, 0.40f, 1.0f }
-                                        : Vec4{ 0.10f, 0.10f, 0.12f, 0.0f };
-        row.style.hoverColor = Vec4{ 0.18f, 0.22f, 0.30f, 1.0f };
-        row.fillX           = true;
-        row.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 24.0f });
-        row.textAlignH      = TextAlignH::Left;
-        row.textAlignV      = TextAlignV::Center;
-        row.hitTestMode     = HitTestMode::Enabled;
-        row.runtimeOnly     = true;
-
-        std::string sectionCopy = section;
-        row.onClicked = [this, sectionCopy]() { selectSection(sectionCopy); };
-
-        parent.children.push_back(std::move(row));
-    }
+    buildIdentitySection(sidebar);
+    sidebar.children.push_back(EditorUIBuilder::makeDivider());
+    buildTransformSection(sidebar);
+    sidebar.children.push_back(EditorUIBuilder::makeDivider());
+    buildTickSettingsSection(sidebar);
+    sidebar.children.push_back(EditorUIBuilder::makeDivider());
+    buildVisualsSection(sidebar);
+    sidebar.children.push_back(EditorUIBuilder::makeDivider());
+    buildChildActorList(sidebar);
+    sidebar.children.push_back(EditorUIBuilder::makeDivider());
+    buildComponentsInfo(sidebar);
+    sidebar.children.push_back(EditorUIBuilder::makeDivider());
+    buildScriptDetails(sidebar);
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-void ActorEditorTab::buildDetailsPanel(WidgetElement& parent)
+void ActorEditorTab::buildIdentitySection(WidgetElement& parent)
 {
-    if (m_state.selectedSection == "ActorClass")
-        buildActorClassDetails(parent);
-    else if (m_state.selectedSection == "ChildActors")
-        buildChildActorList(parent);
-    else if (m_state.selectedSection == "Script")
-        buildScriptDetails(parent);
-}
+    parent.children.push_back(EditorUIBuilder::makeHeading("Identity"));
 
-// ───────────────────────────────────────────────────────────────────────────
-void ActorEditorTab::buildActorClassDetails(WidgetElement& parent)
-{
-    const auto& theme = EditorTheme::Get();
+    // Editable name
+    parent.children.push_back(EditorUIBuilder::makeStringRow(
+        "ActorEditor.Name", "Name", m_state.actorData.name,
+        [this](const std::string& val) {
+            m_state.actorData.name = val;
+            m_state.assetName = val;
+            m_state.isDirty = true;
+            refresh();
+        }));
 
-    // Heading
+    // Editable tag
+    parent.children.push_back(EditorUIBuilder::makeStringRow(
+        "ActorEditor.Tag", "Tag", m_state.actorData.tag,
+        [this](const std::string& val) {
+            m_state.actorData.tag = val;
+            m_state.isDirty = true;
+        }));
+
+    // Actor class dropdown
+    auto classNames = getActorClassNames();
+    int selectedIdx = 0;
+    for (int i = 0; i < static_cast<int>(classNames.size()); ++i)
     {
-        WidgetElement heading{};
-        heading.type            = WidgetElementType::Text;
-        heading.text            = "Actor Class";
-        heading.fontSize        = theme.fontSizeSubheading;
-        heading.style.textColor = Vec4{ 0.55f, 0.85f, 1.00f, 1.0f };
-        heading.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 26.0f });
-        heading.runtimeOnly     = true;
-        parent.children.push_back(std::move(heading));
-    }
-
-    // Current class label
-    {
-        WidgetElement label{};
-        label.type            = WidgetElementType::Text;
-        label.text            = "Class: " + (m_state.actorData.actorClass.empty() ? "(none)" : m_state.actorData.actorClass);
-        label.fontSize        = theme.fontSizeBody;
-        label.style.textColor = theme.textPrimary;
-        label.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 22.0f });
-        label.runtimeOnly     = true;
-        parent.children.push_back(std::move(label));
-    }
-
-    // Root mesh path
-    {
-        WidgetElement label{};
-        label.type            = WidgetElementType::Text;
-        label.text            = "Mesh: " + (m_state.actorData.meshPath.empty() ? "(none)" : m_state.actorData.meshPath);
-        label.fontSize        = theme.fontSizeBody;
-        label.style.textColor = theme.textPrimary;
-        label.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 22.0f });
-        label.runtimeOnly     = true;
-        parent.children.push_back(std::move(label));
-    }
-
-    // Root material path
-    {
-        WidgetElement label{};
-        label.type            = WidgetElementType::Text;
-        label.text            = "Material: " + (m_state.actorData.materialPath.empty() ? "(none)" : m_state.actorData.materialPath);
-        label.fontSize        = theme.fontSizeBody;
-        label.style.textColor = theme.textPrimary;
-        label.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 22.0f });
-        label.runtimeOnly     = true;
-        parent.children.push_back(std::move(label));
-    }
-
-    // Tag
-    {
-        WidgetElement label{};
-        label.type            = WidgetElementType::Text;
-        label.text            = "Tag: " + (m_state.actorData.tag.empty() ? "(none)" : m_state.actorData.tag);
-        label.fontSize        = theme.fontSizeBody;
-        label.style.textColor = theme.textPrimary;
-        label.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 22.0f });
-        label.runtimeOnly     = true;
-        parent.children.push_back(std::move(label));
-    }
-
-    // Available classes list as buttons
-    {
-        WidgetElement subHeading{};
-        subHeading.type            = WidgetElementType::Text;
-        subHeading.text            = "Available Classes";
-        subHeading.fontSize        = theme.fontSizeBody;
-        subHeading.style.textColor = theme.textMuted;
-        subHeading.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 22.0f });
-        subHeading.runtimeOnly     = true;
-        parent.children.push_back(std::move(subHeading));
-    }
-
-    for (const auto& className : getActorClassNames())
-    {
-        const bool selected = (className == m_state.actorData.actorClass);
-        WidgetElement btn{};
-        btn.id              = "ActorEditor.Class." + className;
-        btn.type            = WidgetElementType::Button;
-        btn.text            = className;
-        btn.fontSize        = theme.fontSizeBody;
-        btn.style.textColor = selected ? Vec4{ 1.0f, 1.0f, 1.0f, 1.0f } : theme.textPrimary;
-        btn.style.color     = selected ? Vec4{ 0.2f, 0.4f, 0.3f, 1.0f }
-                                        : Vec4{ 0.12f, 0.13f, 0.16f, 1.0f };
-        btn.style.hoverColor = Vec4{ 0.18f, 0.32f, 0.25f, 1.0f };
-        btn.fillX           = true;
-        btn.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 24.0f });
-        btn.textAlignH      = TextAlignH::Left;
-        btn.textAlignV      = TextAlignV::Center;
-        btn.hitTestMode     = HitTestMode::Enabled;
-        btn.runtimeOnly     = true;
-
-        std::string cls = className;
-        btn.onClicked = [this, cls]()
+        if (classNames[i] == m_state.actorData.actorClass)
         {
-            m_state.actorData.actorClass = cls;
+            selectedIdx = i;
+            break;
+        }
+    }
+
+    parent.children.push_back(EditorUIBuilder::makeDropDownRow(
+        "ActorEditor.ActorClass", "Class", classNames, selectedIdx,
+        [this, classNames](int idx) {
+            if (idx >= 0 && idx < static_cast<int>(classNames.size()))
+            {
+                m_state.actorData.actorClass = classNames[idx];
+                m_state.isDirty = true;
+                rebuildPreviewLevel();
+                refresh();
+            }
+        }));
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+void ActorEditorTab::buildTransformSection(WidgetElement& parent)
+{
+    parent.children.push_back(EditorUIBuilder::makeHeading("Root Transform"));
+
+    // Position
+    parent.children.push_back(EditorUIBuilder::makeVec3Row(
+        "ActorEditor.Pos", "Position", m_state.actorData.rootPosition,
+        [this](int axis, float val) {
+            m_state.actorData.rootPosition[axis] = val;
             m_state.isDirty = true;
             rebuildPreviewLevel();
-            refresh();
-        };
+        }));
 
-        parent.children.push_back(std::move(btn));
-    }
+    // Rotation
+    parent.children.push_back(EditorUIBuilder::makeVec3Row(
+        "ActorEditor.Rot", "Rotation", m_state.actorData.rootRotation,
+        [this](int axis, float val) {
+            m_state.actorData.rootRotation[axis] = val;
+            m_state.isDirty = true;
+            rebuildPreviewLevel();
+        }));
+
+    // Scale
+    parent.children.push_back(EditorUIBuilder::makeVec3Row(
+        "ActorEditor.Scl", "Scale", m_state.actorData.rootScale,
+        [this](int axis, float val) {
+            m_state.actorData.rootScale[axis] = val;
+            m_state.isDirty = true;
+            rebuildPreviewLevel();
+        }));
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+void ActorEditorTab::buildTickSettingsSection(WidgetElement& parent)
+{
+    parent.children.push_back(EditorUIBuilder::makeHeading("Tick Settings"));
+
+    // Can ever tick
+    parent.children.push_back(EditorUIBuilder::makeCheckBox(
+        "ActorEditor.CanEverTick", "Can Ever Tick", m_state.actorData.canEverTick,
+        [this](bool val) {
+            m_state.actorData.canEverTick = val;
+            m_state.isDirty = true;
+        }));
+
+    // Tick group dropdown
+    const std::vector<std::string> tickGroups = {
+        "PrePhysics", "DuringPhysics", "PostPhysics", "PostUpdateWork"
+    };
+    int groupIdx = std::clamp(m_state.actorData.tickGroup, 0, 3);
+
+    parent.children.push_back(EditorUIBuilder::makeDropDownRow(
+        "ActorEditor.TickGroup", "Tick Group", tickGroups, groupIdx,
+        [this](int idx) {
+            m_state.actorData.tickGroup = idx;
+            m_state.isDirty = true;
+        }));
+
+    // Tick interval
+    parent.children.push_back(EditorUIBuilder::makeFloatRow(
+        "ActorEditor.TickInterval", "Interval (s)", m_state.actorData.tickInterval,
+        [this](float val) {
+            m_state.actorData.tickInterval = std::max(0.0f, val);
+            m_state.isDirty = true;
+        }));
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+void ActorEditorTab::buildVisualsSection(WidgetElement& parent)
+{
+    parent.children.push_back(EditorUIBuilder::makeHeading("Visuals"));
+
+    // Root mesh path
+    parent.children.push_back(EditorUIBuilder::makeStringRow(
+        "ActorEditor.MeshPath", "Mesh", m_state.actorData.meshPath,
+        [this](const std::string& val) {
+            m_state.actorData.meshPath = val;
+            m_state.isDirty = true;
+            rebuildPreviewLevel();
+        }));
+
+    // Root material path
+    parent.children.push_back(EditorUIBuilder::makeStringRow(
+        "ActorEditor.MaterialPath", "Material", m_state.actorData.materialPath,
+        [this](const std::string& val) {
+            m_state.actorData.materialPath = val;
+            m_state.isDirty = true;
+            rebuildPreviewLevel();
+        }));
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -560,16 +626,8 @@ void ActorEditorTab::buildChildActorList(WidgetElement& parent)
 {
     const auto& theme = EditorTheme::Get();
 
-    {
-        WidgetElement heading{};
-        heading.type            = WidgetElementType::Text;
-        heading.text            = "Child Actors (" + std::to_string(m_state.actorData.childActors.size()) + ")";
-        heading.fontSize        = theme.fontSizeSubheading;
-        heading.style.textColor = Vec4{ 0.55f, 0.85f, 1.00f, 1.0f };
-        heading.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 26.0f });
-        heading.runtimeOnly     = true;
-        parent.children.push_back(std::move(heading));
-    }
+    parent.children.push_back(EditorUIBuilder::makeHeading(
+        "Child Actors (" + std::to_string(m_state.actorData.childActors.size()) + ")"));
 
     for (size_t i = 0; i < m_state.actorData.childActors.size(); ++i)
     {
@@ -719,56 +777,40 @@ void ActorEditorTab::buildChildActorList(WidgetElement& parent)
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+void ActorEditorTab::buildComponentsInfo(WidgetElement& parent)
+{
+    parent.children.push_back(EditorUIBuilder::makeHeading("Default Components"));
+
+    auto comps = getComponentsForClass(m_state.actorData.actorClass);
+    if (comps.empty())
+    {
+        parent.children.push_back(EditorUIBuilder::makeSecondaryLabel("(no default components)"));
+    }
+    else
+    {
+        for (const auto& comp : comps)
+            parent.children.push_back(EditorUIBuilder::makeLabel(comp));
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 void ActorEditorTab::buildScriptDetails(WidgetElement& parent)
 {
     const auto& theme = EditorTheme::Get();
 
-    {
-        WidgetElement heading{};
-        heading.type            = WidgetElementType::Text;
-        heading.text            = "Embedded Script";
-        heading.fontSize        = theme.fontSizeSubheading;
-        heading.style.textColor = Vec4{ 0.55f, 0.85f, 1.00f, 1.0f };
-        heading.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 26.0f });
-        heading.runtimeOnly     = true;
-        parent.children.push_back(std::move(heading));
-    }
+    parent.children.push_back(EditorUIBuilder::makeHeading("Embedded Script"));
 
     // Script class name
-    {
-        WidgetElement label{};
-        label.type            = WidgetElementType::Text;
-        label.text            = "Class: " + (m_state.actorData.scriptClassName.empty() ? "(none)" : m_state.actorData.scriptClassName);
-        label.fontSize        = theme.fontSizeBody;
-        label.style.textColor = theme.textPrimary;
-        label.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 22.0f });
-        label.runtimeOnly     = true;
-        parent.children.push_back(std::move(label));
-    }
+    parent.children.push_back(EditorUIBuilder::makeLabel(
+        "Class: " + (m_state.actorData.scriptClassName.empty() ? "(none)" : m_state.actorData.scriptClassName)));
 
     // Script header path
-    {
-        WidgetElement label{};
-        label.type            = WidgetElementType::Text;
-        label.text            = "Header: " + (m_state.actorData.scriptHeaderPath.empty() ? "(auto-generated)" : m_state.actorData.scriptHeaderPath);
-        label.fontSize        = theme.fontSizeBody;
-        label.style.textColor = theme.textMuted;
-        label.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 22.0f });
-        label.runtimeOnly     = true;
-        parent.children.push_back(std::move(label));
-    }
+    parent.children.push_back(EditorUIBuilder::makeSecondaryLabel(
+        "Header: " + (m_state.actorData.scriptHeaderPath.empty() ? "(auto-generated)" : m_state.actorData.scriptHeaderPath)));
 
     // Script cpp path
-    {
-        WidgetElement label{};
-        label.type            = WidgetElementType::Text;
-        label.text            = "Source: " + (m_state.actorData.scriptCppPath.empty() ? "(auto-generated)" : m_state.actorData.scriptCppPath);
-        label.fontSize        = theme.fontSizeBody;
-        label.style.textColor = theme.textMuted;
-        label.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 22.0f });
-        label.runtimeOnly     = true;
-        parent.children.push_back(std::move(label));
-    }
+    parent.children.push_back(EditorUIBuilder::makeSecondaryLabel(
+        "Source: " + (m_state.actorData.scriptCppPath.empty() ? "(auto-generated)" : m_state.actorData.scriptCppPath)));
 
     // Enabled toggle
     {
@@ -833,6 +875,28 @@ std::vector<std::string> ActorEditorTab::getActorClassNames() const
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+std::vector<std::string> ActorEditorTab::getComponentsForClass(const std::string& actorClass) const
+{
+    // Map known actor classes to their default component set.
+    // This is static knowledge — matches BuiltinActors.h beginPlay() definitions.
+    if (actorClass == "StaticMeshActor")
+        return { "StaticMeshComponent" };
+    if (actorClass == "PointLightActor" || actorClass == "DirectionalLightActor" || actorClass == "SpotLightActor")
+        return { "LightComponent" };
+    if (actorClass == "CameraActor")
+        return { "CameraComponent" };
+    if (actorClass == "PhysicsActor")
+        return { "StaticMeshComponent", "PhysicsBodyComponent" };
+    if (actorClass == "CharacterActor")
+        return { "StaticMeshComponent", "CharacterControllerComponent" };
+    if (actorClass == "AudioActor")
+        return { "AudioComponent" };
+    if (actorClass == "ParticleActor")
+        return { "ParticleComponent" };
+    return {};
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 std::unique_ptr<EngineLevel> ActorEditorTab::takeRuntimeLevel()
 {
     return std::move(m_runtimeLevel);
@@ -844,8 +908,123 @@ void ActorEditorTab::giveRuntimeLevel(std::unique_ptr<EngineLevel> level)
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+bool ActorEditorTab::handleViewportDrop(const std::string& payload, const Vec2& screenPos)
+{
+    (void)screenPos;
+    if (!m_state.isOpen)
+        return false;
+
+    // Payload format: "<AssetType int>|<content-relative path>"
+    const auto sep = payload.find('|');
+    if (sep == std::string::npos)
+        return false;
+
+    const int typeInt = std::atoi(payload.substr(0, sep).c_str());
+    const std::string relPath = payload.substr(sep + 1);
+    const AssetType assetType = static_cast<AssetType>(typeInt);
+    const std::string assetName = std::filesystem::path(relPath).stem().string();
+
+    if (assetType == AssetType::Model3D)
+    {
+        // If the root has no mesh yet, assign to root; otherwise add as child.
+        if (m_state.actorData.meshPath.empty())
+        {
+            m_state.actorData.meshPath = relPath;
+
+            // Try to pick up the mesh's default material
+            auto meshAsset = AssetManager::Instance().getLoadedAssetByPath(relPath);
+            if (!meshAsset)
+            {
+                int id = AssetManager::Instance().loadAsset(relPath, AssetType::Model3D);
+                if (id > 0)
+                    meshAsset = AssetManager::Instance().getLoadedAssetByID(static_cast<unsigned int>(id));
+            }
+            if (meshAsset)
+            {
+                auto& ad = meshAsset->getData();
+                if (ad.contains("m_materialAssetPaths") && ad["m_materialAssetPaths"].is_array() && !ad["m_materialAssetPaths"].empty())
+                {
+                    std::string mp = ad["m_materialAssetPaths"][0].get<std::string>();
+                    if (!mp.empty())
+                        m_state.actorData.materialPath = mp;
+                }
+            }
+
+            if (m_ui)
+                m_ui->showToastMessage("Set root mesh: " + assetName, UIManager::kToastMedium);
+        }
+        else
+        {
+            // Add as a new child actor with the dropped mesh
+            ChildActorEntry entry;
+            entry.actorClass = "StaticMeshActor";
+            entry.name       = assetName;
+            entry.meshPath   = relPath;
+            entry.scale[0]   = 1.0f;
+            entry.scale[1]   = 1.0f;
+            entry.scale[2]   = 1.0f;
+
+            // Try to pick up the mesh's default material
+            auto meshAsset = AssetManager::Instance().getLoadedAssetByPath(relPath);
+            if (!meshAsset)
+            {
+                int id = AssetManager::Instance().loadAsset(relPath, AssetType::Model3D);
+                if (id > 0)
+                    meshAsset = AssetManager::Instance().getLoadedAssetByID(static_cast<unsigned int>(id));
+            }
+            if (meshAsset)
+            {
+                auto& ad = meshAsset->getData();
+                if (ad.contains("m_materialAssetPaths") && ad["m_materialAssetPaths"].is_array() && !ad["m_materialAssetPaths"].empty())
+                {
+                    std::string mp = ad["m_materialAssetPaths"][0].get<std::string>();
+                    if (!mp.empty())
+                        entry.materialPath = mp;
+                }
+            }
+
+            m_state.actorData.childActors.push_back(std::move(entry));
+            if (m_ui)
+                m_ui->showToastMessage("Added child: " + assetName, UIManager::kToastMedium);
+        }
+
+        m_state.isDirty = true;
+        rebuildPreviewLevel();
+        refresh();
+        return true;
+    }
+
+    if (assetType == AssetType::Material)
+    {
+        // Apply material to the root actor
+        m_state.actorData.materialPath = relPath;
+        m_state.isDirty = true;
+        rebuildPreviewLevel();
+        refresh();
+        if (m_ui)
+            m_ui->showToastMessage("Set root material: " + assetName, UIManager::kToastMedium);
+        return true;
+    }
+
+    return false;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 void ActorEditorTab::rebuildPreviewLevel()
 {
+    // If the actor editor tab is currently active, save the camera from
+    // the renderer so we can restore it after the level swap.
+    auto& diag = DiagnosticsManager::Instance();
+    const bool isActiveTab = m_state.isOpen && m_renderer &&
+                             m_renderer->getActiveTabId() == m_state.tabId;
+    if (isActiveTab)
+    {
+        m_previewCamPos = m_renderer->getCameraPosition();
+        m_previewCamRot = m_renderer->getCameraRotationDegrees();
+    }
+
+    m_previewEntities.clear();
+
     m_runtimeLevel.reset();
     m_runtimeLevel = std::make_unique<EngineLevel>();
     m_runtimeLevel->setName("__ActorPreview__");
@@ -853,20 +1032,22 @@ void ActorEditorTab::rebuildPreviewLevel()
 
     json entities = json::array();
 
-    // Root actor entity (mesh + material if set)
-    if (!m_state.actorData.meshPath.empty())
+    const auto& ad = m_state.actorData;
+
+    // Root actor entity (mesh + material if set) — uses root transform
+    if (!ad.meshPath.empty())
     {
         json rootEntity = json::object();
         json comps = json::object();
         comps["Transform"] = json{
-            {"position", json::array({0.0f, 0.0f, 0.0f})},
-            {"rotation", json::array({0.0f, 0.0f, 0.0f})},
-            {"scale",    json::array({1.0f, 1.0f, 1.0f})}
+            {"position", json::array({ad.rootPosition[0], ad.rootPosition[1], ad.rootPosition[2]})},
+            {"rotation", json::array({ad.rootRotation[0], ad.rootRotation[1], ad.rootRotation[2]})},
+            {"scale",    json::array({ad.rootScale[0],    ad.rootScale[1],    ad.rootScale[2]})}
         };
-        comps["Mesh"] = json{ {"meshAssetPath", m_state.actorData.meshPath} };
-        if (!m_state.actorData.materialPath.empty())
-            comps["Material"] = json{ {"materialAssetPath", m_state.actorData.materialPath} };
-        comps["Name"] = json{ {"displayName", m_state.actorData.name} };
+        comps["Mesh"] = json{ {"meshAssetPath", ad.meshPath} };
+        if (!ad.materialPath.empty())
+            comps["Material"] = json{ {"materialAssetPath", ad.materialPath} };
+        comps["Name"] = json{ {"displayName", ad.name} };
         rootEntity["components"] = std::move(comps);
         entities.push_back(std::move(rootEntity));
     }
@@ -937,4 +1118,14 @@ void ActorEditorTab::rebuildPreviewLevel()
     m_runtimeLevel->setEditorCameraPosition(m_previewCamPos);
     m_runtimeLevel->setEditorCameraRotation(m_previewCamRot);
     m_runtimeLevel->setHasEditorCamera(true);
+
+    // If the actor editor is the active tab, swap the new level into
+    // DiagnosticsManager so the renderer picks it up immediately.
+    if (isActiveTab)
+    {
+        m_runtimeLevel->resetPreparedState();
+        auto old = diag.swapActiveLevel(std::move(m_runtimeLevel));
+        // old preview level is discarded
+        diag.setScenePrepared(false);
+    }
 }

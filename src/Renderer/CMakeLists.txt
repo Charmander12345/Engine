@@ -106,6 +106,8 @@ set(RENDERER_CORE_EDITOR_SOURCES
     EditorTabs/InputActionEditorTab.cpp
     EditorTabs/InputMappingEditorTab.h
     EditorTabs/InputMappingEditorTab.cpp
+    EditorTabs/ReflectionWidgetFactory.h
+    EditorTabs/ReflectionWidgetFactory.cpp
 )
 
 # Shared properties for both RendererCore variants

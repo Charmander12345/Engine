@@ -16,8 +16,8 @@
 |---|---------|--------|---------|-------------|
 | 1 | **Entity Parent-Child Hierarchie (Transform Parenting)** | ✅ | Mittel | Hierarchische Transform-Vererbung vollständig implementiert. `TransformComponent` erweitert um `parent`, `children`, `localPosition/localRotation/localScale`, `dirty`-Flag. ECSManager API: `setParent()`, `removeParent()`, `getParent()`, `getChildren()`, `getRoot()`, `isAncestorOf()`, `updateWorldTransforms()`, `markTransformDirty()`. Dirty-Flag-Propagation top-down, YXZ-Euler-Rotation, World↔Local-Konvertierung bei Reparenting. Level-Serialisierung mit Backward-Kompatibilität. GameplayAPI + INativeScript + Python-Bindings (`engine.entity.set_parent/get_children/...`) + `engine.pyi` IntelliSense. `PhysicsWorld::step()` ruft `updateWorldTransforms()` vor Physics-Sync auf. |
 | 2 | **Character Controller** | ✅ | Mittel | Backend-agnostischer Character Controller implementiert. `CharacterControllerComponent` (Kapsel-Shape, MaxSlopeAngle, StepUp, SkinWidth, GravityFactor). `IPhysicsBackend` erweitert um `CharacterDesc/CharacterState/CharacterHandle` + 7 virtuelle Methoden. **JoltBackend:** `CharacterVirtual` mit `ExtendedUpdate` (StickToFloor, WalkStairs). **PhysXBackend:** `PxCapsuleController` mit `PxControllerManager`. `PhysicsWorld` synchronisiert Character Controller parallel zu Rigidbodies (create/update/readback). Exklusiv mit `PhysicsComponent`. |
-| 3 | **Physics Constraints / Joints** | ❌ | Mittel | Nur isolierte Rigidbodies, keine Verbindungen. Fehlt: Hinge Joint (Türen), Ball-Socket Joint (Ragdolls), Fixed Joint, Spring Joint, Distance Constraint. Jolt unterstützt alle Constraint-Typen nativ. Ohne Joints sind Türen, Fahrzeuge, Ragdolls, Ketten, Brücken unmöglich. |
-| 4 | **Animation Blending / State Machine** | ❌ | Hoch | Nur ein Animations-Clip gleichzeitig abspielbar (`AnimationComponent.currentClipIndex`). Fehlt: Animation Blending, Crossfade, Layers, State Machine, Blend Trees, Root Motion. Ohne das sind Walk→Run-Übergänge, Idle→Attack, Upper/Lower Body Split unmöglich. Unity: Animator Controller, Unreal: AnimGraph. |
+| 3 | **Physics Constraints / Joints** | ✅ | Mittel | Vollständig implementiert. `ConstraintComponent` mit Array-basiertem Multi-Constraint-Modell. Runtime-Jolt-Mappings für alle 7 Constraint-Typen: Fixed, Hinge (mit Limits/Spring), Distance (Auto-Preserve), BallSocket, Slider, Spring, Cone. Editor-Dropdown für Connected-Entity. Substepping für stabile Constraint-Interaktionen. Level-Serialisierung (Array + Legacy-Compat). |
+| 4 | **Animation Blending / State Machine** | ⚠️ Teilweise | Hoch | Multi-Layer Blending, Crossfade, Bone Masks implementiert. `AnimationBlending.h`, `SkeletalAnimator` Rewrite (multi-layer, smooth-step crossfade, Override/Additive modes), `AnimationComponent` erweitert, 8 Renderer-Virtuals, `GameplayAPI` (13 Funktionen), Python `engine.animation` Modul. **Noch ausstehend:** State Machine, Blend Trees, AnimationController Editor. |
 | 5 | **3D Spatial Audio** | ✅ | Gering | Vollständig implementiert. `AudioSourceComponent` (ECS, is3D, minDistance, maxDistance, rolloffFactor, gain, loop, autoPlay). `AudioManager` erweitert um `setSourcePosition()`, `setSourceSpatial()`, `updateListenerTransform()` (OpenAL AL_POSITION, AL_SOURCE_RELATIVE, AL_REFERENCE_DISTANCE, AL_MAX_DISTANCE, AL_ROLLOFF_FACTOR, alListenerfv). Listener-Sync vom aktiven CameraComponent in main.cpp. Editor: AudioPreviewTab mit 2D/3D-Dropdown + Spatial-Settings (MinDistance, MaxDistance, Rolloff) in Audio-Asset-Metadaten. Level-Serialisierung. OutlinerPanel-Inspector. GameplayAPI + INativeScript + Python-Bindings (`set_audio_position`, `set_audio_spatial`) + `engine.pyi`. |
 
 ### 🟡 Wichtig fehlend (Prio 2 – Schränkt viele Spielgenres ein)
@@ -29,8 +29,8 @@
 | 8 | **Reflection Probes / Environment Mapping** | ❌ | Hoch | Nur Skybox-basiertes Ambient Light. Fehlt: Reflection Probes (Cube-Map basiert), Screen-Space Reflections (SSR), Image-Based Lighting (IBL). Essentiell für realistische Metalloberflächen und spiegelnde Materialien. |
 | 9 | **Multi-Level-Streaming / Additive Scenes** | ❌ | Hoch | Ein Level gleichzeitig, komplett geladen. Fehlt: Additives Level-Loading, Level-Streaming basierend auf Streaming Volumes oder Distanz, Sub-Levels. Unity: `SceneManager.LoadSceneAsync(Additive)`, Unreal: World Partition. |
 | 10 | **Decal System** | ❌ | Mittel | Keine projizierten Decals (Blut, Bullet Holes, Schmutz) auf beliebige Geometry. Unity: Decal Projector, Unreal: Decal Actor. |
-| 11 | **Physics Queries (Overlap / Sweep)** | ⚠️ Teilweise | Mittel | Nur Raycast implementiert. Sphere/Box Overlap und Sweep Queries fehlen. Wichtig für Explosion-Radius, Area-of-Effect, Ground-Check. |
-| 12 | **Force an Position (AddForceAtPosition)** | ❌ | Gering | Nur `addForce`/`addImpulse` am Zentrum. Force an bestimmtem Punkt fehlt (wichtig für Drehmoment, Explosion-Kickback). |
+| 11 | **Physics Queries (Overlap / Sweep)** | ✅ | Mittel | Vollständig implementiert. `overlapSphere`, `overlapBox`, `sweepSphere`, `sweepBox` über alle Schichten: IPhysicsBackend, JoltBackend (NarrowPhaseQuery), PhysicsWorld, GameplayAPI, INativeScript, Python-Bindings, `engine.pyi`. |
+| 12 | **Force an Position (AddForceAtPosition)** | ✅ | Gering | Vollständig implementiert. `addForceAtPosition` / `addImpulseAtPosition` über Backend-Interface, JoltBackend, PhysicsWorld, GameplayAPI, INativeScript, Python-Bindings, `engine.pyi`. |
 
 ### 🟢 Nice-to-have (Prio 3 – Erweitert die Möglichkeiten deutlich)
 
@@ -41,7 +41,7 @@
 | 15 | **Lightmapping / Baked GI** | ❌ | Sehr Hoch | Baked Lighting für statische Szenen – deutlich bessere Lichtqualität ohne Runtime-Kosten. |
 | 16 | **Physics Material System** | ❌ | Gering | Verschiedene physikalische Materialien (Eis, Gummi, Metall) als wiederverwendbare Assets mit eigenen Friction/Restitution-Werten. |
 | 17 | **Visual Scripting / Blueprint-System** | ❌ | Sehr Hoch | Visuelles Node-basiertes Scripting für Designer. Extrem aufwändig. |
-| 18 | **Mesh Collider (Convex/Concave)** | ❌ | Mittel | Nur primitive Shapes verfügbar – komplexe Meshes als Collider fehlen. Jolt unterstützt `MeshShape` und `ConvexHullShape`. |
+| 18 | **Mesh Collider (Convex/Concave)** | ✅ | Mittel | Vollständig implementiert. `Shape::Mesh` in PhysicsTypes, `ConvexHullShape`/`MeshShape` in JoltBackend, Mesh-Daten aus AssetManager. |
 | 19 | **Networking / Multiplayer** | ❌ | Sehr Hoch | Client-Server, Replication, RPC – eigenes Großprojekt. |
 | 20 | **Volumetric Fog / Clouds** | ❌ | Hoch | Volumetrischer Nebel und Wolken für atmosphärische Tiefe. |
 
@@ -49,15 +49,196 @@
 
 ```
 Phase 1 (Kern):     Transform Parenting ✅ → 3D Spatial Audio ✅
-Phase 2 (Gameplay): Physics Joints → Animation Blending → Physics Queries
+Phase 2 (Gameplay): Physics Joints ✅ → Animation Blending ⚠️ (Blending/Layers ✅, State Machine ausstehend) → Physics Queries ✅
 Phase 3 (Visuals):  Reflection Probes/IBL → Decals → Runtime UI Framework
 Phase 4 (Welt):     NavMesh/Pathfinding → Multi-Level-Streaming → Foliage
-Phase 5 (Polish):   Root Motion → Physics Materials → Mesh Colliders
+Phase 5 (Polish):   Root Motion → Physics Materials → Mesh Colliders ✅
 ```
 
 ---
 
-## Letzte Änderung (3D Spatial Audio – Vollständige Implementierung)
+## Letzte Änderung (Transaction-System – Snapshot-basiertes Undo/Redo)
+
+Neues **Transaction-System** als Ergänzung zum bestehenden `UndoRedoManager` für snapshot-basiertes Undo/Redo. Jede Transaction erfasst automatisch Before/After-Byte-Snapshots und pusht einen einzelnen `UndoRedoManager::Command`.
+
+### TransactionManager (`src/Core/TransactionManager.h/.cpp`)
+- ✅ `TransactionManager` Singleton: `beginTransaction(desc)` / `endTransaction()` klammern Property-Änderungen.
+- ✅ `recordSnapshot(void*, size_t)` – Raw-Memcpy für stabile Adressen (Globals, Editor-Settings).
+- ✅ `recordEntry(capture, restore)` – Lambda-basiert für relokierbare Daten (ECS-Komponenten per Entity-ID nachgeschlagen).
+- ✅ `addPostRestoreCallback()` – Side-Effect-Callbacks (Physics-Invalidierung, UI-Refresh) nach jedem Undo/Redo.
+- ✅ `isActive()` – Prüft ob eine Transaction aktiv ist.
+
+### ScopedTransaction (RAII)
+- ✅ Konstruktor ruft `beginTransaction()`, Destruktor ruft `endTransaction()`.
+- ✅ `snapshot()`, `entry()`, `onRestore()` als Convenience-Wrapper.
+- ✅ Nicht kopierbar (deleted copy/assign).
+
+### Integration
+- ✅ Committed Transactions werden als `UndoRedoManager::Command` gepusht – bestehende Ctrl+Z/Y, 100-Tiefe-Limit und `onChanged`-Callback funktionieren transparent.
+- ✅ `std::shared_ptr` für gemeinsam genutzte Before/After-Puffer in Execute- und Undo-Lambdas.
+
+### Betroffene Dateien
+- `src/Core/TransactionManager.h` (neu) – TransactionManager Singleton + ScopedTransaction RAII
+- `src/Core/TransactionManager.cpp` (neu) – Implementierung
+- `src/Core/CMakeLists.txt` (mod) – Neue Dateien hinzugefügt
+- ✅ Build erfolgreich.
+
+---
+
+## Letzte Änderung (Reflektions-System – Makro-basierte Property-Registrierung)
+
+Neues **Reflektions-System** für automatische Property-Enumeration, Editor-UI-Generierung und zukünftige Serialisierungs-Integration. Basiert auf dem Unreal-Engine-Konzept von `UProperty` / `UClass` – ohne Code-Generator, rein makro-basiert.
+
+### Kern-Typen (`src/Core/Reflection.h`)
+- ✅ `TypeID` Enum: `Float`, `Int`, `Bool`, `String`, `Vec3`, `Vec2`, `Color3`, `Color4`, `Enum`, `AssetPath`, `EntityRef`, `Custom`.
+- ✅ `PropertyFlags`: `PF_EditAnywhere`, `PF_VisibleOnly`, `PF_Transient`, `PF_Hidden` – steuern Editor-Anzeige und Serialisierung.
+- ✅ `PropertyInfo` Struct: Name, TypeID, Byte-Offset (`offsetof`), Size, Flags, Kategorie, optionale Clamp-Range, Enum-Einträge. Typisierter `ptrIn<T>()` für Runtime-Zugriff.
+- ✅ `ClassInfo` Struct: Klassenname + `std::vector<PropertyInfo>` + optionaler `superClass`-Pointer für Vererbung.
+- ✅ `EnumEntry` Struct: Name/Value-Paare für reflektierte Enums.
+
+### TypeRegistry Singleton (`src/Core/Reflection.cpp`)
+- ✅ `TypeRegistry::Instance()` – Globale Registry, `std::type_index` → `ClassInfo*`.
+- ✅ `getClassInfo<T>()` / `getClassInfo(type_index)` / `getClassInfoByName(const char*)` – 3 Lookup-Varianten.
+- ✅ `all()` – Iteration über alle registrierten Klassen.
+
+### REFLECT-Makros
+- ✅ `REFLECT_BEGIN(ClassName, DisplayName)` / `REFLECT_END(ClassName)` – Nicht-intrusiv, Static-Initializer-basiert.
+- ✅ Per-Typ-Makros: `REFLECT_FLOAT`, `REFLECT_INT`, `REFLECT_BOOL`, `REFLECT_STRING`, `REFLECT_VEC3`, `REFLECT_VEC2`, `REFLECT_COLOR3`, `REFLECT_COLOR4`, `REFLECT_ENUM`, `REFLECT_ASSET_PATH`, `REFLECT_ENTITY_REF`.
+- ✅ `REFLECT_FLOAT_CLAMPED(member, category, flags, min, max)` – Numerische Begrenzung.
+- ✅ `REFLECT_BEGIN_NESTED` / `REFLECT_END_NESTED` – Für verschachtelte Typen (z.B. `LodComponent::LodLevel`).
+
+### ECS-Komponenten-Registrierung (`src/Core/ECS/ComponentReflection.h`)
+- ✅ Alle 16+ ECS-Komponenten reflektiert: Transform, Mesh, MaterialOverrides, Material, Light, Camera, Collision, Physics, Logic, Name, HeightField, Animation, LodLevel, Lod, CharacterController, AudioSource, ParticleEmitter, ConstraintEntry, Constraint.
+- ✅ Enum-Tabellen: `LightType_Entries`, `ColliderType_Entries`, `MotionType_Entries`, `MotionQuality_Entries`, `ConstraintType_Entries`.
+- ✅ Kategorien (z.B. "World", "Local", "Shape", "Body", "Playback") und Flags (PF_Transient für Runtime-State, PF_Hidden für interne Felder).
+
+### ReflectionWidgetFactory (`src/Renderer/EditorTabs/ReflectionWidgetFactory.h/.cpp`)
+- ✅ `buildPropertyWidgets()` – Generiert WidgetElement-Listen aus ClassInfo-Metadaten.
+- ✅ `buildWidgetForProperty()` – Pro-Property Widget-Erzeugung.
+- ✅ TypeID-Mapping: Float→FloatRow (mit Clamp→Slider), Int→IntRow, Bool→CheckBox, String→StringRow, Vec3→Vec3Row, Vec2→Vec2Row, Color3/4→ColorPicker, Enum→DropDownRow, EntityRef→IntRow, AssetPath→StringRow.
+- ✅ PF_Hidden-Properties werden automatisch übersprungen.
+- ✅ PF_VisibleOnly-Properties als Read-Only-Label dargestellt.
+
+### Betroffene Dateien
+- `src/Core/Reflection.h` (neu) – TypeID, PropertyFlags, PropertyInfo, ClassInfo, TypeRegistry, REFLECT-Makros
+- `src/Core/Reflection.cpp` (neu) – TypeRegistry Singleton
+- `src/Core/ECS/ComponentReflection.h` (neu) – Reflektions-Registrierung aller ECS-Komponenten
+- `src/Core/ECS/ECS.cpp` (mod) – Include ComponentReflection.h für Static-Initializer
+- `src/Core/CMakeLists.txt` (mod) – Neue Dateien hinzugefügt
+- `src/Renderer/EditorTabs/ReflectionWidgetFactory.h` (neu) – Property-Widget-Factory Header
+- `src/Renderer/EditorTabs/ReflectionWidgetFactory.cpp` (neu) – Widget-Generierung pro TypeID
+- `src/Renderer/CMakeLists.txt` (mod) – ReflectionWidgetFactory hinzugefügt
+- ✅ Build erfolgreich.
+
+---
+
+## Letzte Änderung (Archive-System – Bidirektionale Serialisierung)
+
+Neues **Archive-System** als Grundlage für binäre Serialisierung, Undo-Snapshots und zukünftige Netzwerk-Pakete. Basiert auf dem Unreal-Engine-Konzept von `FArchive` – ein Aufruf für Lesen UND Schreiben.
+
+### Archive-Basisklasse (`src/Core/Archive.h`)
+- ✅ `Archive` abstrakte Basisklasse: `isLoading()` / `isSaving()`, virtuelles `serialize(void*, size_t)`.
+- ✅ `operator<<` für alle fundamentalen C++-Typen (bool, char, short, int, long, long long, unsigned Varianten, float, double).
+- ✅ `operator<<(std::string&)` – Length-Prefixed (uint32 Länge + Raw-Chars).
+- ✅ `serializeFloatArray<N>()` für Fixed-Size C-Arrays.
+- ✅ `serializeVector<T>()` für trivially-copyable Vektoren (uint32 Count + Raw-Bytes).
+- ✅ `serializeStringVector()` für `std::vector<std::string>`.
+- ✅ `serializeVersion()` für Format-Versionierung und Backward-Kompatibilität.
+- ✅ `hasError()` für Fehler-Tracking.
+
+### Konkrete Archive-Implementierungen
+- ✅ `FileArchiveWriter` – Binäre Dateiausgabe (`std::ofstream`). Für binären Asset-Export und Runtime-Builds.
+- ✅ `FileArchiveReader` – Binäre Dateieingabe (`std::ifstream`). Für binären Asset-Import.
+- ✅ `MemoryArchive` – In-Memory `std::vector<uint8_t>` Buffer. Ideal für Undo/Redo-Snapshots. `takeBuffer()` für Zero-Copy-Extraktion, `resetRead()` / `resetWrite()` für Wiederverwendung.
+
+### ECS-Component-Serialisierung (`src/Core/ECS/ComponentSerialization.h`)
+- ✅ Freie `serialize(Archive&, Component&)` Funktionen für alle ECS-Komponenten:
+  - TransformComponent, MeshComponent, MaterialComponent (mit Overrides)
+  - LightComponent, CameraComponent, CollisionComponent, PhysicsComponent
+  - ConstraintComponent (Array-basiert), LogicComponent, NameComponent
+  - HeightFieldComponent, AnimationComponent, LodComponent
+  - CharacterControllerComponent, AudioSourceComponent, ParticleEmitterComponent
+- ✅ Jede Funktion enthält einen Version-Tag für Forward-kompatible Deserialisierung.
+- ✅ Runtime-Only-State (z.B. `isGrounded`, `emissionAccumulator`, `runtimeHandle`) wird nicht serialisiert.
+
+### ActorAssetData-Serialisierung
+- ✅ `ChildActorEntry::serialize(Archive&)` – Bidirektional, rekursiv für verschachtelte Kinder.
+- ✅ `ActorAssetData::serialize(Archive&)` – Bidirektional, inkl. Script-Metadaten.
+- ✅ Bestehende `toJson()` / `fromJson()` bleiben unverändert – JSON für Editor, Binär für Runtime.
+
+### Betroffene Dateien
+- `src/Core/Archive.h` (neu) – Archive, FileArchiveWriter, FileArchiveReader, MemoryArchive
+- `src/Core/Archive.cpp` (neu) – String/Vector/Version-Implementierungen
+- `src/Core/ECS/ComponentSerialization.h` (neu) – Bidirektionale ECS-Serialisierung
+- `src/Core/Actor/ActorAssetData.h` (mod) – `serialize(Archive&)` Deklaration
+- `src/Core/Actor/ActorAssetData.cpp` (mod) – `serialize(Archive&)` Implementierung
+- `src/Core/CMakeLists.txt` (mod) – Neue Dateien hinzugefügt
+- ✅ Build erfolgreich.
+
+---
+
+## Vorherige Änderung (Actor-System Phase 2: NameID, ObjectHandle, Game Framework, Tick-DAG)
+
+Umfassende Erweiterung des Actor-Systems basierend auf dem Unreal-Engine-Breakdown-Dokument. Fokus auf Entwickler-Ergonomie und Engine-Effizienz.
+
+### NameID – Interned-String-System (`src/Core/NameID.h`)
+- ✅ `NameID` Struct (4 Byte) mit globalem `NamePool` Singleton.
+- ✅ O(1) Vergleiche via Integer-Index statt String-Vergleiche.
+- ✅ `NameID::fromString()` / `NameID::find()` / `NameID::toString()` API.
+- ✅ `Actor::m_nameID` / `m_tagID` nutzen jetzt `NameID` statt `std::string`.
+- ✅ `World::findActorByNameID()` / `findActorsByTagID()` für O(1)-Vergleiche.
+- ✅ Bestehendes String-API bleibt kompatibel (`getName()` / `setName()` / `getTag()` / `setTag()`).
+
+### ObjectHandle – Generationsgezählte Weak-Handles (`src/Core/ObjectHandle.h`)
+- ✅ `ObjectHandle` (8 Byte: index + generation) für sichere Weak-Referenzen.
+- ✅ Chunked `ObjectSlotArray` (4096 Slots/Chunk, Free-List-Recycling).
+- ✅ `TObjectHandle<T>` typisierter Wrapper mit `get()`, `isValid()`, `operator->`.
+- ✅ `ActorHandle` Typedef für Actor-spezifische Handles.
+- ✅ `Actor::getHandle()` liefert einen `ActorHandle` für Weak-Referenzen.
+- ✅ Handle wird in `internalInitialize()` allokiert, in `internalEndPlay()` freigegeben.
+- ✅ `EObjectFlags` Enum für zukünftige GC-Flags (RootSet, PendingKill, Transactional).
+
+### Game Framework (`src/Core/Actor/GameFramework/`)
+- ✅ `GameMode` – Spielregeln, einmal pro World. `onPlayerJoined()`, `onPlayerLeft()`, `onStartPlay()`, `getDefaultPawnClass()`, `getPlayerControllerClass()`.
+- ✅ `GameState` – Spielweiter Zustand (Match-Timer, Scores). Automatisch mit GameMode erstellt.
+- ✅ `PlayerController` – Input-Proxy, persistiert über Pawn-Wechsel. `possess(Pawn*)`, `unpossess()`, `onPossess()`, `onUnpossess()`.
+- ✅ `Pawn` – Besitzbare physische Repräsentation. `onPossessedBy()`, `onUnpossessed()`, `isPossessed()`.
+- ✅ `World::setGameMode<T>()` / `getGameMode()` / `getGameState()`.
+- ✅ `World::beginPlay()` initialisiert GameState und ruft `GameMode::onStartPlay()`.
+
+### Tick-Dependencies (DAG)
+- ✅ `Actor::addTickPrerequisite(Actor* other)` / `removeTickPrerequisite()`.
+- ✅ `World::tickGroupSorted()` nutzt Kahn's Algorithmus für topologische Sortierung pro Tick-Gruppe.
+- ✅ Zyklenerkennung mit Fallback (betroffene Actors ticken in Array-Reihenfolge).
+- ✅ Fast-Path: Wenn keine Dependencies in einer Gruppe existieren, wird die Sortierung übersprungen.
+
+### Actor-Lifecycle-Erweiterungen
+- ✅ `EEndPlayReason` Enum: `Destroyed`, `LevelUnloaded`, `Quit`, `RemovedFromWorld`.
+- ✅ `endPlay(EEndPlayReason)` als bevorzugte Override-Methode (Rückwärtskompatibel mit `endPlay()`).
+- ✅ `Actor::onDestroyed` Delegate – Callback bei Actor-Zerstörung.
+- ✅ `Actor::destroy()` feuert den `onDestroyed` Delegate vor dem Pending-Kill-Marking.
+
+### GameplayAPI – Erweiterte Actor-Funktionen
+- ✅ 20+ neue Funktionen: `spawnActorByClass`, `destroyActor`, `finishSpawning`, `getGameMode`, `getGameState`, `addTickPrerequisite`, `removeTickPrerequisite`, `setTickGroup`, `setTickInterval`, `setCanEverTick`, `getActorName`, `setActorName`, `getActorTag`, `setActorTag`, `findActorByName`, `findActorsByTag`, `possess`, `unpossessController`.
+
+### Betroffene Dateien
+- `src/Core/NameID.h` (neu) – NamePool + NameID
+- `src/Core/ObjectHandle.h` (neu) – ObjectSlotArray + ObjectHandle + TObjectHandle
+- `src/Core/Actor/GameFramework/GameMode.h` (neu)
+- `src/Core/Actor/GameFramework/GameState.h` (neu)
+- `src/Core/Actor/GameFramework/PlayerController.h` (neu)
+- `src/Core/Actor/GameFramework/Pawn.h` (neu)
+- `src/Core/Actor/Actor.h` (mod) – NameID, ObjectHandle, Tick-Prereqs, EEndPlayReason, onDestroyed
+- `src/Core/Actor/Actor.cpp` (mod) – Implementierungen
+- `src/Core/Actor/World.h` (mod) – Game Framework, NameID-Queries, tickGroupSorted, beginPlay
+- `src/Core/Actor/World.cpp` (mod) – Topologische Sortierung, Game Framework, NameID-Queries
+- `src/NativeScripting/GameplayAPI.h/.cpp` (mod) – 20+ neue Funktionen
+- `src/Core/CMakeLists.txt` (mod) – Neue Dateien
+- ✅ Build erfolgreich.
+
+---
+
+## Vorherige Änderung (3D Spatial Audio – Vollständige Implementierung)
 
 - ✅ `Components.h`: `AudioSourceComponent` hinzugefügt — `assetPath`, `assetId`, `is3D`, `minDistance` (1.0), `maxDistance` (50.0), `rolloffFactor` (1.0), `gain` (1.0), `loop`, `autoPlay`, `runtimeHandle` (nicht serialisiert).
 - ✅ `ECS.h/ECS.cpp`: `ComponentKind::AudioSource` (Index 14), `MaxComponentTypes` auf 16 erhöht. `ComponentTraits`, `getStorage()`-Spezialisierungen, `SparseSet<AudioSourceComponent>`. `initialize()` und `removeEntity()` aktualisiert.
@@ -199,14 +380,28 @@ Phase 5 (Polish):   Root Motion → Physics Materials → Mesh Colliders
 - ✅ `Graceful Skip`: Falls keine C++-Scripts vorhanden, wird der Step mit "No C++ game scripts found, skipping." übersprungen.
 - ✅ Build erfolgreich.
 
-## Letzte Änderung (ActorEditor Preview Viewport & Nestable Child Actors)
+## Letzte Änderung (Actor System Phase 1: Tick Groups, Lifecycle Hooks, Deferred Spawning)
 
-- ✅ `ActorAssetData Rework`: Datenmodell von flacher Component-Liste auf nestbare Child-Actor-Hierarchie umgestellt. Neue `ChildActorEntry`-Struct (actorClass, name, meshPath, materialPath, position/rotation/scale, rekursive children). `ActorAssetData` hat jetzt root meshPath/materialPath + `childActors`-Vektor. Legacy-Component-Format wird beim Laden automatisch migriert.
-- ✅ `ActorEditorTab Rework`: Editor-Tab komplett überarbeitet. Layout: 3D-Preview-Viewport (links) + Sidebar (rechts, 280-320px). Sidebar enthält Section-Liste + Details-Panel. Sections: ActorClass (Klasse, Mesh, Material, Tag), ChildActors (Hierarchie mit Add/Remove), Script. Transform-Sektion entfernt (existiert erst wenn Actor im Level platziert ist).
-- ✅ `Preview Viewport`: ActorEditorTab erstellt eigenes `EngineLevel` mit JSON-Entities aus Actor-Daten (Root-Mesh + rekursive Child-Entities + Directional Light + Editor-Kamera). Verwendet MeshViewer-Level-Swap-Pattern (`takeRuntimeLevel`/`giveRuntimeLevel`).
-- ✅ `Tab-Swap Integration`: `OpenGLRendererTabs.cpp::setActiveTab()` um ActorEditor erweitert — Level wird beim Tab-Wechsel korrekt ein-/ausgetauscht (Leaving, Entering, Return-to-Viewport), analog zu MeshViewer/MaterialEditor.
-- ✅ `World::spawnActorFromAsset() Rework`: Spawning von altem Component-Modell auf neues childActors-Modell umgestellt. Rekursives Spawnen von Child-Actors mit `attachToActor()`, Mesh/Material pro Actor, lokale Transforms.
-- ✅ `UIManager`: Neuer `getActorEditorTab()` public Accessor für Renderer-Integration.
+- ✅ `Tick Groups`: `ETickGroup` Enum (PrePhysics, DuringPhysics, PostPhysics, PostUpdateWork) + `TickSettings` Struct (bCanEverTick, tickGroup, tickInterval) in `Actor.h`. `World::tickGroup(ETickGroup, float)` für phasenweises Ticking. Main-Loop umstrukturiert: PrePhysics → Physics → DuringPhysics → Overlap-Events → PostPhysics → PostUpdateWork → flushDestroys → Python.
+- ✅ `Lifecycle Hooks`: `preInitializeComponents()` und `postInitializeComponents()` virtuelle Methoden in `Actor`. Aufruf-Reihenfolge: preInitializeComponents → component->beginPlay() → postInitializeComponents → beginPlay().
+- ✅ `Deferred Spawning`: `World::spawnActorDeferred<T>()` erzeugt Actor ohne BeginPlay. `Actor::finishSpawning()` finalisiert den Spawn. Deferred Actors werden nicht getickt.
+- ✅ `Component Lifecycle Fix`: `addComponent<T>()` ruft jetzt `beginPlay()` auf laufzeit-hinzugefügten Components auf, wenn Actor bereits spielt (`m_beginPlayCalled == true`).
+- ✅ `Tick Interval`: Per-Actor Tick-Throttling via `TickSettings::tickInterval` mit akkumuliertem Timer.
+- ✅ `Legacy tick()`: `World::tick()` bleibt als Convenience-Methode, delegiert intern an alle 4 Tick-Gruppen.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (ActorEditorTab Rework – All Capabilities Exposed)
+
+- ✅ `ActorAssetData Erweiterung`: Neue Felder `rootPosition[3]`/`rootRotation[3]`/`rootScale[3]` (Root-Transform-Defaults), `canEverTick`/`tickGroup`/`tickInterval` (Tick-Settings). Vollständige JSON- und binäre Serialisierung (Version 2). Legacy-Dateien ohne neue Felder werden mit Defaults geladen.
+- ✅ `ActorEditorTab Rework v2`: Section-Switching-Pattern komplett ersetzt durch scrollbare Sidebar mit allen Sektionen gleichzeitig sichtbar:
+  - **Identity**: Editierbare Name/Tag Entry-Bars + Actor-Klasse Dropdown.
+  - **Root Transform**: Position/Rotation/Scale als Vec3-Rows mit Echtzeit-Preview-Update.
+  - **Tick Settings**: CanEverTick Checkbox, TickGroup Dropdown (PrePhysics/DuringPhysics/PostPhysics/PostUpdateWork), TickInterval Float-Row.
+  - **Visuals**: Editierbare Mesh/Material-Pfade mit Preview-Rebuild.
+  - **Child Actors**: Liste mit Add/Remove (8 Actor-Typen).
+  - **Default Components**: Informationsliste der Standard-Komponenten pro Actor-Klasse.
+  - **Embedded Script**: Klasse/Pfade/Enable-Toggle.
+- ✅ `Preview-Viewport Isolation`: 3D-Vorschau rendert nur die Mesh-Hierarchie des Actors in einem isolierten `EngineLevel` (Root-Transform wird jetzt korrekt angewendet). Keine Szene, nur Actor-Meshes + Preview-Light. Dunkles Grau als Hintergrundfarbe (statt Schwarz im Haupt-Viewport). Farbige Achsenlinien am Ursprung (X=rot, Y=grün, Z=blau) und ein immer sichtbares Boden-Grid (unabhängig von der Snap/Grid-Einstellung des Haupt-Viewports) für räumliche Orientierung. Viewport-Drag-Drop für Meshes/Materialien, Gizmo-Transform-Sync zurück zu ActorAssetData.
 - ✅ Build erfolgreich.
 
 ## Letzte Änderung (Popup-Fenster Hintergrundfarbe Fix)
@@ -2355,6 +2550,27 @@ Große Feature-Blöcke, die noch nicht existieren:
 - ✅ **Auto-Registration & New C++ Script Template** – `buildGameScriptsForPIE()` scannt vor dem CMake-Build alle `.h`-Dateien in `Content/Scripts/Native/` per Regex nach `class X : public INativeScript` und generiert automatisch `_AutoRegister.cpp` mit `#include`-Direktiven und `REGISTER_NATIVE_SCRIPT`-Makros für jede entdeckte Klasse. Benutzer müssen das Makro nie manuell schreiben. Content Browser Kontextmenü: neuer Eintrag "New C++ Script" erstellt `.h`+`.cpp`-Boilerplate mit `INativeScript`-Vererbung und `onLoaded()`/`tick()`-Overrides direkt in `Content/Scripts/Native/`.
 - ✅ **PIE Build Progress Popup (Async Build)** – `buildGameScriptsForPIE()` ist jetzt asynchron. Pre-Build-Setup (Auto-Register-Scan, CMakeLists.txt, DLL-Unload) läuft auf dem Main-Thread, CMake configure+build auf einem Background-Thread. Separates Popup-Fenster ("C++ Script Build", 780×460) zeigt Build-Output live: scrollbares StackPanel mit Fehler-Highlighting (rot für `[ERROR]`, `error`, `FAILED`) und Auto-Scroll. Bei Erfolg: Popup schließt automatisch, DLL wird geladen, PIE startet via `finishStartPIE()`. Bei Fehler: Popup bleibt offen mit roter Status-Meldung ("Compilation errors found") und Close-Button — Benutzer kann den gesamten Build-Output mit Compiler-Fehlermeldungen durchscrollen. Neue EditorApp-Methoden: `finishStartPIE()`, `pollPIEBuild()`, `dismissPIEBuildPopup()`. Neue Members: `m_pieBuildThread`, `m_pieBuildMutex`, `m_pieBuildRunning`, `m_pieBuildPendingLines`, `m_pieBuildFinished`, `m_pieBuildSuccess`, `m_pieBuildOutputLines`, `m_pieBuildWidget`, `m_pieBuildPopup`. `tick()` ruft `pollPIEBuild()` auf.
 - ✅ **Runtime Script-Initialisierung (Deferred)** – `initializeScripts()` wurde im Runtime-Modus zu früh aufgerufen (direkt nach `loadGameplayDLL()`), bevor ECS-Entities aus dem Level-JSON erstellt wurden. Fix: DLL wird weiterhin früh geladen, aber `initializeScripts()` wird im Game-Loop deferred aufgerufen — erst nachdem `diagnostics.isScenePrepared()` true ist (d.h. `prepareActiveLevel()` → `prepareEcs()` die Entities deserialisiert hat). Gleiches gilt für die Entity-Kamera-Zuweisung (`setActiveCameraEntity()`), die ebenfalls nach Scene-Preparation läuft. Neue Flags: `rtScriptsNeedInit`, `rtCameraNeedInit`.
+
+## Letzte Änderung (Phase 4.1: Class Default Objects / CDOs)
+
+- ✅ `CDO.h`: `IComponentDefault`/`TComponentDefault<T>` Type-Erasure für typisierte Component-Defaults. `ClassDefaultObject` speichert Defaults pro Actor-Klasse mit `getDefault<T>()`, `isPropertyOverridden()`, `getOverriddenProperties()`, `getMutableDefault<T>()`. `CDORegistry` Singleton mit `buildAll()` und `getCDO()`.
+- ✅ `CDO.cpp`: `CDORegistry::buildAll()` iteriert `ActorRegistry`, erzeugt temporär jede Actor-Klasse (Temp-ECS-Entity, `internalInitialize`/`internalBeginPlay`, Capture aller 16 ECS-Component-Typen), räumt danach auf (`internalEndPlay`, `removeEntity`, `delete`).
+- ✅ `Reflection.h/.cpp`: `reflectPropertyEquals()`, `reflectCopyProperties()`, `reflectDiffProperties()` — property-basiertes Vergleichen und Kopieren mit TypeID-aware Logic (Float, Int, Bool, String, Vec3, Vec2, Color3/4, Enum, AssetPath, EntityRef, Custom).
+- ✅ `Actor.h`: `friend class CDORegistry` für Zugriff auf private `internalInitialize`/`internalBeginPlay`/`internalEndPlay`.
+- ✅ `World.cpp`: `CDORegistry::Instance().buildAll()` in `World::beginPlay()` (einmalig).
+- ✅ `Core/CMakeLists.txt`: `CDO.h` und `CDO.cpp` hinzugefügt.
+- ✅ Build erfolgreich.
+
+## Letzte Änderung (Phase 4.4: Archetype ECS / Mass-Entity-System)
+
+- ✅ `ArchetypeTypes.h`: `FragmentTypeID`, `FragmentRegistry` (compile-time unique IDs), `MassEntity` Handle (index+generation), `MassEntitySlot`, `MassCommandBuffer` (deferred structural changes), `ArchetypeSignature` (bitset<64>), `MASS_FRAGMENT()` Macro.
+- ✅ `Chunk.h`: ~64KB SoA Chunk-Storage mit `ColumnLayout`, cache-line aligned Spalten. Push/swap-remove/copy-row Operationen. `computeChunkLayout()` für optimale Entity-Kapazität pro Chunk.
+- ✅ `Archetype.h`: Archetype-Klasse (Signatur → Chunk-Pool), `allocateRow`/`removeRow`, typisierter Fragment-Zugriff, Query-Matching (required/excluded Signaturen). Move-only (Chunk non-copyable).
+- ✅ `ArchetypeECS.h/.cpp`: `MassEntitySubsystem` Singleton — Entity CRUD (create/batch-create/destroy), Archetype-Graph mit Signatur-Hash-Lookup, `moveEntity()` für strukturelle Änderungen (Fragment add/remove → Archetype-Migration mit Datenkopie), `forEachChunk()` Queries, Processor-Tick-Loop, Generation-counted Slot-Management.
+- ✅ `MassProcessor.h`: `MassQuery` (require/exclude Fragments), `ChunkView` (typisierter Array-Zugriff pro Chunk), `MassProcessor` Basisklasse (configure/executeChunk Pattern).
+- ✅ `MassBridge.h/.cpp`: LOD-basierte Actor↔MassEntity Promotion/Demotion. `ERepresentationLOD` (High/Medium/Low/Off), `LODConfig` mit Hysterese, `registerClass()` mit Custom Promotion/Demotion Callbacks, `spawnMassAgents()` Batch-Erstellung, `MassPositionFragment` built-in.
+- ✅ `Core/CMakeLists.txt`: Alle 8 Archetype-Dateien hinzugefügt.
+- ✅ Build erfolgreich.
 
 ---
 

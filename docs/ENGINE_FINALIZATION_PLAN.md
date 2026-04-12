@@ -130,11 +130,19 @@
 
 ### 2.2 Animation Blending / State Machine
 
-**Status:** ❌ Fehlend | **Aufwand:** Hoch | **Priorität:** 🔴 Kritisch
+**Status:** ⚠️ Teilweise (Blending, Crossfade, Layers implementiert; State Machine & Blend Trees ausstehend) | **Aufwand:** Hoch | **Priorität:** 🔴 Kritisch
 
-**Problem:** Nur ein Animations-Clip gleichzeitig. Walk→Run-Übergänge, Idle→Attack, Upper/Lower Body Split unmöglich.
+**Implementiert:**
+- `AnimationBlending.h`: BlendEntry, CrossfadeState, BoneMask (bitset<128>), AnimBlendMode (Override/Additive), AnimationLayer, kMaxAnimLayers=4
+- `SkeletalAnimator` rewritten: multi-layer blending, crossfade with smooth-step easing, per-bone NodePose decomposition, evaluateEntryPoses(), computeBlendedBoneMatrices()
+- `AnimationComponent` extended: crossfade fields, LayerState sub-struct, layers[4], layerCount
+- `Renderer.h`: 8 new virtual functions (crossfade, layers, findClipByName)
+- `OpenGLRenderer`: All 8 overrides implemented
+- `GameplayAPI`: 13 new C++ scripting functions (isEntitySkinned, play/stop/crossfade/layers)
+- `engine.animation` Python module: 13 functions (play, stop, crossfade, play_on_layer, etc.)
+- `engine.pyi` updated with full animation class
 
-**Vergleich:** Unity (Animator Controller), Unreal (AnimGraph), Godot (AnimationTree).
+**Noch ausstehend:** Animation State Machine, Blend Trees, AnimationController Asset, Editor Graph
 
 #### Implementierungsschritte
 
@@ -181,9 +189,9 @@
 
 ### 2.3 Physics Queries (Overlap / Sweep)
 
-**Status:** ⚠️ Teilweise (nur Raycast) | **Aufwand:** Mittel | **Priorität:** 🟡 Wichtig
+**Status:** ✅ Vollständig implementiert | **Aufwand:** Mittel | **Priorität:** 🟡 Wichtig
 
-**Problem:** Nur Raycast verfügbar. Sphere/Box Overlap und Sweep Queries fehlen.
+**Implementiert:** overlapSphere, overlapBox, sweepSphere, sweepBox in PhysicsWorld, JoltBackend, GameplayAPI (C++ + Python `engine.physics`).
 
 #### Implementierungsschritte
 
@@ -207,7 +215,9 @@
 
 ### 2.4 Force an Position (AddForceAtPosition)
 
-**Status:** ❌ Fehlend | **Aufwand:** Gering | **Priorität:** 🟡 Wichtig
+**Status:** ✅ Vollständig implementiert | **Aufwand:** Gering | **Priorität:** 🟡 Wichtig
+
+**Implementiert:** addForceAtPosition, addImpulseAtPosition in PhysicsWorld, JoltBackend, GameplayAPI (C++ + Python `engine.physics`).
 
 #### Implementierungsschritte
 
@@ -223,7 +233,9 @@
 
 ### 2.5 Mesh Collider (Convex / Concave)
 
-**Status:** ❌ Fehlend | **Aufwand:** Mittel | **Priorität:** 🟡 Wichtig
+**Status:** ✅ Vollständig implementiert | **Aufwand:** Mittel | **Priorität:** 🟡 Wichtig
+
+**Implementiert:** Shape::Mesh in PhysicsTypes.h, ConvexHullShape/MeshShape in JoltBackend, Mesh-Daten aus AssetManager geladen.
 
 #### Implementierungsschritte
 
@@ -532,27 +544,27 @@ Level Streaming ─── benötigt stabile Serialisierung ──────┘
 
 ### Implementierungsreihenfolge (empfohlen)
 
-| Reihenfolge | Feature | Abhängigkeiten | Geschätzter Aufwand |
-|-------------|---------|----------------|---------------------|
-| 1 | Transform Parenting | Keine | 2-3 Wochen |
-| 2 | 3D Spatial Audio | Keine | 3-5 Tage |
-| 3 | Physics Queries (Overlap/Sweep) | Keine | 1 Woche |
-| 4 | Force at Position | Keine | 1-2 Tage |
-| 5 | Physics Joints/Constraints | Transform Parenting | 2-3 Wochen |
-| 6 | Mesh Collider | Keine | 1-2 Wochen |
-| 7 | Animation Blending | Transform Parenting | 3-4 Wochen |
-| 8 | Reflection Probes / IBL | Keine | 2-3 Wochen |
-| 9 | Decal System | Keine | 1-2 Wochen |
-| 10 | Runtime UI Framework | Transform Parenting | 3-4 Wochen |
-| 11 | Physics Material System | Keine | 3-5 Tage |
-| 12 | AI/Navigation (Recast/Detour) | Physics Queries, Character Controller | 3-4 Wochen |
-| 13 | Root Motion | Animation Blending | 1 Woche |
-| 14 | Multi-Level-Streaming | Keine | 2-3 Wochen |
-| 15 | Frustum Culling Verbesserung | Keine | 1-2 Wochen |
-| 16 | Foliage Instancing | Keine | 2-3 Wochen |
-| 17 | Lightmapping / Baked GI | Keine | 4-6 Wochen |
-| 18 | Visual Scripting | Keine | 6-8 Wochen |
-| 19 | Networking | Keine | 8-12 Wochen |
+| Reihenfolge | Feature | Abhängigkeiten | Status |
+|-------------|---------|----------------|--------|
+| 1 | Transform Parenting | Keine | ✅ Fertig |
+| 2 | 3D Spatial Audio | Keine | ✅ Fertig |
+| 3 | Physics Queries (Overlap/Sweep) | Keine | ✅ Fertig |
+| 4 | Force at Position | Keine | ✅ Fertig |
+| 5 | Physics Joints/Constraints | Transform Parenting | ⚠️ Teilweise |
+| 6 | Mesh Collider | Keine | ✅ Fertig |
+| 7 | Animation Blending | Transform Parenting | ⚠️ Blending/Layers fertig, State Machine ausstehend |
+| 8 | Reflection Probes / IBL | Keine | ❌ Ausstehend |
+| 9 | Decal System | Keine | ❌ Ausstehend |
+| 10 | Runtime UI Framework | Transform Parenting | ❌ Ausstehend |
+| 11 | Physics Material System | Keine | ❌ Ausstehend |
+| 12 | AI/Navigation (Recast/Detour) | Physics Queries, Character Controller | ❌ Ausstehend |
+| 13 | Root Motion | Animation Blending | ❌ Ausstehend |
+| 14 | Multi-Level-Streaming | Keine | ❌ Ausstehend |
+| 15 | Frustum Culling Verbesserung | Keine | ❌ Ausstehend |
+| 16 | Foliage Instancing | Keine | ❌ Ausstehend |
+| 17 | Lightmapping / Baked GI | Keine | ❌ Ausstehend |
+| 18 | Visual Scripting | Keine | ❌ Ausstehend |
+| 19 | Networking | Keine | ❌ Ausstehend |
 
 **Gesamt geschätzt:** ~50-75 Wochen (für alle Features, inklusive Nice-to-have)
 **Kern-Features (Prio 1+2):** ~20-30 Wochen

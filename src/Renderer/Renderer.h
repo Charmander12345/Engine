@@ -312,6 +312,16 @@ public:
     virtual std::string getEntityBoneName(unsigned int /*entity*/, int /*boneIndex*/) const { return {}; }
     virtual int   getEntityBoneParent(unsigned int /*entity*/, int /*boneIndex*/) const { return -1; }
 
+    // --- Skeletal animation: crossfade & layers
+    virtual void  crossfadeEntityAnimation(unsigned int /*entity*/, int /*toClip*/, float /*duration*/, bool /*loop*/ = true) {}
+    virtual bool  isEntityCrossfading(unsigned int /*entity*/) const { return false; }
+    virtual void  playEntityAnimationOnLayer(unsigned int /*entity*/, int /*layer*/, int /*clip*/, bool /*loop*/ = true, float /*crossfadeDur*/ = 0.0f) {}
+    virtual void  stopEntityAnimationLayer(unsigned int /*entity*/, int /*layer*/) {}
+    virtual void  setEntityLayerWeight(unsigned int /*entity*/, int /*layer*/, float /*weight*/) {}
+    virtual int   getEntityAnimationLayerCount(unsigned int /*entity*/) const { return 0; }
+    virtual void  setEntityAnimationLayerCount(unsigned int /*entity*/, int /*count*/) {}
+    virtual int   findEntityAnimationClipByName(unsigned int /*entity*/, const char* /*name*/) const { return -1; }
+
     // --- Popup windows (IEditorRenderer overrides) ---
 #if ENGINE_EDITOR
     PopupWindow* openPopupWindow(const std::string& /*id*/, const std::string& /*title*/, int /*width*/, int /*height*/) override { return nullptr; }

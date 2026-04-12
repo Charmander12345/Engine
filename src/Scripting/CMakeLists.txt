@@ -15,6 +15,7 @@ set(SCRIPTING_SOURCES
     "Python/UIModule.cpp"
     "Python/GlobalStateModule.cpp"
     "Python/TimerModule.cpp"
+    "Python/AnimationModule.cpp"
     "Python/EditorModule.cpp"
     ScriptHotReload.cpp
     ScriptHotReload.h

@@ -1,8 +1,15 @@
 #include "World.h"
 #include "ActorRegistry.h"
+#include "CDO.h"
 #include "BuiltinComponents.h"
+#include "GameFramework/GameMode.h"
+#include "GameFramework/GameState.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "../ECS/ECS.h"
 #include <algorithm>
+#include <unordered_set>
+#include <queue>
 
 Actor* World::spawnActorByClass(const std::string& className, float x, float y, float z)
 {
@@ -150,7 +157,7 @@ void World::destroyActor(Actor* actor)
 		child->detachFromParent();
 
 	actor->detachFromParent();
-	actor->internalEndPlay();
+	actor->internalEndPlay(EEndPlayReason::Destroyed);
 
 	// Remove from entity lookup
 	m_entityToActor.erase(actor->getEntity());
@@ -173,7 +180,7 @@ void World::destroyAllActors()
 {
 	// EndPlay in reverse order
 	for (auto it = m_actors.rbegin(); it != m_actors.rend(); ++it)
-		(*it)->internalEndPlay();
+		(*it)->internalEndPlay(EEndPlayReason::LevelUnloaded);
 
 	// Clean up ECS entities
 	for (auto& actor : m_actors)
@@ -189,22 +196,130 @@ void World::tick(float deltaTime)
 {
 	m_ticking = true;
 
-	for (auto& actor : m_actors)
-	{
-		if (!actor->isPendingDestroy())
-			actor->internalTick(deltaTime);
-	}
+	tickGroupSorted(ETickGroup::PrePhysics, deltaTime);
+	tickGroupSorted(ETickGroup::DuringPhysics, deltaTime);
+	tickGroupSorted(ETickGroup::PostPhysics, deltaTime);
+	tickGroupSorted(ETickGroup::PostUpdateWork, deltaTime);
 
 	m_ticking = false;
 
 	processPendingDestroys();
 }
 
+void World::tickGroup(ETickGroup group, float deltaTime)
+{
+	m_ticking = true;
+	tickGroupSorted(group, deltaTime);
+}
+
+void World::tickGroupSorted(ETickGroup group, float deltaTime)
+{
+	// Gather actors in this tick group
+	std::vector<Actor*> groupActors;
+	for (auto& actor : m_actors)
+	{
+		if (!actor->isPendingDestroy() && actor->getTickSettings().tickGroup == group)
+			groupActors.push_back(actor.get());
+	}
+
+	if (groupActors.empty())
+		return;
+
+	// Check if any actor in this group has tick prerequisites
+	bool hasDependencies = false;
+	for (auto* actor : groupActors)
+	{
+		if (!actor->getTickPrerequisites().empty())
+		{
+			hasDependencies = true;
+			break;
+		}
+	}
+
+	if (!hasDependencies)
+	{
+		// Fast path: no dependencies, tick in array order
+		for (auto* actor : groupActors)
+			actor->internalTick(deltaTime);
+		return;
+	}
+
+	// Topological sort via Kahn's algorithm
+	std::unordered_set<Actor*> groupSet(groupActors.begin(), groupActors.end());
+	std::unordered_map<Actor*, int> inDegree;
+	std::unordered_map<Actor*, std::vector<Actor*>> dependents;  // prerequisite → who depends on it
+
+	for (auto* actor : groupActors)
+		inDegree[actor] = 0;
+
+	for (auto* actor : groupActors)
+	{
+		for (auto* prereq : actor->getTickPrerequisites())
+		{
+			if (groupSet.count(prereq))
+			{
+				dependents[prereq].push_back(actor);
+				inDegree[actor]++;
+			}
+		}
+	}
+
+	std::queue<Actor*> ready;
+	for (auto* actor : groupActors)
+	{
+		if (inDegree[actor] == 0)
+			ready.push(actor);
+	}
+
+	std::vector<Actor*> sorted;
+	sorted.reserve(groupActors.size());
+
+	while (!ready.empty())
+	{
+		Actor* current = ready.front();
+		ready.pop();
+		sorted.push_back(current);
+
+		for (auto* dep : dependents[current])
+		{
+			if (--inDegree[dep] == 0)
+				ready.push(dep);
+		}
+	}
+
+	// If cycle detected, remaining actors tick in array order
+	if (sorted.size() < groupActors.size())
+	{
+		for (auto* actor : groupActors)
+		{
+			if (inDegree[actor] > 0)
+				sorted.push_back(actor);
+		}
+	}
+
+	for (auto* actor : sorted)
+		actor->internalTick(deltaTime);
+}
+
+void World::flushDestroys()
+{
+	m_ticking = false;
+	processPendingDestroys();
+}
+
 Actor* World::findActorByName(const std::string& name) const
+{
+	NameID id = NameID::find(name);
+	if (id.isNone())
+		return nullptr;
+	return findActorByNameID(id);
+}
+
+Actor* World::findActorByNameID(NameID nameID) const
 {
 	for (auto& actor : m_actors)
 	{
-		if (actor->getName() == name)
+		if (actor->getNameID() == nameID)
 			return actor.get();
 	}
 	return nullptr;
@@ -212,10 +327,18 @@ Actor* World::findActorByName(const std::string& name) const
 
 std::vector<Actor*> World::findActorsByTag(const std::string& tag) const
 {
+	NameID id = NameID::find(tag);
+	if (id.isNone())
+		return {};
+	return findActorsByTagID(id);
+}
+
+std::vector<Actor*> World::findActorsByTagID(NameID tagID) const
+{
 	std::vector<Actor*> result;
 	for (auto& actor : m_actors)
 	{
-		if (actor->getTag() == tag)
+		if (actor->getTagID() == tagID)
 			result.push_back(actor.get());
 	}
 	return result;
@@ -251,6 +374,32 @@ void World::dispatchEndOverlap(ECS::Entity entityA, ECS::Entity entityB)
 	}
 }
 
+Actor* World::resolveHandle(ActorHandle handle) const
+{
+	return handle.get();
+}
+
+void World::beginPlay()
+{
+	if (m_hasBegunPlay)
+		return;
+	m_hasBegunPlay = true;
+
+	// Build CDOs for all registered Actor classes (once)
+	if (!CDORegistry::Instance().isBuilt())
+		CDORegistry::Instance().buildAll();
+
+	// Set up GameState if a GameMode was configured
+	if (m_gameMode)
+	{
+		if (!m_gameState)
+			m_gameState = spawnActor<GameState>(0, 0, 0);
+		m_gameMode->m_gameState = m_gameState;
+		m_gameState->m_hasBegunPlay = true;
+		m_gameMode->onStartPlay();
+	}
+}
+
 void World::processPendingDestroys()
 {
 	for (auto it = m_actors.begin(); it != m_actors.end(); )
@@ -262,7 +411,7 @@ void World::processPendingDestroys()
 			for (auto* child : childrenCopy)
 				child->detachFromParent();
 			actor->detachFromParent();
-			actor->internalEndPlay();
+			actor->internalEndPlay(EEndPlayReason::Destroyed);
 
 			m_entityToActor.erase(actor->getEntity());
 			ECS::Manager().removeEntity(actor->getEntity());

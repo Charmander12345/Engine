@@ -3,6 +3,10 @@
 
 #include "../Core/ECS/ECS.h"
 #include "../Core/Actor/World.h"
+#include "../Core/Actor/GameFramework/GameMode.h"
+#include "../Core/Actor/GameFramework/GameState.h"
+#include "../Core/Actor/GameFramework/PlayerController.h"
+#include "../Core/Actor/GameFramework/Pawn.h"
 #include "../Logger/Logger.h"
 #include "../Physics/PhysicsWorld.h"
 #include "../Core/AudioManager.h"
@@ -1340,6 +1344,230 @@ namespace GameplayAPI
 				NativeScriptManager::Instance().createInstance(entity, className);
 			});
 		}
+	}
+
+	// ── Actor System – Extended ──────────────────────────────────────
+
+	void* spawnActorByClass(const char* className, float x, float y, float z)
+	{
+		if (!s_activeWorld || !className) return nullptr;
+		auto* w = static_cast<World*>(s_activeWorld);
+		return w->spawnActorByClass(className, x, y, z);
+	}
+
+	void* spawnActorDeferredByClass(const char* className, float x, float y, float z)
+	{
+		if (!s_activeWorld || !className) return nullptr;
+		auto* w = static_cast<World*>(s_activeWorld);
+		// Use spawnActorByClass logic but set deferred before beginPlay
+		// For now, spawn and return – deferred spawning via class name needs World support
+		Actor* actor = w->spawnActorByClass(className, x, y, z);
+		return actor;
+	}
+
+	bool finishSpawning(void* actor)
+	{
+		if (!actor) return false;
+		static_cast<Actor*>(actor)->finishSpawning();
+		return true;
+	}
+
+	bool destroyActor(void* actor)
+	{
+		if (!actor) return false;
+		static_cast<Actor*>(actor)->destroy();
+		return true;
+	}
+
+	void* getGameMode()
+	{
+		if (!s_activeWorld) return nullptr;
+		return static_cast<World*>(s_activeWorld)->getGameMode();
+	}
+
+	void* getGameState()
+	{
+		if (!s_activeWorld) return nullptr;
+		return static_cast<World*>(s_activeWorld)->getGameState();
+	}
+
+	bool addTickPrerequisite(void* actor, void* prerequisite)
+	{
+		if (!actor || !prerequisite) return false;
+		static_cast<Actor*>(actor)->addTickPrerequisite(static_cast<Actor*>(prerequisite));
+		return true;
+	}
+
+	bool removeTickPrerequisite(void* actor, void* prerequisite)
+	{
+		if (!actor || !prerequisite) return false;
+		static_cast<Actor*>(actor)->removeTickPrerequisite(static_cast<Actor*>(prerequisite));
+		return true;
+	}
+
+	bool setTickGroup(void* actor, int tickGroup)
+	{
+		if (!actor || tickGroup < 0 || tickGroup > 3) return false;
+		static_cast<Actor*>(actor)->setTickGroup(static_cast<ETickGroup>(tickGroup));
+		return true;
+	}
+
+	bool setTickInterval(void* actor, float interval)
+	{
+		if (!actor) return false;
+		static_cast<Actor*>(actor)->setTickInterval(interval);
+		return true;
+	}
+
+	bool setCanEverTick(void* actor, bool canTick)
+	{
+		if (!actor) return false;
+		static_cast<Actor*>(actor)->setCanEverTick(canTick);
+		return true;
+	}
+
+	const char* getActorName(void* actor)
+	{
+		if (!actor) return "";
+		return static_cast<Actor*>(actor)->getName().c_str();
+	}
+
+	bool setActorName(void* actor, const char* name)
+	{
+		if (!actor || !name) return false;
+		static_cast<Actor*>(actor)->setName(name);
+		return true;
+	}
+
+	const char* getActorTag(void* actor)
+	{
+		if (!actor) return "";
+		return static_cast<Actor*>(actor)->getTag().c_str();
+	}
+
+	bool setActorTag(void* actor, const char* tag)
+	{
+		if (!actor || !tag) return false;
+		static_cast<Actor*>(actor)->setTag(tag);
+		return true;
+	}
+
+	void* findActorByName(const char* name)
+	{
+		if (!s_activeWorld || !name) return nullptr;
+		return static_cast<World*>(s_activeWorld)->findActorByName(name);
+	}
+
+	int findActorsByTag(const char* tag, void** outActors, int maxCount)
+	{
+		if (!s_activeWorld || !tag || !outActors || maxCount <= 0) return 0;
+		auto results = static_cast<World*>(s_activeWorld)->findActorsByTag(tag);
+		int count = std::min(static_cast<int>(results.size()), maxCount);
+		for (int i = 0; i < count; ++i)
+			outActors[i] = results[i];
+		return count;
+	}
+
+	bool possess(void* controller, void* pawn)
+	{
+		if (!controller || !pawn) return false;
+		auto* pc = dynamic_cast<PlayerController*>(static_cast<Actor*>(controller));
+		auto* p  = dynamic_cast<Pawn*>(static_cast<Actor*>(pawn));
+		if (!pc || !p) return false;
+		pc->possess(p);
+		return true;
+	}
+
+	bool unpossessController(void* controller)
+	{
+		if (!controller) return false;
+		auto* pc = dynamic_cast<PlayerController*>(static_cast<Actor*>(controller));
+		if (!pc) return false;
+		pc->unpossess();
+		return true;
+	}
+
+	// ── Skeletal Animation ───────────────────────────────────────────
+
+	bool isEntitySkinned(ECS::Entity entity)
+	{
+		return s_renderer ? s_renderer->isEntitySkinned(static_cast<unsigned int>(entity)) : false;
+	}
+
+	int getAnimationClipCount(ECS::Entity entity)
+	{
+		return s_renderer ? s_renderer->getEntityAnimationClipCount(static_cast<unsigned int>(entity)) : 0;
+	}
+
+	int findAnimationClipByName(ECS::Entity entity, const char* name)
+	{
+		return s_renderer ? s_renderer->findEntityAnimationClipByName(static_cast<unsigned int>(entity), name) : -1;
+	}
+
+	bool playSkeletalAnimation(ECS::Entity entity, int clipIndex, bool loop)
+	{
+		if (!s_renderer || !s_renderer->isEntitySkinned(static_cast<unsigned int>(entity))) return false;
+		s_renderer->playEntityAnimation(static_cast<unsigned int>(entity), clipIndex, loop);
+		return true;
+	}
+
+	bool stopSkeletalAnimation(ECS::Entity entity)
+	{
+		if (!s_renderer || !s_renderer->isEntitySkinned(static_cast<unsigned int>(entity))) return false;
+		s_renderer->stopEntityAnimation(static_cast<unsigned int>(entity));
+		return true;
+	}
+
+	bool setSkeletalAnimationSpeed(ECS::Entity entity, float speed)
+	{
+		if (!s_renderer || !s_renderer->isEntitySkinned(static_cast<unsigned int>(entity))) return false;
+		s_renderer->setEntityAnimationSpeed(static_cast<unsigned int>(entity), speed);
+		return true;
+	}
+
+	bool crossfadeAnimation(ECS::Entity entity, int toClip, float duration, bool loop)
+	{
+		if (!s_renderer || !s_renderer->isEntitySkinned(static_cast<unsigned int>(entity))) return false;
+		s_renderer->crossfadeEntityAnimation(static_cast<unsigned int>(entity), toClip, duration, loop);
+		return true;
+	}
+
+	bool isCrossfading(ECS::Entity entity)
+	{
+		return s_renderer ? s_renderer->isEntityCrossfading(static_cast<unsigned int>(entity)) : false;
+	}
+
+	bool playAnimationOnLayer(ECS::Entity entity, int layer, int clipIndex, bool loop, float crossfadeDuration)
+	{
+		if (!s_renderer || !s_renderer->isEntitySkinned(static_cast<unsigned int>(entity))) return false;
+		s_renderer->playEntityAnimationOnLayer(static_cast<unsigned int>(entity), layer, clipIndex, loop, crossfadeDuration);
+		return true;
+	}
+
+	bool stopAnimationLayer(ECS::Entity entity, int layer)
+	{
+		if (!s_renderer || !s_renderer->isEntitySkinned(static_cast<unsigned int>(entity))) return false;
+		s_renderer->stopEntityAnimationLayer(static_cast<unsigned int>(entity), layer);
+		return true;
+	}
+
+	bool setAnimationLayerWeight(ECS::Entity entity, int layer, float weight)
+	{
+		if (!s_renderer || !s_renderer->isEntitySkinned(static_cast<unsigned int>(entity))) return false;
+		s_renderer->setEntityLayerWeight(static_cast<unsigned int>(entity), layer, weight);
+		return true;
+	}
+
+	int getAnimationLayerCount(ECS::Entity entity)
+	{
+		return s_renderer ? s_renderer->getEntityAnimationLayerCount(static_cast<unsigned int>(entity)) : 0;
+	}
+
+	bool setAnimationLayerCount(ECS::Entity entity, int count)
+	{
+		if (!s_renderer || !s_renderer->isEntitySkinned(static_cast<unsigned int>(entity))) return false;
+		s_renderer->setEntityAnimationLayerCount(static_cast<unsigned int>(entity), count);
+		return true;
 	}
 }
 

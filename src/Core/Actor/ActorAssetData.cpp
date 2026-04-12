@@ -1,4 +1,5 @@
 #include "ActorAssetData.h"
+#include "../Archive.h"
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
@@ -75,6 +76,16 @@ json ActorAssetData::toJson() const
 	j["meshPath"]     = meshPath;
 	j["materialPath"] = materialPath;
 
+	// Root transform
+	j["rootPosition"] = { rootPosition[0], rootPosition[1], rootPosition[2] };
+	j["rootRotation"] = { rootRotation[0], rootRotation[1], rootRotation[2] };
+	j["rootScale"]    = { rootScale[0],    rootScale[1],    rootScale[2] };
+
+	// Tick settings
+	j["canEverTick"]  = canEverTick;
+	j["tickGroup"]    = tickGroup;
+	j["tickInterval"] = tickInterval;
+
 	// Child actors
 	json childArr = json::array();
 	for (const auto& child : childActors)
@@ -101,6 +112,31 @@ ActorAssetData ActorAssetData::fromJson(const json& j)
 	if (j.contains("tag"))          data.tag           = j["tag"].get<std::string>();
 	if (j.contains("meshPath"))     data.meshPath      = j["meshPath"].get<std::string>();
 	if (j.contains("materialPath")) data.materialPath  = j["materialPath"].get<std::string>();
+
+	// Root transform
+	if (j.contains("rootPosition") && j["rootPosition"].is_array() && j["rootPosition"].size() >= 3)
+	{
+		data.rootPosition[0] = j["rootPosition"][0].get<float>();
+		data.rootPosition[1] = j["rootPosition"][1].get<float>();
+		data.rootPosition[2] = j["rootPosition"][2].get<float>();
+	}
+	if (j.contains("rootRotation") && j["rootRotation"].is_array() && j["rootRotation"].size() >= 3)
+	{
+		data.rootRotation[0] = j["rootRotation"][0].get<float>();
+		data.rootRotation[1] = j["rootRotation"][1].get<float>();
+		data.rootRotation[2] = j["rootRotation"][2].get<float>();
+	}
+	if (j.contains("rootScale") && j["rootScale"].is_array() && j["rootScale"].size() >= 3)
+	{
+		data.rootScale[0] = j["rootScale"][0].get<float>();
+		data.rootScale[1] = j["rootScale"][1].get<float>();
+		data.rootScale[2] = j["rootScale"][2].get<float>();
+	}
+
+	// Tick settings
+	if (j.contains("canEverTick"))  data.canEverTick  = j["canEverTick"].get<bool>();
+	if (j.contains("tickGroup"))    data.tickGroup    = j["tickGroup"].get<int>();
+	if (j.contains("tickInterval")) data.tickInterval = j["tickInterval"].get<float>();
 
 	// Child actors (new format)
 	if (j.contains("childActors") && j["childActors"].is_array())
@@ -263,4 +299,54 @@ bool ActorAssetData::cleanupScriptFiles(const std::string& contentDir) const
 	}
 
 	return ok;
+}
+
+// ── Bidirectional binary serialization ────────────────────────────────────
+
+static constexpr uint32_t kChildActorEntryVersion = 1;
+static constexpr uint32_t kActorAssetDataVersion  = 2;
+
+void ChildActorEntry::serialize(Archive& ar)
+{
+	ar.serializeVersion(kChildActorEntryVersion);
+
+	ar << actorClass << name;
+	ar << meshPath << materialPath;
+	ar.serializeFloatArray(position);
+	ar.serializeFloatArray(rotation);
+	ar.serializeFloatArray(scale);
+
+	uint32_t childCount = static_cast<uint32_t>(children.size());
+	ar << childCount;
+	if (ar.isLoading())
+		children.resize(childCount);
+	for (uint32_t i = 0; i < childCount; ++i)
+		children[i].serialize(ar);
+}
+
+void ActorAssetData::serialize(Archive& ar)
+{
+	ar.serializeVersion(kActorAssetDataVersion);
+
+	ar << name << actorClass << tag;
+	ar << meshPath << materialPath;
+
+	// Child actors
+	uint32_t childCount = static_cast<uint32_t>(childActors.size());
+	ar << childCount;
+	if (ar.isLoading())
+		childActors.resize(childCount);
+	for (uint32_t i = 0; i < childCount; ++i)
+		childActors[i].serialize(ar);
+
+	// Root transform
+	ar.serializeFloatArray(rootPosition);
+	ar.serializeFloatArray(rootRotation);
+	ar.serializeFloatArray(rootScale);
+
+	// Tick settings
+	ar << canEverTick << tickGroup << tickInterval;
+
+	// Embedded script
+	ar << scriptClassName << scriptHeaderPath << scriptCppPath << scriptEnabled;
 }

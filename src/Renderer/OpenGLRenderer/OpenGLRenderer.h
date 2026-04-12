@@ -722,6 +722,9 @@ private:
         GLint  locFadeRadius{-1};
     };
     GridResources m_grid;
+
+    // ---- Origin Axis Lines (Actor Editor) ----
+    void drawOriginAxes(const glm::mat4& view, const glm::mat4& projection);
 #endif // ENGINE_EDITOR — Debug/Picking/Selection/Gizmo/Grid
 
     #if ENGINE_EDITOR
@@ -914,5 +917,15 @@ public:
     int   getEntityBoneCount(unsigned int entity) const override;
     std::string getEntityBoneName(unsigned int entity, int boneIndex) const override;
     int   getEntityBoneParent(unsigned int entity, int boneIndex) const override;
+
+    // Skeletal animation: crossfade & layers
+    void  crossfadeEntityAnimation(unsigned int entity, int toClip, float duration, bool loop) override;
+    bool  isEntityCrossfading(unsigned int entity) const override;
+    void  playEntityAnimationOnLayer(unsigned int entity, int layer, int clip, bool loop, float crossfadeDur) override;
+    void  stopEntityAnimationLayer(unsigned int entity, int layer) override;
+    void  setEntityLayerWeight(unsigned int entity, int layer, float weight) override;
+    int   getEntityAnimationLayerCount(unsigned int entity) const override;
+    void  setEntityAnimationLayerCount(unsigned int entity, int count) override;
+    int   findEntityAnimationClipByName(unsigned int entity, const char* name) const override;
 
 };

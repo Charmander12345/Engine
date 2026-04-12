@@ -13,7 +13,7 @@ Actor::~Actor()
 
 void Actor::setName(const std::string& name)
 {
-	m_name = name;
+	m_nameID = NameID::fromString(name);
 	if (m_entity != 0)
 	{
 		auto& ecs = ECS::Manager();
@@ -231,6 +231,10 @@ void Actor::detachFromParent()
 void Actor::destroy()
 {
 	m_pendingDestroy = true;
+
+	// Fire the destroyed delegate
+	if (m_onDestroyed)
+		m_onDestroyed(this);
 }
 
 // ── Internal lifecycle (called by World) ──────────────────────────────
@@ -239,6 +243,9 @@ void Actor::internalInitialize(ECS::Entity entity, World* world)
 {
 	m_entity = entity;
 	m_world = world;
+
+	// Allocate a generation-safe handle for weak references
+	m_handle = ActorHandle(ObjectSlotArray::Instance().allocate(this));
 
 	// Ensure the entity has at least a transform
 	auto& ecs = ECS::Manager();
@@ -252,17 +259,33 @@ void Actor::internalBeginPlay()
 		return;
 	m_beginPlayCalled = true;
 
+	preInitializeComponents();
+
 	// Initialize all components
 	for (auto& comp : m_components)
 		comp->beginPlay();
+
+	postInitializeComponents();
 
 	beginPlay();
 }
 
 void Actor::internalTick(float deltaTime)
 {
-	if (m_pendingDestroy)
+	if (m_pendingDestroy || m_deferredSpawn)
 		return;
+
+	if (!m_tickSettings.bCanEverTick)
+		return;
+
+	// Tick interval throttle
+	if (m_tickSettings.tickInterval > 0.0f)
+	{
+		m_tickAccumulator += deltaTime;
+		if (m_tickAccumulator < m_tickSettings.tickInterval)
+			return;
+		m_tickAccumulator -= m_tickSettings.tickInterval;
+	}
 
 	// Tick components first
 	for (auto& comp : m_components)
@@ -274,11 +297,51 @@ void Actor::internalTick(float deltaTime)
 	tick(deltaTime);
 }
 
-void Actor::internalEndPlay()
+void Actor::finishSpawning()
 {
-	endPlay();
+	if (!m_deferredSpawn)
+		return;
+	m_deferredSpawn = false;
+	internalBeginPlay();
+}
+
+void Actor::addTickPrerequisite(Actor* other)
+{
+	if (!other || other == this)
+		return;
+	// Avoid duplicates
+	for (auto* existing : m_tickPrerequisites)
+	{
+		if (existing == other)
+			return;
+	}
+	m_tickPrerequisites.push_back(other);
+}
+
+void Actor::removeTickPrerequisite(Actor* other)
+{
+	for (auto it = m_tickPrerequisites.begin(); it != m_tickPrerequisites.end(); ++it)
+	{
+		if (*it == other)
+		{
+			m_tickPrerequisites.erase(it);
+			return;
+		}
+	}
+}
+
+void Actor::internalEndPlay(EEndPlayReason reason)
+{
+	endPlay(reason);
 
 	// Shut down components in reverse order
 	for (auto it = m_components.rbegin(); it != m_components.rend(); ++it)
 		(*it)->endPlay();
+
+	// Release the object handle so weak references become invalid
+	if (!m_handle.isNull())
+	{
+		ObjectSlotArray::Instance().release(m_handle.handle);
+		m_handle = ActorHandle{};
+	}
 }

@@ -1479,13 +1479,66 @@ class editor:
 class actor:
     """Actor system queries accessible from Python.
     The Actor system is primarily a C++ abstraction over ECS.
-    Python scripts can query and interact with actors via these helpers."""
+    Python scripts can query and interact with actors via these helpers.
+
+    Tick Groups:
+        TICK_PRE_PHYSICS = 0
+        TICK_DURING_PHYSICS = 1
+        TICK_POST_PHYSICS = 2   (default)
+        TICK_POST_UPDATE_WORK = 3
+
+    Game Framework:
+        The World can have a GameMode (rules) and GameState (match state).
+        PlayerControllers possess Pawns for input routing.
+    """
+
+    TICK_PRE_PHYSICS: int
+    TICK_DURING_PHYSICS: int
+    TICK_POST_PHYSICS: int
+    TICK_POST_UPDATE_WORK: int
 
     @staticmethod
     def get_world() -> int:
         """Get an opaque handle to the active World (0 if none).
         Used internally by cross-language dispatch."""
         ...
+
+    # ── Spawning ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def spawn_actor_by_class(class_name: str, x: float = 0, y: float = 0, z: float = 0) -> int:
+        """Spawn an actor by registered class name at the given position.
+        Returns the actor's entity ID, or 0 on failure."""
+        ...
+
+    @staticmethod
+    def spawn_actor_deferred(class_name: str, x: float = 0, y: float = 0, z: float = 0) -> int:
+        """Spawn an actor deferred (beginPlay NOT called).
+        Configure properties, then call finish_spawning().
+        Returns the actor's entity ID, or 0 on failure."""
+        ...
+
+    @staticmethod
+    def finish_spawning(entity: int) -> bool:
+        """Finalize a deferred actor spawn — calls beginPlay().
+        Returns True on success."""
+        ...
+
+    @staticmethod
+    def spawn_actor_from_asset(asset_path: str) -> int:
+        """Spawn an actor into the world from an .asset file path (content-relative).
+        Returns the entity ID of the spawned actor, or 0 on failure."""
+        ...
+
+    # ── Destruction ───────────────────────────────────────────────────
+
+    @staticmethod
+    def destroy_actor(entity: int) -> bool:
+        """Mark an actor for deferred destruction (end of frame).
+        Returns True if the actor was found and marked."""
+        ...
+
+    # ── Queries ───────────────────────────────────────────────────────
 
     @staticmethod
     def find_actor_by_name(name: str) -> int:
@@ -1503,10 +1556,82 @@ class actor:
         """Get the total number of living actors in the world."""
         ...
 
+    # ── Actor Identity ────────────────────────────────────────────────
+
     @staticmethod
-    def spawn_actor_from_asset(asset_path: str) -> int:
-        """Spawn an actor into the world from an .asset file path (content-relative).
-        Returns the entity ID of the spawned actor, or 0 on failure."""
+    def get_actor_name(entity: int) -> Optional[str]:
+        """Get the name of an actor by entity ID. Returns None if not found."""
+        ...
+
+    @staticmethod
+    def set_actor_name(entity: int, name: str) -> bool:
+        """Set the name of an actor."""
+        ...
+
+    @staticmethod
+    def get_actor_tag(entity: int) -> Optional[str]:
+        """Get the tag of an actor by entity ID. Returns None if not found."""
+        ...
+
+    @staticmethod
+    def set_actor_tag(entity: int, tag: str) -> bool:
+        """Set the tag of an actor."""
+        ...
+
+    # ── Tick Settings ─────────────────────────────────────────────────
+
+    @staticmethod
+    def set_tick_group(entity: int, group: int) -> bool:
+        """Set the tick group for an actor.
+        0=PrePhysics, 1=DuringPhysics, 2=PostPhysics (default), 3=PostUpdateWork."""
+        ...
+
+    @staticmethod
+    def set_tick_interval(entity: int, interval: float) -> bool:
+        """Set the tick interval for an actor in seconds (0 = every frame)."""
+        ...
+
+    @staticmethod
+    def set_can_ever_tick(entity: int, can_tick: bool) -> bool:
+        """Enable or disable ticking for an actor."""
+        ...
+
+    # ── Tick Dependencies (DAG) ───────────────────────────────────────
+
+    @staticmethod
+    def add_tick_prerequisite(entity: int, prerequisite_entity: int) -> bool:
+        """Declare that 'entity' must tick AFTER 'prerequisite_entity'
+        within the same tick group. Uses topological sorting."""
+        ...
+
+    @staticmethod
+    def remove_tick_prerequisite(entity: int, prerequisite_entity: int) -> bool:
+        """Remove a tick ordering dependency."""
+        ...
+
+    # ── Game Framework ────────────────────────────────────────────────
+
+    @staticmethod
+    def get_game_mode() -> int:
+        """Get the entity ID of the active GameMode actor (0 if none)."""
+        ...
+
+    @staticmethod
+    def get_game_state() -> int:
+        """Get the entity ID of the active GameState actor (0 if none)."""
+        ...
+
+    # ── Possession (PlayerController / Pawn) ──────────────────────────
+
+    @staticmethod
+    def possess(controller_entity: int, pawn_entity: int) -> bool:
+        """Make a PlayerController possess a Pawn.
+        The controller takes control of the pawn's physical representation."""
+        ...
+
+    @staticmethod
+    def unpossess(controller_entity: int) -> bool:
+        """Release the currently possessed Pawn from a PlayerController."""
         ...
 
     @staticmethod
@@ -1584,6 +1709,76 @@ class actor:
     @staticmethod
     def pi() -> float:
         """Return the constant pi."""
+        ...
+
+# ---------------------------------------------------------------------------
+# engine.animation – Skeletal animation (blending, crossfade, layers)
+# ---------------------------------------------------------------------------
+
+class animation:
+    @staticmethod
+    def is_skinned(entity: int) -> bool:
+        """Check if entity has a skeletal mesh."""
+        ...
+
+    @staticmethod
+    def get_clip_count(entity: int) -> int:
+        """Get the number of animation clips on the entity."""
+        ...
+
+    @staticmethod
+    def find_clip(entity: int, name: str) -> int:
+        """Find clip index by name. Returns -1 if not found."""
+        ...
+
+    @staticmethod
+    def play(entity: int, clip: int, loop: bool = True) -> bool:
+        """Play an animation clip on layer 0."""
+        ...
+
+    @staticmethod
+    def stop(entity: int) -> bool:
+        """Stop animation on layer 0."""
+        ...
+
+    @staticmethod
+    def set_speed(entity: int, speed: float) -> bool:
+        """Set playback speed on layer 0."""
+        ...
+
+    @staticmethod
+    def crossfade(entity: int, clip: int, duration: float, loop: bool = True) -> bool:
+        """Smoothly crossfade from the current clip to a new clip on layer 0."""
+        ...
+
+    @staticmethod
+    def is_crossfading(entity: int) -> bool:
+        """Check if layer 0 is currently crossfading."""
+        ...
+
+    @staticmethod
+    def play_on_layer(entity: int, layer: int, clip: int, loop: bool = True, crossfade_dur: float = 0.0) -> bool:
+        """Play a clip on a specific layer with optional crossfade."""
+        ...
+
+    @staticmethod
+    def stop_layer(entity: int, layer: int) -> bool:
+        """Stop animation on a specific layer."""
+        ...
+
+    @staticmethod
+    def set_layer_weight(entity: int, layer: int, weight: float) -> bool:
+        """Set blend weight for a layer (0.0 to 1.0)."""
+        ...
+
+    @staticmethod
+    def get_layer_count(entity: int) -> int:
+        """Get the number of active animation layers."""
+        ...
+
+    @staticmethod
+    def set_layer_count(entity: int, count: int) -> bool:
+        """Set the number of active animation layers (max 4)."""
         ...
 
 # ---------------------------------------------------------------------------

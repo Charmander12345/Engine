@@ -187,13 +187,35 @@ namespace ECS
 	};
 
 	/// Skeletal animation state – references the skeleton embedded in the mesh asset.
+	/// Supports multi-layer blending with crossfade.
 	struct AnimationComponent
 	{
-		int currentClipIndex{-1};           ///< -1 = no animation playing
+		int currentClipIndex{-1};           ///< -1 = no animation playing (layer 0)
 		float currentTime{0.0f};
 		float speed{1.0f};
 		bool playing{false};
 		bool loop{true};
+
+		// ── Crossfade ────────────────────────────────────────────
+		int   crossfadeTargetClip{-1};      ///< Clip index to crossfade into (-1 = none)
+		float crossfadeDuration{0.0f};      ///< Crossfade duration in seconds
+		bool  crossfadeRequested{false};    ///< Set to true to trigger crossfade on next sync
+
+		// ── Layer support ────────────────────────────────────────
+		/// Per-layer overrides.  Layer 0 is always "full body" (uses
+		/// the fields above).  Additional layers allow partial-body
+		/// animation overrides (e.g. upper body aiming).
+		static constexpr int kMaxLayers = 4;
+		struct LayerState
+		{
+			int   clipIndex{-1};
+			float speed{1.0f};
+			float weight{1.0f};
+			bool  loop{true};
+			bool  active{false};
+		};
+		LayerState layers[kMaxLayers]{};
+		int  layerCount{1};                 ///< Number of active layers (min 1)
 	};
 
 	/// Level of Detail – multiple mesh variants sorted by camera distance.

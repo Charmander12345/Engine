@@ -1,4 +1,5 @@
 #include <ECS/ECS.h>
+#include "ComponentReflection.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>

@@ -200,4 +200,77 @@ namespace GameplayAPI
 	GAMEPLAY_API void* getWorld();
 	/// Set the active World pointer (called by engine internals).
 	GAMEPLAY_API void  setWorld(void* world);
+
+	// ── Actor System – Extended ──────────────────────────────────────
+	/// Spawn an actor by class name at the given position.
+	GAMEPLAY_API void* spawnActorByClass(const char* className, float x = 0, float y = 0, float z = 0);
+
+	/// Spawn a deferred actor by class name (beginPlay not called until finishSpawning).
+	GAMEPLAY_API void* spawnActorDeferredByClass(const char* className, float x = 0, float y = 0, float z = 0);
+
+	/// Finalize a deferred actor spawn (calls beginPlay).
+	GAMEPLAY_API bool finishSpawning(void* actor);
+
+	/// Destroy an actor (deferred to end of frame).
+	GAMEPLAY_API bool destroyActor(void* actor);
+
+	/// Get the GameMode actor for the active world (or nullptr).
+	GAMEPLAY_API void* getGameMode();
+
+	/// Get the GameState actor for the active world (or nullptr).
+	GAMEPLAY_API void* getGameState();
+
+	/// Add a tick prerequisite: 'actor' will tick after 'prerequisite'.
+	GAMEPLAY_API bool addTickPrerequisite(void* actor, void* prerequisite);
+
+	/// Remove a tick prerequisite.
+	GAMEPLAY_API bool removeTickPrerequisite(void* actor, void* prerequisite);
+
+	/// Set the tick group for an actor.
+	GAMEPLAY_API bool setTickGroup(void* actor, int tickGroup);
+
+	/// Set the tick interval for an actor (0 = every frame).
+	GAMEPLAY_API bool setTickInterval(void* actor, float interval);
+
+	/// Enable or disable ticking for an actor.
+	GAMEPLAY_API bool setCanEverTick(void* actor, bool canTick);
+
+	/// Get an actor's name.
+	GAMEPLAY_API const char* getActorName(void* actor);
+
+	/// Set an actor's name.
+	GAMEPLAY_API bool setActorName(void* actor, const char* name);
+
+	/// Get an actor's tag.
+	GAMEPLAY_API const char* getActorTag(void* actor);
+
+	/// Set an actor's tag.
+	GAMEPLAY_API bool setActorTag(void* actor, const char* tag);
+
+	/// Find an actor by name in the active world.
+	GAMEPLAY_API void* findActorByName(const char* name);
+
+	/// Find actors by tag in the active world.
+	GAMEPLAY_API int findActorsByTag(const char* tag, void** outActors, int maxCount);
+
+	/// Possess a Pawn with a PlayerController.
+	GAMEPLAY_API bool possess(void* controller, void* pawn);
+
+	/// Unpossess the current Pawn from a PlayerController.
+	GAMEPLAY_API bool unpossessController(void* controller);
+
+	// ── Skeletal Animation ───────────────────────────────────────────
+	GAMEPLAY_API bool  isEntitySkinned(ECS::Entity entity);
+	GAMEPLAY_API int   getAnimationClipCount(ECS::Entity entity);
+	GAMEPLAY_API int   findAnimationClipByName(ECS::Entity entity, const char* name);
+	GAMEPLAY_API bool  playSkeletalAnimation(ECS::Entity entity, int clipIndex, bool loop = true);
+	GAMEPLAY_API bool  stopSkeletalAnimation(ECS::Entity entity);
+	GAMEPLAY_API bool  setSkeletalAnimationSpeed(ECS::Entity entity, float speed);
+	GAMEPLAY_API bool  crossfadeAnimation(ECS::Entity entity, int toClip, float duration, bool loop = true);
+	GAMEPLAY_API bool  isCrossfading(ECS::Entity entity);
+	GAMEPLAY_API bool  playAnimationOnLayer(ECS::Entity entity, int layer, int clipIndex, bool loop = true, float crossfadeDuration = 0.0f);
+	GAMEPLAY_API bool  stopAnimationLayer(ECS::Entity entity, int layer);
+	GAMEPLAY_API bool  setAnimationLayerWeight(ECS::Entity entity, int layer, float weight);
+	GAMEPLAY_API int   getAnimationLayerCount(ECS::Entity entity);
+	GAMEPLAY_API bool  setAnimationLayerCount(ECS::Entity entity, int count);
 }

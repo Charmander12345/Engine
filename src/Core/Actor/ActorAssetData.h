@@ -5,6 +5,7 @@
 #include "../../AssetManager/json.hpp"
 #include "../../AssetManager/AssetTypes.h"
 
+class Archive;
 using json = nlohmann::json;
 
 /// Describes one child actor slot inside an ActorAsset definition.
@@ -30,6 +31,9 @@ struct ChildActorEntry
 
 	json toJson() const;
 	static ChildActorEntry fromJson(const json& j);
+
+	/// Bidirectional binary serialization (same call for save & load).
+	void serialize(Archive& ar);
 };
 
 /// In-memory representation of an .actor asset file.
@@ -52,6 +56,16 @@ struct ActorAssetData
 	std::string meshPath;       // content-relative mesh asset path (may be empty)
 	std::string materialPath;   // content-relative material asset path (may be empty)
 
+	// ── Root transform defaults ──────────────────────────────────────
+	float rootPosition[3]{ 0.0f, 0.0f, 0.0f };
+	float rootRotation[3]{ 0.0f, 0.0f, 0.0f };
+	float rootScale[3]{ 1.0f, 1.0f, 1.0f };
+
+	// ── Tick settings ────────────────────────────────────────────────
+	bool  canEverTick{ true };
+	int   tickGroup{ 2 };          // 0=PrePhysics, 1=DuringPhysics, 2=PostPhysics, 3=PostUpdateWork
+	float tickInterval{ 0.0f };    // 0 = every frame
+
 	// ── Embedded script ──────────────────────────────────────────────
 	std::string scriptClassName;      // auto-generated C++ class name (e.g. "MyActor_Script")
 	std::string scriptHeaderPath;     // content-relative .h path
@@ -61,6 +75,9 @@ struct ActorAssetData
 	// ── Serialization ────────────────────────────────────────────────
 	json toJson() const;
 	static ActorAssetData fromJson(const json& j);
+
+	/// Bidirectional binary serialization (same call for save & load).
+	void serialize(Archive& ar);
 
 	// ── Script file lifecycle ──────────────────────────────────────
 	/// Generate the C++ header + source template files for this actor's

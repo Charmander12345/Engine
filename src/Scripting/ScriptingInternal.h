@@ -71,6 +71,7 @@ PyObject* CreateLoggingModule();
 PyObject* CreateUIModule();
 PyObject* CreateGlobalStateModule();
 PyObject* CreateTimerModule();
+PyObject* CreateAnimationModule();
 #if ENGINE_EDITOR
 PyObject* CreateEditorModule();
 #endif

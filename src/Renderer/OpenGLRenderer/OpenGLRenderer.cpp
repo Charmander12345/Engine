@@ -1456,11 +1456,17 @@ void OpenGLRenderer::renderWorld()
 	}
 
 	// Clear & viewport setup
+#if ENGINE_EDITOR
+	const bool isActorEditorTab = (m_activeTabId == "ActorEditor");
+	const Vec4 clearCol = isActorEditorTab ? Vec4{ 0.12f, 0.12f, 0.14f, 1.0f } : m_clearColor;
+#else
+	const Vec4& clearCol = m_clearColor;
+#endif
 	if (m_currentSubViewportIndex <= 0)
 	{
 		// First sub-viewport (or single mode): clear the full FBO
 		glViewport(0, 0, fullWidth, fullHeight);
-		glClearColor(m_clearColor.x, m_clearColor.y, m_clearColor.z, m_clearColor.w);
+		glClearColor(clearCol.x, clearCol.y, clearCol.z, clearCol.w);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	}
 
@@ -1473,7 +1479,7 @@ void OpenGLRenderer::renderWorld()
 		{
 			// Clear only this sub-viewport area
 			glViewport(vpX, viewportY, width, height);
-			glClearColor(m_clearColor.x, m_clearColor.y, m_clearColor.z, m_clearColor.w);
+			glClearColor(clearCol.x, clearCol.y, clearCol.z, clearCol.w);
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		}
 	}
@@ -2686,7 +2692,19 @@ void OpenGLRenderer::renderWorld()
 #if ENGINE_EDITOR
 	if (!diagnostics.isPIEActive())
 	{
+		// Always show the grid in the actor editor viewport for spatial
+		// reference, regardless of the main viewport's snap/grid setting.
+		const bool gridWasVisible = m_gridVisible;
+		if (isActorEditorTab)
+			m_gridVisible = true;
 		drawViewportGrid(view, m_projectionMatrix);
+		m_gridVisible = gridWasVisible;
+	}
+
+	// Draw origin axis lines in actor editor viewport
+	if (isActorEditorTab)
+	{
+		drawOriginAxes(view, m_projectionMatrix);
 	}
 
 	// Draw collider wireframe debug overlay when not in PIE
@@ -9935,4 +9953,66 @@ int OpenGLRenderer::getEntityBoneParent(unsigned int entity, int boneIndex) cons
 	const Skeleton* sk = it->second->getSkeleton();
 	if (!sk || boneIndex < 0 || boneIndex >= static_cast<int>(sk->bones.size())) return -1;
 	return sk->bones[boneIndex].parentIndex;
+}
+
+// ── Skeletal animation: crossfade & layers ──────────────────────────
+
+void OpenGLRenderer::crossfadeEntityAnimation(unsigned int entity, int toClip, float duration, bool loop)
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return;
+	it->second->crossfade(toClip, duration, loop);
+}
+
+bool OpenGLRenderer::isEntityCrossfading(unsigned int entity) const
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return false;
+	return it->second->isCrossfading();
+}
+
+void OpenGLRenderer::playEntityAnimationOnLayer(unsigned int entity, int layer, int clip, bool loop, float crossfadeDur)
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return;
+	it->second->playOnLayer(layer, clip, loop, crossfadeDur);
+}
+
+void OpenGLRenderer::stopEntityAnimationLayer(unsigned int entity, int layer)
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return;
+	it->second->stopLayer(layer);
+}
+
+void OpenGLRenderer::setEntityLayerWeight(unsigned int entity, int layer, float weight)
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return;
+	it->second->setLayerWeight(layer, weight);
+}
+
+int OpenGLRenderer::getEntityAnimationLayerCount(unsigned int entity) const
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return 0;
+	return it->second->getLayerCount();
+}
+
+void OpenGLRenderer::setEntityAnimationLayerCount(unsigned int entity, int count)
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return;
+	it->second->setLayerCount(count);
+}
+
+int OpenGLRenderer::findEntityAnimationClipByName(unsigned int entity, const char* name) const
+{
+	auto it = m_entityAnimators.find(entity);
+	if (it == m_entityAnimators.end()) return -1;
+	const Skeleton* sk = it->second->getSkeleton();
+	if (!sk || !name) return -1;
+	for (int i = 0; i < static_cast<int>(sk->animations.size()); ++i)
+		if (sk->animations[i].name == name) return i;
+	return -1;
 }

@@ -24,6 +24,7 @@
 #include "../Scripting/Python/PythonScripting.h"
 #include "../NativeScripting/NativeScriptManager.h"
 #include "../Core/Actor/ActorAssetData.h"
+#include "../Renderer/EditorTabs/ActorEditorTab.h"
 #include <filesystem>
 #include <algorithm>
 #include <cmath>
@@ -1253,6 +1254,14 @@ void EditorApp::registerDragDropHandlers()
     auto& uiMgr = m_bridge.getUIManager();
 
     uiMgr.setOnDropOnViewport([renderer](const std::string& payload, const Vec2& screenPos) {
+        // If the actor editor tab is active, delegate to it instead of the normal viewport logic
+        auto* actorTab = renderer->getUIManager().getActorEditorTab();
+        if (actorTab && actorTab->isOpen() && renderer->getActiveTabId() == actorTab->getTabId())
+        {
+            actorTab->handleViewportDrop(payload, screenPos);
+            return;
+        }
+
         const auto sep = payload.find('|'); if (sep==std::string::npos) return;
         const int typeInt = std::atoi(payload.substr(0,sep).c_str());
         const std::string relPath = payload.substr(sep+1);

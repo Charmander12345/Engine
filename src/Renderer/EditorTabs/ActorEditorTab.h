@@ -12,8 +12,10 @@ class Renderer;
 struct WidgetElement;
 
 /// Editor tab: Actor Asset Editor.
-/// Shows a 3D preview viewport (with axis lines) rendering the actor's
-/// mesh hierarchy and a sidebar for editing child actors and scripts.
+/// Shows a 3D preview viewport (rendering only the actor's mesh hierarchy)
+/// and a scrollable sidebar with collapsible sections exposing all actor
+/// capabilities: identity, transform, tick settings, visuals, child actors,
+/// default components, and embedded script.
 class ActorEditorTab final : public IEditorTab
 {
 public:
@@ -26,7 +28,6 @@ public:
         ActorAssetData actorData;       // in-memory actor data
         bool        isOpen{ false };
         bool        isDirty{ false };
-        std::string selectedSection;    // "ActorClass", "ChildActors", "Script"
     };
 
     explicit ActorEditorTab(UIManager* uiManager, Renderer* renderer);
@@ -41,7 +42,7 @@ public:
     /// Open for a specific actor asset path (content-relative).
     void open(const std::string& assetPath);
 
-    /// Rebuild both panels.
+    /// Rebuild the sidebar.
     void refresh();
 
     /// Save the actor asset to disk.
@@ -59,24 +60,33 @@ public:
     Vec3 getInitialCameraPosition() const { return m_previewCamPos; }
     Vec2 getInitialCameraRotation() const { return m_previewCamRot; }
 
+    /// Handle a drag-and-drop from the Content Browser onto the viewport area.
+    /// Returns true if the drop was consumed.
+    bool handleViewportDrop(const std::string& payload, const Vec2& screenPos);
+
 private:
     // ── Layout builders ──────────────────────────────────────────────
     void buildToolbar(WidgetElement& root);
-    void buildSectionListPanel(WidgetElement& parent);
-    void buildDetailsPanel(WidgetElement& parent);
+    void buildSidebar(WidgetElement& sidebar);
 
-    // ── Per-section detail builders ──────────────────────────────────
-    void buildActorClassDetails(WidgetElement& parent);
+    // ── Collapsible section builders ─────────────────────────────────
+    void buildIdentitySection(WidgetElement& parent);
+    void buildTransformSection(WidgetElement& parent);
+    void buildTickSettingsSection(WidgetElement& parent);
+    void buildVisualsSection(WidgetElement& parent);
     void buildChildActorList(WidgetElement& parent);
+    void buildComponentsInfo(WidgetElement& parent);
     void buildScriptDetails(WidgetElement& parent);
 
     // ── Helpers ──────────────────────────────────────────────────────
     void addChildActor(const std::string& actorClass);
     void removeChildActor(size_t index);
-    void selectSection(const std::string& section);
 
     /// Collect registered actor class names for dropdown.
     std::vector<std::string> getActorClassNames() const;
+
+    /// Get human-readable list of default components for an actor class.
+    std::vector<std::string> getComponentsForClass(const std::string& actorClass) const;
 
     /// Build the preview runtime level from the current actor data.
     void rebuildPreviewLevel();
@@ -89,4 +99,8 @@ private:
     std::unique_ptr<EngineLevel> m_runtimeLevel;
     Vec3 m_previewCamPos{ 0.0f, 1.0f, 3.0f };
     Vec2 m_previewCamRot{ -90.0f, -10.0f }; // yaw, pitch (looking at origin)
+
+    // Entity ID mapping: index 0 = root, 1..N = child actors (depth-first order)
+    // Used to sync gizmo transform edits back to ActorAssetData.
+    std::vector<unsigned int> m_previewEntities;
 };

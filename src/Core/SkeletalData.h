@@ -41,6 +41,16 @@ inline Quat quatSlerp(const Quat& a, const Quat& b, float t)
     return quatNormalize({ s0*a.x+s1*bn.x, s0*a.y+s1*bn.y, s0*a.z+s1*bn.z, s0*a.w+s1*bn.w });
 }
 
+inline Quat quatMul(const Quat& a, const Quat& b)
+{
+    return {
+        a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
+        a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
+        a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
+        a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z
+    };
+}
+
 // ── 4×4 matrix helpers (row-major float[16]) ──
 
 struct Mat4x4
@@ -208,53 +218,277 @@ struct VertexBoneData
     }
 };
 
-// ── Skeletal Animator (runtime playback) ──
+// ── Skeletal Animator (runtime playback with blending & layers) ──
+
+#include "AnimationBlending.h"
+
+/// Per-node decomposed transform (position, rotation, scale) used during
+/// pose blending so that quaternion slerp can be applied correctly.
+struct NodePose
+{
+    float pos[3]{ 0, 0, 0 };
+    Quat  rot{ 0, 0, 0, 1 };
+    float scl[3]{ 1, 1, 1 };
+};
 
 class SkeletalAnimator
 {
 public:
-    void setSkeleton(const Skeleton* skeleton) { m_skeleton = skeleton; }
+    void setSkeleton(const Skeleton* skeleton)
+    {
+        m_skeleton = skeleton;
+        if (m_layers.empty())
+        {
+            m_layers.resize(1);
+            m_layers[0].name = "FullBody";
+        }
+    }
     const Skeleton* getSkeleton() const { return m_skeleton; }
+
+    // ── Legacy single-clip API (operates on layer 0) ────────────────
 
     void playAnimation(int clipIndex, bool loop = true)
     {
         if (!m_skeleton || clipIndex < 0 || clipIndex >= static_cast<int>(m_skeleton->animations.size()))
             return;
+        auto& layer = ensureLayer(0);
+        layer.current.clipIndex = clipIndex;
+        layer.current.time = 0.0f;
+        layer.current.speed = m_speed;
+        layer.current.weight = 1.0f;
+        layer.current.loop = loop;
+        layer.current.playing = true;
+        layer.previous = BlendEntry{};
+        layer.crossfade = CrossfadeState{};
+
         m_clipIndex = clipIndex;
         m_currentTime = 0.0f;
         m_playing = true;
         m_loop = loop;
     }
 
-    void stop() { m_playing = false; m_currentTime = 0; }
+    void stop()
+    {
+        m_playing = false;
+        m_currentTime = 0;
+        if (!m_layers.empty())
+        {
+            m_layers[0].current.playing = false;
+            m_layers[0].current.time = 0;
+            m_layers[0].previous = BlendEntry{};
+            m_layers[0].crossfade = CrossfadeState{};
+        }
+    }
+
     bool isPlaying() const { return m_playing; }
     int  getCurrentClipIndex() const { return m_clipIndex; }
     float getCurrentTime() const { return m_currentTime; }
     void setSpeed(float speed) { m_speed = speed; }
 
+    // ── Crossfade API ───────────────────────────────────────────────
+
+    /// Smoothly transition from the current clip to `toClip` over `duration`
+    /// seconds on the specified layer.
+    void crossfade(int toClip, float duration, bool loop = true, int layerIndex = 0)
+    {
+        if (!m_skeleton || toClip < 0 || toClip >= static_cast<int>(m_skeleton->animations.size()))
+            return;
+        auto& layer = ensureLayer(layerIndex);
+        layer.previous = layer.current;
+        layer.current.clipIndex = toClip;
+        layer.current.time = 0.0f;
+        layer.current.speed = m_speed;
+        layer.current.weight = 0.0f;
+        layer.current.loop = loop;
+        layer.current.playing = true;
+        layer.crossfade.active = true;
+        layer.crossfade.duration = (std::max)(duration, 0.001f);
+        layer.crossfade.elapsed = 0.0f;
+    }
+
+    bool isCrossfading(int layerIndex = 0) const
+    {
+        if (layerIndex < 0 || layerIndex >= static_cast<int>(m_layers.size())) return false;
+        return m_layers[layerIndex].crossfade.active;
+    }
+
+    // ── Layer API ───────────────────────────────────────────────────
+
+    int  getLayerCount() const { return static_cast<int>(m_layers.size()); }
+    void setLayerCount(int count)
+    {
+        if (count < 1) count = 1;
+        if (count > kMaxAnimLayers) count = kMaxAnimLayers;
+        m_layers.resize(static_cast<size_t>(count));
+    }
+
+    AnimationLayer&       getLayer(int index)       { return m_layers[static_cast<size_t>(index)]; }
+    const AnimationLayer& getLayer(int index) const { return m_layers[static_cast<size_t>(index)]; }
+
+    void setLayerWeight(int index, float weight)
+    {
+        if (index >= 0 && index < static_cast<int>(m_layers.size()))
+            m_layers[index].layerWeight = std::clamp(weight, 0.0f, 1.0f);
+    }
+
+    void setLayerBoneMask(int index, const BoneMask& mask)
+    {
+        if (index >= 0 && index < static_cast<int>(m_layers.size()))
+            m_layers[index].boneMask = mask;
+    }
+
+    void setLayerBlendMode(int index, AnimBlendMode mode)
+    {
+        if (index >= 0 && index < static_cast<int>(m_layers.size()))
+            m_layers[index].blendMode = mode;
+    }
+
+    /// Play a clip on a specific layer (with optional crossfade).
+    void playOnLayer(int layerIndex, int clipIndex, bool loop = true, float crossfadeDuration = 0.0f)
+    {
+        if (!m_skeleton || clipIndex < 0 || clipIndex >= static_cast<int>(m_skeleton->animations.size()))
+            return;
+        if (crossfadeDuration > 0.0f)
+        {
+            crossfade(clipIndex, crossfadeDuration, loop, layerIndex);
+        }
+        else
+        {
+            auto& layer = ensureLayer(layerIndex);
+            layer.current.clipIndex = clipIndex;
+            layer.current.time = 0.0f;
+            layer.current.speed = m_speed;
+            layer.current.weight = 1.0f;
+            layer.current.loop = loop;
+            layer.current.playing = true;
+            layer.previous = BlendEntry{};
+            layer.crossfade = CrossfadeState{};
+        }
+        if (layerIndex == 0)
+        {
+            m_clipIndex = clipIndex;
+            m_currentTime = 0.0f;
+            m_playing = true;
+            m_loop = loop;
+        }
+    }
+
+    void stopLayer(int layerIndex)
+    {
+        if (layerIndex < 0 || layerIndex >= static_cast<int>(m_layers.size())) return;
+        m_layers[layerIndex].current.playing = false;
+        m_layers[layerIndex].current.time = 0;
+        m_layers[layerIndex].previous = BlendEntry{};
+        m_layers[layerIndex].crossfade = CrossfadeState{};
+        if (layerIndex == 0)
+        {
+            m_playing = false;
+            m_currentTime = 0;
+        }
+    }
+
+    // ── Tick ─────────────────────────────────────────────────────────
+
     /// Advance time and compute bone matrices (call once per frame).
     void tick(float deltaTime)
     {
-        if (!m_playing || !m_skeleton || m_clipIndex < 0) return;
-        const auto& clip = m_skeleton->animations[m_clipIndex];
-        float tps = clip.ticksPerSecond > 0.0f ? clip.ticksPerSecond : 25.0f;
-        m_currentTime += deltaTime * tps * m_speed;
-        if (m_currentTime >= clip.duration) {
-            if (m_loop) {
-                m_currentTime = std::fmod(m_currentTime, clip.duration);
-            } else {
-                m_currentTime = clip.duration;
-                m_playing = false;
+        if (!m_skeleton) return;
+
+        bool anyPlaying = false;
+        for (auto& layer : m_layers)
+        {
+            advanceBlendEntry(layer.current, deltaTime);
+            advanceBlendEntry(layer.previous, deltaTime);
+
+            if (layer.crossfade.active)
+            {
+                layer.crossfade.elapsed += deltaTime;
+                float t = std::clamp(layer.crossfade.elapsed / layer.crossfade.duration, 0.0f, 1.0f);
+                // smooth-step easing
+                t = t * t * (3.0f - 2.0f * t);
+                layer.current.weight = t;
+                layer.previous.weight = 1.0f - t;
+                if (layer.crossfade.elapsed >= layer.crossfade.duration)
+                {
+                    layer.crossfade.active = false;
+                    layer.current.weight = 1.0f;
+                    layer.previous = BlendEntry{};
+                }
             }
+
+            if (layer.current.playing) anyPlaying = true;
         }
-        computeBoneMatrices(clip);
+
+        if (!m_layers.empty())
+        {
+            m_clipIndex = m_layers[0].current.clipIndex;
+            m_currentTime = m_layers[0].current.time;
+            m_playing = m_layers[0].current.playing;
+        }
+
+        computeBlendedBoneMatrices();
     }
 
-    /// Final bone matrices ready for upload to GPU (column-major, count = bones.size()).
+    /// Final bone matrices ready for upload to GPU (count = bones.size()).
     const std::vector<Mat4x4>& getBoneMatrices() const { return m_boneMatrices; }
 
 private:
-    void computeBoneMatrices(const AnimationClip& clip)
+    AnimationLayer& ensureLayer(int index)
+    {
+        if (index >= static_cast<int>(m_layers.size()))
+            m_layers.resize(static_cast<size_t>(index) + 1);
+        return m_layers[index];
+    }
+
+    void advanceBlendEntry(BlendEntry& entry, float dt)
+    {
+        if (!entry.playing || !m_skeleton || entry.clipIndex < 0) return;
+        const auto& clip = m_skeleton->animations[entry.clipIndex];
+        float tps = clip.ticksPerSecond > 0.0f ? clip.ticksPerSecond : 25.0f;
+        entry.time += dt * tps * entry.speed;
+        if (entry.time >= clip.duration)
+        {
+            if (entry.loop)
+                entry.time = std::fmod(entry.time, clip.duration);
+            else
+            {
+                entry.time = clip.duration;
+                entry.playing = false;
+            }
+        }
+    }
+
+    /// Evaluate a single BlendEntry to produce per-node local poses.
+    void evaluateEntryPoses(const BlendEntry& entry,
+                            std::vector<NodePose>& outPoses,
+                            std::vector<bool>& outAnimated) const
+    {
+        if (!m_skeleton || entry.clipIndex < 0) return;
+        const auto& clip = m_skeleton->animations[entry.clipIndex];
+        const auto& nodes = m_skeleton->nodes;
+        const size_t nodeCount = nodes.size();
+        outPoses.resize(nodeCount);
+        outAnimated.resize(nodeCount, false);
+
+        for (size_t i = 0; i < nodeCount; ++i)
+        {
+            outPoses[i] = decomposeNodeTransform(nodes[i].localTransform);
+            outAnimated[i] = false;
+        }
+
+        for (const auto& ch : clip.channels)
+        {
+            int nodeIdx = findNodeForChannel(ch);
+            if (nodeIdx < 0) continue;
+            interpolatePosition(ch, entry.time, outPoses[nodeIdx].pos);
+            interpolateRotation(ch, entry.time, outPoses[nodeIdx].rot);
+            interpolateScaling(ch, entry.time, outPoses[nodeIdx].scl);
+            outAnimated[nodeIdx] = true;
+        }
+    }
+
+    /// Compute final bone matrices by blending all layers.
+    void computeBlendedBoneMatrices()
     {
         if (!m_skeleton) return;
         const auto& nodes = m_skeleton->nodes;
@@ -262,37 +496,130 @@ private:
         const size_t nodeCount = nodes.size();
         const size_t boneCount = bones.size();
 
-        // Build per-node local transforms (animated where a channel exists)
-        std::vector<Mat4x4> localTransforms(nodeCount);
+        // Start with bind-pose local transforms decomposed
+        std::vector<NodePose> basePoses(nodeCount);
         for (size_t i = 0; i < nodeCount; ++i)
-            localTransforms[i] = nodes[i].localTransform;
+            basePoses[i] = decomposeNodeTransform(nodes[i].localTransform);
 
-        for (const auto& ch : clip.channels) {
-            int boneIdx = ch.boneIndex;
-            // Find the node that corresponds to this bone
-            int nodeIdx = -1;
-            for (int ni = 0; ni < static_cast<int>(nodeCount); ++ni) {
-                if (nodes[ni].boneIndex == boneIdx || nodes[ni].name == ch.boneName) {
-                    nodeIdx = ni;
-                    break;
+        // Per-node accumulated pose (starts as bind pose)
+        std::vector<NodePose> finalPoses = basePoses;
+
+        // Track which nodes have been written to by at least one layer
+        std::vector<bool> nodeWritten(nodeCount, false);
+
+        for (size_t li = 0; li < m_layers.size(); ++li)
+        {
+            const auto& layer = m_layers[li];
+            if (layer.layerWeight <= 0.0f) continue;
+
+            // Evaluate the layer's current and previous entries
+            std::vector<NodePose> curPoses, prevPoses;
+            std::vector<bool> curAnimated, prevAnimated;
+
+            bool hasCurrent = layer.current.playing && layer.current.clipIndex >= 0;
+            bool hasPrevious = layer.crossfade.active && layer.previous.playing && layer.previous.clipIndex >= 0;
+
+            if (hasCurrent)
+                evaluateEntryPoses(layer.current, curPoses, curAnimated);
+            if (hasPrevious)
+                evaluateEntryPoses(layer.previous, prevPoses, prevAnimated);
+
+            if (!hasCurrent && !hasPrevious) continue;
+
+            // Blend current and previous within this layer
+            std::vector<NodePose> layerPoses(nodeCount);
+            std::vector<bool> layerAnimated(nodeCount, false);
+
+            for (size_t ni = 0; ni < nodeCount; ++ni)
+            {
+                bool cA = hasCurrent && ni < curAnimated.size() && curAnimated[ni];
+                bool pA = hasPrevious && ni < prevAnimated.size() && prevAnimated[ni];
+
+                if (cA && pA)
+                {
+                    float cw = layer.current.weight;
+                    float pw = layer.previous.weight;
+                    float total = cw + pw;
+                    if (total > 0.0f)
+                    {
+                        float t = cw / total;
+                        blendPose(prevPoses[ni], curPoses[ni], t, layerPoses[ni]);
+                    }
+                    else
+                    {
+                        layerPoses[ni] = basePoses[ni];
+                    }
+                    layerAnimated[ni] = true;
+                }
+                else if (cA)
+                {
+                    layerPoses[ni] = curPoses[ni];
+                    layerAnimated[ni] = true;
+                }
+                else if (pA)
+                {
+                    layerPoses[ni] = prevPoses[ni];
+                    layerAnimated[ni] = true;
+                }
+                else
+                {
+                    layerPoses[ni] = basePoses[ni];
                 }
             }
-            if (nodeIdx < 0) continue;
 
-            float pos[3]{0,0,0};
-            Quat  rot{0,0,0,1};
-            float scl[3]{1,1,1};
+            // Apply this layer to finalPoses with bone mask and layer weight
+            float lw = layer.layerWeight;
+            for (size_t ni = 0; ni < nodeCount; ++ni)
+            {
+                if (!layerAnimated[ni]) continue;
 
-            interpolatePosition(ch, m_currentTime, pos);
-            interpolateRotation(ch, m_currentTime, rot);
-            interpolateScaling(ch, m_currentTime, scl);
+                // Check bone mask (empty = all bones)
+                int boneIdx = (ni < nodes.size()) ? nodes[ni].boneIndex : -1;
+                if (!layer.boneMask.empty() && boneIdx >= 0 && !layer.boneMask.test(boneIdx))
+                    continue;
 
-            localTransforms[nodeIdx] = Mat4x4::fromTRS(pos, rot, scl);
+                if (layer.blendMode == AnimBlendMode::Override)
+                {
+                    if (nodeWritten[ni])
+                        blendPose(finalPoses[ni], layerPoses[ni], lw, finalPoses[ni]);
+                    else
+                    {
+                        blendPose(basePoses[ni], layerPoses[ni], lw, finalPoses[ni]);
+                        nodeWritten[ni] = true;
+                    }
+                }
+                else // Additive
+                {
+                    // Additive: delta = layerPose - bindPose, apply weighted
+                    NodePose& fp = finalPoses[ni];
+                    const NodePose& lp = layerPoses[ni];
+                    const NodePose& bp = basePoses[ni];
+                    fp.pos[0] += (lp.pos[0] - bp.pos[0]) * lw;
+                    fp.pos[1] += (lp.pos[1] - bp.pos[1]) * lw;
+                    fp.pos[2] += (lp.pos[2] - bp.pos[2]) * lw;
+                    fp.scl[0] += (lp.scl[0] - bp.scl[0]) * lw;
+                    fp.scl[1] += (lp.scl[1] - bp.scl[1]) * lw;
+                    fp.scl[2] += (lp.scl[2] - bp.scl[2]) * lw;
+                    // Additive rotation: multiply delta quaternion scaled by weight
+                    // delta = lp.rot * inverse(bp.rot)
+                    Quat bpInv = { -bp.rot.x, -bp.rot.y, -bp.rot.z, bp.rot.w };
+                    Quat delta = quatMul(lp.rot, bpInv);
+                    Quat scaled = quatSlerp(Quat{0,0,0,1}, delta, lw);
+                    fp.rot = quatNormalize(quatMul(scaled, fp.rot));
+                    nodeWritten[ni] = true;
+                }
+            }
         }
+
+        // Recompose local transforms from poses
+        std::vector<Mat4x4> localTransforms(nodeCount);
+        for (size_t i = 0; i < nodeCount; ++i)
+            localTransforms[i] = Mat4x4::fromTRS(finalPoses[i].pos, finalPoses[i].rot, finalPoses[i].scl);
 
         // Compute global transforms by traversal
         std::vector<Mat4x4> globalTransforms(nodeCount);
-        for (size_t i = 0; i < nodeCount; ++i) {
+        for (size_t i = 0; i < nodeCount; ++i)
+        {
             if (nodes[i].parentIndex < 0)
                 globalTransforms[i] = localTransforms[i];
             else
@@ -301,20 +628,98 @@ private:
 
         // Compute final bone matrices: globalTransform * offsetMatrix
         m_boneMatrices.resize(boneCount);
-        for (size_t b = 0; b < boneCount; ++b) {
-            // Find the node for this bone
-            int nodeIdx = -1;
-            for (int ni = 0; ni < static_cast<int>(nodeCount); ++ni) {
-                if (nodes[ni].boneIndex == static_cast<int>(b)) {
-                    nodeIdx = ni;
-                    break;
-                }
-            }
+        for (size_t b = 0; b < boneCount; ++b)
+        {
+            int nodeIdx = findNodeForBone(static_cast<int>(b));
             if (nodeIdx >= 0)
                 m_boneMatrices[b] = globalTransforms[nodeIdx] * bones[b].offsetMatrix;
             else
                 m_boneMatrices[b] = Mat4x4::identity();
         }
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────
+
+    int findNodeForChannel(const BoneChannel& ch) const
+    {
+        const auto& nodes = m_skeleton->nodes;
+        for (int ni = 0; ni < static_cast<int>(nodes.size()); ++ni)
+            if (nodes[ni].boneIndex == ch.boneIndex || nodes[ni].name == ch.boneName)
+                return ni;
+        return -1;
+    }
+
+    int findNodeForBone(int boneIndex) const
+    {
+        const auto& nodes = m_skeleton->nodes;
+        for (int ni = 0; ni < static_cast<int>(nodes.size()); ++ni)
+            if (nodes[ni].boneIndex == boneIndex)
+                return ni;
+        return -1;
+    }
+
+    static NodePose decomposeNodeTransform(const Mat4x4& m)
+    {
+        NodePose p;
+        p.pos[0] = m.m[12]; p.pos[1] = m.m[13]; p.pos[2] = m.m[14];
+        // Extract scale from column lengths (row-major: rows are axes)
+        float sx = std::sqrt(m.m[0]*m.m[0] + m.m[1]*m.m[1] + m.m[2]*m.m[2]);
+        float sy = std::sqrt(m.m[4]*m.m[4] + m.m[5]*m.m[5] + m.m[6]*m.m[6]);
+        float sz = std::sqrt(m.m[8]*m.m[8] + m.m[9]*m.m[9] + m.m[10]*m.m[10]);
+        p.scl[0] = sx > 1e-6f ? sx : 1.0f;
+        p.scl[1] = sy > 1e-6f ? sy : 1.0f;
+        p.scl[2] = sz > 1e-6f ? sz : 1.0f;
+        // Extract rotation matrix (normalize rows)
+        float r00 = m.m[0]/p.scl[0], r01 = m.m[1]/p.scl[0], r02 = m.m[2]/p.scl[0];
+        float r10 = m.m[4]/p.scl[1], r11 = m.m[5]/p.scl[1], r12 = m.m[6]/p.scl[1];
+        float r20 = m.m[8]/p.scl[2], r21 = m.m[9]/p.scl[2], r22 = m.m[10]/p.scl[2];
+        // Rotation matrix → quaternion (Shepperd's method)
+        float trace = r00 + r11 + r22;
+        if (trace > 0.0f)
+        {
+            float s = std::sqrt(trace + 1.0f) * 2.0f;
+            p.rot.w = 0.25f * s;
+            p.rot.x = (r12 - r21) / s;
+            p.rot.y = (r20 - r02) / s;
+            p.rot.z = (r01 - r10) / s;
+        }
+        else if (r00 > r11 && r00 > r22)
+        {
+            float s = std::sqrt(1.0f + r00 - r11 - r22) * 2.0f;
+            p.rot.w = (r12 - r21) / s;
+            p.rot.x = 0.25f * s;
+            p.rot.y = (r01 + r10) / s;
+            p.rot.z = (r02 + r20) / s;
+        }
+        else if (r11 > r22)
+        {
+            float s = std::sqrt(1.0f + r11 - r00 - r22) * 2.0f;
+            p.rot.w = (r20 - r02) / s;
+            p.rot.x = (r01 + r10) / s;
+            p.rot.y = 0.25f * s;
+            p.rot.z = (r12 + r21) / s;
+        }
+        else
+        {
+            float s = std::sqrt(1.0f + r22 - r00 - r11) * 2.0f;
+            p.rot.w = (r01 - r10) / s;
+            p.rot.x = (r02 + r20) / s;
+            p.rot.y = (r12 + r21) / s;
+            p.rot.z = 0.25f * s;
+        }
+        p.rot = quatNormalize(p.rot);
+        return p;
+    }
+
+    static void blendPose(const NodePose& a, const NodePose& b, float t, NodePose& out)
+    {
+        out.pos[0] = a.pos[0] + t * (b.pos[0] - a.pos[0]);
+        out.pos[1] = a.pos[1] + t * (b.pos[1] - a.pos[1]);
+        out.pos[2] = a.pos[2] + t * (b.pos[2] - a.pos[2]);
+        out.scl[0] = a.scl[0] + t * (b.scl[0] - a.scl[0]);
+        out.scl[1] = a.scl[1] + t * (b.scl[1] - a.scl[1]);
+        out.scl[2] = a.scl[2] + t * (b.scl[2] - a.scl[2]);
+        out.rot = quatSlerp(a.rot, b.rot, t);
     }
 
     static void interpolatePosition(const BoneChannel& ch, float time, float out[3])
@@ -375,11 +780,14 @@ private:
         out[2] = k0.value[2] + t*(k1.value[2]-k0.value[2]);
     }
 
-    const Skeleton* m_skeleton{nullptr};
-    int   m_clipIndex{-1};
-    float m_currentTime{0};
-    float m_speed{1.0f};
-    bool  m_playing{false};
-    bool  m_loop{true};
-    std::vector<Mat4x4> m_boneMatrices;
+    const Skeleton* m_skeleton{ nullptr };
+    // Legacy compatibility fields (mirror layer 0)
+    int   m_clipIndex{ -1 };
+    float m_currentTime{ 0 };
+    float m_speed{ 1.0f };
+    bool  m_playing{ false };
+    bool  m_loop{ true };
+
+    std::vector<AnimationLayer> m_layers;
+    std::vector<Mat4x4>         m_boneMatrices;
 };

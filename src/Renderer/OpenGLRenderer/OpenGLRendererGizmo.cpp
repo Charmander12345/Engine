@@ -238,6 +238,52 @@ void OpenGLRenderer::drawViewportGrid(const glm::mat4& view, const glm::mat4& pr
 }
 
 // ============================================================================
+// Origin Axis Lines (Actor Editor viewport)
+// ============================================================================
+
+void OpenGLRenderer::drawOriginAxes(const glm::mat4& view, const glm::mat4& projection)
+{
+	if (!ensureGizmoResources())
+		return;
+
+	const float axisLen = 50.0f;
+	// 6 vertices: 2 per axis (from origin outward)
+	const float verts[] = {
+		// X axis (red)
+		0.0f, 0.0f, 0.0f,   axisLen, 0.0f, 0.0f,
+		// Y axis (green)
+		0.0f, 0.0f, 0.0f,   0.0f, axisLen, 0.0f,
+		// Z axis (blue)
+		0.0f, 0.0f, 0.0f,   0.0f, 0.0f, axisLen,
+	};
+
+	const glm::mat4 mvp = projection * view;
+
+	glUseProgram(m_gizmo.program);
+	glUniformMatrix4fv(m_gizmo.locMVP, 1, GL_FALSE, glm::value_ptr(mvp));
+
+	glBindVertexArray(m_gizmo.vao);
+	glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
+	glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
+
+	glEnable(GL_DEPTH_TEST);
+	glLineWidth(1.5f);
+
+	// X — red
+	glUniform3f(m_gizmo.locColor, 0.8f, 0.2f, 0.2f);
+	glDrawArrays(GL_LINES, 0, 2);
+	// Y — green
+	glUniform3f(m_gizmo.locColor, 0.2f, 0.8f, 0.2f);
+	glDrawArrays(GL_LINES, 2, 2);
+	// Z — blue
+	glUniform3f(m_gizmo.locColor, 0.2f, 0.4f, 0.9f);
+	glDrawArrays(GL_LINES, 4, 2);
+
+	glLineWidth(1.0f);
+	glBindVertexArray(0);
+}
+
+// ============================================================================
 // Gizmo interaction
 // ============================================================================
 

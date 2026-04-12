@@ -921,11 +921,12 @@ namespace
         PyObject* particleModule = CreateParticleModule();
         PyObject* globalStateModule = CreateGlobalStateModule();
         PyObject* timerModule = CreateTimerModule();
+        PyObject* animationModule = CreateAnimationModule();
 #if ENGINE_EDITOR
         PyObject* editorModule = CreateEditorModule();
 #endif
 
-        if (!entityModule || !assetModule || !audioModule || !inputModule || !uiModule || !cameraModule || !diagnosticsModule || !loggingModule || !physicsModule || !mathModule || !particleModule || !globalStateModule || !timerModule
+        if (!entityModule || !assetModule || !audioModule || !inputModule || !uiModule || !cameraModule || !diagnosticsModule || !loggingModule || !physicsModule || !mathModule || !particleModule || !globalStateModule || !timerModule || !animationModule
 #if ENGINE_EDITOR
             || !editorModule
 #endif
@@ -944,6 +945,7 @@ namespace
             Py_XDECREF(particleModule);
             Py_XDECREF(globalStateModule);
             Py_XDECREF(timerModule);
+            Py_XDECREF(animationModule);
 #if ENGINE_EDITOR
             Py_XDECREF(editorModule);
 #endif
@@ -976,7 +978,8 @@ namespace
             !AddSubmodule(module, mathModule, "math") ||
             !AddSubmodule(module, particleModule, "particle") ||
             !AddSubmodule(module, globalStateModule, "globalstate") ||
-            !AddSubmodule(module, timerModule, "timer")
+            !AddSubmodule(module, timerModule, "timer") ||
+            !AddSubmodule(module, animationModule, "animation")
 #if ENGINE_EDITOR
             || !AddSubmodule(module, editorModule, "editor")
 #endif
