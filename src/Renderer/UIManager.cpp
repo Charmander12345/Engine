@@ -1767,6 +1767,26 @@ const std::vector<const UIManager::WidgetEntry*>& UIManager::getWidgetsOrderedBy
 
 void UIManager::unregisterWidget(const std::string& id)
 {
+    // Before destroying the widget's element tree, clear any raw WidgetElement*
+    // pointers that reference elements inside it.  If left dangling they cause
+    // an access violation the next time setFocusedEntry / updateHoverStates runs.
+    for (const auto& entry : m_widgets)
+    {
+        if (entry.id != id || !entry.widget)
+            continue;
+
+        std::function<void(WidgetElement&)> clearPtrs = [&](WidgetElement& el)
+        {
+            if (m_focusedEntry      == &el) m_focusedEntry      = nullptr;
+            if (m_lastHoveredElement == &el) m_lastHoveredElement = nullptr;
+            for (auto& child : el.children)
+                clearPtrs(child);
+        };
+        for (auto& rootEl : entry.widget->getElementsMutable())
+            clearPtrs(rootEl);
+        break;
+    }
+
     m_widgets.erase(
         std::remove_if(m_widgets.begin(), m_widgets.end(),
             [&](const WidgetEntry& entry) { return entry.id == id; }),
@@ -1784,6 +1804,12 @@ void UIManager::setActiveTabId(const std::string& tabId)
     m_widgetOrderDirty = true;
     m_pointerCacheDirty = true;
     m_renderDirty = true;
+#if ENGINE_EDITOR
+    // The overlay is redundant in the Viewport tab where the docked content
+    // browser is already visible — close it automatically on tab switch.
+    if (tabId == "Viewport" && m_contentBrowserOverlayOpen)
+        closeContentBrowserOverlay();
+#endif
 }
 
 const std::string& UIManager::getActiveTabId() const
@@ -2769,6 +2795,10 @@ void UIManager::setMousePosition(const Vec2& screenPos)
             m_dragPending = false;
             Logger::Instance().log(Logger::Category::UI,
                 "Drag started: " + m_dragPayload, Logger::LogLevel::INFO);
+#if ENGINE_EDITOR
+            if (m_contentBrowserOverlayOpen && !m_contentBrowserOverlayHiddenForDrag)
+                onOverlayDragStarted();
+#endif
         }
     }
 
@@ -2787,6 +2817,10 @@ void UIManager::cancelDrag()
     m_dragPayload.clear();
     m_dragSourceId.clear();
     m_dragLabel.clear();
+#if ENGINE_EDITOR
+    if (m_contentBrowserOverlayHiddenForDrag)
+        onOverlayDragEnded();
+#endif
 }
 
 bool UIManager::handleMouseUp(const Vec2& screenPos, int button)

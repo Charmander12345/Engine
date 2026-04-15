@@ -17,6 +17,35 @@ set(BUILD_SHARED_LIBS ON CACHE BOOL "Prefer shared libraries for subprojects" FO
 set(CMAKE_DEBUG_POSTFIX "" CACHE STRING "" FORCE)
 
 set(Python3_USE_DEBUG_LIBS OFF CACHE BOOL "" FORCE)
+
+# Prefer the python.org system install over the Windows Store sandbox version.
+# The Store version lives in a protected WindowsApps directory whose version
+# string changes with every update, breaking the CMake cache silently.
+if(WIN32)
+    # Collect all standard per-user / system-wide install locations.
+    set(_py_hints
+        "$ENV{LOCALAPPDATA}/Programs/Python"
+        "C:/Python313"
+        "C:/Python312"
+        "C:/Python311"
+        "C:/Python310"
+    )
+    # If PYTHON_HOME or PYTHONHOME is set, prepend it.
+    if(DEFINED ENV{PYTHON_HOME})
+        list(PREPEND _py_hints "$ENV{PYTHON_HOME}")
+    endif()
+    if(DEFINED ENV{PYTHONHOME})
+        list(PREPEND _py_hints "$ENV{PYTHONHOME}")
+    endif()
+    set(Python3_ROOT_DIR "" CACHE PATH "Override: root of the Python 3 install to use")
+    if(Python3_ROOT_DIR)
+        list(PREPEND _py_hints "${Python3_ROOT_DIR}")
+    endif()
+    # Suppress the Store stub (python.exe in WindowsApps is a redirect without libs).
+    set(Python3_FIND_REGISTRY LAST)
+    set(Python3_FIND_VIRTUALENV FIRST)
+endif()
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 if(WIN32 AND Python3_LIBRARY_RELEASE)
     set(Python3_LIBRARY_DEBUG ${Python3_LIBRARY_RELEASE} CACHE FILEPATH "" FORCE)

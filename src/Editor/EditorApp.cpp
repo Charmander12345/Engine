@@ -1568,6 +1568,23 @@ void EditorApp::registerShortcuts()
             return handleDelete();
         });
 
+    sm.registerAction("Editor.ToggleContentBrowserOverlay", "Toggle Content Browser Overlay", "Editor",
+        { SDLK_SPACE, Mod::Ctrl }, Phase::KeyUp,
+        [this]() -> bool {
+            if (m_bridge.isPIEActive()) return false;
+            m_bridge.getUIManager().toggleContentBrowserOverlay();
+            return true;
+        });
+
+    sm.registerAction("Editor.CloseContentBrowserOverlay", "Close Content Browser Overlay", "Editor",
+        { SDLK_ESCAPE, Mod::None }, Phase::KeyUp,
+        [this]() -> bool {
+            if (m_bridge.isPIEActive()) return false;
+            if (!m_bridge.getUIManager().isContentBrowserOverlayOpen()) return false;
+            m_bridge.getUIManager().closeContentBrowserOverlay();
+            return true;
+        });
+
     Logger::Instance().log(Logger::Category::Engine,
         "EditorApp: registered editor shortcuts with ShortcutManager.", Logger::LogLevel::INFO);
 }

@@ -414,6 +414,11 @@ private:
 
 	// Content Browser (extracted to EditorTabs/ContentBrowserPanel)
 	std::unique_ptr<ContentBrowserPanel> m_contentBrowserPanel;
+	bool m_contentBrowserOverlayOpen{ false };
+	bool m_contentBrowserOverlayHiddenForDrag{ false };
+	// Called from UIManager.cpp drag detection; implemented in UIManagerContentBrowserOverlay.cpp
+	void onOverlayDragStarted();
+	void onOverlayDragEnded();
 #endif // ENGINE_EDITOR
 
 	// Double-click detection
@@ -528,6 +533,14 @@ public:
 	void refreshContentBrowser(const std::string& subfolder = "");
 	void focusContentBrowserSearch();
 	void requestLevelLoad(const std::string& levelRelPath);
+
+	// Content Browser Overlay (Ctrl+Space — opens the content browser as a
+	// floating overlay in any editor tab so assets can be dragged without
+	// switching to the Viewport tab).
+	void openContentBrowserOverlay();
+	void closeContentBrowserOverlay();
+	void toggleContentBrowserOverlay();
+	bool isContentBrowserOverlayOpen() const;
 	void selectEntity(unsigned int entity);
 	unsigned int getSelectedEntity() const;
 	void applyAssetToEntity(AssetType type, const std::string& assetPath, unsigned int entity);

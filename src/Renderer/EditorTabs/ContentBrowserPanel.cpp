@@ -267,23 +267,22 @@ void ContentBrowserPanel::refresh(const std::string& subfolder)
     bool found = false;
     for (auto& entry : m_uiManager->getRegisteredWidgetsMutable())
     {
-        if (entry.id == "ContentBrowser" && entry.widget)
+        if ((entry.id == "ContentBrowser" || entry.id == "ContentBrowserOverlay") && entry.widget)
         {
-            log.log(Logger::Category::UI, "[ContentBrowser] refreshContentBrowser: found widget entry, calling populateWidget", Logger::LogLevel::INFO);
             populateWidget(entry.widget);
-            m_uiManager->markAllWidgetsDirty();
-            if (m_renamingGridAsset)
-            {
-                if (auto* renameEntry = m_uiManager->findElementById("ContentBrowser.RenameEntry"))
-                {
-                    m_uiManager->setFocusedEntry(renameEntry);
-                }
-            }
             found = true;
-            return;
         }
     }
-    if (!found)
+    if (found)
+    {
+        m_uiManager->markAllWidgetsDirty();
+        if (m_renamingGridAsset)
+        {
+            if (auto* renameEntry = m_uiManager->findElementById("ContentBrowser.RenameEntry"))
+                m_uiManager->setFocusedEntry(renameEntry);
+        }
+    }
+    else
     {
         log.log(Logger::Category::UI, "[ContentBrowser] refreshContentBrowser: no 'ContentBrowser' widget found in m_widgets (count=" + std::to_string(m_uiManager->getRegisteredWidgets().size()) + ")", Logger::LogLevel::WARNING);
     }
@@ -291,6 +290,22 @@ void ContentBrowserPanel::refresh(const std::string& subfolder)
 
 void ContentBrowserPanel::focusSearch()
 {
+    // When the overlay is open it is registered after the docked widget, so
+    // UIManager::findElementById would find the docked element first.  Check
+    // the overlay widget directly so keyboard input goes to the visible bar.
+    if (auto* overlayEntry = m_uiManager->findWidgetEntry("ContentBrowserOverlay"))
+    {
+        if (overlayEntry->widget)
+        {
+            auto& elements = overlayEntry->widget->getElementsMutable();
+            if (auto* searchBar = FindElementById(elements, "ContentBrowser.Search"))
+            {
+                m_uiManager->setFocusedEntry(searchBar);
+                m_uiManager->markAllWidgetsDirty();
+                return;
+            }
+        }
+    }
     if (auto* searchBar = m_uiManager->findElementById("ContentBrowser.Search"))
     {
         m_uiManager->setFocusedEntry(searchBar);

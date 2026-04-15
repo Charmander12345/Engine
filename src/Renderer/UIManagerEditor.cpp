@@ -1494,6 +1494,7 @@ void UIManager::requestLevelLoad(const std::string& levelRelPath)
     if (m_onLevelLoadRequested)
         m_onLevelLoadRequested(levelRelPath);
 }
+
 #endif // ENGINE_EDITOR
 
 
