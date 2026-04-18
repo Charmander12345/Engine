@@ -7,10 +7,13 @@
 
 #include "../../Diagnostics/DiagnosticsManager.h"
 #include "../EditorTheme.h"
-#include "../EditorTabs/ActorEditorTab.h"
 
 // ─── Editor tab system ──────────────────────────────────────────────────────
 #if ENGINE_EDITOR
+#include "../../Editor/Tabs/ITabOpener.h"
+#include "../../Editor/Tabs/ActorEditorTab.h"
+#include "../../Editor/Windows/MeshViewerWindow.h"
+#include "../../Editor/Windows/MaterialEditorWindow.h"
 void OpenGLRenderer::addTab(const std::string& id, const std::string& tabName, bool closable)
 {
 	for (const auto& tab : m_editorTabs)

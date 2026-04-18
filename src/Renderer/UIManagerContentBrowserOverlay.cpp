@@ -6,7 +6,7 @@
 #include "UIManager.h"
 #include "EditorTheme.h"
 #include "EditorUI/EditorWidget.h"
-#include "EditorTabs/ContentBrowserPanel.h"
+#include "../Editor/Tabs/ContentBrowserPanel.h"
 
 void UIManager::openContentBrowserOverlay()
 {

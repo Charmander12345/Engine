@@ -30,6 +30,7 @@
 class IEditorBridge;
 class Renderer;
 class UIManager;
+namespace Editor { class EditorWindowManager; }
 
 class EditorApp
 {
@@ -97,6 +98,10 @@ public:
     /// for C++ native scripting in the given project.
     void generateVSCodeConfig(const std::string& projectPath);
 
+    /// Editor-side facade for opening / closing editor-specific tabs and
+    /// popups.  Available after `initialize()` has been called.
+    Editor::EditorWindowManager* getWindowManager() const { return m_windowManager.get(); }
+
 private:
     void registerWidgets();
     void registerClickEvents();
@@ -140,6 +145,9 @@ private:
     std::string              m_pieBuildFingerprint;
     std::shared_ptr<class EditorWidget> m_pieBuildWidget;
     class PopupWindow*       m_pieBuildPopup{ nullptr };
+
+    // ── Editor UI facade ─────────────────────────────────────────────
+    std::unique_ptr<Editor::EditorWindowManager> m_windowManager;
 };
 
 #endif // ENGINE_EDITOR

@@ -21,7 +21,7 @@
 #endif
 
 #include "Renderer/Renderer.h"
-#include "Renderer/EditorTabs/BuildSystemUI.h"
+#include "Editor/Tabs/BuildSystemUI.h"
 #include "Logger/Logger.h"
 #include "Diagnostics/DiagnosticsManager.h"
 #include "AssetManager/AssetCooker.h"

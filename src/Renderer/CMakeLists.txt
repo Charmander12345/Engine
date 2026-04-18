@@ -58,57 +58,58 @@ set(RENDERER_CORE_EDITOR_SOURCES
     EditorUIBuilder.cpp
     WidgetDetailSchema.h
     WidgetDetailSchema.cpp
-    EditorWindows/MeshViewerWindow.cpp
-    EditorWindows/MeshViewerWindow.h
-    EditorWindows/MaterialEditorWindow.cpp
-    EditorWindows/MaterialEditorWindow.h
-    EditorWindows/TextureViewerWindow.cpp
-    EditorWindows/TextureViewerWindow.h
-    EditorWindows/PopupWindow.cpp
-    EditorWindows/PopupWindow.h
-    EditorTabs/IEditorTab.h
-    EditorTabs/ConsoleTab.h
-    EditorTabs/ConsoleTab.cpp
-    EditorTabs/ProfilerTab.h
-    EditorTabs/ProfilerTab.cpp
-    EditorTabs/NotificationsTab.h
-    EditorTabs/NotificationsTab.cpp
-    EditorTabs/AudioPreviewTab.h
-    EditorTabs/AudioPreviewTab.cpp
-    EditorTabs/ParticleEditorTab.h
-    EditorTabs/ParticleEditorTab.cpp
-    EditorTabs/ShaderViewerTab.h
-    EditorTabs/ShaderViewerTab.cpp
-    EditorTabs/RenderDebuggerTab.h
-    EditorTabs/RenderDebuggerTab.cpp
-    EditorTabs/SequencerTab.h
-    EditorTabs/SequencerTab.cpp
-    EditorTabs/LevelCompositionTab.h
-    EditorTabs/LevelCompositionTab.cpp
-    EditorTabs/AnimationEditorTab.h
-    EditorTabs/AnimationEditorTab.cpp
-    EditorTabs/UIDesignerTab.h
-    EditorTabs/UIDesignerTab.cpp
-    EditorTabs/WidgetEditorTab.h
-    EditorTabs/WidgetEditorTab.cpp
-    EditorTabs/ContentBrowserPanel.h
-    EditorTabs/ContentBrowserPanel.cpp
-    EditorTabs/OutlinerPanel.h
-    EditorTabs/OutlinerPanel.cpp
-    EditorTabs/BuildSystemUI.h
-    EditorTabs/BuildSystemUI.cpp
-    EditorTabs/EditorDialogs.h
-    EditorTabs/EditorDialogs.cpp
-    EditorTabs/EntityEditorTab.h
-    EditorTabs/EntityEditorTab.cpp
-    EditorTabs/ActorEditorTab.h
-    EditorTabs/ActorEditorTab.cpp
-    EditorTabs/InputActionEditorTab.h
-    EditorTabs/InputActionEditorTab.cpp
-    EditorTabs/InputMappingEditorTab.h
-    EditorTabs/InputMappingEditorTab.cpp
-    EditorTabs/ReflectionWidgetFactory.h
-    EditorTabs/ReflectionWidgetFactory.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/ITabOpener.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/IEditorTab.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/ConsoleTab.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/ConsoleTab.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/ProfilerTab.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/ProfilerTab.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/NotificationsTab.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/NotificationsTab.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/AudioPreviewTab.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/AudioPreviewTab.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/ParticleEditorTab.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/ParticleEditorTab.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/ShaderViewerTab.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/ShaderViewerTab.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/RenderDebuggerTab.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/RenderDebuggerTab.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/SequencerTab.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/SequencerTab.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/LevelCompositionTab.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/LevelCompositionTab.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/AnimationEditorTab.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/AnimationEditorTab.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/UIDesignerTab.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/UIDesignerTab.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/WidgetEditorTab.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/WidgetEditorTab.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/ContentBrowserPanel.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/ContentBrowserPanel.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/OutlinerPanel.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/OutlinerPanel.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/BuildSystemUI.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/BuildSystemUI.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/EditorDialogs.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/EditorDialogs.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/EntityEditorTab.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/EntityEditorTab.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/ActorEditorTab.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/ActorEditorTab.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/InputActionEditorTab.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/InputActionEditorTab.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/InputMappingEditorTab.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/InputMappingEditorTab.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/ReflectionWidgetFactory.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/ReflectionWidgetFactory.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Windows/MeshViewerWindow.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Windows/MeshViewerWindow.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Windows/MaterialEditorWindow.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Windows/MaterialEditorWindow.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Windows/TextureViewerWindow.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Windows/TextureViewerWindow.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Windows/PopupWindow.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Windows/PopupWindow.h
 )
 
 # Shared properties for both RendererCore variants
@@ -120,6 +121,7 @@ set(RENDERER_CORE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/external
     ${CMAKE_SOURCE_DIR}/src/Landscape
     ${CMAKE_CURRENT_SOURCE_DIR}/OpenGLRenderer/glad/include
+    ${CMAKE_SOURCE_DIR}/src/Editor
 )
 
 set(RENDERER_CORE_LINK_LIBS_BASE

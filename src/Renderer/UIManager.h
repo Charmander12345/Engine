@@ -24,27 +24,14 @@ class EngineLevel;
 class Renderer;
 #if ENGINE_EDITOR
 class PopupWindow;
-class ConsoleTab;
-class ProfilerTab;
-class NotificationsTab;
-class AudioPreviewTab;
-class ParticleEditorTab;
-class ShaderViewerTab;
-class RenderDebuggerTab;
-class SequencerTab;
-class LevelCompositionTab;
-class AnimationEditorTab;
-class UIDesignerTab;
-class WidgetEditorTab;
-class EntityEditorTab;
-class ActorEditorTab;
-class InputActionEditorTab;
-class InputMappingEditorTab;
 class ContentBrowserPanel;
 class OutlinerPanel;
-#include "EditorTabs/BuildSystemUI.h"
-#include "EditorTabs/EditorDialogs.h"
-#include "EditorTabs/OutlinerPanel.h"
+class WidgetEditorTab;
+class ActorEditorTab;
+class ITabOpener;
+#include "../Editor/Tabs/BuildSystemUI.h"
+#include "../Editor/Tabs/EditorDialogs.h"
+#include "../Editor/Tabs/OutlinerPanel.h"
 #endif
 class ViewportUIManager;
 
@@ -83,6 +70,11 @@ public:
 #endif
 	}
 	Renderer* getRenderer() const { return m_renderer; }
+
+#if ENGINE_EDITOR
+	void setTabOpener(ITabOpener* opener) { m_tabOpener = opener; }
+	ITabOpener* getTabOpener() const { return m_tabOpener; }
+#endif
 
     Vec2 getAvailableViewportSize() const;
     void setAvailableViewportSize(const Vec2& size);
@@ -337,7 +329,10 @@ private:
 	std::shared_ptr<EditorWidget> createToastWidget(const std::string& message, const std::string& name, NotificationLevel level = NotificationLevel::Info) const;
 	void updateToastStackLayout();
 
-    Renderer* m_renderer{ nullptr };
+	Renderer* m_renderer{ nullptr };
+#if ENGINE_EDITOR
+	ITabOpener* m_tabOpener{ nullptr };
+#endif
     Vec2 m_availableViewportSize{};
     Vec4 m_viewportContentRect{};
     Vec2 m_mousePosition{};
@@ -459,54 +454,14 @@ private:
 	void handleTimelineMouseMove(const std::string& tabId, const Vec2& localPos, float trackAreaWidth);
 	void handleTimelineMouseUp(const std::string& tabId);
 
-	// UI Designer tab (extracted to EditorTabs/UIDesignerTab.h)
-	std::unique_ptr<UIDesignerTab> m_uiDesignerTab;
+	// UI Designer tab (delegated to EditorWindowManager)
 	ViewportUIManager* getViewportUIManager() const;
-	void refreshUIDesignerHierarchy();
-	void refreshUIDesignerDetails();
-	void selectUIDesignerElement(const std::string& widgetName, const std::string& elementId);
-	void addElementToViewportWidget(const std::string& elementType);
-	void deleteSelectedUIDesignerElement();
 
-	// Console / Log-Viewer tab (extracted to EditorTabs/ConsoleTab.h)
-	std::unique_ptr<ConsoleTab> m_consoleTab;
+	// Entity Editor tab (delegated to EditorWindowManager)
 
-	// Profiler / Performance-Monitor tab (extracted to EditorTabs/ProfilerTab.h)
-	std::unique_ptr<ProfilerTab> m_profilerTab;
+	// Actor Editor tab (delegated to EditorWindowManager)
 
-	// Notifications tab (extracted to EditorTabs/NotificationsTab.h)
-	std::unique_ptr<NotificationsTab> m_notificationsTab;
-
-	// Audio Preview tab (extracted to EditorTabs/AudioPreviewTab.h)
-	std::unique_ptr<AudioPreviewTab> m_audioPreviewTab;
-
-	// Particle Editor tab (extracted to EditorTabs/ParticleEditorTab.h)
-	std::unique_ptr<ParticleEditorTab> m_particleEditorTab;
-
-	// Shader Viewer tab (extracted to EditorTabs/ShaderViewerTab.h)
-	std::unique_ptr<ShaderViewerTab> m_shaderViewerTab;
-
-	// Render-Pass-Debugger tab (extracted to EditorTabs/RenderDebuggerTab.h)
-	std::unique_ptr<RenderDebuggerTab> m_renderDebuggerTab;
-
-	// Cinematic Sequencer tab (extracted to EditorTabs/SequencerTab.h)
-	std::unique_ptr<SequencerTab> m_sequencerTab;
-
-	// Level Composition tab (extracted to EditorTabs/LevelCompositionTab.h)
-	std::unique_ptr<LevelCompositionTab> m_levelCompositionTab;
-
-	// Animation Editor tab (extracted to EditorTabs/AnimationEditorTab.h)
-	std::unique_ptr<AnimationEditorTab> m_animationEditorTab;
-
-	// Entity Editor tab (extracted to EditorTabs/EntityEditorTab.h)
-	std::unique_ptr<EntityEditorTab> m_entityEditorTab;
-
-	// Actor Editor tab (extracted to EditorTabs/ActorEditorTab.h)
-	std::unique_ptr<ActorEditorTab> m_actorEditorTab;
-
-	// Input Action / Input Mapping Editor tabs
-	std::unique_ptr<InputActionEditorTab> m_inputActionEditorTab;
-	std::unique_ptr<InputMappingEditorTab> m_inputMappingEditorTab;
+	// Input Action / Input Mapping Editor tabs (delegated to EditorWindowManager)
 
 public:
 	bool getWidgetEditorCanvasRect(Vec4& outRect) const;

@@ -40,29 +40,15 @@
 #include "../AssetManager/AssetTypes.h"
 #include "EditorUIBuilder.h"
 #include "WidgetDetailSchema.h"
-#include "EditorTabs/ConsoleTab.h"
-#include "EditorTabs/ProfilerTab.h"
-#include "EditorTabs/NotificationsTab.h"
-#include "EditorTabs/AudioPreviewTab.h"
-#include "EditorTabs/ParticleEditorTab.h"
-#include "EditorTabs/ShaderViewerTab.h"
-#include "EditorTabs/RenderDebuggerTab.h"
-#include "EditorTabs/SequencerTab.h"
-#include "EditorTabs/LevelCompositionTab.h"
-#include "EditorTabs/AnimationEditorTab.h"
-#include "EditorTabs/EntityEditorTab.h"
-#include "EditorTabs/ActorEditorTab.h"
-#include "EditorTabs/InputActionEditorTab.h"
-#include "EditorTabs/InputMappingEditorTab.h"
-#include "EditorTabs/UIDesignerTab.h"
-#include "EditorTabs/WidgetEditorTab.h"
-#include "EditorTabs/ContentBrowserPanel.h"
-#include "EditorTabs/OutlinerPanel.h"
-#include "EditorTabs/BuildSystemUI.h"
+#include "../Editor/Tabs/ITabOpener.h"
+#include "../Editor/Tabs/WidgetEditorTab.h"
+#include "../Editor/Tabs/ContentBrowserPanel.h"
+#include "../Editor/Tabs/OutlinerPanel.h"
+#include "../Editor/Tabs/BuildSystemUI.h"
 #include "../Core/ShortcutManager.h"
 #include "../Core/AudioManager.h"
 #include "../AssetManager/AssetManager.h"
-#include "EditorWindows/PopupWindow.h"
+#include "../Editor/Windows/PopupWindow.h"
 #include "../Landscape/LandscapeManager.h"
 #include "../AssetManager/json.hpp"
 
@@ -190,7 +176,7 @@ void UIManager::applyAssetToEntity(AssetType type, const std::string& assetPath,
 void UIManager::refreshContentBrowser(const std::string& subfolder)
 {
     if (!m_contentBrowserPanel)
-        m_contentBrowserPanel = std::make_unique<ContentBrowserPanel>(this, m_renderer);
+        m_contentBrowserPanel = std::make_unique<ContentBrowserPanel>(this, m_renderer, m_tabOpener);
     m_contentBrowserPanel->refresh(subfolder);
 }
 
@@ -3547,13 +3533,13 @@ void UIManager::openWorkspaceToolsPopup()
         root.children.push_back(std::move(btn));
     };
 
-    addButton("WST.Console", "Console", [this]() { openConsoleTab(); });
-    addButton("WST.Notifications", "Notifications", [this]() { openNotificationsTab(); });
-    addButton("WST.Profiler", "Profiler", [this]() { openProfilerTab(); });
-    addButton("WST.ShaderViewer", "Shader Viewer", [this]() { openShaderViewerTab(); });
-    addButton("WST.RenderDebugger", "Render Debugger", [this]() { openRenderDebuggerTab(); });
-    addButton("WST.Sequencer", "Sequencer", [this]() { openSequencerTab(); });
-    addButton("WST.LevelComposition", "Level Composition", [this]() { openLevelCompositionTab(); });
+    addButton("WST.Console", "Console", [this]() { if (m_tabOpener) m_tabOpener->openConsole(); else openConsoleTab(); });
+    addButton("WST.Notifications", "Notifications", [this]() { if (m_tabOpener) m_tabOpener->openNotifications(); else openNotificationsTab(); });
+    addButton("WST.Profiler", "Profiler", [this]() { if (m_tabOpener) m_tabOpener->openProfiler(); else openProfilerTab(); });
+    addButton("WST.ShaderViewer", "Shader Viewer", [this]() { if (m_tabOpener) m_tabOpener->openShaderViewer(); else openShaderViewerTab(); });
+    addButton("WST.RenderDebugger", "Render Debugger", [this]() { if (m_tabOpener) m_tabOpener->openRenderDebugger(); else openRenderDebuggerTab(); });
+    addButton("WST.Sequencer", "Sequencer", [this]() { if (m_tabOpener) m_tabOpener->openSequencer(); else openSequencerTab(); });
+    addButton("WST.LevelComposition", "Level Composition", [this]() { if (m_tabOpener) m_tabOpener->openLevelComposition(); else openLevelCompositionTab(); });
 
     elements.push_back(std::move(root));
 
@@ -4913,50 +4899,17 @@ ViewportUIManager* UIManager::getViewportUIManager() const
 
 bool UIManager::isUIDesignerOpen() const
 {
-    return m_uiDesignerTab && m_uiDesignerTab->isOpen();
+    return m_tabOpener ? m_tabOpener->isUIDesignerOpen() : false;
 }
 
 void UIManager::openUIDesignerTab()
 {
-    if (!m_uiDesignerTab)
-        m_uiDesignerTab = std::make_unique<UIDesignerTab>(this, m_renderer);
-    m_uiDesignerTab->open();
+    if (m_tabOpener) m_tabOpener->openUIDesigner();
 }
 
 void UIManager::closeUIDesignerTab()
 {
-    if (m_uiDesignerTab)
-        m_uiDesignerTab->close();
-}
-
-void UIManager::selectUIDesignerElement(const std::string& widgetName, const std::string& elementId)
-{
-    if (m_uiDesignerTab)
-        m_uiDesignerTab->selectElement(widgetName, elementId);
-}
-
-void UIManager::addElementToViewportWidget(const std::string& elementType)
-{
-    if (m_uiDesignerTab)
-        m_uiDesignerTab->addElementToViewportWidget(elementType);
-}
-
-void UIManager::deleteSelectedUIDesignerElement()
-{
-    if (m_uiDesignerTab)
-        m_uiDesignerTab->deleteSelectedElement();
-}
-
-void UIManager::refreshUIDesignerHierarchy()
-{
-    if (m_uiDesignerTab)
-        m_uiDesignerTab->refreshHierarchy();
-}
-
-void UIManager::refreshUIDesignerDetails()
-{
-    if (m_uiDesignerTab)
-        m_uiDesignerTab->refreshDetails();
+    if (m_tabOpener) m_tabOpener->closeUIDesigner();
 }
 
 // ===========================================================================
@@ -4965,20 +4918,17 @@ void UIManager::refreshUIDesignerDetails()
 
 bool UIManager::isConsoleOpen() const
 {
-    return m_consoleTab && m_consoleTab->isOpen();
+    return m_tabOpener ? m_tabOpener->isConsoleOpen() : false;
 }
 
 void UIManager::openConsoleTab()
 {
-    if (!m_consoleTab)
-        m_consoleTab = std::make_unique<ConsoleTab>(this, m_renderer);
-    m_consoleTab->open();
+    if (m_tabOpener) m_tabOpener->openConsole();
 }
 
 void UIManager::closeConsoleTab()
 {
-    if (m_consoleTab)
-        m_consoleTab->close();
+    if (m_tabOpener) m_tabOpener->closeConsole();
 }
 
 // ===========================================================================
@@ -4987,38 +4937,32 @@ void UIManager::closeConsoleTab()
 
 bool UIManager::isProfilerOpen() const
 {
-    return m_profilerTab && m_profilerTab->isOpen();
+    return m_tabOpener ? m_tabOpener->isProfilerOpen() : false;
 }
 
 bool UIManager::isNotificationsTabOpen() const
 {
-    return m_notificationsTab && m_notificationsTab->isOpen();
+    return m_tabOpener ? m_tabOpener->isNotificationsOpen() : false;
 }
 
 void UIManager::openProfilerTab()
 {
-    if (!m_profilerTab)
-        m_profilerTab = std::make_unique<ProfilerTab>(this, m_renderer);
-    m_profilerTab->open();
+    if (m_tabOpener) m_tabOpener->openProfiler();
 }
 
 void UIManager::openNotificationsTab()
 {
-    if (!m_notificationsTab)
-        m_notificationsTab = std::make_unique<NotificationsTab>(this, m_renderer);
-    m_notificationsTab->open();
+    if (m_tabOpener) m_tabOpener->openNotifications();
 }
 
 void UIManager::closeProfilerTab()
 {
-    if (m_profilerTab)
-        m_profilerTab->close();
+    if (m_tabOpener) m_tabOpener->closeProfiler();
 }
 
 void UIManager::closeNotificationsTab()
 {
-    if (m_notificationsTab)
-        m_notificationsTab->close();
+    if (m_tabOpener) m_tabOpener->closeNotifications();
 }
 
 // ===========================================================================
@@ -5027,20 +4971,17 @@ void UIManager::closeNotificationsTab()
 
 bool UIManager::isAudioPreviewOpen() const
 {
-    return m_audioPreviewTab && m_audioPreviewTab->isOpen();
+    return m_tabOpener ? m_tabOpener->isAudioPreviewOpen() : false;
 }
 
 void UIManager::openAudioPreviewTab(const std::string& assetPath)
 {
-    if (!m_audioPreviewTab)
-        m_audioPreviewTab = std::make_unique<AudioPreviewTab>(this, m_renderer);
-    m_audioPreviewTab->open(assetPath);
+    if (m_tabOpener) m_tabOpener->openAudioPreview(assetPath);
 }
 
 void UIManager::closeAudioPreviewTab()
 {
-    if (m_audioPreviewTab)
-        m_audioPreviewTab->close();
+    if (m_tabOpener) m_tabOpener->closeAudioPreview();
 }
 // ===========================================================================
 // Particle Editor Tab  (delegated to EditorTabs/ParticleEditorTab)
@@ -5048,20 +4989,17 @@ void UIManager::closeAudioPreviewTab()
 
 bool UIManager::isParticleEditorOpen() const
 {
-    return m_particleEditorTab && m_particleEditorTab->isOpen();
+    return m_tabOpener ? m_tabOpener->isParticleEditorOpen() : false;
 }
 
 void UIManager::openParticleEditorTab(ECS::Entity entity)
 {
-    if (!m_particleEditorTab)
-        m_particleEditorTab = std::make_unique<ParticleEditorTab>(this, m_renderer);
-    m_particleEditorTab->open(entity);
+    if (m_tabOpener) m_tabOpener->openParticleEditor(entity);
 }
 
 void UIManager::closeParticleEditorTab()
 {
-    if (m_particleEditorTab)
-        m_particleEditorTab->close();
+    if (m_tabOpener) m_tabOpener->closeParticleEditor();
 }
 
 // ===========================================================================
@@ -5070,20 +5008,17 @@ void UIManager::closeParticleEditorTab()
 
 bool UIManager::isShaderViewerOpen() const
 {
-    return m_shaderViewerTab && m_shaderViewerTab->isOpen();
+    return m_tabOpener ? m_tabOpener->isShaderViewerOpen() : false;
 }
 
 void UIManager::openShaderViewerTab()
 {
-    if (!m_shaderViewerTab)
-        m_shaderViewerTab = std::make_unique<ShaderViewerTab>(this, m_renderer);
-    m_shaderViewerTab->open();
+    if (m_tabOpener) m_tabOpener->openShaderViewer();
 }
 
 void UIManager::closeShaderViewerTab()
 {
-    if (m_shaderViewerTab)
-        m_shaderViewerTab->close();
+    if (m_tabOpener) m_tabOpener->closeShaderViewer();
 }
 
 // ===========================================================================
@@ -5092,20 +5027,17 @@ void UIManager::closeShaderViewerTab()
 
 bool UIManager::isRenderDebuggerOpen() const
 {
-    return m_renderDebuggerTab && m_renderDebuggerTab->isOpen();
+    return m_tabOpener ? m_tabOpener->isRenderDebuggerOpen() : false;
 }
 
 void UIManager::openRenderDebuggerTab()
 {
-    if (!m_renderDebuggerTab)
-        m_renderDebuggerTab = std::make_unique<RenderDebuggerTab>(this, m_renderer);
-    m_renderDebuggerTab->open();
+    if (m_tabOpener) m_tabOpener->openRenderDebugger();
 }
 
 void UIManager::closeRenderDebuggerTab()
 {
-    if (m_renderDebuggerTab)
-        m_renderDebuggerTab->close();
+    if (m_tabOpener) m_tabOpener->closeRenderDebugger();
 }
 
 
@@ -5115,20 +5047,17 @@ void UIManager::closeRenderDebuggerTab()
 
 bool UIManager::isSequencerOpen() const
 {
-    return m_sequencerTab && m_sequencerTab->isOpen();
+    return m_tabOpener ? m_tabOpener->isSequencerOpen() : false;
 }
 
 void UIManager::openSequencerTab()
 {
-    if (!m_sequencerTab)
-        m_sequencerTab = std::make_unique<SequencerTab>(this, m_renderer);
-    m_sequencerTab->open();
+    if (m_tabOpener) m_tabOpener->openSequencer();
 }
 
 void UIManager::closeSequencerTab()
 {
-    if (m_sequencerTab)
-        m_sequencerTab->close();
+    if (m_tabOpener) m_tabOpener->closeSequencer();
 }
 // =============================================================================
 // =============================================================================
@@ -5137,20 +5066,17 @@ void UIManager::closeSequencerTab()
 
 bool UIManager::isLevelCompositionOpen() const
 {
-    return m_levelCompositionTab && m_levelCompositionTab->isOpen();
+    return m_tabOpener ? m_tabOpener->isLevelCompositionOpen() : false;
 }
 
 void UIManager::openLevelCompositionTab()
 {
-    if (!m_levelCompositionTab)
-        m_levelCompositionTab = std::make_unique<LevelCompositionTab>(this, m_renderer);
-    m_levelCompositionTab->open();
+    if (m_tabOpener) m_tabOpener->openLevelComposition();
 }
 
 void UIManager::closeLevelCompositionTab()
 {
-    if (m_levelCompositionTab)
-        m_levelCompositionTab->close();
+    if (m_tabOpener) m_tabOpener->closeLevelComposition();
 }
 
 // ÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â
@@ -5233,109 +5159,94 @@ void UIManager::pollBuildToolInstall()             { m_buildSystemUI->pollToolIn
 // ===========================================================================
 bool UIManager::isAnimationEditorOpen() const
 {
-    return m_animationEditorTab && m_animationEditorTab->isOpen();
+    return m_tabOpener ? m_tabOpener->isAnimationEditorOpen() : false;
 }
 
 void UIManager::openAnimationEditorTab(ECS::Entity entity)
 {
-    if (!m_animationEditorTab)
-        m_animationEditorTab = std::make_unique<AnimationEditorTab>(this, m_renderer);
-    m_animationEditorTab->open(entity);
+    if (m_tabOpener) m_tabOpener->openAnimationEditor(entity);
 }
 
 void UIManager::closeAnimationEditorTab()
 {
-    if (m_animationEditorTab)
-        m_animationEditorTab->close();
+    if (m_tabOpener) m_tabOpener->closeAnimationEditor();
 }
 
 // ===========================================================================
-// Entity Editor Tab (extracted to EditorTabs/EntityEditorTab.h)
+// Entity Editor Tab (delegated to EditorWindowManager)
 // ===========================================================================
 bool UIManager::isEntityEditorOpen() const
 {
-    return m_entityEditorTab && m_entityEditorTab->isOpen();
+    return m_tabOpener ? m_tabOpener->isEntityEditorOpen() : false;
 }
 
 void UIManager::openEntityEditorTab(const std::string& assetPath)
 {
-    if (!m_entityEditorTab)
-        m_entityEditorTab = std::make_unique<EntityEditorTab>(this, m_renderer);
-    m_entityEditorTab->open(assetPath);
+    if (m_tabOpener) m_tabOpener->openEntityEditor(assetPath);
 }
 
 void UIManager::closeEntityEditorTab()
 {
-    if (m_entityEditorTab)
-        m_entityEditorTab->close();
+    if (m_tabOpener) m_tabOpener->closeEntityEditor();
 }
 
 // ===========================================================================
-// Actor Editor Tab (extracted to EditorTabs/ActorEditorTab.h)
+// Actor Editor Tab (delegated to EditorWindowManager)
 // ===========================================================================
 bool UIManager::isActorEditorOpen() const
 {
-    return m_actorEditorTab && m_actorEditorTab->isOpen();
+    return m_tabOpener ? m_tabOpener->isActorEditorOpen() : false;
 }
 
 void UIManager::openActorEditorTab(const std::string& assetPath)
 {
-    if (!m_actorEditorTab)
-        m_actorEditorTab = std::make_unique<ActorEditorTab>(this, m_renderer);
-    m_actorEditorTab->open(assetPath);
+    if (m_tabOpener) m_tabOpener->openActorEditor(assetPath);
 }
 
 void UIManager::closeActorEditorTab()
 {
-    if (m_actorEditorTab)
-        m_actorEditorTab->close();
+    if (m_tabOpener) m_tabOpener->closeActorEditor();
 }
 
 ActorEditorTab* UIManager::getActorEditorTab() const
 {
-    return m_actorEditorTab.get();
+    return m_tabOpener ? m_tabOpener->getActorEditorTab() : nullptr;
 }
 
 // ===========================================================================
-// Input Action Editor Tab
+// Input Action Editor Tab (delegated to EditorWindowManager)
 // ===========================================================================
 bool UIManager::isInputActionEditorOpen() const
 {
-    return m_inputActionEditorTab && m_inputActionEditorTab->isOpen();
+    return m_tabOpener ? m_tabOpener->isInputActionEditorOpen() : false;
 }
 
 void UIManager::openInputActionEditorTab(const std::string& assetPath)
 {
-    if (!m_inputActionEditorTab)
-        m_inputActionEditorTab = std::make_unique<InputActionEditorTab>(this, m_renderer);
-    m_inputActionEditorTab->open(assetPath);
+    if (m_tabOpener) m_tabOpener->openInputActionEditor(assetPath);
 }
 
 void UIManager::closeInputActionEditorTab()
 {
-    if (m_inputActionEditorTab)
-        m_inputActionEditorTab->close();
+    if (m_tabOpener) m_tabOpener->closeInputActionEditor();
 }
 
 // ===========================================================================
-// Input Mapping Editor Tab
+// Input Mapping Editor Tab (delegated to EditorWindowManager)
 // ===========================================================================
 bool UIManager::isInputMappingEditorOpen() const
 {
-    return m_inputMappingEditorTab && m_inputMappingEditorTab->isOpen();
+    return m_tabOpener ? m_tabOpener->isInputMappingEditorOpen() : false;
 }
 
 void UIManager::openInputMappingEditorTab(const std::string& assetPath)
 {
-    if (!m_inputMappingEditorTab)
-        m_inputMappingEditorTab = std::make_unique<InputMappingEditorTab>(this, m_renderer);
-    m_inputMappingEditorTab->open(assetPath);
+    if (m_tabOpener) m_tabOpener->openInputMappingEditor(assetPath);
 }
 
 void UIManager::closeInputMappingEditorTab()
 {
-    if (m_inputMappingEditorTab)
-        m_inputMappingEditorTab->close();
+    if (m_tabOpener) m_tabOpener->closeInputMappingEditor();
 }
 
 #endif // ENGINE_EDITOR

@@ -1,6 +1,7 @@
 #if ENGINE_EDITOR
 
 #include "EditorApp.h"
+#include "UI/EditorWindowManager.h"
 #include "../Core/IEditorBridge.h"
 #include "../Renderer/Renderer.h"
 #include "../Renderer/UIManager.h"
@@ -9,8 +10,8 @@
 #include "../Renderer/UIWidget.h"
 #include "../Renderer/EditorUI/EditorWidget.h"
 #include "../Renderer/EditorUIBuilder.h"
-#include "../Renderer/EditorWindows/PopupWindow.h"
-#include "../Renderer/EditorWindows/TextureViewerWindow.h"
+#include "Windows/PopupWindow.h"
+#include "Windows/TextureViewerWindow.h"
 #include "../Logger/Logger.h"
 #include "../Diagnostics/DiagnosticsManager.h"
 #include "../BuildPipeline.h"
@@ -24,7 +25,7 @@
 #include "../Scripting/Python/PythonScripting.h"
 #include "../NativeScripting/NativeScriptManager.h"
 #include "../Core/Actor/ActorAssetData.h"
-#include "../Renderer/EditorTabs/ActorEditorTab.h"
+#include "Tabs/ActorEditorTab.h"
 #include <filesystem>
 #include <algorithm>
 #include <cmath>
@@ -59,6 +60,8 @@ EditorApp::~EditorApp()
 void EditorApp::initialize()
 {
     Logger::Instance().log(Logger::Category::Engine, "EditorApp: initializing...", Logger::LogLevel::INFO);
+    m_windowManager = std::make_unique<Editor::EditorWindowManager>(m_bridge);
+    m_bridge.getUIManager().setTabOpener(m_windowManager.get());
     m_playTexId = m_bridge.preloadUITexture("Play.tga");
     m_stopTexId = m_bridge.preloadUITexture("Stop.tga");
     registerWidgets();
@@ -1093,8 +1096,9 @@ void EditorApp::registerClickEvents()
     uiMgr.registerClickEvent("TitleBar.Menu.Window", []() { Logger::Instance().log(Logger::Category::Input, "Menu: Window clicked.", Logger::LogLevel::INFO); });
     uiMgr.registerClickEvent("TitleBar.Menu.Build", []() { Logger::Instance().log(Logger::Category::Input, "Menu: Build clicked.", Logger::LogLevel::INFO); });
     uiMgr.registerClickEvent("TitleBar.Menu.Help", []() { Logger::Instance().log(Logger::Category::Input, "Menu: Help clicked.", Logger::LogLevel::INFO); });
-    uiMgr.registerClickEvent("WorldSettings.Tools.Landscape", [renderer]() { renderer->getUIManager().openLandscapeManagerPopup(); });
-    uiMgr.registerClickEvent("WorldSettings.Tools.MaterialEditor", [renderer]() { renderer->getUIManager().openMaterialEditorPopup(); });
+    auto* wm = m_windowManager.get();
+    uiMgr.registerClickEvent("WorldSettings.Tools.Landscape", [wm]() { wm->openLandscapeManagerPopup(); });
+    uiMgr.registerClickEvent("WorldSettings.Tools.MaterialEditor", [wm]() { wm->openMaterialEditorPopup(); });
     uiMgr.registerClickEvent("TitleBar.Tab.Viewport", [renderer]() { renderer->setActiveTab("Viewport"); renderer->getUIManager().markAllWidgetsDirty(); });
     uiMgr.registerClickEvent("ViewportOverlay.Select", []() { Logger::Instance().log(Logger::Category::Input, "Toolbar: Select mode.", Logger::LogLevel::INFO); });
     uiMgr.registerClickEvent("ViewportOverlay.Move", []() { Logger::Instance().log(Logger::Category::Input, "Toolbar: Move mode.", Logger::LogLevel::INFO); });
@@ -1180,14 +1184,14 @@ void EditorApp::registerClickEvents()
         ui.showDropdownMenu(anchor,items);
     });
 
-    uiMgr.registerClickEvent("ViewportOverlay.Settings", [renderer]() {
+    uiMgr.registerClickEvent("ViewportOverlay.Settings", [renderer, wm]() {
         auto& ui = renderer->getUIManager(); if (ui.isDropdownMenuOpen()) { ui.closeDropdownMenu(); return; }
         auto* btn = ui.findElementById("ViewportOverlay.Settings"); Vec2 anchor{0,0};
         if (btn && btn->hasBounds) { constexpr float kW=180.0f; anchor = Vec2{btn->boundsMaxPixels.x-kW, btn->boundsMaxPixels.y+2.0f}; }
         std::vector<UIManager::DropdownMenuItem> items;
-        items.push_back({"Engine Settings",[renderer](){renderer->getUIManager().openEngineSettingsPopup();}});
-        items.push_back({"Editor Settings",[renderer](){renderer->getUIManager().openEditorSettingsPopup();}});
-        items.push_back({"Workspace Tools",[renderer](){renderer->getUIManager().openWorkspaceToolsPopup();}});
+        items.push_back({"Engine Settings",[wm](){wm->openEngineSettingsPopup();}});
+        items.push_back({"Editor Settings",[wm](){wm->openEditorSettingsPopup();}});
+        items.push_back({"Workspace Tools",[wm](){wm->openWorkspaceToolsPopup();}});
         items.push_back({"Build Game",[renderer](){renderer->getUIManager().openBuildGameDialog();}});
         items.push_back({"---",[](){}});
         items.push_back({"Drop to Surface (End)",[renderer](){renderer->getUIManager().dropSelectedEntitiesToSurface([](float ox,float oy,float oz)->std::pair<bool,float>{auto hit=PhysicsWorld::Instance().raycast(ox,oy,oz,0,-1,0,10000.0f);return{hit.hit,hit.point[1]};});}});
@@ -1548,7 +1552,7 @@ void EditorApp::registerShortcuts()
         [this]() -> bool {
             Renderer* renderer = m_bridge.getRenderer();
             if (!renderer || m_bridge.getUIManager().hasEntryFocused()) return false;
-            m_bridge.getUIManager().openShortcutHelpPopup();
+            m_windowManager->openShortcutHelpPopup();
             return true;
         });
 
@@ -1753,6 +1757,7 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
         uiManager.closeDropdownMenu();
 
     std::vector<UIManager::DropdownMenuItem> items;
+    auto* wm = m_windowManager.get();
 
     items.push_back({ "New Folder", [renderer]()
         {
@@ -2082,7 +2087,7 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             popup->uiManager().registerWidget("NewLevel", widget);
         }});
 
-    items.push_back({ "New Widget", [renderer]()
+    items.push_back({ "New Widget", [renderer, wm]()
         {
             auto& uiMgr = renderer->getUIManager();
             const auto& folder = uiMgr.getSelectedBrowserFolder();
@@ -2173,10 +2178,10 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
 
             uiMgr.refreshContentBrowser();
             uiMgr.showToastMessage("Created: " + fileName, UIManager::kToastMedium);
-            uiMgr.openWidgetEditorPopup(relPath);
+            wm->openWidgetEditorPopup(relPath);
         }});
 
-    items.push_back({ "New Input Action", [renderer]()
+    items.push_back({ "New Input Action", [renderer, wm]()
         {
             auto& uiMgr = renderer->getUIManager();
             const auto& folder = uiMgr.getSelectedBrowserFolder();
@@ -2236,10 +2241,10 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
 
             uiMgr.refreshContentBrowser();
             uiMgr.showToastMessage("Created: " + fileName, UIManager::kToastMedium);
-            uiMgr.openInputActionEditorTab(relPath);
+            wm->openInputActionEditor(relPath);
         }});
 
-    items.push_back({ "New Input Mapping", [renderer]()
+    items.push_back({ "New Input Mapping", [renderer, wm]()
         {
             auto& uiMgr = renderer->getUIManager();
             const auto& folder = uiMgr.getSelectedBrowserFolder();
@@ -2297,7 +2302,7 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
 
             uiMgr.refreshContentBrowser();
             uiMgr.showToastMessage("Created: " + fileName, UIManager::kToastMedium);
-            uiMgr.openInputMappingEditorTab(relPath);
+            wm->openInputMappingEditor(relPath);
         }});
 
     items.push_back({ "New Material", [renderer]()
@@ -2523,7 +2528,7 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
             popup->uiManager().registerWidget("NewMaterial", widget);
         }});
 
-    items.push_back({ "New Entity", [renderer]()
+    items.push_back({ "New Entity", [renderer, wm]()
         {
             auto& uiMgr = renderer->getUIManager();
             const auto& folder = uiMgr.getSelectedBrowserFolder();
@@ -2577,10 +2582,10 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
 
             uiMgr.refreshContentBrowser();
             uiMgr.showToastMessage("Created: " + fileName, UIManager::kToastMedium);
-            uiMgr.openEntityEditorTab(relPath);
+            wm->openEntityEditor(relPath);
         }});
 
-    items.push_back({ "New Actor", [renderer]()
+    items.push_back({ "New Actor", [renderer, wm]()
         {
             auto& uiMgr = renderer->getUIManager();
             const auto& folder = uiMgr.getSelectedBrowserFolder();
@@ -2648,7 +2653,7 @@ bool EditorApp::handleContentBrowserContextMenu(const Vec2& mousePos)
 
             uiMgr.refreshContentBrowser();
             uiMgr.showToastMessage("Created actor: " + fileName, UIManager::kToastMedium);
-            uiMgr.openActorEditorTab(relPath);
+            wm->openActorEditor(relPath);
         }});
 
     // ?? Save selected entity as Prefab ??

@@ -121,6 +121,18 @@ The engine provides a physics system layered around `IPhysicsBackend`, but the a
 - Workspace tools are exposed through a dedicated quick-access `Workspace Tools` popup from the viewport settings dropdown.
 - The `Build Game` dialog now rebuilds its widget tree every time it is opened and reads `EntryBar` values correctly, preventing the dialog from appearing blank or losing form content.
 
+## Editor/Engine Separation
+- `EditorWindowManager` (`src/Editor/UI/`) is the editor-side facade for all editor tab lifecycle management.
+- `ITabOpener` (`src/Editor/Tabs/`) is the abstract interface crossing the DLL boundary between the Renderer shared library and the Editor object library.
+- 15 editor tabs are fully owned and managed by `EditorWindowManager`, no longer by `UIManager`:
+  - Simple tabs: Console, Profiler, Notifications, AudioPreview, ParticleEditor, ShaderViewer, RenderDebugger, Sequencer, LevelComposition, AnimationEditor.
+  - Complex tabs: EntityEditor, ActorEditor, InputActionEditor, InputMappingEditor, UIDesigner.
+- All editor tabs live in `src/Editor/Tabs/`, editor windows in `src/Editor/Windows/`.
+- `UIManager` delegates tab operations via `m_tabOpener` pointer; tab updates go through `ITabOpener::updateTabs()`.
+- `OpenGLRenderer.h` uses forward declarations for editor window types; full includes are in `.cpp` files behind `#if ENGINE_EDITOR`.
+- Remaining UIManager-owned editor types (WidgetEditorTab, ContentBrowserPanel, OutlinerPanel, BuildSystemUI, EditorDialogs) are planned for later extraction.
+- See `docs/EDITOR_ENGINE_SEPARATION_PLAN.md` for the full roadmap.
+
 ## PIE Native C++ Script Build
 - Before PIE, native C++ gameplay scripts under `Content/Scripts/Native` are fingerprinted by filename, size, and write time.
 - The editor now reuses the last successful `GameScripts.dll` build when those native C++ source/header files have not changed since the previous PIE build.

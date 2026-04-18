@@ -6,10 +6,10 @@
 #include "../UIManager.h"
 #include "../ViewportUIManager.h"
 #if ENGINE_EDITOR
-#include "../EditorWindows/PopupWindow.h"
-#include "../EditorWindows/MeshViewerWindow.h"
-#include "../EditorWindows/MaterialEditorWindow.h"
-#include "../EditorWindows/TextureViewerWindow.h"
+class PopupWindow;
+class MeshViewerWindow;
+class MaterialEditorWindow;
+class TextureViewerWindow;
 #endif
 #include "../IRenderTarget.h"
 #include "OpenGLRenderTarget.h"

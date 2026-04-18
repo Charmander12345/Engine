@@ -36,6 +36,13 @@
 #include "../../Core/UndoRedoManager.h"
 #include "../Texture.h"
 
+#if ENGINE_EDITOR
+#include "../../Editor/Windows/PopupWindow.h"
+#include "../../Editor/Windows/MeshViewerWindow.h"
+#include "../../Editor/Windows/MaterialEditorWindow.h"
+#include "../../Editor/Windows/TextureViewerWindow.h"
+#endif
+
 namespace
 {
 	Vec4 HsvToRgb(float hue, float saturation, float value)

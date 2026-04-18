@@ -41,7 +41,7 @@
 #include "Renderer/UIManager.h"
 #include "Renderer/UIWidget.h"
 #if ENGINE_EDITOR
-#include "Renderer/EditorWindows/TextureViewerWindow.h"
+#include "Editor/Windows/TextureViewerWindow.h"
 #include "Renderer/EditorTheme.h"
 #include "Core/IEditorBridge.h"
 #include "Core/EditorBridgeImpl.h"

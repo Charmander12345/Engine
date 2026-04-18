@@ -9,6 +9,8 @@ set(EDITOR_SOURCES
     EditorApp.h
     ProjectSelector.cpp
     ProjectSelector.h
+    UI/EditorWindowManager.cpp
+    UI/EditorWindowManager.h
     ${CMAKE_SOURCE_DIR}/src/Core/EditorBridgeImpl.cpp
     ${CMAKE_SOURCE_DIR}/src/Core/EditorBridgeImpl.h
 )
