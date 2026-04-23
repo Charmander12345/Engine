@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     HorizonEngine Build Environment Bootstrap (Windows)
-    Downloads and configures CMake, LLVM/Clang, Ninja, and Python
+    Downloads and configures CMake, LLVM/Clang, and Ninja
     into a portable Tools/ directory so the engine can be built
     without a full Visual Studio installation.
 
@@ -10,7 +10,6 @@
       - CMake (portable ZIP)
       - LLVM/Clang (installer, silent)
       - Ninja (portable ZIP)
-      - Python (embeddable ZIP + dev headers)
     
     On Windows, if Visual Studio with C++ workload is already installed,
     MSVC will be preferred. Otherwise Clang + Ninja is used.
@@ -22,9 +21,6 @@
 .PARAMETER ToolsDir
     Directory to install portable tools into.
     Default: <script_dir>/../Tools
-
-.PARAMETER SkipPython
-    Skip Python installation (if already installed system-wide).
 
 .PARAMETER Force
     Re-download all tools even if already present.
@@ -42,8 +38,6 @@ param(
 
     [string]$ToolsDir = '',
 
-    [switch]$SkipPython,
-
     [switch]$Force
 )
 
@@ -54,14 +48,10 @@ $ErrorActionPreference = 'Stop'
 $CMakeVersion       = '3.31.4'
 $LLVMVersion        = '19.1.6'
 $NinjaVersion       = '1.12.1'
-$PythonVersion      = '3.13.1'
-
-# ── Download URLs ─────────────────────────────────────────────────────────
+# ── Download URLs
 $CMakeZipUrl        = "https://github.com/Kitware/CMake/releases/download/v${CMakeVersion}/cmake-${CMakeVersion}-windows-x86_64.zip"
 $LLVMInstallerUrl   = "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVMVersion}/LLVM-${LLVMVersion}-win64.exe"
 $NinjaZipUrl        = "https://github.com/ninja-build/ninja/releases/download/v${NinjaVersion}/ninja-win.zip"
-$PythonEmbedUrl     = "https://www.python.org/ftp/python/${PythonVersion}/python-${PythonVersion}-embed-amd64.zip"
-$PythonDevUrl       = "https://www.python.org/ftp/python/${PythonVersion}/python-${PythonVersion}-amd64.exe"
 
 # VS Build Tools (fallback for MSVC)
 $VSBuildToolsUrl    = 'https://aka.ms/vs/17/release/vs_BuildTools.exe'
@@ -84,7 +74,6 @@ $TempDir    = Join-Path $ToolsDir '_temp'
 $CMakeDir   = Join-Path $ToolsDir 'cmake'
 $LLVMDir    = Join-Path $ToolsDir 'llvm'
 $NinjaDir   = Join-Path $ToolsDir 'ninja'
-$PythonDir  = Join-Path $ToolsDir 'python'
 
 # ── Helper Functions ──────────────────────────────────────────────────────
 
@@ -114,26 +103,54 @@ function Ensure-Dir([string]$path) {
 function Download-File([string]$url, [string]$dest) {
     Write-Host "    Downloading: $url"
     Write-Host "    To: $dest"
-    
+
     # Use BITS for large files, WebClient for small ones
     $fileSize = 0
     try {
         $req = [System.Net.WebRequest]::Create($url)
         $req.Method = 'HEAD'
         $req.AllowAutoRedirect = $true
+        $req.Timeout = 15000
         $resp = $req.GetResponse()
         $fileSize = $resp.ContentLength
         $resp.Close()
-    } catch {}
-
-    if ($fileSize -gt 10MB) {
-        Write-Host "    (Large file: $([math]::Round($fileSize / 1MB, 1)) MB - using background download)"
-        Start-BitsTransfer -Source $url -Destination $dest -DisplayName "Downloading..."
-    } else {
-        $wc = New-Object System.Net.WebClient
-        $wc.Headers.Add('User-Agent', 'HorizonEngine-Bootstrap/1.0')
-        $wc.DownloadFile($url, $dest)
+    } catch {
+        Write-Host "    [WARN] Could not determine file size (HEAD request failed: $($_.Exception.Message))" -ForegroundColor Yellow
     }
+
+    $maxRetries = 3
+    for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+        try {
+            if ($attempt -gt 1) {
+                Write-Host "    Retry attempt $attempt of $maxRetries..." -ForegroundColor Yellow
+                Start-Sleep -Seconds (2 * $attempt)
+            }
+
+            if ($fileSize -gt 10MB) {
+                Write-Host "    (Large file: $([math]::Round($fileSize / 1MB, 1)) MB - using background download)"
+                Start-BitsTransfer -Source $url -Destination $dest -DisplayName "Downloading..." -ErrorAction Stop
+            } else {
+                $wc = New-Object System.Net.WebClient
+                $wc.Headers.Add('User-Agent', 'HorizonEngine-Bootstrap/1.0')
+                $wc.DownloadFile($url, $dest)
+            }
+
+            # Verify download succeeded
+            if (Test-Path $dest) {
+                $dlSize = (Get-Item $dest).Length
+                if ($dlSize -gt 0) {
+                    return  # Success
+                }
+                Write-Host "    Downloaded file is empty (0 bytes)." -ForegroundColor Yellow
+                Remove-Item $dest -Force -ErrorAction SilentlyContinue
+            }
+        } catch {
+            Write-Host "    Download failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            if (Test-Path $dest) { Remove-Item $dest -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
+    throw "Failed to download $url after $maxRetries attempts."
 }
 
 function Test-CommandExists([string]$cmd) {
@@ -379,20 +396,166 @@ if ($useClang) {
     if (-not $clangFound -or $Force) {
         Write-Host "    Installing LLVM/Clang ${LLVMVersion} (silent installer)..."
         $installerPath = Join-Path $TempDir "LLVM-${LLVMVersion}.exe"
-        Download-File $LLVMInstallerUrl $installerPath
-        
+
+        # Download with error handling
+        try {
+            Download-File $LLVMInstallerUrl $installerPath
+        } catch {
+            Write-Err "Failed to download LLVM installer from: $LLVMInstallerUrl"
+            Write-Err "Error: $_"
+            Write-Host "    Check your internet connection or download manually from:" -ForegroundColor Yellow
+            Write-Host "    https://github.com/llvm/llvm-project/releases/tag/llvmorg-${LLVMVersion}" -ForegroundColor Yellow
+            exit 1
+        }
+
+        if (-not (Test-Path $installerPath)) {
+            Write-Err "LLVM installer not found after download: $installerPath"
+            exit 1
+        }
+
+        $installerSize = (Get-Item $installerPath).Length
+        Write-Host "    Downloaded installer: $([math]::Round($installerSize / 1MB, 1)) MB"
+
+        if ($installerSize -lt 1MB) {
+            Write-Err "LLVM installer file is too small ($([math]::Round($installerSize / 1KB, 1)) KB) - download likely incomplete or corrupt."
+            Write-Host "    Deleting corrupt file and retrying may help. Use -Force to re-download." -ForegroundColor Yellow
+            Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+            exit 1
+        }
+
         $installDir = $LLVMDir
-        Write-Host "    Target: $installDir"
-        
-        # LLVM NSIS installer supports /S (silent) and /D=<path> (directory)
-        $proc = Start-Process -FilePath $installerPath -ArgumentList "/S /D=$installDir" -Wait -PassThru
-        
-        if ($proc.ExitCode -eq 0 -and (Test-Path (Join-Path $installDir 'bin\clang++.exe'))) {
-            $clangExe = Join-Path $installDir 'bin\clang++.exe'
+        Write-Host "    Target directory: $installDir"
+
+        # Delete leftover files from previous install
+        if (Test-Path $installDir) {
+            Write-Host "    Removing leftover files in $installDir..."
+            Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path $installDir) {
+                Start-Sleep -Seconds 2
+                Remove-Item $installDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        # Ensure parent directory exists
+        $installParent = Split-Path $installDir -Parent
+        if (-not (Test-Path $installParent)) {
+            New-Item -ItemType Directory -Path $installParent -Force | Out-Null
+        }
+
+        # ── Extract NSIS installer with 7-Zip (bypasses all NSIS issues) ──
+        # The NSIS .exe is just a self-extracting archive.  By extracting it
+        # directly with 7-Zip we avoid: registry conflicts, path-with-spaces
+        # failures, exit-code-2 uninstall errors, and admin requirements.
+        $7zaExe = Join-Path $TempDir '7za.exe'
+        $7zaUrl = 'https://www.7-zip.org/a/7zr.exe'
+
+        if (-not (Test-Path $7zaExe)) {
+            Write-Host "    Downloading 7-Zip extractor (~1 MB)..."
+            try {
+                Download-File $7zaUrl $7zaExe
+            } catch {
+                Write-Err "Failed to download 7-Zip extractor."
+                Write-Host "    Fallback: download 7zr.exe manually from https://www.7-zip.org" -ForegroundColor Yellow
+                exit 1
+            }
+        }
+
+        Write-Host "    Extracting LLVM from installer (this may take a few minutes)..."
+        Ensure-Dir $installDir
+
+        # 7zr.exe can extract NSIS installers: 7zr x <file> -o<dir>
+        $extractArgs = "x `"$installerPath`" -o`"$installDir`" -y"
+        try {
+            $proc = Start-Process -FilePath $7zaExe -ArgumentList $extractArgs -Wait -PassThru -NoNewWindow
+        } catch {
+            Write-Err "Failed to run 7-Zip extraction."
+            Write-Err "Error: $_"
+            exit 1
+        }
+
+        if ($proc.ExitCode -ne 0) {
+            Write-Err "7-Zip extraction failed (exit code: $($proc.ExitCode))."
+            Write-Host "    The NSIS installer may use a format 7zr.exe cannot handle." -ForegroundColor Yellow
+            Write-Host "    Trying NSIS silent install as fallback..." -ForegroundColor Yellow
+
+            # Fallback: run NSIS installer directly
+            $proc2 = Start-Process -FilePath $installerPath -ArgumentList "/S /D=$installDir" -Wait -PassThru
+            if ($proc2.ExitCode -ne 0) {
+                Write-Err "NSIS installer also failed (exit code: $($proc2.ExitCode))."
+                Write-Host "    Troubleshooting:" -ForegroundColor Yellow
+                Write-Host "      1. Try: .\bootstrap.ps1 -Compiler clang -Force" -ForegroundColor Yellow
+                Write-Host "      2. Try: .\bootstrap.ps1 -ToolsDir C:\Tools -Compiler clang" -ForegroundColor Yellow
+                Write-Host "      3. Use MSVC instead: .\bootstrap.ps1 -Compiler msvc" -ForegroundColor Yellow
+                Write-Host "      4. Download manually: https://github.com/llvm/llvm-project/releases/tag/llvmorg-${LLVMVersion}" -ForegroundColor Yellow
+                exit 1
+            }
+        }
+
+        # The NSIS extraction puts files under $`INSTDIR/ subfolder - flatten if needed
+        $extractedBin = Join-Path $installDir 'bin\clang++.exe'
+        if (-not (Test-Path $extractedBin)) {
+            # Check for $INSTDIR or similar NSIS subfolder
+            $subDirs = Get-ChildItem $installDir -Directory -ErrorAction SilentlyContinue
+            foreach ($sub in $subDirs) {
+                $candidate = Join-Path $sub.FullName 'bin\clang++.exe'
+                if (Test-Path $candidate) {
+                    Write-Host "    Moving extracted files from $($sub.Name)/ to install root..."
+                    Get-ChildItem $sub.FullName | Move-Item -Destination $installDir -Force
+                    Remove-Item $sub.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                    break
+                }
+            }
+        }
+
+        $clangBinary = Join-Path $installDir 'bin\clang++.exe'
+
+        if (Test-Path $clangBinary) {
+            $clangExe = $clangBinary
             $ver = & $clangExe --version 2>$null | Select-Object -First 1
             Write-OK "LLVM/Clang installed: $ver"
+
+            # Verify essential files
+            $essentialFiles = @('bin\clang.exe', 'bin\clang++.exe', 'bin\lld-link.exe', 'lib\clang')
+            $missingFiles = @()
+            foreach ($f in $essentialFiles) {
+                $fullPath = Join-Path $installDir $f
+                if (-not (Test-Path $fullPath)) { $missingFiles += $f }
+            }
+            if ($missingFiles.Count -gt 0) {
+                Write-Host "    [WARNING] Installation may be incomplete. Missing:" -ForegroundColor Yellow
+                foreach ($mf in $missingFiles) {
+                    Write-Host "      - $mf" -ForegroundColor Yellow
+                }
+            }
         } else {
-            Write-Err "LLVM/Clang installation failed (exit code: $($proc.ExitCode))."
+            Write-Err "LLVM/Clang installation failed!"
+            Write-Host "    Expected binary not found: $clangBinary" -ForegroundColor Red
+
+            if (Test-Path $installDir) {
+                $items = Get-ChildItem $installDir -ErrorAction SilentlyContinue
+                if ($items) {
+                    Write-Host "    Contents of ${installDir}:" -ForegroundColor Yellow
+                    foreach ($item in $items) {
+                        Write-Host "      $($item.Name)" -ForegroundColor Yellow
+                    }
+                }
+            } else {
+                Write-Host "    Install directory was not created." -ForegroundColor Yellow
+            }
+
+            try {
+                $drive = (Split-Path $installDir -Qualifier)
+                $disk = Get-PSDrive ($drive -replace ':','')
+                $freeGB = [math]::Round($disk.Free / 1GB, 1)
+                Write-Host "    Available disk space on ${drive}: ${freeGB} GB" -ForegroundColor Yellow
+            } catch {}
+
+            Write-Host ""
+            Write-Host "    Troubleshooting:" -ForegroundColor Yellow
+            Write-Host "      1. Try: .\bootstrap.ps1 -ToolsDir C:\Tools -Compiler clang" -ForegroundColor Yellow
+            Write-Host "      2. Use MSVC instead: .\bootstrap.ps1 -Compiler msvc" -ForegroundColor Yellow
+            Write-Host "      3. Download manually: https://github.com/llvm/llvm-project/releases/tag/llvmorg-${LLVMVersion}" -ForegroundColor Yellow
+            Write-Host ""
             exit 1
         }
     }
@@ -463,64 +626,7 @@ if ($useClang) {
     }
 }
 
-# ── 4. Detect / Install Python ────────────────────────────────────────────
-if (-not $SkipPython) {
-    Write-Step "Checking Python..."
-    
-    $pythonExe = Join-Path $PythonDir 'python.exe'
-    $pythonFound = $false
-    
-    if (-not $Force -and (Test-Path $pythonExe)) {
-        $ver = & $pythonExe --version 2>$null
-        Write-OK "Bundled Python found: $ver"
-        $pythonFound = $true
-    }
-    elseif (-not $Force -and (Test-CommandExists 'python')) {
-        $ver = python --version 2>$null
-        Write-OK "System Python found: $ver"
-        $pythonFound = $true
-    }
-    
-    if (-not $pythonFound -or $Force) {
-        Write-Host "    Installing Python ${PythonVersion}..."
-        Write-Host "    Note: The engine needs Python with development headers."
-        Write-Host "    Using the full installer for include/ and libs/ directories."
-        
-        $installerPath = Join-Path $TempDir "python-${PythonVersion}.exe"
-        Download-File $PythonDevUrl $installerPath
-        
-        # Python installer supports /quiet and TargetDir
-        $installArgs = @(
-            '/quiet',
-            'InstallAllUsers=0',
-            "TargetDir=$PythonDir",
-            'Include_pip=0',
-            'Include_doc=0',
-            'Include_test=0',
-            'Include_tcltk=0',
-            'Include_launcher=0',
-            'Include_dev=1',
-            'Include_lib=1',
-            'Shortcuts=0',
-            'AssociateFiles=0'
-        )
-        
-        $proc = Start-Process -FilePath $installerPath -ArgumentList $installArgs -Wait -PassThru
-        
-        if ($proc.ExitCode -eq 0 -and (Test-Path (Join-Path $PythonDir 'python.exe'))) {
-            $ver = & (Join-Path $PythonDir 'python.exe') --version 2>$null
-            Write-OK "Python installed: $ver"
-        } else {
-            Write-Err "Python installation failed (exit code: $($proc.ExitCode))."
-            Write-Host "    You can install Python manually from https://python.org/downloads/"
-            Write-Host "    Make sure to include development headers (include/ and libs/)."
-        }
-    }
-} else {
-    Write-Skip "Python (--SkipPython)"
-}
-
-# ── 5. Download VC++ Redistributable (for game distribution) ──────────────
+# ── 4. Download VC++ Redistributable (for game distribution) ──────────────
 Write-Step "Checking VC++ Redistributable for game distribution..."
 
 $VCRedistPath = Join-Path $ToolsDir 'vc_redist.x64.exe'
@@ -537,14 +643,14 @@ if ((Test-Path $VCRedistPath) -and -not $Force) {
     }
 }
 
-# ── 6. Clean up temp files ────────────────────────────────────────────────
+# ── 5. Clean up temp files
 Write-Step "Cleaning up..."
 if (Test-Path $TempDir) {
     Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue
     Write-OK "Temp files removed."
 }
 
-# ── 7. Generate environment script ────────────────────────────────────────
+# ── 6. Generate environment script
 Write-Step "Generating environment setup..."
 
 $envScript = Join-Path $ToolsDir 'env.ps1'
@@ -570,11 +676,7 @@ if (Test-Path `$ninjaBin) { `$env:PATH = "`$ninjaBin;`$env:PATH" }
 `$llvmBin = Join-Path `$ToolsRoot 'llvm\bin'
 if (Test-Path `$llvmBin) { `$env:PATH = "`$llvmBin;`$env:PATH" }
 
-# Python
-`$pythonDir = Join-Path `$ToolsRoot 'python'
-if (Test-Path `$pythonDir) { `$env:PATH = "`$pythonDir;`$env:PATH" }
-
-Write-Host "HorizonEngine build environment loaded." -ForegroundColor Green
+Write-Host
 "@
 Set-Content -Path $envScript -Value $psContent -Encoding UTF8
 
@@ -590,15 +692,13 @@ set "ENGINE_ROOT=%TOOLS_ROOT%.."
 if exist "%TOOLS_ROOT%cmake\bin" set "PATH=%TOOLS_ROOT%cmake\bin;%PATH%"
 if exist "%TOOLS_ROOT%ninja" set "PATH=%TOOLS_ROOT%ninja;%PATH%"
 if exist "%TOOLS_ROOT%llvm\bin" set "PATH=%TOOLS_ROOT%llvm\bin;%PATH%"
-if exist "%TOOLS_ROOT%python" set "PATH=%TOOLS_ROOT%python;%PATH%"
-
-echo HorizonEngine build environment loaded.
+echo
 "@
 Set-Content -Path $envBatch -Value $batContent -Encoding ASCII
 
 Write-OK "Generated Tools\env.ps1 and Tools\env.bat"
 
-# ── 8. Summary ────────────────────────────────────────────────────────────
+# ── 7. Summary ────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "=============================================" -ForegroundColor Green
 Write-Host "  Bootstrap Complete!" -ForegroundColor Green
@@ -627,11 +727,6 @@ if ($useClang) {
         $cv = & $clangBin --version 2>$null | Select-Object -First 1
         Write-Host "  Compiler: $cv" -ForegroundColor White
     }
-}
-
-if (-not $SkipPython -and (Test-Path (Join-Path $PythonDir 'python.exe'))) {
-    $pv = & (Join-Path $PythonDir 'python.exe') --version 2>$null
-    Write-Host "  Python:   $pv" -ForegroundColor White
 }
 
 Write-Host ""

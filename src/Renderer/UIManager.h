@@ -182,6 +182,7 @@ public:
 	void openLandscapeManagerPopup();
 	void openEngineSettingsPopup();
 	void openEditorSettingsPopup();
+	void openProjectSettingsPopup();
    void openWorkspaceToolsPopup();
 	void openShortcutHelpPopup();
 	void openAssetReferencesPopup(const std::string& title, const std::string& assetPath,

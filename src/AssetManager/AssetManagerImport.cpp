@@ -195,6 +195,8 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 	json data = json::object();
 	bool success = false;
 
+	AssetType finalAssetType = detectedType;
+
 	switch (detectedType)
 	{
 	case AssetType::Texture:
@@ -256,6 +258,8 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 	}
 
 	case AssetType::Model3D:
+	case AssetType::StaticMesh:
+	case AssetType::SkeletalMesh:
 	{
 		Assimp::Importer importer;
 		const aiScene* scene = importer.ReadFile(path,
@@ -323,10 +327,14 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 		std::vector<float> vertices;
 		std::vector<uint32_t> indices;
 		uint32_t indexOffset = 0;
+		json subMeshesJson = json::array();
 
 		for (unsigned int m = 0; m < scene->mNumMeshes; ++m)
 		{
 			const aiMesh* mesh = scene->mMeshes[m];
+			const uint32_t meshVertexOffset = indexOffset;
+			const uint32_t meshIndexOffset = static_cast<uint32_t>(indices.size());
+
 			for (unsigned int v = 0; v < mesh->mNumVertices; ++v)
 			{
 				vertices.push_back(mesh->mVertices[v].x);
@@ -345,20 +353,34 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 				}
 			}
 
+			uint32_t meshIndexCount = 0;
 			for (unsigned int f = 0; f < mesh->mNumFaces; ++f)
 			{
 				const aiFace& face = mesh->mFaces[f];
 				for (unsigned int i = 0; i < face.mNumIndices; ++i)
 				{
 					indices.push_back(indexOffset + face.mIndices[i]);
+					++meshIndexCount;
 				}
 			}
+
+			json subMeshJson;
+			subMeshJson["name"] = mesh->mName.length > 0 ? mesh->mName.C_Str() : ("Mesh_" + std::to_string(m));
+			subMeshJson["vertexOffset"] = meshVertexOffset;
+			subMeshJson["vertexCount"] = mesh->mNumVertices;
+			subMeshJson["indexOffset"] = meshIndexOffset;
+			subMeshJson["indexCount"] = meshIndexCount;
+			subMeshJson["materialIndex"] = mesh->mMaterialIndex;
+			subMeshJson["boneCount"] = mesh->mNumBones;
+			subMeshJson["hasBones"] = mesh->mNumBones > 0;
+			subMeshesJson.push_back(subMeshJson);
 
 			indexOffset += mesh->mNumVertices;
 		}
 
 		data["m_vertices"] = vertices;
 		data["m_indices"] = indices;
+		data["m_subMeshes"] = subMeshesJson;
 
 		logger.log(Logger::Category::AssetManagement,
 			"Import 3D model: " + std::to_string(vertices.size() / 5) + " vertices, " + std::to_string(indices.size()) + " indices",
@@ -371,6 +393,7 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 			if (scene->mMeshes[mi]->mNumBones > 0)
 				hasBones = true;
 		}
+		finalAssetType = hasBones ? AssetType::SkeletalMesh : AssetType::StaticMesh;
 
 		if (hasBones)
 		{
@@ -385,6 +408,7 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 			std::vector<int> boneSlots(totalVertices, 0);
 
 			std::unordered_map<std::string, int> boneNameToIndex;
+			std::vector<std::vector<int>> subMeshBoneIndices(scene->mNumMeshes);
 			json bonesJson = json::array();
 
 			uint32_t globalVertexOffset = 0;
@@ -418,6 +442,20 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 							om.d1, om.d2, om.d3, om.d4
 						};
 						bonesJson.push_back(boneJson);
+					}
+
+					bool alreadyInSubMesh = false;
+					for (int existing : subMeshBoneIndices[mi])
+					{
+						if (existing == boneIndex)
+						{
+							alreadyInSubMesh = true;
+							break;
+						}
+					}
+					if (!alreadyInSubMesh)
+					{
+						subMeshBoneIndices[mi].push_back(boneIndex);
 					}
 
 					// Assign weights to vertices
@@ -467,6 +505,17 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 			data["m_bones"] = bonesJson;
 			data["m_boneIds"] = boneIdsFlat;
 			data["m_boneWeights"] = boneWeightsFlat;
+
+			if (data.contains("m_subMeshes") && data["m_subMeshes"].is_array())
+			{
+				auto& subMeshes = data["m_subMeshes"];
+				const size_t count = (std::min)(subMeshes.size(), subMeshBoneIndices.size());
+				for (size_t i = 0; i < count; ++i)
+				{
+					subMeshes[i]["hasBones"] = !subMeshBoneIndices[i].empty();
+					subMeshes[i]["boneIndices"] = subMeshBoneIndices[i];
+				}
+			}
 
 			// ── Build node hierarchy ──
 			{
@@ -928,7 +977,7 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 	json fileJson = json::object();
 	fileJson["magic"] = 0x41535453;
 	fileJson["version"] = 2;
-	fileJson["type"] = static_cast<int>(detectedType);
+	fileJson["type"] = static_cast<int>(finalAssetType);
 	fileJson["name"] = assetName;
 	fileJson["data"] = data;
 
@@ -939,7 +988,7 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 	AssetRegistryEntry regEntry;
 	regEntry.name = assetName;
 	regEntry.path = relPath;
-	regEntry.type = detectedType;
+	regEntry.type = finalAssetType;
 	registerAssetInRegistry(regEntry);
 
 	diagnostics.updateActionProgress(ActionID, false);
@@ -947,7 +996,7 @@ void AssetManager::importAssetFromPath(std::string path, AssetType preferredType
 		"Import successful: " + assetName + " (" + relPath + ")",
 		Logger::LogLevel::INFO);
 	// Model3D sends its own detailed toast with material/texture counts
-	if (detectedType != AssetType::Model3D)
+	if (finalAssetType != AssetType::StaticMesh && finalAssetType != AssetType::SkeletalMesh && finalAssetType != AssetType::Model3D)
 		diagnostics.enqueueToastNotification("Imported: " + assetName, 3.0f, DiagnosticsManager::NotificationLevel::Success);
 
 	if (m_onImportCompleted)

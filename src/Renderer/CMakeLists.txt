@@ -100,6 +100,8 @@ set(RENDERER_CORE_EDITOR_SOURCES
     ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/InputActionEditorTab.cpp
     ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/InputMappingEditorTab.h
     ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/InputMappingEditorTab.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/SkeletalMeshEditorTab.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/SkeletalMeshEditorTab.cpp
     ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/ReflectionWidgetFactory.h
     ${CMAKE_SOURCE_DIR}/src/Editor/Tabs/ReflectionWidgetFactory.cpp
     ${CMAKE_SOURCE_DIR}/src/Editor/Windows/MeshViewerWindow.cpp
@@ -110,6 +112,8 @@ set(RENDERER_CORE_EDITOR_SOURCES
     ${CMAKE_SOURCE_DIR}/src/Editor/Windows/TextureViewerWindow.h
     ${CMAKE_SOURCE_DIR}/src/Editor/Windows/PopupWindow.cpp
     ${CMAKE_SOURCE_DIR}/src/Editor/Windows/PopupWindow.h
+    ${CMAKE_SOURCE_DIR}/src/Editor/Windows/ProjectSettingsWindow.cpp
+    ${CMAKE_SOURCE_DIR}/src/Editor/Windows/ProjectSettingsWindow.h
 )
 
 # Shared properties for both RendererCore variants

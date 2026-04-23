@@ -1759,6 +1759,8 @@ int AssetManager::loadAsset(const std::string& path, AssetType type, SyncState s
 	switch (type)
 	{
 	case AssetType::Model3D:
+	case AssetType::StaticMesh:
+	case AssetType::SkeletalMesh:
 	case AssetType::PointLight:
 		result = loadObject3DAsset(path);
 		break;
@@ -1864,6 +1866,8 @@ bool AssetManager::saveAsset(const Asset& asset, SyncState syncState, Diagnostic
 			result = saveObject2DAsset(assetData);
             break;
 	case AssetType::Model3D:
+	case AssetType::StaticMesh:
+	case AssetType::SkeletalMesh:
 	case AssetType::PointLight:
 			result = saveObject3DAsset(assetData);
 			break;
@@ -3014,9 +3018,29 @@ AssetManager::SaveResult AssetManager::saveObject3DAsset(const std::shared_ptr<A
     fileJson["magic"] = 0x41535453;
     fileJson["version"] = 2;
     AssetType objectType = object3D->getAssetType();
-    if (objectType != AssetType::PointLight)
+    // Legacy Model3D assets are migrated to StaticMesh/SkeletalMesh based on
+    // whether skeletal data is present. PointLight stays as-is.
+    if (objectType != AssetType::PointLight &&
+        objectType != AssetType::StaticMesh &&
+        objectType != AssetType::SkeletalMesh)
     {
-        objectType = AssetType::Model3D;
+        const bool hasBones =
+            data.is_object() && data.contains("m_hasBones") &&
+            data.at("m_hasBones").is_boolean() && data.at("m_hasBones").get<bool>();
+        objectType = hasBones ? AssetType::SkeletalMesh : AssetType::StaticMesh;
+        object3D->setAssetType(objectType);
+        object3D->setType(objectType);
+    }
+    // Ensure the data JSON and its m_hasBones flag stay in sync with the type.
+    if (objectType == AssetType::SkeletalMesh)
+    {
+        if (!data.is_object()) data = json::object();
+        data["m_hasBones"] = true;
+    }
+    else if (objectType == AssetType::StaticMesh)
+    {
+        if (data.is_object() && data.contains("m_hasBones"))
+            data["m_hasBones"] = false;
     }
     fileJson["type"] = static_cast<int>(objectType);
     fileJson["name"] = name;

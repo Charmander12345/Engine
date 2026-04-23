@@ -49,6 +49,7 @@
 #include "../Core/AudioManager.h"
 #include "../AssetManager/AssetManager.h"
 #include "../Editor/Windows/PopupWindow.h"
+#include "../Editor/Windows/ProjectSettingsWindow.h"
 #include "../Landscape/LandscapeManager.h"
 #include "../AssetManager/json.hpp"
 
@@ -5247,6 +5248,15 @@ void UIManager::openInputMappingEditorTab(const std::string& assetPath)
 void UIManager::closeInputMappingEditorTab()
 {
     if (m_tabOpener) m_tabOpener->closeInputMappingEditor();
+}
+
+// ---------------------------------------------------------------------------------
+// Project Settings Popup
+// ---------------------------------------------------------------------------------
+void UIManager::openProjectSettingsPopup()
+{
+    if (!m_renderer) return;
+    ProjectSettingsWindow::open(m_renderer);
 }
 
 #endif // ENGINE_EDITOR

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # HorizonEngine Build Environment Bootstrap (Linux / macOS)
-# Downloads and configures CMake, Clang, Ninja, and Python
+# Downloads and configures CMake, Clang, and Ninja
 # into a portable Tools/ directory so the engine can be built
 # without manual setup.
 #
@@ -18,16 +18,14 @@ CMAKE_VERSION="3.31.4"
 NINJA_VERSION="1.12.1"
 COMPILER_PREF="auto"   # auto | clang | gcc
 FORCE=false
-SKIP_PYTHON=false
 
 # ── Parse arguments ───────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --compiler) COMPILER_PREF="$2"; shift 2 ;;
         --force)    FORCE=true; shift ;;
-        --skip-python) SKIP_PYTHON=true; shift ;;
         --help|-h)
-            echo "Usage: $0 [--compiler auto|clang|gcc] [--force] [--skip-python]"
+            echo "Usage: $0 [--compiler auto|clang|gcc] [--force]"
             exit 0 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
@@ -220,38 +218,7 @@ if [[ -z "$COMPILER_CMD" ]]; then
     exit 1
 fi
 
-# ── 4. Python ─────────────────────────────────────────────────────────────
-if [[ "$SKIP_PYTHON" != true ]]; then
-    step "Checking Python 3..."
-    
-    if command_exists python3; then
-        ver=$(python3 --version 2>/dev/null)
-        
-        # Check for development headers
-        PYTHON_INCLUDE=$(python3 -c "import sysconfig; print(sysconfig.get_path('include'))" 2>/dev/null || true)
-        if [[ -n "$PYTHON_INCLUDE" ]] && [[ -f "$PYTHON_INCLUDE/Python.h" ]]; then
-            ok "Python: $ver (dev headers: $PYTHON_INCLUDE)"
-        else
-            echo "    [WARNING] Python found but development headers missing!" 
-            if [[ "$PLATFORM" == "linux" ]]; then
-                echo "    Install:  sudo apt install python3-dev"
-            else
-                echo "    Python from python.org or Homebrew includes dev headers."
-            fi
-        fi
-    else
-        err "Python 3 not found!"
-        if [[ "$PLATFORM" == "linux" ]]; then
-            echo "    Install:  sudo apt install python3 python3-dev"
-        else
-            echo "    Install:  brew install python3"
-        fi
-    fi
-else
-    skip "Python (--skip-python)"
-fi
-
-# ── 5. OpenGL / Development Libraries ────────────────────────────────────
+# ── 4. OpenGL / Development Libraries
 step "Checking OpenGL development libraries..."
 
 if [[ "$PLATFORM" == "linux" ]]; then
@@ -272,12 +239,12 @@ else
     ok "macOS includes OpenGL framework."
 fi
 
-# ── 6. Clean up ───────────────────────────────────────────────────────────
+# ── 5. Clean up
 step "Cleaning up..."
 rm -rf "$TEMP_DIR"
 ok "Temp files removed."
 
-# ── 7. Generate env script ───────────────────────────────────────────────
+# ── 6. Generate env script
 step "Generating environment setup..."
 
 cat > "$TOOLS_DIR/env.sh" << 'ENVEOF'
@@ -295,7 +262,7 @@ ENVEOF
 chmod +x "$TOOLS_DIR/env.sh"
 ok "Generated Tools/env.sh"
 
-# ── 8. Summary ────────────────────────────────────────────────────────────
+# ── 7. Summary
 echo ""
 echo -e "\033[32m=============================================\033[0m"
 echo -e "\033[32m  Bootstrap Complete!\033[0m"

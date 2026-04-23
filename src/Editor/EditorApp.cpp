@@ -1191,6 +1191,7 @@ void EditorApp::registerClickEvents()
         std::vector<UIManager::DropdownMenuItem> items;
         items.push_back({"Engine Settings",[wm](){wm->openEngineSettingsPopup();}});
         items.push_back({"Editor Settings",[wm](){wm->openEditorSettingsPopup();}});
+        items.push_back({"Project Settings",[wm](){wm->openProjectSettingsPopup();}});
         items.push_back({"Workspace Tools",[wm](){wm->openWorkspaceToolsPopup();}});
         items.push_back({"Build Game",[renderer](){renderer->getUIManager().openBuildGameDialog();}});
         items.push_back({"---",[](){}});

@@ -600,14 +600,14 @@ void OutlinerPanel::populateDetails(unsigned int entity)
             const auto& registry = AssetManager::Instance().getAssetRegistry();
             for (const auto& reg : registry)
             {
-                if (reg.type == AssetType::Model3D)
-                {
-                    const std::string assetPath = reg.path;
-                    dropdown.addItem(reg.name.empty() ? reg.path : reg.name, [this, entity, assetPath]()
-                    {
-                        applyAssetToEntity(AssetType::Model3D, assetPath, entity);
-                    });
-                }
+                if (reg.type == AssetType::Model3D || reg.type == AssetType::StaticMesh || reg.type == AssetType::SkeletalMesh)
+				{
+					const std::string assetPath = reg.path;
+					dropdown.addItem(reg.name.empty() ? reg.path : reg.name, [this, entity, assetPath]()
+					{
+						applyAssetToEntity(AssetType::Model3D, assetPath, entity);
+					});
+				}
             }
             WidgetElement dropdownEl = dropdown.toElement();
             dropdownEl.id = "Details.Mesh.Dropdown";
@@ -1967,6 +1967,8 @@ void OutlinerPanel::applyAssetToEntity(AssetType type, const std::string& assetP
     switch (type)
     {
     case AssetType::Model3D:
+    case AssetType::StaticMesh:
+    case AssetType::SkeletalMesh:
     {
         // Capture old state for undo
         std::optional<ECS::MeshComponent> oldMesh;
@@ -1991,6 +1993,8 @@ void OutlinerPanel::applyAssetToEntity(AssetType type, const std::string& assetP
             if (!meshAsset)
             {
                 int id = AssetManager::Instance().loadAsset(assetPath, AssetType::Model3D);
+                if (id <= 0) id = AssetManager::Instance().loadAsset(assetPath, AssetType::StaticMesh);
+                if (id <= 0) id = AssetManager::Instance().loadAsset(assetPath, AssetType::SkeletalMesh);
                 if (id > 0)
                     meshAsset = AssetManager::Instance().getLoadedAssetByID(static_cast<unsigned int>(id));
             }

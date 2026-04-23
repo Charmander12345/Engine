@@ -328,6 +328,7 @@ bool AssetCooker::cookMesh(const AssetRegistryEntry& entry,
         if (data.contains("m_bones"))      skelJson["m_bones"]      = data.at("m_bones");
         if (data.contains("m_nodes"))       skelJson["m_nodes"]      = data.at("m_nodes");
         if (data.contains("m_animations"))  skelJson["m_animations"] = data.at("m_animations");
+        if (data.contains("m_subMeshes"))   skelJson["m_subMeshes"]  = data.at("m_subMeshes");
         if (data.contains("m_hasBones"))    skelJson["m_hasBones"]   = data.at("m_hasBones");
 
         // Preserve shader overrides
@@ -338,8 +339,9 @@ bool AssetCooker::cookMesh(const AssetRegistryEntry& entry,
     }
     else
     {
-        // Still preserve shader overrides for non-skinned meshes
+        // Still preserve mesh metadata and shader overrides for non-skinned meshes
         json meta;
+        if (data.contains("m_subMeshes"))      meta["m_subMeshes"]      = data.at("m_subMeshes");
         if (data.contains("m_shaderVertex"))   meta["m_shaderVertex"]   = data.at("m_shaderVertex");
         if (data.contains("m_shaderFragment")) meta["m_shaderFragment"] = data.at("m_shaderFragment");
         if (!meta.empty())

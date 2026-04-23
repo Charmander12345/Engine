@@ -288,3 +288,19 @@ Three bugs fixed that caused unreliable rigid body simulations:
 - **Problem**: Dynamic rigid bodies and character controllers wrote backend world-space transforms directly into `TransformComponent::position` / `rotation`, but did not recompute `localPosition` / `localRotation` for parented entities. In a hierarchy this could cause visual jitter, children lagging behind, or physics-updated world transforms being overwritten by stale local transforms on the next ECS world-transform update.
 - **Fix**: Added a dedicated physics transform writeback helper in `PhysicsWorld.cpp` that converts backend world-space transforms back into ECS local-space data when an entity has a parent.
 - **Fix (hierarchy propagation)**: After physics sync, descendants of physics-updated entities are marked dirty and `ECS::ECSManager::updateWorldTransforms()` is run once so child world transforms stay consistent with the newly written parent transforms.
+
+## Letzte Änderung (StaticMesh/SkeletalMesh AssetType-Split)
+
+- ? 3D-Mesh-Assets sind jetzt in zwei konkrete Asset-Typen getrennt: `StaticMesh` und `SkeletalMesh` (Legacy-`Model3D` bleibt kompatibel beim Laden).
+- ? Der Import klassifiziert 3D-Modelle automatisch anhand vorhandener Bones und schreibt den konkreten Mesh-Typ in die `.asset`-Datei.
+- ? Save/Load- und Typvalidierungs-Pfade akzeptieren und serialisieren beide Typen konsistent, inklusive Runtime-Pfade (Content Browser, Outliner, RenderResourceManager).
+
+## Letzte Änderung (Skeletal-Mesh-Import – SubMeshes/Material-Indizes/Bones)
+
+- ? Der 3D-Import (`AssetManagerImport`) speichert jetzt pro Quell-Mesh `m_subMeshes`-Metadaten mit Name, Vertex-/Index-Bereichen und `materialIndex`.
+- ? Für Skeletal Meshes werden zusätzlich Bone-Informationen pro SubMesh mitgespeichert (`hasBones`, `boneIndices`) und mit den globalen Bone-Influences verknüpft.
+- ? Der Cooker (`AssetCooker`) übernimmt `m_subMeshes` in den CMSH-Metadaten-Blob (skinned und non-skinned), sodass mehrteilige Skeletal-Meshes zur Laufzeit als zusammengehöriges Objekt gerendert werden können, inklusive korrekter Material-Zuordnung pro Teilmesh.
+
+## Letzte Änderung (Transaction-System – Snapshot-basiertes Undo/Redo)
+
+Neues **Transaction-System** als Ergänzung zum bestehenden `UndoRedoManager` für snapshot-basiertes Undo/Redo. Jede Transaction erfasst automatisch Before/After-Byte-Snapshots und pusht einen einzelnen `UndoRedoManager::Command`.

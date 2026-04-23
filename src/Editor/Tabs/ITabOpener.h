@@ -17,6 +17,7 @@ public:
     virtual void openActorEditor(const std::string& assetPath) = 0;
     virtual void openInputActionEditor(const std::string& assetPath) = 0;
     virtual void openInputMappingEditor(const std::string& assetPath) = 0;
+    virtual void openSkeletalMeshEditor(const std::string& assetPath) = 0;
     virtual void openParticleEditor(unsigned int entity) = 0;
     virtual void openAnimationEditor(unsigned int entity) = 0;
 
@@ -45,6 +46,7 @@ public:
     virtual void closeActorEditor() = 0;
     virtual void closeInputActionEditor() = 0;
     virtual void closeInputMappingEditor() = 0;
+    virtual void closeSkeletalMeshEditor() = 0;
     virtual void closeUIDesigner() = 0;
 
     // Query methods
@@ -62,6 +64,7 @@ public:
     virtual bool isActorEditorOpen() const = 0;
     virtual bool isInputActionEditorOpen() const = 0;
     virtual bool isInputMappingEditorOpen() const = 0;
+    virtual bool isSkeletalMeshEditorOpen() const = 0;
     virtual bool isUIDesignerOpen() const = 0;
 
     // Typed tab accessors (for renderer level-swap etc.)

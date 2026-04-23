@@ -49,6 +49,8 @@ static const char* iconForAssetType(AssetType type)
     case AssetType::Material: return "material.png";
     case AssetType::Model2D:  return "model2d.png";
     case AssetType::Model3D:  return "model3d.png";
+    case AssetType::StaticMesh: return "model3d.png";
+    case AssetType::SkeletalMesh: return "model3d.png";
     case AssetType::Audio:    return "sound.png";
     case AssetType::Script:       return "script.png";
     case AssetType::NativeScript: return "script.png";
@@ -76,6 +78,8 @@ static Vec4 iconTintForAssetType(AssetType type)
     case AssetType::NativeScript: return Vec4{ 0.30f, 0.70f, 1.00f, 1.0f };
     case AssetType::Model2D:      return Vec4{ 0.55f, 0.85f, 0.95f, 1.0f };
     case AssetType::Model3D:  return Vec4{ 0.50f, 0.80f, 0.90f, 1.0f };
+    case AssetType::StaticMesh: return Vec4{ 0.50f, 0.80f, 0.90f, 1.0f };
+    case AssetType::SkeletalMesh: return Vec4{ 0.45f, 0.90f, 0.65f, 1.0f };
     case AssetType::Shader:   return Vec4{ 0.75f, 0.50f, 1.00f, 1.0f };
     case AssetType::Level:    return Vec4{ 0.95f, 0.85f, 0.40f, 1.0f };
     case AssetType::Widget:   return Vec4{ 0.70f, 0.70f, 0.90f, 1.0f };
@@ -892,6 +896,8 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
                 struct FilterDef { const char* label; AssetType type; };
                 const FilterDef filters[] = {
                     { "Mesh",          AssetType::Model3D       },
+                    { "Static Mesh",   AssetType::StaticMesh    },
+                    { "Skeletal Mesh", AssetType::SkeletalMesh  },
                     { "Material",      AssetType::Material      },
                     { "Texture",       AssetType::Texture       },
                     { "Script",        AssetType::Script        },
@@ -1080,6 +1086,14 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
                     if (assetType == AssetType::Model3D && m_uiManager->getRenderer())
                     {
                         m_uiManager->getRenderer()->openMeshViewer(relPath);
+                    }
+                    else if (assetType == AssetType::StaticMesh && m_uiManager->getRenderer())
+                    {
+                        m_uiManager->getRenderer()->openMeshViewer(relPath);
+                    }
+                    else if (assetType == AssetType::SkeletalMesh)
+                    {
+                        if (m_tabOpener) m_tabOpener->openSkeletalMeshEditor(relPath);
                     }
                     else if (assetType == AssetType::Texture && m_uiManager->getRenderer())
                     {
@@ -1286,6 +1300,16 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
                 if (assetType == AssetType::Model3D && m_uiManager->getRenderer())
                 {
                     m_uiManager->getRenderer()->openMeshViewer(relPath);
+                    return;
+                }
+                if (assetType == AssetType::StaticMesh && m_uiManager->getRenderer())
+                {
+                    m_uiManager->getRenderer()->openMeshViewer(relPath);
+                    return;
+                }
+                if (assetType == AssetType::SkeletalMesh)
+                {
+                    if (m_tabOpener) m_tabOpener->openSkeletalMeshEditor(relPath);
                     return;
                 }
                 if (assetType == AssetType::Texture && m_uiManager->getRenderer())

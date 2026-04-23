@@ -9,6 +9,8 @@ enum class AssetType
     Material,
     Model2D,
     Model3D,
+    StaticMesh,
+    SkeletalMesh,
     PointLight,
     Audio,
     Script,

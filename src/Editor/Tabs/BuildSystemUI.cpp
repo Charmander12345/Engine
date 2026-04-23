@@ -1393,6 +1393,36 @@ void BuildSystemUI::runBootstrapInstall()
             "Bootstrap script: " + scriptPath.string(), Logger::LogLevel::INFO);
 
 #if defined(_WIN32)
+        // ── Pre-bootstrap: clean leftover LLVM/NSIS registry keys ────────
+        // The NSIS installer (exit code 2) aborts when it finds registry
+        // entries from a previous LLVM installation it cannot uninstall.
+        // We clean these from C++ so we don't depend on PowerShell having
+        // the right permissions.  HKCU keys always work; HKLM may fail
+        // without admin rights but that's fine — HKCU is usually enough.
+        {
+            const HKEY roots[] = { HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE };
+            const char* rootNames[] = { "HKCU", "HKLM" };
+            const char* subkeys[] = {
+                "SOFTWARE\\LLVM",
+                "SOFTWARE\\WOW6432Node\\LLVM",
+                "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\LLVM",
+                "SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\LLVM"
+            };
+            for (int r = 0; r < 2; ++r)
+            {
+                for (const char* subkey : subkeys)
+                {
+                    LSTATUS st = RegDeleteTreeA(roots[r], subkey);
+                    if (st == ERROR_SUCCESS)
+                    {
+                        logger.log(Logger::Category::Engine,
+                            std::string("[Bootstrap] Cleaned registry: ") + rootNames[r] + "\\" + subkey,
+                            Logger::LogLevel::INFO);
+                    }
+                    // ERROR_FILE_NOT_FOUND = key doesn't exist, that's fine
+                }
+            }
+        }
         // Build the PowerShell command line.
         // -ExecutionPolicy Bypass: allow unsigned scripts
         // -Compiler auto: use MSVC if present, else install Clang

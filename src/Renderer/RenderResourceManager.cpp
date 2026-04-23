@@ -115,7 +115,7 @@ bool RenderResourceManager::prepareOpenGL(EngineLevel& level)
 				logger.log(Logger::Category::Rendering, "RenderResourceManager: prepared Model2D '" + asset->getPath() + "'", Logger::LogLevel::INFO);
 			}
 		}
-		else if (type == AssetType::Model3D || type == AssetType::PointLight)
+		else if (type == AssetType::Model3D || type == AssetType::StaticMesh || type == AssetType::SkeletalMesh || type == AssetType::PointLight)
 		{
 			logger.log(Logger::Category::Rendering, "RenderResourceManager: preparing Model3D '" + asset->getPath() + "'", Logger::LogLevel::INFO);
 			if (!prepareOpenGLObject3D(asset, {}))
@@ -484,7 +484,7 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
         const unsigned int meshCacheId = (asset->getId() != 0) ? asset->getId() : static_cast<unsigned int>(assetId);
         const std::string obj3DCacheKey = std::to_string(meshCacheId) + "|" + materialCacheKey + "|" + effectiveFragShader;
 
-        if (renderable.assetType == AssetType::Model3D || renderable.assetType == AssetType::PointLight)
+        if (renderable.assetType == AssetType::Model3D || renderable.assetType == AssetType::StaticMesh || renderable.assetType == AssetType::SkeletalMesh || renderable.assetType == AssetType::PointLight)
         {
             auto it = m_object3DCache.find(obj3DCacheKey);
             if (it != m_object3DCache.end())
@@ -846,7 +846,7 @@ RenderResourceManager::RenderableAsset RenderResourceManager::refreshEntityRende
 	const unsigned int meshCacheId = (asset->getId() != 0) ? asset->getId() : static_cast<unsigned int>(assetId);
 	const std::string obj3DCacheKey = std::to_string(meshCacheId) + "|" + materialCacheKey + "|" + effectiveFragShader;
 
-	if (result.assetType == AssetType::Model3D || result.assetType == AssetType::PointLight)
+	if (result.assetType == AssetType::Model3D || result.assetType == AssetType::StaticMesh || result.assetType == AssetType::SkeletalMesh || result.assetType == AssetType::PointLight)
 	{
 		auto it = m_object3DCache.find(obj3DCacheKey);
 		if (it != m_object3DCache.end())

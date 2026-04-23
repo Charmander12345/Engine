@@ -42,6 +42,7 @@ class InputActionEditorTab;
 class InputMappingEditorTab;
 class UIDesignerTab;
 class WidgetEditorTab;
+class SkeletalMeshEditorTab;
 
 namespace ECS { using Entity = unsigned int; }
 
@@ -126,6 +127,11 @@ namespace Editor
         void closeInputMappingEditor() override;
         bool isInputMappingEditorOpen() const override;
 
+        // Skeletal Mesh Editor
+        void openSkeletalMeshEditor(const std::string& assetPath) override;
+        void closeSkeletalMeshEditor() override;
+        bool isSkeletalMeshEditorOpen() const override;
+
         // ── UI Designer ──────────────────────────────────────────────
         void openUIDesigner() override;
         void closeUIDesigner() override;
@@ -140,6 +146,7 @@ namespace Editor
         void openLandscapeManagerPopup();
         void openEngineSettingsPopup();
         void openEditorSettingsPopup();
+        void openProjectSettingsPopup();
         void openWorkspaceToolsPopup();
         void openShortcutHelpPopup();
 
@@ -163,6 +170,7 @@ namespace Editor
         std::unique_ptr<InputMappingEditorTab>  m_inputMappingEditorTab;
         std::unique_ptr<UIDesignerTab>          m_uiDesignerTab;
         std::unique_ptr<WidgetEditorTab>        m_widgetEditorTab;
+        std::unique_ptr<SkeletalMeshEditorTab>  m_skeletalMeshEditorTab;
     };
 }
 

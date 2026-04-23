@@ -1015,6 +1015,14 @@ int main()
         const double dt = (freq > 0.0) ? (static_cast<double>(now - lastCounter) / freq) : 0.016;
         lastCounter = now;
 
+        // Cache per-frame flags to avoid repeated singleton lookups in the hot path
+        const bool inPIE = diagnostics.isPIEActive();
+        const bool isPIECapturing = (isRuntimeMode || inPIE) && pieMouseCaptured && !pieInputPaused;
+        const bool laptopMode = [&]() {
+            if (auto v = diagnostics.getState("LaptopMode")) return *v == "1";
+            return false;
+        }();
+
         fpsTimer += dt;
         ++fpsFrames;
         if (fpsTimer >= 1.0)
@@ -1145,13 +1153,8 @@ int main()
         const bool* keys = SDL_GetKeyboardState(nullptr);
         if (keys)
         {
-            const bool inPIE = diagnostics.isPIEActive();
-            const bool laptopMode = [&]() {
-                if (auto v = diagnostics.getState("LaptopMode")) return *v == "1";
-                return false;
-            }();
             // In runtime or PIE (and not paused): always move. Outside PIE: require right-click (unless laptop mode).
-            const bool canMove = ((isRuntimeMode || inPIE) && pieMouseCaptured && !pieInputPaused) || (!inPIE && !isRuntimeMode && (rightMouseDown || laptopMode));
+            const bool canMove = isPIECapturing || (!inPIE && !isRuntimeMode && (rightMouseDown || laptopMode));
             if (canMove)
             {
                 if (keys[SDL_SCANCODE_W]) renderer->moveCamera(+moveSpeed, 0.0f, 0.0f);
@@ -1170,7 +1173,7 @@ int main()
             SDL_GetMouseState(&mouseX, &mouseY);
             mousePosPixels = Vec2{ mouseX, mouseY };
             hasMousePos = true;
-            if (renderer && !((isRuntimeMode || diagnostics.isPIEActive()) && pieMouseCaptured && !pieInputPaused))
+            if (renderer && !isPIECapturing)
             {
                 auto& uiManager = renderer->getUIManager();
                 uiManager.setMousePosition(mousePosPixels);
@@ -1212,7 +1215,7 @@ int main()
                     hasMousePos = true;
 
                     // During active runtime/PIE capture, skip UI updates so editor stays inert (no hover effects)
-                    if (!((isRuntimeMode || diagnostics.isPIEActive()) && pieMouseCaptured && !pieInputPaused))
+                    if (!isPIECapturing)
                     {
                         auto& uiManager = renderer->getUIManager();
                         uiManager.setMousePosition(mousePosPixels);
@@ -1248,7 +1251,7 @@ int main()
             if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT)
             {
                 // During active runtime/PIE capture, ignore left-click so editor UI stays inert
-                if ((isRuntimeMode || diagnostics.isPIEActive()) && pieMouseCaptured && !pieInputPaused)
+                if (isPIECapturing)
                     continue;
 
                 if (renderer)
@@ -1278,11 +1281,7 @@ int main()
                     if (!isOverUI)
                     {
                         // Texture viewer: left-click starts panning in laptop mode
-                        const bool laptopModeLocal = [&]() {
-                            if (auto v = diagnostics.getState("LaptopMode")) return *v == "1";
-                            return false;
-                        }();
-                        if (laptopModeLocal)
+                        if (laptopMode)
                         {
 #if ENGINE_EDITOR
                             auto* texViewer = renderer->getTextureViewer(renderer->getActiveTabId());
@@ -1295,7 +1294,7 @@ int main()
                         }
 
                         // PIE/Runtime: recapture mouse
-                        if ((isRuntimeMode || diagnostics.isPIEActive()) && pieInputPaused)
+                        if ((isRuntimeMode || inPIE) && pieInputPaused)
                         {
                             pieInputPaused = false;
                             SDL_GetMouseState(&preCaptureMouseX, &preCaptureMouseY);
@@ -1337,7 +1336,7 @@ int main()
                     continue;
                 }
 
-                if ((isRuntimeMode || diagnostics.isPIEActive()) && pieMouseCaptured && !pieInputPaused)
+                if (isPIECapturing)
                     continue;
 
                 if (renderer)
@@ -1390,7 +1389,7 @@ int main()
 
             if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_RIGHT)
             {
-                if ((isRuntimeMode || diagnostics.isPIEActive()) && pieMouseCaptured && !pieInputPaused)
+                if (isPIECapturing)
                     continue;
 
                 if (renderer)
@@ -1441,6 +1440,9 @@ int main()
                     if (editorApp) editorApp->setRightMouseDown(true);
 #endif
                     SDL_GetMouseState(&preCaptureMouseX, &preCaptureMouseY);
+#if ENGINE_EDITOR
+                    if (editorApp) editorApp->setPreCaptureMousePos(preCaptureMouseX, preCaptureMouseY);
+#endif
                     if (auto* w = renderer->window())
                     {
                         SDL_SetWindowRelativeMouseMode(w, true);
@@ -1474,12 +1476,12 @@ int main()
                         if (editorApp) editorApp->setRightMouseDown(false);
 #endif
                         if (auto* w = renderer->window())
-                        {
-                            SDL_SetWindowRelativeMouseMode(w, false);
-                            SDL_SetWindowMouseGrab(w, false);
-                            SDL_WarpMouseInWindow(w, preCaptureMouseX, preCaptureMouseY);
-                        }
-                        SDL_ShowCursor();
+                            {
+                                SDL_SetWindowRelativeMouseMode(w, false);
+                                SDL_SetWindowMouseGrab(w, false);
+                                SDL_WarpMouseInWindow(w, preCaptureMouseX, preCaptureMouseY);
+                            }
+                            SDL_ShowCursor();
                     }
                 }
                 else if (rightMouseDown)
@@ -1493,7 +1495,7 @@ int main()
 
             if (event.type == SDL_EVENT_MOUSE_WHEEL)
             {
-                if (renderer && !((isRuntimeMode || diagnostics.isPIEActive()) && pieMouseCaptured && !pieInputPaused))
+                if (renderer && !isPIECapturing)
                 {
                     auto& uiManager = renderer->getUIManager();
                     if (uiManager.handleScroll(mousePosPixels, event.wheel.y))
@@ -1569,11 +1571,11 @@ int main()
                 continue;
             }
 
-            if (event.type == SDL_EVENT_MOUSE_MOTION && (rightMouseDown || ((isRuntimeMode || diagnostics.isPIEActive()) && pieMouseCaptured && !pieInputPaused)))
+            if (event.type == SDL_EVENT_MOUSE_MOTION && (rightMouseDown || isPIECapturing))
             {
                 // Block camera rotation when gameplay cursor is visible
                 bool cursorBlocksCamera = false;
-                if ((isRuntimeMode || diagnostics.isPIEActive()) && pieMouseCaptured && !pieInputPaused)
+                if (isPIECapturing)
                 {
                     if (auto* vpUI = renderer->getViewportUIManagerPtr())
                         cursorBlocksCamera = vpUI->isGameplayCursorVisible();
@@ -1616,7 +1618,7 @@ int main()
                     continue;
                 }
 #endif // !ENGINE_BUILD_SHIPPING
-                if (isRuntimeMode || diagnostics.isPIEActive())
+                if (isRuntimeMode || inPIE)
                 {
                     Scripting::HandleKeyUp(event.key.key);
                     InputActionManager::Instance().handleKeyUp(event.key.key, event.key.mod);
@@ -1647,7 +1649,7 @@ int main()
                     }
                 }
                 diagnostics.dispatchKeyDown(event.key.key);
-                if (isRuntimeMode || diagnostics.isPIEActive())
+                if (isRuntimeMode || inPIE)
                 {
                     Scripting::HandleKeyDown(event.key.key);
                     InputActionManager::Instance().handleKeyDown(event.key.key, event.key.mod);
@@ -1739,7 +1741,7 @@ int main()
             running = false;
         }
 
-        if (isRuntimeMode || diagnostics.isPIEActive())
+        if (isRuntimeMode || inPIE)
         {
             // Deferred native-script init: run once after scene preparation
             // has created ECS entities from the level JSON.
@@ -1838,16 +1840,18 @@ int main()
             renderer->getUIManager().updateNotifications(static_cast<float>(dt));
         }
 
+#if !defined(ENGINE_BUILD_SHIPPING)
+        // Only show performance stats on the Viewport tab, not in Mesh Viewer tabs
+#if ENGINE_EDITOR
+        const bool isViewportTab = renderer && (renderer->getActiveTabId() == "Viewport");
+#else
+        const bool isViewportTab = renderer != nullptr;
+#endif
+#endif
+
         if (renderer)
         {
 #if !defined(ENGINE_BUILD_SHIPPING)
-            // Only show performance stats on the Viewport tab, not in Mesh Viewer tabs
-#if ENGINE_EDITOR
-            const bool isViewportTab = (renderer->getActiveTabId() == "Viewport");
-#else
-            const bool isViewportTab = true;
-#endif
-
             if (metricsUpdatePending)
             {
                 fpsText = "FPS: " + std::to_string(static_cast<int>(fpsValue + 0.5));
@@ -1907,12 +1911,6 @@ int main()
         if (renderer)
         {
 #if !defined(ENGINE_BUILD_SHIPPING)
-#if ENGINE_EDITOR
-            const bool isViewportTab = (renderer->getActiveTabId() == "Viewport");
-#else
-            const bool isViewportTab = true;
-#endif
-
             if (metricsUpdatePending)
             {
                 char buf[128];
@@ -2005,8 +2003,8 @@ int main()
 
         if (fpscap)
         {
-            const uint64_t frameEndCounter = SDL_GetPerformanceCounter();
-            const double frameMs = (freq > 0.0) ? (static_cast<double>(frameEndCounter - frameStartCounter) / freq * 1000.0) : 0.0;
+            const uint64_t fpscapEndCounter = SDL_GetPerformanceCounter();
+            const double frameMs = (freq > 0.0) ? (static_cast<double>(fpscapEndCounter - frameStartCounter) / freq * 1000.0) : 0.0;
             const double remainingMs = 16.66 - frameMs;
             if (remainingMs > 0.0)
             {

@@ -156,37 +156,6 @@ The live runtime/build path is currently **Jolt-only**: `PhysicsWorld` and PIE a
 The engine supports multi-layer skeletal animation blending with crossfade transitions and per-bone masking:
 
 - **`AnimationBlending.h`** (`src/Core/AnimationBlending.h`) – Core data structures: `BlendEntry` (clipIndex/time/speed/weight/loop/playing), `CrossfadeState` (active/duration/elapsed), `BoneMask` (std::bitset<128>), `AnimBlendMode` (Override/Additive), `AnimationLayer` (current + previous blend entries, crossfade, bone mask, blend mode, layer weight, name), `kMaxAnimLayers = 4`.
+- **Mesh asset type split (Static vs Skeletal)** – 3D assets now differentiate between `AssetType::StaticMesh` and `AssetType::SkeletalMesh` (legacy `Model3D` remains load-compatible). Import classifies meshes by bone presence; serialization and load/save paths preserve and accept both types.
+- **Skeletal mesh import/cook metadata** – `AssetManagerImport` now writes `m_subMeshes` entries per source mesh (name, vertex/index ranges, `materialIndex`, bone presence and per-submesh `boneIndices`). `AssetCooker` preserves this metadata in CMSH blobs for both skinned and non-skinned meshes, so multi-part skeletal assets can be reconstructed and rendered as one object while keeping per-mesh material assignments.
 - **`SkeletalAnimator`** (`src/Core/SkeletalData.h`) – Multi-layer animation evaluator. Per-bone `NodePose` (pos/rot/scl) decomposition, `evaluateEntryPoses()` from keyframes, `computeBlendedBoneMatrices()` with smooth-step crossfade easing, bone mask filtering, Override/Additive blend mode support. `decomposeNodeTransform()` uses Shepperd's quaternion extraction. `blendPose()` uses lerp for position/scale and slerp for rotation. Backward-compatible: `playAnimation()`/`stop()` still work on layer 0.
-- **`AnimationComponent`** – Extended with crossfade fields (crossfadeTargetClip, crossfadeDuration, crossfadeRequested), `LayerState` sub-struct (clipIndex/speed/weight/loop/active), `layers[4]`, `layerCount`.
-- **Renderer**: 8 new virtual functions in `Renderer.h` (crossfadeEntityAnimation, isEntityCrossfading, playEntityAnimationOnLayer, stopEntityAnimationLayer, setEntityLayerWeight, get/setEntityAnimationLayerCount, findEntityAnimationClipByName). All implemented in `OpenGLRenderer`.
-- **GameplayAPI**: 13 new C++ scripting functions (isEntitySkinned, getAnimationClipCount, findAnimationClipByName, playSkeletalAnimation, stopSkeletalAnimation, setSkeletalAnimationSpeed, crossfadeAnimation, isCrossfading, playAnimationOnLayer, stopAnimationLayer, setAnimationLayerWeight, get/setAnimationLayerCount).
-- **Python**: `engine.animation` module with 13 functions (is_skinned, get_clip_count, find_clip, play, stop, set_speed, crossfade, is_crossfading, play_on_layer, stop_layer, set_layer_weight, get_layer_count, set_layer_count). `engine.pyi` includes full IntelliSense stubs.
-- **Planned**: Animation State Machine, Blend Trees, AnimationController asset type, and visual editor graph.
-
-### Forces & Impulses
-- `addForce` / `addImpulse`: Apply at center-of-mass (routed through backend for correct physics simulation).
-- `addForceAtPosition` / `addImpulseAtPosition`: Apply at a world-space point (backend-level, generates torque).
-- `setVelocity` / `setAngularVelocity`: Set directly on the backend body so changes survive the backend readback cycle.
-- Python `engine.physics` functions keep the same external signatures, but now route through `PhysicsWorld`/`JoltBackend` instead of applying fake physics directly to ECS state.
-
-### HeightField Collision
-- HeightField shapes combine `HeightFieldComponent` scale values with entity transform scale.
-- HeightField bodies are always forced to Static motion type.
-- Existing rigid bodies are recreated automatically when collision or rigid-body configuration changes, so create-time Jolt settings like motion quality, sleeping, and internal edge removal are applied immediately.
-- Older saved scenes upgrade serialized `Discrete` motion quality to `LinearCast` on load.
-- Collision-only scene geometry without a `PhysicsComponent` defaults to `Static` rather than `Kinematic`, while sensor-only colliders still use `Kinematic` to produce overlap events.
-- Non-dynamic bodies are only re-synced to the backend when their transform changes, preserving stable contact caches for support geometry.
-- Editor-side collider/physics/scale changes mark the affected entities in a dedicated physics-dirty list, and `PhysicsWorld` rebuilds only those bodies on the next physics step so PIE reflects the updated body setup immediately.
-- `ColliderType::Mesh` now flows real mesh vertex/index data into Jolt. Static mesh colliders use a true Jolt `MeshShape`; non-static mesh colliders use a `ConvexHullShape` approximation instead of collapsing directly to a box.
-- Mesh colliders that are not truly static are always routed away from `MeshShape` and onto convex/primitive fallbacks, which avoids illegal moving triangle-mesh setups in Jolt.
-- Mesh/heightfield overlap queries now return unique entity IDs instead of repeated entries from subshape-level hits.
-- Physics writeback now keeps `TransformComponent` world and local transform data aligned for parented entities, and child transforms are re-propagated after backend sync so hierarchy rendering stays consistent with Jolt motion.
-
-### API Layers
-Active runtime path: `JoltBackend` -> `PhysicsWorld` (singleton) -> `GameplayAPI` (C++) -> `INativeScript` (convenience) -> `PhysicsModule.cpp` (Python) -> `engine.pyi` (stubs).
-
-Compatibility layer: `IPhysicsBackend` still exists under `JoltBackend`, but `PhysicsWorld` no longer routes the live simulation/sync path through that abstraction.
-
-`JoltBackend` itself is now also a direct class rather than an active `IPhysicsBackend` subclass; compatibility types from `IPhysicsBackend` are retained only to keep external API/data shapes stable during migration.
-
-Shared runtime physics types now live in `src/Physics/PhysicsTypes.h`. `JoltBackend` uses these types directly, while `IPhysicsBackend` only re-exports them for compatibility-facing layers.

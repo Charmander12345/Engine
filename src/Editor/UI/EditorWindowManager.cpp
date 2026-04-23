@@ -23,6 +23,7 @@
 #include "../Tabs/InputMappingEditorTab.h"
 #include "../Tabs/UIDesignerTab.h"
 #include "../Tabs/WidgetEditorTab.h"
+#include "../Tabs/SkeletalMeshEditorTab.h"
 
 namespace Editor
 {
@@ -149,6 +150,7 @@ namespace Editor
         if (m_inputActionEditorTab)  m_inputActionEditorTab->update(deltaSeconds);
         if (m_inputMappingEditorTab) m_inputMappingEditorTab->update(deltaSeconds);
         if (m_uiDesignerTab)       m_uiDesignerTab->update(deltaSeconds);
+        if (m_skeletalMeshEditorTab) m_skeletalMeshEditorTab->update(deltaSeconds);
     }
 
     // ── Entity Editor ───────────────────────────────────────────────
@@ -201,12 +203,23 @@ namespace Editor
     void EditorWindowManager::closeUIDesigner()       { if (m_uiDesignerTab) m_uiDesignerTab->close(); }
     bool EditorWindowManager::isUIDesignerOpen() const { return m_uiDesignerTab && m_uiDesignerTab->isOpen(); }
 
+    // Skeletal Mesh Editor
+    void EditorWindowManager::openSkeletalMeshEditor(const std::string& assetPath)
+    {
+        if (!m_skeletalMeshEditorTab)
+            m_skeletalMeshEditorTab = std::make_unique<SkeletalMeshEditorTab>(uiMgr(m_bridge), ren(m_bridge));
+        m_skeletalMeshEditorTab->open(assetPath);
+    }
+    void EditorWindowManager::closeSkeletalMeshEditor()       { if (m_skeletalMeshEditorTab) m_skeletalMeshEditorTab->close(); }
+    bool EditorWindowManager::isSkeletalMeshEditorOpen() const { return m_skeletalMeshEditorTab && m_skeletalMeshEditorTab->isOpen(); }
+
     // ── Popups ──────────────────────────────────────────────────────
     void EditorWindowManager::openWidgetEditorPopup(const std::string& relativeAssetPath)   { m_bridge.getUIManager().openWidgetEditorPopup(relativeAssetPath); }
     void EditorWindowManager::openMaterialEditorPopup(const std::string& materialAssetPath) { m_bridge.getUIManager().openMaterialEditorPopup(materialAssetPath); }
     void EditorWindowManager::openLandscapeManagerPopup() { m_bridge.getUIManager().openLandscapeManagerPopup(); }
     void EditorWindowManager::openEngineSettingsPopup()   { m_bridge.getUIManager().openEngineSettingsPopup(); }
     void EditorWindowManager::openEditorSettingsPopup()   { m_bridge.getUIManager().openEditorSettingsPopup(); }
+    void EditorWindowManager::openProjectSettingsPopup()  { m_bridge.getUIManager().openProjectSettingsPopup(); }
     void EditorWindowManager::openWorkspaceToolsPopup()   { m_bridge.getUIManager().openWorkspaceToolsPopup(); }
     void EditorWindowManager::openShortcutHelpPopup()     { m_bridge.getUIManager().openShortcutHelpPopup(); }
 }
