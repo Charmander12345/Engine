@@ -416,6 +416,7 @@ public:
     void setSubViewportCamera(int /*index*/, const SubViewportCamera& /*cam*/) override {}
     /// Returns which sub-viewport (0-based) contains the given screen position, or -1.
     int subViewportHitTest(int /*screenX*/, int /*screenY*/) const override { return 0; }
+    void setSkeletonTabOverlay(const std::string& /*meshAssetPath*/, const std::string& /*highlightedBoneName*/) override {}
 
     static const char* viewportLayoutToString(ViewportLayout l)
     {

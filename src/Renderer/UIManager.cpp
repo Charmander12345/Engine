@@ -3339,11 +3339,22 @@ bool UIManager::isPointerOverUI(const Vec2& screenPos) const
     const std::function<bool(const WidgetElement&)> hitAny =
         [&](const WidgetElement& element) -> bool
         {
+            // Whole subtree opted out of hit-testing (used by editor tab overlays
+            // that need the 3D viewport behind them to receive mouse input).
+            if (element.hitTestMode == HitTestMode::DisabledAll)
+            {
+                return false;
+            }
             if (!pointInBounds(element, screenPos))
             {
                 return false;
             }
-            if (element.hasComputedPosition && element.hasComputedSize)
+            // Fully transparent containers (alpha == 0) don't claim hits themselves
+            // so the 3D viewport behind editor-tab overlays receives mouse input.
+            // Their children are still iterated below so opaque sub-panels keep
+            // blocking input as expected.
+            const bool isFullyTransparent = (element.style.color.w <= 0.0001f);
+            if (!isFullyTransparent && element.hasComputedPosition && element.hasComputedSize)
             {
                 if (pointInRect(element.computedPositionPixels, element.computedSizePixels, screenPos))
                 {

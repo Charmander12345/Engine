@@ -171,6 +171,7 @@ public:
     SubViewportCamera getSubViewportCamera(int index) const override;
     void setSubViewportCamera(int index, const SubViewportCamera& cam) override;
     int subViewportHitTest(int screenX, int screenY) const override;
+    void setSkeletonTabOverlay(const std::string& meshAssetPath, const std::string& highlightedBoneName) override;
 #endif
 
 private:
@@ -725,6 +726,11 @@ private:
 
     // ---- Origin Axis Lines (Actor Editor) ----
     void drawOriginAxes(const glm::mat4& view, const glm::mat4& projection);
+
+    // ---- Skeleton Tab Overlay (SkeletalMeshEditor) ----
+    void renderSkeletonTabOverlay(const glm::mat4& view, const glm::mat4& projection);
+    std::string m_skeletonTabMeshPath;       // empty = overlay disabled
+    std::string m_skeletonTabHighlightBone;
 #endif // ENGINE_EDITOR — Debug/Picking/Selection/Gizmo/Grid
 
     #if ENGINE_EDITOR

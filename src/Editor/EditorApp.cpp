@@ -1286,7 +1286,7 @@ void EditorApp::registerDragDropHandlers()
             Vec3 sp{0,0,0}; if (!renderer->screenToWorldPos((int)screenPos.x,(int)screenPos.y,sp)){const Vec3 cp=renderer->getCameraPosition();const Vec2 cr=renderer->getCameraRotationDegrees();float y=cr.x*3.14159265f/180.f,p=cr.y*3.14159265f/180.f;sp.x=cp.x+cosf(y)*cosf(p)*5.f;sp.y=cp.y+sinf(p)*5.f;sp.z=cp.z+sinf(y)*cosf(p)*5.f;}
             renderer->getUIManager().spawnEntityAssetAtPosition(relPath,sp); return; }
 
-        if (assetType != AssetType::Model3D) {
+        if (assetType != AssetType::Model3D && assetType != AssetType::StaticMesh && assetType != AssetType::SkeletalMesh) {
             if (targetEntity!=0) {
                 switch(assetType){
                 case AssetType::Material: case AssetType::Texture: {ECS::MaterialComponent mc{};mc.materialAssetPath=relPath;if(ecs.hasComponent<ECS::MaterialComponent>(target))ecs.setComponent<ECS::MaterialComponent>(target,mc);else ecs.addComponent<ECS::MaterialComponent>(target,mc);break;}
@@ -1304,7 +1304,7 @@ void EditorApp::registerDragDropHandlers()
         ECS::NameComponent nameComp;nameComp.displayName=assetName;ecs.addComponent<ECS::NameComponent>(entity,nameComp);
         ECS::MeshComponent mesh;mesh.meshAssetPath=relPath;ecs.addComponent<ECS::MeshComponent>(entity,mesh);
 
-        {auto meshAsset=AssetManager::Instance().getLoadedAssetByPath(relPath);if(!meshAsset){int id=AssetManager::Instance().loadAsset(relPath,AssetType::Model3D);if(id>0)meshAsset=AssetManager::Instance().getLoadedAssetByID((unsigned int)id);}
+        {auto meshAsset=AssetManager::Instance().getLoadedAssetByPath(relPath);if(!meshAsset){const AssetType loadType=(assetType==AssetType::SkeletalMesh)?AssetType::SkeletalMesh:AssetType::Model3D;int id=AssetManager::Instance().loadAsset(relPath,loadType);if(id>0)meshAsset=AssetManager::Instance().getLoadedAssetByID((unsigned int)id);}
          if(meshAsset){auto&ad=meshAsset->getData();if(ad.contains("m_materialAssetPaths")&&ad["m_materialAssetPaths"].is_array()&&!ad["m_materialAssetPaths"].empty()){std::string mp=ad["m_materialAssetPaths"][0].get<std::string>();if(!mp.empty()){ECS::MaterialComponent mc{};mc.materialAssetPath=mp;ecs.addComponent<ECS::MaterialComponent>(entity,mc);}}}}
 
         auto*level=diagnostics.getActiveLevelSoft();if(level)level->onEntityAdded(entity);
@@ -1349,8 +1349,8 @@ void EditorApp::registerDragDropHandlers()
         auto&ecs=ECS::ECSManager::Instance();const auto entity=static_cast<ECS::Entity>(entityId);
         switch(assetType){
         case AssetType::Material:case AssetType::Texture:{ECS::MaterialComponent mc{};mc.materialAssetPath=relPath;if(ecs.hasComponent<ECS::MaterialComponent>(entity))ecs.setComponent<ECS::MaterialComponent>(entity,mc);else ecs.addComponent<ECS::MaterialComponent>(entity,mc);break;}
-        case AssetType::Model3D:{ECS::MeshComponent meshComp{};meshComp.meshAssetPath=relPath;if(ecs.hasComponent<ECS::MeshComponent>(entity))ecs.setComponent<ECS::MeshComponent>(entity,meshComp);else ecs.addComponent<ECS::MeshComponent>(entity,meshComp);
-            {auto meshAsset=AssetManager::Instance().getLoadedAssetByPath(relPath);if(!meshAsset){int id=AssetManager::Instance().loadAsset(relPath,AssetType::Model3D);if(id>0)meshAsset=AssetManager::Instance().getLoadedAssetByID((unsigned int)id);}
+        case AssetType::Model3D: case AssetType::StaticMesh: case AssetType::SkeletalMesh:{ECS::MeshComponent meshComp{};meshComp.meshAssetPath=relPath;if(ecs.hasComponent<ECS::MeshComponent>(entity))ecs.setComponent<ECS::MeshComponent>(entity,meshComp);else ecs.addComponent<ECS::MeshComponent>(entity,meshComp);
+            {const AssetType loadType=(assetType==AssetType::SkeletalMesh)?AssetType::SkeletalMesh:AssetType::Model3D;auto meshAsset=AssetManager::Instance().getLoadedAssetByPath(relPath);if(!meshAsset){int id=AssetManager::Instance().loadAsset(relPath,loadType);if(id>0)meshAsset=AssetManager::Instance().getLoadedAssetByID((unsigned int)id);}
              if(meshAsset){auto&ad=meshAsset->getData();if(ad.contains("m_materialAssetPaths")&&ad["m_materialAssetPaths"].is_array()&&!ad["m_materialAssetPaths"].empty()){std::string mp=ad["m_materialAssetPaths"][0].get<std::string>();if(!mp.empty()){ECS::MaterialComponent mc{};mc.materialAssetPath=mp;if(ecs.hasComponent<ECS::MaterialComponent>(entity))ecs.setComponent<ECS::MaterialComponent>(entity,mc);else ecs.addComponent<ECS::MaterialComponent>(entity,mc);}}}}
             break;}
         case AssetType::Script:{ECS::LogicComponent sc{};sc.scriptPath=relPath;if(ecs.hasComponent<ECS::LogicComponent>(entity))ecs.setComponent<ECS::LogicComponent>(entity,sc);else ecs.addComponent<ECS::LogicComponent>(entity,sc);break;}

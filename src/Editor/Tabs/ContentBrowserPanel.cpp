@@ -1202,7 +1202,8 @@ void ContentBrowserPanel::populateWidget(const std::shared_ptr<EditorWidget>& wi
                 if (!srcPath.empty())
                     thumbTex = m_renderer->preloadUITexture(srcPath);
             }
-            else if ((item.type == AssetType::Model3D || item.type == AssetType::Material) && m_renderer)
+            else if ((item.type == AssetType::Model3D || item.type == AssetType::StaticMesh
+                   || item.type == AssetType::SkeletalMesh || item.type == AssetType::Material) && m_renderer)
             {
                 thumbTex = m_renderer->generateAssetThumbnail(relPath, static_cast<int>(item.type));
             }

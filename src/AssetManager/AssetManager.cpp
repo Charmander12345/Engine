@@ -1727,6 +1727,8 @@ int AssetManager::loadAsset(const std::string& path, AssetType type, SyncState s
 				switch (type)
 				{
 				case AssetType::Model3D:
+				case AssetType::StaticMesh:
+				case AssetType::SkeletalMesh:
 				case AssetType::PointLight:
 					loadObject3DAsset(path);
 					break;
@@ -3686,16 +3688,20 @@ RawAssetData AssetManager::readAssetFromDisk(const std::string& path, AssetType 
             return raw;
     }
 
-    // Type validation (Model3D assets may also be PointLight)
+    // Type validation: all 3D mesh types are interchangeable at load time
     bool typeOk = false;
-    if (expectedType == AssetType::Model3D || expectedType == AssetType::PointLight)
-    {
-        typeOk = (headerType == AssetType::Model3D || headerType == AssetType::PointLight);
-    }
+    const bool expected3D = (expectedType == AssetType::Model3D
+                          || expectedType == AssetType::StaticMesh
+                          || expectedType == AssetType::SkeletalMesh
+                          || expectedType == AssetType::PointLight);
+    const bool header3D  = (headerType == AssetType::Model3D
+                          || headerType == AssetType::StaticMesh
+                          || headerType == AssetType::SkeletalMesh
+                          || headerType == AssetType::PointLight);
+    if (expected3D)
+        typeOk = header3D;
     else
-    {
         typeOk = (headerType == expectedType);
-    }
     if (!typeOk)
     {
         raw.errorMessage = "Asset type mismatch for: " + path;

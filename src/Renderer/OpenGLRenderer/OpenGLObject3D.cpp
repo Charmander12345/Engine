@@ -364,6 +364,11 @@ bool OpenGLObject3D::hasLocalBounds() const
     return m_hasLocalBounds;
 }
 
+std::string OpenGLObject3D::getAssetPath() const
+{
+    return m_asset ? m_asset->getPath() : std::string{};
+}
+
 Vec3 OpenGLObject3D::getLocalBoundsMin() const
 {
     return Vec3{ m_localBoundsMin.x, m_localBoundsMin.y, m_localBoundsMin.z };

@@ -5259,6 +5259,26 @@ void UIManager::openProjectSettingsPopup()
     ProjectSettingsWindow::open(m_renderer);
 }
 
+// ---------------------------------------------------------------------------------
+// Skeletal Mesh Editor Tab
+// ---------------------------------------------------------------------------------
+void UIManager::openSkeletalMeshEditorTab(const std::string& assetPath)
+{
+    if (m_tabOpener) m_tabOpener->openSkeletalMeshEditor(assetPath);
+}
+void UIManager::closeSkeletalMeshEditorTab()
+{
+    if (m_tabOpener) m_tabOpener->closeSkeletalMeshEditor();
+}
+bool UIManager::isSkeletalMeshEditorOpen() const
+{
+    return m_tabOpener ? m_tabOpener->isSkeletalMeshEditorOpen() : false;
+}
+class SkeletalMeshEditorTab* UIManager::getSkeletalMeshEditorTab() const
+{
+    return m_tabOpener ? m_tabOpener->getSkeletalMeshEditorTab() : nullptr;
+}
+
 #endif // ENGINE_EDITOR
 
 

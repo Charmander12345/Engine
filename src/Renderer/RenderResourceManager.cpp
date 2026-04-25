@@ -442,6 +442,10 @@ std::vector<RenderResourceManager::RenderableAsset> RenderResourceManager::build
         int assetId = assetManager.loadAsset(meshPath, AssetType::Model3D, AssetManager::Sync);
         if (assetId == 0)
         {
+            assetId = assetManager.loadAsset(meshPath, AssetType::SkeletalMesh, AssetManager::Sync);
+        }
+        if (assetId == 0)
+        {
             assetId = assetManager.loadAsset(meshPath, AssetType::Model2D, AssetManager::Sync);
         }
         if (assetId == 0)

@@ -3,15 +3,19 @@
 #include "../../Renderer/Renderer.h"
 #include "../../Renderer/EditorTheme.h"
 #include "../../Renderer/EditorUI/EditorWidget.h"
+#include "../../Renderer/UIWidgets/TreeViewWidget.h"
 #include "../../Diagnostics/DiagnosticsManager.h"
 #include "../../AssetManager/AssetManager.h"
 #include "../../AssetManager/AssetTypes.h"
 #include "../../Logger/Logger.h"
+#include "../../Core/EngineLevel.h"
 
 #include <filesystem>
 #include <fstream>
 #include <unordered_map>
 #include <vector>
+#include <cmath>
+#include <algorithm>
 
 using json = nlohmann::json;
 
@@ -19,6 +23,12 @@ SkeletalMeshEditorTab::SkeletalMeshEditorTab(UIManager* uiManager, Renderer* ren
     : m_ui(uiManager)
     , m_renderer(renderer)
 {}
+
+SkeletalMeshEditorTab::~SkeletalMeshEditorTab()
+{
+    if (m_state.isOpen)
+        close();
+}
 
 void SkeletalMeshEditorTab::open()
 {
@@ -66,8 +76,6 @@ void SkeletalMeshEditorTab::open(const std::string& assetPath)
         return;
     }
 
-    // The asset file is JSON (magic/version/type/name/data). We only need
-    // the data object for inspection here.
     json fileJson = json::parse(in, nullptr, false);
     in.close();
     if (fileJson.is_discarded() || !fileJson.contains("data"))
@@ -75,9 +83,6 @@ void SkeletalMeshEditorTab::open(const std::string& assetPath)
         m_ui->showToastMessage("Invalid skeletal mesh asset format.", UIManager::kToastMedium);
         return;
     }
-
-    m_renderer->addTab(tabId, "Skeletal Mesh", true);
-    m_renderer->setActiveTab(tabId);
 
     const std::string widgetId = "SkeletalMeshEditor.Main";
     m_ui->unregisterWidget(widgetId);
@@ -89,6 +94,13 @@ void SkeletalMeshEditorTab::open(const std::string& assetPath)
     m_state.assetName = fileJson.value("name", std::filesystem::path(assetPath).stem().string());
     m_state.meshData  = fileJson["data"];
     m_state.isOpen    = true;
+
+    parseSkeleton();
+    rebuildPreviewLevel();
+
+    m_renderer->addTab(tabId, "Skeletal Mesh", true);
+    m_renderer->setActiveTab(tabId);
+    pushSkeletonOverlay();
 
     {
         auto widget = std::make_shared<EditorWidget>();
@@ -109,7 +121,8 @@ void SkeletalMeshEditorTab::open(const std::string& assetPath)
         root.fillX       = true;
         root.fillY       = true;
         root.orientation = StackOrientation::Vertical;
-        root.style.color = theme.panelBackground;
+        root.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f }; // transparent – 3D viewport shows through
+        root.hitTestMode = HitTestMode::DisabledSelf;        // root itself doesn't block, but children may
         root.runtimeOnly = true;
 
         buildToolbar(root);
@@ -158,8 +171,11 @@ void SkeletalMeshEditorTab::close()
     if (m_renderer->getActiveTabId() == tabId)
         m_renderer->setActiveTab("Viewport");
 
+    m_renderer->setSkeletonTabOverlay("", "");
     m_ui->unregisterWidget(m_state.widgetId);
     m_renderer->removeTab(tabId);
+    m_runtimeLevel.reset();
+    m_skeleton = Skeleton{};
     m_state = {};
     m_ui->markAllWidgetsDirty();
 }
@@ -187,7 +203,7 @@ void SkeletalMeshEditorTab::refresh()
     if (auto* titleEl = m_ui->findElementById("SkeletalMeshEditor.Title"))
         titleEl->text = "Skeletal Mesh: " + m_state.assetName;
 
-    // Rebuild body panel from scratch.
+    // Rebuild body panel from scratch
     for (auto it = root.children.begin(); it != root.children.end(); ++it)
     {
         if (it->id == "SkeletalMeshEditor.Body")
@@ -234,33 +250,250 @@ void SkeletalMeshEditorTab::buildToolbar(WidgetElement& root)
 
 void SkeletalMeshEditorTab::buildBodyPanel(WidgetElement& root)
 {
+    const auto& theme = EditorTheme::Get();
+
     WidgetElement body{};
     body.id          = "SkeletalMeshEditor.Body";
     body.type        = WidgetElementType::StackPanel;
     body.fillX       = true;
     body.fillY       = true;
-    body.scrollable  = true;
-    body.orientation = StackOrientation::Vertical;
-    body.padding     = EditorTheme::Scaled(Vec2{ 10.0f, 8.0f });
-    body.spacing     = EditorTheme::Scaled(6.0f);
-    body.style.color = Vec4{ 0.08f, 0.09f, 0.11f, 1.0f };
+    body.orientation = StackOrientation::Horizontal;
+    body.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f }; // transparent – 3D viewport shows through
+    body.hitTestMode = HitTestMode::DisabledSelf;       // children opt-in individually
     body.runtimeOnly = true;
 
-    buildStatsSection(body);
-    buildBonesSection(body);
-    buildAnimationsSection(body);
+    // Left panel: Bone hierarchy tree view
+    {
+        WidgetElement leftPanel{};
+        leftPanel.id          = "SkeletalMeshEditor.LeftPanel";
+        leftPanel.type        = WidgetElementType::StackPanel;
+        leftPanel.fillY       = true;
+        leftPanel.minSize     = EditorTheme::Scaled(Vec2{ 200.0f, 0.0f });
+        leftPanel.maxSize     = EditorTheme::Scaled(Vec2{ 300.0f, 99999.0f });
+        leftPanel.orientation = StackOrientation::Vertical;
+        leftPanel.padding     = EditorTheme::Scaled(Vec2{ 6.0f, 6.0f });
+        leftPanel.spacing     = EditorTheme::Scaled(4.0f);
+        leftPanel.style.color = Vec4{ 0.07f, 0.08f, 0.10f, 1.0f };
+        leftPanel.runtimeOnly = true;
+
+        // Title
+        {
+            WidgetElement title{};
+            title.type            = WidgetElementType::Text;
+            title.text            = "Bones";
+            title.font            = theme.fontDefault;
+            title.fontSize        = theme.fontSizeSubheading;
+            title.style.textColor = theme.textPrimary;
+            title.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 20.0f });
+            title.runtimeOnly     = true;
+            leftPanel.children.push_back(std::move(title));
+        }
+
+        // Build bone tree
+        {
+            std::vector<TreeViewNode> boneNodes;
+            buildBoneHierarchy(boneNodes);
+
+            WidgetElement treeContainer{};
+            treeContainer.type        = WidgetElementType::StackPanel;
+            treeContainer.fillX       = true;
+            treeContainer.fillY       = true;
+            treeContainer.scrollable  = true;
+            treeContainer.orientation = StackOrientation::Vertical;
+            treeContainer.padding     = EditorTheme::Scaled(Vec2{ 2.0f, 2.0f });
+            treeContainer.style.color = Vec4{ 0.06f, 0.07f, 0.09f, 1.0f };
+            treeContainer.runtimeOnly = true;
+
+            for (const auto& node : boneNodes)
+            {
+                std::function<void(std::vector<WidgetElement>&, const TreeViewNode&, int)> addNode =
+                    [&](std::vector<WidgetElement>& container, const TreeViewNode& n, int depth)
+                {
+                    WidgetElement item{};
+                    item.type        = WidgetElementType::Button;
+                    item.id          = "SkeletalMeshEditor.Bone." + n.id;
+                    item.fillX       = true;
+                    item.text        = std::string(depth * 2, ' ') + (n.children.empty() ? "• " : "► ") + n.label;
+                    item.font        = theme.fontDefault;
+                    item.fontSize    = theme.fontSizeBody;
+                    item.textAlignH  = TextAlignH::Left;
+                    item.textAlignV  = TextAlignV::Center;
+                    item.minSize     = EditorTheme::Scaled(Vec2{ 0.0f, 20.0f });
+                    item.padding     = EditorTheme::Scaled(Vec2{ 4.0f + static_cast<float>(depth) * 8.0f, 2.0f });
+                    const bool isSel = (n.id == m_state.selectedBoneId);
+                    item.style.color      = isSel ? Vec4{ 0.80f, 0.40f, 0.0f, 0.85f }
+                                                  : Vec4{ 0.12f, 0.13f, 0.15f, 1.0f };
+                    item.style.hoverColor = isSel ? Vec4{ 0.90f, 0.50f, 0.0f, 0.90f }
+                                                  : Vec4{ 0.18f, 0.19f, 0.21f, 1.0f };
+                    item.style.textColor  = isSel ? Vec4{ 1.0f, 1.0f, 1.0f, 1.0f }
+                                                  : theme.textPrimary;
+                    item.runtimeOnly = true;
+                    item.hitTestMode = HitTestMode::Enabled;
+
+                    auto boneId = n.id;
+                    item.onClicked = [this, boneId]() { onBoneSelected(boneId); };
+
+                    container.push_back(std::move(item));
+
+                    for (const auto& child : n.children)
+                        addNode(container, child, depth + 1);
+                };
+
+                addNode(treeContainer.children, node, 0);
+            }
+
+            leftPanel.children.push_back(std::move(treeContainer));
+        }
+
+        body.children.push_back(std::move(leftPanel));
+    }
+
+    // Separator
+    {
+        WidgetElement sep{};
+        sep.type        = WidgetElementType::Panel;
+        sep.fillY       = true;
+        sep.minSize     = EditorTheme::Scaled(Vec2{ 1.0f, 0.0f });
+        sep.style.color = theme.panelBorder;
+        sep.runtimeOnly = true;
+        body.children.push_back(std::move(sep));
+    }
+
+    // Middle panel: 3D Preview
+    {
+        WidgetElement previewPanel{};
+        previewPanel.id          = "SkeletalMeshEditor.PreviewPanel";
+        previewPanel.type        = WidgetElementType::Panel;
+        previewPanel.fillX       = true;
+        previewPanel.fillY       = true;
+        previewPanel.minSize     = EditorTheme::Scaled(Vec2{ 300.0f, 0.0f });
+        previewPanel.style.color = Vec4{ 0.0f, 0.0f, 0.0f, 0.0f }; // transparent – 3D render shows through
+        previewPanel.hitTestMode = HitTestMode::DisabledAll;       // never blocks viewport input
+        previewPanel.runtimeOnly = true;
+        body.children.push_back(std::move(previewPanel));
+    }
+
+    // Separator
+    {
+        WidgetElement sep{};
+        sep.type        = WidgetElementType::Panel;
+        sep.fillY       = true;
+        sep.minSize     = EditorTheme::Scaled(Vec2{ 1.0f, 0.0f });
+        sep.style.color = theme.panelBorder;
+        sep.runtimeOnly = true;
+        body.children.push_back(std::move(sep));
+    }
+
+    // Right panel: Stats and animations
+    {
+        WidgetElement rightPanel{};
+        rightPanel.id          = "SkeletalMeshEditor.RightPanel";
+        rightPanel.type        = WidgetElementType::StackPanel;
+        rightPanel.fillY       = true;
+        rightPanel.minSize     = EditorTheme::Scaled(Vec2{ 250.0f, 0.0f });
+        rightPanel.maxSize     = EditorTheme::Scaled(Vec2{ 400.0f, 99999.0f });
+        rightPanel.scrollable  = true;
+        rightPanel.orientation = StackOrientation::Vertical;
+        rightPanel.padding     = EditorTheme::Scaled(Vec2{ 10.0f, 8.0f });
+        rightPanel.spacing     = EditorTheme::Scaled(6.0f);
+        rightPanel.style.color = Vec4{ 0.08f, 0.09f, 0.11f, 1.0f };
+        rightPanel.runtimeOnly = true;
+
+        buildStatsSection(rightPanel);
+        buildAnimationsSection(rightPanel);
+
+        body.children.push_back(std::move(rightPanel));
+    }
 
     root.children.push_back(std::move(body));
 }
 
-namespace {
-    WidgetElement makeHeading(const std::string& id, const std::string& text)
+void SkeletalMeshEditorTab::buildBoneHierarchy(std::vector<TreeViewNode>& nodes)
+{
+    const json& d = m_state.meshData;
+
+    if (!d.contains("m_bones") || !d["m_bones"].is_array() || d["m_bones"].empty())
     {
-        const auto& theme = EditorTheme::Get();
+        return;
+    }
+
+    const auto& bones = d["m_bones"];
+
+    // Build parent index map from m_nodes
+    std::unordered_map<int, int> boneParent;
+    if (d.contains("m_nodes") && d["m_nodes"].is_array())
+    {
+        const auto& nodeList = d["m_nodes"];
+        std::vector<int> parentOf(nodeList.size(), -1);
+        std::vector<int> boneOf(nodeList.size(), -1);
+        for (size_t i = 0; i < nodeList.size(); ++i)
+        {
+            const auto& n = nodeList[i];
+            parentOf[i] = n.value("parent", -1);
+            boneOf[i]   = n.value("boneIndex", -1);
+        }
+        for (size_t i = 0; i < nodeList.size(); ++i)
+        {
+            const int bi = boneOf[i];
+            if (bi < 0) continue;
+            int p = parentOf[i];
+            int pBone = -1;
+            while (p >= 0)
+            {
+                if (boneOf[p] >= 0) { pBone = boneOf[p]; break; }
+                p = parentOf[p];
+            }
+            boneParent[bi] = pBone;
+        }
+    }
+
+    // Build tree structure
+    std::vector<bool> hasParent(bones.size(), false);
+    for (const auto& [child, parent] : boneParent)
+    {
+        if (parent >= 0) hasParent[child] = true;
+    }
+
+    std::function<void(int, std::vector<TreeViewNode>&)> buildSubtree =
+        [&](int boneIdx, std::vector<TreeViewNode>& parentNodes)
+    {
+        TreeViewNode node{};
+        node.id = std::to_string(boneIdx);
+        node.label = bones[boneIdx].value("name", std::string{"<unnamed>"});
+        node.isExpanded = true;
+
+        // Find children
+        for (size_t i = 0; i < bones.size(); ++i)
+        {
+            auto it = boneParent.find(static_cast<int>(i));
+            if (it != boneParent.end() && it->second == boneIdx)
+            {
+                buildSubtree(static_cast<int>(i), node.children);
+            }
+        }
+
+        parentNodes.push_back(std::move(node));
+    };
+
+    // Find root bones (those without parents)
+    for (size_t i = 0; i < bones.size(); ++i)
+    {
+        if (!hasParent[i])
+        {
+            buildSubtree(static_cast<int>(i), nodes);
+        }
+    }
+}
+
+void SkeletalMeshEditorTab::buildStatsSection(WidgetElement& parent)
+{
+    const json& d = m_state.meshData;
+    const auto& theme = EditorTheme::Get();
+
+    {
         WidgetElement h{};
-        h.id              = id;
         h.type            = WidgetElementType::Text;
-        h.text            = text;
+        h.text            = "Mesh Statistics";
         h.font            = theme.fontDefault;
         h.fontSize        = theme.fontSizeSubheading;
         h.style.textColor = theme.textPrimary;
@@ -268,36 +501,12 @@ namespace {
         h.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 22.0f });
         h.padding         = EditorTheme::Scaled(Vec2{ 0.0f, 2.0f });
         h.runtimeOnly     = true;
-        return h;
+        parent.children.push_back(std::move(h));
     }
-
-    WidgetElement makeLine(const std::string& id, const std::string& text, bool muted = false)
-    {
-        const auto& theme = EditorTheme::Get();
-        WidgetElement t{};
-        t.id              = id;
-        t.type            = WidgetElementType::Text;
-        t.text            = text;
-        t.font            = theme.fontDefault;
-        t.fontSize        = theme.fontSizeBody;
-        t.style.textColor = muted ? theme.textMuted : theme.textPrimary;
-        t.fillX           = true;
-        t.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 18.0f });
-        t.runtimeOnly     = true;
-        return t;
-    }
-}
-
-void SkeletalMeshEditorTab::buildStatsSection(WidgetElement& parent)
-{
-    const json& d = m_state.meshData;
-
-    parent.children.push_back(makeHeading("SkeletalMeshEditor.StatsHeading", "Mesh"));
 
     size_t vertCount = 0;
     if (d.contains("m_vertices") && d["m_vertices"].is_array())
     {
-        // Vertices are stored as a flat float array (pos3 + uv2 = 5 floats).
         vertCount = d["m_vertices"].size() / 5;
     }
 
@@ -315,112 +524,63 @@ void SkeletalMeshEditorTab::buildStatsSection(WidgetElement& parent)
 
     const size_t boneIdsLen = (d.contains("m_boneIds") && d["m_boneIds"].is_array())
         ? d["m_boneIds"].size() : 0;
-    const size_t boneWeightsLen = (d.contains("m_boneWeights") && d["m_boneWeights"].is_array())
-        ? d["m_boneWeights"].size() : 0;
 
-    parent.children.push_back(makeLine("SkeletalMeshEditor.Stats.Path", "Path: " + m_state.assetPath, true));
-    parent.children.push_back(makeLine("SkeletalMeshEditor.Stats.Verts", "Vertices: " + std::to_string(vertCount)));
-    parent.children.push_back(makeLine("SkeletalMeshEditor.Stats.Indices", "Indices: " + std::to_string(indexCount)));
-    parent.children.push_back(makeLine("SkeletalMeshEditor.Stats.Sub", "Sub-meshes: " + std::to_string(subMeshCount)));
+    auto makeLine = [&](const std::string& text, bool muted = false) -> WidgetElement
+    {
+        WidgetElement t{};
+        t.type            = WidgetElementType::Text;
+        t.text            = text;
+        t.font            = theme.fontDefault;
+        t.fontSize        = theme.fontSizeBody;
+        t.style.textColor = muted ? theme.textMuted : theme.textPrimary;
+        t.fillX           = true;
+        t.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 18.0f });
+        t.runtimeOnly     = true;
+        return t;
+    };
 
-    const std::string bonesLine = "Skeletal: " + std::string(hasBones ? "yes" : "no")
+    parent.children.push_back(makeLine("Path: " + m_state.assetPath, true));
+    parent.children.push_back(makeLine("Vertices: " + std::to_string(vertCount)));
+    parent.children.push_back(makeLine("Indices: " + std::to_string(indexCount)));
+    parent.children.push_back(makeLine("Sub-Meshes: " + std::to_string(subMeshCount)));
+
+    const std::string bonesLine = "Skeletal: " + std::string(hasBones ? "Yes" : "No")
         + " (" + std::to_string(boneCount) + " bones, "
         + std::to_string(boneIdsLen / 4) + " skinned verts)";
-    parent.children.push_back(makeLine("SkeletalMeshEditor.Stats.Bones", bonesLine));
-
-    if (hasBones && boneIdsLen != boneWeightsLen)
-    {
-        parent.children.push_back(makeLine(
-            "SkeletalMeshEditor.Stats.Warn",
-            "Warning: bone ids/weights arrays size mismatch.",
-            true));
-    }
-}
-
-void SkeletalMeshEditorTab::buildBonesSection(WidgetElement& parent)
-{
-    const json& d = m_state.meshData;
-
-    parent.children.push_back(makeHeading("SkeletalMeshEditor.BonesHeading", "Bones"));
-
-    if (!d.contains("m_bones") || !d["m_bones"].is_array() || d["m_bones"].empty())
-    {
-        parent.children.push_back(makeLine(
-            "SkeletalMeshEditor.Bones.Empty",
-            "No bones stored in this mesh asset.",
-            true));
-        return;
-    }
-
-    // Build parent index map from m_nodes (if present). Each node references
-    // its bone via "boneIndex". We derive a bone's parent by walking up the
-    // node hierarchy until another node with a boneIndex != -1 is found.
-    std::unordered_map<int, int> boneParent; // boneIndex -> parentBoneIndex
-    if (d.contains("m_nodes") && d["m_nodes"].is_array())
-    {
-        const auto& nodes = d["m_nodes"];
-        std::vector<int> parentOf(nodes.size(), -1);
-        std::vector<int> boneOf(nodes.size(), -1);
-        for (size_t i = 0; i < nodes.size(); ++i)
-        {
-            const auto& n = nodes[i];
-            parentOf[i] = n.value("parent", -1);
-            boneOf[i]   = n.value("boneIndex", -1);
-        }
-        for (size_t i = 0; i < nodes.size(); ++i)
-        {
-            const int bi = boneOf[i];
-            if (bi < 0) continue;
-            int p = parentOf[i];
-            int pBone = -1;
-            while (p >= 0)
-            {
-                if (boneOf[p] >= 0) { pBone = boneOf[p]; break; }
-                p = parentOf[p];
-            }
-            boneParent[bi] = pBone;
-        }
-    }
-
-    const auto& bones = d["m_bones"];
-    for (size_t i = 0; i < bones.size(); ++i)
-    {
-        const auto& b = bones[i];
-        const std::string boneName = b.value("name", std::string{"<unnamed>"});
-
-        int parentBi = -1;
-        auto it = boneParent.find(static_cast<int>(i));
-        if (it != boneParent.end()) parentBi = it->second;
-
-        std::string line = "[" + std::to_string(i) + "] " + boneName;
-        if (parentBi >= 0 && parentBi < static_cast<int>(bones.size()))
-        {
-            const std::string parentName = bones[parentBi].value("name", std::string{"?"});
-            line += "  ← parent: " + parentName + " (" + std::to_string(parentBi) + ")";
-        }
-        else
-        {
-            line += "  (root)";
-        }
-
-        parent.children.push_back(makeLine(
-            "SkeletalMeshEditor.Bone." + std::to_string(i),
-            line));
-    }
+    parent.children.push_back(makeLine(bonesLine));
 }
 
 void SkeletalMeshEditorTab::buildAnimationsSection(WidgetElement& parent)
 {
     const json& d = m_state.meshData;
+    const auto& theme = EditorTheme::Get();
 
-    parent.children.push_back(makeHeading("SkeletalMeshEditor.AnimsHeading", "Animations"));
+    {
+        WidgetElement h{};
+        h.type            = WidgetElementType::Text;
+        h.text            = "Animations";
+        h.font            = theme.fontDefault;
+        h.fontSize        = theme.fontSizeSubheading;
+        h.style.textColor = theme.textPrimary;
+        h.fillX           = true;
+        h.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 22.0f });
+        h.padding         = EditorTheme::Scaled(Vec2{ 0.0f, 4.0f });
+        h.runtimeOnly     = true;
+        parent.children.push_back(std::move(h));
+    }
 
     if (!d.contains("m_animations") || !d["m_animations"].is_array() || d["m_animations"].empty())
     {
-        parent.children.push_back(makeLine(
-            "SkeletalMeshEditor.Anims.Empty",
-            "No animation clips stored in this mesh asset.",
-            true));
+        WidgetElement t{};
+        t.type            = WidgetElementType::Text;
+        t.text            = "(none)";
+        t.font            = theme.fontDefault;
+        t.fontSize        = theme.fontSizeBody;
+        t.style.textColor = theme.textMuted;
+        t.fillX           = true;
+        t.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 18.0f });
+        t.runtimeOnly     = true;
+        parent.children.push_back(std::move(t));
         return;
     }
 
@@ -438,11 +598,216 @@ void SkeletalMeshEditorTab::buildAnimationsSection(WidgetElement& parent)
 
         char buf[256];
         std::snprintf(buf, sizeof(buf),
-            "[%zu] %s  duration=%.2fs (%.1f ticks @ %.1f tps)  channels=%zu",
-            i, name.c_str(), seconds, duration, tps, channelCount);
+            "%s (%.2fs, %zu channels)",
+            name.c_str(), seconds, channelCount);
 
-        parent.children.push_back(makeLine(
-            "SkeletalMeshEditor.Anim." + std::to_string(i),
-            buf));
+        WidgetElement t{};
+        t.type            = WidgetElementType::Text;
+        t.text            = buf;
+        t.font            = theme.fontDefault;
+        t.fontSize        = theme.fontSizeBody;
+        t.style.textColor = theme.textPrimary;
+        t.fillX           = true;
+        t.minSize         = EditorTheme::Scaled(Vec2{ 0.0f, 18.0f });
+        t.runtimeOnly     = true;
+        parent.children.push_back(std::move(t));
     }
+}
+
+void SkeletalMeshEditorTab::onBoneSelected(const std::string& boneId)
+{
+    // Toggle: clicking the same bone deselects it
+    if (m_state.selectedBoneId == boneId)
+        m_state.selectedBoneId.clear();
+    else
+        m_state.selectedBoneId = boneId;
+
+    pushSkeletonOverlay();
+    refresh();
+}
+
+void SkeletalMeshEditorTab::parseSkeleton()
+{
+    m_skeleton = Skeleton{};
+    const auto& data = m_state.meshData;
+    if (!data.is_object() || !data.contains("m_bones"))
+        return;
+
+    // Bones
+    const auto& bonesJson = data.at("m_bones");
+    for (const auto& bj : bonesJson)
+    {
+        BoneInfo bone;
+        bone.name = bj.value("name", "");
+        bone.parentIndex = -1; // filled from node hierarchy below
+        if (bj.contains("offsetMatrix"))
+        {
+            const auto& om = bj.at("offsetMatrix");
+            for (int i = 0; i < 16 && i < static_cast<int>(om.size()); ++i)
+                bone.offsetMatrix.m[i] = om[i].get<float>();
+        }
+        m_skeleton.boneNameToIndex[bone.name] = static_cast<int>(m_skeleton.bones.size());
+        m_skeleton.bones.push_back(std::move(bone));
+    }
+
+    // Node hierarchy – used to resolve parentIndex per bone
+    if (data.contains("m_nodes"))
+    {
+        for (const auto& nj : data.at("m_nodes"))
+        {
+            const std::string nodeName  = nj.value("name", "");
+            const int         parentIdx = nj.value("parent", -1);
+            const int         boneIdx   = nj.value("boneIndex", -1);
+            if (boneIdx >= 0 && boneIdx < static_cast<int>(m_skeleton.bones.size()))
+            {
+                // Resolve parent bone index from parent node's boneIndex
+                if (parentIdx >= 0 && data.contains("m_nodes"))
+                {
+                    const auto& nodes = data.at("m_nodes");
+                    if (parentIdx < static_cast<int>(nodes.size()))
+                    {
+                        const int parentBone = nodes[parentIdx].value("boneIndex", -1);
+                        m_skeleton.bones[boneIdx].parentIndex = parentBone;
+                    }
+                }
+            }
+        }
+    }
+}
+
+void SkeletalMeshEditorTab::pushSkeletonOverlay()
+{
+    if (!m_renderer) return;
+    m_renderer->setSkeletonTabOverlay(m_state.assetPath, m_state.selectedBoneId);
+}
+
+void SkeletalMeshEditorTab::rebuildPreviewLevel()
+{
+    auto& diag = DiagnosticsManager::Instance();
+    const bool isActiveTab = m_state.isOpen && m_renderer &&
+                             m_renderer->getActiveTabId() == m_state.tabId;
+    if (isActiveTab)
+    {
+        m_previewCamPos = m_renderer->getCameraPosition();
+        m_previewCamRot = m_renderer->getCameraRotationDegrees();
+    }
+
+    m_runtimeLevel.reset();
+
+    if (m_state.assetPath.empty())
+        return;
+
+    auto& assetMgr = AssetManager::Instance();
+    std::string materialPath;
+    {
+        auto meshAsset = assetMgr.getLoadedAssetByPath(m_state.assetPath);
+        if (!meshAsset)
+        {
+            const std::string resolvedPath = assetMgr.getAbsoluteContentPath(m_state.assetPath);
+            if (!resolvedPath.empty())
+                meshAsset = assetMgr.getLoadedAssetByPath(resolvedPath);
+        }
+        if (meshAsset)
+        {
+            const auto& data = meshAsset->getData();
+            if (data.contains("m_materialAssetPaths") && data["m_materialAssetPaths"].is_array()
+                && !data["m_materialAssetPaths"].empty())
+            {
+                materialPath = data["m_materialAssetPaths"][0].get<std::string>();
+            }
+        }
+    }
+
+    m_runtimeLevel = std::make_unique<EngineLevel>();
+    m_runtimeLevel->setName("__SkeletalMeshViewer__");
+    m_runtimeLevel->setAssetType(AssetType::Level);
+
+    json entities = json::array();
+
+    // Skeletal mesh entity
+    {
+        json meshEntity = json::object();
+        json comps = json::object();
+        comps["Transform"] = json{
+            {"position", json::array({0.0f, 0.0f, 0.0f})},
+            {"rotation", json::array({0.0f, 0.0f, 0.0f})},
+            {"scale",    json::array({1.0f, 1.0f, 1.0f})}
+        };
+        comps["Mesh"] = json{ {"meshAssetPath", m_state.assetPath} };
+        if (!materialPath.empty())
+        {
+            comps["Material"] = json{ {"materialAssetPath", materialPath} };
+        }
+        comps["Name"] = json{ {"displayName", "SkeletalMeshPreview"} };
+        meshEntity["components"] = std::move(comps);
+        entities.push_back(std::move(meshEntity));
+    }
+
+    // Directional light
+    {
+        json lightEntity = json::object();
+        json comps = json::object();
+        comps["Transform"] = json{
+            {"position", json::array({0.0f, 0.0f, 0.0f})},
+            {"rotation", json::array({50.0f, 30.0f, 0.0f})},
+            {"scale",    json::array({1.0f, 1.0f, 1.0f})}
+        };
+        comps["Light"] = json{
+            {"type", 1},
+            {"color", json::array({0.9f, 0.85f, 0.78f})},
+            {"intensity", 0.8f},
+            {"range", 100.0f},
+            {"spotAngle", 0.0f}
+        };
+        comps["Name"] = json{ {"displayName", "PreviewLight"} };
+        lightEntity["components"] = std::move(comps);
+        entities.push_back(std::move(lightEntity));
+    }
+
+    // Ground plane
+    {
+        json groundEntity = json::object();
+        json comps = json::object();
+        comps["Transform"] = json{
+            {"position", json::array({0.0f, -0.5f, 0.0f})},
+            {"rotation", json::array({0.0f, 0.0f, 0.0f})},
+            {"scale",    json::array({20.0f, 0.01f, 20.0f})}
+        };
+        comps["Mesh"] = json{ {"meshAssetPath", "default_quad3d.asset"} };
+        comps["Material"] = json{ {"materialAssetPath", "Materials/WorldGrid.asset"} };
+        comps["Name"] = json{ {"displayName", "PreviewGround"} };
+        groundEntity["components"] = std::move(comps);
+        entities.push_back(std::move(groundEntity));
+    }
+
+    json levelData = json::object();
+    levelData["Entities"] = std::move(entities);
+    levelData["EditorCamera"] = json{
+        {"position", json::array({m_previewCamPos.x, m_previewCamPos.y, m_previewCamPos.z})},
+        {"rotation", json::array({m_previewCamRot.x, m_previewCamRot.y})}
+    };
+
+    m_runtimeLevel->setLevelData(levelData);
+    m_runtimeLevel->setEditorCameraPosition(m_previewCamPos);
+    m_runtimeLevel->setEditorCameraRotation(m_previewCamRot);
+    m_runtimeLevel->setHasEditorCamera(true);
+
+    // If this tab is already active, swap the new level in immediately
+    if (isActiveTab)
+    {
+        m_runtimeLevel->resetPreparedState();
+        auto old = diag.swapActiveLevel(std::move(m_runtimeLevel));
+        diag.setScenePrepared(false);
+        // old level discarded
+    }
+}
+
+std::unique_ptr<EngineLevel> SkeletalMeshEditorTab::takeRuntimeLevel()
+{
+    return std::move(m_runtimeLevel);
+}
+
+void SkeletalMeshEditorTab::giveRuntimeLevel(std::unique_ptr<EngineLevel> level)
+{
+    m_runtimeLevel = std::move(level);
 }

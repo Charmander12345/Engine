@@ -69,6 +69,7 @@ public:
 
     // Typed tab accessors (for renderer level-swap etc.)
     virtual ActorEditorTab* getActorEditorTab() const = 0;
+    virtual class SkeletalMeshEditorTab* getSkeletalMeshEditorTab() const = 0;
 
     // Tick all managed tabs
     virtual void updateTabs(float deltaSeconds) = 0;

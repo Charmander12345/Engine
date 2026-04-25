@@ -261,6 +261,12 @@ public:
 	bool isActorEditorOpen() const;
 	ActorEditorTab* getActorEditorTab() const;
 
+	// Skeletal Mesh Editor tab
+	void openSkeletalMeshEditorTab(const std::string& assetPath);
+	void closeSkeletalMeshEditorTab();
+	bool isSkeletalMeshEditorOpen() const;
+	class SkeletalMeshEditorTab* getSkeletalMeshEditorTab() const;
+
 	// Input Action Editor tab
 	void openInputActionEditorTab(const std::string& assetPath);
 	void closeInputActionEditorTab();

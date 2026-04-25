@@ -193,17 +193,7 @@ namespace Editor
     void EditorWindowManager::closeInputMappingEditor()       { if (m_inputMappingEditorTab) m_inputMappingEditorTab->close(); }
     bool EditorWindowManager::isInputMappingEditorOpen() const { return m_inputMappingEditorTab && m_inputMappingEditorTab->isOpen(); }
 
-    // ── UI Designer ─────────────────────────────────────────────────
-    void EditorWindowManager::openUIDesigner()
-    {
-        if (!m_uiDesignerTab)
-            m_uiDesignerTab = std::make_unique<UIDesignerTab>(uiMgr(m_bridge), ren(m_bridge));
-        m_uiDesignerTab->open();
-    }
-    void EditorWindowManager::closeUIDesigner()       { if (m_uiDesignerTab) m_uiDesignerTab->close(); }
-    bool EditorWindowManager::isUIDesignerOpen() const { return m_uiDesignerTab && m_uiDesignerTab->isOpen(); }
-
-    // Skeletal Mesh Editor
+    // ── Skeletal Mesh Editor ────────────────────────────────────────
     void EditorWindowManager::openSkeletalMeshEditor(const std::string& assetPath)
     {
         if (!m_skeletalMeshEditorTab)
@@ -212,6 +202,17 @@ namespace Editor
     }
     void EditorWindowManager::closeSkeletalMeshEditor()       { if (m_skeletalMeshEditorTab) m_skeletalMeshEditorTab->close(); }
     bool EditorWindowManager::isSkeletalMeshEditorOpen() const { return m_skeletalMeshEditorTab && m_skeletalMeshEditorTab->isOpen(); }
+    SkeletalMeshEditorTab* EditorWindowManager::getSkeletalMeshEditorTab() const { return m_skeletalMeshEditorTab.get(); }
+
+    // ── UI Designer ──────────────────────────────────────────────────
+    void EditorWindowManager::openUIDesigner()
+    {
+        if (!m_uiDesignerTab)
+            m_uiDesignerTab = std::make_unique<UIDesignerTab>(uiMgr(m_bridge), ren(m_bridge));
+        m_uiDesignerTab->open();
+    }
+    void EditorWindowManager::closeUIDesigner()       { if (m_uiDesignerTab) m_uiDesignerTab->close(); }
+    bool EditorWindowManager::isUIDesignerOpen() const { return m_uiDesignerTab && m_uiDesignerTab->isOpen(); }
 
     // ── Popups ──────────────────────────────────────────────────────
     void EditorWindowManager::openWidgetEditorPopup(const std::string& relativeAssetPath)   { m_bridge.getUIManager().openWidgetEditorPopup(relativeAssetPath); }

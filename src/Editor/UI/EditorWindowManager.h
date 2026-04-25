@@ -131,6 +131,7 @@ namespace Editor
         void openSkeletalMeshEditor(const std::string& assetPath) override;
         void closeSkeletalMeshEditor() override;
         bool isSkeletalMeshEditorOpen() const override;
+        SkeletalMeshEditorTab* getSkeletalMeshEditorTab() const override;
 
         // ── UI Designer ──────────────────────────────────────────────
         void openUIDesigner() override;

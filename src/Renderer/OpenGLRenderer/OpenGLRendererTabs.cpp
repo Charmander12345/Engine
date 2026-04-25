@@ -12,6 +12,7 @@
 #if ENGINE_EDITOR
 #include "../../Editor/Tabs/ITabOpener.h"
 #include "../../Editor/Tabs/ActorEditorTab.h"
+#include "../../Editor/Tabs/SkeletalMeshEditorTab.h"
 #include "../../Editor/Windows/MeshViewerWindow.h"
 #include "../../Editor/Windows/MaterialEditorWindow.h"
 void OpenGLRenderer::addTab(const std::string& id, const std::string& tabName, bool closable)
@@ -164,9 +165,11 @@ void OpenGLRenderer::setActiveTab(const std::string& id)
 		const bool isMeshViewer = (meshIt != m_meshViewers.end() && meshIt->second);
 		const bool isMatEditor  = (matIt  != m_materialEditors.end() && matIt->second);
 		auto* actorTab = m_uiManager.getActorEditorTab();
+		auto* skeletalTab = m_uiManager.getSkeletalMeshEditorTab();
 		const bool isActorEditor = (actorTab && actorTab->isOpen() && actorTab->getTabId() == oldTabId);
+		const bool isSkeletalEditor = (skeletalTab && skeletalTab->isOpen() && skeletalTab->getTabId() == oldTabId);
 
-		if (isMeshViewer || isMatEditor || isActorEditor)
+		if (isMeshViewer || isMatEditor || isActorEditor || isSkeletalEditor)
 		{
 			// Save camera state into the viewer's runtime level before swapping out
 			auto returnedLevel = diag.swapActiveLevel(std::move(m_savedViewportLevel));
@@ -183,9 +186,15 @@ void OpenGLRenderer::setActiveTab(const std::string& id)
 					meshIt->second->giveRuntimeLevel(std::move(returnedLevel));
 				else if (isMatEditor)
 					matIt->second->giveRuntimeLevel(std::move(returnedLevel));
-				else
+				else if (isActorEditor)
 					actorTab->giveRuntimeLevel(std::move(returnedLevel));
+				else if (isSkeletalEditor)
+					skeletalTab->giveRuntimeLevel(std::move(returnedLevel));
 			}
+
+			// Clear skeleton overlay when leaving SkeletalMesh editor tab
+			if (isSkeletalEditor)
+				setSkeletonTabOverlay("", "");
 		}
 	}
 	else
@@ -211,6 +220,7 @@ void OpenGLRenderer::setActiveTab(const std::string& id)
 		auto meshIt = m_meshViewers.find(id);
 		auto matIt  = m_materialEditors.find(id);
 		auto* actorTab = m_uiManager.getActorEditorTab();
+		auto* skeletalTab = m_uiManager.getSkeletalMeshEditorTab();
 
 		if (meshIt != m_meshViewers.end() && meshIt->second)
 			incomingLevel = meshIt->second->takeRuntimeLevel();
@@ -218,6 +228,8 @@ void OpenGLRenderer::setActiveTab(const std::string& id)
 			incomingLevel = matIt->second->takeRuntimeLevel();
 		else if (actorTab && actorTab->isOpen() && actorTab->getTabId() == id)
 			incomingLevel = actorTab->takeRuntimeLevel();
+		else if (skeletalTab && skeletalTab->isOpen() && skeletalTab->getTabId() == id)
+			incomingLevel = skeletalTab->takeRuntimeLevel();
 
 		if (incomingLevel)
 		{

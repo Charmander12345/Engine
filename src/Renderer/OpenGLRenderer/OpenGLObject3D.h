@@ -38,6 +38,7 @@ public:
     void setBoneMatrices(const float* data, int count);
     bool isSkinned() const { return m_isSkinned; }
     const Skeleton* getSkeleton() const { return m_skeleton ? m_skeleton.get() : nullptr; }
+    std::string getAssetPath() const;
     void render() override;
     void renderBatchContinuation();
     void setTextures(const std::vector<std::shared_ptr<Texture>>& textures) override;

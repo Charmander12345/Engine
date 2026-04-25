@@ -3,6 +3,8 @@
 //           renderBoneDebug, drawRubberBand
 
 #include "OpenGLRenderer.h"
+#include "OpenGLObject3D.h"
+#include "Logger.h"
 #include <cmath>
 #include <vector>
 #include <glm/gtc/matrix_transform.hpp>
@@ -583,4 +585,127 @@ void OpenGLRenderer::drawRubberBand(const glm::mat4& ortho)
 	glDeleteBuffers(1, &vbo);
 	glDeleteVertexArrays(1, &vao);
 }
+
+// ─── Skeleton Tab Overlay (SkeletalMeshEditor) ──────────────────────────────
+
+void OpenGLRenderer::setSkeletonTabOverlay(const std::string& meshAssetPath, const std::string& highlightedBoneName)
+{
+	m_skeletonTabMeshPath      = meshAssetPath;
+	m_skeletonTabHighlightBone = highlightedBoneName;
+}
+
+void OpenGLRenderer::renderSkeletonTabOverlay(const glm::mat4& view, const glm::mat4& projection)
+{
+	if (m_skeletonTabMeshPath.empty())
+		return;
+
+	// Locate the OpenGLObject3D that loaded this mesh asset – its Skeleton has
+	// the same parent indices and offset matrices we need for bind-pose drawing.
+	const Skeleton* skel = nullptr;
+	glm::mat4 modelMatrix(1.0f);
+
+	auto firstSkinned = [&](const RenderEntry& e) -> bool {
+		if (!e.object3D) return false;
+		const Skeleton* s = e.object3D->getSkeleton();
+		if (!s || s->bones.empty()) return false;
+		skel = s;
+		modelMatrix = e.cachedModelMatrix;
+		return true;
+	};
+
+	for (const auto& e : m_renderEntries) if (firstSkinned(e)) break;
+	if (!skel) for (const auto& e : m_meshEntries) if (firstSkinned(e)) break;
+
+	if (!skel || skel->bones.empty())
+	{
+		static int s_warnCount = 0;
+		if (s_warnCount++ < 3)
+		{
+			Logger::Instance().log(Logger::Category::Rendering,
+				"renderSkeletonTabOverlay: no skinned mesh with skeleton found in scene (renderEntries="
+				+ std::to_string(m_renderEntries.size())
+				+ ", meshEntries=" + std::to_string(m_meshEntries.size()) + ")",
+				Logger::LogLevel::WARNING);
+		}
+		return;
+	}
+
+	if (!ensureGizmoResources())
+		return;
+
+	const size_t boneCount = skel->bones.size();
+
+	// Bone positions in mesh space from bind pose: inverse(offsetMatrix).translation.
+	// Then transform by the mesh's model matrix to world space.
+	std::vector<glm::vec3> bonePos(boneCount);
+	for (size_t b = 0; b < boneCount; ++b)
+	{
+		const Mat4x4 invOffset = skel->bones[b].offsetMatrix.inverse();
+		const glm::vec4 meshPos(invOffset.m[12], invOffset.m[13], invOffset.m[14], 1.0f);
+		const glm::vec4 worldPos = modelMatrix * meshPos;
+		bonePos[b] = glm::vec3(worldPos);
+	}
+
+	const glm::mat4 vp = projection * view;
+
+	glUseProgram(m_gizmo.program);
+	glBindVertexArray(m_gizmo.vao);
+	glDisable(GL_DEPTH_TEST);
+	glUniformMatrix4fv(m_gizmo.locMVP, 1, GL_FALSE, &vp[0][0]);
+
+	// ── Bone lines ──────────────────────────────────────────────────────────
+	glLineWidth(2.0f);
+	for (size_t b = 0; b < boneCount; ++b)
+	{
+		const int parentIdx = skel->bones[b].parentIndex;
+		if (parentIdx < 0 || parentIdx >= static_cast<int>(boneCount))
+			continue;
+
+		const bool isHighlighted = (!m_skeletonTabHighlightBone.empty() &&
+									(skel->bones[b].name == m_skeletonTabHighlightBone ||
+									 skel->bones[parentIdx].name == m_skeletonTabHighlightBone));
+
+		const glm::vec3 color = isHighlighted
+			? glm::vec3(1.0f, 0.65f, 0.0f)   // orange highlight
+			: glm::vec3(0.0f, 0.85f, 0.85f);  // cyan default
+
+		glUniform3fv(m_gizmo.locColor, 1, &color[0]);
+
+		const glm::vec3& from = bonePos[parentIdx];
+		const glm::vec3& to   = bonePos[b];
+		float verts[] = { from.x, from.y, from.z, to.x, to.y, to.z };
+		glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
+		glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(verts), verts);
+		glDrawArrays(GL_LINES, 0, 2);
+	}
+
+	// ── Bone joints (crosses) ───────────────────────────────────────────────
+	for (size_t b = 0; b < boneCount; ++b)
+	{
+		const bool isRoot     = (skel->bones[b].parentIndex < 0);
+		const bool isSelected = (skel->bones[b].name == m_skeletonTabHighlightBone);
+		const float crossSize = isRoot ? 0.06f : (isSelected ? 0.05f : 0.03f);
+		const glm::vec3 color = isSelected ? glm::vec3(1.0f, 0.65f, 0.0f)
+							   : isRoot    ? glm::vec3(1.0f, 1.0f, 0.0f)
+										   : glm::vec3(0.0f, 0.85f, 0.85f);
+
+		glUniform3fv(m_gizmo.locColor, 1, &color[0]);
+		glLineWidth(isRoot || isSelected ? 3.0f : 2.0f);
+
+		const glm::vec3& p = bonePos[b];
+		float crossVerts[] = {
+			p.x - crossSize, p.y,            p.z,  p.x + crossSize, p.y,            p.z,
+			p.x,             p.y - crossSize, p.z,  p.x,             p.y + crossSize, p.z,
+			p.x,             p.y,  p.z - crossSize,  p.x,             p.y,  p.z + crossSize,
+		};
+		glBindBuffer(GL_ARRAY_BUFFER, m_gizmo.vbo);
+		glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(crossVerts), crossVerts);
+		glDrawArrays(GL_LINES, 0, 6);
+	}
+
+	glEnable(GL_DEPTH_TEST);
+	glLineWidth(1.0f);
+	glBindVertexArray(0);
+}
+
 #endif // ENGINE_EDITOR — Debug-rendering editor-only code

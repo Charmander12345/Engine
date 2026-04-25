@@ -123,6 +123,11 @@ public:
     virtual SubViewportCamera getSubViewportCamera(int index) const = 0;
     virtual void setSubViewportCamera(int index, const SubViewportCamera& cam) = 0;
     virtual int subViewportHitTest(int screenX, int screenY) const = 0;
+
+    // --- Skeletal Mesh Editor Tab overlay ---
+    /// Enable the skeleton overlay drawn in the SkeletalMeshEditor tab.
+    /// meshAssetPath = "" disables the overlay. highlightedBoneName = "" means no highlight.
+    virtual void setSkeletonTabOverlay(const std::string& meshAssetPath, const std::string& highlightedBoneName) = 0;
 };
 
 #endif // ENGINE_EDITOR

@@ -2092,6 +2092,7 @@ void OpenGLRenderer::renderWorld()
 			cmd.material = entry.object3D->getMaterial();
 			cmd.modelMatrix = entry.cachedModelMatrix;
 			cmd.entityId = static_cast<unsigned int>(entry.entity);
+			cmd.isSkinned = entry.object3D->isSkinned();
 			bool isLight = false;
 			if (entry.entity != 0)
 			{
@@ -2691,6 +2692,14 @@ void OpenGLRenderer::renderWorld()
 	{
 		renderBoneDebug(view, m_projectionMatrix);
 	}
+
+#if ENGINE_EDITOR
+	// Draw skeleton overlay for SkeletalMeshEditor tab
+	if (!m_skeletonTabMeshPath.empty() && !diagnostics.isPIEActive())
+	{
+		renderSkeletonTabOverlay(view, m_projectionMatrix);
+	}
+#endif
 
 	#if ENGINE_EDITOR
 		// Draw camera path spline in viewport when Sequencer is open and spline visible
